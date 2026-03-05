@@ -1,9 +1,7 @@
 name: Release (Nightly)
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 env:
   APP_NAME: DanTerm Dev
