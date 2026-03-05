@@ -82,6 +82,10 @@ jobs:
 
           cp app/Info.plist build/DanTerm.app/Contents/
 
+          mkdir -p build/DanTerm.app/Contents/Resources
+          cp icon/AppIcon/AppIcon.icns build/DanTerm.app/Contents/Resources/AppIcon.icns
+          cp icon/AppIcon/Assets.car build/DanTerm.app/Contents/Resources/
+
           # Ad-hoc sign only
           codesign --force --deep --sign - build/DanTerm.app
 

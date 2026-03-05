@@ -103,6 +103,10 @@ jobs:
           plutil -replace CFBundleVersion -string "${{ env.VERSION }}" "$APP_PATH/Contents/Info.plist"
           plutil -replace CFBundleShortVersionString -string "${{ env.VERSION }}" "$APP_PATH/Contents/Info.plist"
 
+          mkdir -p "$APP_PATH/Contents/Resources"
+          cp icon/AppIcon-dev/AppIcon-dev.icns "$APP_PATH/Contents/Resources/AppIcon.icns"
+          cp icon/AppIcon-dev/Assets.car "$APP_PATH/Contents/Resources/"
+
       - name: Import signing certificate
         env:
           DEVELOPER_ID_APPLICATION_CERT_P12: ${{ secrets.DEVELOPER_ID_APPLICATION_CERT_P12 }}
