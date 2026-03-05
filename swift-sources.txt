@@ -1,0 +1,12 @@
+app/main.swift
+app/Model.swift
+app/ModelOperations.swift
+app/Msg.swift
+app/Effect.swift
+app/Update.swift
+app/AppRuntime.swift
+app/AppDelegate.swift
+app/GhosttyApp.swift
+app/TerminalView.swift
+app/SidebarView.swift
+app/SplitContainerView.swift

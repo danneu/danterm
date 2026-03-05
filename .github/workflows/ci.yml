@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.14.1
+
+      - name: Clone Ghostty source
+        run: |
+          git clone --depth 1 --branch v1.2.3 https://github.com/ghostty-org/ghostty.git .ghostty-src
+          # Patch stale iTerm2-Color-Schemes URL (removed upstream between Ghostty releases)
+          sed -i '' \
+            's|release-20251002-142451-4a5043e|release-20260216-151611-fc73ce3|' \
+            .ghostty-src/build.zig.zon
+          sed -i '' \
+            's|N-V-__8AALIsAwDyo88G5mGJGN2lSVmmFMx4YePfUvp_2o3Y|N-V-__8AABVbAwBwDRyZONfx553tvMW8_A2OKUoLzPUSRiLF|' \
+            .ghostty-src/build.zig.zon
+
+      - name: Cache GhosttyKit
+        id: cache-ghosttykit
+        uses: actions/cache@v4
+        with:
+          path: lib/GhosttyKit.xcframework
+          key: ghosttykit-v1.2.3-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Build GhosttyKit
+        if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
+        run: |
+          cd .ghostty-src
+          zig build \
+            -Demit-xcframework \
+            -Dxcframework-target=native \
+            -Demit-macos-app=false \
+            -Dsentry=false \
+            -Doptimize=ReleaseFast
+          cd ..
+          mkdir -p lib
+          cp -R .ghostty-src/macos/GhosttyKit.xcframework lib/
+
+      - name: Build Swift app
+        run: |
+          # Find macOS slice
+          MACOS_DIR=$(find lib/GhosttyKit.xcframework -maxdepth 1 -type d -name 'macos-*' | head -1)
+          if [ -z "$MACOS_DIR" ]; then
+            echo "Error: no macOS slice found in xcframework"
+            exit 1
+          fi
+
+          # Read swift sources
+          SWIFT_FILES=()
+          while IFS= read -r line; do
+            [[ -z "$line" || "$line" == \#* ]] && continue
+            SWIFT_FILES+=("$line")
+          done < swift-sources.txt
+
+          # Compile
+          mkdir -p build/DanTerm.app/Contents/MacOS
+          xcrun swiftc -O \
+            -o "build/DanTerm.app/Contents/MacOS/DanTerm" \
+            "${SWIFT_FILES[@]}" \
+            -I "$MACOS_DIR/Headers" \
+            -Xcc -fmodule-map-file="$MACOS_DIR/Headers/module.modulemap" \
+            "$MACOS_DIR"/libghostty*.a \
+            -framework Cocoa \
+            -framework Metal \
+            -framework MetalKit \
+            -framework QuartzCore \
+            -framework CoreText \
+            -framework IOKit \
+            -framework IOSurface \
+            -framework Carbon \
+            -framework UniformTypeIdentifiers \
+            -lc++
+
+          cp app/Info.plist build/DanTerm.app/Contents/
+
+          # Ad-hoc sign only
+          codesign --force --deep --sign - build/DanTerm.app
+
+          echo "Build succeeded"

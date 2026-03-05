@@ -1,0 +1,173 @@
+import Foundation
+
+func paneTests() {
+    print("Pane Tests...")
+
+    test("testSplitPaneProducesCorrectTree") {
+        var model = makeModel()
+        createTab(&model)
+        let originalPaneId = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .splitPane(direction: .horizontal))
+        let tab = model.groups[0].tabs[0]
+
+        guard case .split(_, let direction, let first, let second, _) = tab.rootNode else {
+            throw TestFailure(message: "root should be a split after splitting")
+        }
+        try expectEqual(direction, .horizontal)
+        if case .leaf(let fid) = first {
+            try expectEqual(fid, originalPaneId, "first child should be original pane")
+        } else {
+            throw TestFailure(message: "first child should be a leaf")
+        }
+        if case .leaf(let sid) = second {
+            try expectEqual(sid, tab.focusedPaneId, "second child should be new focused pane")
+        } else {
+            throw TestFailure(message: "second child should be a leaf")
+        }
+        try expectEqual(model.panes.count, 2)
+    }
+
+    test("testClosePanePromotesSibling") {
+        var model = makeModel()
+        createTab(&model)
+        let firstPaneId = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .splitPane(direction: .horizontal))
+        let newPaneId = model.groups[0].tabs[0].focusedPaneId
+        try expect(newPaneId != firstPaneId, "split should create new pane")
+
+        update(&model, .closePane(paneId: newPaneId))
+        let updatedTab = model.groups[0].tabs[0]
+        try expect(model.panes[newPaneId] == nil, "closed pane should be removed from panes dict")
+        if case .leaf(let remainingId) = updatedTab.rootNode {
+            try expectEqual(remainingId, firstPaneId)
+        } else {
+            throw TestFailure(message: "root should be a leaf after closing one of two panes")
+        }
+    }
+
+    test("testFocusDirectionNavigates") {
+        var model = makeModel()
+        createTab(&model)
+        let leftPaneId = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .splitPane(direction: .horizontal))
+        let rightPaneId = model.groups[0].tabs[0].focusedPaneId
+        try expect(rightPaneId != leftPaneId)
+
+        update(&model, .focusDirection(direction: .horizontal, side: .first))
+        let tab = model.groups[0].tabs[0]
+        try expectEqual(tab.focusedPaneId, leftPaneId, "should navigate to left pane")
+
+        update(&model, .focusDirection(direction: .horizontal, side: .second))
+        let tab2 = model.groups[0].tabs[0]
+        try expectEqual(tab2.focusedPaneId, rightPaneId, "should navigate to right pane")
+    }
+
+    test("testSplitRatioChangedNoEffects") {
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .splitPane(direction: .horizontal))
+
+        guard case .split(let splitId, _, _, _, _) = model.groups[0].tabs[0].rootNode else {
+            throw TestFailure(message: "should be a split")
+        }
+
+        let effects = update(&model, .splitRatioChanged(splitId: splitId, ratio: 0.3))
+        try expectEqual(effects.count, 0, "splitRatioChanged should produce no effects")
+
+        guard case .split(_, _, _, _, let ratio) = model.groups[0].tabs[0].rootNode else {
+            throw TestFailure(message: "should still be a split")
+        }
+        try expectEqual(ratio, 0.3, "ratio should be updated")
+    }
+
+    test("testClosePaneDeepTree") {
+        var model = makeModel()
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        // Split A -> [A, B]
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+
+        // Split B -> [B, C] making tree: [A, [B, C]]
+        update(&model, .splitPane(direction: .vertical))
+        let paneC = model.groups[0].tabs[0].focusedPaneId
+
+        try expectEqual(model.panes.count, 3)
+
+        // Close B (inner leaf)
+        update(&model, .closePane(paneId: paneB))
+        try expect(model.panes[paneB] == nil, "paneB should be removed")
+        try expectEqual(model.panes.count, 2)
+
+        // Tree should now be [A, C]
+        let tab = model.groups[0].tabs[0]
+        guard case .split(_, .horizontal, let first, let second, _) = tab.rootNode else {
+            throw TestFailure(message: "root should be a horizontal split")
+        }
+        if case .leaf(let fid) = first {
+            try expectEqual(fid, paneA, "first should be paneA")
+        } else {
+            throw TestFailure(message: "first child should be a leaf")
+        }
+        if case .leaf(let sid) = second {
+            try expectEqual(sid, paneC, "second should be paneC")
+        } else {
+            throw TestFailure(message: "second child should be a leaf")
+        }
+    }
+
+    test("testFocusDirectionNoNeighbor") {
+        var model = makeModel()
+        createTab(&model)
+
+        // Single pane, try to navigate
+        let effects = update(&model, .focusDirection(direction: .horizontal, side: .first))
+        try expectEqual(effects.count, 0, "no effects when no neighbor exists")
+    }
+
+    test("testPaneBecameFirstResponder") {
+        var model = makeModel()
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        // Split to create paneB
+        update(&model, .splitPane(direction: .horizontal))
+
+        // Set some state on paneA
+        model.panes[paneA]?.hasBell = true
+        model.panes[paneA]?.title = "my-title"
+        model.panes[paneA]?.cwd = "/tmp/foo"
+
+        // paneB is focused. Simulate paneA becoming first responder.
+        let effects = update(&model, .paneBecameFirstResponder(paneId: paneA))
+
+        let tab = model.groups[0].tabs[0]
+        try expectEqual(tab.focusedPaneId, paneA, "focused pane should change")
+        try expectEqual(model.panes[paneA]?.hasBell, false, "bell should be cleared")
+        try expect(hasEffect(effects) {
+            if case .rebuildContentView = $0 { return true }
+            return false
+        }, "should emit rebuildContentView")
+        try expect(hasEffect(effects) {
+            if case .reloadSidebarRow = $0 { return true }
+            return false
+        }, "should emit reloadSidebarRow")
+        try expect(hasEffect(effects) {
+            if case .setWindowTitle = $0 { return true }
+            return false
+        }, "should emit setWindowTitle")
+    }
+
+    test("testPaneBecameFirstResponderSamePane") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+
+        let effects = update(&model, .paneBecameFirstResponder(paneId: paneId))
+        try expectEqual(effects.count, 0, "same pane should return no effects")
+    }
+}

@@ -1,0 +1,8 @@
+# Built XCFramework (rebuild with ./build-lib.sh)
+lib/
+
+# Ghostty source cache
+.ghostty-src/
+
+# Dev build output
+.build/
