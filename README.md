@@ -1,8 +1,12 @@
-# danterm
+# <img src="icon/raw-readme.svg" width="64" height="64" alt="DanTerm icon" align="center" style="vertical-align: middle;"> danterm
 
 A macOS terminal built on ghostty with the behavior I want.
 
 ![DanTerm screenshot](docs/screenshot/screenshot1.png)
+
+## Install
+
+Download the latest `.dmg` from [Releases](https://github.com/danneu/danterm/releases/latest).
 
 ## Non-negotiable features:
 

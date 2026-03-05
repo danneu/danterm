@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- This file is a copy of raw.svg but with this macOS-style
+  rounded rect background so that it's visible on the readme -->
+  <rect x="0" y="0" width="1024" height="1024" rx="228" fill="#1a1a2e"/>
+
+  <g font-family="'Monaco'" font-size="288" font-weight="bold">
+    <!-- "$" in gray -->
+    <text x="123" y="555" fill="#888888">$</text>
+
+    <!-- Block cursor rect -->
+    <rect x="382" y="290" width="173" height="320" rx="12" fill="#FF8C00"/>
+
+    <!-- "d" inverted on cursor -->
+    <text x="382" y="555" fill="#1a1a2e">d</text>
+
+    <!-- "a" in orange -->
+    <text x="555" y="555" fill="#FF8C00">a</text>
+
+    <!-- "n" in orange -->
+    <text x="728" y="555" fill="#FF8C00">n</text>
+  </g>
+</svg>
