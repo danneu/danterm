@@ -64,6 +64,20 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         effects.append(.reloadSidebar)
         return effects
 
+    case .requestCloseTab(let id):
+        guard let groupIdx = model.groups.firstIndex(where: { $0.tabs.contains(where: { $0.id == id }) }),
+              let tabIdx = model.groups[groupIdx].tabs.firstIndex(where: { $0.id == id }) else { return [] }
+
+        let tab = model.groups[groupIdx].tabs[tabIdx]
+        let paneCount = allPaneIds(tab.rootNode).count
+
+        if paneCount > 1 {
+            let isLastTab = totalTabCount(model) == 1
+            return [.showCloseTabConfirmation(tabId: id, tabTitle: tab.title, paneCount: paneCount, isLastTab: isLastTab)]
+        }
+
+        return update(&model, .closeTab(id: id))
+
     case .closeTab(let id):
         guard let groupIdx = model.groups.firstIndex(where: { $0.tabs.contains(where: { $0.id == id }) }),
               let tabIdx = model.groups[groupIdx].tabs.firstIndex(where: { $0.id == id }) else { return [] }

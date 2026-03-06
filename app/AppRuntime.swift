@@ -95,6 +95,29 @@ class AppRuntime {
         case .requestNotificationPermission:
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
 
+        case .showCloseTabConfirmation(let tabId, let tabTitle, let paneCount, let isLastTab):
+            let alert = NSAlert()
+            alert.messageText = "Close tab \"\(tabTitle)\"?"
+            if isLastTab {
+                alert.informativeText = "This tab has \(paneCount) terminal panes. Closing it will quit DanTerm."
+            } else {
+                alert.informativeText = "This tab has \(paneCount) terminal panes."
+            }
+            alert.addButton(withTitle: "Close Tab")
+            alert.addButton(withTitle: "Cancel")
+            if let window = window {
+                alert.beginSheetModal(for: window) { [weak self] response in
+                    if response == .alertFirstButtonReturn {
+                        self?.send(.closeTab(id: tabId))
+                    }
+                }
+            } else {
+                let response = alert.runModal()
+                if response == .alertFirstButtonReturn {
+                    self.send(.closeTab(id: tabId))
+                }
+            }
+
         case .showTerminateConfirmation:
             let alert = NSAlert()
             alert.messageText = "Quit DanTerm?"

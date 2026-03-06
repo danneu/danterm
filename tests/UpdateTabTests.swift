@@ -189,6 +189,59 @@ func tabTests() {
         try expectEqual(effects.count, 0)
     }
 
+    // MARK: - requestCloseTab
+
+    test("testRequestCloseTabSinglePaneClosesDirectly") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+
+        let effects = update(&model, .requestCloseTab(id: firstTabId))
+        try expectEqual(model.groups[0].tabs.count, 1, "tab should be removed")
+        try expect(hasEffect(effects) {
+            if case .destroySurface = $0 { return true }
+            return false
+        }, "should emit destroySurface")
+        try expect(!hasEffect(effects) {
+            if case .showCloseTabConfirmation = $0 { return true }
+            return false
+        }, "should not show confirmation for single-pane tab")
+    }
+
+    test("testRequestCloseTabMultiPaneShowsConfirmation") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .selectTab(id: firstTabId))
+
+        // Split to get 2 panes
+        update(&model, .splitPane(direction: .horizontal))
+
+        let effects = update(&model, .requestCloseTab(id: firstTabId))
+        try expectEqual(model.groups[0].tabs.count, 2, "tab should NOT be removed yet")
+        try expect(hasEffect(effects) {
+            if case .showCloseTabConfirmation(let tid, _, let count, let last) = $0 {
+                return tid == firstTabId && count == 2 && !last
+            }
+            return false
+        }, "should show confirmation with correct args")
+    }
+
+    test("testRequestCloseTabSinglePaneLastTabShowsTerminateConfirmation") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+
+        let effects = update(&model, .requestCloseTab(id: tabId))
+        try expectEqual(model.groups[0].tabs.count, 1, "tab should NOT be removed")
+        try expect(hasEffect(effects) {
+            if case .showTerminateConfirmation = $0 { return true }
+            return false
+        }, "should show terminate confirmation for last single-pane tab")
+    }
+
     test("testCloseTabNonSelected") {
         var model = makeModel()
         createTab(&model)

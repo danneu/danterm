@@ -539,32 +539,9 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     }
 
     @objc private func contextCloseTab(_ sender: NSMenuItem) {
-        guard let rawId = sender.representedObject as? UUID,
-              let model = currentModel else { return }
+        guard let rawId = sender.representedObject as? UUID else { return }
         let tabId = TabId(rawValue: rawId)
-
-        let allTabs = model.groups.flatMap(\.tabs)
-        guard let tab = allTabs.first(where: { $0.id == tabId }) else { return }
-
-        let paneCount = allPaneIds(tab.rootNode).count
-        let isLastTab = allTabs.count == 1
-
-        let alert = NSAlert()
-        alert.messageText = "Close tab \"\(tab.title)\"?"
-        if isLastTab {
-            alert.informativeText = "This tab has \(paneCount) terminal pane\(paneCount == 1 ? "" : "s"). Closing it will quit DanTerm."
-        } else {
-            alert.informativeText = "This tab has \(paneCount) terminal pane\(paneCount == 1 ? "" : "s")."
-        }
-        alert.addButton(withTitle: "Close Tab")
-        alert.addButton(withTitle: "Cancel")
-
-        guard let window = window else { return }
-        alert.beginSheetModal(for: window) { [weak self] response in
-            if response == .alertFirstButtonReturn {
-                self?.runtime?.send(.closeTab(id: tabId))
-            }
-        }
+        runtime?.send(.requestCloseTab(id: tabId))
     }
 
     // MARK: - Cell Factories

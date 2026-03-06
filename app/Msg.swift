@@ -9,7 +9,7 @@ enum Msg {
     // User actions
     case createTab(inGroupId: GroupId?)
     case selectTab(id: TabId)
-    case closeTab(id: TabId)
+    case requestCloseTab(id: TabId)
     case splitPane(direction: SplitNodeModel.Direction)
     case closePane(paneId: PaneId)
     case focusDirection(direction: SplitNodeModel.Direction, side: SplitNodeModel.Side)
@@ -21,6 +21,9 @@ enum Msg {
     case toggleGroupCollapse(groupId: GroupId)
     case selectAdjacentTab(direction: TabDirection)
     case paneBecameFirstResponder(paneId: PaneId)
+
+    // Internal (confirmed close — do not send from UI directly)
+    case closeTab(id: TabId)
 
     // Ghostty callbacks
     case surfaceTitle(paneId: PaneId, title: String)
