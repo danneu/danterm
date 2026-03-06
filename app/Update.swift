@@ -158,9 +158,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         guard let tab = selectedTab(in: model) else { return [] }
         guard let target = nearestLeaf(tab.rootNode, from: tab.focusedPaneId, direction: direction, side: side) else { return [] }
 
-        model.panes[target]?.hasBell = false
-        updateSelectedTab(&model) { t in t.focusedPaneId = target }
-
+        // Keep focused-pane state changes in paneBecameFirstResponder so
+        // keyboard focus changes and border rendering stay in sync.
         return [.makeFirstResponder(paneId: target)]
 
     case .paneBecameFirstResponder(let paneId):

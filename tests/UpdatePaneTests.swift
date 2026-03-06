@@ -47,7 +47,7 @@ func paneTests() {
         }
     }
 
-    test("testFocusDirectionNavigates") {
+    test("testFocusDirectionRequestsFirstResponder") {
         var model = makeModel()
         createTab(&model)
         let leftPaneId = model.groups[0].tabs[0].focusedPaneId
@@ -56,13 +56,22 @@ func paneTests() {
         let rightPaneId = model.groups[0].tabs[0].focusedPaneId
         try expect(rightPaneId != leftPaneId)
 
-        update(&model, .focusDirection(direction: .horizontal, side: .first))
-        let tab = model.groups[0].tabs[0]
-        try expectEqual(tab.focusedPaneId, leftPaneId, "should navigate to left pane")
+        let effectsLeft = update(&model, .focusDirection(direction: .horizontal, side: .first))
+        try expectEqual(model.groups[0].tabs[0].focusedPaneId, rightPaneId, "focusDirection should not change model focus directly")
+        try expect(hasEffect(effectsLeft) {
+            if case .makeFirstResponder(let paneId) = $0, paneId == leftPaneId { return true }
+            return false
+        }, "should request first responder for left pane")
 
-        update(&model, .focusDirection(direction: .horizontal, side: .second))
-        let tab2 = model.groups[0].tabs[0]
-        try expectEqual(tab2.focusedPaneId, rightPaneId, "should navigate to right pane")
+        // Simulate AppKit callback to move model focus to the left pane.
+        _ = update(&model, .paneBecameFirstResponder(paneId: leftPaneId))
+
+        let effectsRight = update(&model, .focusDirection(direction: .horizontal, side: .second))
+        try expectEqual(model.groups[0].tabs[0].focusedPaneId, leftPaneId, "focusDirection should still not mutate focus")
+        try expect(hasEffect(effectsRight) {
+            if case .makeFirstResponder(let paneId) = $0, paneId == rightPaneId { return true }
+            return false
+        }, "should request first responder for right pane")
     }
 
     test("testSplitRatioChangedNoEffects") {
@@ -169,5 +178,29 @@ func paneTests() {
 
         let effects = update(&model, .paneBecameFirstResponder(paneId: paneId))
         try expectEqual(effects.count, 0, "same pane should return no effects")
+    }
+
+    test("testFocusDirectionThenFirstResponderUpdatesFocusAndRebuilds") {
+        var model = makeModel()
+        createTab(&model)
+        let leftPaneId = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .splitPane(direction: .horizontal))
+        let rightPaneId = model.groups[0].tabs[0].focusedPaneId
+        try expect(rightPaneId != leftPaneId)
+
+        let focusEffects = update(&model, .focusDirection(direction: .horizontal, side: .first))
+        try expectEqual(model.groups[0].tabs[0].focusedPaneId, rightPaneId, "focus should remain on right pane until first responder callback")
+        try expect(hasEffect(focusEffects) {
+            if case .makeFirstResponder(let paneId) = $0, paneId == leftPaneId { return true }
+            return false
+        }, "should request first responder for left pane")
+
+        let callbackEffects = update(&model, .paneBecameFirstResponder(paneId: leftPaneId))
+        try expectEqual(model.groups[0].tabs[0].focusedPaneId, leftPaneId, "focus should update after first responder callback")
+        try expect(hasEffect(callbackEffects) {
+            if case .rebuildContentView = $0 { return true }
+            return false
+        }, "should rebuild content view after focus change callback")
     }
 }
