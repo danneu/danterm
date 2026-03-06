@@ -2,26 +2,25 @@
 <!-- Font size 288, char width ~173 -->
   <!-- Using text-anchor="start" so text x = left edge of glyph -->
   <!-- Left edges: $=123, d=382, a=555, n=728 -->
-  <!-- Baseline y=480 (shifted up to make room for "dev") -->
+  <!-- Baseline y=555 -->
   <g font-family="'Monaco'" font-size="288" font-weight="bold">
 
-    <!-- "$" in gray -->
-    <text x="123" y="480" fill="#888888">$</text>
+    <!-- "$" in systemGreen -->
+    <text x="123" y="555" fill="#34C759">$</text>
 
     <!-- Block cursor rect — same x and width as "d" glyph slot -->
-    <rect x="382" y="215" width="173" height="320" rx="12" fill="#FF8C00"/>
+    <rect x="382" y="290" width="173" height="320" rx="12" fill="#FF6600"/>
 
     <!-- "d" inverted on cursor -->
-    <text x="382" y="480" fill="#1a1a2e">d</text>
+    <text x="382" y="555" fill="#1a1a2e">d</text>
 
     <!-- "a" in orange -->
-    <text x="555" y="480" fill="#FF8C00">a</text>
+    <text x="555" y="555" fill="#FF6600">a</text>
 
     <!-- "n" in orange -->
-    <text x="728" y="480" fill="#FF8C00">n</text>
+    <text x="728" y="555" fill="#FF6600">n</text>
   </g>
-
   <!-- "dev" label with green background -->
-  <rect x="282" y="550" width="460" height="260" rx="20" fill="#16a34a"/>
-  <text x="512" y="750" text-anchor="middle" font-family="'Monaco'" font-size="220" font-weight="bold" fill="#FFFFFF">dev</text>
+  <rect x="282" y="650" width="460" height="260" rx="20" fill="#16a34a"/>
+  <text x="512" y="850" text-anchor="middle" font-family="'Monaco'" font-size="220" font-weight="bold" fill="#FFFFFF">dev</text>
 </svg>

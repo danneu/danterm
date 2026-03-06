@@ -5,7 +5,10 @@ default:
     @just --list
 
 # Compile Icon Composer .icon files into .icns + Assets.car
-build-icon:
+build-icons:
+    ./icon/gen-dev-icon.sh
+    cp icon/raw.svg icon/AppIcon.icon/Assets/raw.svg
+    cp icon/raw-dev.svg icon/AppIcon-dev.icon/Assets/raw-dev.svg
     ./icon/build-icns.sh AppIcon
     ./icon/build-icns.sh AppIcon-dev
 
