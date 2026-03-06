@@ -35,6 +35,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
             defer: false
         )
         window.title = "DanTerm"
+        window.minSize = NSSize(width: 600, height: 300)
         window.center()
 
         // Toolbar with sidebar toggle
