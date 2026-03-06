@@ -194,7 +194,7 @@ jobs:
 
       - name: Compute release zip hash
         run: |
-          SRI=$(nix hash to-sri --type sha256 $(nix-prefetch-url --unpack --type sha256 "file://$PWD/build/${{ env.ZIP_NAME }}" 2>/dev/null))
+          SRI=$(nix hash convert --hash-algo sha256 --to sri $(nix-prefetch-url --unpack --type sha256 "file://$PWD/build/${{ env.ZIP_NAME }}" 2>/dev/null))
           echo "ZIP_SRI=$SRI" >> "$GITHUB_ENV"
 
       - name: Checkout master for package.nix update
