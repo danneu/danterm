@@ -112,6 +112,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
         splitDownItem.keyEquivalentModifierMask = [.command, .shift]
         shellMenu.addItem(splitDownItem)
 
+        let nextTabItem = NSMenuItem(title: "Next Tab", action: #selector(nextTab(_:)), keyEquivalent: "N")
+        nextTabItem.keyEquivalentModifierMask = [.command, .shift]
+        shellMenu.addItem(nextTabItem)
+
+        let prevTabItem = NSMenuItem(title: "Previous Tab", action: #selector(prevTab(_:)), keyEquivalent: "P")
+        prevTabItem.keyEquivalentModifierMask = [.command, .shift]
+        shellMenu.addItem(prevTabItem)
+
         shellMenu.addItem(NSMenuItem.separator())
         shellMenu.addItem(withTitle: "Close Pane", action: #selector(closePane(_:)), keyEquivalent: "w")
         shellMenuItem.submenu = shellMenu
@@ -163,6 +171,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
 
     @objc func splitDown(_ sender: Any?) {
         runtime.send(.splitPane(direction: .vertical))
+    }
+
+    @objc func nextTab(_ sender: Any?) {
+        runtime.send(.selectAdjacentTab(direction: .next))
+    }
+
+    @objc func prevTab(_ sender: Any?) {
+        runtime.send(.selectAdjacentTab(direction: .prev))
     }
 
     @objc func closePane(_ sender: Any?) {

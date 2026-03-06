@@ -1,5 +1,10 @@
 import Foundation
 
+enum TabDirection {
+    case prev
+    case next
+}
+
 enum Msg {
     // User actions
     case createTab(inGroupId: GroupId?)
@@ -14,6 +19,7 @@ enum Msg {
     case moveTab(tabId: TabId, toGroupId: GroupId, atIndex: Int)
     case reorderGroup(groupId: GroupId, toIndex: Int)
     case toggleGroupCollapse(groupId: GroupId)
+    case selectAdjacentTab(direction: TabDirection)
     case paneBecameFirstResponder(paneId: PaneId)
 
     // Ghostty callbacks

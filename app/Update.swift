@@ -43,6 +43,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         effects.append(.reloadSidebar)
         return effects
 
+    case .selectAdjacentTab(let direction):
+        guard let targetId = adjacentTabId(direction: direction, in: model) else { return [] }
+        return update(&model, .selectTab(id: targetId))
+
     case .selectTab(let id):
         guard id != model.selectedTabId else { return [] }
 

@@ -103,6 +103,92 @@ func tabTests() {
         try expectEqual(effects.count, 0, "selecting already-selected tab should return no effects")
     }
 
+    // MARK: - Adjacent Tab Navigation
+
+    test("testNextTabWithinSameGroup") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let secondTabId = model.groups[0].tabs[1].id
+        update(&model, .selectTab(id: firstTabId))
+
+        let effects = update(&model, .selectAdjacentTab(direction: .next))
+        try expectEqual(model.selectedTabId, secondTabId)
+        try expect(effects.count > 0, "should have effects")
+    }
+
+    test("testPrevTabWithinSameGroup") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let secondTabId = model.groups[0].tabs[1].id
+        update(&model, .selectTab(id: secondTabId))
+
+        let effects = update(&model, .selectAdjacentTab(direction: .prev))
+        try expectEqual(model.selectedTabId, firstTabId)
+        try expect(effects.count > 0, "should have effects")
+    }
+
+    test("testNextTabAcrossGroups") {
+        var model = makeModel()
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .createGroup(name: "Work"))
+        let secondTabId = model.groups[1].tabs[0].id
+        update(&model, .selectTab(id: firstTabId))
+
+        let effects = update(&model, .selectAdjacentTab(direction: .next))
+        try expectEqual(model.selectedTabId, secondTabId)
+        try expect(effects.count > 0, "should have effects")
+    }
+
+    test("testPrevTabAcrossGroups") {
+        var model = makeModel()
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .createGroup(name: "Work"))
+        let secondTabId = model.groups[1].tabs[0].id
+        update(&model, .selectTab(id: secondTabId))
+
+        let effects = update(&model, .selectAdjacentTab(direction: .prev))
+        try expectEqual(model.selectedTabId, firstTabId)
+        try expect(effects.count > 0, "should have effects")
+    }
+
+    test("testNextTabNoOpAtLastTab") {
+        var model = makeModel()
+        createTab(&model)
+        let lastTabId = model.groups[0].tabs[0].id
+
+        let effects = update(&model, .selectAdjacentTab(direction: .next))
+        try expectEqual(effects.count, 0, "should be no-op at last tab")
+        try expectEqual(model.selectedTabId, lastTabId)
+    }
+
+    test("testPrevTabNoOpAtFirstTab") {
+        var model = makeModel()
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+
+        let effects = update(&model, .selectAdjacentTab(direction: .prev))
+        try expectEqual(effects.count, 0, "should be no-op at first tab")
+        try expectEqual(model.selectedTabId, firstTabId)
+    }
+
+    test("testNextTabNoOpWithNoTabs") {
+        var model = makeModel()
+        let effects = update(&model, .selectAdjacentTab(direction: .next))
+        try expectEqual(effects.count, 0)
+    }
+
+    test("testPrevTabNoOpWithNoTabs") {
+        var model = makeModel()
+        let effects = update(&model, .selectAdjacentTab(direction: .prev))
+        try expectEqual(effects.count, 0)
+    }
+
     test("testCloseTabNonSelected") {
         var model = makeModel()
         createTab(&model)

@@ -203,6 +203,18 @@ func abbreviateHome(_ path: String) -> String {
     return "~" + path.dropFirst(home.count)
 }
 
+func adjacentTabId(direction: TabDirection, in model: AppModel) -> TabId? {
+    let allTabs = model.groups.flatMap(\.tabs)
+    guard let idx = allTabs.firstIndex(where: { $0.id == model.selectedTabId }) else { return nil }
+    let newIdx: Int
+    switch direction {
+    case .next: newIdx = idx + 1
+    case .prev: newIdx = idx - 1
+    }
+    guard newIdx >= 0, newIdx < allTabs.count else { return nil }
+    return allTabs[newIdx].id
+}
+
 // MARK: - Termination Helpers
 
 func totalTabCount(_ model: AppModel) -> Int {
