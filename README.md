@@ -8,6 +8,13 @@ A macOS terminal built on ghostty with the behavior I want.
 
 Download the latest `.dmg` from [Releases](https://github.com/danneu/danterm/releases/latest).
 
+## Usage
+
+Like any other terminal, you probably want to grant DanTerm.app these macOS permissions:
+
+- Settings -> Privacy & Security -> Full Disk Access
+- Settings -> Privacy & Security -> Developer Tools
+
 ## Non-negotiable features:
 
 - Vertical tab sidebar
