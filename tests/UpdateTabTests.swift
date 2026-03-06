@@ -54,6 +54,26 @@ func tabTests() {
         try expectEqual(model.selectedTabId, firstTabId)
     }
 
+    test("testSelectTabClearsBell") {
+        var model = makeModel()
+        createTab(&model)
+        let tabAId = model.groups[0].tabs[0].id
+        createTab(&model)
+        let tabBId = model.groups[0].tabs[1].id
+        let tabBPaneId = model.groups[0].tabs[1].focusedPaneId
+
+        // Select tab A so tab B's pane is in the background
+        update(&model, .selectTab(id: tabAId))
+
+        // Set bell on background tab's pane via production path
+        update(&model, .surfaceBell(paneId: tabBPaneId))
+        try expect(model.panes[tabBPaneId]?.hasBell == true, "bell should be set on background pane")
+
+        // Select tab B — bell should clear
+        update(&model, .selectTab(id: tabBId))
+        try expect(model.panes[tabBPaneId]?.hasBell == false, "selecting tab should clear bell")
+    }
+
     test("testCloseLastPaneShowsConfirmation") {
         var model = makeModel()
         createTab(&model)

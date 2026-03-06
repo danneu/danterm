@@ -60,6 +60,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
 
         model.selectedTabId = id
+        // Clear bell on the newly focused pane
+        if let tab = selectedTab(in: model) {
+            model.panes[tab.focusedPaneId]?.hasBell = false
+        }
         effects.append(.rebuildContentView)
         effects.append(.reloadSidebar)
         return effects
