@@ -77,6 +77,9 @@ class TerminalView: NSView, NSTextInputClient {
 
 
 
+        // Register for file/URL/string drag-and-drop
+        registerForDraggedTypes([.fileURL, .URL, .string])
+
         // Set up tracking area for mouse events
         updateTrackingAreas()
     }
@@ -524,6 +527,34 @@ class TerminalView: NSView, NSTextInputClient {
         if raw & UInt(NX_DEVICERCMDKEYMASK) != 0 { mods |= GHOSTTY_MODS_SUPER_RIGHT.rawValue }
 
         return ghostty_input_mods_e(mods)
+    }
+}
+
+// MARK: - Drag & Drop
+
+extension TerminalView {
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard let types = sender.draggingPasteboard.types else { return [] }
+        let accepted: Set<NSPasteboard.PasteboardType> = [.fileURL, .URL, .string]
+        if Set(types).isDisjoint(with: accepted) { return [] }
+        return .copy
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        let pb = sender.draggingPasteboard
+
+        // Extract pasteboard values into plain strings for the pure helper
+        let urls = pb.readObjects(forClasses: [NSURL.self]) as? [URL] ?? []
+        let filePaths = urls.map { $0.isFileURL ? $0.path : $0.absoluteString }
+        let urlString = pb.string(forType: .URL)
+        let plainString = pb.string(forType: .string)
+
+        guard let content = DragDropInput.buildContent(filePaths: filePaths, urlString: urlString, plainString: plainString),
+              let surface = surface else { return false }
+        content.withCString { ptr in
+            ghostty_surface_text(surface, ptr, UInt(content.utf8.count))
+        }
+        return true
     }
 }
 

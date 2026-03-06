@@ -10,6 +10,7 @@ struct TestRunner {
         lifecycleTests()
         modelOperationsTests()
         snapshotTests()
+        dragDropInputTests()
         print("\n\(total - failures)/\(total) passed")
         if failures > 0 { exit(1) }
     }
