@@ -64,6 +64,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         guard let groupIdx = model.groups.firstIndex(where: { $0.tabs.contains(where: { $0.id == id }) }),
               let tabIdx = model.groups[groupIdx].tabs.firstIndex(where: { $0.id == id }) else { return [] }
 
+        if wouldQuitFromClose(model) {
+            return [.showTerminateConfirmation]
+        }
+
         let tab = model.groups[groupIdx].tabs[tabIdx]
         let paneIds = allPaneIds(tab.rootNode)
 
@@ -125,6 +129,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
         let tab = model.groups[groupIdx].tabs[tabIdx]
         let (newTree, nextFocus) = removeLeaf(tab.rootNode, paneId: paneId)
+
+        if newTree == nil && wouldQuitFromClose(model) {
+            return [.showTerminateConfirmation]
+        }
 
         var effects: [Effect] = [.destroySurface(paneId: paneId)]
         model.panes.removeValue(forKey: paneId)
@@ -295,6 +303,15 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         effects.append(.activateApp)
         return effects
 
+    case .confirmTerminate:
+        if wouldQuitFromClose(model) {
+            return [.terminate]
+        }
+        return []
+
+    case .cancelTerminate:
+        return []
+
     case .terminate:
         return [.terminate]
 
@@ -311,6 +328,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
               !model.groups[idx].isDefault else { return [] }
 
         let group = model.groups[idx]
+        if !moveTabs && !group.tabs.isEmpty && totalTabCount(model) == group.tabs.count {
+            return [.showTerminateConfirmation]
+        }
         if moveTabs {
             model.groups[0].tabs.append(contentsOf: group.tabs)
         } else {

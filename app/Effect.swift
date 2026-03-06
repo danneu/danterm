@@ -19,6 +19,7 @@ enum Effect {
     // System
     case sendNotification(title: String, body: String, tabId: TabId, paneId: PaneId)
     case requestNotificationPermission
+    case showTerminateConfirmation
     case terminate
     case activateApp
     case setAppFocus(Bool)

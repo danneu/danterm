@@ -232,6 +232,28 @@ func modelOperationsTests() {
         try expectEqual(innerRatio, 0.3, "inner ratio updated")
     }
 
+    // MARK: - totalTabCount
+
+    test("testTotalTabCountEmpty") {
+        let model = makeModel()
+        try expectEqual(totalTabCount(model), 0)
+    }
+
+    test("testTotalTabCountSingleTab") {
+        var model = makeModel()
+        createTab(&model)
+        try expectEqual(totalTabCount(model), 1)
+    }
+
+    test("testTotalTabCountMultipleGroups") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        update(&model, .createGroup(name: "Work"))
+        // createGroup auto-creates a tab
+        try expectEqual(totalTabCount(model), 3)
+    }
+
     // MARK: - abbreviateHome
 
     test("testAbbreviateHome") {

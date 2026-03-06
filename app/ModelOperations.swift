@@ -203,6 +203,16 @@ func abbreviateHome(_ path: String) -> String {
     return "~" + path.dropFirst(home.count)
 }
 
+// MARK: - Termination Helpers
+
+func totalTabCount(_ model: AppModel) -> Int {
+    model.groups.flatMap(\.tabs).count
+}
+
+func wouldQuitFromClose(_ model: AppModel) -> Bool {
+    totalTabCount(model) == 1
+}
+
 // MARK: - Bell Helpers
 
 func bellCount(for tab: TabModel, panes: [PaneId: PaneModel]) -> Int {

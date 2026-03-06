@@ -90,6 +90,20 @@ class AppRuntime {
         case .requestNotificationPermission:
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
 
+        case .showTerminateConfirmation:
+            let alert = NSAlert()
+            alert.messageText = "Quit DanTerm?"
+            alert.informativeText = "Closing the last pane will quit the application."
+            alert.addButton(withTitle: "Quit")
+            alert.addButton(withTitle: "Cancel")
+            alert.alertStyle = .warning
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                self.send(.confirmTerminate)
+            } else {
+                self.send(.cancelTerminate)
+            }
+
         case .terminate:
             NSApp.terminate(nil)
 

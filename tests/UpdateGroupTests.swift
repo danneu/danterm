@@ -67,7 +67,7 @@ func groupTests() {
         try expectEqual(model.groups[0].tabs[0].id, tabId2)
     }
 
-    test("testDeleteGroupTerminatesIfLast") {
+    test("testDeleteGroupShowsConfirmationIfLast") {
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
@@ -76,12 +76,14 @@ func groupTests() {
         let onlyGroupId = model.groups[1].id
         update(&model, .moveTab(tabId: tabId, toGroupId: onlyGroupId, atIndex: 0))
 
-        // General has no tabs, Only has the only tab
+        // General has no tabs, Only has the only tab + auto-created tab
         let effects = update(&model, .deleteGroup(id: onlyGroupId, moveTabs: false))
+        try expectEqual(effects.count, 1)
         try expect(hasEffect(effects) {
-            if case .terminate = $0 { return true }
+            if case .showTerminateConfirmation = $0 { return true }
             return false
-        }, "should terminate when all tabs are gone")
+        }, "should show confirmation when deleting group with all tabs")
+        try expectEqual(model.groups.count, 2, "model should be unchanged")
     }
 
     test("testDeleteDefaultGroupNoOp") {

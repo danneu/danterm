@@ -54,16 +54,33 @@ func tabTests() {
         try expectEqual(model.selectedTabId, firstTabId)
     }
 
-    test("testCloseLastPaneTerminates") {
+    test("testCloseLastPaneShowsConfirmation") {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
         let effects = update(&model, .closePane(paneId: paneId))
+        try expectEqual(effects.count, 1)
         try expect(hasEffect(effects) {
-            if case .terminate = $0 { return true }
+            if case .showTerminateConfirmation = $0 { return true }
             return false
-        }, "should terminate when last pane closed")
+        }, "should show confirmation when closing last pane")
+        try expectEqual(model.groups[0].tabs.count, 1, "model should be unchanged")
+        try expect(model.panes[paneId] != nil, "pane should still exist")
+    }
+
+    test("testCloseLastTabShowsConfirmation") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+
+        let effects = update(&model, .closeTab(id: tabId))
+        try expectEqual(effects.count, 1)
+        try expect(hasEffect(effects) {
+            if case .showTerminateConfirmation = $0 { return true }
+            return false
+        }, "should show confirmation when closing last tab")
+        try expectEqual(model.groups[0].tabs.count, 1, "model should be unchanged")
     }
 
     test("testCreateTabInSpecificGroup") {

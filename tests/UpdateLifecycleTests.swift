@@ -75,4 +75,30 @@ func lifecycleTests() {
             throw TestFailure(message: "expected terminate effect")
         }
     }
+
+    test("testConfirmTerminateWithOneTab") {
+        var model = makeModel()
+        createTab(&model)
+        let effects = update(&model, .confirmTerminate)
+        try expectEqual(effects.count, 1)
+        try expect(hasEffect(effects) {
+            if case .terminate = $0 { return true }
+            return false
+        }, "should terminate when only one tab remains")
+    }
+
+    test("testConfirmTerminateWithMultipleTabs") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let effects = update(&model, .confirmTerminate)
+        try expectEqual(effects.count, 0, "should not terminate when multiple tabs exist")
+    }
+
+    test("testCancelTerminate") {
+        var model = makeModel()
+        createTab(&model)
+        let effects = update(&model, .cancelTerminate)
+        try expectEqual(effects.count, 0, "cancel should produce no effects")
+    }
 }

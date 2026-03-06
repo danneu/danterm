@@ -201,10 +201,10 @@ func ghosttyTests() {
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
         let effects = update(&model, .surfaceClosed(paneId: paneId))
-        try expect(model.panes[paneId] == nil, "pane should be removed")
+        try expect(model.panes[paneId] != nil, "pane should still exist (confirmation pending)")
         try expect(hasEffect(effects) {
-            if case .terminate = $0 { return true }
+            if case .showTerminateConfirmation = $0 { return true }
             return false
-        }, "should terminate when last pane closed via surfaceClosed")
+        }, "should show confirmation when last pane closed via surfaceClosed")
     }
 }

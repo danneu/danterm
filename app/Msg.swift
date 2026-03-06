@@ -27,6 +27,8 @@ enum Msg {
     case appBecameActive
     case appResignedActive
     case notificationClicked(tabId: TabId, paneId: PaneId?)
+    case confirmTerminate
+    case cancelTerminate
     case terminate
 
     // View
