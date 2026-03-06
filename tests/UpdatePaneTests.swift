@@ -180,6 +180,86 @@ func paneTests() {
         try expectEqual(effects.count, 0, "same pane should return no effects")
     }
 
+    // MARK: - Zoom Tests
+
+    test("testToggleZoomOnSplit") {
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .splitPane(direction: .horizontal))
+
+        let effects = update(&model, .toggleZoomPane)
+        try expectEqual(model.groups[0].tabs[0].isZoomed, true)
+        try expect(hasEffect(effects) {
+            if case .rebuildContentView = $0 { return true }
+            return false
+        }, "should rebuild content view")
+    }
+
+    test("testToggleZoomOff") {
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .toggleZoomPane)
+
+        let effects = update(&model, .toggleZoomPane)
+        try expectEqual(model.groups[0].tabs[0].isZoomed, false)
+        try expect(hasEffect(effects) {
+            if case .rebuildContentView = $0 { return true }
+            return false
+        }, "should rebuild content view")
+    }
+
+    test("testToggleZoomNoOpOnSinglePane") {
+        var model = makeModel()
+        createTab(&model)
+
+        let effects = update(&model, .toggleZoomPane)
+        try expectEqual(model.groups[0].tabs[0].isZoomed, false)
+        try expectEqual(effects.count, 0, "no effects on single pane")
+    }
+
+    test("testCloseZoomedPaneNormalizesZoom") {
+        var model = makeModel()
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .toggleZoomPane)
+        try expectEqual(model.groups[0].tabs[0].isZoomed, true)
+
+        // Close paneB, leaving only paneA (single leaf)
+        update(&model, .closePane(paneId: paneB))
+        try expectEqual(model.groups[0].tabs[0].isZoomed, false, "zoom should normalize when single pane remains")
+        try expectEqual(model.groups[0].tabs[0].focusedPaneId, paneA)
+    }
+
+    test("testSplitWhileZoomedClearsZoom") {
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .toggleZoomPane)
+        try expectEqual(model.groups[0].tabs[0].isZoomed, true)
+
+        update(&model, .splitPane(direction: .vertical))
+        try expectEqual(model.groups[0].tabs[0].isZoomed, false, "split should clear zoom")
+    }
+
+    test("testFocusDirectionWhileZoomedClearsZoom") {
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .toggleZoomPane)
+        try expectEqual(model.groups[0].tabs[0].isZoomed, true)
+
+        let effects = update(&model, .focusDirection(direction: .horizontal, side: .first))
+        try expectEqual(model.groups[0].tabs[0].isZoomed, false, "focus direction should clear zoom")
+        try expect(hasEffect(effects) {
+            if case .rebuildContentView = $0 { return true }
+            return false
+        }, "should rebuild content view")
+    }
+
     test("testFocusDirectionThenFirstResponderUpdatesFocusAndRebuilds") {
         var model = makeModel()
         createTab(&model)

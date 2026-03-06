@@ -65,6 +65,43 @@ func lifecycleTests() {
         }, "should still activate app")
     }
 
+    test("testNotificationClickedWhileZoomedClearsZoom") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        // Split and zoom paneB
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .toggleZoomPane)
+        try expectEqual(model.groups[0].tabs[0].isZoomed, true)
+
+        // Notification targets paneA (not the focused paneB)
+        let effects = update(&model, .notificationClicked(tabId: tabId, paneId: paneA))
+        try expectEqual(model.groups[0].tabs[0].isZoomed, false, "zoom should clear when notification targets different pane")
+        try expect(hasEffect(effects) {
+            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
+            return false
+        }, "should focus notification's pane")
+        // Suppress unused variable warning
+        _ = paneB
+    }
+
+    test("testNotificationClickedWhileZoomedSamePaneKeepsZoom") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .toggleZoomPane)
+
+        // Notification targets the already-focused paneB
+        _ = update(&model, .notificationClicked(tabId: tabId, paneId: paneB))
+        try expectEqual(model.groups[0].tabs[0].isZoomed, true, "zoom should remain when notification targets same pane")
+    }
+
     test("testTerminate") {
         var model = makeModel()
         let effects = update(&model, .terminate)

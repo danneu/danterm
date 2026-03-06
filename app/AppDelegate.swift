@@ -120,6 +120,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
         prevTabItem.keyEquivalentModifierMask = [.command, .shift]
         shellMenu.addItem(prevTabItem)
 
+        let zoomItem = NSMenuItem(title: "Toggle Zoom", action: #selector(toggleZoom(_:)), keyEquivalent: "\r")
+        zoomItem.keyEquivalentModifierMask = [.command, .shift]
+        shellMenu.addItem(zoomItem)
+
         shellMenu.addItem(NSMenuItem.separator())
         shellMenu.addItem(withTitle: "Close Pane", action: #selector(closePane(_:)), keyEquivalent: "w")
         shellMenuItem.submenu = shellMenu
@@ -179,6 +183,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
 
     @objc func prevTab(_ sender: Any?) {
         runtime.send(.selectAdjacentTab(direction: .prev))
+    }
+
+    @objc func toggleZoom(_ sender: Any?) {
+        runtime.send(.toggleZoomPane)
     }
 
     @objc func closePane(_ sender: Any?) {

@@ -49,6 +49,7 @@ struct TabModel: Equatable {
     var subtitle: String?
     var focusedPaneId: PaneId
     var rootNode: SplitNodeModel
+    var isZoomed: Bool = false
 }
 
 struct GroupModel: Equatable {

@@ -21,6 +21,7 @@ enum Msg {
     case toggleGroupCollapse(groupId: GroupId)
     case selectAdjacentTab(direction: TabDirection)
     case paneBecameFirstResponder(paneId: PaneId)
+    case toggleZoomPane
 
     // Internal (confirmed close — do not send from UI directly)
     case closeTab(id: TabId)

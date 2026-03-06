@@ -137,6 +137,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         updateSelectedTab(&model) { tab in
             tab.rootNode = newRoot
             tab.focusedPaneId = newPaneId
+            tab.isZoomed = false
         }
 
         return [
@@ -168,12 +169,17 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         if let next = nextFocus {
             model.groups[groupIdx].tabs[tabIdx].focusedPaneId = next
         }
+        normalizeZoom(&model.groups[groupIdx].tabs[tabIdx])
 
         effects.append(.rebuildContentView)
         return effects
 
     case .focusDirection(let direction, let side):
         guard let tab = selectedTab(in: model) else { return [] }
+        if tab.isZoomed {
+            updateSelectedTab(&model) { t in t.isZoomed = false }
+            return [.rebuildContentView]
+        }
         guard let target = nearestLeaf(tab.rootNode, from: tab.focusedPaneId, direction: direction, side: side) else { return [] }
 
         // Keep focused-pane state changes in paneBecameFirstResponder so
@@ -318,6 +324,11 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
     case .notificationClicked(let tabId, let paneId):
         var effects = update(&model, .selectTab(id: tabId))
+        // Clear zoom if notification targets a different pane than focused
+        if let pid = paneId, let tab = selectedTab(in: model), tab.isZoomed, pid != tab.focusedPaneId {
+            updateSelectedTab(&model) { t in t.isZoomed = false }
+            effects.append(.rebuildContentView)
+        }
         if let pid = paneId {
             effects.append(.makeFirstResponder(paneId: pid))
         }
@@ -408,6 +419,18 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         model.groups[idx].isCollapsed.toggle()
         return []
 
+    case .toggleZoomPane:
+        guard let tab = selectedTab(in: model) else { return [] }
+        if tab.isZoomed {
+            updateSelectedTab(&model) { t in t.isZoomed = false }
+            return [.rebuildContentView]
+        }
+        if case .split = tab.rootNode {
+            updateSelectedTab(&model) { t in t.isZoomed = true }
+            return [.rebuildContentView]
+        }
+        return []
+
     // MARK: - View
 
     case .splitRatioChanged(let splitId, let ratio):
@@ -432,6 +455,10 @@ private func updateTab(_ tabId: TabId, in model: inout AppModel, _ body: (inout 
             return
         }
     }
+}
+
+private func normalizeZoom(_ tab: inout TabModel) {
+    if case .leaf = tab.rootNode { tab.isZoomed = false }
 }
 
 private func windowTitle(for tab: TabModel) -> String {

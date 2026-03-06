@@ -195,6 +195,13 @@ class AppRuntime {
 
         guard let tab = selectedTab(in: model) else { return }
 
+        let displayNode: SplitNodeModel
+        if tab.isZoomed {
+            displayNode = .leaf(tab.focusedPaneId)
+        } else {
+            displayNode = tab.rootNode
+        }
+
         // Defocus all surfaces before rebuilding
         for paneId in allPaneIds(tab.rootNode) {
             if let view = surfaces[paneId], let surface = view.surface {
@@ -203,7 +210,7 @@ class AppRuntime {
         }
 
         let container = SplitContainerView(
-            rootNode: tab.rootNode,
+            rootNode: displayNode,
             surfaceLookup: { [weak self] paneId in self?.surfaces[paneId] },
             runtime: self,
             frame: contentArea.bounds
@@ -214,7 +221,7 @@ class AppRuntime {
 
         // Set focus borders based on model state
         let focusedId = tab.focusedPaneId
-        for paneId in allPaneIds(tab.rootNode) {
+        for paneId in allPaneIds(displayNode) {
             let isFocused = paneId == focusedId
             let hasBell = model.panes[paneId]?.hasBell ?? false
             surfaces[paneId]?.setFocusBorder(isFocused, hasBell: hasBell)
