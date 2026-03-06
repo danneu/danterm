@@ -5,14 +5,14 @@ class PaneWrapperView: NSView {
     let paneId: PaneId
     let terminalView: TerminalView
     private let toolbarLabel: NSTextField
-    private let closeButton: NSButton
+    private let closeButton: PaneToolbarButton
     private weak var runtime: AppRuntime?
 
     init(paneId: PaneId, terminalView: TerminalView, isZoomed: Bool, hasSplits: Bool, runtime: AppRuntime?) {
         self.paneId = paneId
         self.terminalView = terminalView
         self.toolbarLabel = NSTextField(labelWithString: "")
-        self.closeButton = NSButton()
+        self.closeButton = PaneToolbarButton()
         self.runtime = runtime
         super.init(frame: .zero)
 
@@ -40,11 +40,12 @@ class PaneWrapperView: NSView {
         closeButton.contentTintColor = NSColor.secondaryLabelColor
         closeButton.target = self
         closeButton.action = #selector(closePaneAction)
+        closeButton.toolTip = "Close Pane"
         closeButton.setContentHuggingPriority(.required, for: .horizontal)
         toolbar.addSubview(closeButton)
 
         // Split right button
-        let splitRightButton = NSButton()
+        let splitRightButton = PaneToolbarButton()
         splitRightButton.translatesAutoresizingMaskIntoConstraints = false
         splitRightButton.bezelStyle = .inline
         splitRightButton.isBordered = false
@@ -53,11 +54,12 @@ class PaneWrapperView: NSView {
         splitRightButton.contentTintColor = NSColor.secondaryLabelColor
         splitRightButton.target = self
         splitRightButton.action = #selector(splitRightAction)
+        splitRightButton.toolTip = "Split Right"
         splitRightButton.setContentHuggingPriority(.required, for: .horizontal)
         toolbar.addSubview(splitRightButton)
 
         // Split down button
-        let splitDownButton = NSButton()
+        let splitDownButton = PaneToolbarButton()
         splitDownButton.translatesAutoresizingMaskIntoConstraints = false
         splitDownButton.bezelStyle = .inline
         splitDownButton.isBordered = false
@@ -66,11 +68,12 @@ class PaneWrapperView: NSView {
         splitDownButton.contentTintColor = NSColor.secondaryLabelColor
         splitDownButton.target = self
         splitDownButton.action = #selector(splitDownAction)
+        splitDownButton.toolTip = "Split Down"
         splitDownButton.setContentHuggingPriority(.required, for: .horizontal)
         toolbar.addSubview(splitDownButton)
 
         // Zoom toggle button
-        let zoomButton = NSButton()
+        let zoomButton = PaneToolbarButton()
         zoomButton.translatesAutoresizingMaskIntoConstraints = false
         zoomButton.bezelStyle = .inline
         zoomButton.isBordered = false
@@ -78,8 +81,10 @@ class PaneWrapperView: NSView {
             zoomButton.image = NSImage(systemSymbolName: "arrow.down.right.and.arrow.up.left", accessibilityDescription: "Unzoom pane")
             zoomButton.wantsLayer = true
             zoomButton.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+            zoomButton.toolTip = "Unzoom Pane"
         } else {
             zoomButton.image = NSImage(systemSymbolName: "arrow.up.left.and.arrow.down.right", accessibilityDescription: "Zoom pane")
+            zoomButton.toolTip = "Zoom Pane"
         }
         zoomButton.imageScaling = .scaleProportionallyDown
         zoomButton.contentTintColor = NSColor.secondaryLabelColor
@@ -160,5 +165,52 @@ class PaneWrapperView: NSView {
 
     @objc private func zoomPaneAction() {
         runtime?.send(.toggleZoomPane)
+    }
+}
+
+class PaneToolbarButton: NSButton {
+    private var trackingArea: NSTrackingArea?
+
+    override var isEnabled: Bool {
+        didSet {
+            contentTintColor = NSColor.secondaryLabelColor
+            window?.invalidateCursorRects(for: self)
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = trackingArea {
+            removeTrackingArea(existing)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        if isEnabled {
+            addCursorRect(bounds, cursor: .pointingHand)
+        }
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        if isEnabled {
+            contentTintColor = NSColor.labelColor
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        if isEnabled {
+            contentTintColor = NSColor.secondaryLabelColor
+        }
     }
 }
