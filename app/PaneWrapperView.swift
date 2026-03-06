@@ -4,20 +4,63 @@ import GhosttyKit
 class PaneWrapperView: NSView {
     let paneId: PaneId
     let terminalView: TerminalView
+    private let toolbar: NSView
     private let toolbarLabel: NSTextField
-    private let closeButton: PaneToolbarButton
+    private let menuButton: NSButton
+    private let unzoomButton: PaneToolbarButton?
+    private let isZoomed: Bool
+    private let hasSplits: Bool
     private weak var runtime: AppRuntime?
 
     init(paneId: PaneId, terminalView: TerminalView, isZoomed: Bool, hasSplits: Bool, runtime: AppRuntime?) {
         self.paneId = paneId
         self.terminalView = terminalView
+        self.toolbar = NSView()
         self.toolbarLabel = NSTextField(labelWithString: "")
-        self.closeButton = PaneToolbarButton()
+        self.isZoomed = isZoomed
+        self.hasSplits = hasSplits
         self.runtime = runtime
+
+        // Menu button (always visible)
+        let mb = NSButton()
+        mb.translatesAutoresizingMaskIntoConstraints = false
+        mb.bezelStyle = .inline
+        mb.isBordered = false
+        mb.image = NSImage(systemSymbolName: "ellipsis.circle", accessibilityDescription: "Pane menu")
+        mb.imageScaling = .scaleProportionallyDown
+        mb.contentTintColor = NSColor.secondaryLabelColor
+        mb.setContentHuggingPriority(.required, for: .horizontal)
+        self.menuButton = mb
+
+        // Unzoom button (only when zoomed)
+        if isZoomed {
+            let ub = PaneToolbarButton()
+            ub.translatesAutoresizingMaskIntoConstraints = false
+            ub.bezelStyle = .inline
+            ub.isBordered = false
+            ub.image = NSImage(systemSymbolName: "arrow.down.right.and.arrow.up.left", accessibilityDescription: "Unzoom pane")
+            ub.imageScaling = .scaleProportionallyDown
+            ub.contentTintColor = NSColor.secondaryLabelColor
+            ub.wantsLayer = true
+            ub.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+            ub.toolTip = "Unzoom Pane"
+            ub.setContentHuggingPriority(.required, for: .horizontal)
+            self.unzoomButton = ub
+        } else {
+            self.unzoomButton = nil
+        }
+
         super.init(frame: .zero)
 
+        menuButton.target = self
+        menuButton.action = #selector(showPaneMenu)
+
+        if let ub = unzoomButton {
+            ub.target = self
+            ub.action = #selector(zoomPaneAction)
+        }
+
         // Toolbar container
-        let toolbar = NSView()
         toolbar.translatesAutoresizingMaskIntoConstraints = false
         toolbar.wantsLayer = true
         toolbar.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.8).cgColor
@@ -31,74 +74,20 @@ class PaneWrapperView: NSView {
         toolbarLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         toolbar.addSubview(toolbarLabel)
 
-        // Close button
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
-        closeButton.bezelStyle = .inline
-        closeButton.isBordered = false
-        closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close pane")
-        closeButton.imageScaling = .scaleProportionallyDown
-        closeButton.contentTintColor = NSColor.secondaryLabelColor
-        closeButton.target = self
-        closeButton.action = #selector(closePaneAction)
-        closeButton.toolTip = "Close Pane"
-        closeButton.setContentHuggingPriority(.required, for: .horizontal)
-        toolbar.addSubview(closeButton)
-
-        // Split right button
-        let splitRightButton = PaneToolbarButton()
-        splitRightButton.translatesAutoresizingMaskIntoConstraints = false
-        splitRightButton.bezelStyle = .inline
-        splitRightButton.isBordered = false
-        splitRightButton.image = NSImage(systemSymbolName: "square.split.2x1", accessibilityDescription: "Split right")
-        splitRightButton.imageScaling = .scaleProportionallyDown
-        splitRightButton.contentTintColor = NSColor.secondaryLabelColor
-        splitRightButton.target = self
-        splitRightButton.action = #selector(splitRightAction)
-        splitRightButton.toolTip = "Split Right"
-        splitRightButton.setContentHuggingPriority(.required, for: .horizontal)
-        toolbar.addSubview(splitRightButton)
-
-        // Split down button
-        let splitDownButton = PaneToolbarButton()
-        splitDownButton.translatesAutoresizingMaskIntoConstraints = false
-        splitDownButton.bezelStyle = .inline
-        splitDownButton.isBordered = false
-        splitDownButton.image = NSImage(systemSymbolName: "square.split.1x2", accessibilityDescription: "Split down")
-        splitDownButton.imageScaling = .scaleProportionallyDown
-        splitDownButton.contentTintColor = NSColor.secondaryLabelColor
-        splitDownButton.target = self
-        splitDownButton.action = #selector(splitDownAction)
-        splitDownButton.toolTip = "Split Down"
-        splitDownButton.setContentHuggingPriority(.required, for: .horizontal)
-        toolbar.addSubview(splitDownButton)
-
-        // Zoom toggle button
-        let zoomButton = PaneToolbarButton()
-        zoomButton.translatesAutoresizingMaskIntoConstraints = false
-        zoomButton.bezelStyle = .inline
-        zoomButton.isBordered = false
-        if isZoomed {
-            zoomButton.image = NSImage(systemSymbolName: "arrow.down.right.and.arrow.up.left", accessibilityDescription: "Unzoom pane")
-            zoomButton.wantsLayer = true
-            zoomButton.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
-            zoomButton.toolTip = "Unzoom Pane"
-        } else {
-            zoomButton.image = NSImage(systemSymbolName: "arrow.up.left.and.arrow.down.right", accessibilityDescription: "Zoom pane")
-            zoomButton.toolTip = "Zoom Pane"
+        // Add buttons to toolbar
+        toolbar.addSubview(menuButton)
+        if let ub = unzoomButton {
+            toolbar.addSubview(ub)
         }
-        zoomButton.imageScaling = .scaleProportionallyDown
-        zoomButton.contentTintColor = NSColor.secondaryLabelColor
-        zoomButton.target = self
-        zoomButton.action = #selector(zoomPaneAction)
-        zoomButton.isEnabled = hasSplits
-        zoomButton.setContentHuggingPriority(.required, for: .horizontal)
-        toolbar.addSubview(zoomButton)
 
         // Terminal view
         terminalView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(terminalView)
 
-        NSLayoutConstraint.activate([
+        // Label trailing anchors to the first trailing button
+        let labelTrailingAnchor = unzoomButton?.leadingAnchor ?? menuButton.leadingAnchor
+
+        var constraints = [
             // Toolbar
             toolbar.topAnchor.constraint(equalTo: topAnchor),
             toolbar.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -108,38 +97,31 @@ class PaneWrapperView: NSView {
             // Label within toolbar
             toolbarLabel.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
             toolbarLabel.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 8),
-            toolbarLabel.trailingAnchor.constraint(lessThanOrEqualTo: splitRightButton.leadingAnchor, constant: -4),
+            toolbarLabel.trailingAnchor.constraint(lessThanOrEqualTo: labelTrailingAnchor, constant: -4),
 
-            // Split right button within toolbar
-            splitRightButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            splitRightButton.trailingAnchor.constraint(equalTo: splitDownButton.leadingAnchor),
-            splitRightButton.widthAnchor.constraint(equalToConstant: 16),
-            splitRightButton.heightAnchor.constraint(equalToConstant: 16),
-
-            // Split down button within toolbar
-            splitDownButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            splitDownButton.trailingAnchor.constraint(equalTo: zoomButton.leadingAnchor),
-            splitDownButton.widthAnchor.constraint(equalToConstant: 16),
-            splitDownButton.heightAnchor.constraint(equalToConstant: 16),
-
-            // Zoom button within toolbar
-            zoomButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            zoomButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor),
-            zoomButton.widthAnchor.constraint(equalToConstant: 16),
-            zoomButton.heightAnchor.constraint(equalToConstant: 16),
-
-            // Close button within toolbar
-            closeButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            closeButton.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor, constant: -4),
-            closeButton.widthAnchor.constraint(equalToConstant: 16),
-            closeButton.heightAnchor.constraint(equalToConstant: 16),
+            // Menu button
+            menuButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+            menuButton.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor, constant: -4),
+            menuButton.widthAnchor.constraint(equalToConstant: 16),
+            menuButton.heightAnchor.constraint(equalToConstant: 16),
 
             // Terminal view below toolbar
             terminalView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
             terminalView.leadingAnchor.constraint(equalTo: leadingAnchor),
             terminalView.trailingAnchor.constraint(equalTo: trailingAnchor),
             terminalView.bottomAnchor.constraint(equalTo: bottomAnchor),
-        ])
+        ]
+
+        if let ub = unzoomButton {
+            constraints.append(contentsOf: [
+                ub.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+                ub.trailingAnchor.constraint(equalTo: menuButton.leadingAnchor),
+                ub.widthAnchor.constraint(equalToConstant: 16),
+                ub.heightAnchor.constraint(equalToConstant: 16),
+            ])
+        }
+
+        NSLayoutConstraint.activate(constraints)
     }
 
     required init?(coder: NSCoder) {
@@ -148,6 +130,34 @@ class PaneWrapperView: NSView {
 
     func updateToolbar(title: String, cwd: String?) {
         toolbarLabel.stringValue = formatToolbarLabel(title: title, cwd: cwd)
+    }
+
+    @objc private func showPaneMenu() {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let splitRight = NSMenuItem(title: "Split Right", action: #selector(splitRightAction), keyEquivalent: "")
+        splitRight.target = self
+        menu.addItem(splitRight)
+
+        let splitDown = NSMenuItem(title: "Split Down", action: #selector(splitDownAction), keyEquivalent: "")
+        splitDown.target = self
+        menu.addItem(splitDown)
+
+        menu.addItem(.separator())
+
+        let zoomTitle = isZoomed ? "Unzoom Pane" : "Zoom Pane"
+        let zoom = NSMenuItem(title: zoomTitle, action: #selector(zoomPaneAction), keyEquivalent: "")
+        zoom.target = self
+        zoom.isEnabled = hasSplits || isZoomed
+        menu.addItem(zoom)
+
+        let close = NSMenuItem(title: "Close Pane", action: #selector(closePaneAction), keyEquivalent: "")
+        close.target = self
+        menu.addItem(close)
+
+        let point = NSPoint(x: 0, y: menuButton.bounds.height + 2)
+        menu.popUp(positioning: nil, at: point, in: menuButton)
     }
 
     @objc private func closePaneAction() {
