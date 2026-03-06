@@ -492,7 +492,7 @@ class TerminalView: NSView, NSTextInputClient {
         guard let layer = layer else { return }
         if focused {
             layer.borderWidth = 2
-            layer.borderColor = NSColor.selectedControlColor.cgColor
+            layer.borderColor = NSColor.systemGreen.cgColor
         } else if hasBell {
             layer.borderWidth = 2
             layer.borderColor = NSColor.systemRed.cgColor
