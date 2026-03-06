@@ -38,6 +38,29 @@ class SidebarOutlineView: NSOutlineView {
         return nil
     }
 
+    private static let tabInsetX: CGFloat = 5
+
+    /// Tab rows don't have a disclosure triangle, but NSOutlineView still
+    /// reserves gutter space for one. Zero it out so tabs aren't indented.
+    /// Group rows keep theirs for expand/collapse.
+    override func frameOfOutlineCell(atRow row: Int) -> NSRect {
+        if let sidebarItem = item(atRow: row) as? SidebarItem, case .tab = sidebarItem.kind {
+            return .zero
+        }
+        return super.frameOfOutlineCell(atRow: row)
+    }
+
+    /// Reclaim the gutter space left by the hidden disclosure triangle so tab
+    /// rows extend to the left edge (plus a small inset).
+    override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {
+        var frame = super.frameOfCell(atColumn: column, row: row)
+        if let sidebarItem = item(atRow: row) as? SidebarItem, case .tab = sidebarItem.kind {
+            frame.size.width += frame.origin.x - Self.tabInsetX
+            frame.origin.x = Self.tabInsetX
+        }
+        return frame
+    }
+
     override var acceptsFirstResponder: Bool { false }
 }
 
