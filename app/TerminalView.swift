@@ -284,8 +284,25 @@ class TerminalView: NSView, NSTextInputClient {
                 sendKeyEvent(action, event: event, text: text)
             }
         } else {
-            // No text — send key event without text
-            sendKeyEvent(action, event: event, text: event.characters)
+            // No text — send key event without text.
+            // Filter out PUA function key characters (arrow keys, etc.) — libghostty
+            // handles these via keycode, not text.
+            let text: String? = {
+                guard let chars = event.characters,
+                      chars.count == 1,
+                      let scalar = chars.unicodeScalars.first
+                else { return event.characters }
+                // PUA range = function keys (arrows, F1-F12, etc.) — let libghostty
+                // handle via keycode
+                if scalar.value >= 0xF700 && scalar.value <= 0xF8FF { return nil }
+                // Control characters — let libghostty handle ctrl encoding
+                if scalar.value < 0x20 {
+                    return event.characters(byApplyingModifiers:
+                        event.modifierFlags.subtracting(.control))
+                }
+                return chars
+            }()
+            sendKeyEvent(action, event: event, text: text)
         }
     }
 
