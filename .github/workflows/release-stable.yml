@@ -196,12 +196,18 @@ jobs:
           SRI=$(nix hash convert --hash-algo sha256 --to sri $(nix-prefetch-url --unpack --type sha256 "file://$PWD/build/${{ env.ZIP_NAME }}" 2>/dev/null))
           echo "ZIP_SRI=$SRI" >> "$GITHUB_ENV"
 
+      # Check out master to a separate path so the second checkout doesn't
+      # clobber the default workdir (which holds lib/GhosttyKit.xcframework
+      # and .zig-cache). actions/cache saves in post-job cleanup, so those
+      # paths must still exist when the job finishes.
       - name: Checkout master for package.nix update
         uses: actions/checkout@v4
         with:
           ref: master
+          path: master-checkout
 
       - name: Update package.nix with release hash
+        working-directory: master-checkout
         run: |
           sed -i '' "s|version = \".*\"|version = \"$VERSION\"|" package.nix
           sed -i '' "s|sha256 = \".*\"|sha256 = \"$ZIP_SRI\"|" package.nix
@@ -210,6 +216,7 @@ jobs:
         id: package_pr
         uses: peter-evans/create-pull-request@v7
         with:
+          path: master-checkout
           base: master
           branch: nix/v${{ env.VERSION }}
           commit-message: "nix: update package.nix to v${{ env.VERSION }}"
