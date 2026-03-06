@@ -26,7 +26,13 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         } else {
             targetGroupIndex = 0
         }
-        model.groups[targetGroupIndex].tabs.append(tab)
+        // Insert after current tab if it's in the same group, otherwise append
+        if let selId = model.selectedTabId,
+           let selIdx = model.groups[targetGroupIndex].tabs.firstIndex(where: { $0.id == selId }) {
+            model.groups[targetGroupIndex].tabs.insert(tab, at: selIdx + 1)
+        } else {
+            model.groups[targetGroupIndex].tabs.append(tab)
+        }
 
         // Defocus old tab's panes
         var effects: [Effect] = []

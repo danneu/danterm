@@ -114,6 +114,27 @@ func tabTests() {
         try expectEqual(model.groups[1].tabs.count, 2, "Work should have auto-created tab + explicit tab")
     }
 
+    test("testCreateTabInsertsAfterCurrentTab") {
+        var model = makeModel()
+        createTab(&model) // tab A
+        createTab(&model) // tab B (inserted after A)
+        createTab(&model) // tab C (inserted after B)
+        let tabAId = model.groups[0].tabs[0].id
+        let tabBId = model.groups[0].tabs[1].id
+        let tabCId = model.groups[0].tabs[2].id
+
+        // Select tab A, then create a new tab — should insert after A, not at end
+        update(&model, .selectTab(id: tabAId))
+        createTab(&model) // tab D
+        let tabDId = model.groups[0].tabs[1].id
+
+        try expectEqual(model.groups[0].tabs.count, 4)
+        try expectEqual(model.groups[0].tabs[0].id, tabAId, "tab A should be first")
+        try expectEqual(model.groups[0].tabs[1].id, tabDId, "new tab D should be after A")
+        try expectEqual(model.groups[0].tabs[2].id, tabBId, "tab B should shift right")
+        try expectEqual(model.groups[0].tabs[3].id, tabCId, "tab C should shift right")
+    }
+
     test("testSelectTabAlreadySelected") {
         var model = makeModel()
         createTab(&model)
