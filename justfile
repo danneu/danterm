@@ -17,6 +17,10 @@ build-icons:
 test:
     ./test.sh
 
+# Run UI tests (AppKit, requires display)
+test-ui:
+    ./test-ui.sh
+
 # Build local dev app to .build/DanTerm Dev.app
 build:
     ./dev-build.sh

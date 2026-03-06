@@ -70,6 +70,19 @@ typealias GroupId = TypedId<GroupTag>
 typealias SplitId = TypedId<SplitTag>
 ```
 
+## Code Style
+
+Every `.swift` file should have a top-level comment explaining the file's purpose.
+
+Every non-trivial method should have a comment explaining intent, not mechanics.
+For AppKit delegate/protocol methods, identify which protocol is being targeted
+so it's clear the method isn't just a custom addition.
+
+```swift
+// NSSplitViewDelegate: called on divider double-click. We reset to 50/50 instead of collapsing.
+func splitView(_ splitView: NSSplitView, ...) -> Bool {
+```
+
 ## Build
 
 Two-step build:
@@ -170,6 +183,10 @@ can have a local clone.
 
 Also see `github:manaflow-ai/cmux` — another macOS terminal built on libghostty
 (vertical tabs, AI agent notifications). Useful reference for feature work.
+
+Don't guess at API signatures, delegate protocols, enum cases, or framework
+behavior. Check local sources first; if insufficient, search online and read
+official docs before writing code.
 
 ## CI/CD
 

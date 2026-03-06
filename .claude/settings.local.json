@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(just build-icon:*)",
-      "Bash(git clone:*)"
+      "Bash(git clone:*)",
+      "Bash(defaults read:*)"
     ]
   }
 }

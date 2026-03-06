@@ -36,7 +36,9 @@ class SplitContainerView: NSView {
             view.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])
 
-        // Force layout from root down, then apply ratios top-down
+        // Guard against splitViewDidResizeSubviews during layout + ratio application
+        setApplyingRatio(true, in: self)
+        defer { setApplyingRatio(false, in: self) }
         layoutSubtreeIfNeeded()
         applyRatios(for: rootNode)
     }
@@ -80,7 +82,10 @@ class SplitContainerView: NSView {
             return NSView()
 
         case .split(let id, let direction, let first, let second, let ratio):
-            let splitView = PaneSplitView(splitId: id, ratio: ratio, runtime: runtime)
+            let splitView = PaneSplitView(splitId: id, ratio: ratio)
+            splitView.onRatioChanged = { [weak self] splitId, ratio in
+                self?.runtime?.send(.splitRatioChanged(splitId: splitId, ratio: ratio))
+            }
             splitView.isVertical = (direction == .horizontal)
             splitView.dividerStyle = .thin
             splitView.delegate = splitView
@@ -100,52 +105,13 @@ class SplitContainerView: NSView {
             return splitView
         }
     }
-}
 
-// MARK: - PaneSplitView
-
-class PaneSplitView: NSSplitView, NSSplitViewDelegate {
-    let splitId: SplitId
-    var ratio: CGFloat
-    weak var runtime: AppRuntime?
-
-    init(splitId: SplitId, ratio: CGFloat, runtime: AppRuntime?) {
-        self.splitId = splitId
-        self.ratio = ratio
-        self.runtime = runtime
-        super.init(frame: .zero)
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) not implemented")
-    }
-
-    func applyRatio() {
-        guard arrangedSubviews.count == 2 else { return }
-        let totalSize = isVertical ? bounds.width : bounds.height
-        guard totalSize > 0 else { return }
-        let position = totalSize * ratio
-        setPosition(position, ofDividerAt: 0)
-    }
-
-    // MARK: - NSSplitViewDelegate
-
-    func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
-        return 100
-    }
-
-    func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
-        let totalSize = isVertical ? bounds.width : bounds.height
-        return totalSize - 100
-    }
-
-    func splitViewDidResizeSubviews(_ notification: Notification) {
-        guard arrangedSubviews.count == 2 else { return }
-        let totalSize = isVertical ? bounds.width : bounds.height
-        guard totalSize > 0 else { return }
-        let firstSize = isVertical ? arrangedSubviews[0].frame.width : arrangedSubviews[0].frame.height
-        let newRatio = firstSize / totalSize
-        ratio = newRatio
-        runtime?.send(.splitRatioChanged(splitId: splitId, ratio: newRatio))
+    private func setApplyingRatio(_ value: Bool, in view: NSView) {
+        if let paneSplit = view as? PaneSplitView {
+            paneSplit.isApplyingRatio = value
+        }
+        for sub in view.subviews {
+            setApplyingRatio(value, in: sub)
+        }
     }
 }

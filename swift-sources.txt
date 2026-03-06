@@ -10,5 +10,6 @@ app/GhosttyApp.swift
 app/TerminalView.swift
 app/SidebarView.swift
 app/SplitContainerView.swift
+app/PaneSplitView.swift
 app/PaneWrapperView.swift
 app/DragDropInput.swift
