@@ -6,3 +6,4 @@ lib/
 
 # Dev build output
 .build/
+/result

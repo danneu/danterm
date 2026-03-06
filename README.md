@@ -8,6 +8,31 @@ A macOS terminal built on ghostty with the behavior I want.
 
 Download the latest `.dmg` from [Releases](https://github.com/danneu/danterm/releases/latest).
 
+### Nix (home-manager)
+
+```nix
+# flake.nix
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    home-manager.url = "github:nix-community/home-manager";
+    danterm.url = "github:danneu/danterm";
+  };
+
+  outputs = { nixpkgs, home-manager, danterm, ... }: {
+    homeConfigurations."myuser" = home-manager.lib.homeManagerConfiguration {
+      pkgs = nixpkgs.legacyPackages.aarch64-darwin;
+      modules = [
+        danterm.homeManagerModules.default
+        {
+          programs.danterm.enable = true;
+        }
+      ];
+    };
+  };
+}
+```
+
 ## Usage
 
 Like any other terminal, you probably want to grant DanTerm.app these macOS permissions:

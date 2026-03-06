@@ -16,6 +16,7 @@ jobs:
     runs-on: macos-15
     permissions:
       contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
 
@@ -188,3 +189,29 @@ jobs:
           files: |
             build/${{ env.DMG_NAME }}
             build/${{ env.ZIP_NAME }}
+
+      - name: Compute release zip hash
+        run: |
+          HASH=$(shasum -a 256 "build/${{ env.ZIP_NAME }}" | cut -d' ' -f1)
+          SRI="sha256-$(echo "$HASH" | xxd -r -p | base64)"
+          echo "ZIP_SRI=$SRI" >> "$GITHUB_ENV"
+
+      - name: Checkout master for package.nix update
+        uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Update package.nix with release hash
+        run: |
+          sed -i '' "s|version = \".*\"|version = \"$VERSION\"|" package.nix
+          sed -i '' "s|sha256 = \".*\"|sha256 = \"$ZIP_SRI\"|" package.nix
+
+      - name: Create PR with updated package.nix
+        uses: peter-evans/create-pull-request@v7
+        with:
+          base: master
+          branch: nix/v${{ env.VERSION }}
+          commit-message: "nix: update package.nix to v${{ env.VERSION }}"
+          title: "nix: update package.nix to v${{ env.VERSION }}"
+          body: "Auto-generated after release v${{ env.VERSION }}."
+          delete-branch: true
