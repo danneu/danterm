@@ -2,7 +2,7 @@ import Cocoa
 import GhosttyKit
 import UserNotifications
 
-class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserNotificationCenterDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolbarDelegate, UNUserNotificationCenterDelegate {
     var window: NSWindow!
     var ghosttyApp: GhosttyApp!
     var runtime: AppRuntime!
@@ -36,6 +36,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
         )
         window.title = "DanTerm"
         window.center()
+
+        // Toolbar with sidebar toggle
+        let toolbar = NSToolbar(identifier: "MainToolbar")
+        toolbar.delegate = self
+        toolbar.displayMode = .iconOnly
+        window.toolbar = toolbar
+        window.toolbarStyle = .unified
 
         // Create split view (sidebar | content)
         splitView = NSSplitView()
@@ -243,6 +250,44 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         completionHandler([])
+    }
+
+    // MARK: - NSToolbarDelegate
+
+    private static let sidebarToggleId = NSToolbarItem.Identifier("ToggleSidebar")
+
+    // System .toggleSidebar only works with NSSplitViewController, so we use a
+    // custom item with the standard sidebar icon and explicit target/action.
+    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        if itemIdentifier == Self.sidebarToggleId {
+            let item = NSToolbarItem(itemIdentifier: Self.sidebarToggleId)
+            item.label = "Toggle Sidebar"
+            item.toolTip = "Toggle Sidebar"
+            item.image = NSImage(systemSymbolName: "sidebar.leading", accessibilityDescription: "Toggle Sidebar")
+            item.target = self
+            item.action = #selector(toggleSidebar(_:))
+            return item
+        }
+        return nil
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [Self.sidebarToggleId]
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        [Self.sidebarToggleId]
+    }
+
+    // Collapse/uncollapse the sidebar in the NSSplitView.
+    // When collapsed, NSSplitView hides the subview so we unhide before restoring position.
+    @objc func toggleSidebar(_ sender: Any?) {
+        if splitView.isSubviewCollapsed(sidebarView) {
+            sidebarView.isHidden = false
+            splitView.setPosition(200, ofDividerAt: 0)
+        } else {
+            splitView.setPosition(0, ofDividerAt: 0)
+        }
     }
 
     // MARK: - NSSplitViewDelegate (sidebar)
