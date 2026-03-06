@@ -1,22 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- This file is a copy of raw.svg but with this macOS-style
-  rounded rect background so that it's visible on the readme -->
   <rect x="0" y="0" width="1024" height="1024" rx="228" fill="#1a1a2e"/>
-
+<!-- Font size 288, char width ~173 -->
+  <!-- Using text-anchor="start" so text x = left edge of glyph -->
+  <!-- Left edges: $=123, d=382, a=555, n=728 -->
+  <!-- Baseline y=555 -->
   <g font-family="'Monaco'" font-size="288" font-weight="bold">
-    <!-- "$" in gray -->
-    <text x="123" y="555" fill="#888888">$</text>
 
-    <!-- Block cursor rect -->
-    <rect x="382" y="290" width="173" height="320" rx="12" fill="#FF8C00"/>
+    <!-- "$" in systemGreen -->
+    <text x="123" y="555" fill="#34C759">$</text>
+
+    <!-- Block cursor rect — same x and width as "d" glyph slot -->
+    <rect x="382" y="290" width="173" height="320" rx="12" fill="#FF6600"/>
 
     <!-- "d" inverted on cursor -->
     <text x="382" y="555" fill="#1a1a2e">d</text>
 
     <!-- "a" in orange -->
-    <text x="555" y="555" fill="#FF8C00">a</text>
+    <text x="555" y="555" fill="#FF6600">a</text>
 
     <!-- "n" in orange -->
-    <text x="728" y="555" fill="#FF8C00">n</text>
+    <text x="728" y="555" fill="#FF6600">n</text>
   </g>
 </svg>
