@@ -57,6 +57,61 @@ Like any other terminal, you probably want to grant DanTerm.app these macOS perm
 - Lightweight: Built with AppKit (Swift) on top of ghostty (zig)
 - Launch terminal with specific layout/tabs/panes/commands: `--init <model.json>`
 
+## Shell Integration
+
+DanTerm can export its state or load from a state file.
+
+This state includes the tab groups, tabs, pane layout, cwd of each pane, and
+(once you opt in) the command running in each pane.
+
+Add the snippet for your shell to opt in. It's zero-cost when not running inside DanTerm.
+
+<details>
+<summary>Zsh (~/.zshrc)</summary>
+
+```zsh
+# Report current command to DanTerm.app
+if [[ -n "$DANTERM_TOKEN" ]]; then
+  typeset -g _danterm_tok="$DANTERM_TOKEN"
+  unset DANTERM_TOKEN
+  _danterm_b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
+  _danterm_preexec() {
+    printf '\e]0;__DANTERM_EVT__:%s:CMD_START:%s\a' "$_danterm_tok" "$(_danterm_b64 "$1")"
+    printf '\e]0;%s\a' "$1"
+  }
+  _danterm_precmd() {
+    printf '\e]0;__DANTERM_EVT__:%s:CMD_END\a' "$_danterm_tok"
+    printf '\e]0;%s\a' "${(%):-%(4~|…/%3~|%~)}"
+  }
+  preexec_functions+=(_danterm_preexec)
+  precmd_functions+=(_danterm_precmd)
+fi
+```
+
+</details>
+
+<details>
+<summary>Fish (~/.config/fish/config.fish)</summary>
+
+```fish
+# Report current command to DanTerm.app
+if set -q DANTERM_TOKEN
+  set -g _danterm_tok $DANTERM_TOKEN
+  set -e DANTERM_TOKEN
+  function __danterm_preexec --on-event fish_preexec
+    set -l b64 (printf '%s' $argv[1] | base64 | string replace -a '\n' '')
+    printf '\e]0;__DANTERM_EVT__:%s:CMD_START:%s\a' $_danterm_tok $b64
+    printf '\e]0;%s\a' $argv[1]
+  end
+  function __danterm_postcmd --on-event fish_prompt
+    printf '\e]0;__DANTERM_EVT__:%s:CMD_END\a' $_danterm_tok
+    printf '\e]0;%s\a' (prompt_pwd)
+  end
+end
+```
+
+</details>
+
 ## Keybinds
 
 | Action           | Shortcut |

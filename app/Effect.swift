@@ -16,6 +16,9 @@ enum Effect {
     case reloadSidebarGroupRow(groupId: GroupId)
     case setWindowTitle(String)
 
+    // Export
+    case exportState(AppInitFile)
+
     // System
     case sendNotification(title: String, body: String, tabId: TabId, paneId: PaneId)
     case requestNotificationPermission

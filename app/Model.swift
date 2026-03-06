@@ -26,6 +26,7 @@ struct PaneModel: Equatable {
     var cwd: String?
     var hasBell: Bool = false
     var lastBellNotification: Date?
+    var lastCommand: String?
 }
 
 indirect enum SplitNodeModel: Equatable {

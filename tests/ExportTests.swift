@@ -1,0 +1,404 @@
+import Foundation
+
+func exportTests() {
+    print("Export Tests...")
+
+    // MARK: - parseDantermEvent
+
+    test("parseDantermEvent: valid CMD_START") {
+        let cmd = "vim"
+        let b64 = Data(cmd.utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:CMD_START:\(b64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        try expectEqual(result, .commandStarted(command: "vim"))
+    }
+
+    test("parseDantermEvent: valid CMD_END") {
+        let raw = "__DANTERM_EVT__:tok123:CMD_END"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        try expectEqual(result, .commandEnded)
+    }
+
+    test("parseDantermEvent: wrong token rejected") {
+        let cmd = "vim"
+        let b64 = Data(cmd.utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:wrong:CMD_START:\(b64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        try expect(result == nil, "wrong token should be rejected")
+    }
+
+    test("parseDantermEvent: missing token segment rejected") {
+        let raw = "__DANTERM_EVT__:"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        try expect(result == nil, "missing token should be rejected")
+    }
+
+    test("parseDantermEvent: malformed base64 rejected") {
+        let raw = "__DANTERM_EVT__:tok123:CMD_START:!!!invalid!!!"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        try expect(result == nil, "malformed base64 should be rejected")
+    }
+
+    test("parseDantermEvent: empty command after decode rejected") {
+        let b64 = Data("".utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:CMD_START:\(b64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        try expect(result == nil, "empty command should be rejected")
+    }
+
+    test("parseDantermEvent: no prefix returns nil") {
+        let result = parseDantermEvent("just a normal title", expectedToken: "tok123")
+        try expect(result == nil, "non-event title should return nil")
+    }
+
+    test("parseDantermEvent: unknown event type returns nil") {
+        let raw = "__DANTERM_EVT__:tok123:CMD_UNKNOWN"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        try expect(result == nil, "unknown event type should return nil")
+    }
+
+    test("parseDantermEvent: command with special characters") {
+        let cmd = "ssh user@host -p 2222"
+        let b64 = Data(cmd.utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:CMD_START:\(b64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        try expectEqual(result, .commandStarted(command: cmd))
+    }
+
+    // MARK: - translateMsg (runtime interception path)
+
+    test("translateMsg: valid CMD_START translates to commandStarted") {
+        let paneId = PaneId()
+        let token = "my-token"
+        let b64 = Data("vim".utf8).base64EncodedString()
+        let title = "__DANTERM_EVT__:\(token):CMD_START:\(b64)"
+        let result = translateMsg(.surfaceTitle(paneId: paneId, title: title)) { id in
+            id == paneId ? token : nil
+        }
+        guard case .commandStarted(let pid, let cmd) = result else {
+            throw TestFailure(message: "expected .commandStarted, got \(String(describing: result))")
+        }
+        try expectEqual(pid, paneId)
+        try expectEqual(cmd, "vim")
+    }
+
+    test("translateMsg: CMD_END is dropped") {
+        let paneId = PaneId()
+        let token = "my-token"
+        let title = "__DANTERM_EVT__:\(token):CMD_END"
+        let result = translateMsg(.surfaceTitle(paneId: paneId, title: title)) { id in
+            id == paneId ? token : nil
+        }
+        try expect(result == nil, "CMD_END should be dropped")
+    }
+
+    test("translateMsg: wrong token drops message") {
+        let paneId = PaneId()
+        let b64 = Data("vim".utf8).base64EncodedString()
+        let title = "__DANTERM_EVT__:wrong-token:CMD_START:\(b64)"
+        let result = translateMsg(.surfaceTitle(paneId: paneId, title: title)) { id in
+            id == paneId ? "correct-token" : nil
+        }
+        try expect(result == nil, "wrong token should drop message")
+    }
+
+    test("translateMsg: no token for pane drops message") {
+        let paneId = PaneId()
+        let b64 = Data("vim".utf8).base64EncodedString()
+        let title = "__DANTERM_EVT__:any-token:CMD_START:\(b64)"
+        let result = translateMsg(.surfaceTitle(paneId: paneId, title: title)) { _ in nil }
+        try expect(result == nil, "no token for pane should drop message")
+    }
+
+    test("translateMsg: normal title passes through") {
+        let paneId = PaneId()
+        let msg = Msg.surfaceTitle(paneId: paneId, title: "vim - file.txt")
+        let result = translateMsg(msg) { _ in "some-token" }
+        guard case .surfaceTitle(let pid, let t) = result else {
+            throw TestFailure(message: "expected .surfaceTitle, got \(String(describing: result))")
+        }
+        try expectEqual(pid, paneId)
+        try expectEqual(t, "vim - file.txt")
+    }
+
+    test("translateMsg: non-surfaceTitle msg passes through") {
+        let paneId = PaneId()
+        let msg = Msg.surfaceCwd(paneId: paneId, cwd: "/home")
+        let result = translateMsg(msg) { _ in nil }
+        guard case .surfaceCwd(let pid, let cwd) = result else {
+            throw TestFailure(message: "expected .surfaceCwd, got \(String(describing: result))")
+        }
+        try expectEqual(pid, paneId)
+        try expectEqual(cwd, "/home")
+    }
+
+    // MARK: - PaneTokenStore (token lifecycle)
+
+    test("PaneTokenStore: generate creates token") {
+        var store = PaneTokenStore()
+        let paneId = PaneId()
+        let token = store.generate(for: paneId)
+        try expect(!token.isEmpty, "token should not be empty")
+        try expectEqual(store.token(for: paneId), token)
+    }
+
+    test("PaneTokenStore: remove cleans up token") {
+        var store = PaneTokenStore()
+        let paneId = PaneId()
+        _ = store.generate(for: paneId)
+        store.remove(paneId)
+        try expect(store.token(for: paneId) == nil, "token should be removed")
+    }
+
+    test("PaneTokenStore: each pane gets unique token") {
+        var store = PaneTokenStore()
+        let p1 = PaneId()
+        let p2 = PaneId()
+        let t1 = store.generate(for: p1)
+        let t2 = store.generate(for: p2)
+        try expect(t1 != t2, "tokens should be unique")
+    }
+
+    test("PaneTokenStore: generate replaces existing token") {
+        var store = PaneTokenStore()
+        let paneId = PaneId()
+        let t1 = store.generate(for: paneId)
+        let t2 = store.generate(for: paneId)
+        try expect(t1 != t2, "regenerated token should differ")
+        try expectEqual(store.token(for: paneId), t2)
+    }
+
+    test("PaneTokenStore: unknown pane returns nil") {
+        let store = PaneTokenStore()
+        try expect(store.token(for: PaneId()) == nil, "unknown pane should return nil")
+    }
+
+    // MARK: - commandStarted Msg
+
+    test("commandStarted sets lastCommand") {
+        var model = makeModel()
+        createTab(&model)
+        let tab = model.groups[0].tabs[0]
+        let paneId = tab.focusedPaneId
+        update(&model, .commandStarted(paneId: paneId, command: "vim"))
+        try expectEqual(model.panes[paneId]?.lastCommand, "vim")
+    }
+
+    test("commandStarted overwrites previous command") {
+        var model = makeModel()
+        createTab(&model)
+        let tab = model.groups[0].tabs[0]
+        let paneId = tab.focusedPaneId
+        update(&model, .commandStarted(paneId: paneId, command: "vim"))
+        update(&model, .commandStarted(paneId: paneId, command: "ssh"))
+        try expectEqual(model.panes[paneId]?.lastCommand, "ssh")
+    }
+
+    test("commandStarted does not affect title") {
+        var model = makeModel()
+        createTab(&model)
+        let tab = model.groups[0].tabs[0]
+        let paneId = tab.focusedPaneId
+        let titleBefore = model.panes[paneId]?.title
+        update(&model, .commandStarted(paneId: paneId, command: "vim"))
+        try expectEqual(model.panes[paneId]?.title, titleBefore)
+    }
+
+    test("surfaceTitle does not affect lastCommand") {
+        var model = makeModel()
+        createTab(&model)
+        let tab = model.groups[0].tabs[0]
+        let paneId = tab.focusedPaneId
+        update(&model, .commandStarted(paneId: paneId, command: "vim"))
+        update(&model, .surfaceTitle(paneId: paneId, title: "new title"))
+        try expectEqual(model.panes[paneId]?.lastCommand, "vim")
+    }
+
+    // MARK: - exportState Msg/Effect
+
+    test("exportState effect matches toInitFile output") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        model.panes[paneId]?.lastCommand = "vim"
+        model.panes[paneId]?.cwd = NSHomeDirectory() + "/projects"
+
+        let expected = toInitFile(model)
+        let effects = update(&model, .exportState)
+        try expectEqual(effects.count, 1)
+        guard case .exportState(let initFile) = effects[0] else {
+            throw TestFailure(message: "expected .exportState effect")
+        }
+        try expectEqual(initFile.version, expected.version)
+        try expectEqual(initFile.model.groups.count, expected.model.groups.count)
+        try expectEqual(initFile.model.panes.count, expected.model.panes.count)
+        try expectEqual(initFile.model.selectedTabId, expected.model.selectedTabId)
+        // Verify IDs match
+        try expectEqual(initFile.model.groups[0].id, expected.model.groups[0].id)
+        try expectEqual(initFile.model.groups[0].tabs[0].id, expected.model.groups[0].tabs[0].id)
+        try expectEqual(initFile.model.groups[0].tabs[0].focusedPaneId, expected.model.groups[0].tabs[0].focusedPaneId)
+        // Verify launch fields
+        try expectEqual(initFile.model.panes[0].id, expected.model.panes[0].id)
+        try expectEqual(initFile.model.panes[0].launch?.command, "vim")
+        try expectEqual(initFile.model.panes[0].launch?.cwd, "~/projects")
+        // Verify rootNode type
+        if case .leaf(let snapPaneId) = initFile.model.groups[0].tabs[0].rootNode {
+            try expectEqual(snapPaneId, paneId.rawValue.uuidString)
+        } else {
+            throw TestFailure(message: "expected leaf rootNode")
+        }
+    }
+
+    // MARK: - toSnapshot round-trip
+
+    test("toSnapshot round-trips through validateAndBuild") {
+        var model = makeModel()
+        createTab(&model)
+        let snapshot = toSnapshot(model)
+        let rebuilt = validateAndBuild(snapshot)
+        try expect(rebuilt != nil, "round-trip should produce valid model")
+        try expectEqual(rebuilt!.groups.count, model.groups.count)
+        try expectEqual(rebuilt!.panes.count, model.panes.count)
+    }
+
+    test("toSnapshot preserves UUIDs through round-trip") {
+        var model = makeModel()
+        createTab(&model)
+        let snapshot = toSnapshot(model)
+        let rebuilt = validateAndBuild(snapshot)!
+        try expectEqual(rebuilt.groups[0].id, model.groups[0].id)
+        try expectEqual(rebuilt.groups[0].tabs[0].id, model.groups[0].tabs[0].id)
+        try expectEqual(rebuilt.selectedTabId, model.selectedTabId)
+        let origPaneId = model.groups[0].tabs[0].focusedPaneId
+        try expect(rebuilt.panes[origPaneId] != nil, "pane ID should survive round-trip")
+    }
+
+    test("toSnapshot preserves selectedTabId") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .selectTab(id: firstTabId))
+        let snapshot = toSnapshot(model)
+        try expectEqual(snapshot.selectedTabId, firstTabId.rawValue.uuidString)
+    }
+
+    test("toSnapshot preserves split tree structure") {
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .splitPane(direction: .horizontal))
+        let snapshot = toSnapshot(model)
+        let rebuilt = validateAndBuild(snapshot)!
+        let tab = rebuilt.groups[0].tabs[0]
+        if case .split(_, let dir, _, _, let ratio) = tab.rootNode {
+            try expectEqual(dir, .horizontal)
+            try expectEqual(ratio, 0.5)
+        } else {
+            throw TestFailure(message: "expected split node")
+        }
+        try expectEqual(allPaneIds(tab.rootNode).count, 2)
+    }
+
+    test("toSnapshot preserves multiple groups") {
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .createGroup(name: "Work"))
+        let snapshot = toSnapshot(model)
+        let rebuilt = validateAndBuild(snapshot)!
+        try expectEqual(rebuilt.groups.count, 2)
+        try expectEqual(rebuilt.groups[0].name, "General")
+        try expectEqual(rebuilt.groups[1].name, "Work")
+    }
+
+    test("toSnapshot preserves group collapsed state") {
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .createGroup(name: "Work"))
+        update(&model, .toggleGroupCollapse(groupId: model.groups[1].id))
+        let snapshot = toSnapshot(model)
+        try expectEqual(snapshot.groups[1].isCollapsed, true)
+    }
+
+    // MARK: - Launch field
+
+    test("lastCommand maps to launch.command in snapshot") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        model.panes[paneId]?.lastCommand = "vim"
+        let snapshot = toSnapshot(model)
+        try expectEqual(snapshot.panes[0].launch?.command, "vim")
+    }
+
+    test("launch omitted when no command and no cwd") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        model.panes[paneId]?.cwd = nil
+        model.panes[paneId]?.lastCommand = nil
+        let snapshot = toSnapshot(model)
+        try expect(snapshot.panes[0].launch == nil, "launch should be nil when no command and no cwd")
+    }
+
+    test("cwd abbreviated with ~ in export") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let home = NSHomeDirectory()
+        model.panes[paneId]?.cwd = home + "/projects"
+        let snapshot = toSnapshot(model)
+        try expectEqual(snapshot.panes[0].cwd, "~/projects")
+    }
+
+    test("launch.cwd present when cwd is set") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let home = NSHomeDirectory()
+        model.panes[paneId]?.cwd = home + "/work"
+        let snapshot = toSnapshot(model)
+        try expectEqual(snapshot.panes[0].launch?.cwd, "~/work")
+    }
+
+    test("launch has both command and cwd when both set") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let home = NSHomeDirectory()
+        model.panes[paneId]?.cwd = home + "/code"
+        model.panes[paneId]?.lastCommand = "claude"
+        let snapshot = toSnapshot(model)
+        let launch = snapshot.panes[0].launch
+        try expect(launch != nil, "launch should be present")
+        try expectEqual(launch?.command, "claude")
+        try expectEqual(launch?.cwd, "~/code")
+    }
+
+    // MARK: - JSON round-trip
+
+    test("JSON round-trip preserves command metadata") {
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .splitPane(direction: .horizontal))
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        model.panes[paneId]?.lastCommand = "claude"
+        model.panes[paneId]?.cwd = NSHomeDirectory() + "/work"
+
+        let initFile = toInitFile(model)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(initFile)
+        let decoded = try JSONDecoder().decode(AppInitFile.self, from: data)
+
+        // Verify snapshot-level launch fields survive encoding
+        let exportedPane = decoded.model.panes.first(where: { $0.id == paneId.rawValue.uuidString })
+        try expect(exportedPane != nil, "pane should exist in decoded snapshot")
+        try expectEqual(exportedPane?.launch?.command, "claude")
+        try expectEqual(exportedPane?.launch?.cwd, "~/work")
+
+        // Verify full rebuild succeeds
+        let rebuilt = validateAndBuild(decoded.model)
+        try expect(rebuilt != nil, "JSON round-trip should produce valid model")
+        try expectEqual(rebuilt!.panes.count, 2)
+    }
+}

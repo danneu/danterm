@@ -287,3 +287,144 @@ func groupBellCount(for group: GroupModel, panes: [PaneId: PaneModel]) -> Int {
 func totalBellCount(model: AppModel) -> Int {
     model.groups.reduce(0) { $0 + groupBellCount(for: $1, panes: model.panes) }
 }
+
+// MARK: - Export
+
+func toInitFile(_ model: AppModel) -> AppInitFile {
+    AppInitFile(version: 1, model: toSnapshot(model))
+}
+
+func toSnapshot(_ model: AppModel) -> AppModelSnapshot {
+    var paneSnapshots: [PaneSnapshot] = []
+    var seenPaneIds = Set<PaneId>()
+
+    let groupSnapshots: [GroupSnapshot] = model.groups.map { group in
+        let tabSnapshots: [TabSnapshot] = group.tabs.map { tab in
+            // Collect panes in tree traversal order
+            for paneId in allPaneIds(tab.rootNode) {
+                guard seenPaneIds.insert(paneId).inserted,
+                      let pane = model.panes[paneId] else { continue }
+                let abbrevCwd = pane.cwd.map { abbreviateHome($0) }
+                let launch: PaneLaunchSnapshot?
+                if pane.lastCommand != nil || abbrevCwd != nil {
+                    launch = PaneLaunchSnapshot(command: pane.lastCommand, cwd: abbrevCwd)
+                } else {
+                    launch = nil
+                }
+                paneSnapshots.append(PaneSnapshot(
+                    id: paneId.rawValue.uuidString,
+                    title: pane.title,
+                    cwd: abbrevCwd,
+                    launch: launch
+                ))
+            }
+
+            return TabSnapshot(
+                id: tab.id.rawValue.uuidString,
+                title: tab.title,
+                subtitle: tab.subtitle,
+                focusedPaneId: tab.focusedPaneId.rawValue.uuidString,
+                rootNode: toSplitNodeSnapshot(tab.rootNode)
+            )
+        }
+        return GroupSnapshot(
+            id: group.id.rawValue.uuidString,
+            name: group.name,
+            isCollapsed: group.isCollapsed,
+            tabs: tabSnapshots
+        )
+    }
+
+    return AppModelSnapshot(
+        groups: groupSnapshots,
+        panes: paneSnapshots,
+        selectedTabId: model.selectedTabId?.rawValue.uuidString
+    )
+}
+
+private func toSplitNodeSnapshot(_ node: SplitNodeModel) -> SplitNodeSnapshot {
+    switch node {
+    case .leaf(let paneId):
+        return .leaf(paneId: paneId.rawValue.uuidString)
+    case .split(let id, let direction, let first, let second, let ratio):
+        let dirStr: String
+        switch direction {
+        case .horizontal: dirStr = "horizontal"
+        case .vertical: dirStr = "vertical"
+        }
+        return .split(
+            id: id.rawValue.uuidString,
+            direction: dirStr,
+            first: toSplitNodeSnapshot(first),
+            second: toSplitNodeSnapshot(second),
+            ratio: Double(ratio)
+        )
+    }
+}
+
+// MARK: - DanTerm Event Protocol
+
+enum DantermEvent: Equatable {
+    case commandStarted(command: String)
+    case commandEnded
+}
+
+/// Token store for pane-to-token mapping. Used by AppRuntime; extracted here for testability.
+struct PaneTokenStore {
+    private(set) var tokens: [PaneId: String] = [:]
+
+    mutating func generate(for paneId: PaneId) -> String {
+        let token = UUID().uuidString
+        tokens[paneId] = token
+        return token
+    }
+
+    mutating func remove(_ paneId: PaneId) {
+        tokens.removeValue(forKey: paneId)
+    }
+
+    func token(for paneId: PaneId) -> String? {
+        tokens[paneId]
+    }
+}
+
+/// Translate a Msg through the event protocol layer.
+/// Returns nil when the message should be dropped (CMD_END, bad token, malformed event).
+/// Normal (non-event) messages pass through unchanged.
+func translateMsg(_ msg: Msg, tokenForPane: (PaneId) -> String?) -> Msg? {
+    guard case .surfaceTitle(let paneId, let title) = msg,
+          title.hasPrefix("__DANTERM_EVT__:") else {
+        return msg
+    }
+    guard let token = tokenForPane(paneId),
+          let event = parseDantermEvent(title, expectedToken: token) else {
+        return nil
+    }
+    switch event {
+    case .commandStarted(let command):
+        return .commandStarted(paneId: paneId, command: command)
+    case .commandEnded:
+        return nil
+    }
+}
+
+func parseDantermEvent(_ raw: String, expectedToken: String) -> DantermEvent? {
+    let prefix = "__DANTERM_EVT__:"
+    guard raw.hasPrefix(prefix) else { return nil }
+    let payload = String(raw.dropFirst(prefix.count))
+
+    let parts = payload.split(separator: ":", maxSplits: 1)
+    guard parts.count == 2, String(parts[0]) == expectedToken else { return nil }
+    let event = String(parts[1])
+
+    if event.hasPrefix("CMD_START:") {
+        let b64 = String(event.dropFirst("CMD_START:".count))
+        guard let data = Data(base64Encoded: b64),
+              let cmd = String(data: data, encoding: .utf8),
+              !cmd.isEmpty else { return nil }
+        return .commandStarted(command: cmd)
+    } else if event == "CMD_END" {
+        return .commandEnded
+    }
+    return nil
+}

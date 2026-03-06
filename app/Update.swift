@@ -220,6 +220,18 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         return effects
 
+    // MARK: - Command Tracking
+
+    case .commandStarted(let paneId, let command):
+        model.panes[paneId]?.lastCommand = command
+        return []
+
+    // MARK: - Export
+
+    case .exportState:
+        let initFile = toInitFile(model)
+        return [.exportState(initFile)]
+
     // MARK: - Ghostty Callbacks
 
     case .surfaceTitle(let paneId, let title):

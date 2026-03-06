@@ -20,7 +20,7 @@ class TerminalView: NSView, NSTextInputClient {
 
     // MARK: - Init
 
-    init(ghosttyApp: GhosttyApp, workingDirectory: String? = nil, command: String? = nil) {
+    init(ghosttyApp: GhosttyApp, workingDirectory: String? = nil, command: String? = nil, envVars: [(String, String)] = []) {
         self.ghosttyApp = ghosttyApp
         self.bridge = SurfaceBridge() // set after super.init
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
@@ -52,6 +52,23 @@ class TerminalView: NSView, NSTextInputClient {
         // stays alive after command exit. We send them via initial_input.
         let initialInput = Self.initialInputForCommand(command)
 
+        // Build env var structs (strdup'd so pointers stay alive through createSurface)
+        var envVarStructs = envVars.map { (key, value) in
+            ghostty_env_var_s(key: strdup(key), value: strdup(value))
+        }
+        defer {
+            for ev in envVarStructs {
+                free(UnsafeMutablePointer(mutating: ev.key))
+                free(UnsafeMutablePointer(mutating: ev.value))
+            }
+        }
+
+        // Wire env vars into config
+        envVarStructs.withUnsafeMutableBufferPointer { buf in
+            config.env_vars = buf.baseAddress
+            config.env_var_count = buf.count
+        }
+
         // Apply working directory and initial input, then create surface.
         // withCString closures must nest so both pointers stay alive.
         if let dir = workingDirectory {
@@ -74,8 +91,6 @@ class TerminalView: NSView, NSTextInputClient {
         } else {
             createSurface()
         }
-
-
 
         // Register for file/URL/string drag-and-drop
         registerForDraggedTypes([.fileURL, .URL, .string])

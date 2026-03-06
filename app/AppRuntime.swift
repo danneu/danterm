@@ -1,11 +1,13 @@
 import Cocoa
 import GhosttyKit
+import UniformTypeIdentifiers
 import UserNotifications
 
 class AppRuntime {
     var model: AppModel
     let ghosttyApp: GhosttyApp
     var surfaces: [PaneId: TerminalView] = [:]
+    var tokenStore = PaneTokenStore()
     weak var window: NSWindow?
     weak var sidebarView: SidebarView?
     weak var contentArea: NSView?
@@ -19,8 +21,10 @@ class AppRuntime {
     }
 
     func send(_ msg: Msg) {
+        guard let translatedMsg = translateMsg(msg, tokenForPane: { self.tokenStore.token(for: $0) }) else { return }
+
         let oldBellCount = totalBellCount(model: model)
-        let effects = update(&model, msg)
+        let effects = update(&model, translatedMsg)
         for effect in effects {
             perform(effect)
         }
@@ -30,7 +34,7 @@ class AppRuntime {
         }
 
         // Refresh toolbar text after title/cwd changes
-        switch msg {
+        switch translatedMsg {
         case .surfaceTitle(let paneId, _), .surfaceCwd(let paneId, _):
             refreshPaneToolbar(for: paneId)
         default:
@@ -47,7 +51,8 @@ class AppRuntime {
     private func perform(_ effect: Effect) {
         switch effect {
         case .createSurface(let paneId, let cwd, let command):
-            let view = TerminalView(ghosttyApp: ghosttyApp, workingDirectory: cwd, command: command)
+            let token = tokenStore.generate(for: paneId)
+            let view = TerminalView(ghosttyApp: ghosttyApp, workingDirectory: cwd, command: command, envVars: [("DANTERM_TOKEN", token)])
             view.bridge.paneId = paneId
             view.runtime = self
             surfaces[paneId] = view
@@ -56,6 +61,7 @@ class AppRuntime {
             }
 
         case .destroySurface(let paneId):
+            tokenStore.remove(paneId)
             if let view = surfaces.removeValue(forKey: paneId) {
                 view.closeSurface()
             }
@@ -102,6 +108,38 @@ class AppRuntime {
 
         case .requestNotificationPermission:
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+
+        case .exportState(let initFile):
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data: Data
+            do {
+                data = try encoder.encode(initFile)
+            } catch {
+                let alert = NSAlert()
+                alert.messageText = "Export Failed"
+                alert.informativeText = "Failed to encode state: \(error.localizedDescription)"
+                alert.runModal()
+                return
+            }
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = "danterm-state.json"
+            panel.allowedContentTypes = [.json]
+            panel.canCreateDirectories = true
+            guard let window = window else { return }
+            panel.beginSheetModal(for: window) { response in
+                guard response == .OK, let url = panel.url else { return }
+                do {
+                    try data.write(to: url)
+                } catch {
+                    DispatchQueue.main.async {
+                        let alert = NSAlert()
+                        alert.messageText = "Save Failed"
+                        alert.informativeText = error.localizedDescription
+                        alert.runModal()
+                    }
+                }
+            }
 
         case .showCloseTabConfirmation(let tabId, let tabTitle, let paneCount, let isLastTab):
             let alert = NSAlert()
@@ -174,7 +212,8 @@ class AppRuntime {
                 for paneId in allPaneIds(tab.rootNode) {
                     let ps = built.paneSnapshots[paneId]
                     let resolved = ps.map { resolveLaunch($0) }
-                    let view = TerminalView(ghosttyApp: ghosttyApp, workingDirectory: resolved?.cwd, command: resolved?.command)
+                    let token = tokenStore.generate(for: paneId)
+                    let view = TerminalView(ghosttyApp: ghosttyApp, workingDirectory: resolved?.cwd, command: resolved?.command, envVars: [("DANTERM_TOKEN", token)])
                     view.bridge.paneId = paneId
                     view.runtime = self
                     surfaces[paneId] = view

@@ -26,6 +26,12 @@ enum Msg {
     // Internal (confirmed close — do not send from UI directly)
     case closeTab(id: TabId)
 
+    // Command tracking
+    case commandStarted(paneId: PaneId, command: String)
+
+    // Export
+    case exportState
+
     // Ghostty callbacks
     case surfaceTitle(paneId: PaneId, title: String)
     case surfaceCwd(paneId: PaneId, cwd: String)
