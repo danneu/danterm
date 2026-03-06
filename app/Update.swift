@@ -172,10 +172,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
 
         model.groups[groupIdx].tabs[tabIdx].rootNode = newRoot
+        model.groups[groupIdx].tabs[tabIdx].isZoomed = false
         if let next = nextFocus {
             model.groups[groupIdx].tabs[tabIdx].focusedPaneId = next
         }
-        normalizeZoom(&model.groups[groupIdx].tabs[tabIdx])
 
         effects.append(.rebuildContentView)
         return effects
@@ -461,10 +461,6 @@ private func updateTab(_ tabId: TabId, in model: inout AppModel, _ body: (inout 
             return
         }
     }
-}
-
-private func normalizeZoom(_ tab: inout TabModel) {
-    if case .leaf = tab.rootNode { tab.isZoomed = false }
 }
 
 private func windowTitle(for tab: TabModel) -> String {

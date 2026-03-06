@@ -3,11 +3,15 @@ import Cocoa
 class SplitContainerView: NSView {
     let rootNode: SplitNodeModel
     let surfaceLookup: (PaneId) -> TerminalView?
+    let isZoomed: Bool
+    let hasSplits: Bool
     weak var runtime: AppRuntime?
 
-    init(rootNode: SplitNodeModel, surfaceLookup: @escaping (PaneId) -> TerminalView?, runtime: AppRuntime?, frame: NSRect) {
+    init(rootNode: SplitNodeModel, surfaceLookup: @escaping (PaneId) -> TerminalView?, runtime: AppRuntime?, isZoomed: Bool, hasSplits: Bool, frame: NSRect) {
         self.rootNode = rootNode
         self.surfaceLookup = surfaceLookup
+        self.isZoomed = isZoomed
+        self.hasSplits = hasSplits
         self.runtime = runtime
         super.init(frame: frame)
     }
@@ -69,7 +73,7 @@ class SplitContainerView: NSView {
         case .leaf(let paneId):
             if let terminalView = surfaceLookup(paneId) {
                 terminalView.frame = .zero
-                let wrapper = PaneWrapperView(paneId: paneId, terminalView: terminalView)
+                let wrapper = PaneWrapperView(paneId: paneId, terminalView: terminalView, isZoomed: isZoomed, hasSplits: hasSplits, runtime: runtime)
                 return wrapper
             }
             // Fallback: empty view (should not happen)

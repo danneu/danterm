@@ -6,12 +6,14 @@ class PaneWrapperView: NSView {
     let terminalView: TerminalView
     private let toolbarLabel: NSTextField
     private let closeButton: NSButton
+    private weak var runtime: AppRuntime?
 
-    init(paneId: PaneId, terminalView: TerminalView) {
+    init(paneId: PaneId, terminalView: TerminalView, isZoomed: Bool, hasSplits: Bool, runtime: AppRuntime?) {
         self.paneId = paneId
         self.terminalView = terminalView
         self.toolbarLabel = NSTextField(labelWithString: "")
         self.closeButton = NSButton()
+        self.runtime = runtime
         super.init(frame: .zero)
 
         // Toolbar container
@@ -41,6 +43,26 @@ class PaneWrapperView: NSView {
         closeButton.setContentHuggingPriority(.required, for: .horizontal)
         toolbar.addSubview(closeButton)
 
+        // Zoom toggle button
+        let zoomButton = NSButton()
+        zoomButton.translatesAutoresizingMaskIntoConstraints = false
+        zoomButton.bezelStyle = .inline
+        zoomButton.isBordered = false
+        if isZoomed {
+            zoomButton.image = NSImage(systemSymbolName: "arrow.down.right.and.arrow.up.left", accessibilityDescription: "Unzoom pane")
+            zoomButton.wantsLayer = true
+            zoomButton.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+        } else {
+            zoomButton.image = NSImage(systemSymbolName: "arrow.up.left.and.arrow.down.right", accessibilityDescription: "Zoom pane")
+        }
+        zoomButton.imageScaling = .scaleProportionallyDown
+        zoomButton.contentTintColor = NSColor.secondaryLabelColor
+        zoomButton.target = self
+        zoomButton.action = #selector(zoomPaneAction)
+        zoomButton.isEnabled = hasSplits
+        zoomButton.setContentHuggingPriority(.required, for: .horizontal)
+        toolbar.addSubview(zoomButton)
+
         // Terminal view
         terminalView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(terminalView)
@@ -55,7 +77,13 @@ class PaneWrapperView: NSView {
             // Label within toolbar
             toolbarLabel.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
             toolbarLabel.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 8),
-            toolbarLabel.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -4),
+            toolbarLabel.trailingAnchor.constraint(lessThanOrEqualTo: zoomButton.leadingAnchor, constant: -4),
+
+            // Zoom button within toolbar
+            zoomButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+            zoomButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor),
+            zoomButton.widthAnchor.constraint(equalToConstant: 16),
+            zoomButton.heightAnchor.constraint(equalToConstant: 16),
 
             // Close button within toolbar
             closeButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
@@ -82,5 +110,9 @@ class PaneWrapperView: NSView {
     @objc private func closePaneAction() {
         guard let surface = terminalView.surface else { return }
         ghostty_surface_request_close(surface)
+    }
+
+    @objc private func zoomPaneAction() {
+        runtime?.send(.toggleZoomPane)
     }
 }

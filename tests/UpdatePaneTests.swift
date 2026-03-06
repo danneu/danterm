@@ -234,6 +234,26 @@ func paneTests() {
         try expectEqual(model.groups[0].tabs[0].focusedPaneId, paneA)
     }
 
+    test("testCloseZoomedPaneClearsZoomWithMultiplePanesRemaining") {
+        var model = makeModel()
+        createTab(&model)
+
+        // Create 3 panes: [A, [B, C]]
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .splitPane(direction: .vertical))
+        let paneC = model.groups[0].tabs[0].focusedPaneId
+
+        // Zoom paneC
+        update(&model, .toggleZoomPane)
+        try expectEqual(model.groups[0].tabs[0].isZoomed, true)
+
+        // Close zoomed paneC — should unzoom even though splits remain
+        update(&model, .closePane(paneId: paneC))
+        try expectEqual(model.groups[0].tabs[0].isZoomed, false, "zoom should clear when zoomed pane is closed")
+        try expectEqual(model.groups[0].tabs[0].focusedPaneId, paneB, "focus should move to sibling")
+    }
+
     test("testSplitWhileZoomedClearsZoom") {
         var model = makeModel()
         createTab(&model)

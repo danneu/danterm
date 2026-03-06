@@ -258,6 +258,8 @@ class AppRuntime {
             rootNode: displayNode,
             surfaceLookup: { [weak self] paneId in self?.surfaces[paneId] },
             runtime: self,
+            isZoomed: tab.isZoomed,
+            hasSplits: { if case .leaf = tab.rootNode { return false } else { return true } }(),
             frame: contentArea.bounds
         )
         container.autoresizingMask = [.width, .height]
