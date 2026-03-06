@@ -8,7 +8,8 @@ A macOS terminal built on ghostty with the behavior I want.
 
 Download the latest `.dmg` from [Releases](https://github.com/danneu/danterm/releases/latest).
 
-### Nix (home-manager)
+<details>
+<summary>Nix (home-manager)</summary>
 
 ```nix
 # flake.nix
@@ -33,6 +34,8 @@ Download the latest `.dmg` from [Releases](https://github.com/danneu/danterm/rel
 }
 ```
 
+</details>
+
 ## Usage
 
 Like any other terminal, you probably want to grant DanTerm.app these macOS permissions:
@@ -53,6 +56,24 @@ Like any other terminal, you probably want to grant DanTerm.app these macOS perm
 - Tabs can be grouped into collapsible sections
 - Lightweight: Built with AppKit (Swift) on top of ghostty (zig)
 - Launch terminal with specific layout/tabs/panes/commands: `--init <model.json>`
+
+## Keybinds
+
+| Action           | Shortcut |
+| ---------------- | -------- |
+| New Tab          | ⌘T       |
+| Next Tab         | ⇧⌘N      |
+| Previous Tab     | ⇧⌘P      |
+| Close Pane       | ⌘W       |
+| Split Pane Right | ⌘D       |
+| Split Pane Down  | ⇧⌘D      |
+| Focus Pane Left  | ⇧⌘H      |
+| Focus Pane Down  | ⇧⌘J      |
+| Focus Pane Up    | ⇧⌘K      |
+| Focus Pane Right | ⇧⌘L      |
+| Toggle Pane Zoom | ⇧⌘Enter  |
+| New Group        | ⇧⌘G      |
+| Quit             | ⌘Q       |
 
 ## Comparison
 
