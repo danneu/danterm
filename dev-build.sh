@@ -60,7 +60,6 @@ xcrun swiftc -O \
 
 cp "$SRC_DIR/Info.plist" "$APP_PATH/Contents/"
 mkdir -p "$APP_PATH/Contents/Resources"
-cp "$SCRIPT_DIR/icon/AppIcon-dev/AppIcon-dev.icns" "$APP_PATH/Contents/Resources/AppIcon.icns"
 cp "$SCRIPT_DIR/icon/AppIcon-dev/Assets.car" "$APP_PATH/Contents/Resources/"
 
 # Patch Info.plist for dev build
@@ -68,6 +67,7 @@ plutil -replace CFBundleIdentifier -string "com.danneu.danterm-dev" "$APP_PATH/C
 plutil -replace CFBundleName -string "DanTerm Dev" "$APP_PATH/Contents/Info.plist"
 plutil -replace CFBundleDisplayName -string "DanTerm Dev" "$APP_PATH/Contents/Info.plist"
 plutil -replace CFBundleExecutable -string "DanTerm Dev" "$APP_PATH/Contents/Info.plist"
+plutil -replace CFBundleIconName -string "AppIcon-dev" "$APP_PATH/Contents/Info.plist"
 
 codesign --force --deep --sign - "$APP_PATH"
 
@@ -75,6 +75,9 @@ codesign --force --deep --sign - "$APP_PATH"
 mkdir -p "$HOME/Applications"
 rm -rf "$INSTALL_APP"
 cp -R "$APP_PATH" "$INSTALL_APP"
+
+# Force macOS to rescan the app bundle so icon changes take effect immediately.
+/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister -f "$INSTALL_APP"
 
 echo "Built: $APP_PATH"
 echo "Installed: $INSTALL_APP"

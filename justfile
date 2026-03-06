@@ -4,7 +4,7 @@ _current_version := `git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' |
 default:
     @just --list
 
-# Compile Icon Composer .icon files into .icns + Assets.car
+# Compile Icon Composer .icon files into Assets.car
 build-icons:
     ./icon/gen-dev-icon.sh
     ./icon/gen-readme-icon.sh

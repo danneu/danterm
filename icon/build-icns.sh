@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Compile an Icon Composer .icon document into .icns + Assets.car.
+# Compile an Icon Composer .icon document into Assets.car.
 # Uses actool to preserve Icon Composer effects (glass, shadow, translucency).
 #
 # Usage: ./build-icns.sh [IconName]  (default: AppIcon)
@@ -20,4 +20,7 @@ $ACTOOL "$ICON" --app-icon "$NAME" \
     --output-partial-info-plist /dev/null \
     --minimum-deployment-target 26.0 --platform macosx --target-device mac
 
-echo "Built: $OUT/$NAME.icns + $OUT/Assets.car"
+# Remove legacy .icns — we only need Assets.car (CFBundleIconName)
+rm -f "$OUT/$NAME.icns"
+
+echo "Built: $OUT/Assets.car"

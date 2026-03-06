@@ -6,7 +6,7 @@
 	<string>DanTerm</string>
 	<key>CFBundleExecutable</key>
 	<string>DanTerm</string>
-	<key>CFBundleIconFile</key>
+	<key>CFBundleIconName</key>
 	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.danneu.danterm</string>
