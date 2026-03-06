@@ -247,6 +247,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
 
     // MARK: - NSSplitViewDelegate (sidebar)
 
+    // Sidebar drag bounds: min 150px, max 300px
     func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
         return 150
     }
@@ -255,8 +256,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
         return 300
     }
 
+    // Allow collapsing sidebar (but not content area)
     func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool {
         return subview === sidebarView
+    }
+
+    // On window resize, only the content area resizes; sidebar keeps its width
+    func splitView(_ splitView: NSSplitView, shouldAdjustSizeOfSubview view: NSView) -> Bool {
+        return view !== sidebarView
     }
 
     // MARK: - App Lifecycle
