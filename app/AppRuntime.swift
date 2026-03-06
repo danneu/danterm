@@ -28,6 +28,14 @@ class AppRuntime {
         if newBellCount != oldBellCount {
             perform(.updateDockBadge(newBellCount))
         }
+
+        // Refresh toolbar text after title/cwd changes
+        switch msg {
+        case .surfaceTitle(let paneId, _), .surfaceCwd(let paneId, _):
+            refreshPaneToolbar(for: paneId)
+        default:
+            break
+        }
     }
 
     func terminalView(for paneId: PaneId) -> TerminalView? {
@@ -183,6 +191,43 @@ class AppRuntime {
         sidebarView?.reload(model: model)
     }
 
+    // MARK: - Pane Toolbars
+
+    func refreshPaneToolbars() {
+        guard let contentArea = contentArea else { return }
+        forEachPaneWrapper(in: contentArea) { wrapper in
+            let (title, cwd) = paneToolbarText(for: wrapper.paneId, in: model)
+            wrapper.updateToolbar(title: title, cwd: cwd)
+        }
+    }
+
+    private func refreshPaneToolbar(for paneId: PaneId) {
+        guard let contentArea = contentArea else { return }
+        let (title, cwd) = paneToolbarText(for: paneId, in: model)
+        findPaneWrapper(for: paneId, in: contentArea)?.updateToolbar(title: title, cwd: cwd)
+    }
+
+    private func findPaneWrapper(for paneId: PaneId, in view: NSView) -> PaneWrapperView? {
+        for sub in view.subviews {
+            if let wrapper = sub as? PaneWrapperView {
+                if wrapper.paneId == paneId { return wrapper }
+            } else if let found = findPaneWrapper(for: paneId, in: sub) {
+                return found
+            }
+        }
+        return nil
+    }
+
+    private func forEachPaneWrapper(in view: NSView, _ body: (PaneWrapperView) -> Void) {
+        for sub in view.subviews {
+            if let wrapper = sub as? PaneWrapperView {
+                body(wrapper)
+            } else {
+                forEachPaneWrapper(in: sub, body)
+            }
+        }
+    }
+
     // MARK: - View Building
 
     private func rebuildContentView() {
@@ -231,5 +276,8 @@ class AppRuntime {
         if let focusedView = surfaces[focusedId] {
             window?.makeFirstResponder(focusedView)
         }
+
+        refreshPaneToolbars()
     }
 }
+

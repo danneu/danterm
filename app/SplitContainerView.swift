@@ -69,7 +69,8 @@ class SplitContainerView: NSView {
         case .leaf(let paneId):
             if let terminalView = surfaceLookup(paneId) {
                 terminalView.frame = .zero
-                return terminalView
+                let wrapper = PaneWrapperView(paneId: paneId, terminalView: terminalView)
+                return wrapper
             }
             // Fallback: empty view (should not happen)
             return NSView()

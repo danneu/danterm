@@ -1,5 +1,24 @@
 import Foundation
 
+// MARK: - Pane Toolbar
+
+func paneToolbarText(for paneId: PaneId, in model: AppModel) -> (title: String, cwd: String?) {
+    guard let pane = model.panes[paneId] else {
+        return (title: "Terminal", cwd: nil)
+    }
+    return (title: pane.title, cwd: pane.cwd)
+}
+
+func formatToolbarLabel(title: String, cwd: String?) -> String {
+    guard let cwd else { return title }
+    let shortCwd = abbreviateHome(cwd)
+    if title == cwd {
+        return shortCwd
+    } else {
+        return "\(title) \u{2013} \(shortCwd)"
+    }
+}
+
 // MARK: - SplitNodeModel Operations
 
 func allPaneIds(_ node: SplitNodeModel) -> [PaneId] {

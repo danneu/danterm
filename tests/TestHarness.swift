@@ -11,6 +11,7 @@ struct TestRunner {
         modelOperationsTests()
         snapshotTests()
         dragDropInputTests()
+        paneToolbarTests()
         print("\n\(total - failures)/\(total) passed")
         if failures > 0 { exit(1) }
     }
