@@ -190,10 +190,11 @@ jobs:
             build/${{ env.DMG_NAME }}
             build/${{ env.ZIP_NAME }}
 
+      - uses: DeterminateSystems/nix-installer-action@main
+
       - name: Compute release zip hash
         run: |
-          HASH=$(shasum -a 256 "build/${{ env.ZIP_NAME }}" | cut -d' ' -f1)
-          SRI="sha256-$(echo "$HASH" | xxd -r -p | base64)"
+          SRI=$(nix hash to-sri --type sha256 $(nix-prefetch-url --unpack --type sha256 "file://$PWD/build/${{ env.ZIP_NAME }}" 2>/dev/null))
           echo "ZIP_SRI=$SRI" >> "$GITHUB_ENV"
 
       - name: Checkout master for package.nix update
