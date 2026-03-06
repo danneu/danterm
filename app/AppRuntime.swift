@@ -305,10 +305,11 @@ class AppRuntime {
         contentArea.addSubview(container)
         container.rebuild()
 
-        // Set focus borders based on model state
+        // Set focus borders based on model state (skip green border for single-pane tabs)
         let focusedId = tab.focusedPaneId
+        let isSinglePane: Bool = { if case .leaf = tab.rootNode { return true } else { return false } }()
         for paneId in allPaneIds(displayNode) {
-            let isFocused = paneId == focusedId
+            let isFocused = !isSinglePane && paneId == focusedId
             let hasBell = model.panes[paneId]?.hasBell ?? false
             surfaces[paneId]?.setFocusBorder(isFocused, hasBell: hasBell)
         }
