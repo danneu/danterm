@@ -192,4 +192,33 @@ func groupTests() {
         try expectEqual(model.groups[1].tabs.count, 2, "should have auto-created tab + moved tab")
         try expectEqual(model.groups[1].tabs[1].id, tabId, "tab should land at clamped end index")
     }
+
+    test("moveTab within same group adjusts for removal offset") {
+        var model = makeModel()
+        createTab(&model) // tab A
+        createTab(&model) // tab B
+        createTab(&model) // tab C
+        let groupId = model.groups[0].id
+        let a = model.groups[0].tabs[0].id
+        let b = model.groups[0].tabs[1].id
+        let c = model.groups[0].tabs[2].id
+
+        // Drag A to after B (outline view proposes child index 2)
+        update(&model, .moveTab(tabId: a, toGroupId: groupId, atIndex: 2))
+        try expectEqual(model.groups[0].tabs[0].id, b, "B should be first")
+        try expectEqual(model.groups[0].tabs[1].id, a, "A should be second")
+        try expectEqual(model.groups[0].tabs[2].id, c, "C should be third")
+    }
+
+    test("moveTab with negative atIndex clamps to 0") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+
+        update(&model, .createGroup(name: "Target"))
+        let targetId = model.groups[1].id
+
+        update(&model, .moveTab(tabId: tabId, toGroupId: targetId, atIndex: -1))
+        try expectEqual(model.groups[1].tabs[0].id, tabId, "tab should land at clamped index 0")
+    }
 }

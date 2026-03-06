@@ -420,7 +420,11 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
               let dstGroupIdx = model.groups.firstIndex(where: { $0.id == toGroupId }) else { return [] }
 
         let tab = model.groups[srcGroupIdx].tabs.remove(at: tabIdx)
-        let clampedIndex = min(atIndex, model.groups[dstGroupIdx].tabs.count)
+        var adjustedIndex = atIndex
+        if srcGroupIdx == dstGroupIdx && tabIdx < atIndex {
+            adjustedIndex -= 1
+        }
+        let clampedIndex = max(0, min(adjustedIndex, model.groups[dstGroupIdx].tabs.count))
         model.groups[dstGroupIdx].tabs.insert(tab, at: clampedIndex)
         return [.reloadSidebar]
 

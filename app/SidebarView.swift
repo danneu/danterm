@@ -443,7 +443,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 }
                 return []
             }
-            if let sidebarItem = item as? SidebarItem, case .group = sidebarItem.kind, index != NSOutlineViewDropOnItemIndex {
+            if let sidebarItem = item as? SidebarItem, case .group(let group) = sidebarItem.kind {
+                if index == NSOutlineViewDropOnItemIndex {
+                    let childCount = childItems[group.id]?.count ?? 0
+                    outlineView.setDropItem(item, dropChildIndex: childCount)
+                }
                 return .move
             }
             return []
