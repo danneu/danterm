@@ -663,7 +663,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     }
 
     private func configureGroupCell(_ cell: NSTableCellView, group: GroupModel) {
-        cell.textField?.stringValue = group.name.uppercased()
+        cell.textField?.stringValue = group.name
         cell.textField?.tag = group.id.rawValue.hashValue
         if let addButton = cell.subviews.first(where: { $0.identifier?.rawValue == "groupAddButton" }) as? NSButton {
             objc_setAssociatedObject(addButton, &AssociatedKeys.groupId, group.id.rawValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
