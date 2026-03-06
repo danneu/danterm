@@ -7,7 +7,7 @@ stdenv.mkDerivation {
   inherit version;
   src = fetchzip {
     url = "https://github.com/danneu/danterm/releases/download/v${version}/DanTerm-${version}.zip";
-    sha256 = "sha256-HIZ0oHCcQKVnXMVTwKCVfQNdhq2uKhQMxrTmTdzkDDY=";
+    sha256 = "sha256-olwYyMxa5CkfXIUGsLUdMQ/iJZnnLEEV+yw6NdJPslw=";
   };
   installPhase = ''
     mkdir -p $out/Applications/DanTerm.app
