@@ -43,6 +43,32 @@ class PaneWrapperView: NSView {
         closeButton.setContentHuggingPriority(.required, for: .horizontal)
         toolbar.addSubview(closeButton)
 
+        // Split right button
+        let splitRightButton = NSButton()
+        splitRightButton.translatesAutoresizingMaskIntoConstraints = false
+        splitRightButton.bezelStyle = .inline
+        splitRightButton.isBordered = false
+        splitRightButton.image = NSImage(systemSymbolName: "square.split.2x1", accessibilityDescription: "Split right")
+        splitRightButton.imageScaling = .scaleProportionallyDown
+        splitRightButton.contentTintColor = NSColor.secondaryLabelColor
+        splitRightButton.target = self
+        splitRightButton.action = #selector(splitRightAction)
+        splitRightButton.setContentHuggingPriority(.required, for: .horizontal)
+        toolbar.addSubview(splitRightButton)
+
+        // Split down button
+        let splitDownButton = NSButton()
+        splitDownButton.translatesAutoresizingMaskIntoConstraints = false
+        splitDownButton.bezelStyle = .inline
+        splitDownButton.isBordered = false
+        splitDownButton.image = NSImage(systemSymbolName: "square.split.1x2", accessibilityDescription: "Split down")
+        splitDownButton.imageScaling = .scaleProportionallyDown
+        splitDownButton.contentTintColor = NSColor.secondaryLabelColor
+        splitDownButton.target = self
+        splitDownButton.action = #selector(splitDownAction)
+        splitDownButton.setContentHuggingPriority(.required, for: .horizontal)
+        toolbar.addSubview(splitDownButton)
+
         // Zoom toggle button
         let zoomButton = NSButton()
         zoomButton.translatesAutoresizingMaskIntoConstraints = false
@@ -77,7 +103,19 @@ class PaneWrapperView: NSView {
             // Label within toolbar
             toolbarLabel.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
             toolbarLabel.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 8),
-            toolbarLabel.trailingAnchor.constraint(lessThanOrEqualTo: zoomButton.leadingAnchor, constant: -4),
+            toolbarLabel.trailingAnchor.constraint(lessThanOrEqualTo: splitRightButton.leadingAnchor, constant: -4),
+
+            // Split right button within toolbar
+            splitRightButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+            splitRightButton.trailingAnchor.constraint(equalTo: splitDownButton.leadingAnchor),
+            splitRightButton.widthAnchor.constraint(equalToConstant: 16),
+            splitRightButton.heightAnchor.constraint(equalToConstant: 16),
+
+            // Split down button within toolbar
+            splitDownButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+            splitDownButton.trailingAnchor.constraint(equalTo: zoomButton.leadingAnchor),
+            splitDownButton.widthAnchor.constraint(equalToConstant: 16),
+            splitDownButton.heightAnchor.constraint(equalToConstant: 16),
 
             // Zoom button within toolbar
             zoomButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
@@ -110,6 +148,14 @@ class PaneWrapperView: NSView {
     @objc private func closePaneAction() {
         guard let surface = terminalView.surface else { return }
         ghostty_surface_request_close(surface)
+    }
+
+    @objc private func splitRightAction() {
+        runtime?.send(.splitPane(direction: .horizontal))
+    }
+
+    @objc private func splitDownAction() {
+        runtime?.send(.splitPane(direction: .vertical))
     }
 
     @objc private func zoomPaneAction() {
