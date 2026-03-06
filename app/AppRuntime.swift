@@ -19,9 +19,14 @@ class AppRuntime {
     }
 
     func send(_ msg: Msg) {
+        let oldBellCount = totalBellCount(model: model)
         let effects = update(&model, msg)
         for effect in effects {
             perform(effect)
+        }
+        let newBellCount = totalBellCount(model: model)
+        if newBellCount != oldBellCount {
+            perform(.updateDockBadge(newBellCount))
         }
     }
 
@@ -88,7 +93,7 @@ class AppRuntime {
             UNUserNotificationCenter.current().add(request)
 
         case .requestNotificationPermission:
-            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
 
         case .showTerminateConfirmation:
             let alert = NSAlert()
@@ -115,6 +120,10 @@ class AppRuntime {
             if let app = ghosttyApp.app {
                 ghostty_app_set_focus(app, focused)
             }
+
+        case .updateDockBadge(let count):
+            NSApp.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
+            NSApp.dockTile.display()
         }
     }
 

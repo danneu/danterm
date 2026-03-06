@@ -23,4 +23,5 @@ enum Effect {
     case terminate
     case activateApp
     case setAppFocus(Bool)
+    case updateDockBadge(Int)
 }

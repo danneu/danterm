@@ -264,3 +264,7 @@ func bellCount(for tab: TabModel, panes: [PaneId: PaneModel]) -> Int {
 func groupBellCount(for group: GroupModel, panes: [PaneId: PaneModel]) -> Int {
     group.tabs.reduce(0) { $0 + bellCount(for: $1, panes: panes) }
 }
+
+func totalBellCount(model: AppModel) -> Int {
+    model.groups.reduce(0) { $0 + groupBellCount(for: $1, panes: model.panes) }
+}
