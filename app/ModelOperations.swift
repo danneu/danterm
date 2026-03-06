@@ -102,17 +102,47 @@ func nearestLeaf(_ node: SplitNodeModel, from paneId: PaneId, direction: SplitNo
             switch side {
             case .second:
                 if isInFirst {
-                    return firstLeafId(second)
+                    let hints = Array(path[(i + 1)...])
+                    return enterSubtree(second, navigating: direction, side: side, hints: hints)
                 }
             case .first:
                 if !isInFirst {
-                    return lastLeafId(first)
+                    let hints = Array(path[(i + 1)...])
+                    return enterSubtree(first, navigating: direction, side: side, hints: hints)
                 }
             }
         }
     }
 
     return nil
+}
+
+/// Pick the best leaf when entering a sibling subtree.
+/// For splits in the navigation direction, pick the near edge.
+/// For perpendicular splits, preserve the source pane's position using path hints.
+private func enterSubtree(_ node: SplitNodeModel, navigating direction: SplitNodeModel.Direction, side: SplitNodeModel.Side, hints: [(SplitNodeModel, Bool)]) -> PaneId {
+    switch node {
+    case .leaf(let id):
+        return id
+    case .split(_, let dir, let first, let second, _):
+        if dir == direction {
+            // Same direction as navigation: pick the near edge
+            switch side {
+            case .first:
+                return enterSubtree(second, navigating: direction, side: side, hints: hints)
+            case .second:
+                return enterSubtree(first, navigating: direction, side: side, hints: hints)
+            }
+        } else {
+            // Perpendicular split: use hint from source pane's position if available
+            let hint = hints.first(where: {
+                if case .split(_, let hDir, _, _, _) = $0.0 { return hDir == dir }
+                return false
+            })
+            let goFirst = hint?.1 ?? true
+            return enterSubtree(goFirst ? first : second, navigating: direction, side: side, hints: hints)
+        }
+    }
 }
 
 private func buildPath(_ node: SplitNodeModel, target: PaneId, path: inout [(SplitNodeModel, Bool)]) -> Bool {

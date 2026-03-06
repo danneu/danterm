@@ -189,6 +189,38 @@ func modelOperationsTests() {
         try expect(nearestLeaf(node, from: a, direction: .vertical, side: .second) == nil, "should return nil for wrong direction")
     }
 
+    test("testNearestLeaf2x2GridPreservesPerpendicularPosition") {
+        let tl = PaneId(), tr = PaneId(), bl = PaneId(), br = PaneId()
+        // 2x2 grid: horizontal split of two vertical columns
+        //   H
+        //   ├── V1: TL (first), BL (second)
+        //   └── V2: TR (first), BR (second)
+        let node = SplitNodeModel.split(
+            id: SplitId(), direction: .horizontal,
+            first: .split(
+                id: SplitId(), direction: .vertical,
+                first: .leaf(tl),
+                second: .leaf(bl),
+                ratio: 0.5
+            ),
+            second: .split(
+                id: SplitId(), direction: .vertical,
+                first: .leaf(tr),
+                second: .leaf(br),
+                ratio: 0.5
+            ),
+            ratio: 0.5
+        )
+        // From TR, go left → should be TL (same row), not BL
+        try expectEqual(nearestLeaf(node, from: tr, direction: .horizontal, side: .first), tl)
+        // From BR, go left → should be BL (same row)
+        try expectEqual(nearestLeaf(node, from: br, direction: .horizontal, side: .first), bl)
+        // From TL, go right → should be TR (same row)
+        try expectEqual(nearestLeaf(node, from: tl, direction: .horizontal, side: .second), tr)
+        // From BL, go right → should be BR (same row)
+        try expectEqual(nearestLeaf(node, from: bl, direction: .horizontal, side: .second), br)
+    }
+
     // MARK: - setRatio
 
     test("testSetRatio") {
