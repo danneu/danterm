@@ -40,23 +40,24 @@ class SidebarOutlineView: NSOutlineView {
 
     private static let tabInsetX: CGFloat = 5
 
-    /// Tab rows don't have a disclosure triangle, but NSOutlineView still
-    /// reserves gutter space for one. Zero it out so tabs aren't indented.
-    /// Group rows keep theirs for expand/collapse.
+    /// Hide the native disclosure triangle for all rows. Group rows use a
+    /// custom caret button on the right side instead.
     override func frameOfOutlineCell(atRow row: Int) -> NSRect {
-        if let sidebarItem = item(atRow: row) as? SidebarItem, case .tab = sidebarItem.kind {
-            return .zero
-        }
-        return super.frameOfOutlineCell(atRow: row)
+        return .zero
     }
 
-    /// Reclaim the gutter space left by the hidden disclosure triangle so tab
-    /// rows extend to the left edge (plus a small inset).
+    /// Stretch cells to full width. Tab rows get a small left inset.
     override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {
         var frame = super.frameOfCell(atColumn: column, row: row)
-        if let sidebarItem = item(atRow: row) as? SidebarItem, case .tab = sidebarItem.kind {
-            frame.size.width += frame.origin.x - Self.tabInsetX
-            frame.origin.x = Self.tabInsetX
+        if let sidebarItem = item(atRow: row) as? SidebarItem {
+            switch sidebarItem.kind {
+            case .tab:
+                frame.origin.x = Self.tabInsetX
+                frame.size.width = bounds.width - Self.tabInsetX
+            case .group:
+                frame.origin.x = 0
+                frame.size.width = bounds.width
+            }
         }
         return frame
     }
@@ -102,13 +103,17 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("TabColumn"))
         column.title = ""
+        column.resizingMask = .autoresizingMask
         outlineView.addTableColumn(column)
         outlineView.outlineTableColumn = column
+        outlineView.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
         outlineView.headerView = nil
         outlineView.dataSource = self
         outlineView.delegate = self
+        outlineView.style = .fullWidth
         outlineView.selectionHighlightStyle = .regular
         outlineView.allowsEmptySelection = true
+        outlineView.intercellSpacing = NSSize(width: 0, height: 0)
         outlineView.indentationPerLevel = 0
 
         outlineView.registerForDraggedTypes([SidebarView.tabDragType, SidebarView.groupDragType])
@@ -189,6 +194,17 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     @objc private func addTabToGroup(_ sender: NSButton) {
         guard let rawId = objc_getAssociatedObject(sender, &AssociatedKeys.groupId) as? UUID else { return }
         runtime?.send(.createTab(inGroupId: GroupId(rawValue: rawId)))
+    }
+
+    @objc private func caretClicked(_ sender: NSButton) {
+        guard let rawId = objc_getAssociatedObject(sender, &AssociatedKeys.groupId) as? UUID else { return }
+        let groupId = GroupId(rawValue: rawId)
+        guard let item = groupItemCache[groupId] else { return }
+        if outlineView.isItemExpanded(item) {
+            outlineView.collapseItem(item)
+        } else {
+            outlineView.expandItem(item)
+        }
     }
 
     // MARK: - Reconcile & Reload
@@ -370,7 +386,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         guard let sidebarItem = notification.userInfo?["NSObject"] as? SidebarItem,
               case .group(let group) = sidebarItem.kind else { return }
         runtime?.send(.toggleGroupCollapse(groupId: group.id))
-        updateBellBadge(for: sidebarItem)
+        updateGroupRow(for: sidebarItem, collapsed: true)
     }
 
     func outlineViewItemDidExpand(_ notification: Notification) {
@@ -378,19 +394,23 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         guard let sidebarItem = notification.userInfo?["NSObject"] as? SidebarItem,
               case .group(let group) = sidebarItem.kind else { return }
         runtime?.send(.toggleGroupCollapse(groupId: group.id))
-        updateBellBadge(for: sidebarItem)
+        updateGroupRow(for: sidebarItem, collapsed: false)
     }
 
-    private func updateBellBadge(for sidebarItem: SidebarItem) {
+    private func updateGroupRow(for sidebarItem: SidebarItem, collapsed: Bool) {
         guard case .group(let group) = sidebarItem.kind else { return }
         let row = outlineView.row(forItem: sidebarItem)
         guard row >= 0,
               let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) else { return }
+        if let caretButton = cell.subviews.first(where: { $0.identifier?.rawValue == "groupCaretButton" }) as? NSButton {
+            let symbolName = collapsed ? "chevron.right" : "chevron.down"
+            caretButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Toggle Group")
+        }
         if let bellBadge = cell.subviews.first(where: { $0.identifier?.rawValue == "groupBellBadge" }) as? NSTextField {
             let panes = currentModel?.panes ?? [:]
             let count = groupBellCount(for: group, panes: panes)
             bellBadge.stringValue = "\(count)"
-            bellBadge.isHidden = count == 0 || !group.isCollapsed
+            bellBadge.isHidden = count == 0 || !collapsed
         }
     }
 
@@ -602,6 +622,15 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         bellBadge.isHidden = true
         cell.addSubview(bellBadge)
 
+        let caretButton = NSButton(image: NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Toggle Group")!, target: self, action: #selector(caretClicked(_:)))
+        caretButton.translatesAutoresizingMaskIntoConstraints = false
+        caretButton.bezelStyle = .accessoryBarAction
+        caretButton.isBordered = false
+        caretButton.imageScaling = .scaleProportionallyDown
+        caretButton.contentTintColor = .tertiaryLabelColor
+        caretButton.identifier = NSUserInterfaceItemIdentifier("groupCaretButton")
+        cell.addSubview(caretButton)
+
         let addButton = NSButton(image: NSImage(named: NSImage.addTemplateName)!, target: self, action: #selector(addTabToGroup(_:)))
         addButton.translatesAutoresizingMaskIntoConstraints = false
         addButton.bezelStyle = .accessoryBarAction
@@ -612,13 +641,17 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         cell.addSubview(addButton)
 
         NSLayoutConstraint.activate([
-            textField.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 10),
+            textField.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
             textField.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             textField.trailingAnchor.constraint(lessThanOrEqualTo: bellBadge.leadingAnchor, constant: -4),
             bellBadge.widthAnchor.constraint(greaterThanOrEqualToConstant: 12),
             bellBadge.heightAnchor.constraint(equalToConstant: 12),
             bellBadge.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            bellBadge.trailingAnchor.constraint(equalTo: addButton.leadingAnchor, constant: -4),
+            bellBadge.trailingAnchor.constraint(equalTo: caretButton.leadingAnchor, constant: -2),
+            caretButton.trailingAnchor.constraint(equalTo: addButton.leadingAnchor, constant: 2),
+            caretButton.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            caretButton.widthAnchor.constraint(equalToConstant: 16),
+            caretButton.heightAnchor.constraint(equalToConstant: 16),
             addButton.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -2),
             addButton.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             addButton.widthAnchor.constraint(equalToConstant: 16),
@@ -634,6 +667,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         cell.textField?.tag = group.id.rawValue.hashValue
         if let addButton = cell.subviews.first(where: { $0.identifier?.rawValue == "groupAddButton" }) as? NSButton {
             objc_setAssociatedObject(addButton, &AssociatedKeys.groupId, group.id.rawValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        }
+        if let caretButton = cell.subviews.first(where: { $0.identifier?.rawValue == "groupCaretButton" }) as? NSButton {
+            let symbolName = group.isCollapsed ? "chevron.right" : "chevron.down"
+            caretButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Toggle Group")
+            objc_setAssociatedObject(caretButton, &AssociatedKeys.groupId, group.id.rawValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         }
         if let bellBadge = cell.subviews.first(where: { $0.identifier?.rawValue == "groupBellBadge" }) as? NSTextField {
             let panes = currentModel?.panes ?? [:]
@@ -716,6 +754,18 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 // MARK: - NSTextFieldDelegate (inline rename)
 
 extension SidebarView: NSTextFieldDelegate {
+    /// Force Enter/Escape to always end editing. By default, AppKit skips
+    /// textShouldEndEditing when the value hasn't changed, leaving the field
+    /// editor active. Resigning first responder ensures editing ends regardless.
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.insertNewline(_:)) ||
+           commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+            window?.makeFirstResponder(nil)
+            return true
+        }
+        return false
+    }
+
     func control(_ control: NSControl, textShouldEndEditing fieldEditor: NSText) -> Bool {
         guard let textField = control as? NSTextField else { return true }
         let newName = textField.stringValue.trimmingCharacters(in: .whitespaces)
