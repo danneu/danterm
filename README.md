@@ -53,3 +53,22 @@ Like any other terminal, you probably want to grant DanTerm.app these macOS perm
 - Tabs can be grouped into collapsible sections
 - Lightweight: Built with AppKit (Swift) on top of ghostty (zig)
 - Launch terminal with specific layout/tabs/panes/commands: `--init <model.json>`
+
+## Comparison
+
+| Feature       | DanTerm | iTerm2 | Kitty | WezTerm |
+| ------------- | ------- | ------ | ----- | ------- |
+| Vertical tabs | Yes     | Yes    | --    | --      |
+| Tab groups    | Yes     | --     | --    | --      |
+| Fast          | Yes     | --     | Yes   | Yes     |
+| Dan           | Yes     | --     | --    | --      |
+
+### iTerm2
+
+iTerm was my go-to macOS terminal for 10+ years, but I've been having enough random issues with it that I figured it would be less of a setback to build my own.
+
+e.g. Copy (cmd-c) was unreliable and notifications never seemed to properly focus the originating pane when using the global hotkey window.
+
+### Kitty/WezTerm
+
+I tried these after iTerm, but they have really bad tab systems. I want something more first class and polished, like browser tabs.
