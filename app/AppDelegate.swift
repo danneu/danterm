@@ -130,19 +130,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
         let panesMenu = NSMenu(title: "Panes")
 
         let focusLeft = NSMenuItem(title: "Focus Left", action: #selector(focusLeft(_:)), keyEquivalent: "H")
-        focusLeft.keyEquivalentModifierMask = [.control, .shift]
+        focusLeft.keyEquivalentModifierMask = [.command, .shift]
         panesMenu.addItem(focusLeft)
 
         let focusDown = NSMenuItem(title: "Focus Down", action: #selector(focusDown(_:)), keyEquivalent: "J")
-        focusDown.keyEquivalentModifierMask = [.control, .shift]
+        focusDown.keyEquivalentModifierMask = [.command, .shift]
         panesMenu.addItem(focusDown)
 
         let focusUp = NSMenuItem(title: "Focus Up", action: #selector(focusUp(_:)), keyEquivalent: "K")
-        focusUp.keyEquivalentModifierMask = [.control, .shift]
+        focusUp.keyEquivalentModifierMask = [.command, .shift]
         panesMenu.addItem(focusUp)
 
         let focusRight = NSMenuItem(title: "Focus Right", action: #selector(focusRight(_:)), keyEquivalent: "L")
-        focusRight.keyEquivalentModifierMask = [.control, .shift]
+        focusRight.keyEquivalentModifierMask = [.command, .shift]
         panesMenu.addItem(focusRight)
 
         panesMenuItem.submenu = panesMenu
