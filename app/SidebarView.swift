@@ -407,8 +407,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             caretButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Toggle Group")
         }
         if let bellBadge = cell.subviews.first(where: { $0.identifier?.rawValue == "groupBellBadge" }) as? NSTextField {
-            let panes = currentModel?.panes ?? [:]
-            let count = groupBellCount(for: group, panes: panes)
+            let count = groupUnreadAlertCount(for: group, alerts: currentModel?.alerts ?? [])
             bellBadge.stringValue = "\(count)"
             bellBadge.isHidden = count == 0 || !collapsed
         }
@@ -678,8 +677,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             objc_setAssociatedObject(caretButton, &AssociatedKeys.groupId, group.id.rawValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         }
         if let bellBadge = cell.subviews.first(where: { $0.identifier?.rawValue == "groupBellBadge" }) as? NSTextField {
-            let panes = currentModel?.panes ?? [:]
-            let count = groupBellCount(for: group, panes: panes)
+            let count = groupUnreadAlertCount(for: group, alerts: currentModel?.alerts ?? [])
             bellBadge.stringValue = "\(count)"
             bellBadge.isHidden = count == 0 || !group.isCollapsed
         }
@@ -744,8 +742,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             subtitleField.isHidden = tab.subtitle == nil
         }
         if let bellBadge = cell.subviews.first(where: { $0.identifier == bellDotId }) as? NSTextField {
-            let panes = currentModel?.panes ?? [:]
-            let count = bellCount(for: tab, panes: panes)
+            let count = unreadAlertCount(for: tab, alerts: currentModel?.alerts ?? [])
             bellBadge.stringValue = "\(count)"
             bellBadge.isHidden = count == 0
         }

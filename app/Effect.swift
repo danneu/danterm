@@ -20,12 +20,14 @@ enum Effect {
     case exportState(AppInitFile)
 
     // System
-    case sendNotification(title: String, body: String, tabId: TabId, paneId: PaneId)
+    case sendNotification(alertId: AlertId, title: String, body: String, tabId: TabId, paneId: PaneId)
     case requestNotificationPermission
     case showTerminateConfirmation
     case showCloseTabConfirmation(tabId: TabId, tabTitle: String, paneCount: Int, isLastTab: Bool)
     case terminate
     case activateApp
     case setAppFocus(Bool)
+    case dismissAlertsPopover
+    case updateToolbarBellBadge(Int)
     case updateDockBadge(Int)
 }

@@ -274,18 +274,23 @@ func wouldQuitFromClose(_ model: AppModel) -> Bool {
     totalTabCount(model) == 1
 }
 
-// MARK: - Bell Helpers
+// MARK: - Alert Helpers
 
-func bellCount(for tab: TabModel, panes: [PaneId: PaneModel]) -> Int {
-    allPaneIds(tab.rootNode).filter { panes[$0]?.hasBell == true }.count
+func paneHasUnreadAlert(_ paneId: PaneId, alerts: [AlertModel]) -> Bool {
+    alerts.contains { $0.isUnread && $0.paneId == paneId }
 }
 
-func groupBellCount(for group: GroupModel, panes: [PaneId: PaneModel]) -> Int {
-    group.tabs.reduce(0) { $0 + bellCount(for: $1, panes: panes) }
+func unreadAlertCount(for tab: TabModel, alerts: [AlertModel]) -> Int {
+    let paneIds = Set(allPaneIds(tab.rootNode))
+    return alerts.filter { $0.isUnread && paneIds.contains($0.paneId) }.count
 }
 
-func totalBellCount(model: AppModel) -> Int {
-    model.groups.reduce(0) { $0 + groupBellCount(for: $1, panes: model.panes) }
+func groupUnreadAlertCount(for group: GroupModel, alerts: [AlertModel]) -> Int {
+    group.tabs.reduce(0) { $0 + unreadAlertCount(for: $1, alerts: alerts) }
+}
+
+func totalUnreadAlertCount(model: AppModel) -> Int {
+    model.alerts.filter(\.isUnread).count
 }
 
 // MARK: - Export

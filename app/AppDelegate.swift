@@ -10,6 +10,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
     var contentArea: NSView!
     var splitView: NSSplitView!
     var initSnapshot: AppModelSnapshot?
+    var alertsBellItem: NSToolbarItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Create ghostty app (config + runtime callbacks)
@@ -88,6 +89,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
         UNUserNotificationCenter.current().delegate = self
 
         NSApp.activate(ignoringOtherApps: true)
+
     }
 
     // MARK: - Menu
@@ -233,14 +235,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let userInfo = response.notification.request.content.userInfo
-        if let tabIdStr = userInfo["tabId"] as? String,
-           let rawTabId = UUID(uuidString: tabIdStr) {
-            var paneId: PaneId? = nil
-            if let paneIdStr = userInfo["paneId"] as? String,
-               let rawPaneId = UUID(uuidString: paneIdStr) {
-                paneId = PaneId(rawValue: rawPaneId)
-            }
-            runtime.send(.notificationClicked(tabId: TabId(rawValue: rawTabId), paneId: paneId))
+        if let alertIdStr = userInfo["alertId"] as? String,
+           let rawAlertId = UUID(uuidString: alertIdStr) {
+            runtime.send(.activateAlert(alertId: AlertId(rawValue: rawAlertId)))
         }
         completionHandler()
     }
@@ -256,6 +253,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
     // MARK: - NSToolbarDelegate
 
     private static let sidebarToggleId = NSToolbarItem.Identifier("ToggleSidebar")
+    private static let alertsBellId = NSToolbarItem.Identifier("AlertsBell")
 
     // System .toggleSidebar only works with NSSplitViewController, so we use a
     // custom item with the standard sidebar icon and explicit target/action.
@@ -269,15 +267,32 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
             item.action = #selector(toggleSidebar(_:))
             return item
         }
+        if itemIdentifier == Self.alertsBellId {
+            let item = NSToolbarItem(itemIdentifier: Self.alertsBellId)
+            item.label = "Alerts"
+            item.toolTip = "Alerts"
+            // Use a custom view so we own the badge directly — no view hierarchy walking needed.
+            let bellButton = BellToolbarButton()
+            bellButton.target = self
+            bellButton.action = #selector(toggleAlerts(_:))
+            item.view = bellButton
+            alertsBellItem = item
+            runtime.alertsBellButton = bellButton
+            return item
+        }
         return nil
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.sidebarToggleId]
+        [Self.sidebarToggleId, Self.alertsBellId]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.sidebarToggleId]
+        [Self.sidebarToggleId, Self.alertsBellId]
+    }
+
+    @objc func toggleAlerts(_ sender: Any?) {
+        runtime.toggleAlertsPopover()
     }
 
     // Collapse/uncollapse the sidebar in the NSSplitView.

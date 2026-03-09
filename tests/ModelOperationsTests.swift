@@ -297,10 +297,11 @@ func modelOperationsTests() {
 
     // MARK: - bellCount / groupBellCount
 
-    test("testBellCount") {
+    test("testUnreadAlertCount") {
         let a = PaneId(), b = PaneId()
+        let tabId = TabId()
         let tab = TabModel(
-            id: TabId(),
+            id: tabId,
             focusedPaneId: a,
             rootNode: .split(
                 id: SplitId(), direction: .horizontal,
@@ -309,31 +310,35 @@ func modelOperationsTests() {
                 ratio: 0.5
             )
         )
-        var panes: [PaneId: PaneModel] = [
-            a: PaneModel(id: a),
-            b: PaneModel(id: b),
-        ]
-        try expectEqual(bellCount(for: tab, panes: panes), 0)
+        var alerts: [AlertModel] = []
+        try expectEqual(unreadAlertCount(for: tab, alerts: alerts), 0)
 
-        panes[a]?.hasBell = true
-        try expectEqual(bellCount(for: tab, panes: panes), 1)
+        alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: a, tabId: tabId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+        try expectEqual(unreadAlertCount(for: tab, alerts: alerts), 1)
 
-        panes[b]?.hasBell = true
-        try expectEqual(bellCount(for: tab, panes: panes), 2)
+        alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: b, tabId: tabId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+        try expectEqual(unreadAlertCount(for: tab, alerts: alerts), 2)
     }
 
-    test("testGroupBellCount") {
+    test("testGroupUnreadAlertCount") {
         let a = PaneId(), b = PaneId()
-        let tab1 = TabModel(id: TabId(), focusedPaneId: a, rootNode: .leaf(a))
-        let tab2 = TabModel(id: TabId(), focusedPaneId: b, rootNode: .leaf(b))
+        let tabId1 = TabId(), tabId2 = TabId()
+        let tab1 = TabModel(id: tabId1, focusedPaneId: a, rootNode: .leaf(a))
+        let tab2 = TabModel(id: tabId2, focusedPaneId: b, rootNode: .leaf(b))
         let group = GroupModel(id: GroupId(), name: "Test", isDefault: false, tabs: [tab1, tab2])
-        var panes: [PaneId: PaneModel] = [
-            a: PaneModel(id: a),
-            b: PaneModel(id: b),
-        ]
+        var alerts: [AlertModel] = []
 
-        try expectEqual(groupBellCount(for: group, panes: panes), 0)
-        panes[b]?.hasBell = true
-        try expectEqual(groupBellCount(for: group, panes: panes), 1)
+        try expectEqual(groupUnreadAlertCount(for: group, alerts: alerts), 0)
+        alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: b, tabId: tabId2,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+        try expectEqual(groupUnreadAlertCount(for: group, alerts: alerts), 1)
     }
 }

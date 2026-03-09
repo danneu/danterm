@@ -147,16 +147,22 @@ func paneTests() {
         update(&model, .splitPane(direction: .horizontal))
 
         // Set some state on paneA
-        model.panes[paneA]?.hasBell = true
         model.panes[paneA]?.title = "my-title"
         model.panes[paneA]?.cwd = "/tmp/foo"
+
+        // Add an unread alert for paneA
+        let tabId = model.groups[0].tabs[0].id
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA, tabId: tabId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
 
         // paneB is focused. Simulate paneA becoming first responder.
         let effects = update(&model, .paneBecameFirstResponder(paneId: paneA))
 
         let tab = model.groups[0].tabs[0]
         try expectEqual(tab.focusedPaneId, paneA, "focused pane should change")
-        try expectEqual(model.panes[paneA]?.hasBell, false, "bell should be cleared")
+        try expectEqual(model.alerts[0].isUnread, false, "alert should be marked read")
         try expect(hasEffect(effects) {
             if case .rebuildContentView = $0 { return true }
             return false

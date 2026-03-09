@@ -66,9 +66,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
 
         model.selectedTabId = id
-        // Clear bell on the newly focused pane
+        // Mark alerts read on the newly focused pane
         if let tab = selectedTab(in: model) {
-            model.panes[tab.focusedPaneId]?.hasBell = false
+            markAlertsReadForPane(tab.focusedPaneId, in: &model)
         }
         effects.append(.rebuildContentView)
         effects.append(.reloadSidebar)
@@ -102,6 +102,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         var effects: [Effect] = []
         for pid in paneIds {
             effects.append(.destroySurface(paneId: pid))
+            markAlertsReadForPane(pid, in: &model)
+            model.lastNotificationTime.removeValue(forKey: pid)
             model.panes.removeValue(forKey: pid)
         }
 
@@ -164,6 +166,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
 
         var effects: [Effect] = [.destroySurface(paneId: paneId)]
+        markAlertsReadForPane(paneId, in: &model)
+        model.lastNotificationTime.removeValue(forKey: paneId)
         model.panes.removeValue(forKey: paneId)
 
         guard let newRoot = newTree else {
@@ -197,7 +201,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let oldFocusedId = tab.focusedPaneId
         guard paneId != oldFocusedId else { return [] }
 
-        model.panes[paneId]?.hasBell = false
+        markAlertsReadForPane(paneId, in: &model)
         updateSelectedTab(&model) { t in t.focusedPaneId = paneId }
 
         // Update tab title/subtitle from newly focused pane
@@ -263,101 +267,56 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return effects
 
     case .surfaceBell(let paneId):
-        model.panes[paneId]?.hasBell = true
-
-        // If focused in selected tab, immediately clear
+        // No alert for bell on the focused pane of the selected tab
         if let tab = selectedTab(in: model), tab.focusedPaneId == paneId {
-            model.panes[paneId]?.hasBell = false
             return []
         }
 
-        // Find which tab this pane belongs to
-        var effects: [Effect] = [.rebuildContentView]
-        for group in model.groups {
-            for tab in group.tabs {
-                if allPaneIds(tab.rootNode).contains(paneId) {
-                    effects.append(.reloadSidebarRow(tabId: tab.id))
-                    if group.isCollapsed {
-                        effects.append(.reloadSidebarGroupRow(groupId: group.id))
-                    }
+        guard let tab = tabForPane(paneId, in: model) else { return [] }
+        let paneTitle = model.panes[paneId]?.title ?? "Terminal"
 
-                    // System notification only when app is not active
-                    // Throttle: skip if last notification was within 5 seconds
-                    if let pane = model.panes[paneId] {
-                        let shouldNotify: Bool
-                        if let last = pane.lastBellNotification {
-                            shouldNotify = Date().timeIntervalSince(last) >= 5
-                        } else {
-                            shouldNotify = true
-                        }
+        let alert = AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneId, tabId: tab.id,
+            title: "DanTerm", body: paneTitle, createdAt: Date(), isUnread: true
+        )
+        model.alerts.insert(alert, at: 0)
+        if model.alerts.count > 100 { model.alerts.removeLast() }
 
-                        if shouldNotify {
-                            model.panes[paneId]?.lastBellNotification = Date()
-                            if !model.notificationPermissionRequested {
-                                model.notificationPermissionRequested = true
-                                effects.append(.requestNotificationPermission)
-                            }
-                            effects.append(.sendNotification(
-                                title: "DanTerm",
-                                body: pane.title,
-                                tabId: tab.id,
-                                paneId: paneId
-                            ))
-                        }
-                    }
-                    break
-                }
-            }
+        var effects: [Effect] = [.rebuildContentView, .reloadSidebarRow(tabId: tab.id)]
+        if let group = groupForTab(tab.id, in: model), group.isCollapsed {
+            effects.append(.reloadSidebarGroupRow(groupId: group.id))
         }
+
+        effects.append(contentsOf: throttledNotification(
+            alertId: alert.id, kind: .bell, paneId: paneId,
+            title: "DanTerm", body: paneTitle, tabId: tab.id, model: &model
+        ))
         return effects
 
     case .desktopNotification(let paneId, let title, let body):
         let isFocused = selectedTab(in: model).map { $0.focusedPaneId == paneId } ?? false
+        guard let tab = tabForPane(paneId, in: model) else { return [] }
 
-        // Background pane: set bell state for sidebar badge / dock badge
+        let alert = AlertModel(
+            id: AlertId(), kind: .desktopNotification, paneId: paneId, tabId: tab.id,
+            title: title, body: body, createdAt: Date(), isUnread: !isFocused
+        )
+        model.alerts.insert(alert, at: 0)
+        if model.alerts.count > 100 { model.alerts.removeLast() }
+
+        var effects: [Effect] = []
         if !isFocused {
-            model.panes[paneId]?.hasBell = true
-        }
-
-        // Find which tab this pane belongs to
-        var effects: [Effect] = isFocused ? [] : [.rebuildContentView]
-        for group in model.groups {
-            for tab in group.tabs {
-                if allPaneIds(tab.rootNode).contains(paneId) {
-                    if !isFocused {
-                        effects.append(.reloadSidebarRow(tabId: tab.id))
-                        if group.isCollapsed {
-                            effects.append(.reloadSidebarGroupRow(groupId: group.id))
-                        }
-                    }
-
-                    // Throttle independently from bell
-                    if let pane = model.panes[paneId] {
-                        let shouldNotify: Bool
-                        if let last = pane.lastDesktopNotification {
-                            shouldNotify = Date().timeIntervalSince(last) >= 5
-                        } else {
-                            shouldNotify = true
-                        }
-
-                        if shouldNotify {
-                            model.panes[paneId]?.lastDesktopNotification = Date()
-                            if !model.notificationPermissionRequested {
-                                model.notificationPermissionRequested = true
-                                effects.append(.requestNotificationPermission)
-                            }
-                            effects.append(.sendNotification(
-                                title: title,
-                                body: body,
-                                tabId: tab.id,
-                                paneId: paneId
-                            ))
-                        }
-                    }
-                    break
-                }
+            effects.append(.rebuildContentView)
+            effects.append(.reloadSidebarRow(tabId: tab.id))
+            if let group = groupForTab(tab.id, in: model), group.isCollapsed {
+                effects.append(.reloadSidebarGroupRow(groupId: group.id))
             }
         }
+
+        effects.append(contentsOf: throttledNotification(
+            alertId: alert.id, kind: .desktopNotification, paneId: paneId,
+            title: title, body: body, tabId: tab.id, model: &model
+        ))
         return effects
 
     case .surfaceClosed(let paneId):
@@ -389,17 +348,45 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
     case .appResignedActive:
         return [.setAppFocus(false)]
 
-    case .notificationClicked(let tabId, let paneId):
-        var effects = update(&model, .selectTab(id: tabId))
-        // Clear zoom if notification targets a different pane than focused
-        if let pid = paneId, let tab = selectedTab(in: model), tab.isZoomed, pid != tab.focusedPaneId {
+    // MARK: - Alerts
+
+    case .markAlertRead(let alertId):
+        if let idx = model.alerts.firstIndex(where: { $0.id == alertId }) {
+            model.alerts[idx].isUnread = false
+        }
+        return [.rebuildContentView, .reloadSidebar]
+
+    case .markAllAlertsRead:
+        for i in model.alerts.indices { model.alerts[i].isUnread = false }
+        return [.rebuildContentView, .reloadSidebar]
+
+    case .activateAlert(let alertId):
+        guard let alert = model.alerts.first(where: { $0.id == alertId }) else { return [] }
+        // Stale alert: pane or tab no longer exists — just mark read, no navigation
+        guard model.panes[alert.paneId] != nil,
+              tabForPane(alert.paneId, in: model) != nil else {
+            if let idx = model.alerts.firstIndex(where: { $0.id == alertId }) {
+                model.alerts[idx].isUnread = false
+            }
+            return [.rebuildContentView, .reloadSidebar, .dismissAlertsPopover]
+        }
+        // Mark read
+        if let idx = model.alerts.firstIndex(where: { $0.id == alertId }) {
+            model.alerts[idx].isUnread = false
+        }
+        // Navigate: select tab, focus pane, clear zoom if needed, activate app
+        var effects = update(&model, .selectTab(id: alert.tabId))
+        if let tab = selectedTab(in: model), tab.isZoomed, alert.paneId != tab.focusedPaneId {
             updateSelectedTab(&model) { t in t.isZoomed = false }
-            effects.append(.rebuildContentView)
         }
-        if let pid = paneId {
-            effects.append(.makeFirstResponder(paneId: pid))
-        }
+        // Always emit refresh effects — selectTab is a no-op when already on
+        // the alert's tab, but we still need to clear the red border/badges
+        // after marking the alert read.
+        effects.append(.rebuildContentView)
+        effects.append(.reloadSidebar)
+        effects.append(.makeFirstResponder(paneId: alert.paneId))
         effects.append(.activateApp)
+        effects.append(.dismissAlertsPopover)
         return effects
 
     case .confirmTerminate:
@@ -438,6 +425,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             for tab in group.tabs {
                 for pid in allPaneIds(tab.rootNode) {
                     effects.append(.destroySurface(paneId: pid))
+                    markAlertsReadForPane(pid, in: &model)
+                    model.lastNotificationTime.removeValue(forKey: pid)
                     model.panes.removeValue(forKey: pid)
                 }
             }
@@ -533,4 +522,38 @@ private func windowTitle(for tab: TabModel) -> String {
         return "\(tab.title) — \(subtitle)"
     }
     return tab.title
+}
+
+private func markAlertsReadForPane(_ paneId: PaneId, in model: inout AppModel) {
+    for i in model.alerts.indices where model.alerts[i].paneId == paneId && model.alerts[i].isUnread {
+        model.alerts[i].isUnread = false
+    }
+}
+
+/// Throttle macOS notification delivery: one per pane per kind every 5 seconds.
+private func throttledNotification(
+    alertId: AlertId, kind: AlertKind, paneId: PaneId,
+    title: String, body: String, tabId: TabId, model: inout AppModel
+) -> [Effect] {
+    let now = Date()
+    let shouldNotify: Bool
+    if let last = model.lastNotificationTime[paneId]?[kind] {
+        shouldNotify = now.timeIntervalSince(last) >= 5
+    } else {
+        shouldNotify = true
+    }
+
+    guard shouldNotify else { return [] }
+
+    model.lastNotificationTime[paneId, default: [:]][kind] = now
+
+    var effects: [Effect] = []
+    if !model.notificationPermissionRequested {
+        model.notificationPermissionRequested = true
+        effects.append(.requestNotificationPermission)
+    }
+    effects.append(.sendNotification(
+        alertId: alertId, title: title, body: body, tabId: tabId, paneId: paneId
+    ))
+    return effects
 }

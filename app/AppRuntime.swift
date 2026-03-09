@@ -11,6 +11,10 @@ class AppRuntime {
     weak var window: NSWindow?
     weak var sidebarView: SidebarView?
     weak var contentArea: NSView?
+    var alertsPopover: NSPopover?
+    weak var alertsBellItem: NSToolbarItem?
+    /// The custom bell button set as the toolbar item's view. Owns the badge directly.
+    weak var alertsBellButton: BellToolbarButton?
 
     init(ghosttyApp: GhosttyApp) {
         self.ghosttyApp = ghosttyApp
@@ -23,14 +27,15 @@ class AppRuntime {
     func send(_ msg: Msg) {
         guard let translatedMsg = translateMsg(msg, tokenForPane: { self.tokenStore.token(for: $0) }) else { return }
 
-        let oldBellCount = totalBellCount(model: model)
+        let oldUnreadCount = totalUnreadAlertCount(model: model)
         let effects = update(&model, translatedMsg)
         for effect in effects {
             perform(effect)
         }
-        let newBellCount = totalBellCount(model: model)
-        if newBellCount != oldBellCount {
-            perform(.updateDockBadge(newBellCount))
+        let newUnreadCount = totalUnreadAlertCount(model: model)
+        if newUnreadCount != oldUnreadCount {
+            perform(.updateDockBadge(newUnreadCount))
+            perform(.updateToolbarBellBadge(newUnreadCount))
         }
 
         // Refresh toolbar text after title/cwd changes
@@ -91,11 +96,12 @@ class AppRuntime {
         case .setWindowTitle(let title):
             window?.title = title
 
-        case .sendNotification(let title, let body, let tabId, let paneId):
+        case .sendNotification(let alertId, let title, let body, let tabId, let paneId):
             let content = UNMutableNotificationContent()
             content.title = title
             content.body = body
             content.userInfo = [
+                "alertId": alertId.rawValue.uuidString,
                 "tabId": tabId.rawValue.uuidString,
                 "paneId": paneId.rawValue.uuidString,
             ]
@@ -189,6 +195,13 @@ class AppRuntime {
             if let app = ghosttyApp.app {
                 ghostty_app_set_focus(app, focused)
             }
+
+        case .dismissAlertsPopover:
+            alertsPopover?.performClose(nil)
+            alertsPopover = nil
+
+        case .updateToolbarBellBadge(let count):
+            alertsBellButton?.updateBadge(count: count)
 
         case .updateDockBadge(let count):
             NSApp.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
@@ -310,7 +323,7 @@ class AppRuntime {
         let isSinglePane: Bool = { if case .leaf = tab.rootNode { return true } else { return false } }()
         for paneId in allPaneIds(displayNode) {
             let isFocused = !isSinglePane && paneId == focusedId
-            let hasBell = model.panes[paneId]?.hasBell ?? false
+            let hasBell = paneHasUnreadAlert(paneId, alerts: model.alerts)
             surfaces[paneId]?.setFocusBorder(isFocused, hasBell: hasBell)
         }
 
@@ -321,5 +334,79 @@ class AppRuntime {
 
         refreshPaneToolbars()
     }
+
+    // MARK: - Alerts Popover
+
+    func toggleAlertsPopover() {
+        if let popover = alertsPopover, popover.isShown {
+            popover.performClose(nil)
+            alertsPopover = nil
+            return
+        }
+        guard let anchor = alertsBellButton else { return }
+        let vc = AlertsPopoverViewController()
+        vc.runtime = self
+        let popover = NSPopover()
+        popover.contentViewController = vc
+        popover.behavior = .transient
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
+        alertsPopover = popover
+    }
 }
 
+/// Custom toolbar button that displays a bell icon with an overlaid badge count.
+/// Set as the NSToolbarItem's `view` directly, so no view hierarchy discovery is needed.
+class BellToolbarButton: NSButton {
+    private let badgeLabel: NSTextField
+
+    init() {
+        badgeLabel = NSTextField(labelWithString: "0")
+        super.init(frame: .zero)
+
+        translatesAutoresizingMaskIntoConstraints = false
+        bezelStyle = .texturedRounded
+        isBordered = true
+        let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+        image = NSImage(systemSymbolName: "bell", accessibilityDescription: "Alerts")?.withSymbolConfiguration(config)
+        imagePosition = .imageOnly
+        imageScaling = .scaleNone
+
+        // Badge: red circle with white count text, ignores mouse events
+        badgeLabel.translatesAutoresizingMaskIntoConstraints = false
+        badgeLabel.font = .monospacedSystemFont(ofSize: 8, weight: .bold)
+        badgeLabel.textColor = .white
+        badgeLabel.alignment = .center
+        badgeLabel.wantsLayer = true
+        badgeLabel.layer?.backgroundColor = NSColor.systemRed.cgColor
+        badgeLabel.layer?.cornerRadius = 7
+        badgeLabel.layer?.masksToBounds = true
+        badgeLabel.isHidden = true
+        addSubview(badgeLabel)
+
+        NSLayoutConstraint.activate([
+            // Size to match standard toolbar buttons
+            widthAnchor.constraint(equalToConstant: 36),
+            heightAnchor.constraint(equalToConstant: 28),
+            // Badge at top-right of button
+            badgeLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 14),
+            badgeLabel.heightAnchor.constraint(equalToConstant: 14),
+            badgeLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: 2),
+            badgeLabel.topAnchor.constraint(equalTo: topAnchor, constant: -2),
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) not implemented")
+    }
+
+    func updateBadge(count: Int) {
+        badgeLabel.stringValue = "\(count)"
+        badgeLabel.isHidden = count == 0
+    }
+
+    // Route all hits within our bounds to self, so the badge doesn't intercept clicks.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let local = convert(point, from: superview)
+        return bounds.contains(local) ? self : nil
+    }
+}

@@ -9,6 +9,7 @@ app/AppDelegate.swift
 app/GhosttyApp.swift
 app/TerminalView.swift
 app/SidebarView.swift
+app/AlertsPopoverView.swift
 app/SplitContainerView.swift
 app/PaneSplitView.swift
 app/PaneWrapperView.swift

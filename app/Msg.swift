@@ -40,10 +40,14 @@ enum Msg {
     case surfaceClosed(paneId: PaneId)
     case surfaceCreationFailed(paneId: PaneId)
 
+    // Alerts
+    case markAlertRead(alertId: AlertId)
+    case markAllAlertsRead
+    case activateAlert(alertId: AlertId)
+
     // Lifecycle
     case appBecameActive
     case appResignedActive
-    case notificationClicked(tabId: TabId, paneId: PaneId?)
     case confirmTerminate
     case cancelTerminate
     case terminate

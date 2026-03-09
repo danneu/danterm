@@ -25,7 +25,7 @@ func lifecycleTests() {
         }
     }
 
-    test("testNotificationClicked") {
+    test("testActivateAlert") {
         var model = makeModel()
         createTab(&model)
         let firstTabId = model.groups[0].tabs[0].id
@@ -34,8 +34,16 @@ func lifecycleTests() {
         // Create second tab so selecting first is meaningful
         createTab(&model)
 
-        let effects = update(&model, .notificationClicked(tabId: firstTabId, paneId: firstPaneId))
-        try expectEqual(model.selectedTabId, firstTabId, "should select the clicked tab")
+        // Add an unread alert for the first tab's pane
+        let alertId = AlertId()
+        model.alerts.insert(AlertModel(
+            id: alertId, kind: .bell, paneId: firstPaneId, tabId: firstTabId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        let effects = update(&model, .activateAlert(alertId: alertId))
+        try expectEqual(model.selectedTabId, firstTabId, "should select the alert's tab")
+        try expectEqual(model.alerts[0].isUnread, false, "alert should be marked read")
         try expect(hasEffect(effects) {
             if case .makeFirstResponder(let pid) = $0, pid == firstPaneId { return true }
             return false
@@ -44,28 +52,38 @@ func lifecycleTests() {
             if case .activateApp = $0 { return true }
             return false
         }, "should activate app")
+        try expect(hasEffect(effects) {
+            if case .dismissAlertsPopover = $0 { return true }
+            return false
+        }, "should dismiss alerts popover")
     }
 
-    test("testNotificationClickedNilPane") {
+    test("testActivateAlertStalePane") {
         var model = makeModel()
         createTab(&model)
-        let firstTabId = model.groups[0].tabs[0].id
+        let tabId = model.groups[0].tabs[0].id
 
-        createTab(&model)
+        // Create an alert referencing a pane that no longer exists
+        let stalePaneId = PaneId()
+        let alertId = AlertId()
+        model.alerts.insert(AlertModel(
+            id: alertId, kind: .bell, paneId: stalePaneId, tabId: tabId,
+            title: "DanTerm", body: "stale", createdAt: Date(), isUnread: true
+        ), at: 0)
 
-        let effects = update(&model, .notificationClicked(tabId: firstTabId, paneId: nil))
-        try expectEqual(model.selectedTabId, firstTabId)
+        let effects = update(&model, .activateAlert(alertId: alertId))
+        try expectEqual(model.alerts[0].isUnread, false, "stale alert should be marked read")
         try expect(!hasEffect(effects) {
             if case .makeFirstResponder = $0 { return true }
             return false
-        }, "should not have makeFirstResponder when paneId is nil")
+        }, "should not navigate when pane is gone")
         try expect(hasEffect(effects) {
-            if case .activateApp = $0 { return true }
+            if case .dismissAlertsPopover = $0 { return true }
             return false
-        }, "should still activate app")
+        }, "should still dismiss popover")
     }
 
-    test("testNotificationClickedWhileZoomedClearsZoom") {
+    test("testActivateAlertWhileZoomedClearsZoom") {
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
@@ -77,18 +95,23 @@ func lifecycleTests() {
         update(&model, .toggleZoomPane)
         try expectEqual(model.groups[0].tabs[0].isZoomed, true)
 
-        // Notification targets paneA (not the focused paneB)
-        let effects = update(&model, .notificationClicked(tabId: tabId, paneId: paneA))
-        try expectEqual(model.groups[0].tabs[0].isZoomed, false, "zoom should clear when notification targets different pane")
+        // Alert targets paneA (not the focused paneB)
+        let alertId = AlertId()
+        model.alerts.insert(AlertModel(
+            id: alertId, kind: .bell, paneId: paneA, tabId: tabId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        let effects = update(&model, .activateAlert(alertId: alertId))
+        try expectEqual(model.groups[0].tabs[0].isZoomed, false, "zoom should clear when alert targets different pane")
         try expect(hasEffect(effects) {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
             return false
-        }, "should focus notification's pane")
-        // Suppress unused variable warning
+        }, "should focus alert's pane")
         _ = paneB
     }
 
-    test("testNotificationClickedWhileZoomedSamePaneKeepsZoom") {
+    test("testActivateAlertWhileZoomedSamePaneKeepsZoom") {
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
@@ -97,9 +120,15 @@ func lifecycleTests() {
         let paneB = model.groups[0].tabs[0].focusedPaneId
         update(&model, .toggleZoomPane)
 
-        // Notification targets the already-focused paneB
-        _ = update(&model, .notificationClicked(tabId: tabId, paneId: paneB))
-        try expectEqual(model.groups[0].tabs[0].isZoomed, true, "zoom should remain when notification targets same pane")
+        // Alert targets the already-focused paneB
+        let alertId = AlertId()
+        model.alerts.insert(AlertModel(
+            id: alertId, kind: .bell, paneId: paneB, tabId: tabId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        _ = update(&model, .activateAlert(alertId: alertId))
+        try expectEqual(model.groups[0].tabs[0].isZoomed, true, "zoom should remain when alert targets same pane")
     }
 
     test("testTerminate") {

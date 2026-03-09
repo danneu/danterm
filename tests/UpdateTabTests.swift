@@ -67,11 +67,11 @@ func tabTests() {
 
         // Set bell on background tab's pane via production path
         update(&model, .surfaceBell(paneId: tabBPaneId))
-        try expect(model.panes[tabBPaneId]?.hasBell == true, "bell should be set on background pane")
+        try expect(model.alerts.contains { $0.paneId == tabBPaneId && $0.isUnread }, "should have unread alert on background pane")
 
-        // Select tab B — bell should clear
+        // Select tab B — alert should be marked read
         update(&model, .selectTab(id: tabBId))
-        try expect(model.panes[tabBPaneId]?.hasBell == false, "selecting tab should clear bell")
+        try expect(!model.alerts.contains { $0.paneId == tabBPaneId && $0.isUnread }, "selecting tab should mark alerts read")
     }
 
     test("testCloseLastPaneShowsConfirmation") {

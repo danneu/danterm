@@ -8,6 +8,7 @@ struct TestRunner {
         ghosttyTests()
         groupTests()
         lifecycleTests()
+        alertTests()
         modelOperationsTests()
         snapshotTests()
         dragDropInputTests()

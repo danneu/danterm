@@ -6,6 +6,7 @@ enum TabTag {}
 enum PaneTag {}
 enum GroupTag {}
 enum SplitTag {}
+enum AlertTag {}
 
 struct TypedId<Tag>: Hashable, RawRepresentable, Codable {
     let rawValue: UUID
@@ -17,6 +18,23 @@ typealias TabId = TypedId<TabTag>
 typealias PaneId = TypedId<PaneTag>
 typealias GroupId = TypedId<GroupTag>
 typealias SplitId = TypedId<SplitTag>
+typealias AlertId = TypedId<AlertTag>
+
+enum AlertKind: Hashable {
+    case bell
+    case desktopNotification
+}
+
+struct AlertModel: Equatable {
+    let id: AlertId
+    let kind: AlertKind
+    let paneId: PaneId
+    let tabId: TabId
+    let title: String
+    let body: String
+    let createdAt: Date
+    var isUnread: Bool
+}
 
 // MARK: - Model
 
@@ -24,9 +42,6 @@ struct PaneModel: Equatable {
     let id: PaneId
     var title: String = "Terminal"
     var cwd: String?
-    var hasBell: Bool = false
-    var lastBellNotification: Date?
-    var lastDesktopNotification: Date?
     var lastCommand: String?
 }
 
@@ -67,6 +82,8 @@ struct AppModel: Equatable {
     var panes: [PaneId: PaneModel]
     var selectedTabId: TabId?
     var notificationPermissionRequested: Bool = false
+    var alerts: [AlertModel] = []  // newest first, capped at 100
+    var lastNotificationTime: [PaneId: [AlertKind: Date]] = [:]
 }
 
 // MARK: - Init Snapshot Types
