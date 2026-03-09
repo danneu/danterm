@@ -132,12 +132,12 @@ end
 
 ## Comparison
 
-| Feature       | DanTerm | iTerm2 | Kitty | WezTerm |
-| ------------- | ------- | ------ | ----- | ------- |
-| Vertical tabs | Yes     | Yes    | --    | --      |
-| Tab groups    | Yes     | --     | --    | --      |
-| Fast          | Yes     | --     | Yes   | Yes     |
-| Dan           | Yes     | --     | --    | --      |
+| Feature       | DanTerm | [cmux](https://github.com/manaflow-ai/cmux) | iTerm2 | Kitty | WezTerm |
+| ------------- | ------- | ------------------------------------------- | ------ | ----- | ------- |
+| Vertical tabs | Yes     | Yes                                         | Yes    | --    | --      |
+| Tab groups    | Yes     | Yes                                         | --     | --    | --      |
+| Fast          | Yes     | Yes                                         | --     | Yes   | Yes     |
+| Dan           | Yes     | --                                          | --     | --    | --      |
 
 ### iTerm2
 
@@ -148,3 +148,9 @@ e.g. Copy (cmd-c) was unreliable and notifications never seemed to properly focu
 ### Kitty/WezTerm
 
 I tried these after iTerm, but they have really bad tab systems. I want something more first class and polished, like browser tabs.
+
+### cmux
+
+Cmux is really good: https://github.com/manaflow-ai/cmux
+
+But it's more complicated than I'd like since it includes a browser, and its panes can contain tabs.
