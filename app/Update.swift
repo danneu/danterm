@@ -184,6 +184,35 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         effects.append(.rebuildContentView)
         return effects
 
+    case .movePane(let source, let target, let intent):
+        guard source != target else { return [] }
+        guard let tab = selectedTab(in: model) else { return [] }
+        guard !tab.isZoomed else { return [] }
+
+        let newRoot: SplitNodeModel?
+        if intent == .swap {
+            newRoot = swapLeaves(tab.rootNode, source, target)
+        } else {
+            let (direction, insertFirst): (SplitNodeModel.Direction, Bool) = {
+                switch intent {
+                case .splitTop: return (.vertical, true)
+                case .splitBottom: return (.vertical, false)
+                case .splitLeft: return (.horizontal, true)
+                case .splitRight: return (.horizontal, false)
+                case .swap: fatalError("handled above")
+                }
+            }()
+            newRoot = moveLeaf(tab.rootNode, source: source, target: target, direction: direction, insertFirst: insertFirst)
+        }
+
+        guard let newRoot = newRoot else { return [] }
+        updateSelectedTab(&model) { tab in
+            tab.rootNode = newRoot
+            tab.focusedPaneId = source
+            tab.isZoomed = false
+        }
+        return [.rebuildContentView]
+
     case .focusDirection(let direction, let side):
         guard let tab = selectedTab(in: model) else { return [] }
         if tab.isZoomed {

@@ -15,6 +15,7 @@ class AppRuntime {
     weak var alertsBellItem: NSToolbarItem?
     /// The custom bell button set as the toolbar item's view. Owns the badge directly.
     weak var alertsBellButton: BellToolbarButton?
+    private var dragCoordinator: PaneDragCoordinator?
 
     init(ghosttyApp: GhosttyApp) {
         self.ghosttyApp = ghosttyApp
@@ -36,6 +37,12 @@ class AppRuntime {
         if newUnreadCount != oldUnreadCount {
             perform(.updateDockBadge(newUnreadCount))
             perform(.updateToolbarBellBadge(newUnreadCount))
+        }
+
+        // Defensive backstop: cancel drag on app resign, in case the coordinator's
+        // notification observer fires out of order.
+        if case .appResignedActive = translatedMsg {
+            cancelPaneDrag()
         }
 
         // Refresh toolbar text after title/cwd changes
@@ -209,6 +216,54 @@ class AppRuntime {
         }
     }
 
+    // MARK: - Pane Drag
+
+    func startPaneDrag(paneId: PaneId) {
+        cancelPaneDrag()
+        guard let contentArea = contentArea else { return }
+        guard let tab = selectedTab(in: model) else { return }
+
+        let targetIds = allPaneIds(tab.rootNode).filter { $0 != paneId }
+        guard !targetIds.isEmpty else { return }
+
+        // Build pane frame provider: converts PaneWrapperView frames to window coordinates
+        let provider: (PaneId) -> NSRect? = { [weak self] targetPaneId in
+            guard let self = self, let contentArea = self.contentArea else { return nil }
+            guard let wrapper = self.findPaneWrapper(for: targetPaneId, in: contentArea) else { return nil }
+            return wrapper.convert(wrapper.bounds, to: nil)
+        }
+
+        let coordinator = PaneDragCoordinator(
+            sourcePaneId: paneId,
+            contentView: contentArea,
+            paneFrameProvider: provider,
+            targetPaneIds: targetIds
+        )
+        coordinator.onCancel = { [weak self] in self?.cancelPaneDrag() }
+        dragCoordinator = coordinator
+    }
+
+    func updatePaneDrag(event: NSEvent) {
+        dragCoordinator?.updateDrag(locationInWindow: event.locationInWindow)
+    }
+
+    func completePaneDrag() {
+        guard let result = dragCoordinator?.currentDrop() else {
+            cancelPaneDrag()
+            return
+        }
+        cancelPaneDrag()
+        send(.movePane(source: result.source, target: result.target, intent: result.intent))
+    }
+
+    func cancelPaneDrag() {
+        guard dragCoordinator != nil else { return }
+        // Reset to arrow; cursor rects will correct on next mouse move.
+        NSCursor.arrow.set()
+        dragCoordinator?.teardown()
+        dragCoordinator = nil
+    }
+
     // MARK: - Snapshot Bootstrap
 
     func bootstrapFromSnapshot(_ snapshot: AppModelSnapshot) {
@@ -283,6 +338,7 @@ class AppRuntime {
     // MARK: - View Building
 
     private func rebuildContentView() {
+        cancelPaneDrag()
         guard let contentArea = contentArea else { return }
 
         // Remove old content

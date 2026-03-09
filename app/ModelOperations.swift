@@ -107,6 +107,74 @@ func removeLeaf(_ node: SplitNodeModel, paneId: PaneId) -> (SplitNodeModel?, Pan
     }
 }
 
+/// Swap two leaf IDs throughout the tree. Returns nil if either ID is missing.
+func swapLeaves(_ node: SplitNodeModel, _ a: PaneId, _ b: PaneId) -> SplitNodeModel? {
+    guard a != b else { return nil }
+    let ids = Set(allPaneIds(node))
+    guard ids.contains(a), ids.contains(b) else { return nil }
+    return swapLeavesInner(node, a, b)
+}
+
+private func swapLeavesInner(_ node: SplitNodeModel, _ a: PaneId, _ b: PaneId) -> SplitNodeModel {
+    switch node {
+    case .leaf(let id):
+        if id == a { return .leaf(b) }
+        if id == b { return .leaf(a) }
+        return node
+    case .split(let splitId, let dir, let first, let second, let ratio):
+        return .split(
+            id: splitId, direction: dir,
+            first: swapLeavesInner(first, a, b),
+            second: swapLeavesInner(second, a, b),
+            ratio: ratio
+        )
+    }
+}
+
+/// Remove source from tree and split-insert it at target's position.
+/// Returns nil if source == target, either is missing, or source is the root leaf.
+func moveLeaf(
+    _ node: SplitNodeModel,
+    source: PaneId,
+    target: PaneId,
+    direction: SplitNodeModel.Direction,
+    insertFirst: Bool
+) -> SplitNodeModel? {
+    guard source != target else { return nil }
+    let ids = Set(allPaneIds(node))
+    guard ids.contains(source), ids.contains(target) else { return nil }
+    let (stripped, _) = removeLeaf(node, paneId: source)
+    guard let stripped = stripped else { return nil }
+    return insertAtLeaf(stripped, at: target, inserting: source, direction: direction, insertFirst: insertFirst)
+}
+
+/// Replace a target leaf with a split containing both source and target.
+private func insertAtLeaf(
+    _ node: SplitNodeModel,
+    at targetId: PaneId,
+    inserting sourceId: PaneId,
+    direction: SplitNodeModel.Direction,
+    insertFirst: Bool
+) -> SplitNodeModel? {
+    switch node {
+    case .leaf(let id):
+        if id == targetId {
+            let first: SplitNodeModel = insertFirst ? .leaf(sourceId) : .leaf(targetId)
+            let second: SplitNodeModel = insertFirst ? .leaf(targetId) : .leaf(sourceId)
+            return .split(id: SplitId(), direction: direction, first: first, second: second, ratio: 0.5)
+        }
+        return nil
+    case .split(let splitId, let dir, let first, let second, let ratio):
+        if let newFirst = insertAtLeaf(first, at: targetId, inserting: sourceId, direction: direction, insertFirst: insertFirst) {
+            return .split(id: splitId, direction: dir, first: newFirst, second: second, ratio: ratio)
+        }
+        if let newSecond = insertAtLeaf(second, at: targetId, inserting: sourceId, direction: direction, insertFirst: insertFirst) {
+            return .split(id: splitId, direction: dir, first: first, second: newSecond, ratio: ratio)
+        }
+        return nil
+    }
+}
+
 func nearestLeaf(_ node: SplitNodeModel, from paneId: PaneId, direction: SplitNodeModel.Direction, side: SplitNodeModel.Side) -> PaneId? {
     // Build path from root to paneId
     var path: [(SplitNodeModel, Bool)] = [] // (splitNode, isInFirstChild)

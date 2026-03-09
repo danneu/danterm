@@ -5,6 +5,10 @@ enum TabDirection {
     case next
 }
 
+enum PaneDropIntent {
+    case splitTop, splitBottom, splitLeft, splitRight, swap
+}
+
 enum Msg {
     // User actions
     case createTab(inGroupId: GroupId?)
@@ -22,6 +26,7 @@ enum Msg {
     case selectAdjacentTab(direction: TabDirection)
     case paneBecameFirstResponder(paneId: PaneId)
     case toggleZoomPane
+    case movePane(source: PaneId, target: PaneId, intent: PaneDropIntent)
 
     // Internal (confirmed close — do not send from UI directly)
     case closeTab(id: TabId)

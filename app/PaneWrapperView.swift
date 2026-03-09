@@ -5,7 +5,7 @@ class PaneWrapperView: NSView {
     let paneId: PaneId
     let terminalView: TerminalView
     private let toolbar: NSView
-    private let toolbarLabel: NSTextField
+    private let toolbarLabel: NonHitTestingLabel
     private let menuButton: NSButton
     private let unzoomButton: PaneToolbarButton?
     private let isZoomed: Bool
@@ -16,7 +16,7 @@ class PaneWrapperView: NSView {
         self.paneId = paneId
         self.terminalView = terminalView
         self.toolbar = NSView()
-        self.toolbarLabel = NSTextField(labelWithString: "")
+        self.toolbarLabel = NonHitTestingLabel(labelWithString: "")
         self.isZoomed = isZoomed
         self.hasSplits = hasSplits
         self.runtime = runtime
@@ -74,7 +74,14 @@ class PaneWrapperView: NSView {
         toolbarLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         toolbar.addSubview(toolbarLabel)
 
-        // Add buttons to toolbar
+        // Drag handle: fills toolbar, sits above label but below buttons
+        let dragHandle = ToolbarDragHandleView()
+        dragHandle.translatesAutoresizingMaskIntoConstraints = false
+        dragHandle.runtime = runtime
+        dragHandle.paneId = paneId
+        toolbar.addSubview(dragHandle)
+
+        // Add buttons to toolbar (on top of drag handle)
         toolbar.addSubview(menuButton)
         if let ub = unzoomButton {
             toolbar.addSubview(ub)
@@ -98,6 +105,12 @@ class PaneWrapperView: NSView {
             toolbarLabel.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
             toolbarLabel.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 8),
             toolbarLabel.trailingAnchor.constraint(lessThanOrEqualTo: labelTrailingAnchor, constant: -4),
+
+            // Drag handle fills toolbar
+            dragHandle.topAnchor.constraint(equalTo: toolbar.topAnchor),
+            dragHandle.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            dragHandle.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor),
+            dragHandle.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor),
 
             // Menu button
             menuButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
@@ -189,6 +202,68 @@ class PaneWrapperView: NSView {
     @objc private func zoomPaneAction() {
         runtime?.send(.toggleZoomPane)
     }
+}
+
+// MARK: - Toolbar Drag Handle
+
+/// Fills the toolbar area to capture mouse events for pane drag-to-split.
+/// Sits above the label (which is non-hit-testing) but below buttons.
+class ToolbarDragHandleView: NSView {
+    weak var runtime: AppRuntime?
+    var paneId: PaneId?
+    private var dragOrigin: NSPoint?
+    private var isDragging = false
+
+    // Show open hand on hover to indicate draggability.
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .openHand)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        dragOrigin = event.locationInWindow
+        isDragging = false
+        NSCursor.closedHand.set()
+        // Do not call super — prevent propagation to toolbar/wrapper
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let origin = dragOrigin, let paneId = paneId, let runtime = runtime else { return }
+
+        if !isDragging {
+            let loc = event.locationInWindow
+            let dx = loc.x - origin.x
+            let dy = loc.y - origin.y
+            let distance = sqrt(dx * dx + dy * dy)
+            guard distance > 5 else { return }
+
+            // Don't start drag if tab is zoomed or single-pane
+            guard let tab = selectedTab(in: runtime.model) else { return }
+            guard !tab.isZoomed else { return }
+            guard case .split = tab.rootNode else { return }
+
+            runtime.startPaneDrag(paneId: paneId)
+            isDragging = true
+        }
+
+        // Re-assert on every event to override cursor rect interference from other views.
+        NSCursor.closedHand.set()
+        runtime.updatePaneDrag(event: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if isDragging {
+            runtime?.completePaneDrag()
+        }
+        dragOrigin = nil
+        isDragging = false
+    }
+}
+
+/// NSTextField subclass that never intercepts mouse events.
+/// Used for the toolbar label so the drag handle underneath receives hits.
+class NonHitTestingLabel: NSTextField {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 class PaneToolbarButton: NSButton {

@@ -14,6 +14,7 @@ struct TestRunner {
         dragDropInputTests()
         paneToolbarTests()
         exportTests()
+        dropZoneTests()
         print("\n\(total - failures)/\(total) passed")
         if failures > 0 { exit(1) }
     }

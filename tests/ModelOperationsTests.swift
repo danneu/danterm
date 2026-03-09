@@ -286,6 +286,185 @@ func modelOperationsTests() {
         try expectEqual(totalTabCount(model), 3)
     }
 
+    // MARK: - swapLeaves
+
+    test("testSwapLeavesSimple") {
+        let a = PaneId(), b = PaneId()
+        let splitId = SplitId()
+        let node = SplitNodeModel.split(
+            id: splitId, direction: .horizontal,
+            first: .leaf(a),
+            second: .leaf(b),
+            ratio: 0.6
+        )
+        let result = swapLeaves(node, a, b)
+        try expect(result != nil, "should return non-nil")
+        guard case .split(let rSplitId, .horizontal, let first, let second, let ratio) = result! else {
+            throw TestFailure(message: "should be a horizontal split")
+        }
+        try expectEqual(rSplitId, splitId, "split id preserved")
+        try expectEqual(ratio, 0.6, "ratio preserved")
+        if case .leaf(let fid) = first { try expectEqual(fid, b) }
+        else { throw TestFailure(message: "first should be leaf B") }
+        if case .leaf(let sid) = second { try expectEqual(sid, a) }
+        else { throw TestFailure(message: "second should be leaf A") }
+    }
+
+    test("testSwapLeavesNested") {
+        let a = PaneId(), b = PaneId(), c = PaneId()
+        let innerSplitId = SplitId()
+        let outerSplitId = SplitId()
+        let node = SplitNodeModel.split(
+            id: outerSplitId, direction: .horizontal,
+            first: .leaf(a),
+            second: .split(
+                id: innerSplitId, direction: .vertical,
+                first: .leaf(b),
+                second: .leaf(c),
+                ratio: 0.3
+            ),
+            ratio: 0.7
+        )
+        let result = swapLeaves(node, a, c)!
+        guard case .split(let rOuterId, .horizontal, let first, let second, let outerRatio) = result else {
+            throw TestFailure(message: "should be outer split")
+        }
+        try expectEqual(rOuterId, outerSplitId, "outer split id preserved")
+        try expectEqual(outerRatio, 0.7, "outer ratio preserved")
+        if case .leaf(let fid) = first { try expectEqual(fid, c, "first should now be C") }
+        else { throw TestFailure(message: "first should be a leaf") }
+        guard case .split(let rInnerId, .vertical, let innerFirst, let innerSecond, let innerRatio) = second else {
+            throw TestFailure(message: "second should be inner split")
+        }
+        try expectEqual(rInnerId, innerSplitId, "inner split id preserved")
+        try expectEqual(innerRatio, 0.3, "inner ratio preserved")
+        if case .leaf(let fid) = innerFirst { try expectEqual(fid, b, "inner first still B") }
+        else { throw TestFailure(message: "inner first should be leaf") }
+        if case .leaf(let sid) = innerSecond { try expectEqual(sid, a, "inner second now A") }
+        else { throw TestFailure(message: "inner second should be leaf") }
+    }
+
+    test("testSwapLeavesSamePane") {
+        let a = PaneId()
+        let node = SplitNodeModel.leaf(a)
+        try expect(swapLeaves(node, a, a) == nil, "same pane returns nil")
+    }
+
+    test("testSwapLeavesMissingPane") {
+        let a = PaneId(), b = PaneId()
+        let node = SplitNodeModel.split(
+            id: SplitId(), direction: .horizontal,
+            first: .leaf(a),
+            second: .leaf(b),
+            ratio: 0.5
+        )
+        try expect(swapLeaves(node, a, PaneId()) == nil, "missing pane returns nil")
+    }
+
+    // MARK: - moveLeaf
+
+    test("testMoveLeafLeftInsert") {
+        let a = PaneId(), b = PaneId()
+        // [A, B] → move A to left of B → [A, B] (same shape but fresh split)
+        let node = SplitNodeModel.split(
+            id: SplitId(), direction: .horizontal,
+            first: .leaf(a),
+            second: .leaf(b),
+            ratio: 0.5
+        )
+        let result = moveLeaf(node, source: a, target: b, direction: .horizontal, insertFirst: true)
+        try expect(result != nil, "should succeed")
+        let ids = allPaneIds(result!)
+        try expectEqual(ids.count, 2)
+        try expect(ids.contains(a))
+        try expect(ids.contains(b))
+        // Source should be first (left)
+        try expectEqual(firstLeafId(result!), a, "A should be first")
+    }
+
+    test("testMoveLeafRightInsert") {
+        let a = PaneId(), b = PaneId()
+        let node = SplitNodeModel.split(
+            id: SplitId(), direction: .horizontal,
+            first: .leaf(a),
+            second: .leaf(b),
+            ratio: 0.5
+        )
+        let result = moveLeaf(node, source: a, target: b, direction: .horizontal, insertFirst: false)
+        try expect(result != nil, "should succeed")
+        // Source should be second (right)
+        try expectEqual(lastLeafId(result!), a, "A should be last")
+    }
+
+    test("testMoveLeafFromNestedTree") {
+        let a = PaneId(), b = PaneId(), c = PaneId()
+        // Tree: [A, [B, C]] — move B to top of A
+        let node = SplitNodeModel.split(
+            id: SplitId(), direction: .horizontal,
+            first: .leaf(a),
+            second: .split(
+                id: SplitId(), direction: .vertical,
+                first: .leaf(b),
+                second: .leaf(c),
+                ratio: 0.5
+            ),
+            ratio: 0.5
+        )
+        let result = moveLeaf(node, source: b, target: a, direction: .vertical, insertFirst: true)!
+        let ids = allPaneIds(result)
+        try expectEqual(ids.count, 3, "all three panes preserved")
+        // After removing B from [B,C], inner collapses to C.
+        // Then insert B above A → [[B,A], C]
+        try expectEqual(firstLeafId(result), b, "B should be first (top-left)")
+    }
+
+    test("testMoveLeafCreatesNewSplitId") {
+        let a = PaneId(), b = PaneId()
+        let origSplitId = SplitId()
+        let node = SplitNodeModel.split(
+            id: origSplitId, direction: .horizontal,
+            first: .leaf(a),
+            second: .leaf(b),
+            ratio: 0.5
+        )
+        let result = moveLeaf(node, source: a, target: b, direction: .vertical, insertFirst: true)!
+        // The result should have a split with ratio 0.5 wrapping A and B
+        guard case .split(let newSplitId, .vertical, _, _, let ratio) = result else {
+            throw TestFailure(message: "should be a vertical split")
+        }
+        try expectEqual(ratio, 0.5, "new split has ratio 0.5")
+        try expect(newSplitId != origSplitId, "new split should have fresh ID")
+    }
+
+    test("testMoveLeafSameSourceTarget") {
+        let a = PaneId()
+        let node = SplitNodeModel.leaf(a)
+        try expect(moveLeaf(node, source: a, target: a, direction: .horizontal, insertFirst: true) == nil, "same source/target returns nil")
+    }
+
+    test("testMoveLeafMissingSource") {
+        let a = PaneId(), b = PaneId()
+        let node = SplitNodeModel.split(
+            id: SplitId(), direction: .horizontal,
+            first: .leaf(a),
+            second: .leaf(b),
+            ratio: 0.5
+        )
+        try expect(moveLeaf(node, source: PaneId(), target: b, direction: .horizontal, insertFirst: true) == nil, "missing source returns nil")
+    }
+
+    test("testMoveLeafMissingTarget") {
+        let a = PaneId(), b = PaneId()
+        let node = SplitNodeModel.split(
+            id: SplitId(), direction: .horizontal,
+            first: .leaf(a),
+            second: .leaf(b),
+            ratio: 0.5
+        )
+        // removeLeaf(a) leaves .leaf(b), then insertAtLeaf for missing target returns nil
+        try expect(moveLeaf(node, source: a, target: PaneId(), direction: .horizontal, insertFirst: true) == nil, "missing target returns nil")
+    }
+
     // MARK: - abbreviateHome
 
     test("testAbbreviateHome") {

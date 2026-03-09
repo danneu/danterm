@@ -286,6 +286,82 @@ func paneTests() {
         }, "should rebuild content view")
     }
 
+    // MARK: - movePane Tests
+
+    test("testMovePaneSplitIntent") {
+        var model = makeModel()
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+
+        // Move A to bottom of B
+        let effects = update(&model, .movePane(source: paneA, target: paneB, intent: .splitBottom))
+        let tab = model.groups[0].tabs[0]
+        try expectEqual(tab.focusedPaneId, paneA, "source should be focused after move")
+        try expectEqual(tab.isZoomed, false, "zoom should be cleared")
+        try expect(hasEffect(effects) {
+            if case .rebuildContentView = $0 { return true }
+            return false
+        }, "should emit rebuildContentView")
+        // Both panes should still exist
+        let ids = allPaneIds(tab.rootNode)
+        try expectEqual(ids.count, 2)
+        try expect(ids.contains(paneA))
+        try expect(ids.contains(paneB))
+    }
+
+    test("testMovePaneSwapIntent") {
+        var model = makeModel()
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+
+        let effects = update(&model, .movePane(source: paneA, target: paneB, intent: .swap))
+        let tab = model.groups[0].tabs[0]
+        try expectEqual(tab.focusedPaneId, paneA, "source should be focused after swap")
+        try expect(hasEffect(effects) {
+            if case .rebuildContentView = $0 { return true }
+            return false
+        }, "should emit rebuildContentView")
+        // A should now be second (was first before swap)
+        try expectEqual(lastLeafId(tab.rootNode), paneA, "A should now be last (swapped to right)")
+    }
+
+    test("testMovePaneSameSourceTarget") {
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .splitPane(direction: .horizontal))
+        let pane = model.groups[0].tabs[0].focusedPaneId
+
+        let effects = update(&model, .movePane(source: pane, target: pane, intent: .swap))
+        try expectEqual(effects.count, 0, "same source/target is no-op")
+    }
+
+    test("testMovePaneNoSelectedTab") {
+        var model = makeModel()
+        model.selectedTabId = nil
+
+        let effects = update(&model, .movePane(source: PaneId(), target: PaneId(), intent: .swap))
+        try expectEqual(effects.count, 0, "no selected tab is no-op")
+    }
+
+    test("testMovePaneZoomedTab") {
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .splitPane(direction: .horizontal))
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .toggleZoomPane)
+        try expectEqual(model.groups[0].tabs[0].isZoomed, true)
+
+        let paneB = allPaneIds(model.groups[0].tabs[0].rootNode).first(where: { $0 != paneA })!
+        let effects = update(&model, .movePane(source: paneA, target: paneB, intent: .swap))
+        try expectEqual(effects.count, 0, "zoomed tab is no-op")
+    }
+
     test("testFocusDirectionThenFirstResponderUpdatesFocusAndRebuilds") {
         var model = makeModel()
         createTab(&model)

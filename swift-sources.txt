@@ -14,3 +14,6 @@ app/SplitContainerView.swift
 app/PaneSplitView.swift
 app/PaneWrapperView.swift
 app/DragDropInput.swift
+app/DropZone.swift
+app/PaneDragOverlayView.swift
+app/PaneDragCoordinator.swift
