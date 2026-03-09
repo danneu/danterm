@@ -3,7 +3,8 @@
     "allow": [
       "Bash(just build-icon:*)",
       "Bash(git clone:*)",
-      "Bash(defaults read:*)"
+      "Bash(defaults read:*)",
+      "Bash(grep:*)"
     ]
   }
 }
