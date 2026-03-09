@@ -195,6 +195,73 @@ func ghosttyTests() {
         }, "should NOT set window title for background tab")
     }
 
+    test("testDesktopNotificationOnFocusedPaneSendsNotificationButNoBell") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let tabId = model.groups[0].tabs[0].id
+
+        let effects = update(&model, .desktopNotification(paneId: paneId, title: "Build complete", body: "make finished"))
+        try expectEqual(model.panes[paneId]?.hasBell, false, "focused pane should not get bell")
+        try expect(hasEffect(effects) {
+            if case .sendNotification(let t, let b, let tid, let pid) = $0,
+               t == "Build complete", b == "make finished", tid == tabId, pid == paneId { return true }
+            return false
+        }, "should send notification with OSC 777 title/body")
+        try expect(!hasEffect(effects) {
+            if case .rebuildContentView = $0 { return true }
+            return false
+        }, "should not rebuild content view for focused pane")
+    }
+
+    test("testDesktopNotificationOnBackgroundPaneSetsBellAndSendsNotification") {
+        var model = makeModel()
+        createTab(&model)
+        let firstTabPaneId = model.groups[0].tabs[0].focusedPaneId
+        let firstTabId = model.groups[0].tabs[0].id
+
+        createTab(&model)
+
+        let effects = update(&model, .desktopNotification(paneId: firstTabPaneId, title: "Hello", body: "World"))
+        try expectEqual(model.panes[firstTabPaneId]?.hasBell, true, "background pane should get bell")
+        try expect(hasEffect(effects) {
+            if case .sendNotification(let t, let b, let tid, let pid) = $0,
+               t == "Hello", b == "World", tid == firstTabId, pid == firstTabPaneId { return true }
+            return false
+        }, "should send notification with OSC 777 title/body")
+        try expect(hasEffect(effects) {
+            if case .rebuildContentView = $0 { return true }
+            return false
+        }, "should rebuild content view for background pane bell")
+    }
+
+    test("testDesktopNotificationThrottlesIndependentlyFromBell") {
+        var model = makeModel()
+        createTab(&model)
+        let firstTabPaneId = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model)
+
+        // Fire a bell first
+        update(&model, .surfaceBell(paneId: firstTabPaneId))
+        try expect(model.panes[firstTabPaneId]?.lastBellNotification != nil, "bell should set lastBellNotification")
+
+        // Desktop notification should still fire (independent throttle)
+        let effects = update(&model, .desktopNotification(paneId: firstTabPaneId, title: "Done", body: "Task finished"))
+        try expect(hasEffect(effects) {
+            if case .sendNotification(let t, _, _, _) = $0, t == "Done" { return true }
+            return false
+        }, "desktop notification should not be throttled by bell")
+        try expect(model.panes[firstTabPaneId]?.lastDesktopNotification != nil, "should set lastDesktopNotification")
+
+        // Second desktop notification immediately — should be throttled
+        let effects2 = update(&model, .desktopNotification(paneId: firstTabPaneId, title: "Done2", body: "Again"))
+        try expect(!hasEffect(effects2) {
+            if case .sendNotification = $0 { return true }
+            return false
+        }, "second desktop notification should be throttled")
+    }
+
     test("testSurfaceClosed") {
         var model = makeModel()
         createTab(&model)

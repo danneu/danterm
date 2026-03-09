@@ -36,6 +36,7 @@ enum Msg {
     case surfaceTitle(paneId: PaneId, title: String)
     case surfaceCwd(paneId: PaneId, cwd: String)
     case surfaceBell(paneId: PaneId)
+    case desktopNotification(paneId: PaneId, title: String, body: String)
     case surfaceClosed(paneId: PaneId)
     case surfaceCreationFailed(paneId: PaneId)
 

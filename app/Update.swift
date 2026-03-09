@@ -311,6 +311,55 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         return effects
 
+    case .desktopNotification(let paneId, let title, let body):
+        let isFocused = selectedTab(in: model).map { $0.focusedPaneId == paneId } ?? false
+
+        // Background pane: set bell state for sidebar badge / dock badge
+        if !isFocused {
+            model.panes[paneId]?.hasBell = true
+        }
+
+        // Find which tab this pane belongs to
+        var effects: [Effect] = isFocused ? [] : [.rebuildContentView]
+        for group in model.groups {
+            for tab in group.tabs {
+                if allPaneIds(tab.rootNode).contains(paneId) {
+                    if !isFocused {
+                        effects.append(.reloadSidebarRow(tabId: tab.id))
+                        if group.isCollapsed {
+                            effects.append(.reloadSidebarGroupRow(groupId: group.id))
+                        }
+                    }
+
+                    // Throttle independently from bell
+                    if let pane = model.panes[paneId] {
+                        let shouldNotify: Bool
+                        if let last = pane.lastDesktopNotification {
+                            shouldNotify = Date().timeIntervalSince(last) >= 5
+                        } else {
+                            shouldNotify = true
+                        }
+
+                        if shouldNotify {
+                            model.panes[paneId]?.lastDesktopNotification = Date()
+                            if !model.notificationPermissionRequested {
+                                model.notificationPermissionRequested = true
+                                effects.append(.requestNotificationPermission)
+                            }
+                            effects.append(.sendNotification(
+                                title: title,
+                                body: body,
+                                tabId: tab.id,
+                                paneId: paneId
+                            ))
+                        }
+                    }
+                    break
+                }
+            }
+        }
+        return effects
+
     case .surfaceClosed(let paneId):
         return update(&model, .closePane(paneId: paneId))
 

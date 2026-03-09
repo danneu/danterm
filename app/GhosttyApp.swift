@@ -203,6 +203,19 @@ class GhosttyApp {
             }
             return true
 
+        case GHOSTTY_ACTION_DESKTOP_NOTIFICATION:
+            if let surface = Self.targetSurface(target),
+               let bridge = Self.surfaceBridge(from: surface),
+               let paneId = bridge.paneId {
+                let notif = action.action.desktop_notification
+                let title = String(cString: notif.title)
+                let body = String(cString: notif.body)
+                DispatchQueue.main.async { [weak self] in
+                    self?.runtime?.send(.desktopNotification(paneId: paneId, title: title, body: body))
+                }
+            }
+            return true
+
         default:
             return false
         }
