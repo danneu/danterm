@@ -146,6 +146,13 @@ class PaneWrapperView: NSView {
 
         menu.addItem(.separator())
 
+        let copyCwd = NSMenuItem(title: "Copy cwd", action: #selector(copyCwdAction), keyEquivalent: "")
+        copyCwd.target = self
+        copyCwd.isEnabled = runtime?.model.panes[paneId]?.cwd != nil
+        menu.addItem(copyCwd)
+
+        menu.addItem(.separator())
+
         let zoomTitle = isZoomed ? "Unzoom Pane" : "Zoom Pane"
         let zoom = NSMenuItem(title: zoomTitle, action: #selector(zoomPaneAction), keyEquivalent: "")
         zoom.target = self
@@ -171,6 +178,12 @@ class PaneWrapperView: NSView {
 
     @objc private func splitDownAction() {
         runtime?.send(.splitPane(direction: .vertical))
+    }
+
+    @objc private func copyCwdAction() {
+        guard let cwd = runtime?.model.panes[paneId]?.cwd else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(cwd, forType: .string)
     }
 
     @objc private func zoomPaneAction() {
