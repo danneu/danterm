@@ -624,23 +624,15 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     @objc private func contextDeleteGroup(_ sender: NSMenuItem) {
         guard let rawId = sender.representedObject as? UUID else { return }
         let groupId = GroupId(rawValue: rawId)
-        guard let model = currentModel,
-              let group = model.groups.first(where: { $0.id == groupId }) else { return }
+        guard let model = currentModel else { return }
 
-        let alert = NSAlert()
-        alert.messageText = "Delete group \"\(group.name)\"?"
-        if group.tabs.isEmpty {
-            alert.informativeText = "This group has no tabs."
-            alert.addButton(withTitle: "Delete")
-            alert.addButton(withTitle: "Cancel")
-            guard let window = window else { return }
-            alert.beginSheetModal(for: window) { [weak self] response in
-                if response == .alertFirstButtonReturn {
-                    self?.runtime?.send(.deleteGroup(id: groupId, moveTabs: false))
-                }
-            }
-        } else {
-            alert.informativeText = "This group has \(group.tabs.count) tab(s)."
+        switch deleteGroupAction(for: groupId, in: model) {
+        case .deleteImmediately(let gid):
+            runtime?.send(.deleteGroup(id: gid, moveTabs: false))
+        case .confirm(let gid, let name, let tabCount):
+            let alert = NSAlert()
+            alert.messageText = "Delete group \"\(name)\"?"
+            alert.informativeText = "This group has \(tabCount) tab(s)."
             alert.addButton(withTitle: "Move to General")
             alert.addButton(withTitle: "Close Tabs")
             alert.addButton(withTitle: "Cancel")
@@ -648,13 +640,15 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             alert.beginSheetModal(for: window) { [weak self] response in
                 switch response {
                 case .alertFirstButtonReturn:
-                    self?.runtime?.send(.deleteGroup(id: groupId, moveTabs: true))
+                    self?.runtime?.send(.deleteGroup(id: gid, moveTabs: true))
                 case .alertSecondButtonReturn:
-                    self?.runtime?.send(.deleteGroup(id: groupId, moveTabs: false))
+                    self?.runtime?.send(.deleteGroup(id: gid, moveTabs: false))
                 default:
                     break
                 }
             }
+        case nil:
+            break
         }
     }
 

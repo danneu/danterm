@@ -474,6 +474,45 @@ func modelOperationsTests() {
         try expectEqual(abbreviateHome(home), "~")
     }
 
+    // MARK: - deleteGroupAction
+
+    test("testDeleteGroupActionEmptyGroup") {
+        var model = makeModel()
+        // Need at least one tab in General so closing Work's tab doesn't trigger terminate confirmation
+        createTab(&model)
+        update(&model, .createGroup(name: "Work"))
+        let workGroup = model.groups.first(where: { $0.name == "Work" })!
+        // Remove auto-created tab so group is empty
+        let tabId = workGroup.tabs[0].id
+        update(&model, .closeTab(id: tabId))
+        let action = deleteGroupAction(for: workGroup.id, in: model)
+        guard case .deleteImmediately(let gid) = action else {
+            throw TestFailure(message: "expected .deleteImmediately, got \(String(describing: action))")
+        }
+        try expectEqual(gid, workGroup.id)
+    }
+
+    test("testDeleteGroupActionGroupWithTabs") {
+        var model = makeModel()
+        update(&model, .createGroup(name: "Work"))
+        let workGroup = model.groups.first(where: { $0.name == "Work" })!
+        // createGroup auto-creates one tab
+        let action = deleteGroupAction(for: workGroup.id, in: model)
+        guard case .confirm(let gid, let name, let tabCount) = action else {
+            throw TestFailure(message: "expected .confirm, got \(String(describing: action))")
+        }
+        try expectEqual(gid, workGroup.id)
+        try expectEqual(name, "Work")
+        try expectEqual(tabCount, 1)
+    }
+
+    test("testDeleteGroupActionDefaultGroup") {
+        let model = makeModel()
+        let defaultGroup = model.groups.first(where: { $0.isDefault })!
+        let action = deleteGroupAction(for: defaultGroup.id, in: model)
+        try expect(action == nil, "default group should return nil")
+    }
+
     // MARK: - bellCount / groupBellCount
 
     test("testUnreadAlertCount") {

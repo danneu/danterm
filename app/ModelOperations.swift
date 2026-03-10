@@ -361,6 +361,24 @@ func totalUnreadAlertCount(model: AppModel) -> Int {
     model.alerts.filter(\.isUnread).count
 }
 
+// MARK: - Delete Group
+
+// Determines whether deleting a group requires user confirmation.
+enum DeleteGroupAction {
+    case deleteImmediately(groupId: GroupId)
+    case confirm(groupId: GroupId, name: String, tabCount: Int)
+}
+
+func deleteGroupAction(for groupId: GroupId, in model: AppModel) -> DeleteGroupAction? {
+    guard let group = model.groups.first(where: { $0.id == groupId }),
+          !group.isDefault else { return nil }
+    if group.tabs.isEmpty {
+        return .deleteImmediately(groupId: groupId)
+    } else {
+        return .confirm(groupId: groupId, name: group.name, tabCount: group.tabs.count)
+    }
+}
+
 // MARK: - Export
 
 func toInitFile(_ model: AppModel) -> AppInitFile {
