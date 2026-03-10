@@ -10,19 +10,26 @@ class PaneDragCoordinator {
 
     private(set) var currentTarget: PaneId?
     private(set) var currentIntent: PaneDropIntent?
+    private(set) var currentSidebarTabTarget: TabId?
 
     /// Called on escape or app resign. AppRuntime sets this to its cancelPaneDrag() method.
     var onCancel: (() -> Void)?
+    /// Called when the cursor enters or leaves a sidebar tab row during drag.
+    var onSidebarHighlight: ((TabId?) -> Void)?
 
     private let paneFrameProvider: (PaneId) -> NSRect?
     private let allTargetPaneIds: [PaneId]
+    private let sidebarTabFrameProvider: ((TabId) -> NSRect?)?
+    private let allSidebarTabIds: [TabId]
     private var keyMonitor: Any?
     private var resignObserver: Any?
 
-    init(sourcePaneId: PaneId, contentView: NSView, paneFrameProvider: @escaping (PaneId) -> NSRect?, targetPaneIds: [PaneId]) {
+    init(sourcePaneId: PaneId, contentView: NSView, paneFrameProvider: @escaping (PaneId) -> NSRect?, targetPaneIds: [PaneId], sidebarTabFrameProvider: ((TabId) -> NSRect?)? = nil, sidebarTabIds: [TabId] = []) {
         self.sourcePaneId = sourcePaneId
         self.paneFrameProvider = paneFrameProvider
         self.allTargetPaneIds = targetPaneIds
+        self.sidebarTabFrameProvider = sidebarTabFrameProvider
+        self.allSidebarTabIds = sidebarTabIds
 
         // Create overlay covering the entire content area
         overlayView = PaneDragOverlayView(frame: contentView.bounds)
@@ -72,6 +79,28 @@ class PaneDragCoordinator {
         currentTarget = hitTarget
         currentIntent = hitIntent
 
+        // Sidebar tab hit-testing: only when no pane hit
+        if hitTarget != nil {
+            // Cursor is over a pane — clear any sidebar highlight
+            if currentSidebarTabTarget != nil {
+                currentSidebarTabTarget = nil
+                onSidebarHighlight?(nil)
+            }
+        } else if let provider = sidebarTabFrameProvider {
+            var hitSidebarTab: TabId?
+            for tabId in allSidebarTabIds {
+                guard let frame = provider(tabId) else { continue }
+                if frame.contains(locationInWindow) {
+                    hitSidebarTab = tabId
+                    break
+                }
+            }
+            if hitSidebarTab != currentSidebarTabTarget {
+                currentSidebarTabTarget = hitSidebarTab
+                onSidebarHighlight?(hitSidebarTab)
+            }
+        }
+
         if let target = hitTarget, let intent = hitIntent, let frame = paneFrameProvider(target) {
             // Convert frame from window coords to overlay (content view) coords
             let overlayFrame = overlayView.convert(frame, from: nil)
@@ -88,6 +117,12 @@ class PaneDragCoordinator {
         return (sourcePaneId, target, intent)
     }
 
+    /// Return current sidebar drop parameters if cursor is over a sidebar tab row.
+    func currentSidebarDrop() -> (paneId: PaneId, tabId: TabId)? {
+        guard let tabId = currentSidebarTabTarget else { return nil }
+        return (sourcePaneId, tabId)
+    }
+
     /// Remove overlay and event monitors. Does NOT nil out AppRuntime's reference.
     func teardown() {
         overlayView.removeFromSuperview()
@@ -101,6 +136,10 @@ class PaneDragCoordinator {
         }
         currentTarget = nil
         currentIntent = nil
+        if currentSidebarTabTarget != nil {
+            currentSidebarTabTarget = nil
+            onSidebarHighlight?(nil)
+        }
     }
 
     // MARK: - Highlight Geometry

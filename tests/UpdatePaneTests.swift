@@ -385,4 +385,218 @@ func paneTests() {
             return false
         }, "should rebuild content view after focus change callback")
     }
+
+    // MARK: - movePaneToTab Tests
+
+    test("testMovePaneToTabBasicCrossTab") {
+        var model = makeModel()
+        createTab(&model) // tab1 with paneA
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model) // tab2 with paneB
+        let tab2Id = model.groups[0].tabs[1].id
+        let paneB = model.groups[0].tabs[1].focusedPaneId
+
+        let effects = update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
+
+        // Source tab (single pane) should be removed
+        try expectEqual(model.groups[0].tabs.count, 1, "source tab should be removed when empty")
+        try expectEqual(model.groups[0].tabs[0].id, tab2Id, "remaining tab should be target")
+
+        // Target tab should have both panes in a split
+        let targetTab = model.groups[0].tabs[0]
+        let targetPaneIds = allPaneIds(targetTab.rootNode)
+        try expectEqual(targetPaneIds.count, 2, "target tab should have 2 panes")
+        try expect(targetPaneIds.contains(paneA), "target should contain moved pane")
+        try expect(targetPaneIds.contains(paneB), "target should contain original pane")
+
+        // Selection and focus
+        try expectEqual(model.selectedTabId, tab2Id, "should select target tab")
+        try expectEqual(targetTab.focusedPaneId, paneA, "should focus moved pane")
+        try expectEqual(targetTab.isZoomed, false, "target zoom should be cleared")
+
+        // No destroySurface — surface is reused
+        try expect(!hasEffect(effects) {
+            if case .destroySurface = $0 { return true }
+            return false
+        }, "should not destroy any surfaces")
+
+        try expect(hasEffect(effects) {
+            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
+            return false
+        }, "should emit makeFirstResponder for moved pane")
+    }
+
+    test("testMovePaneToTabSourceHasMultiplePanes") {
+        var model = makeModel()
+        createTab(&model) // tab1
+        let tab1Id = model.groups[0].tabs[0].id
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .splitPane(direction: .horizontal)) // tab1 = [A, B]
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model) // tab2 with paneC
+        let tab2Id = model.groups[0].tabs[1].id
+        let paneC = model.groups[0].tabs[1].focusedPaneId
+
+        // Move paneA from tab1 to tab2
+        update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
+
+        // Tab1 should remain with just paneB
+        try expectEqual(model.groups[0].tabs.count, 2, "source tab should remain")
+        let srcTab = model.groups[0].tabs.first(where: { $0.id == tab1Id })!
+        if case .leaf(let id) = srcTab.rootNode {
+            try expectEqual(id, paneB, "source tab should have paneB as leaf")
+        } else {
+            throw TestFailure(message: "source tab should be a single leaf")
+        }
+        try expectEqual(srcTab.focusedPaneId, paneB, "source tab should focus paneB")
+
+        // Tab2 should have [C, A] split
+        let dstTab = model.groups[0].tabs.first(where: { $0.id == tab2Id })!
+        let dstPaneIds = allPaneIds(dstTab.rootNode)
+        try expectEqual(dstPaneIds.count, 2)
+        try expect(dstPaneIds.contains(paneA))
+        try expect(dstPaneIds.contains(paneC))
+        try expectEqual(dstTab.focusedPaneId, paneA, "target tab should focus moved pane")
+    }
+
+    test("testMovePaneToTabSameTabIsNoOp") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+
+        let effects = update(&model, .movePaneToTab(paneId: paneId, targetTabId: tabId))
+        try expectEqual(effects.count, 0, "same tab should be no-op")
+    }
+
+    test("testMovePaneToTabSourceTabClosedWhenEmpty") {
+        var model = makeModel()
+        createTab(&model) // tab1 with single pane
+        let tab1Id = model.groups[0].tabs[0].id
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model) // tab2
+        let tab2Id = model.groups[0].tabs[1].id
+
+        update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
+
+        // Tab1 should be gone
+        try expect(!model.groups[0].tabs.contains(where: { $0.id == tab1Id }), "empty source tab should be removed")
+        try expectEqual(model.groups[0].tabs.count, 1)
+    }
+
+    test("testMovePaneToTabCrossGroup") {
+        var model = makeModel()
+        createTab(&model) // tab1 in group 0 (General)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        // Create a second group with a tab
+        update(&model, .createGroup(name: "Work"))
+        let group1Id = model.groups[1].id
+        let tab2Id = model.groups[1].tabs[0].id
+        let paneB = model.groups[1].tabs[0].focusedPaneId
+
+        // Move paneA from group0 to group1's tab
+        update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
+
+        // Source tab should be removed (was single pane)
+        try expectEqual(model.groups[0].tabs.count, 0, "source group should have no tabs")
+
+        // Target tab should have both panes
+        let targetTab = model.groups.first(where: { $0.id == group1Id })!.tabs.first(where: { $0.id == tab2Id })!
+        let targetPanes = allPaneIds(targetTab.rootNode)
+        try expectEqual(targetPanes.count, 2)
+        try expect(targetPanes.contains(paneA))
+        try expect(targetPanes.contains(paneB))
+    }
+
+    test("testMovePaneToTabDefocusesOldTabSurfaces") {
+        var model = makeModel()
+        createTab(&model) // tab1
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model) // tab2 (now selected)
+        let tab2Id = model.groups[0].tabs[1].id
+        let paneB = model.groups[0].tabs[1].focusedPaneId
+
+        // Move paneA to tab2 (tab2 is currently selected)
+        let effects = update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
+
+        // Should defocus tab2's panes before switching (paneB was in the selected tab)
+        try expect(hasEffect(effects) {
+            if case .focusSurface(let pid, let focused) = $0, pid == paneB, !focused { return true }
+            return false
+        }, "should defocus old tab's panes")
+    }
+
+    test("testMovePaneToTabEmitsMakeFirstResponder") {
+        var model = makeModel()
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model)
+        let tab2Id = model.groups[0].tabs[1].id
+
+        let effects = update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
+
+        try expect(hasEffect(effects) {
+            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
+            return false
+        }, "should emit makeFirstResponder for moved pane")
+    }
+
+    test("testMovePaneToTabTargetZoomCleared") {
+        var model = makeModel()
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model)
+        let tab2Id = model.groups[0].tabs[1].id
+        // Zoom tab2
+        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .toggleZoomPane)
+        try expectEqual(model.groups[0].tabs[1].isZoomed, true)
+
+        update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
+
+        let targetTab = model.groups[0].tabs.first(where: { $0.id == tab2Id })!
+        try expectEqual(targetTab.isZoomed, false, "target zoom should be cleared after move")
+    }
+
+    test("testMovePaneToTabAlertsClearedOnMove") {
+        var model = makeModel()
+        createTab(&model)
+        let tab1Id = model.groups[0].tabs[0].id
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model)
+        let tab2Id = model.groups[0].tabs[1].id
+        let paneB = model.groups[0].tabs[1].focusedPaneId
+
+        // Create unread alert for paneA (the pane being moved)
+        let alertA = AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA, tabId: tab1Id,
+            title: "DanTerm", body: "alert A", createdAt: Date(), isUnread: true
+        )
+        model.alerts.insert(alertA, at: 0)
+
+        // Create unread alert for paneB (unrelated)
+        let alertB = AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneB, tabId: tab2Id,
+            title: "DanTerm", body: "alert B", createdAt: Date(), isUnread: true
+        )
+        model.alerts.insert(alertB, at: 0)
+
+        update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
+
+        // Moved pane's alert should be read
+        let movedAlert = model.alerts.first(where: { $0.paneId == paneA })!
+        try expectEqual(movedAlert.isUnread, false, "moved pane's alert should be marked read")
+
+        // Unrelated alert should remain unread
+        let otherAlert = model.alerts.first(where: { $0.paneId == paneB })!
+        try expectEqual(otherAlert.isUnread, true, "unrelated alert should remain unread")
+    }
 }

@@ -237,10 +237,12 @@ class ToolbarDragHandleView: NSView {
             let distance = sqrt(dx * dx + dy * dy)
             guard distance > 5 else { return }
 
-            // Don't start drag if tab is zoomed or single-pane
+            // Don't start drag if tab is zoomed, or single-pane with no other tabs
             guard let tab = selectedTab(in: runtime.model) else { return }
             guard !tab.isZoomed else { return }
-            guard case .split = tab.rootNode else { return }
+            let hasSplits: Bool
+            if case .split = tab.rootNode { hasSplits = true } else { hasSplits = false }
+            guard hasSplits || totalTabCount(runtime.model) > 1 else { return }
 
             runtime.startPaneDrag(paneId: paneId)
             isDragging = true

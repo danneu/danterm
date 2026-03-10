@@ -213,6 +213,72 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         return [.rebuildContentView]
 
+    case .movePaneToTab(let paneId, let targetTabId):
+        // Find source tab containing this pane
+        guard let sourceTab = tabForPane(paneId, in: model) else { return [] }
+        guard sourceTab.id != targetTabId else { return [] }
+
+        // Find target tab
+        guard let targetGroupIdx = model.groups.firstIndex(where: { $0.tabs.contains(where: { $0.id == targetTabId }) }),
+              let targetTabIdx = model.groups[targetGroupIdx].tabs.firstIndex(where: { $0.id == targetTabId }) else { return [] }
+
+        // Remove pane from source tab's tree
+        let (newSourceTree, nextFocus) = removeLeaf(sourceTab.rootNode, paneId: paneId)
+
+        // Wrap target tab's root with the moved pane
+        let targetRoot = model.groups[targetGroupIdx].tabs[targetTabIdx].rootNode
+        let newTargetRoot: SplitNodeModel = .split(
+            id: SplitId(), direction: .horizontal,
+            first: targetRoot, second: .leaf(paneId), ratio: 0.5
+        )
+
+        // Update target tab
+        model.groups[targetGroupIdx].tabs[targetTabIdx].rootNode = newTargetRoot
+        model.groups[targetGroupIdx].tabs[targetTabIdx].focusedPaneId = paneId
+        model.groups[targetGroupIdx].tabs[targetTabIdx].isZoomed = false
+        if let pane = model.panes[paneId] {
+            model.groups[targetGroupIdx].tabs[targetTabIdx].title = abbreviateHome(pane.title)
+            if let cwd = pane.cwd {
+                model.groups[targetGroupIdx].tabs[targetTabIdx].subtitle = abbreviateHome(cwd)
+            }
+        }
+
+        // Handle source tab
+        if let newRoot = newSourceTree {
+            // Source tab still has panes — update it
+            guard let srcGroupIdx = model.groups.firstIndex(where: { $0.tabs.contains(where: { $0.id == sourceTab.id }) }),
+                  let srcTabIdx = model.groups[srcGroupIdx].tabs.firstIndex(where: { $0.id == sourceTab.id }) else { return [] }
+            model.groups[srcGroupIdx].tabs[srcTabIdx].rootNode = newRoot
+            model.groups[srcGroupIdx].tabs[srcTabIdx].isZoomed = false
+            if model.groups[srcGroupIdx].tabs[srcTabIdx].focusedPaneId == paneId {
+                if let next = nextFocus {
+                    model.groups[srcGroupIdx].tabs[srcTabIdx].focusedPaneId = next
+                }
+            }
+        } else {
+            // Source tab is empty — remove it from its group
+            if let srcGroupIdx = model.groups.firstIndex(where: { $0.tabs.contains(where: { $0.id == sourceTab.id }) }),
+               let srcTabIdx = model.groups[srcGroupIdx].tabs.firstIndex(where: { $0.id == sourceTab.id }) {
+                model.groups[srcGroupIdx].tabs.remove(at: srcTabIdx)
+            }
+        }
+
+        // Mark alerts read for the moved pane (cross-tab move is a navigation action)
+        markAlertsReadForPane(paneId, in: &model)
+
+        // Build effects: defocus old tab's panes, select target tab, rebuild
+        var effects: [Effect] = []
+        if let oldTabId = model.selectedTabId {
+            for oldPaneId in paneIdsForTab(oldTabId, in: model) {
+                effects.append(.focusSurface(paneId: oldPaneId, focused: false))
+            }
+        }
+        model.selectedTabId = targetTabId
+        effects.append(.rebuildContentView)
+        effects.append(.reloadSidebar)
+        effects.append(.makeFirstResponder(paneId: paneId))
+        return effects
+
     case .focusDirection(let direction, let side):
         guard let tab = selectedTab(in: model) else { return [] }
         if tab.isZoomed {

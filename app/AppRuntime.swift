@@ -224,7 +224,6 @@ class AppRuntime {
         guard let tab = selectedTab(in: model) else { return }
 
         let targetIds = allPaneIds(tab.rootNode).filter { $0 != paneId }
-        guard !targetIds.isEmpty else { return }
 
         // Build pane frame provider: converts PaneWrapperView frames to window coordinates
         let provider: (PaneId) -> NSRect? = { [weak self] targetPaneId in
@@ -233,13 +232,27 @@ class AppRuntime {
             return wrapper.convert(wrapper.bounds, to: nil)
         }
 
+        // Build sidebar tab IDs: all tabs except the source pane's tab
+        let sourceTabId = tab.id
+        let sidebarTabIds = model.groups.flatMap(\.tabs).map(\.id).filter { $0 != sourceTabId }
+
+        // Sidebar frame provider
+        let sidebarProvider: ((TabId) -> NSRect?)? = { [weak self] tabId in
+            self?.sidebarView?.tabRowFrame(for: tabId)
+        }
+
         let coordinator = PaneDragCoordinator(
             sourcePaneId: paneId,
             contentView: contentArea,
             paneFrameProvider: provider,
-            targetPaneIds: targetIds
+            targetPaneIds: targetIds,
+            sidebarTabFrameProvider: sidebarProvider,
+            sidebarTabIds: sidebarTabIds
         )
         coordinator.onCancel = { [weak self] in self?.cancelPaneDrag() }
+        coordinator.onSidebarHighlight = { [weak self] tabId in
+            self?.sidebarView?.highlightTabForDrop(tabId)
+        }
         dragCoordinator = coordinator
     }
 
@@ -248,6 +261,13 @@ class AppRuntime {
     }
 
     func completePaneDrag() {
+        // Check sidebar drop first (pane → different tab)
+        if let sidebarResult = dragCoordinator?.currentSidebarDrop() {
+            cancelPaneDrag()
+            send(.movePaneToTab(paneId: sidebarResult.paneId, targetTabId: sidebarResult.tabId))
+            return
+        }
+        // Then check intra-tab pane drop
         guard let result = dragCoordinator?.currentDrop() else {
             cancelPaneDrag()
             return

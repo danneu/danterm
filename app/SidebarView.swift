@@ -80,6 +80,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     private var rootItems: [SidebarItem] = []
     private var childItems: [GroupId: [SidebarItem]] = [:]
     private var currentModel: AppModel?
+    private var dropHighlightedTabId: TabId?
 
     private var isSingleGroupMode: Bool {
         currentModel?.groups.count == 1
@@ -304,6 +305,34 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let row = outlineView.row(forItem: item)
         guard row >= 0 else { return }
         outlineView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
+    }
+
+    // MARK: - Pane Drag Highlight
+
+    /// Return the frame of a tab row in window coordinates, for drag hit-testing.
+    func tabRowFrame(for tabId: TabId) -> NSRect? {
+        guard let item = tabItemCache[tabId] else { return nil }
+        let row = outlineView.row(forItem: item)
+        guard row >= 0 else { return nil }
+        return outlineView.convert(outlineView.rect(ofRow: row), to: nil)
+    }
+
+    /// Highlight or clear the sidebar tab row under the drag cursor.
+    func highlightTabForDrop(_ tabId: TabId?) {
+        let oldId = dropHighlightedTabId
+        dropHighlightedTabId = tabId
+        var rowsToReload = IndexSet()
+        if let oldId, let item = tabItemCache[oldId] {
+            let row = outlineView.row(forItem: item)
+            if row >= 0 { rowsToReload.insert(row) }
+        }
+        if let tabId, let item = tabItemCache[tabId] {
+            let row = outlineView.row(forItem: item)
+            if row >= 0 { rowsToReload.insert(row) }
+        }
+        if !rowsToReload.isEmpty {
+            outlineView.reloadData(forRowIndexes: rowsToReload, columnIndexes: IndexSet(integer: 0))
+        }
     }
 
     // MARK: - Inline Rename
@@ -746,6 +775,13 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             bellBadge.stringValue = "\(count)"
             bellBadge.isHidden = count == 0
         }
+
+        // Drop highlight for pane-to-tab drag
+        cell.wantsLayer = true
+        cell.layer?.backgroundColor = (tab.id == dropHighlightedTabId)
+            ? NSColor.controlAccentColor.withAlphaComponent(0.3).cgColor
+            : nil
+
         return cell
     }
 
