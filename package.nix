@@ -1,13 +1,13 @@
 { lib, stdenv, fetchzip }:
 let
-  version = "0.0.12";
+  version = "0.0.13";
 in
 stdenv.mkDerivation {
   pname = "danterm";
   inherit version;
   src = fetchzip {
     url = "https://github.com/danneu/danterm/releases/download/v${version}/DanTerm-${version}.zip";
-    sha256 = "sha256-MOS5HOhn5BmiCY0lnBk6SuyhBxXEvUlUVYdOtdPtwuA=";
+    sha256 = "sha256-LcuFaNr8k1rjYwwVcgXpZIObuZBrB8/dRh/TLYisCTw=";
   };
   installPhase = ''
     mkdir -p $out/Applications/DanTerm.app
