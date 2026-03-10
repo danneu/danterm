@@ -259,6 +259,7 @@ class ToolbarDragHandleView: NSView {
         }
         dragOrigin = nil
         isDragging = false
+        NSCursor.openHand.set()
     }
 }
 
