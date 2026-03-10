@@ -47,6 +47,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         effects.append(.createSurface(paneId: paneId, cwd: cwd, command: nil))
         effects.append(.rebuildContentView)
         effects.append(.reloadSidebar)
+        effects.append(contentsOf: selectionSyncEffects(for: model))
         return effects
 
     case .selectAdjacentTab(let direction):
@@ -72,6 +73,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         effects.append(.rebuildContentView)
         effects.append(.reloadSidebar)
+        effects.append(contentsOf: selectionSyncEffects(for: model))
         return effects
 
     case .requestCloseTab(let id):
@@ -83,7 +85,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
         if paneCount > 1 {
             let isLastTab = totalTabCount(model) == 1
-            return [.showCloseTabConfirmation(tabId: id, tabTitle: tab.title, paneCount: paneCount, isLastTab: isLastTab)]
+            return [.showCloseTabConfirmation(tabId: id, tabTitle: tab.displayTitle, paneCount: paneCount, isLastTab: isLastTab)]
         }
 
         return update(&model, .closeTab(id: id))
@@ -124,6 +126,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 model.selectedTabId = allTabs.first?.id
             }
             effects.append(.rebuildContentView)
+            effects.append(contentsOf: selectionSyncEffects(for: model))
         }
         effects.append(.reloadSidebar)
         return effects
@@ -276,12 +279,23 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         model.selectedTabId = targetTabId
         effects.append(.rebuildContentView)
         effects.append(.reloadSidebar)
+        effects.append(contentsOf: selectionSyncEffects(for: model))
         effects.append(.makeFirstResponder(paneId: paneId))
         return effects
 
     case .setTabColor(let tabId, let color):
         updateTab(tabId, in: &model) { t in t.color = color }
         return [.reloadSidebarRow(tabId: tabId)]
+
+    case .renameTab(let id, let name):
+        let trimmed = name?.trimmingCharacters(in: .whitespaces)
+        let customTitle: String? = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        updateTab(id, in: &model) { t in t.customTitle = customTitle }
+        var effects: [Effect] = [.reloadSidebarRow(tabId: id)]
+        if id == model.selectedTabId {
+            effects.append(contentsOf: selectionSyncEffects(for: model))
+        }
+        return effects
 
     case .focusDirection(let direction, let side):
         guard let tab = selectedTab(in: model) else { return [] }
@@ -434,7 +448,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 if model.groups.flatMap(\.tabs).isEmpty {
                     return [.terminate]
                 }
-                return [.rebuildContentView, .reloadSidebar]
+                var effects: [Effect] = [.rebuildContentView, .reloadSidebar]
+                effects.append(contentsOf: selectionSyncEffects(for: model))
+                return effects
             }
         }
         return []
@@ -538,6 +554,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                !model.groups.flatMap(\.tabs).contains(where: { $0.id == selId }) {
                 model.selectedTabId = model.groups.flatMap(\.tabs).first?.id
                 effects.append(.rebuildContentView)
+                effects.append(contentsOf: selectionSyncEffects(for: model))
             }
             effects.append(.reloadSidebar)
             return effects
@@ -617,10 +634,15 @@ private func updateTab(_ tabId: TabId, in model: inout AppModel, _ body: (inout 
 }
 
 private func windowTitle(for tab: TabModel) -> String {
-    if let subtitle = tab.subtitle, subtitle != tab.title {
-        return "\(tab.title) — \(subtitle)"
+    if let subtitle = tab.subtitle, subtitle != tab.displayTitle {
+        return "\(tab.displayTitle) — \(subtitle)"
     }
-    return tab.title
+    return tab.displayTitle
+}
+
+private func selectionSyncEffects(for model: AppModel) -> [Effect] {
+    guard let tab = selectedTab(in: model) else { return [] }
+    return [.setWindowTitle(windowTitle(for: tab))]
 }
 
 private func markAlertsReadForPane(_ paneId: PaneId, in model: inout AppModel) {

@@ -29,6 +29,7 @@ enum Msg {
     case movePane(source: PaneId, target: PaneId, intent: PaneDropIntent)
     case movePaneToTab(paneId: PaneId, targetTabId: TabId)
     case setTabColor(tabId: TabId, color: TabColor?)
+    case renameTab(id: TabId, name: String?)
 
     // Internal (confirmed close — do not send from UI directly)
     case closeTab(id: TabId)

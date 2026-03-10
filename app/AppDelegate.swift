@@ -138,6 +138,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
         zoomItem.keyEquivalentModifierMask = [.command, .shift]
         shellMenu.addItem(zoomItem)
 
+        let renameTabItem = NSMenuItem(title: "Rename Tab", action: #selector(renameTab(_:)), keyEquivalent: "R")
+        renameTabItem.keyEquivalentModifierMask = [.command, .shift]
+        shellMenu.addItem(renameTabItem)
+
         shellMenu.addItem(NSMenuItem.separator())
         shellMenu.addItem(withTitle: "Close Pane", action: #selector(closePane(_:)), keyEquivalent: "w")
         shellMenuItem.submenu = shellMenu
@@ -201,6 +205,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
 
     @objc func toggleZoom(_ sender: Any?) {
         runtime.send(.toggleZoomPane)
+    }
+
+    @objc func renameTab(_ sender: Any?) {
+        guard let tabId = runtime.model.selectedTabId else { return }
+        sidebarView.beginRenamingTab(tabId)
     }
 
     @objc func exportState(_ sender: Any?) {

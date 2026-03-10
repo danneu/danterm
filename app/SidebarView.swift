@@ -125,6 +125,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
         outlineView.registerForDraggedTypes([SidebarView.tabDragType, SidebarView.groupDragType])
         outlineView.setDraggingSourceOperationMask(.move, forLocal: true)
+        outlineView.doubleAction = #selector(outlineViewDoubleClicked)
 
         scrollView.documentView = outlineView
         scrollView.hasVerticalScroller = true
@@ -195,6 +196,19 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         runtime?.send(.createGroup(name: "Untitled"))
         if let lastGroup = runtime?.model.groups.last, !lastGroup.isDefault {
             beginRenamingGroup(lastGroup.id)
+        }
+    }
+
+    @objc private func outlineViewDoubleClicked() {
+        let row = outlineView.clickedRow
+        guard row >= 0 else { return }
+        guard let sidebarItem = outlineView.item(atRow: row) as? SidebarItem else { return }
+        switch sidebarItem.kind {
+        case .tab(let tab):
+            beginRenamingTab(tab.id)
+        case .group(let group):
+            guard !group.isDefault else { return }
+            beginRenamingGroup(group.id)
         }
     }
 
@@ -345,10 +359,20 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     func beginRenamingGroup(_ groupId: GroupId) {
         guard let item = groupItemCache[groupId] else { return }
+        beginRenaming(item: item, target: .group(groupId))
+    }
+
+    func beginRenamingTab(_ tabId: TabId) {
+        guard let item = tabItemCache[tabId] else { return }
+        beginRenaming(item: item, target: .tab(tabId))
+    }
+
+    private func beginRenaming(item: SidebarItem, target: RenameTarget) {
         let row = outlineView.row(forItem: item)
         guard row >= 0 else { return }
         guard let cellView = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView else { return }
         guard let textField = cellView.textField else { return }
+        objc_setAssociatedObject(textField, &AssociatedKeys.renameTarget, target, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         textField.isEditable = true
         textField.selectText(nil)
         window?.makeFirstResponder(textField)
@@ -548,6 +572,21 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         guard let model = currentModel else { return nil }
 
         let menu = NSMenu()
+
+        let renameItem = NSMenuItem(title: "Rename Tab", action: #selector(contextRenameTab(_:)), keyEquivalent: "")
+        renameItem.target = self
+        renameItem.representedObject = tab.id.rawValue
+        menu.addItem(renameItem)
+
+        if tab.customTitle != nil {
+            let clearItem = NSMenuItem(title: "Clear Custom Title", action: #selector(contextClearCustomTitle(_:)), keyEquivalent: "")
+            clearItem.target = self
+            clearItem.representedObject = tab.id.rawValue
+            menu.addItem(clearItem)
+        }
+
+        menu.addItem(NSMenuItem.separator())
+
         let closeItem = NSMenuItem(title: "Close Tab", action: #selector(contextCloseTab(_:)), keyEquivalent: "")
         closeItem.target = self
         closeItem.representedObject = tab.id.rawValue
@@ -650,6 +689,16 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     @objc private func contextSetTabColor(_ sender: NSMenuItem) {
         guard let info = sender.representedObject as? SetTabColorInfo else { return }
         runtime?.send(.setTabColor(tabId: info.tabId, color: info.color))
+    }
+
+    @objc private func contextRenameTab(_ sender: NSMenuItem) {
+        guard let rawId = sender.representedObject as? UUID else { return }
+        beginRenamingTab(TabId(rawValue: rawId))
+    }
+
+    @objc private func contextClearCustomTitle(_ sender: NSMenuItem) {
+        guard let rawId = sender.representedObject as? UUID else { return }
+        runtime?.send(.renameTab(id: TabId(rawValue: rawId), name: nil))
     }
 
     @objc private func contextCloseTab(_ sender: NSMenuItem) {
@@ -776,6 +825,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             textField.translatesAutoresizingMaskIntoConstraints = false
             textField.font = .systemFont(ofSize: 13)
             textField.lineBreakMode = .byTruncatingTail
+            textField.isEditable = false
+            textField.delegate = self
             cell.addSubview(textField)
             cell.textField = textField
 
@@ -817,7 +868,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             ])
         }
 
-        cell.textField?.stringValue = tab.title
+        cell.textField?.stringValue = tab.displayTitle
         if let subtitleField = cell.subviews.first(where: { $0.identifier == subtitleId }) as? NSTextField {
             subtitleField.stringValue = tab.subtitle ?? ""
             subtitleField.isHidden = tab.subtitle == nil
@@ -867,17 +918,31 @@ extension SidebarView: NSTextFieldDelegate {
 
     func control(_ control: NSControl, textShouldEndEditing fieldEditor: NSText) -> Bool {
         guard let textField = control as? NSTextField else { return true }
+        let target = objc_getAssociatedObject(textField, &AssociatedKeys.renameTarget) as? RenameTarget
         let newName = textField.stringValue.trimmingCharacters(in: .whitespaces)
-        if newName.isEmpty { return false }
 
-        if let model = currentModel,
-           let group = model.groups.first(where: { $0.id.rawValue.hashValue == textField.tag }) {
-            let groupId = group.id
-            // Defer to avoid reentrant reloadData while text field is ending editing
+        switch target {
+        case .tab(let tabId):
+            // Empty string clears custom title
+            let name: String? = newName.isEmpty ? nil : newName
+            DispatchQueue.main.async { [weak self] in
+                self?.runtime?.send(.renameTab(id: tabId, name: name))
+            }
+        case .group(let groupId):
+            // Reject empty for groups (existing behavior)
+            if newName.isEmpty {
+                objc_setAssociatedObject(textField, &AssociatedKeys.renameTarget, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+                textField.isEditable = false
+                return false
+            }
             DispatchQueue.main.async { [weak self] in
                 self?.runtime?.send(.renameGroup(id: groupId, name: newName))
             }
+        case nil:
+            break
         }
+
+        objc_setAssociatedObject(textField, &AssociatedKeys.renameTarget, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         textField.isEditable = false
         return true
     }
@@ -885,8 +950,15 @@ extension SidebarView: NSTextFieldDelegate {
 
 // MARK: - Helpers
 
+/// Tracks whether an inline-editing text field is renaming a tab or a group.
+private enum RenameTarget {
+    case tab(TabId)
+    case group(GroupId)
+}
+
 private enum AssociatedKeys {
     static var groupId: UInt8 = 0
+    static var renameTarget: UInt8 = 0
 }
 
 private class MoveTabInfo: NSObject {

@@ -68,10 +68,13 @@ struct TabModel: Equatable {
     let id: TabId
     var title: String = "Terminal"
     var subtitle: String?
+    var customTitle: String?
     var focusedPaneId: PaneId
     var rootNode: SplitNodeModel
     var isZoomed: Bool = false
     var color: TabColor? = nil
+
+    var displayTitle: String { customTitle ?? title }
 }
 
 struct GroupModel: Equatable {
@@ -114,6 +117,7 @@ struct TabSnapshot: Codable {
     let id: String?
     let title: String?
     let subtitle: String?
+    let customTitle: String?
     let focusedPaneId: String?
     let rootNode: SplitNodeSnapshot
     let color: TabColor?
@@ -292,6 +296,7 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel,
                 id: tabId,
                 title: ts.title ?? "Terminal",
                 subtitle: ts.subtitle,
+                customTitle: ts.customTitle,
                 focusedPaneId: focusedPaneId,
                 rootNode: rootNode,
                 color: ts.color
