@@ -16,7 +16,6 @@ func snapshotTests() {
               "isDefault": true,
               "tabs": [{
                 "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
-                "title": "Terminal",
                 "focusedPaneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
                 "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
               }]
@@ -338,7 +337,6 @@ func snapshotTests() {
             "groups": [{
               "name": "General",
               "tabs": [{
-                "title": "Terminal",
                 "rootNode": { "type": "leaf" }
               }]
             }],

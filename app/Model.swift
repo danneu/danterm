@@ -115,8 +115,6 @@ struct GroupSnapshot: Codable {
 
 struct TabSnapshot: Codable {
     let id: String?
-    let title: String?
-    let subtitle: String?
     let customTitle: String?
     let focusedPaneId: String?
     let rootNode: SplitNodeSnapshot
@@ -292,10 +290,13 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel,
                 focusedPaneId = firstLeafId(rootNode)
             }
 
+            let focusedPs = paneSnapshotById[focusedPaneId]!
+            let chrome = deriveTabChromeFromSnapshot(focusedPs)
+
             let tab = TabModel(
                 id: tabId,
-                title: ts.title ?? "Terminal",
-                subtitle: ts.subtitle,
+                title: chrome.title,
+                subtitle: chrome.subtitle,
                 customTitle: ts.customTitle,
                 focusedPaneId: focusedPaneId,
                 rootNode: rootNode,

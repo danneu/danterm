@@ -240,10 +240,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         model.groups[targetGroupIdx].tabs[targetTabIdx].focusedPaneId = paneId
         model.groups[targetGroupIdx].tabs[targetTabIdx].isZoomed = false
         if let pane = model.panes[paneId] {
-            model.groups[targetGroupIdx].tabs[targetTabIdx].title = abbreviateHome(pane.title)
-            if let cwd = pane.cwd {
-                model.groups[targetGroupIdx].tabs[targetTabIdx].subtitle = abbreviateHome(cwd)
-            }
+            let chrome = deriveTabChrome(from: pane)
+            model.groups[targetGroupIdx].tabs[targetTabIdx].title = chrome.title
+            model.groups[targetGroupIdx].tabs[targetTabIdx].subtitle = chrome.subtitle
         }
 
         // Handle source tab
@@ -319,11 +318,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
         // Update tab title/subtitle from newly focused pane
         if let pane = model.panes[paneId] {
+            let chrome = deriveTabChrome(from: pane)
             updateSelectedTab(&model) { t in
-                t.title = abbreviateHome(pane.title)
-                if let cwd = pane.cwd {
-                    t.subtitle = abbreviateHome(cwd)
-                }
+                t.title = chrome.title
+                t.subtitle = chrome.subtitle
             }
         }
 

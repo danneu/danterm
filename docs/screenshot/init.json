@@ -7,8 +7,6 @@
         "tabs": [
           {
             "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
-            "title": "Terminal",
-            "subtitle": null,
             "focusedPaneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
             "rootNode": {
               "type": "leaf",
@@ -17,8 +15,6 @@
           },
           {
             "id": "AB28B4CE-4A8F-4D39-BAC8-665B6B2DE0F9",
-            "title": "htop",
-            "subtitle": "~/world",
             "focusedPaneId": "4A53A920-BC2E-4C8E-8242-267DC4F9BC2D",
             "rootNode": {
               "type": "leaf",
@@ -27,8 +23,6 @@
           },
           {
             "id": "C1D2E3F4-A1B2-4C3D-9E8F-1A2B3C4D5E6F",
-            "title": "claude \"Say cheese\"",
-            "subtitle": null,
             "focusedPaneId": "D4E5F6A7-B8C9-4D0E-AF12-3B4C5D6E7F80",
             "rootNode": {
               "type": "split",
@@ -50,8 +44,6 @@
         "tabs": [
           {
             "id": "6382C6D4-F1C3-4DDF-B9D2-FF944147D797",
-            "title": "lazygit",
-            "subtitle": "~/Code/Recontrol",
             "focusedPaneId": "2A5C2AF9-CBE2-4934-8573-8204875F079D",
             "rootNode": {
               "type": "leaf",
@@ -60,8 +52,6 @@
           },
           {
             "id": "D8A70D7F-AF12-4538-83D5-2D8369EAE13B",
-            "title": "vim README.md",
-            "subtitle": "~/Code/Recontrol",
             "focusedPaneId": "2F69A409-70D6-4E73-A5F8-E54022AA327C",
             "rootNode": {
               "type": "leaf",

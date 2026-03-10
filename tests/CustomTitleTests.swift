@@ -279,6 +279,134 @@ func customTitleTests() {
         try expectEqual(rebuilt!.groups[0].tabs[0].displayTitle, "My Server")
     }
 
+    // MARK: - Tab chrome derivation from snapshot
+
+    test("testImportDerivesTitleFromFocusedPane") {
+        let home = NSHomeDirectory()
+        let json = """
+        {
+          "version": 1,
+          "model": {
+            "groups": [{
+              "name": "General",
+              "tabs": [{
+                "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
+                "focusedPaneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
+                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+              }]
+            }],
+            "panes": [{ "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "\(home)/world", "cwd": "~/world" }]
+          }
+        }
+        """
+        let data = json.data(using: .utf8)!
+        let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
+        let model = validateAndBuild(initFile.model)
+        try expect(model != nil, "should build model")
+        try expectEqual(model!.groups[0].tabs[0].title, "~/world")
+    }
+
+    test("testImportDerivesSubtitleFromLaunchCwd") {
+        let json = """
+        {
+          "version": 1,
+          "model": {
+            "groups": [{
+              "name": "General",
+              "tabs": [{
+                "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
+                "focusedPaneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
+                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+              }]
+            }],
+            "panes": [{ "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "T", "launch": { "cwd": "~/projects" } }]
+          }
+        }
+        """
+        let data = json.data(using: .utf8)!
+        let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
+        let model = validateAndBuild(initFile.model)
+        try expect(model != nil, "should build model")
+        try expectEqual(model!.groups[0].tabs[0].subtitle, "~/projects")
+    }
+
+    test("testImportNilCwdDerivesNilSubtitle") {
+        let json = """
+        {
+          "version": 1,
+          "model": {
+            "groups": [{
+              "name": "General",
+              "tabs": [{
+                "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
+                "focusedPaneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
+                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+              }]
+            }],
+            "panes": [{ "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "Terminal" }]
+          }
+        }
+        """
+        let data = json.data(using: .utf8)!
+        let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
+        let model = validateAndBuild(initFile.model)
+        try expect(model != nil, "should build model")
+        try expect(model!.groups[0].tabs[0].subtitle == nil, "subtitle should be nil when pane has no cwd")
+    }
+
+    test("testLegacySnapshotWithTitleSubtitleDecodesSuccessfully") {
+        // Old JSON that still includes tab-level "title" and "subtitle" should decode fine
+        let json = """
+        {
+          "version": 1,
+          "model": {
+            "groups": [{
+              "name": "General",
+              "tabs": [{
+                "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
+                "title": "vim",
+                "subtitle": "~/world",
+                "focusedPaneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
+                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+              }]
+            }],
+            "panes": [{ "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "Terminal", "cwd": "~/world" }]
+          }
+        }
+        """
+        let data = json.data(using: .utf8)!
+        let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
+        let model = validateAndBuild(initFile.model)
+        try expect(model != nil, "legacy snapshot with title/subtitle should still decode")
+        // Title is derived from pane, not from the (now-ignored) tab-level title
+        try expectEqual(model!.groups[0].tabs[0].title, "Terminal")
+        try expectEqual(model!.groups[0].tabs[0].subtitle, "~/world")
+    }
+
+    test("testDeriveTabChromeMatchesRuntimeBehavior") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let home = NSHomeDirectory()
+
+        // Set pane title and cwd to absolute paths
+        model.panes[paneId]?.title = "\(home)/world"
+        model.panes[paneId]?.cwd = "\(home)/projects"
+
+        // Trigger paneBecameFirstResponder via split + refocus
+        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .paneBecameFirstResponder(paneId: paneId))
+
+        let tab = model.groups[0].tabs[0]
+        let pane = model.panes[paneId]!
+        let chrome = deriveTabChrome(from: pane)
+
+        try expectEqual(tab.title, chrome.title)
+        try expectEqual(tab.subtitle, chrome.subtitle)
+        try expectEqual(tab.title, "~/world")
+        try expectEqual(tab.subtitle, "~/projects")
+    }
+
     test("testSnapshotCustomTitleOmitted") {
         // JSON without customTitle should decode to nil (backward compat)
         let json = """
@@ -290,11 +418,10 @@ func customTitleTests() {
               "name": "General",
               "tabs": [{
                 "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
-                "title": "Terminal",
                 "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
               }]
             }],
-            "panes": [{ "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "T" }]
+            "panes": [{ "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "Terminal" }]
           }
         }
         """
