@@ -5,7 +5,8 @@
       "Bash(git clone:*)",
       "Bash(defaults read:*)",
       "Bash(grep:*)",
-      "Bash(just test:*)"
+      "Bash(just test:*)",
+      "Bash(just build:*)"
     ]
   }
 }
