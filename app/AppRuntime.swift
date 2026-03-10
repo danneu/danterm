@@ -3,6 +3,8 @@ import GhosttyKit
 import UniformTypeIdentifiers
 import UserNotifications
 
+// App runtime owns the mutable app model, performs side effects emitted by the
+// pure update function, and bridges model changes into AppKit/Ghostty objects.
 class AppRuntime {
     var model: AppModel
     let ghosttyApp: GhosttyApp
@@ -117,7 +119,7 @@ class AppRuntime {
                 content: content,
                 trigger: nil
             )
-            UNUserNotificationCenter.current().add(request)
+            enqueueNotificationRequest(request)
 
         case .exportState(let initFile):
             let encoder = JSONEncoder()
@@ -210,6 +212,39 @@ class AppRuntime {
         case .updateDockBadge(let count):
             NSApp.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
             NSApp.dockTile.display()
+        }
+    }
+
+    // Deliver notifications only after checking authorization state so the
+    // first real alert can recover if the launch-time prompt was skipped.
+    private func enqueueNotificationRequest(_ request: UNNotificationRequest) {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                center.add(request) { error in
+                    if let error {
+                        print("Failed to enqueue notification: \(error)")
+                    }
+                }
+            case .notDetermined:
+                center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+                    if let error {
+                        print("Notification authorization request failed: \(error)")
+                        return
+                    }
+                    guard granted else { return }
+                    center.add(request) { error in
+                        if let error {
+                            print("Failed to enqueue notification: \(error)")
+                        }
+                    }
+                }
+            case .denied:
+                break
+            @unknown default:
+                break
+            }
         }
     }
 

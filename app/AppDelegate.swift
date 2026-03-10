@@ -1,3 +1,5 @@
+// App delegate responsible for window setup, app lifecycle hooks, menus, and
+// notification center delegation.
 import Cocoa
 import GhosttyKit
 import UserNotifications
@@ -12,6 +14,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
     var initSnapshot: AppModelSnapshot?
     var alertsBellItem: NSToolbarItem?
 
+    // NSApplicationDelegate: finish bootstrapping the Ghostty runtime, main
+    // window, and launch-time services once AppKit has started the app.
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Create ghostty app (config + runtime callbacks)
         ghosttyApp = GhosttyApp()
@@ -88,10 +92,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
         // Set up notification center
         let notifCenter = UNUserNotificationCenter.current()
         notifCenter.delegate = self
-        notifCenter.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
 
         NSApp.activate(ignoringOtherApps: true)
 
+        // Request notification authorization after the app is active so the
+        // system prompt is not racing the initial launch and window setup.
+        DispatchQueue.main.async { [weak self] in
+            self?.requestNotificationAuthorizationIfNeeded()
+        }
+
+    }
+
+    private func requestNotificationAuthorizationIfNeeded() {
+        let notifCenter = UNUserNotificationCenter.current()
+        notifCenter.getNotificationSettings { settings in
+            guard settings.authorizationStatus == .notDetermined else { return }
+            notifCenter.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+                if let error {
+                    print("Notification authorization request failed: \(error)")
+                    return
+                }
+                print("Notification authorization granted: \(granted)")
+            }
+        }
     }
 
     // MARK: - Menu
