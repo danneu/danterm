@@ -64,32 +64,6 @@ func ghosttyTests() {
         }, "second bell should be throttled (no sendNotification)")
     }
 
-    test("testBellRequestsPermissionOnce") {
-        var model = makeModel()
-        createTab(&model)
-        let firstTabPaneId = model.groups[0].tabs[0].focusedPaneId
-
-        createTab(&model)
-
-        try expectEqual(model.notificationPermissionRequested, false)
-
-        let effects1 = update(&model, .surfaceBell(paneId: firstTabPaneId))
-        try expect(hasEffect(effects1) {
-            if case .requestNotificationPermission = $0 { return true }
-            return false
-        }, "first bell should request permission")
-        try expectEqual(model.notificationPermissionRequested, true)
-
-        // Reset throttle so second bell sends notification
-        model.lastNotificationTime[firstTabPaneId]?[.bell] = Date.distantPast
-
-        let effects2 = update(&model, .surfaceBell(paneId: firstTabPaneId))
-        try expect(!hasEffect(effects2) {
-            if case .requestNotificationPermission = $0 { return true }
-            return false
-        }, "second bell should not request permission again")
-    }
-
     test("testSurfaceTitleFocusedPane") {
         var model = makeModel()
         createTab(&model)

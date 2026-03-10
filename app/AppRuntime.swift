@@ -119,9 +119,6 @@ class AppRuntime {
             )
             UNUserNotificationCenter.current().add(request)
 
-        case .requestNotificationPermission:
-            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
-
         case .exportState(let initFile):
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

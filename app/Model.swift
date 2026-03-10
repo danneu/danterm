@@ -86,7 +86,6 @@ struct AppModel: Equatable {
     var groups: [GroupModel]
     var panes: [PaneId: PaneModel]
     var selectedTabId: TabId?
-    var notificationPermissionRequested: Bool = false
     var alerts: [AlertModel] = []  // newest first, capped at 100
     var lastNotificationTime: [PaneId: [AlertKind: Date]] = [:]
 }

@@ -630,6 +630,9 @@ private func markAlertsReadForPane(_ paneId: PaneId, in model: inout AppModel) {
 }
 
 /// Throttle macOS notification delivery: one per pane per kind every 5 seconds.
+private let notificationThrottleInterval: TimeInterval = 1
+
+/// Throttle macOS notification delivery: one per pane per kind every throttle interval.
 private func throttledNotification(
     alertId: AlertId, kind: AlertKind, paneId: PaneId,
     title: String, body: String, tabId: TabId, model: inout AppModel
@@ -637,7 +640,7 @@ private func throttledNotification(
     let now = Date()
     let shouldNotify: Bool
     if let last = model.lastNotificationTime[paneId]?[kind] {
-        shouldNotify = now.timeIntervalSince(last) >= 5
+        shouldNotify = now.timeIntervalSince(last) >= notificationThrottleInterval
     } else {
         shouldNotify = true
     }
@@ -646,13 +649,7 @@ private func throttledNotification(
 
     model.lastNotificationTime[paneId, default: [:]][kind] = now
 
-    var effects: [Effect] = []
-    if !model.notificationPermissionRequested {
-        model.notificationPermissionRequested = true
-        effects.append(.requestNotificationPermission)
-    }
-    effects.append(.sendNotification(
+    return [.sendNotification(
         alertId: alertId, title: title, body: body, tabId: tabId, paneId: paneId
-    ))
-    return effects
+    )]
 }

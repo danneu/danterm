@@ -86,7 +86,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
         }
 
         // Set up notification center
-        UNUserNotificationCenter.current().delegate = self
+        let notifCenter = UNUserNotificationCenter.current()
+        notifCenter.delegate = self
+        notifCenter.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
 
         NSApp.activate(ignoringOtherApps: true)
 
@@ -247,7 +249,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([])
+        completionHandler([.banner, .sound, .list])
     }
 
     // MARK: - NSToolbarDelegate
