@@ -54,27 +54,17 @@ class SidebarOutlineView: NSOutlineView {
         return nil
     }
 
-    private static let tabInsetX: CGFloat = 5
-
     /// Hide the native disclosure triangle for all rows. Group rows use a
     /// custom caret button on the right side instead.
     override func frameOfOutlineCell(atRow row: Int) -> NSRect {
         return .zero
     }
 
-    /// Stretch cells to full width. Tab rows get a small left inset.
+    /// Stretch all cells to full width (no indentation for child rows).
     override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {
         var frame = super.frameOfCell(atColumn: column, row: row)
-        if let sidebarItem = item(atRow: row) as? SidebarItem {
-            switch sidebarItem.kind {
-            case .tab:
-                frame.origin.x = Self.tabInsetX
-                frame.size.width = bounds.width - Self.tabInsetX
-            case .group:
-                frame.origin.x = 0
-                frame.size.width = bounds.width
-            }
-        }
+        frame.origin.x = 0
+        frame.size.width = bounds.width
         return frame
     }
 
