@@ -397,7 +397,8 @@ func toSnapshot(_ model: AppModel) -> AppModelSnapshot {
                 title: tab.title,
                 subtitle: tab.subtitle,
                 focusedPaneId: tab.focusedPaneId.rawValue.uuidString,
-                rootNode: toSplitNodeSnapshot(tab.rootNode)
+                rootNode: toSplitNodeSnapshot(tab.rootNode),
+                color: tab.color
             )
         }
         return GroupSnapshot(

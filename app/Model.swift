@@ -60,6 +60,10 @@ indirect enum SplitNodeModel: Equatable {
     }
 }
 
+enum TabColor: String, Codable, CaseIterable, Equatable {
+    case red, orange, yellow, green, blue, purple, gray
+}
+
 struct TabModel: Equatable {
     let id: TabId
     var title: String = "Terminal"
@@ -67,6 +71,7 @@ struct TabModel: Equatable {
     var focusedPaneId: PaneId
     var rootNode: SplitNodeModel
     var isZoomed: Bool = false
+    var color: TabColor? = nil
 }
 
 struct GroupModel: Equatable {
@@ -112,6 +117,7 @@ struct TabSnapshot: Codable {
     let subtitle: String?
     let focusedPaneId: String?
     let rootNode: SplitNodeSnapshot
+    let color: TabColor?
 }
 
 indirect enum SplitNodeSnapshot: Codable {
@@ -288,7 +294,8 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel,
                 title: ts.title ?? "Terminal",
                 subtitle: ts.subtitle,
                 focusedPaneId: focusedPaneId,
-                rootNode: rootNode
+                rootNode: rootNode,
+                color: ts.color
             )
             tabs.append(tab)
             allTabIds.append(tabId)

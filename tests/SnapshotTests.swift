@@ -421,6 +421,30 @@ func snapshotTests() {
         try expectEqual(expandTilde("~"), home)
     }
 
+    // MARK: - Tab Color Snapshot
+
+    test("testSnapshotPreservesTabColor") {
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .setTabColor(tabId: model.groups[0].tabs[0].id, color: .purple))
+
+        let snapshot = toSnapshot(model)
+        let rebuilt = validateAndBuild(snapshot)
+        try expect(rebuilt != nil, "should rebuild from snapshot")
+        try expectEqual(rebuilt!.groups[0].tabs[0].color, .purple)
+    }
+
+    test("testSnapshotNilColorPreserved") {
+        var model = makeModel()
+        createTab(&model)
+        // No color set — should remain nil through round-trip
+
+        let snapshot = toSnapshot(model)
+        let rebuilt = validateAndBuild(snapshot)
+        try expect(rebuilt != nil, "should rebuild from snapshot")
+        try expect(rebuilt!.groups[0].tabs[0].color == nil, "color should remain nil")
+    }
+
     test("validation rejects duplicate IDs across domains") {
         // Use same UUID for group and tab
         let json = """

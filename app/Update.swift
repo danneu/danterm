@@ -279,6 +279,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         effects.append(.makeFirstResponder(paneId: paneId))
         return effects
 
+    case .setTabColor(let tabId, let color):
+        updateTab(tabId, in: &model) { t in t.color = color }
+        return [.reloadSidebarRow(tabId: tabId)]
+
     case .focusDirection(let direction, let side):
         guard let tab = selectedTab(in: model) else { return [] }
         if tab.isZoomed {

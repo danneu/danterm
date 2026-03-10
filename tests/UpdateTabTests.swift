@@ -283,6 +283,44 @@ func tabTests() {
         }, "should show terminate confirmation for last single-pane tab")
     }
 
+    // MARK: - Tab Color
+
+    test("testSetTabColor") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+
+        let effects = update(&model, .setTabColor(tabId: tabId, color: .red))
+        try expectEqual(model.groups[0].tabs[0].color, .red)
+        try expect(hasEffect(effects) {
+            if case .reloadSidebarRow(let tid) = $0, tid == tabId { return true }
+            return false
+        }, "should emit reloadSidebarRow")
+    }
+
+    test("testSetTabColorClear") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        update(&model, .setTabColor(tabId: tabId, color: .blue))
+
+        let effects = update(&model, .setTabColor(tabId: tabId, color: nil))
+        try expect(model.groups[0].tabs[0].color == nil, "color should be nil")
+        try expect(hasEffect(effects) {
+            if case .reloadSidebarRow(let tid) = $0, tid == tabId { return true }
+            return false
+        }, "should emit reloadSidebarRow")
+    }
+
+    test("testSetTabColorInvalidTab") {
+        var model = makeModel()
+        createTab(&model)
+        let bogusId = TabId()
+
+        let effects = update(&model, .setTabColor(tabId: bogusId, color: .green))
+        try expectEqual(effects.count, 1, "should still emit reloadSidebarRow even for unknown tab")
+    }
+
     test("testCloseTabNonSelected") {
         var model = makeModel()
         createTab(&model)

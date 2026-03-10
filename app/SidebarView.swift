@@ -1,5 +1,21 @@
 import Cocoa
 
+// MARK: - TabColor → NSColor
+
+extension TabColor {
+    var nsColor: NSColor {
+        switch self {
+        case .red: return .systemRed
+        case .orange: return .systemOrange
+        case .yellow: return .systemYellow
+        case .green: return .systemGreen
+        case .blue: return .systemBlue
+        case .purple: return .systemPurple
+        case .gray: return .systemGray
+        }
+    }
+}
+
 // MARK: - SidebarItem (reference-type wrapper for NSOutlineView identity stability)
 
 class SidebarItem {
@@ -547,6 +563,40 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         closeItem.representedObject = tab.id.rawValue
         menu.addItem(closeItem)
 
+        // Color submenu
+        menu.addItem(NSMenuItem.separator())
+        let colorItem = NSMenuItem(title: "Color", action: nil, keyEquivalent: "")
+        let colorSubmenu = NSMenu()
+        for color in TabColor.allCases {
+            let item = NSMenuItem(title: color.rawValue.capitalized, action: #selector(contextSetTabColor(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = SetTabColorInfo(tabId: tab.id, color: color)
+            // Show a filled circle swatch tinted to the color
+            let swatch = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: color.rawValue)!
+            item.image = swatch.withSymbolConfiguration(.init(pointSize: 12, weight: .regular))
+            item.image?.isTemplate = false
+            // Apply color tint via a custom subclass isn't needed — use contentTintColor on the menu item's view
+            // Instead, create a colored swatch image
+            let size = NSSize(width: 12, height: 12)
+            let coloredImage = NSImage(size: size, flipped: false) { rect in
+                color.nsColor.setFill()
+                NSBezierPath(ovalIn: rect).fill()
+                return true
+            }
+            item.image = coloredImage
+            if tab.color == color {
+                item.state = .on
+            }
+            colorSubmenu.addItem(item)
+        }
+        colorSubmenu.addItem(NSMenuItem.separator())
+        let clearItem = NSMenuItem(title: "Clear Color", action: #selector(contextSetTabColor(_:)), keyEquivalent: "")
+        clearItem.target = self
+        clearItem.representedObject = SetTabColorInfo(tabId: tab.id, color: nil)
+        colorSubmenu.addItem(clearItem)
+        colorItem.submenu = colorSubmenu
+        menu.addItem(colorItem)
+
         if model.groups.count > 1, let currentGroup = groupForTab(tab.id, in: model) {
             menu.addItem(NSMenuItem.separator())
 
@@ -611,6 +661,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     @objc private func contextMoveTab(_ sender: NSMenuItem) {
         guard let info = sender.representedObject as? MoveTabInfo else { return }
         runtime?.send(.moveTab(tabId: info.tabId, toGroupId: info.targetGroupId, atIndex: info.targetGroupTabCount))
+    }
+
+    @objc private func contextSetTabColor(_ sender: NSMenuItem) {
+        guard let info = sender.representedObject as? SetTabColorInfo else { return }
+        runtime?.send(.setTabColor(tabId: info.tabId, color: info.color))
     }
 
     @objc private func contextCloseTab(_ sender: NSMenuItem) {
@@ -716,6 +771,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let cellId = NSUserInterfaceItemIdentifier("TabCell")
         let subtitleId = NSUserInterfaceItemIdentifier("subtitle")
         let bellDotId = NSUserInterfaceItemIdentifier("bellDot")
+        let colorStripeId = NSUserInterfaceItemIdentifier("colorStripe")
 
         let cell: NSTableCellView
         if let existing = outlineView.makeView(withIdentifier: cellId, owner: nil) as? NSTableCellView {
@@ -723,6 +779,14 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         } else {
             cell = NSTableCellView()
             cell.identifier = cellId
+
+            // Color stripe: 3px vertical bar on the left edge
+            let colorStripe = NSView()
+            colorStripe.identifier = colorStripeId
+            colorStripe.translatesAutoresizingMaskIntoConstraints = false
+            colorStripe.wantsLayer = true
+            colorStripe.isHidden = true
+            cell.addSubview(colorStripe)
 
             let textField = NSTextField(labelWithString: "")
             textField.translatesAutoresizingMaskIntoConstraints = false
@@ -752,6 +816,10 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             cell.addSubview(bellBadge)
 
             NSLayoutConstraint.activate([
+                colorStripe.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
+                colorStripe.topAnchor.constraint(equalTo: cell.topAnchor),
+                colorStripe.bottomAnchor.constraint(equalTo: cell.bottomAnchor),
+                colorStripe.widthAnchor.constraint(equalToConstant: 3),
                 bellBadge.widthAnchor.constraint(greaterThanOrEqualToConstant: 14),
                 bellBadge.heightAnchor.constraint(equalToConstant: 14),
                 bellBadge.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
@@ -774,6 +842,16 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             let count = unreadAlertCount(for: tab, alerts: currentModel?.alerts ?? [])
             bellBadge.stringValue = "\(count)"
             bellBadge.isHidden = count == 0
+        }
+
+        // Color stripe
+        if let stripe = cell.subviews.first(where: { $0.identifier == colorStripeId }) {
+            if let color = tab.color {
+                stripe.layer?.backgroundColor = color.nsColor.cgColor
+                stripe.isHidden = false
+            } else {
+                stripe.isHidden = true
+            }
         }
 
         // Drop highlight for pane-to-tab drag
@@ -835,5 +913,14 @@ private class MoveTabInfo: NSObject {
         self.tabId = tabId
         self.targetGroupId = targetGroupId
         self.targetGroupTabCount = targetGroupTabCount
+    }
+}
+
+private class SetTabColorInfo: NSObject {
+    let tabId: TabId
+    let color: TabColor?
+    init(tabId: TabId, color: TabColor?) {
+        self.tabId = tabId
+        self.color = color
     }
 }
