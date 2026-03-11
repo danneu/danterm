@@ -556,7 +556,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     }
 
     func contextMenu(for tab: TabModel) -> NSMenu? {
-        guard let model = currentModel else { return nil }
+        guard currentModel != nil else { return nil }
 
         let menu = NSMenu()
 
@@ -605,23 +605,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         colorSubmenu.addItem(clearItem)
         colorItem.submenu = colorSubmenu
         menu.addItem(colorItem)
-
-        if model.groups.count > 1, let currentGroup = groupForTab(tab.id, in: model) {
-            menu.addItem(NSMenuItem.separator())
-
-            let moveItem = NSMenuItem(title: "Move to", action: nil, keyEquivalent: "")
-            let submenu = NSMenu()
-
-            for group in model.groups where group.id != currentGroup.id {
-                let item = NSMenuItem(title: group.name, action: #selector(contextMoveTab(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = MoveTabInfo(tabId: tab.id, targetGroupId: group.id, targetGroupTabCount: group.tabs.count)
-                submenu.addItem(item)
-            }
-
-            moveItem.submenu = submenu
-            menu.addItem(moveItem)
-        }
 
         menu.addItem(NSMenuItem.separator())
 
@@ -672,11 +655,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         case nil:
             break
         }
-    }
-
-    @objc private func contextMoveTab(_ sender: NSMenuItem) {
-        guard let info = sender.representedObject as? MoveTabInfo else { return }
-        runtime?.send(.moveTab(tabId: info.tabId, toGroupId: info.targetGroupId, atIndex: info.targetGroupTabCount))
     }
 
     @objc private func contextSetTabColor(_ sender: NSMenuItem) {
@@ -917,17 +895,6 @@ private enum RenameTarget {
 private enum AssociatedKeys {
     static var groupId: UInt8 = 0
     static var renameTarget: UInt8 = 0
-}
-
-private class MoveTabInfo: NSObject {
-    let tabId: TabId
-    let targetGroupId: GroupId
-    let targetGroupTabCount: Int
-    init(tabId: TabId, targetGroupId: GroupId, targetGroupTabCount: Int) {
-        self.tabId = tabId
-        self.targetGroupId = targetGroupId
-        self.targetGroupTabCount = targetGroupTabCount
-    }
 }
 
 private class SetTabColorInfo: NSObject {
