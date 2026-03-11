@@ -174,24 +174,14 @@ func ghosttyTests() {
         }, "should NOT set window title for background tab")
     }
 
-    test("testDesktopNotificationOnFocusedPaneSendsNotificationButNoUnread") {
+    test("testDesktopNotificationOnFocusedPaneIsIgnored") {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        let tabId = model.groups[0].tabs[0].id
 
         let effects = update(&model, .desktopNotification(paneId: paneId, title: "Build complete", body: "make finished"))
-        try expectEqual(model.alerts.count, 1, "should create alert")
-        try expectEqual(model.alerts[0].isUnread, false, "focused pane alert should be read")
-        try expect(hasEffect(effects) {
-            if case .sendNotification(_, let t, let b, let tid, let pid) = $0,
-               t == "Build complete", b == "make finished", tid == tabId, pid == paneId { return true }
-            return false
-        }, "should send notification with OSC 777 title/body")
-        try expect(!hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
-            return false
-        }, "should not rebuild content view for focused pane")
+        try expectEqual(model.alerts.count, 0, "should not create alert for focused pane")
+        try expectEqual(effects.count, 0, "should produce no effects for focused pane")
     }
 
     test("testDesktopNotificationOnBackgroundPaneCreatesUnreadAlert") {

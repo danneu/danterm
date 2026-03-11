@@ -489,23 +489,23 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return effects
 
     case .desktopNotification(let paneId, let title, let body):
-        let isFocused = selectedTab(in: model).map { $0.focusedPaneId == paneId } ?? false
+        // Same as bell: no alert for the focused pane of the selected tab
+        if let tab = selectedTab(in: model), tab.focusedPaneId == paneId {
+            return []
+        }
+
         guard let tab = tabForPane(paneId, in: model) else { return [] }
 
         let alert = AlertModel(
             id: AlertId(), kind: .desktopNotification, paneId: paneId, tabId: tab.id,
-            title: title, body: body, createdAt: Date(), isUnread: !isFocused
+            title: title, body: body, createdAt: Date(), isUnread: true
         )
         model.alerts.insert(alert, at: 0)
         if model.alerts.count > 100 { model.alerts.removeLast() }
 
-        var effects: [Effect] = []
-        if !isFocused {
-            effects.append(.rebuildContentView)
-            effects.append(.reloadSidebarRow(tabId: tab.id))
-            if let group = groupForTab(tab.id, in: model), group.isCollapsed {
-                effects.append(.reloadSidebarGroupRow(groupId: group.id))
-            }
+        var effects: [Effect] = [.rebuildContentView, .reloadSidebarRow(tabId: tab.id)]
+        if let group = groupForTab(tab.id, in: model), group.isCollapsed {
+            effects.append(.reloadSidebarGroupRow(groupId: group.id))
         }
 
         effects.append(contentsOf: throttledNotification(
