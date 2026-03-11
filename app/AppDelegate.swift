@@ -161,6 +161,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "About DanTerm", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
+        appMenu.addItem(withTitle: "Import State...", action: #selector(importState(_:)), keyEquivalent: "")
         appMenu.addItem(withTitle: "Export State...", action: #selector(exportState(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Quit DanTerm", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -271,6 +272,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
 
     @objc func exportState(_ sender: Any?) {
         runtime.send(.exportState)
+    }
+
+    @objc func importState(_ sender: Any?) {
+        runtime.importStateFromPanel(restoreCommandBehavior: restoreCommandBehavior)
     }
 
     @objc func closePane(_ sender: Any?) {

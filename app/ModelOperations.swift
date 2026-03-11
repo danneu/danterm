@@ -394,6 +394,42 @@ func wouldQuitFromClose(_ model: AppModel) -> Bool {
 
 // MARK: - Restore
 
+struct ValidatedAppRestore {
+  let snapshot: AppModelSnapshot
+  let model: AppModel
+  let paneSnapshots: [PaneId: PaneSnapshot]
+}
+
+enum AppInitFileLoadError: Error, Equatable {
+  case decodeFailed
+  case unsupportedVersion(Int)
+  case invalidSnapshot
+}
+
+/// Decode a saved init file and validate that its snapshot can be rebuilt.
+func loadValidatedInitFile(from data: Data) throws -> ValidatedAppRestore {
+  let initFile: AppInitFile
+  do {
+    initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
+  } catch {
+    throw AppInitFileLoadError.decodeFailed
+  }
+
+  guard initFile.version == 1 else {
+    throw AppInitFileLoadError.unsupportedVersion(initFile.version)
+  }
+
+  guard let built = validateAndBuildDetailed(initFile.model) else {
+    throw AppInitFileLoadError.invalidSnapshot
+  }
+
+  return ValidatedAppRestore(
+    snapshot: initFile.model,
+    model: built.model,
+    paneSnapshots: built.paneSnapshots
+  )
+}
+
 /// Parse the restore command behavior from CLI arguments.
 /// Defaults to `.prefill` to avoid surprising command execution during restore.
 func restoreCommandBehavior(from arguments: [String]) -> RestoreCommandBehavior {

@@ -317,6 +317,34 @@ class AppRuntime {
         try? FileManager.default.removeItem(at: dir)
     }
 
+    // MARK: - State Import
+
+    /// Present a file picker, validate the chosen state file, and replace the current session.
+    func importStateFromPanel(restoreCommandBehavior: RestoreCommandBehavior = .prefill) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        guard let window else { return }
+        panel.beginSheetModal(for: window) { [weak self] response in
+            guard let self, response == .OK, let url = panel.url else { return }
+            self.importState(from: url, restoreCommandBehavior: restoreCommandBehavior)
+        }
+    }
+
+    /// Load a state file from disk, keeping the current session intact on any validation failure.
+    func importState(from url: URL, restoreCommandBehavior: RestoreCommandBehavior = .prefill) {
+        do {
+            let data = try Data(contentsOf: url)
+            let loaded = try loadValidatedInitFile(from: data)
+            replaceCurrentSession(with: loaded, restoreCommandBehavior: restoreCommandBehavior)
+        } catch let error as AppInitFileLoadError {
+            showImportError(message: importErrorMessage(for: error))
+        } catch {
+            showImportError(message: error.localizedDescription)
+        }
+    }
+
     // MARK: - Pane Drag
 
     func startPaneDrag(paneId: PaneId) {
@@ -373,21 +401,59 @@ class AppRuntime {
             send(.createTab(inGroupId: nil))
             return
         }
-        self.model = built.model
+        let loaded = ValidatedAppRestore(snapshot: snapshot, model: built.model, paneSnapshots: built.paneSnapshots)
+        applyValidatedRestore(loaded, restoreCommandBehavior: restoreCommandBehavior)
+    }
 
-        // Create surfaces for all panes
+    /// Replace all live runtime state with a validated snapshot restore.
+    private func replaceCurrentSession(
+        with loaded: ValidatedAppRestore,
+        restoreCommandBehavior: RestoreCommandBehavior
+    ) {
+        resetCurrentSession()
+        applyValidatedRestore(loaded, restoreCommandBehavior: restoreCommandBehavior)
+    }
+
+    /// Tear down the current live session so imported panes start from a clean runtime state.
+    private func resetCurrentSession() {
+        cancelPaneDrag()
+        alertsPopover?.performClose(nil)
+        alertsPopover = nil
+
+        for paneId in Array(surfaces.keys) {
+            tokenStore.remove(paneId)
+            cleanupReplayFile(for: paneId)
+            if let view = surfaces.removeValue(forKey: paneId) {
+                view.closeSurface()
+            }
+        }
+
+        model = AppModel(groups: [GroupModel(id: GroupId(), name: "General", isDefault: true)], panes: [:])
+        sidebarView?.reload(model: model)
+        rebuildContentView()
+        chromeView?.updateBellBadge(count: 0)
+        NSApp.dockTile.badgeLabel = nil
+        NSApp.dockTile.display()
+    }
+
+    /// Build live surfaces and views from already-validated restore data.
+    private func applyValidatedRestore(
+        _ loaded: ValidatedAppRestore,
+        restoreCommandBehavior: RestoreCommandBehavior
+    ) {
+        model = loaded.model
+
         for group in model.groups {
             for tab in group.tabs {
                 for paneId in allPaneIds(tab.rootNode) {
-                    let ps = built.paneSnapshots[paneId]
+                    let ps = loaded.paneSnapshots[paneId]
                     let resolved = ps.map { resolveLaunch($0) }
                     let token = tokenStore.generate(for: paneId)
                     var envVars: [(String, String)] = [("DANTERM_TOKEN", token)]
-                    if let scrollback = ps?.scrollback {
-                        if let replayURL = writeReplayFile(scrollback: scrollback) {
-                            replayFiles[paneId] = replayURL
-                            envVars.append(("DANTERM_RESTORE_SCROLLBACK_FILE", replayURL.path))
-                        }
+                    if let scrollback = ps?.scrollback,
+                       let replayURL = writeReplayFile(scrollback: scrollback) {
+                        replayFiles[paneId] = replayURL
+                        envVars.append(("DANTERM_RESTORE_SCROLLBACK_FILE", replayURL.path))
                     }
                     let view = TerminalView(
                         ghosttyApp: ghosttyApp,
@@ -408,10 +474,38 @@ class AppRuntime {
             }
         }
 
-        // Rebuild views
         rebuildContentView()
         sidebarView?.reload(model: model)
         refreshContentTitlebar()
+        let unreadCount = totalUnreadAlertCount(model: model)
+        chromeView?.updateBellBadge(count: unreadCount)
+        NSApp.dockTile.badgeLabel = unreadCount > 0 ? "\(unreadCount)" : nil
+        NSApp.dockTile.display()
+    }
+
+    private func importErrorMessage(for error: AppInitFileLoadError) -> String {
+        switch error {
+        case .decodeFailed:
+            return "The selected file is not valid DanTerm JSON."
+        case .unsupportedVersion(let version):
+            return "Unsupported state file version: \(version)."
+        case .invalidSnapshot:
+            return "The selected state file failed snapshot validation."
+        }
+    }
+
+    private func showImportError(message: String) {
+        let presentAlert = {
+            let alert = NSAlert()
+            alert.messageText = "Import Failed"
+            alert.informativeText = message
+            alert.runModal()
+        }
+        if Thread.isMainThread {
+            presentAlert()
+        } else {
+            DispatchQueue.main.async(execute: presentAlert)
+        }
     }
 
     // MARK: - Content Titlebar

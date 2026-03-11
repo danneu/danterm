@@ -50,14 +50,20 @@ do {
         let path = args[idx + 1]
         let url = URL(fileURLWithPath: path)
         let data = try Data(contentsOf: url)
-        let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
-        guard initFile.version == 1 else {
-            print("[init] Unsupported version: \(initFile.version)")
-            throw SnapshotValidationError(message: "unsupported version")
-        }
-        initSnapshot = initFile.model
+        let loaded = try loadValidatedInitFile(from: data)
+        initSnapshot = loaded.snapshot
         print("[init] Loaded snapshot from \(path)")
     }
+} catch let error as AppInitFileLoadError {
+    switch error {
+    case .decodeFailed:
+        print("[init] Failed to decode snapshot JSON. Using default startup.")
+    case .unsupportedVersion(let version):
+        print("[init] Unsupported version: \(version). Using default startup.")
+    case .invalidSnapshot:
+        print("[init] Snapshot validation failed. Using default startup.")
+    }
+    initSnapshot = nil
 } catch {
     print("[init] Failed to load snapshot: \(error). Using default startup.")
     initSnapshot = nil

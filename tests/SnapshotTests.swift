@@ -48,6 +48,76 @@ func snapshotTests() {
         try expect(!decoded, "should fail to decode malformed JSON")
     }
 
+    test("loadValidatedInitFile rejects malformed JSON") {
+        let data = "{ invalid json".data(using: .utf8)!
+        do {
+            _ = try loadValidatedInitFile(from: data)
+            throw TestFailure(message: "expected malformed JSON to fail")
+        } catch let error as AppInitFileLoadError {
+            try expectEqual(error, .decodeFailed)
+        }
+    }
+
+    test("loadValidatedInitFile rejects unsupported version") {
+        let json = """
+        {
+          "version": 2,
+          "model": {
+            "groups": [{
+              "name": "General",
+              "tabs": [{
+                "rootNode": { "type": "leaf" }
+              }]
+            }],
+            "panes": [{
+              "title": "Terminal"
+            }]
+          }
+        }
+        """
+        let data = json.data(using: .utf8)!
+        do {
+            _ = try loadValidatedInitFile(from: data)
+            throw TestFailure(message: "expected unsupported version to fail")
+        } catch let error as AppInitFileLoadError {
+            try expectEqual(error, .unsupportedVersion(2))
+        }
+    }
+
+    test("loadValidatedInitFile rejects invalid snapshot") {
+        let json = """
+        {
+          "version": 1,
+          "model": {
+            "groups": [{
+              "name": "General",
+              "tabs": [{
+                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+              }]
+            }],
+            "panes": []
+          }
+        }
+        """
+        let data = json.data(using: .utf8)!
+        do {
+            _ = try loadValidatedInitFile(from: data)
+            throw TestFailure(message: "expected invalid snapshot to fail")
+        } catch let error as AppInitFileLoadError {
+            try expectEqual(error, .invalidSnapshot)
+        }
+    }
+
+    test("loadValidatedInitFile returns validated restore") {
+        var model = makeModel()
+        createTab(&model)
+        let data = try JSONEncoder().encode(toInitFile(model))
+        let loaded = try loadValidatedInitFile(from: data)
+        try expectEqual(loaded.snapshot.selectedTabId, model.selectedTabId?.rawValue.uuidString)
+        try expectEqual(loaded.model.groups.count, model.groups.count)
+        try expectEqual(loaded.model.panes.count, model.panes.count)
+    }
+
     test("decode split node") {
         let json = """
         {
