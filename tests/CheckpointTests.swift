@@ -190,6 +190,25 @@ func checkpointTests() {
                    "cancelTerminate should not emit scheduleCheckpoint")
     }
 
+    // MARK: - Snapshot fidelity
+
+    test("toSnapshot does not persist isZoomed — restored tabs are always unzoomed") {
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .toggleZoomPane)
+        let tab = selectedTab(in: model)!
+        try expect(tab.isZoomed, "tab should be zoomed before snapshot")
+
+        // Round-trip through snapshot
+        let snapshot = toSnapshot(model)
+        guard let restored = validateAndBuild(snapshot) else {
+            throw TestFailure(message: "snapshot round-trip failed")
+        }
+        let restoredTab = selectedTab(in: restored)!
+        try expect(!restoredTab.isZoomed, "restored tab should not be zoomed")
+    }
+
     // MARK: - Session Lock round-trip
 
     test("SessionLock round-trips through write/read helpers") {
