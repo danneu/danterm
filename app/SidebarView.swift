@@ -231,11 +231,12 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             }
         }
 
-        // Select current tab
+        // Select current tab and scroll it into view
         if let selectedTabId = model.selectedTabId, let item = tabItemCache[selectedTabId] {
             let row = outlineView.row(forItem: item)
             if row >= 0 {
                 outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+                outlineView.scrollRowToVisible(row)
             }
         }
     }
