@@ -412,7 +412,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
         if let bellBadge = cell.subviews.first(where: { $0.identifier?.rawValue == "groupBellBadge" }) as? NSTextField {
             let count = groupUnreadAlertCount(for: group, alerts: currentModel?.alerts ?? [])
-            updateBadgeLabel(bellBadge, count: count)
+            bellBadge.updateBadge(count: count)
             if !collapsed { bellBadge.isHidden = true }
         }
     }
@@ -675,7 +675,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         cell.addSubview(textField)
         cell.textField = textField
 
-        let bellBadge = makeBadgeLabel()
+        let bellBadge = NSTextField.makeBadge()
         bellBadge.identifier = NSUserInterfaceItemIdentifier("groupBellBadge")
         cell.addSubview(bellBadge)
 
@@ -730,7 +730,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
         if let bellBadge = cell.subviews.first(where: { $0.identifier?.rawValue == "groupBellBadge" }) as? NSTextField {
             let count = groupUnreadAlertCount(for: group, alerts: currentModel?.alerts ?? [])
-            updateBadgeLabel(bellBadge, count: count)
+            bellBadge.updateBadge(count: count)
             if !group.isCollapsed { bellBadge.isHidden = true }
         }
     }
@@ -773,7 +773,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             subtitleField.lineBreakMode = .byTruncatingMiddle
             cell.addSubview(subtitleField)
 
-            let bellBadge = makeBadgeLabel()
+            let bellBadge = NSTextField.makeBadge()
             bellBadge.identifier = bellDotId
             cell.addSubview(bellBadge)
 
@@ -800,7 +800,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
         if let bellBadge = cell.subviews.first(where: { $0.identifier == bellDotId }) as? NSTextField {
             let count = unreadAlertCount(for: tab, alerts: currentModel?.alerts ?? [])
-            updateBadgeLabel(bellBadge, count: count)
+            bellBadge.updateBadge(count: count)
         }
 
         // Color stripe

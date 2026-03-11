@@ -1,38 +1,12 @@
-// Badge helpers and toolbar button for alert counts.
-import Cocoa
-
-/// Create a red circle badge label with white count text.
-func makeBadgeLabel() -> NSTextField {
-    let label = NSTextField(labelWithString: "")
-    label.translatesAutoresizingMaskIntoConstraints = false
-    label.font = .boldSystemFont(ofSize: 10)
-    label.textColor = .white
-    label.alignment = .center
-    label.wantsLayer = true
-    label.layer?.backgroundColor = NSColor.systemRed.cgColor
-    label.layer?.cornerRadius = 7
-    label.layer?.masksToBounds = true
-    label.isHidden = true
-    NSLayoutConstraint.activate([
-        label.widthAnchor.constraint(greaterThanOrEqualToConstant: 14),
-        label.heightAnchor.constraint(equalToConstant: 14),
-    ])
-    return label
-}
-
-/// Update a badge label's count and visibility.
-func updateBadgeLabel(_ label: NSTextField, count: Int) {
-    label.stringValue = "\(count)"
-    label.isHidden = count == 0
-}
-
 // Custom button that displays a bell icon with an overlaid badge count.
 // Used in the window chrome bar for the alerts toggle.
+import Cocoa
+
 class BellToolbarButton: NSButton {
     private let badgeLabel: NSTextField
 
     init() {
-        badgeLabel = makeBadgeLabel()
+        badgeLabel = .makeBadge()
         super.init(frame: .zero)
 
         translatesAutoresizingMaskIntoConstraints = false
@@ -59,7 +33,7 @@ class BellToolbarButton: NSButton {
     }
 
     func updateBadge(count: Int) {
-        updateBadgeLabel(badgeLabel, count: count)
+        badgeLabel.updateBadge(count: count)
     }
 
     // Route all hits within our bounds to self, so the badge doesn't intercept clicks.
