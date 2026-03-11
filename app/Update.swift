@@ -77,10 +77,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return effects
 
     case .requestCloseTab(let id):
-        guard let groupIdx = model.groups.firstIndex(where: { $0.tabs.contains(where: { $0.id == id }) }),
-              let tabIdx = model.groups[groupIdx].tabs.firstIndex(where: { $0.id == id }) else { return [] }
-
-        let tab = model.groups[groupIdx].tabs[tabIdx]
+        guard let tab = tabById(id, in: model) else { return [] }
         let paneCount = allPaneIds(tab.rootNode).count
 
         if paneCount > 1 {
@@ -158,10 +155,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
     case .closePane(let paneId):
         guard let tabId = model.selectedTabId,
-              let groupIdx = model.groups.firstIndex(where: { $0.tabs.contains(where: { $0.id == tabId }) }),
-              let tabIdx = model.groups[groupIdx].tabs.firstIndex(where: { $0.id == tabId }) else { return [] }
+              let tab = selectedTab(in: model) else { return [] }
 
-        let tab = model.groups[groupIdx].tabs[tabIdx]
         let (newTree, nextFocus) = removeLeaf(tab.rootNode, paneId: paneId)
 
         if newTree == nil && wouldQuitFromClose(model) {
@@ -178,10 +173,12 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             return update(&model, .closeTab(id: tabId))
         }
 
-        model.groups[groupIdx].tabs[tabIdx].rootNode = newRoot
-        model.groups[groupIdx].tabs[tabIdx].isZoomed = false
-        if let next = nextFocus {
-            model.groups[groupIdx].tabs[tabIdx].focusedPaneId = next
+        updateSelectedTab(&model) { tab in
+            tab.rootNode = newRoot
+            tab.isZoomed = false
+            if let next = nextFocus {
+                tab.focusedPaneId = next
+            }
         }
 
         effects.append(.rebuildContentView)
@@ -221,48 +218,39 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         guard let sourceTab = tabForPane(paneId, in: model) else { return [] }
         guard sourceTab.id != targetTabId else { return [] }
 
-        // Find target tab
-        guard let targetGroupIdx = model.groups.firstIndex(where: { $0.tabs.contains(where: { $0.id == targetTabId }) }),
-              let targetTabIdx = model.groups[targetGroupIdx].tabs.firstIndex(where: { $0.id == targetTabId }) else { return [] }
+        guard tabById(targetTabId, in: model) != nil else { return [] }
 
         // Remove pane from source tab's tree
         let (newSourceTree, nextFocus) = removeLeaf(sourceTab.rootNode, paneId: paneId)
 
-        // Wrap target tab's root with the moved pane
-        let targetRoot = model.groups[targetGroupIdx].tabs[targetTabIdx].rootNode
-        let newTargetRoot: SplitNodeModel = .split(
-            id: SplitId(), direction: .horizontal,
-            first: targetRoot, second: .leaf(paneId), ratio: 0.5
-        )
-
-        // Update target tab
-        model.groups[targetGroupIdx].tabs[targetTabIdx].rootNode = newTargetRoot
-        model.groups[targetGroupIdx].tabs[targetTabIdx].focusedPaneId = paneId
-        model.groups[targetGroupIdx].tabs[targetTabIdx].isZoomed = false
-        if let pane = model.panes[paneId] {
-            let chrome = deriveTabChrome(from: pane)
-            model.groups[targetGroupIdx].tabs[targetTabIdx].title = chrome.title
-            model.groups[targetGroupIdx].tabs[targetTabIdx].subtitle = chrome.subtitle
+        // Update target tab: wrap its root with the moved pane
+        let chrome = model.panes[paneId].map { deriveTabChrome(from: $0) }
+        updateTab(targetTabId, in: &model) { tab in
+            tab.rootNode = .split(
+                id: SplitId(), direction: .horizontal,
+                first: tab.rootNode, second: .leaf(paneId), ratio: 0.5
+            )
+            tab.focusedPaneId = paneId
+            tab.isZoomed = false
+            if let chrome {
+                tab.title = chrome.title
+                tab.subtitle = chrome.subtitle
+            }
         }
 
         // Handle source tab
         if let newRoot = newSourceTree {
             // Source tab still has panes — update it
-            guard let srcGroupIdx = model.groups.firstIndex(where: { $0.tabs.contains(where: { $0.id == sourceTab.id }) }),
-                  let srcTabIdx = model.groups[srcGroupIdx].tabs.firstIndex(where: { $0.id == sourceTab.id }) else { return [] }
-            model.groups[srcGroupIdx].tabs[srcTabIdx].rootNode = newRoot
-            model.groups[srcGroupIdx].tabs[srcTabIdx].isZoomed = false
-            if model.groups[srcGroupIdx].tabs[srcTabIdx].focusedPaneId == paneId {
-                if let next = nextFocus {
-                    model.groups[srcGroupIdx].tabs[srcTabIdx].focusedPaneId = next
+            updateTab(sourceTab.id, in: &model) { tab in
+                tab.rootNode = newRoot
+                tab.isZoomed = false
+                if tab.focusedPaneId == paneId, let next = nextFocus {
+                    tab.focusedPaneId = next
                 }
             }
         } else {
             // Source tab is empty — remove it from its group
-            if let srcGroupIdx = model.groups.firstIndex(where: { $0.tabs.contains(where: { $0.id == sourceTab.id }) }),
-               let srcTabIdx = model.groups[srcGroupIdx].tabs.firstIndex(where: { $0.id == sourceTab.id }) {
-                model.groups[srcGroupIdx].tabs.remove(at: srcTabIdx)
-            }
+            removeTab(sourceTab.id, from: &model)
         }
 
         // Mark alerts read for the moved pane (cross-tab move is a navigation action)
@@ -629,6 +617,15 @@ private func updateTab(_ tabId: TabId, in model: inout AppModel, _ body: (inout 
     for gi in model.groups.indices {
         if let ti = model.groups[gi].tabs.firstIndex(where: { $0.id == tabId }) {
             body(&model.groups[gi].tabs[ti])
+            return
+        }
+    }
+}
+
+private func removeTab(_ tabId: TabId, from model: inout AppModel) {
+    for gi in model.groups.indices {
+        if let ti = model.groups[gi].tabs.firstIndex(where: { $0.id == tabId }) {
+            model.groups[gi].tabs.remove(at: ti)
             return
         }
     }

@@ -269,12 +269,16 @@ func setRatio(_ node: SplitNodeModel, splitId: SplitId, ratio: CGFloat) -> Split
 
 // MARK: - AppModel Query Helpers
 
-func selectedTab(in model: AppModel) -> TabModel? {
-    guard let id = model.selectedTabId else { return nil }
+func tabById(_ tabId: TabId, in model: AppModel) -> TabModel? {
     for group in model.groups {
-        if let tab = group.tabs.first(where: { $0.id == id }) { return tab }
+        if let tab = group.tabs.first(where: { $0.id == tabId }) { return tab }
     }
     return nil
+}
+
+func selectedTab(in model: AppModel) -> TabModel? {
+    guard let id = model.selectedTabId else { return nil }
+    return tabById(id, in: model)
 }
 
 func tabForPane(_ paneId: PaneId, in model: AppModel) -> TabModel? {
