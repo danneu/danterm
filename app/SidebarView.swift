@@ -585,13 +585,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             menu.addItem(clearItem)
         }
 
-        menu.addItem(NSMenuItem.separator())
-
-        let closeItem = NSMenuItem(title: "Close Tab", action: #selector(contextCloseTab(_:)), keyEquivalent: "")
-        closeItem.target = self
-        closeItem.representedObject = tab.id.rawValue
-        menu.addItem(closeItem)
-
         // Color submenu
         menu.addItem(NSMenuItem.separator())
         let colorItem = NSMenuItem(title: "Color", action: nil, keyEquivalent: "")
@@ -642,6 +635,14 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             moveItem.submenu = submenu
             menu.addItem(moveItem)
         }
+
+        menu.addItem(NSMenuItem.separator())
+
+        let closeItem = NSMenuItem(title: "Close Tab", action: #selector(contextCloseTab(_:)), keyEquivalent: "")
+        closeItem.target = self
+        closeItem.representedObject = tab.id.rawValue
+        menu.addItem(closeItem)
+
         return menu
     }
 
