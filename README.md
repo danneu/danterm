@@ -70,6 +70,17 @@ Add the snippet for your shell to opt in. It's zero-cost when not running inside
 <summary>Zsh (~/.zshrc)</summary>
 
 ```zsh
+# Restore scrollback from previous DanTerm session
+if [[ -n "$DANTERM_RESTORE_SCROLLBACK_FILE" ]]; then
+  _danterm_sbf="$DANTERM_RESTORE_SCROLLBACK_FILE"
+  unset DANTERM_RESTORE_SCROLLBACK_FILE
+  if [[ -r "$_danterm_sbf" ]]; then
+    /bin/cat -- "$_danterm_sbf" 2>/dev/null || true
+    /bin/rm -f -- "$_danterm_sbf" >/dev/null 2>&1 || true
+  fi
+  unset _danterm_sbf
+fi
+
 # Report current command to DanTerm.app
 if [[ -n "$DANTERM_TOKEN" ]]; then
   typeset -g _danterm_tok="$DANTERM_TOKEN"
@@ -94,6 +105,16 @@ fi
 <summary>Fish (~/.config/fish/config.fish)</summary>
 
 ```fish
+# Restore scrollback from previous DanTerm session
+if set -q DANTERM_RESTORE_SCROLLBACK_FILE
+  set -l f $DANTERM_RESTORE_SCROLLBACK_FILE
+  set -e DANTERM_RESTORE_SCROLLBACK_FILE
+  if test -r "$f"
+    /bin/cat -- "$f" 2>/dev/null; or true
+    /bin/rm -f -- "$f" >/dev/null 2>&1; or true
+  end
+end
+
 # Report current command to DanTerm.app
 if set -q DANTERM_TOKEN
   set -g _danterm_tok $DANTERM_TOKEN

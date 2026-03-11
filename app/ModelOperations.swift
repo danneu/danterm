@@ -422,7 +422,8 @@ func toSnapshot(_ model: AppModel) -> AppModelSnapshot {
                     id: paneId.rawValue.uuidString,
                     title: pane.title,
                     cwd: abbrevCwd,
-                    launch: launch
+                    launch: launch,
+                    scrollback: nil
                 ))
             }
 
@@ -467,6 +468,35 @@ private func toSplitNodeSnapshot(_ node: SplitNodeModel) -> SplitNodeSnapshot {
             ratio: Double(ratio)
         )
     }
+}
+
+// MARK: - Scrollback Truncation
+
+/// Truncate scrollback text to the last `maxLines` lines and `maxChars` characters.
+/// Returns nil for empty/whitespace-only input.
+func truncateScrollback(_ text: String, maxLines: Int = 4000, maxChars: Int = 400_000) -> String? {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+
+    var result = text
+
+    // Keep the last maxLines lines
+    let lines = result.split(separator: "\n", omittingEmptySubsequences: false)
+    if lines.count > maxLines {
+        result = lines.suffix(maxLines).joined(separator: "\n")
+    }
+
+    // If still over maxChars, take last maxChars breaking at nearest newline
+    if result.count > maxChars {
+        let tail = result.suffix(maxChars)
+        if let newlineIdx = tail.firstIndex(of: "\n") {
+            result = String(tail[tail.index(after: newlineIdx)...])
+        } else {
+            result = String(tail)
+        }
+    }
+
+    return result
 }
 
 // MARK: - DanTerm Event Protocol

@@ -18,6 +18,8 @@ class AppRuntime {
     /// The custom bell button set as the toolbar item's view. Owns the badge directly.
     weak var alertsBellButton: BellToolbarButton?
     private var dragCoordinator: PaneDragCoordinator?
+    private var replayFiles: [PaneId: URL] = [:]
+    private static let replayDirectoryName = "danterm-scrollback"
 
     init(ghosttyApp: GhosttyApp) {
         self.ghosttyApp = ghosttyApp
@@ -76,6 +78,7 @@ class AppRuntime {
 
         case .destroySurface(let paneId):
             tokenStore.remove(paneId)
+            cleanupReplayFile(for: paneId)
             if let view = surfaces.removeValue(forKey: paneId) {
                 view.closeSurface()
             }
@@ -121,7 +124,29 @@ class AppRuntime {
             )
             enqueueNotificationRequest(request)
 
-        case .exportState(let initFile):
+        case .exportState(let snapshot):
+            // Enrich pane snapshots with scrollback from live surfaces
+            let enrichedPanes: [PaneSnapshot] = snapshot.panes.map { ps in
+                guard let idStr = ps.id,
+                      let uuid = UUID(uuidString: idStr),
+                      let view = surfaces[PaneId(rawValue: uuid)],
+                      let surface = view.surface,
+                      let rawText = readScrollbackText(surface: surface),
+                      let scrollback = truncateScrollback(rawText) else {
+                    return ps
+                }
+                return PaneSnapshot(
+                    id: ps.id, title: ps.title, cwd: ps.cwd,
+                    launch: ps.launch, scrollback: scrollback
+                )
+            }
+            let enrichedSnapshot = AppModelSnapshot(
+                groups: snapshot.groups,
+                panes: enrichedPanes,
+                selectedTabId: snapshot.selectedTabId
+            )
+            let initFile = AppInitFile(version: 1, model: enrichedSnapshot)
+
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data: Data
@@ -191,6 +216,9 @@ class AppRuntime {
             }
 
         case .terminate:
+            for paneId in replayFiles.keys {
+                cleanupReplayFile(for: paneId)
+            }
             NSApp.terminate(nil)
 
         case .activateApp:
@@ -246,6 +274,48 @@ class AppRuntime {
                 break
             }
         }
+    }
+
+    // MARK: - Scrollback Replay Files
+
+    /// Read full scrollback text from a ghostty surface using line-based selection.
+    private func readScrollbackText(surface: ghostty_surface_t) -> String? {
+        let topLeft = ghostty_point_s(tag: GHOSTTY_POINT_SCREEN, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0)
+        let bottomRight = ghostty_point_s(tag: GHOSTTY_POINT_SCREEN, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0)
+        let selection = ghostty_selection_s(top_left: topLeft, bottom_right: bottomRight, rectangle: false)
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_text(surface, selection, &text) else { return nil }
+        defer { ghostty_surface_free_text(surface, &text) }
+        guard let ptr = text.text, text.text_len > 0 else { return nil }
+        let len = Int(text.text_len)
+        return ptr.withMemoryRebound(to: UInt8.self, capacity: len) { reboundPtr in
+            String(bytes: UnsafeBufferPointer(start: reboundPtr, count: len), encoding: .utf8)
+        }
+    }
+
+    /// Write scrollback text to a temp file for shell replay. Returns the file URL.
+    private func writeReplayFile(scrollback: String) -> URL? {
+        guard let data = scrollback.data(using: .utf8) else { return nil }
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(Self.replayDirectoryName, isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fileURL = dir.appendingPathComponent(UUID().uuidString).appendingPathExtension("txt")
+        guard (try? data.write(to: fileURL, options: .atomic)) != nil else { return nil }
+        return fileURL
+    }
+
+    /// Delete the replay file for a pane if one exists.
+    private func cleanupReplayFile(for paneId: PaneId) {
+        if let url = replayFiles.removeValue(forKey: paneId) {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    /// Delete all files in $TMPDIR/danterm-scrollback/ from prior sessions.
+    func cleanupStaleReplayDirectory() {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(Self.replayDirectoryName, isDirectory: true)
+        try? FileManager.default.removeItem(at: dir)
     }
 
     // MARK: - Pane Drag
@@ -333,11 +403,19 @@ class AppRuntime {
                     let ps = built.paneSnapshots[paneId]
                     let resolved = ps.map { resolveLaunch($0) }
                     let token = tokenStore.generate(for: paneId)
-                    let view = TerminalView(ghosttyApp: ghosttyApp, workingDirectory: resolved?.cwd, command: resolved?.command, envVars: [("DANTERM_TOKEN", token)])
+                    var envVars: [(String, String)] = [("DANTERM_TOKEN", token)]
+                    if let scrollback = ps?.scrollback {
+                        if let replayURL = writeReplayFile(scrollback: scrollback) {
+                            replayFiles[paneId] = replayURL
+                            envVars.append(("DANTERM_RESTORE_SCROLLBACK_FILE", replayURL.path))
+                        }
+                    }
+                    let view = TerminalView(ghosttyApp: ghosttyApp, workingDirectory: resolved?.cwd, command: resolved?.command, envVars: envVars)
                     view.bridge.paneId = paneId
                     view.runtime = self
                     surfaces[paneId] = view
                     if view.surface == nil {
+                        cleanupReplayFile(for: paneId)
                         send(.surfaceCreationFailed(paneId: paneId))
                         return
                     }

@@ -81,6 +81,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
         runtime.sidebarView = sidebarView
         runtime.contentArea = contentArea
 
+        // Clean up stale replay files from prior sessions
+        runtime.cleanupStaleReplayDirectory()
+
         // Bootstrap from snapshot or create default tab
         if let snapshot = initSnapshot {
             runtime.bootstrapFromSnapshot(snapshot)

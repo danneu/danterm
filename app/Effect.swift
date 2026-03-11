@@ -17,7 +17,7 @@ enum Effect {
     case setWindowTitle(String)
 
     // Export
-    case exportState(AppInitFile)
+    case exportState(AppModelSnapshot)
 
     // System
     case sendNotification(alertId: AlertId, title: String, body: String, tabId: TabId, paneId: PaneId)

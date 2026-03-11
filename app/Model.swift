@@ -180,6 +180,7 @@ struct PaneSnapshot: Codable {
     let title: String?
     let cwd: String?
     let launch: PaneLaunchSnapshot?
+    let scrollback: String?  // optional for backward compat
 }
 
 struct PaneLaunchSnapshot: Codable {

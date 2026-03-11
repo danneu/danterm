@@ -344,8 +344,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
     // MARK: - Export
 
     case .exportState:
-        let initFile = toInitFile(model)
-        return [.exportState(initFile)]
+        return [.exportState(toSnapshot(model))]
 
     // MARK: - Ghostty Callbacks
 

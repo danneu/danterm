@@ -214,35 +214,73 @@ func exportTests() {
         try expectEqual(model.panes[paneId]?.lastCommand, "vim")
     }
 
+    // MARK: - truncateScrollback
+
+    test("truncateScrollback: empty string returns nil") {
+        try expect(truncateScrollback("") == nil, "empty should be nil")
+    }
+
+    test("truncateScrollback: whitespace-only returns nil") {
+        try expect(truncateScrollback("  \n  \n  ") == nil, "whitespace should be nil")
+    }
+
+    test("truncateScrollback: text under limits returned as-is") {
+        let text = "line1\nline2\nline3"
+        try expectEqual(truncateScrollback(text), text)
+    }
+
+    test("truncateScrollback: keeps last maxLines lines") {
+        let lines = (1...5000).map { "line \($0)" }
+        let text = lines.joined(separator: "\n")
+        let result = truncateScrollback(text, maxLines: 4000)!
+        let resultLines = result.split(separator: "\n", omittingEmptySubsequences: false)
+        try expectEqual(resultLines.count, 4000)
+        try expectEqual(String(resultLines.first!), "line 1001")
+        try expectEqual(String(resultLines.last!), "line 5000")
+    }
+
+    test("truncateScrollback: over maxChars truncates at newline") {
+        // Build text that's under line limit but over char limit
+        let longLine = String(repeating: "x", count: 100)
+        let lines = (1...100).map { _ in longLine }
+        let text = lines.joined(separator: "\n")
+        // maxChars=500 with 100-char lines + newlines
+        let result = truncateScrollback(text, maxLines: 10000, maxChars: 500)!
+        try expect(result.count <= 500, "result should be at most maxChars")
+        // Should break at a newline boundary
+        try expect(!result.hasPrefix("\n"), "should not start with newline")
+    }
+
     // MARK: - exportState Msg/Effect
 
-    test("exportState effect matches toInitFile output") {
+    test("exportState effect contains AppModelSnapshot") {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         model.panes[paneId]?.lastCommand = "vim"
         model.panes[paneId]?.cwd = NSHomeDirectory() + "/projects"
 
-        let expected = toInitFile(model)
+        let expected = toSnapshot(model)
         let effects = update(&model, .exportState)
         try expectEqual(effects.count, 1)
-        guard case .exportState(let initFile) = effects[0] else {
+        guard case .exportState(let snapshot) = effects[0] else {
             throw TestFailure(message: "expected .exportState effect")
         }
-        try expectEqual(initFile.version, expected.version)
-        try expectEqual(initFile.model.groups.count, expected.model.groups.count)
-        try expectEqual(initFile.model.panes.count, expected.model.panes.count)
-        try expectEqual(initFile.model.selectedTabId, expected.model.selectedTabId)
+        try expectEqual(snapshot.groups.count, expected.groups.count)
+        try expectEqual(snapshot.panes.count, expected.panes.count)
+        try expectEqual(snapshot.selectedTabId, expected.selectedTabId)
         // Verify IDs match
-        try expectEqual(initFile.model.groups[0].id, expected.model.groups[0].id)
-        try expectEqual(initFile.model.groups[0].tabs[0].id, expected.model.groups[0].tabs[0].id)
-        try expectEqual(initFile.model.groups[0].tabs[0].focusedPaneId, expected.model.groups[0].tabs[0].focusedPaneId)
+        try expectEqual(snapshot.groups[0].id, expected.groups[0].id)
+        try expectEqual(snapshot.groups[0].tabs[0].id, expected.groups[0].tabs[0].id)
+        try expectEqual(snapshot.groups[0].tabs[0].focusedPaneId, expected.groups[0].tabs[0].focusedPaneId)
         // Verify launch fields
-        try expectEqual(initFile.model.panes[0].id, expected.model.panes[0].id)
-        try expectEqual(initFile.model.panes[0].launch?.command, "vim")
-        try expectEqual(initFile.model.panes[0].launch?.cwd, "~/projects")
+        try expectEqual(snapshot.panes[0].id, expected.panes[0].id)
+        try expectEqual(snapshot.panes[0].launch?.command, "vim")
+        try expectEqual(snapshot.panes[0].launch?.cwd, "~/projects")
+        // Pure snapshot has nil scrollback (enrichment happens in runtime)
+        try expect(snapshot.panes[0].scrollback == nil, "pure snapshot should have nil scrollback")
         // Verify rootNode type
-        if case .leaf(let snapPaneId) = initFile.model.groups[0].tabs[0].rootNode {
+        if case .leaf(let snapPaneId) = snapshot.groups[0].tabs[0].rootNode {
             try expectEqual(snapPaneId, paneId.rawValue.uuidString)
         } else {
             throw TestFailure(message: "expected leaf rootNode")
