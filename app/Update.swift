@@ -48,6 +48,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         effects.append(.rebuildContentView)
         effects.append(.reloadSidebar)
         effects.append(contentsOf: selectionSyncEffects(for: model))
+        // Persist new tab + pane + selection so a crash doesn't lose the tab.
         effects.append(.scheduleCheckpoint)
         return effects
 
@@ -75,6 +76,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         effects.append(.rebuildContentView)
         effects.append(.reloadSidebar)
         effects.append(contentsOf: selectionSyncEffects(for: model))
+        // Persist which tab is selected so restore opens the right one.
         effects.append(.scheduleCheckpoint)
         return effects
 
@@ -127,6 +129,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             effects.append(contentsOf: selectionSyncEffects(for: model))
         }
         effects.append(.reloadSidebar)
+        // Persist tab removal + new selection so closed tabs don't reappear on restore.
         effects.append(.scheduleCheckpoint)
         return effects
 
@@ -153,6 +156,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return [
             .createSurface(paneId: newPaneId, cwd: cwd, command: nil),
             .rebuildContentView,
+            // Persist new split tree so the pane layout survives a crash.
             .scheduleCheckpoint,
         ]
 
@@ -185,6 +189,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
 
         effects.append(.rebuildContentView)
+        // Persist pane removal + updated tree so closed panes stay closed on restore.
         effects.append(.scheduleCheckpoint)
         return effects
 
@@ -215,6 +220,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             tab.focusedPaneId = source
             tab.isZoomed = false
         }
+        // Persist rearranged split tree so pane positions survive a crash.
         return [.rebuildContentView, .scheduleCheckpoint]
 
     case .movePaneToTab(let paneId, let targetTabId):
@@ -272,6 +278,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         effects.append(.reloadSidebar)
         effects.append(contentsOf: selectionSyncEffects(for: model))
         effects.append(.makeFirstResponder(paneId: paneId))
+        // Persist cross-tab pane move so the new tree layout survives a crash.
         effects.append(.scheduleCheckpoint)
         return effects
 
@@ -339,11 +346,13 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         effects.append(.reloadSidebar)
         effects.append(contentsOf: selectionSyncEffects(for: model))
         effects.append(.makeFirstResponder(paneId: paneId))
+        // Persist pane-to-new-tab extraction so the tab structure survives a crash.
         effects.append(.scheduleCheckpoint)
         return effects
 
     case .setTabColor(let tabId, let color):
         updateTab(tabId, in: &model) { t in t.color = color }
+        // Persist tab color so it's restored on next launch.
         return [.reloadSidebarRow(tabId: tabId), .scheduleCheckpoint]
 
     case .renameTab(let id, let name):
@@ -354,6 +363,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         if id == model.selectedTabId {
             effects.append(contentsOf: selectionSyncEffects(for: model))
         }
+        // Persist custom title so user's rename survives a crash.
         effects.append(.scheduleCheckpoint)
         return effects
 
@@ -394,6 +404,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 effects.append(.reloadSidebarGroupRow(groupId: group.id))
             }
         }
+        // Persist focused pane so restore opens the right pane within each tab.
         effects.append(.scheduleCheckpoint)
         return effects
 
@@ -401,6 +412,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
     case .commandStarted(let paneId, let command):
         model.panes[paneId]?.lastCommand = command
+        // Persist last command so restore can prefill it in the shell.
         return [.scheduleCheckpoint]
 
     // MARK: - Export
@@ -413,6 +425,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
     case .surfaceTitle(let paneId, let title):
         model.panes[paneId]?.title = title
         guard let tab = tabForPane(paneId, in: model), tab.focusedPaneId == paneId else {
+            // Persist pane title even for unfocused panes — it appears in restore.
             return [.scheduleCheckpoint]
         }
         let abbrev = abbreviateHome(title)
@@ -422,12 +435,15 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             let updatedTab = selectedTab(in: model)!
             effects.append(.setWindowTitle(windowTitle(for: updatedTab)))
         }
+        // Persist pane title so restored tabs show the correct name.
         effects.append(.scheduleCheckpoint)
         return effects
 
     case .surfaceCwd(let paneId, let cwd):
         model.panes[paneId]?.cwd = cwd
         guard let tab = tabForPane(paneId, in: model), tab.focusedPaneId == paneId else {
+            // Persist cwd even for unfocused panes — it determines the shell's starting
+            // directory on restore.
             return [.scheduleCheckpoint]
         }
         let abbrev = abbreviateHome(cwd)
@@ -437,6 +453,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             let updatedTab = selectedTab(in: model)!
             effects.append(.setWindowTitle(windowTitle(for: updatedTab)))
         }
+        // Persist cwd so restored panes open in the correct directory.
         effects.append(.scheduleCheckpoint)
         return effects
 
@@ -515,6 +532,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 }
                 var effects: [Effect] = [.rebuildContentView, .reloadSidebar]
                 effects.append(contentsOf: selectionSyncEffects(for: model))
+                // Persist tab removal after a failed surface so it doesn't reappear.
                 effects.append(.scheduleCheckpoint)
                 return effects
             }
@@ -623,16 +641,19 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 effects.append(contentsOf: selectionSyncEffects(for: model))
             }
             effects.append(.reloadSidebar)
+            // Persist group deletion + tab removal so they don't reappear.
             effects.append(.scheduleCheckpoint)
             return effects
         }
 
         model.groups.remove(at: idx)
+        // Persist group deletion (tabs moved to default group).
         return [.reloadSidebar, .scheduleCheckpoint]
 
     case .renameGroup(let id, let name):
         guard let idx = model.groups.firstIndex(where: { $0.id == id }) else { return [] }
         model.groups[idx].name = name
+        // Persist group name so it appears correctly on restore.
         return [.reloadSidebar, .scheduleCheckpoint]
 
     case .moveTab(let tabId, let toGroupId, let atIndex):
@@ -646,6 +667,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         let clampedIndex = max(0, min(adjustedIndex, model.groups[dstGroupIdx].tabs.count))
         model.groups[dstGroupIdx].tabs.insert(tab, at: clampedIndex)
+        // Persist tab's new group membership so it restores in the right group.
         return [.reloadSidebar, .scheduleCheckpoint]
 
     case .reorderGroup(let groupId, let toIndex):
@@ -654,22 +676,24 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let clamped = max(1, min(toIndex, model.groups.count - 1))
         let group = model.groups.remove(at: currentIdx)
         model.groups.insert(group, at: clamped)
+        // Persist group ordering so sidebar layout survives a restart.
         return [.reloadSidebar, .scheduleCheckpoint]
 
     case .toggleGroupCollapse(let groupId):
         guard let idx = model.groups.firstIndex(where: { $0.id == groupId }) else { return [] }
         model.groups[idx].isCollapsed.toggle()
+        // Persist collapse state so sidebar groups restore expanded/collapsed.
         return [.scheduleCheckpoint]
 
     case .toggleZoomPane:
         guard let tab = selectedTab(in: model) else { return [] }
         if tab.isZoomed {
             updateSelectedTab(&model) { t in t.isZoomed = false }
-            return [.rebuildContentView, .scheduleCheckpoint]
+            return [.rebuildContentView]
         }
         if case .split = tab.rootNode {
             updateSelectedTab(&model) { t in t.isZoomed = true }
-            return [.rebuildContentView, .scheduleCheckpoint]
+            return [.rebuildContentView]
         }
         return []
 
@@ -679,6 +703,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         updateSelectedTab(&model) { tab in
             tab.rootNode = setRatio(tab.rootNode, splitId: splitId, ratio: ratio)
         }
+        // Persist split ratio so pane proportions are restored accurately.
         return [.scheduleCheckpoint]
     }
 }

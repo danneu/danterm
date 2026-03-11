@@ -114,13 +114,13 @@ func checkpointTests() {
                    "toggleGroupCollapse should emit scheduleCheckpoint")
     }
 
-    test("toggleZoomPane emits scheduleCheckpoint when zooming") {
+    test("toggleZoomPane does not emit scheduleCheckpoint — zoom is transient") {
         var model = makeModel()
         createTab(&model)
         update(&model, .splitPane(direction: .horizontal))
         let effects = update(&model, .toggleZoomPane)
-        try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
-                   "toggleZoomPane should emit scheduleCheckpoint")
+        try expect(!hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+                   "toggleZoomPane should not emit scheduleCheckpoint")
     }
 
     test("splitRatioChanged emits scheduleCheckpoint") {
