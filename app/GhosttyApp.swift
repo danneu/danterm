@@ -203,6 +203,27 @@ class GhosttyApp {
             }
             return true
 
+        case GHOSTTY_ACTION_PROGRESS_REPORT:
+            if let surface = Self.targetSurface(target),
+               let bridge = Self.surfaceBridge(from: surface),
+               let paneId = bridge.paneId {
+                let raw = action.action.progress_report
+                let progress: UInt8? = raw.progress >= 0 ? UInt8(raw.progress) : nil
+                let state: ProgressState?
+                switch raw.state {
+                case GHOSTTY_PROGRESS_STATE_REMOVE:        state = nil
+                case GHOSTTY_PROGRESS_STATE_SET:           state = .set(percent: progress ?? 0)
+                case GHOSTTY_PROGRESS_STATE_ERROR:         state = .error(percent: progress)
+                case GHOSTTY_PROGRESS_STATE_INDETERMINATE: state = .indeterminate
+                case GHOSTTY_PROGRESS_STATE_PAUSE:         state = .pause(percent: progress)
+                default:                                   state = nil
+                }
+                DispatchQueue.main.async { [weak self] in
+                    self?.runtime?.send(.surfaceProgress(paneId: paneId, state: state))
+                }
+            }
+            return true
+
         case GHOSTTY_ACTION_DESKTOP_NOTIFICATION:
             if let surface = Self.targetSurface(target),
                let bridge = Self.surfaceBridge(from: surface),

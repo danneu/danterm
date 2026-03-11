@@ -36,6 +36,15 @@ struct AlertModel: Equatable {
     var isUnread: Bool
 }
 
+// MARK: - Progress State
+
+enum ProgressState: Equatable {
+    case set(percent: UInt8)       // 0–100
+    case indeterminate
+    case error(percent: UInt8?)
+    case pause(percent: UInt8?)
+}
+
 // MARK: - Model
 
 struct PaneModel: Equatable {
@@ -43,6 +52,7 @@ struct PaneModel: Equatable {
     var title: String = "Terminal"
     var cwd: String?
     var lastCommand: String?
+    var progress: ProgressState? = nil
 }
 
 indirect enum SplitNodeModel: Equatable {

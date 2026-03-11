@@ -12,6 +12,13 @@ class PaneWrapperView: NSView {
     private let hasSplits: Bool
     private weak var runtime: AppRuntime?
 
+    // Progress indicator
+    private let progressIndicator: ProgressIndicatorView
+    private var currentProgress: ProgressState?
+    // Constraint for label leading when indicator is visible vs hidden
+    private var labelLeadingToIndicator: NSLayoutConstraint!
+    private var labelLeadingToToolbar: NSLayoutConstraint!
+
     init(paneId: PaneId, terminalView: TerminalView, isZoomed: Bool, hasSplits: Bool, runtime: AppRuntime?) {
         self.paneId = paneId
         self.terminalView = terminalView
@@ -20,6 +27,7 @@ class PaneWrapperView: NSView {
         self.isZoomed = isZoomed
         self.hasSplits = hasSplits
         self.runtime = runtime
+        self.progressIndicator = ProgressIndicatorView()
 
         // Menu button (always visible)
         let mb = NSButton()
@@ -66,6 +74,11 @@ class PaneWrapperView: NSView {
         toolbar.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.8).cgColor
         addSubview(toolbar)
 
+        // Progress indicator (before label)
+        progressIndicator.translatesAutoresizingMaskIntoConstraints = false
+        progressIndicator.isHidden = true
+        toolbar.addSubview(progressIndicator)
+
         // Label
         toolbarLabel.translatesAutoresizingMaskIntoConstraints = false
         toolbarLabel.font = NSFont.systemFont(ofSize: 11)
@@ -94,6 +107,11 @@ class PaneWrapperView: NSView {
         // Label trailing anchors to the first trailing button
         let labelTrailingAnchor = unzoomButton?.leadingAnchor ?? menuButton.leadingAnchor
 
+        // Label leading constraints (swapped based on indicator visibility)
+        labelLeadingToToolbar = toolbarLabel.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 8)
+        labelLeadingToIndicator = toolbarLabel.leadingAnchor.constraint(equalTo: progressIndicator.trailingAnchor, constant: 4)
+        labelLeadingToToolbar.isActive = true
+
         var constraints = [
             // Toolbar
             toolbar.topAnchor.constraint(equalTo: topAnchor),
@@ -101,9 +119,14 @@ class PaneWrapperView: NSView {
             toolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
             toolbar.heightAnchor.constraint(equalToConstant: 22),
 
+            // Progress indicator
+            progressIndicator.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+            progressIndicator.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 8),
+            progressIndicator.widthAnchor.constraint(equalToConstant: 12),
+            progressIndicator.heightAnchor.constraint(equalToConstant: 12),
+
             // Label within toolbar
             toolbarLabel.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            toolbarLabel.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 8),
             toolbarLabel.trailingAnchor.constraint(lessThanOrEqualTo: labelTrailingAnchor, constant: -4),
 
             // Drag handle fills toolbar
@@ -141,8 +164,46 @@ class PaneWrapperView: NSView {
         fatalError("init(coder:) not implemented")
     }
 
-    func updateToolbar(title: String, cwd: String?) {
+    func updateToolbar(title: String, cwd: String?, progress: ProgressState? = nil) {
         toolbarLabel.stringValue = formatToolbarLabel(title: title, cwd: cwd)
+        applyProgressState(progress)
+    }
+
+    private func applyProgressState(_ state: ProgressState?) {
+        guard state != currentProgress else { return }
+        currentProgress = state
+
+        guard let state = state else {
+            // Remove indicator
+            progressIndicator.isHidden = true
+            progressIndicator.removeSpinAnimation()
+            labelLeadingToIndicator.isActive = false
+            labelLeadingToToolbar.isActive = true
+            return
+        }
+
+        progressIndicator.isHidden = false
+        labelLeadingToToolbar.isActive = false
+        labelLeadingToIndicator.isActive = true
+
+        switch state {
+        case .set(let percent):
+            progressIndicator.showDeterminate(percent: percent, color: .controlAccentColor)
+        case .indeterminate:
+            progressIndicator.showIndeterminate(color: .controlAccentColor)
+        case .error(let percent):
+            if let percent = percent {
+                progressIndicator.showDeterminate(percent: percent, color: .systemRed)
+            } else {
+                progressIndicator.showIndeterminate(color: .systemRed)
+            }
+        case .pause(let percent):
+            if let percent = percent {
+                progressIndicator.showDeterminate(percent: percent, color: .systemOrange)
+            } else {
+                progressIndicator.showDeterminate(percent: 100, color: .systemOrange)
+            }
+        }
     }
 
     @objc private func showPaneMenu() {
@@ -267,6 +328,103 @@ class ToolbarDragHandleView: NSView {
 /// Used for the toolbar label so the drag handle underneath receives hits.
 class NonHitTestingLabel: NSTextField {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+// MARK: - Progress Indicator
+
+/// Small radial progress ring (12x12pt) for the pane toolbar.
+/// Non-hit-testing so the drag handle underneath still receives events.
+class ProgressIndicatorView: NSView {
+    private let trackLayer = CAShapeLayer()
+    private let arcLayer = CAShapeLayer()
+    private let lineWidth: CGFloat = 1.5
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.addSublayer(trackLayer)
+        layer?.addSublayer(arcLayer)
+
+        trackLayer.fillColor = nil
+        trackLayer.lineWidth = lineWidth
+        trackLayer.lineCap = .round
+
+        arcLayer.fillColor = nil
+        arcLayer.lineWidth = lineWidth
+        arcLayer.lineCap = .round
+        arcLayer.strokeStart = 0
+        arcLayer.strokeEnd = 0
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) not implemented")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        layoutLayers()
+    }
+
+    private func layoutLayers() {
+        let size = bounds.size
+        guard size.width > 0, size.height > 0 else { return }
+        let inset = lineWidth / 2
+        let rect = bounds.insetBy(dx: inset, dy: inset)
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) / 2
+        // Start from top (12 o'clock), go clockwise
+        let path = CGPath(ellipseIn: CGRect(
+            x: center.x - radius, y: center.y - radius,
+            width: radius * 2, height: radius * 2
+        ), transform: nil)
+        trackLayer.path = path
+        arcLayer.path = path
+        trackLayer.frame = bounds
+        arcLayer.frame = bounds
+
+        // Rotate so stroke starts at 12 o'clock (default ellipse starts at 3 o'clock)
+        let rotation = CATransform3DMakeRotation(-.pi / 2, 0, 0, 1)
+        trackLayer.transform = rotation
+        // For arcLayer, preserve any existing spin animation transform
+        if arcLayer.animation(forKey: "spin") == nil {
+            arcLayer.transform = rotation
+        }
+    }
+
+    func showDeterminate(percent: UInt8, color: NSColor) {
+        removeSpinAnimation()
+        trackLayer.isHidden = false
+        trackLayer.strokeColor = color.withAlphaComponent(0.2).cgColor
+        arcLayer.strokeColor = color.cgColor
+        let rotation = CATransform3DMakeRotation(-.pi / 2, 0, 0, 1)
+        arcLayer.transform = rotation
+
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.15)
+        arcLayer.strokeEnd = CGFloat(percent) / 100
+        CATransaction.commit()
+    }
+
+    func showIndeterminate(color: NSColor) {
+        trackLayer.isHidden = true
+        arcLayer.strokeColor = color.cgColor
+        arcLayer.strokeEnd = 0.25
+
+        guard arcLayer.animation(forKey: "spin") == nil else { return }
+        let rotation = CABasicAnimation(keyPath: "transform.rotation.z")
+        rotation.fromValue = -CGFloat.pi / 2
+        rotation.toValue = -CGFloat.pi / 2 + CGFloat.pi * 2
+        rotation.duration = 0.8
+        rotation.repeatCount = .infinity
+        rotation.isRemovedOnCompletion = false
+        arcLayer.add(rotation, forKey: "spin")
+    }
+
+    func removeSpinAnimation() {
+        arcLayer.removeAnimation(forKey: "spin")
+    }
 }
 
 class PaneToolbarButton: NSButton {

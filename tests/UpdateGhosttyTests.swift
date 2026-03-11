@@ -241,6 +241,63 @@ func ghosttyTests() {
         }, "second desktop notification should be throttled")
     }
 
+    // MARK: - Progress
+
+    test("testSurfaceProgressSetStoresState") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+
+        let effects = update(&model, .surfaceProgress(paneId: paneId, state: .set(percent: 50)))
+        try expectEqual(model.panes[paneId]?.progress, .set(percent: 50))
+        try expectEqual(effects.count, 0, "no effects from progress update")
+    }
+
+    test("testSurfaceProgressNilClearsState") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .surfaceProgress(paneId: paneId, state: .set(percent: 75)))
+        try expectEqual(model.panes[paneId]?.progress, .set(percent: 75))
+
+        update(&model, .surfaceProgress(paneId: paneId, state: nil))
+        try expect(model.panes[paneId]?.progress == nil, "progress should be cleared")
+    }
+
+    test("testSurfaceProgressUnknownPaneIsNoop") {
+        var model = makeModel()
+        createTab(&model)
+        let unknownPaneId = PaneId()
+
+        let effects = update(&model, .surfaceProgress(paneId: unknownPaneId, state: .set(percent: 50)))
+        try expectEqual(effects.count, 0, "no effects for unknown pane")
+    }
+
+    test("testProgressStateSurvivesTitleUpdate") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .surfaceProgress(paneId: paneId, state: .indeterminate))
+        update(&model, .surfaceTitle(paneId: paneId, title: "vim"))
+
+        try expectEqual(model.panes[paneId]?.progress, .indeterminate, "progress should survive title update")
+        try expectEqual(model.panes[paneId]?.title, "vim")
+    }
+
+    test("testProgressStateSurvivesCwdUpdate") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .surfaceProgress(paneId: paneId, state: .error(percent: 80)))
+        update(&model, .surfaceCwd(paneId: paneId, cwd: "/tmp"))
+
+        try expectEqual(model.panes[paneId]?.progress, .error(percent: 80), "progress should survive cwd update")
+        try expectEqual(model.panes[paneId]?.cwd, "/tmp")
+    }
+
     test("testSurfaceClosed") {
         var model = makeModel()
         createTab(&model)

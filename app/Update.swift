@@ -377,6 +377,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         return effects
 
+    case .surfaceProgress(let paneId, let state):
+        model.panes[paneId]?.progress = state
+        return []
+
     case .surfaceBell(let paneId):
         // No alert for bell on the focused pane of the selected tab
         if let tab = selectedTab(in: model), tab.focusedPaneId == paneId {

@@ -47,9 +47,9 @@ class AppRuntime {
             cancelPaneDrag()
         }
 
-        // Refresh toolbar text after title/cwd changes
+        // Refresh toolbar text after title/cwd/progress changes
         switch translatedMsg {
-        case .surfaceTitle(let paneId, _), .surfaceCwd(let paneId, _):
+        case .surfaceTitle(let paneId, _), .surfaceCwd(let paneId, _), .surfaceProgress(let paneId, _):
             refreshPaneToolbar(for: paneId)
         default:
             break
@@ -356,14 +356,16 @@ class AppRuntime {
         guard let contentArea = contentArea else { return }
         forEachPaneWrapper(in: contentArea) { wrapper in
             let (title, cwd) = paneToolbarText(for: wrapper.paneId, in: model)
-            wrapper.updateToolbar(title: title, cwd: cwd)
+            let progress = model.panes[wrapper.paneId]?.progress
+            wrapper.updateToolbar(title: title, cwd: cwd, progress: progress)
         }
     }
 
     private func refreshPaneToolbar(for paneId: PaneId) {
         guard let contentArea = contentArea else { return }
         let (title, cwd) = paneToolbarText(for: paneId, in: model)
-        findPaneWrapper(for: paneId, in: contentArea)?.updateToolbar(title: title, cwd: cwd)
+        let progress = model.panes[paneId]?.progress
+        findPaneWrapper(for: paneId, in: contentArea)?.updateToolbar(title: title, cwd: cwd, progress: progress)
     }
 
     private func findPaneWrapper(for paneId: PaneId, in view: NSView) -> PaneWrapperView? {
