@@ -4,9 +4,10 @@ import Cocoa
 import GhosttyKit
 import UserNotifications
 
-class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolbarDelegate, UNUserNotificationCenterDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserNotificationCenterDelegate {
     static let minWindowWidth: CGFloat = 600
     static let minWindowHeight: CGFloat = 300
+    static let minSidebarWidth: CGFloat = 200
 
     var window: NSWindow!
     var ghosttyApp: GhosttyApp!
@@ -14,9 +15,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
     var sidebarView: SidebarView!
     var contentArea: NSView!
     var splitView: NSSplitView!
+    var chromeView: WindowChromeView!
     var initSnapshot: AppModelSnapshot?
     var restoreCommandBehavior: RestoreCommandBehavior = .prefill
-    var alertsBellItem: NSToolbarItem?
 
     // NSApplicationDelegate: finish bootstrapping the Ghostty runtime, main
     // window, and launch-time services once AppKit has started the app.
@@ -36,32 +37,40 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
         // Build menu bar
         buildMenu()
 
-        // Create window
+        // Create window with transparent titlebar
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1000, height: 600),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         window.title = "DanTerm"
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = false
         window.minSize = NSSize(width: Self.minWindowWidth, height: Self.minWindowHeight)
         window.center()
 
-        // Toolbar with sidebar toggle
-        let toolbar = NSToolbar(identifier: "MainToolbar")
-        toolbar.delegate = self
-        toolbar.displayMode = .iconOnly
-        window.toolbar = toolbar
-        window.toolbarStyle = .unified
+        // Custom chrome view (replaces NSToolbar)
+        chromeView = WindowChromeView()
+        chromeView.toggleButton.target = self
+        chromeView.toggleButton.action = #selector(toggleSidebar(_:))
+        chromeView.bellButton.target = self
+        chromeView.bellButton.action = #selector(toggleAlerts(_:))
+        chromeView.addTabButton.target = self
+        chromeView.addTabButton.action = #selector(newTab(_:))
+        chromeView.addGroupButton.target = self
+        chromeView.addGroupButton.action = #selector(newGroup(_:))
 
         // Create split view (sidebar | content)
         splitView = NSSplitView()
         splitView.isVertical = true
         splitView.dividerStyle = .thin
         splitView.delegate = self
+        splitView.translatesAutoresizingMaskIntoConstraints = false
 
         // Sidebar
-        sidebarView = SidebarView(frame: NSRect(x: 0, y: 0, width: 200, height: 600))
+        sidebarView = SidebarView(frame: NSRect(x: 0, y: 0, width: Self.minSidebarWidth, height: 600))
         sidebarView.runtime = runtime
 
         // Content area
@@ -74,16 +83,34 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
         sidebarView.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         contentArea.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        window.contentView = splitView
+        // Root container: chrome view on top, split view below
+        let rootView = NSView()
+        rootView.addSubview(chromeView)
+        rootView.addSubview(splitView)
+
+        NSLayoutConstraint.activate([
+            chromeView.topAnchor.constraint(equalTo: rootView.topAnchor),
+            chromeView.leadingAnchor.constraint(equalTo: rootView.leadingAnchor),
+            chromeView.trailingAnchor.constraint(equalTo: rootView.trailingAnchor),
+
+            splitView.topAnchor.constraint(equalTo: chromeView.bottomAnchor),
+            splitView.leadingAnchor.constraint(equalTo: rootView.leadingAnchor),
+            splitView.trailingAnchor.constraint(equalTo: rootView.trailingAnchor),
+            splitView.bottomAnchor.constraint(equalTo: rootView.bottomAnchor),
+        ])
+
+        window.contentView = rootView
         window.makeKeyAndOrderFront(nil)
 
         // Set divider position after window is visible
-        splitView.setPosition(200, ofDividerAt: 0)
+        splitView.setPosition(Self.minSidebarWidth, ofDividerAt: 0)
+        chromeView.syncWithSidebarState(collapsed: false, sidebarWidth: Self.minSidebarWidth)
 
         // Wire runtime to views
         runtime.window = window
         runtime.sidebarView = sidebarView
         runtime.contentArea = contentArea
+        runtime.chromeView = chromeView
 
         // Clean up stale replay files from prior sessions
         runtime.cleanupStaleReplayDirectory()
@@ -291,59 +318,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
         completionHandler([.banner, .sound, .list])
     }
 
-    // MARK: - NSToolbarDelegate
-
-    private static let sidebarToggleId = NSToolbarItem.Identifier("ToggleSidebar")
-    private static let alertsBellId = NSToolbarItem.Identifier("AlertsBell")
-
-    // System .toggleSidebar only works with NSSplitViewController, so we use a
-    // custom item with the standard sidebar icon and explicit target/action.
-    func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
-        if itemIdentifier == Self.sidebarToggleId {
-            let item = NSToolbarItem(itemIdentifier: Self.sidebarToggleId)
-            item.label = "Toggle Sidebar"
-            item.toolTip = "Toggle Sidebar"
-            item.image = NSImage(systemSymbolName: "sidebar.leading", accessibilityDescription: "Toggle Sidebar")
-            item.target = self
-            item.action = #selector(toggleSidebar(_:))
-            return item
-        }
-        if itemIdentifier == Self.alertsBellId {
-            let item = NSToolbarItem(itemIdentifier: Self.alertsBellId)
-            item.label = "Alerts"
-            item.toolTip = "Alerts"
-            // Use a custom view so we own the badge directly — no view hierarchy walking needed.
-            let bellButton = BellToolbarButton()
-            bellButton.target = self
-            bellButton.action = #selector(toggleAlerts(_:))
-            item.view = bellButton
-            alertsBellItem = item
-            runtime.alertsBellButton = bellButton
-            return item
-        }
-        return nil
-    }
-
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.sidebarToggleId, Self.alertsBellId]
-    }
-
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.sidebarToggleId, Self.alertsBellId]
-    }
-
     @objc func toggleAlerts(_ sender: Any?) {
         runtime.toggleAlertsPopover()
     }
 
-    // Collapse/uncollapse the sidebar in the NSSplitView.
-    // When collapsed, NSSplitView hides the subview so we unhide before restoring position.
+    // Collapse/uncollapse the sidebar in the NSSplitView and sync the chrome.
     @objc func toggleSidebar(_ sender: Any?) {
         if splitView.isSubviewCollapsed(sidebarView) {
             sidebarView.isHidden = false
-            splitView.setPosition(200, ofDividerAt: 0)
+            splitView.setPosition(Self.minSidebarWidth, ofDividerAt: 0)
+            chromeView.syncWithSidebarState(collapsed: false, sidebarWidth: Self.minSidebarWidth)
         } else {
             splitView.setPosition(0, ofDividerAt: 0)
+            chromeView.syncWithSidebarState(collapsed: true, sidebarWidth: 0)
         }
     }
 
@@ -351,7 +338,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
 
     // Sidebar drag bounds: min 150px, max 300px
     func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
-        return 150
+        return Self.minSidebarWidth
     }
 
     func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximumPosition: CGFloat, ofSubviewAt dividerIndex: Int) -> CGFloat {
@@ -366,6 +353,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
     // On window resize, only the content area resizes; sidebar keeps its width
     func splitView(_ splitView: NSSplitView, shouldAdjustSizeOfSubview view: NSView) -> Bool {
         return view !== sidebarView
+    }
+
+    // NSSplitViewDelegate: keep the chrome separator aligned with the divider during drag.
+    func splitViewDidResizeSubviews(_ notification: Notification) {
+        let sidebarWidth = sidebarView.frame.width
+        if splitView.isSubviewCollapsed(sidebarView) {
+            chromeView.syncWithSidebarState(collapsed: true, sidebarWidth: 0)
+        } else {
+            chromeView.syncWithSidebarState(collapsed: false, sidebarWidth: sidebarWidth)
+        }
     }
 
     // MARK: - App Lifecycle

@@ -13,6 +13,9 @@ app/AlertsPopoverView.swift
 app/SplitContainerView.swift
 app/PaneSplitView.swift
 app/PaneWrapperView.swift
+app/BellToolbarButton.swift
+app/TitlebarDragView.swift
+app/WindowChromeView.swift
 app/DragDropInput.swift
 app/DropZone.swift
 app/PaneDragOverlayView.swift

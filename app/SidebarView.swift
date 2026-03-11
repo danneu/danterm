@@ -132,72 +132,17 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
 
-        // Bottom bar with + tab and + group buttons
-        let bottomBar = NSView()
-        bottomBar.translatesAutoresizingMaskIntoConstraints = false
-
-        let separator = NSBox()
-        separator.boxType = .separator
-        separator.translatesAutoresizingMaskIntoConstraints = false
-        bottomBar.addSubview(separator)
-
-        let addTabButton = NSButton(image: NSImage(named: NSImage.addTemplateName)!, target: self, action: #selector(addTabClicked))
-        addTabButton.translatesAutoresizingMaskIntoConstraints = false
-        addTabButton.bezelStyle = .accessoryBarAction
-        addTabButton.isBordered = false
-        addTabButton.imageScaling = .scaleProportionallyDown
-        addTabButton.toolTip = "New Tab"
-        bottomBar.addSubview(addTabButton)
-
-        let addGroupButton = NSButton(image: NSImage(systemSymbolName: "folder.badge.plus", accessibilityDescription: "New Group")!, target: self, action: #selector(addGroupClicked))
-        addGroupButton.translatesAutoresizingMaskIntoConstraints = false
-        addGroupButton.bezelStyle = .accessoryBarAction
-        addGroupButton.isBordered = false
-        addGroupButton.imageScaling = .scaleProportionallyDown
-        addGroupButton.toolTip = "New Group"
-        bottomBar.addSubview(addGroupButton)
-
-        NSLayoutConstraint.activate([
-            separator.topAnchor.constraint(equalTo: bottomBar.topAnchor),
-            separator.leadingAnchor.constraint(equalTo: bottomBar.leadingAnchor),
-            separator.trailingAnchor.constraint(equalTo: bottomBar.trailingAnchor),
-            addTabButton.leadingAnchor.constraint(equalTo: bottomBar.leadingAnchor, constant: 4),
-            addTabButton.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
-            addTabButton.widthAnchor.constraint(equalToConstant: 24),
-            addTabButton.heightAnchor.constraint(equalToConstant: 24),
-            addGroupButton.leadingAnchor.constraint(equalTo: addTabButton.trailingAnchor, constant: 4),
-            addGroupButton.centerYAnchor.constraint(equalTo: bottomBar.centerYAnchor),
-            addGroupButton.widthAnchor.constraint(equalToConstant: 24),
-            addGroupButton.heightAnchor.constraint(equalToConstant: 24),
-        ])
-
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scrollView)
-        addSubview(bottomBar)
         NSLayoutConstraint.activate([
             scrollView.topAnchor.constraint(equalTo: topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: bottomBar.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            bottomBar.bottomAnchor.constraint(equalTo: bottomAnchor),
-            bottomBar.leadingAnchor.constraint(equalTo: leadingAnchor),
-            bottomBar.trailingAnchor.constraint(equalTo: trailingAnchor),
-            bottomBar.heightAnchor.constraint(equalToConstant: 30),
         ])
     }
 
     // MARK: - Actions
-
-    @objc private func addTabClicked() {
-        runtime?.send(.createTab(inGroupId: nil))
-    }
-
-    @objc private func addGroupClicked() {
-        runtime?.send(.createGroup(name: "Untitled"))
-        if let lastGroup = runtime?.model.groups.last, !lastGroup.isDefault {
-            beginRenamingGroup(lastGroup.id)
-        }
-    }
 
     @objc private func outlineViewDoubleClicked() {
         let row = outlineView.clickedRow

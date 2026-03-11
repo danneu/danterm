@@ -13,10 +13,8 @@ class AppRuntime {
     weak var window: NSWindow?
     weak var sidebarView: SidebarView?
     weak var contentArea: NSView?
+    weak var chromeView: WindowChromeView?
     var alertsPopover: NSPopover?
-    weak var alertsBellItem: NSToolbarItem?
-    /// The custom bell button set as the toolbar item's view. Owns the badge directly.
-    weak var alertsBellButton: BellToolbarButton?
     private var dragCoordinator: PaneDragCoordinator?
     private var replayFiles: [PaneId: URL] = [:]
     private static let replayDirectoryName = "danterm-scrollback"
@@ -107,6 +105,7 @@ class AppRuntime {
 
         case .setWindowTitle(let title):
             window?.title = title
+            refreshContentTitlebar()
 
         case .sendNotification(let alertId, let title, let body, let tabId, let paneId):
             let content = UNMutableNotificationContent()
@@ -235,7 +234,7 @@ class AppRuntime {
             alertsPopover = nil
 
         case .updateToolbarBellBadge(let count):
-            alertsBellButton?.updateBadge(count: count)
+            chromeView?.updateBellBadge(count: count)
 
         case .updateDockBadge(let count):
             NSApp.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
@@ -432,6 +431,19 @@ class AppRuntime {
         // Rebuild views
         rebuildContentView()
         sidebarView?.reload(model: model)
+        refreshContentTitlebar()
+    }
+
+    // MARK: - Content Titlebar
+
+    /// Update the window chrome title with the selected tab's display title.
+    /// Called from .setWindowTitle effect (emitted on tab select, rename, title/cwd changes).
+    func refreshContentTitlebar() {
+        guard let tab = selectedTab(in: model) else {
+            chromeView?.updateTitle("")
+            return
+        }
+        chromeView?.updateTitle(tab.displayTitle)
     }
 
     // MARK: - Pane Toolbars
@@ -527,6 +539,7 @@ class AppRuntime {
         }
 
         refreshPaneToolbars()
+        refreshContentTitlebar()
     }
 
     // MARK: - Alerts Popover
@@ -537,7 +550,7 @@ class AppRuntime {
             alertsPopover = nil
             return
         }
-        guard let anchor = alertsBellButton else { return }
+        guard let anchor = chromeView?.bellButton else { return }
         let vc = AlertsPopoverViewController()
         vc.runtime = self
         let popover = NSPopover()
@@ -545,62 +558,5 @@ class AppRuntime {
         popover.behavior = .transient
         popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
         alertsPopover = popover
-    }
-}
-
-/// Custom toolbar button that displays a bell icon with an overlaid badge count.
-/// Set as the NSToolbarItem's `view` directly, so no view hierarchy discovery is needed.
-class BellToolbarButton: NSButton {
-    private let badgeLabel: NSTextField
-
-    init() {
-        badgeLabel = NSTextField(labelWithString: "0")
-        super.init(frame: .zero)
-
-        translatesAutoresizingMaskIntoConstraints = false
-        bezelStyle = .texturedRounded
-        isBordered = true
-        let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
-        image = NSImage(systemSymbolName: "bell", accessibilityDescription: "Alerts")?.withSymbolConfiguration(config)
-        imagePosition = .imageOnly
-        imageScaling = .scaleNone
-
-        // Badge: red circle with white count text, ignores mouse events
-        badgeLabel.translatesAutoresizingMaskIntoConstraints = false
-        badgeLabel.font = .monospacedSystemFont(ofSize: 8, weight: .bold)
-        badgeLabel.textColor = .white
-        badgeLabel.alignment = .center
-        badgeLabel.wantsLayer = true
-        badgeLabel.layer?.backgroundColor = NSColor.systemRed.cgColor
-        badgeLabel.layer?.cornerRadius = 7
-        badgeLabel.layer?.masksToBounds = true
-        badgeLabel.isHidden = true
-        addSubview(badgeLabel)
-
-        NSLayoutConstraint.activate([
-            // Size to match standard toolbar buttons
-            widthAnchor.constraint(equalToConstant: 36),
-            heightAnchor.constraint(equalToConstant: 28),
-            // Badge at top-right of button
-            badgeLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 14),
-            badgeLabel.heightAnchor.constraint(equalToConstant: 14),
-            badgeLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: 2),
-            badgeLabel.topAnchor.constraint(equalTo: topAnchor, constant: -2),
-        ])
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) not implemented")
-    }
-
-    func updateBadge(count: Int) {
-        badgeLabel.stringValue = "\(count)"
-        badgeLabel.isHidden = count == 0
-    }
-
-    // Route all hits within our bounds to self, so the badge doesn't intercept clicks.
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        let local = convert(point, from: superview)
-        return bounds.contains(local) ? self : nil
     }
 }
