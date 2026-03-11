@@ -6,6 +6,13 @@ import UserNotifications
 // App runtime owns the mutable app model, performs side effects emitted by the
 // pure update function, and bridges model changes into AppKit/Ghostty objects.
 class AppRuntime {
+    private struct StagedRestoreSession {
+        let model: AppModel
+        let surfaces: [PaneId: TerminalView]
+        let tokenStore: PaneTokenStore
+        let replayFiles: [PaneId: URL]
+    }
+
     var model: AppModel
     let ghosttyApp: GhosttyApp
     var surfaces: [PaneId: TerminalView] = [:]
@@ -66,9 +73,13 @@ class AppRuntime {
         switch effect {
         case .createSurface(let paneId, let cwd, let command):
             let token = tokenStore.generate(for: paneId)
-            let view = TerminalView(ghosttyApp: ghosttyApp, workingDirectory: cwd, command: command, envVars: [("DANTERM_TOKEN", token)])
-            view.bridge.paneId = paneId
-            view.runtime = self
+            let view = makeTerminalView(
+                paneId: paneId,
+                workingDirectory: cwd,
+                command: command,
+                restoreCommandBehavior: .execute,
+                envVars: [("DANTERM_TOKEN", token)]
+            )
             surfaces[paneId] = view
             if view.surface == nil {
                 send(.surfaceCreationFailed(paneId: paneId))
@@ -337,7 +348,12 @@ class AppRuntime {
         do {
             let data = try Data(contentsOf: url)
             let loaded = try loadValidatedInitFile(from: data)
-            replaceCurrentSession(with: loaded, restoreCommandBehavior: restoreCommandBehavior)
+            do {
+                let staged = try stageValidatedRestore(loaded, restoreCommandBehavior: restoreCommandBehavior)
+                commitRestoreSession(staged)
+            } catch {
+                showImportError(message: "Import failed while creating terminal surfaces.")
+            }
         } catch let error as AppInitFileLoadError {
             showImportError(message: importErrorMessage(for: error))
         } catch {
@@ -402,85 +418,132 @@ class AppRuntime {
             return
         }
         let loaded = ValidatedAppRestore(snapshot: snapshot, model: built.model, paneSnapshots: built.paneSnapshots)
-        applyValidatedRestore(loaded, restoreCommandBehavior: restoreCommandBehavior)
+        do {
+            let staged = try stageValidatedRestore(loaded, restoreCommandBehavior: restoreCommandBehavior)
+            commitRestoreSession(staged)
+        } catch {
+            print("[init] Snapshot surface creation failed, falling back to default startup")
+            send(.createTab(inGroupId: nil))
+        }
     }
 
-    /// Replace all live runtime state with a validated snapshot restore.
-    private func replaceCurrentSession(
-        with loaded: ValidatedAppRestore,
+    /// Build all runtime objects for a validated restore without touching the live session.
+    private func stageValidatedRestore(
+        _ loaded: ValidatedAppRestore,
         restoreCommandBehavior: RestoreCommandBehavior
-    ) {
-        resetCurrentSession()
-        applyValidatedRestore(loaded, restoreCommandBehavior: restoreCommandBehavior)
+    ) throws -> StagedRestoreSession {
+        var stagedSurfaces: [PaneId: TerminalView] = [:]
+        var stagedTokenStore = PaneTokenStore()
+        var stagedReplayFiles: [PaneId: URL] = [:]
+
+        do {
+            for group in loaded.model.groups {
+                for tab in group.tabs {
+                    for paneId in allPaneIds(tab.rootNode) {
+                        let ps = loaded.paneSnapshots[paneId]
+                        let resolved = ps.map { resolveLaunch($0) }
+                        let token = stagedTokenStore.generate(for: paneId)
+                        var envVars: [(String, String)] = [("DANTERM_TOKEN", token)]
+                        if let scrollback = ps?.scrollback,
+                           let replayURL = writeReplayFile(scrollback: scrollback) {
+                            stagedReplayFiles[paneId] = replayURL
+                            envVars.append(("DANTERM_RESTORE_SCROLLBACK_FILE", replayURL.path))
+                        }
+                        let view = makeTerminalView(
+                            paneId: paneId,
+                            workingDirectory: resolved?.cwd,
+                            command: resolved?.command,
+                            restoreCommandBehavior: restoreCommandBehavior,
+                            envVars: envVars
+                        )
+                        stagedSurfaces[paneId] = view
+                        if view.surface == nil {
+                            throw RestoreBuildError.surfaceCreationFailed
+                        }
+                    }
+                }
+            }
+
+            return StagedRestoreSession(
+                model: loaded.model,
+                surfaces: stagedSurfaces,
+                tokenStore: stagedTokenStore,
+                replayFiles: stagedReplayFiles
+            )
+        } catch {
+            discardRestoreSession(StagedRestoreSession(
+                model: loaded.model,
+                surfaces: stagedSurfaces,
+                tokenStore: stagedTokenStore,
+                replayFiles: stagedReplayFiles
+            ))
+            throw error
+        }
     }
 
-    /// Tear down the current live session so imported panes start from a clean runtime state.
-    private func resetCurrentSession() {
+    /// Tear down live runtime resources before swapping in a replacement session.
+    private func tearDownCurrentSession() {
         cancelPaneDrag()
         alertsPopover?.performClose(nil)
         alertsPopover = nil
 
         for paneId in Array(surfaces.keys) {
-            tokenStore.remove(paneId)
             cleanupReplayFile(for: paneId)
             if let view = surfaces.removeValue(forKey: paneId) {
                 view.closeSurface()
             }
         }
-
-        model = AppModel(groups: [GroupModel(id: GroupId(), name: "General", isDefault: true)], panes: [:])
-        sidebarView?.reload(model: model)
-        rebuildContentView()
-        chromeView?.updateBellBadge(count: 0)
-        NSApp.dockTile.badgeLabel = nil
-        NSApp.dockTile.display()
+        for paneId in Array(replayFiles.keys) {
+            cleanupReplayFile(for: paneId)
+        }
+        tokenStore = PaneTokenStore()
     }
 
-    /// Build live surfaces and views from already-validated restore data.
-    private func applyValidatedRestore(
-        _ loaded: ValidatedAppRestore,
-        restoreCommandBehavior: RestoreCommandBehavior
-    ) {
-        model = loaded.model
+    /// Swap a fully staged restore into the live runtime and refresh derived UI state.
+    private func commitRestoreSession(_ staged: StagedRestoreSession) {
+        tearDownCurrentSession()
+        model = staged.model
+        surfaces = staged.surfaces
+        tokenStore = staged.tokenStore
+        replayFiles = staged.replayFiles
 
-        for group in model.groups {
-            for tab in group.tabs {
-                for paneId in allPaneIds(tab.rootNode) {
-                    let ps = loaded.paneSnapshots[paneId]
-                    let resolved = ps.map { resolveLaunch($0) }
-                    let token = tokenStore.generate(for: paneId)
-                    var envVars: [(String, String)] = [("DANTERM_TOKEN", token)]
-                    if let scrollback = ps?.scrollback,
-                       let replayURL = writeReplayFile(scrollback: scrollback) {
-                        replayFiles[paneId] = replayURL
-                        envVars.append(("DANTERM_RESTORE_SCROLLBACK_FILE", replayURL.path))
-                    }
-                    let view = TerminalView(
-                        ghosttyApp: ghosttyApp,
-                        workingDirectory: resolved?.cwd,
-                        command: resolved?.command,
-                        restoreCommandBehavior: restoreCommandBehavior,
-                        envVars: envVars
-                    )
-                    view.bridge.paneId = paneId
-                    view.runtime = self
-                    surfaces[paneId] = view
-                    if view.surface == nil {
-                        cleanupReplayFile(for: paneId)
-                        send(.surfaceCreationFailed(paneId: paneId))
-                        return
-                    }
-                }
-            }
-        }
-
+        refreshContentTitlebar()
         rebuildContentView()
         sidebarView?.reload(model: model)
-        refreshContentTitlebar()
         let unreadCount = totalUnreadAlertCount(model: model)
         chromeView?.updateBellBadge(count: unreadCount)
         NSApp.dockTile.badgeLabel = unreadCount > 0 ? "\(unreadCount)" : nil
         NSApp.dockTile.display()
+    }
+
+    /// Dispose of a staged restore after a failed build so no temp state leaks into the live session.
+    private func discardRestoreSession(_ staged: StagedRestoreSession) {
+        for (_, view) in staged.surfaces {
+            view.closeSurface()
+        }
+        for url in staged.replayFiles.values {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    /// Construct a terminal view and attach DanTerm runtime metadata before first use.
+    private func makeTerminalView(
+        paneId: PaneId,
+        workingDirectory: String?,
+        command: String?,
+        restoreCommandBehavior: RestoreCommandBehavior,
+        envVars: [(String, String)]
+    ) -> TerminalView {
+        let view = TerminalView(
+            ghosttyApp: ghosttyApp,
+            workingDirectory: workingDirectory,
+            command: command,
+            restoreCommandBehavior: restoreCommandBehavior,
+            envVars: envVars
+        )
+        view.bridge.paneId = paneId
+        view.runtime = self
+        return view
     }
 
     private func importErrorMessage(for error: AppInitFileLoadError) -> String {
@@ -633,4 +696,8 @@ class AppRuntime {
         popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
         alertsPopover = popover
     }
+}
+
+private enum RestoreBuildError: Error {
+    case surfaceCreationFailed
 }

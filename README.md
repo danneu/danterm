@@ -56,6 +56,8 @@ Like any other terminal, you probably want to grant DanTerm.app these macOS perm
 - Tabs can be grouped into collapsible sections
 - Lightweight: Built with AppKit (Swift) on top of ghostty (zig)
 - Launch terminal with specific layout/tabs/panes/commands: `--init <model.json>`
+- Dump and restore danterm state from a json file
+- Restore danterm state if it detects non-graceful exit
 
 ## Shell Integration
 
