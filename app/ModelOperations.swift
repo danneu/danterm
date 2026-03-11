@@ -579,8 +579,9 @@ private func toSplitNodeSnapshot(_ node: SplitNodeModel) -> SplitNodeSnapshot {
 // MARK: - Recovery Paths
 //
 // Session persistence lives in ~/Library/Application Support/DanTerm/Recovery/:
-//   last.json    — model snapshot, always kept across launches (the recovery file)
-//   session.json — lock file, written at launch and deleted on clean exit
+//   last-light.json    — frequent structural checkpoint (no scrollback, 2s debounce)
+//   last-enriched.json — periodic full checkpoint (structure + scrollback, 60s timer)
+//   session.json       — lock file, written at launch and deleted on clean exit
 
 func recoveryDirectoryURL() -> URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -588,8 +589,29 @@ func recoveryDirectoryURL() -> URL {
         .appendingPathComponent("Recovery", isDirectory: true)
 }
 
-func recoveryCheckpointURL() -> URL {
-    recoveryDirectoryURL().appendingPathComponent("last.json")
+func lightCheckpointURL() -> URL {
+    recoveryDirectoryURL().appendingPathComponent("last-light.json")
+}
+
+func enrichedCheckpointURL() -> URL {
+    recoveryDirectoryURL().appendingPathComponent("last-enriched.json")
+}
+
+/// Merge scrollback from an enriched snapshot into a light snapshot's structure.
+/// Panes matched by ID. Light provides authoritative structure; enriched provides scrollback.
+func mergeCheckpoints(light: AppModelSnapshot, enriched: AppModelSnapshot) -> AppModelSnapshot {
+    var scrollbackById: [String: String] = [:]
+    for pane in enriched.panes {
+        guard let id = pane.id, let scrollback = pane.scrollback else { continue }
+        scrollbackById[id] = scrollback
+    }
+    let mergedPanes: [PaneSnapshot] = light.panes.map { ps in
+        guard let id = ps.id, let scrollback = scrollbackById[id] else { return ps }
+        return PaneSnapshot(id: ps.id, title: ps.title, cwd: ps.cwd,
+                            launch: ps.launch, scrollback: scrollback)
+    }
+    return AppModelSnapshot(groups: light.groups, panes: mergedPanes,
+                            selectedTabId: light.selectedTabId)
 }
 
 func sessionLockURL() -> URL {

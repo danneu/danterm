@@ -19,7 +19,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
     var initSnapshot: AppModelSnapshot?
     var restoreCommandBehavior: RestoreCommandBehavior = .prefill
     // Session recovery state set by main.swift before app launch.
-    var lastSessionSnapshot: AppModelSnapshot?  // loaded from Recovery/last.json if it exists
+    var lastSessionSnapshot: AppModelSnapshot?  // merged from Recovery/last-light.json + last-enriched.json
     var previousSessionCrashed: Bool = false     // true if session.json lock was still present
 
     // NSApplicationDelegate: finish bootstrapping the Ghostty runtime, main

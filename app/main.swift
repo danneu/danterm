@@ -82,10 +82,19 @@ if initSnapshot == nil {
         previousSessionCrashed = true
     }
 
-    // Load last session checkpoint (exists for both clean and crash exits)
-    if let cpData = try? Data(contentsOf: recoveryCheckpointURL()),
-       let loaded = try? loadValidatedInitFile(from: cpData) {
-        lastSessionSnapshot = loaded.snapshot
+    // Load last session from split checkpoint files.
+    // Light has fresh structure; enriched has scrollback. Merge both when available.
+    let lightData = try? Data(contentsOf: lightCheckpointURL())
+    let enrichedData = try? Data(contentsOf: enrichedCheckpointURL())
+
+    if let ld = lightData, let ed = enrichedData,
+       let light = try? loadValidatedInitFile(from: ld),
+       let enriched = try? loadValidatedInitFile(from: ed) {
+        lastSessionSnapshot = mergeCheckpoints(light: light.snapshot, enriched: enriched.snapshot)
+    } else if let ld = lightData, let light = try? loadValidatedInitFile(from: ld) {
+        lastSessionSnapshot = light.snapshot
+    } else if let ed = enrichedData, let enriched = try? loadValidatedInitFile(from: ed) {
+        lastSessionSnapshot = enriched.snapshot
     }
 }
 

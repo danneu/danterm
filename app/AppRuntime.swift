@@ -393,7 +393,7 @@ class AppRuntime {
     private func performLightCheckpoint() {
         checkpointPending = false
         let initFile = toInitFile(model)
-        writeCheckpoint(initFile)
+        writeCheckpoint(initFile, to: lightCheckpointURL())
     }
 
     /// Write an enriched checkpoint: model snapshot + scrollback text read from
@@ -420,18 +420,18 @@ class AppRuntime {
             panes: enrichedPanes,
             selectedTabId: snapshot.selectedTabId
         )
-        writeCheckpoint(AppInitFile(version: 1, model: enrichedSnapshot))
+        writeCheckpoint(AppInitFile(version: 1, model: enrichedSnapshot), to: enrichedCheckpointURL())
     }
 
-    /// Encode and atomically write a checkpoint to Recovery/last.json.
+    /// Encode and atomically write a checkpoint to the given URL.
     /// Uses .sortedKeys for stable output (no .prettyPrinted — this is a machine file).
-    private func writeCheckpoint(_ initFile: AppInitFile) {
+    private func writeCheckpoint(_ initFile: AppInitFile, to url: URL) {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         guard let data = try? encoder.encode(initFile) else { return }
         let dir = recoveryDirectoryURL()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try? data.write(to: recoveryCheckpointURL(), options: .atomic)
+        try? data.write(to: url, options: .atomic)
     }
 
     // MARK: - State Import
