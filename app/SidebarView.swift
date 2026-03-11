@@ -119,7 +119,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         outlineView.delegate = self
         outlineView.style = .fullWidth
         outlineView.selectionHighlightStyle = .regular
-        outlineView.allowsEmptySelection = true
+        outlineView.allowsEmptySelection = false
         outlineView.intercellSpacing = NSSize(width: 0, height: 0)
         outlineView.indentationPerLevel = 0
 
