@@ -59,6 +59,42 @@ Like any other terminal, you probably want to grant DanTerm.app these macOS perm
 - Dump and restore danterm state from a json file
 - Restore danterm state if it detects non-graceful exit
 
+## Claude Code Integration
+
+For some reason, Claude Code seems to wait 1-2 minutes before sending an OSC 777 / OSC 9 notification when it's waiting for a response.
+
+To work around this, create a script (e.g. `~/.claude/hooks/claude-notify.sh`):
+
+```bash
+#!/usr/bin/env bash
+# Extracts Claude's last message and sends an OSC 777 notification.
+MSG=$(cat | jq -r '.last_assistant_message // empty' | head -c 200)
+printf '\e]777;notify;Claude Code;%s\a' "${MSG:-Claude finished responding}" > /dev/tty
+```
+
+Then add a `Stop` hook to your Claude Code settings (`~/.claude/settings.json`):
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/claude-notify.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+DanTerm turns OSC 777 and OSC 9 messages into a macOS notification that, when
+clicked, will take you to the originating pane.
+
 ## Shell Integration
 
 DanTerm can export its state or load from a state file.
