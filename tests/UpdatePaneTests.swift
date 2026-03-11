@@ -611,6 +611,215 @@ func paneTests() {
         try expectEqual(targetTab.isZoomed, false, "target zoom should be cleared after move")
     }
 
+    // MARK: - movePaneToNewTab Tests
+
+    test("testMovePaneToNewTabPathB_SplitTabCreatesNewTab") {
+        var model = makeModel()
+        createTab(&model) // tab1
+        let tab1Id = model.groups[0].tabs[0].id
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .splitPane(direction: .horizontal)) // tab1 = [A, B]
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let groupId = model.groups[0].id
+
+        // Drag paneA to new tab at index 1 (after tab1)
+        let effects = update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 1))
+
+        try expectEqual(model.groups[0].tabs.count, 2, "should have 2 tabs")
+        // Source tab should still exist with paneB only
+        let srcTab = model.groups[0].tabs[0]
+        try expectEqual(srcTab.id, tab1Id)
+        if case .leaf(let id) = srcTab.rootNode {
+            try expectEqual(id, paneB, "source tab should have paneB")
+        } else {
+            throw TestFailure(message: "source tab should be a single leaf")
+        }
+        try expectEqual(srcTab.focusedPaneId, paneB)
+
+        // New tab should be at index 1 with paneA
+        let newTab = model.groups[0].tabs[1]
+        if case .leaf(let id) = newTab.rootNode {
+            try expectEqual(id, paneA, "new tab should have paneA")
+        } else {
+            throw TestFailure(message: "new tab should be a single leaf")
+        }
+        try expectEqual(newTab.focusedPaneId, paneA)
+        try expectEqual(model.selectedTabId, newTab.id, "new tab should be selected")
+
+        // No destroySurface
+        try expect(!hasEffect(effects) {
+            if case .destroySurface = $0 { return true }
+            return false
+        }, "should not destroy any surfaces")
+
+        try expect(hasEffect(effects) {
+            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
+            return false
+        }, "should emit makeFirstResponder for moved pane")
+    }
+
+    test("testMovePaneToNewTabPathA_SinglePaneMoveTab") {
+        var model = makeModel()
+        createTab(&model) // tab1 single pane
+        let tab1Id = model.groups[0].tabs[0].id
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+        // Give tab1 custom metadata
+        update(&model, .setTabColor(tabId: tab1Id, color: .red))
+        update(&model, .renameTab(id: tab1Id, name: "MyTab"))
+
+        createTab(&model) // tab2
+        let groupId = model.groups[0].id
+
+        // Drag paneA (only pane in tab1) to index 2 (after tab2)
+        let effects = update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 2))
+
+        try expectEqual(model.groups[0].tabs.count, 2, "tab count should be same (tab was moved, not cloned)")
+        // tab1 should now be at index 1 (it was moved from 0 to end)
+        let movedTab = model.groups[0].tabs[1]
+        try expectEqual(movedTab.id, tab1Id, "tab entity should be preserved (same ID)")
+        try expectEqual(movedTab.color, .red, "color should be preserved")
+        try expectEqual(movedTab.customTitle, "MyTab", "custom title should be preserved")
+        try expectEqual(model.selectedTabId, tab1Id, "moved tab should be selected")
+
+        try expect(!hasEffect(effects) {
+            if case .destroySurface = $0 { return true }
+            return false
+        }, "should not destroy any surfaces")
+    }
+
+    test("testMovePaneToNewTabPathA_SameGroupIndexAdjust") {
+        var model = makeModel()
+        createTab(&model) // tab1 at index 0
+        let tab1Id = model.groups[0].tabs[0].id
+        let pane1 = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model) // tab2 at index 1
+        createTab(&model) // tab3 at index 2
+        let groupId = model.groups[0].id
+
+        // Move tab1 (single pane) to index 2. Since removing tab1 from index 0 shifts
+        // everything, the adjusted index should be 1.
+        update(&model, .movePaneToNewTab(paneId: pane1, inGroupId: groupId, atIndex: 2))
+
+        try expectEqual(model.groups[0].tabs.count, 3)
+        // tab1 should be at index 1 after adjustment (was index 0, target 2, adjusted to 1)
+        try expectEqual(model.groups[0].tabs[1].id, tab1Id)
+        try expectEqual(model.selectedTabId, tab1Id)
+    }
+
+    test("testMovePaneToNewTabCrossGroup") {
+        var model = makeModel()
+        createTab(&model) // tab1 in General
+        let tab1Id = model.groups[0].tabs[0].id
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .splitPane(direction: .horizontal)) // tab1 = [A, B]
+
+        // Create second group with a tab
+        update(&model, .createGroup(name: "Work"))
+        let group1Id = model.groups[1].id
+
+        // Move paneA to a new tab in group1 at index 0
+        update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: group1Id, atIndex: 0))
+
+        // Source tab should remain with paneB
+        try expectEqual(model.groups[0].tabs.count, 1)
+        try expectEqual(model.groups[0].tabs[0].id, tab1Id)
+
+        // New tab in group1 at index 0
+        try expectEqual(model.groups[1].tabs.count, 2, "group1 should have 2 tabs")
+        let newTab = model.groups[1].tabs[0]
+        if case .leaf(let id) = newTab.rootNode {
+            try expectEqual(id, paneA)
+        } else {
+            throw TestFailure(message: "new tab should be a leaf")
+        }
+    }
+
+    test("testMovePaneToNewTabSinglePaneSingleTabGuard") {
+        var model = makeModel()
+        createTab(&model) // only tab with single pane
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let groupId = model.groups[0].id
+
+        // Should be no-op: can't create a new tab from the only pane in the only tab
+        let effects = update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 0))
+        try expectEqual(effects.count, 0, "should be no-op for single-pane single-tab")
+        try expectEqual(model.groups[0].tabs.count, 1)
+    }
+
+    test("testMovePaneToNewTabPathB_SourceFocusUpdated") {
+        var model = makeModel()
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .splitPane(direction: .horizontal)) // [A, B], B focused
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+
+        // Move B (the focused pane) to a new tab
+        let groupId = model.groups[0].id
+        update(&model, .movePaneToNewTab(paneId: paneB, inGroupId: groupId, atIndex: 1))
+
+        // Source tab should now focus paneA
+        let srcTab = model.groups[0].tabs[0]
+        try expectEqual(srcTab.focusedPaneId, paneA, "source tab should focus remaining pane")
+    }
+
+    test("testMovePaneToNewTabPathB_ChromeDerived") {
+        var model = makeModel()
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+        model.panes[paneA]?.title = "/Users/dan/projects"
+        model.panes[paneA]?.cwd = "/Users/dan/projects"
+        update(&model, .splitPane(direction: .horizontal))
+        let groupId = model.groups[0].id
+
+        // Move paneA to a new tab
+        update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 1))
+
+        let newTab = model.groups[0].tabs[1]
+        try expectEqual(newTab.title, abbreviateHome("/Users/dan/projects"), "title should be derived from pane")
+        try expectEqual(newTab.subtitle, abbreviateHome("/Users/dan/projects"), "subtitle should be derived from pane cwd")
+    }
+
+    test("testMovePaneToNewTabAlertsClearedOnMove") {
+        var model = makeModel()
+        createTab(&model)
+        let tab1Id = model.groups[0].tabs[0].id
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .splitPane(direction: .horizontal))
+        let groupId = model.groups[0].id
+
+        let alert = AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA, tabId: tab1Id,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        )
+        model.alerts.insert(alert, at: 0)
+
+        update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 1))
+
+        let movedAlert = model.alerts.first(where: { $0.paneId == paneA })!
+        try expectEqual(movedAlert.isUnread, false, "alert should be marked read")
+    }
+
+    test("testMovePaneToNewTabBeforeSourceIndex") {
+        var model = makeModel()
+        createTab(&model) // tab1 at 0
+        update(&model, .splitPane(direction: .horizontal)) // tab1 = [A, B]
+        let paneA = allPaneIds(model.groups[0].tabs[0].rootNode).first!
+        let groupId = model.groups[0].id
+
+        // Drag paneA to index 0 (before tab1)
+        update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 0))
+
+        try expectEqual(model.groups[0].tabs.count, 2)
+        // New tab should be at index 0
+        let newTab = model.groups[0].tabs[0]
+        if case .leaf(let id) = newTab.rootNode {
+            try expectEqual(id, paneA)
+        } else {
+            throw TestFailure(message: "new tab should be a leaf with paneA")
+        }
+    }
+
     test("testMovePaneToTabAlertsClearedOnMove") {
         var model = makeModel()
         createTab(&model)

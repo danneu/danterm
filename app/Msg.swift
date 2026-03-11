@@ -28,6 +28,7 @@ enum Msg {
     case toggleZoomPane
     case movePane(source: PaneId, target: PaneId, intent: PaneDropIntent)
     case movePaneToTab(paneId: PaneId, targetTabId: TabId)
+    case movePaneToNewTab(paneId: PaneId, inGroupId: GroupId, atIndex: Int)
     case setTabColor(tabId: TabId, color: TabColor?)
     case renameTab(id: TabId, name: String?)
 

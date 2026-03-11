@@ -86,7 +86,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     private var rootItems: [SidebarItem] = []
     private var childItems: [GroupId: [SidebarItem]] = [:]
     private var currentModel: AppModel?
-    private var dropHighlightedTabId: TabId?
 
     private var isSingleGroupMode: Bool {
         currentModel?.groups.count == 1
@@ -123,7 +122,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         outlineView.intercellSpacing = NSSize(width: 0, height: 0)
         outlineView.indentationPerLevel = 0
 
-        outlineView.registerForDraggedTypes([SidebarView.tabDragType, SidebarView.groupDragType])
+        outlineView.registerForDraggedTypes([SidebarView.tabDragType, SidebarView.groupDragType, paneDragType])
         outlineView.setDraggingSourceOperationMask(.move, forLocal: true)
         outlineView.doubleAction = #selector(outlineViewDoubleClicked)
 
@@ -271,34 +270,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let row = outlineView.row(forItem: item)
         guard row >= 0 else { return }
         outlineView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
-    }
-
-    // MARK: - Pane Drag Highlight
-
-    /// Return the frame of a tab row in window coordinates, for drag hit-testing.
-    func tabRowFrame(for tabId: TabId) -> NSRect? {
-        guard let item = tabItemCache[tabId] else { return nil }
-        let row = outlineView.row(forItem: item)
-        guard row >= 0 else { return nil }
-        return outlineView.convert(outlineView.rect(ofRow: row), to: nil)
-    }
-
-    /// Highlight or clear the sidebar tab row under the drag cursor.
-    func highlightTabForDrop(_ tabId: TabId?) {
-        let oldId = dropHighlightedTabId
-        dropHighlightedTabId = tabId
-        var rowsToReload = IndexSet()
-        if let oldId, let item = tabItemCache[oldId] {
-            let row = outlineView.row(forItem: item)
-            if row >= 0 { rowsToReload.insert(row) }
-        }
-        if let tabId, let item = tabItemCache[tabId] {
-            let row = outlineView.row(forItem: item)
-            if row >= 0 { rowsToReload.insert(row) }
-        }
-        if !rowsToReload.isEmpty {
-            outlineView.reloadData(forRowIndexes: rowsToReload, columnIndexes: IndexSet(integer: 0))
-        }
     }
 
     // MARK: - Inline Rename
@@ -464,6 +435,42 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             return []
         }
 
+        // Pane drag: accept drops between tab rows (insertion) or onto tab rows (merge)
+        if pb.string(forType: paneDragType) != nil {
+            if isSingleGroupMode {
+                // Drop between root tab items → insertion marker
+                if item == nil && index != NSOutlineViewDropOnItemIndex {
+                    return .move
+                }
+                // Drop onto a tab row → merge pane into that tab
+                if let sidebarItem = item as? SidebarItem, case .tab = sidebarItem.kind,
+                   index == NSOutlineViewDropOnItemIndex {
+                    return .move
+                }
+                return []
+            }
+            // Multi-group mode
+            if let sidebarItem = item as? SidebarItem {
+                switch sidebarItem.kind {
+                case .group(let group):
+                    if index == NSOutlineViewDropOnItemIndex {
+                        // Drop onto collapsed group → append at end
+                        let childCount = childItems[group.id]?.count ?? 0
+                        outlineView.setDropItem(item, dropChildIndex: childCount)
+                    }
+                    // Drop between group's tabs → insertion marker
+                    return .move
+                case .tab:
+                    if index == NSOutlineViewDropOnItemIndex {
+                        // Drop onto a tab row → merge pane into that tab
+                        return .move
+                    }
+                    return []
+                }
+            }
+            return []
+        }
+
         return []
     }
 
@@ -489,6 +496,32 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         if let groupIdStr = pb.string(forType: SidebarView.groupDragType),
            let rawId = UUID(uuidString: groupIdStr) {
             runtime?.send(.reorderGroup(groupId: GroupId(rawValue: rawId), toIndex: index))
+            return true
+        }
+
+        // Pane drag
+        if let paneIdStr = pb.string(forType: paneDragType),
+           let rawId = UUID(uuidString: paneIdStr) {
+            let paneId = PaneId(rawValue: rawId)
+
+            // Drop onto a tab row → merge pane into that tab
+            if let sidebarItem = item as? SidebarItem, case .tab(let tab) = sidebarItem.kind,
+               index == NSOutlineViewDropOnItemIndex {
+                runtime?.send(.movePaneToTab(paneId: paneId, targetTabId: tab.id))
+                return true
+            }
+
+            // Drop between tabs → create new tab at insertion index
+            let groupId: GroupId
+            if isSingleGroupMode {
+                guard let model = currentModel else { return false }
+                groupId = model.groups[0].id
+            } else if let sidebarItem = item as? SidebarItem, case .group(let group) = sidebarItem.kind {
+                groupId = group.id
+            } else {
+                return false
+            }
+            runtime?.send(.movePaneToNewTab(paneId: paneId, inGroupId: groupId, atIndex: index))
             return true
         }
 
@@ -813,12 +846,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 stripe.isHidden = true
             }
         }
-
-        // Drop highlight for pane-to-tab drag
-        cell.wantsLayer = true
-        cell.layer?.backgroundColor = (tab.id == dropHighlightedTabId)
-            ? NSColor.controlAccentColor.withAlphaComponent(0.3).cgColor
-            : nil
 
         return cell
     }

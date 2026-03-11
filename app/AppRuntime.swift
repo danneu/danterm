@@ -333,54 +333,34 @@ class AppRuntime {
             return wrapper.convert(wrapper.bounds, to: nil)
         }
 
-        // Build sidebar tab IDs: all tabs except the source pane's tab
-        let sourceTabId = tab.id
-        let sidebarTabIds = model.groups.flatMap(\.tabs).map(\.id).filter { $0 != sourceTabId }
-
-        // Sidebar frame provider
-        let sidebarProvider: ((TabId) -> NSRect?)? = { [weak self] tabId in
-            self?.sidebarView?.tabRowFrame(for: tabId)
-        }
-
         let coordinator = PaneDragCoordinator(
             sourcePaneId: paneId,
             contentView: contentArea,
             paneFrameProvider: provider,
-            targetPaneIds: targetIds,
-            sidebarTabFrameProvider: sidebarProvider,
-            sidebarTabIds: sidebarTabIds
+            targetPaneIds: targetIds
         )
-        coordinator.onCancel = { [weak self] in self?.cancelPaneDrag() }
-        coordinator.onSidebarHighlight = { [weak self] tabId in
-            self?.sidebarView?.highlightTabForDrop(tabId)
-        }
         dragCoordinator = coordinator
     }
 
-    func updatePaneDrag(event: NSEvent) {
-        dragCoordinator?.updateDrag(locationInWindow: event.locationInWindow)
+    /// Convert a screen point to window coordinates and update the drag overlay.
+    func updatePaneDrag(screenPoint: NSPoint) {
+        guard let window = window else { return }
+        let windowPoint = window.convertPoint(fromScreen: screenPoint)
+        dragCoordinator?.updateDrag(locationInWindow: windowPoint)
     }
 
-    func completePaneDrag() {
-        // Check sidebar drop first (pane → different tab)
-        if let sidebarResult = dragCoordinator?.currentSidebarDrop() {
-            cancelPaneDrag()
-            send(.movePaneToTab(paneId: sidebarResult.paneId, targetTabId: sidebarResult.tabId))
-            return
-        }
-        // Then check intra-tab pane drop
-        guard let result = dragCoordinator?.currentDrop() else {
-            cancelPaneDrag()
-            return
-        }
+    /// Return current pane-area drop if one is active (for use by NSDraggingSource endedAt).
+    func currentPaneDrop() -> (source: PaneId, target: PaneId, intent: PaneDropIntent)? {
+        return dragCoordinator?.currentDrop()
+    }
+
+    /// Tear down the drag coordinator overlay. Called after the NSDraggingSession ends.
+    func endPaneDrag() {
         cancelPaneDrag()
-        send(.movePane(source: result.source, target: result.target, intent: result.intent))
     }
 
     func cancelPaneDrag() {
         guard dragCoordinator != nil else { return }
-        // Reset to arrow; cursor rects will correct on next mouse move.
-        NSCursor.arrow.set()
         dragCoordinator?.teardown()
         dragCoordinator = nil
     }

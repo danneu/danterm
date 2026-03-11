@@ -269,6 +269,72 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         effects.append(.makeFirstResponder(paneId: paneId))
         return effects
 
+    case .movePaneToNewTab(let paneId, let inGroupId, let atIndex):
+        // Find source tab containing this pane
+        guard let sourceTab = tabForPane(paneId, in: model) else { return [] }
+        guard let dstGroupIdx = model.groups.firstIndex(where: { $0.id == inGroupId }) else { return [] }
+
+        let sourceHasOnlyThisPane: Bool = {
+            if case .leaf(let id) = sourceTab.rootNode { return id == paneId } else { return false }
+        }()
+
+        // Guard: don't allow if this would leave zero tabs
+        if sourceHasOnlyThisPane && totalTabCount(model) == 1 { return [] }
+
+        var effects: [Effect] = []
+
+        // Defocus old tab's panes
+        if let oldTabId = model.selectedTabId {
+            for oldPaneId in paneIdsForTab(oldTabId, in: model) {
+                effects.append(.focusSurface(paneId: oldPaneId, focused: false))
+            }
+        }
+
+        if sourceHasOnlyThisPane {
+            // Path A: Source tab has only this pane — move the tab entity
+            guard let (srcGroupIdx, srcTabIdx) = tabLocation(sourceTab.id, in: model) else { return [] }
+            let tab = model.groups[srcGroupIdx].tabs.remove(at: srcTabIdx)
+            var adjustedIndex = atIndex
+            if srcGroupIdx == dstGroupIdx && srcTabIdx < atIndex {
+                adjustedIndex -= 1
+            }
+            let clamped = max(0, min(adjustedIndex, model.groups[dstGroupIdx].tabs.count))
+            model.groups[dstGroupIdx].tabs.insert(tab, at: clamped)
+            model.selectedTabId = tab.id
+        } else {
+            // Path B: Source tab has other panes — create new tab
+            let (newSourceTree, nextFocus) = removeLeaf(sourceTab.rootNode, paneId: paneId)
+            guard let newRoot = newSourceTree else { return [] }
+
+            // Update source tab
+            updateTab(sourceTab.id, in: &model) { tab in
+                tab.rootNode = newRoot
+                tab.isZoomed = false
+                if tab.focusedPaneId == paneId, let next = nextFocus {
+                    tab.focusedPaneId = next
+                }
+            }
+
+            // Create new tab for the moved pane
+            var newTab = TabModel(id: TabId(), focusedPaneId: paneId, rootNode: .leaf(paneId))
+            if let pane = model.panes[paneId] {
+                let chrome = deriveTabChrome(from: pane)
+                newTab.title = chrome.title
+                newTab.subtitle = chrome.subtitle
+            }
+            let clamped = max(0, min(atIndex, model.groups[dstGroupIdx].tabs.count))
+            model.groups[dstGroupIdx].tabs.insert(newTab, at: clamped)
+            model.selectedTabId = newTab.id
+        }
+
+        markAlertsReadForPane(paneId, in: &model)
+
+        effects.append(.rebuildContentView)
+        effects.append(.reloadSidebar)
+        effects.append(contentsOf: selectionSyncEffects(for: model))
+        effects.append(.makeFirstResponder(paneId: paneId))
+        return effects
+
     case .setTabColor(let tabId, let color):
         updateTab(tabId, in: &model) { t in t.color = color }
         return [.reloadSidebarRow(tabId: tabId)]

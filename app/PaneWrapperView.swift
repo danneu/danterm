@@ -267,11 +267,15 @@ class PaneWrapperView: NSView {
 
 // MARK: - Toolbar Drag Handle
 
+/// Pasteboard type for pane drag-and-drop (used by ToolbarDragHandleView and SidebarView).
+let paneDragType = NSPasteboard.PasteboardType("com.danterm.pane")
+
 /// Fills the toolbar area to capture mouse events for pane drag-to-split.
-/// Sits above the label (which is non-hit-testing) but below buttons.
-class ToolbarDragHandleView: NSView {
+/// Initiates an NSDraggingSession so the sidebar can show native insertion markers.
+class ToolbarDragHandleView: NSView, NSDraggingSource {
     weak var runtime: AppRuntime?
     var paneId: PaneId?
+    private var mouseDownEvent: NSEvent?
     private var dragOrigin: NSPoint?
     private var isDragging = false
 
@@ -282,6 +286,7 @@ class ToolbarDragHandleView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        mouseDownEvent = event
         dragOrigin = event.locationInWindow
         isDragging = false
         NSCursor.closedHand.set()
@@ -289,7 +294,8 @@ class ToolbarDragHandleView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let origin = dragOrigin, let paneId = paneId, let runtime = runtime else { return }
+        guard let origin = dragOrigin, let paneId = paneId, let runtime = runtime,
+              let mouseDownEvent = mouseDownEvent else { return }
 
         if !isDragging {
             let loc = event.locationInWindow
@@ -305,22 +311,53 @@ class ToolbarDragHandleView: NSView {
             if case .split = tab.rootNode { hasSplits = true } else { hasSplits = false }
             guard hasSplits || totalTabCount(runtime.model) > 1 else { return }
 
+            // Install overlay + coordinator for pane-area drops
             runtime.startPaneDrag(paneId: paneId)
+
+            // Begin NSDraggingSession so the sidebar gets native drop validation
+            let pbItem = NSPasteboardItem()
+            pbItem.setString(paneId.rawValue.uuidString, forType: paneDragType)
+            let dragItem = NSDraggingItem(pasteboardWriter: pbItem)
+            dragItem.setDraggingFrame(bounds, contents: NSImage(size: bounds.size))
+            let session = beginDraggingSession(with: [dragItem], event: mouseDownEvent, source: self)
+            session.animatesToStartingPositionsOnCancelOrFail = false
+
             isDragging = true
         }
-
-        // Re-assert on every event to override cursor rect interference from other views.
-        NSCursor.closedHand.set()
-        runtime.updatePaneDrag(event: event)
     }
 
-    override func mouseUp(with event: NSEvent) {
-        if isDragging {
-            runtime?.completePaneDrag()
+    // NSDraggingSource: allow .move within the application.
+    func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+        return context == .withinApplication ? .move : []
+    }
+
+    // NSDraggingSource: drive the pane overlay from the session's screen position.
+    func draggingSession(_ session: NSDraggingSession, movedTo screenPoint: NSPoint) {
+        runtime?.updatePaneDrag(screenPoint: screenPoint)
+    }
+
+    // NSDraggingSource: finalize the drag when the session ends.
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        guard let runtime = runtime else { return }
+
+        // Final position update so the coordinator reflects the exact release location
+        runtime.updatePaneDrag(screenPoint: screenPoint)
+
+        if operation != [] {
+            // Sidebar accepted the drop via acceptDrop — just tear down the overlay
+            runtime.endPaneDrag()
+        } else if let drop = runtime.currentPaneDrop() {
+            // Pane-area split/swap drop
+            runtime.endPaneDrag()
+            runtime.send(.movePane(source: drop.source, target: drop.target, intent: drop.intent))
+        } else {
+            // Cancelled (escape, dropped on nothing)
+            runtime.endPaneDrag()
         }
+
         dragOrigin = nil
+        mouseDownEvent = nil
         isDragging = false
-        NSCursor.openHand.set()
     }
 }
 
