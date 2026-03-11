@@ -1,0 +1,60 @@
+name: Cache GhosttyKit
+
+# Warm the GhosttyKit cache on the default branch so tag-triggered release
+# workflows can reuse it (GitHub Actions caches from tags are scoped to that
+# tag ref and invisible to other tags).
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'build-lib.sh'
+
+  # Allow manual trigger to seed the cache
+  workflow_dispatch:
+
+env:
+  GHOSTTY_TAG: v1.2.3
+
+jobs:
+  cache:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache GhosttyKit
+        id: cache-ghosttykit
+        uses: actions/cache@v4
+        with:
+          path: lib/GhosttyKit.xcframework
+          key: ghosttykit-${{ env.GHOSTTY_TAG }}-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
+
+      - uses: mlugg/setup-zig@v2
+        if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
+        with:
+          version: 0.14.1
+
+      - name: Clone Ghostty source
+        if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch ${{ env.GHOSTTY_TAG }} https://github.com/ghostty-org/ghostty.git .ghostty-src
+          sed -i '' \
+            's|release-20251002-142451-4a5043e|release-20260216-151611-fc73ce3|' \
+            .ghostty-src/build.zig.zon
+          sed -i '' \
+            's|N-V-__8AALIsAwDyo88G5mGJGN2lSVmmFMx4YePfUvp_2o3Y|N-V-__8AABVbAwBwDRyZONfx553tvMW8_A2OKUoLzPUSRiLF|' \
+            .ghostty-src/build.zig.zon
+
+      - name: Build GhosttyKit
+        if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
+        run: |
+          cd .ghostty-src
+          zig build \
+            -Demit-xcframework \
+            -Dxcframework-target=native \
+            -Demit-macos-app=false \
+            -Dsentry=false \
+            -Doptimize=ReleaseFast
+          cd ..
+          mkdir -p lib
+          cp -R .ghostty-src/macos/GhosttyKit.xcframework lib/
