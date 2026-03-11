@@ -6,7 +6,8 @@
       "Bash(defaults read:*)",
       "Bash(grep:*)",
       "Bash(just test:*)",
-      "Bash(just build:*)"
+      "Bash(just build:*)",
+      "Bash(find app:*)"
     ]
   }
 }
