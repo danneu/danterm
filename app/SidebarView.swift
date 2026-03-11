@@ -412,8 +412,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
         if let bellBadge = cell.subviews.first(where: { $0.identifier?.rawValue == "groupBellBadge" }) as? NSTextField {
             let count = groupUnreadAlertCount(for: group, alerts: currentModel?.alerts ?? [])
-            bellBadge.stringValue = "\(count)"
-            bellBadge.isHidden = count == 0 || !collapsed
+            updateBadgeLabel(bellBadge, count: count)
+            if !collapsed { bellBadge.isHidden = true }
         }
     }
 
@@ -675,17 +675,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         cell.addSubview(textField)
         cell.textField = textField
 
-        let bellBadge = NSTextField(labelWithString: "")
+        let bellBadge = makeBadgeLabel()
         bellBadge.identifier = NSUserInterfaceItemIdentifier("groupBellBadge")
-        bellBadge.translatesAutoresizingMaskIntoConstraints = false
-        bellBadge.font = .boldSystemFont(ofSize: 9)
-        bellBadge.textColor = .white
-        bellBadge.alignment = .center
-        bellBadge.wantsLayer = true
-        bellBadge.layer?.backgroundColor = NSColor.systemRed.cgColor
-        bellBadge.layer?.cornerRadius = 6
-        bellBadge.layer?.masksToBounds = true
-        bellBadge.isHidden = true
         cell.addSubview(bellBadge)
 
         let caretButton = NSButton(image: NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Toggle Group")!, target: self, action: #selector(caretClicked(_:)))
@@ -710,8 +701,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             textField.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
             textField.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             textField.trailingAnchor.constraint(lessThanOrEqualTo: bellBadge.leadingAnchor, constant: -4),
-            bellBadge.widthAnchor.constraint(greaterThanOrEqualToConstant: 12),
-            bellBadge.heightAnchor.constraint(equalToConstant: 12),
             bellBadge.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             bellBadge.trailingAnchor.constraint(equalTo: caretButton.leadingAnchor, constant: -2),
             caretButton.trailingAnchor.constraint(equalTo: addButton.leadingAnchor, constant: 2),
@@ -741,8 +730,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
         if let bellBadge = cell.subviews.first(where: { $0.identifier?.rawValue == "groupBellBadge" }) as? NSTextField {
             let count = groupUnreadAlertCount(for: group, alerts: currentModel?.alerts ?? [])
-            bellBadge.stringValue = "\(count)"
-            bellBadge.isHidden = count == 0 || !group.isCollapsed
+            updateBadgeLabel(bellBadge, count: count)
+            if !group.isCollapsed { bellBadge.isHidden = true }
         }
     }
 
@@ -784,16 +773,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             subtitleField.lineBreakMode = .byTruncatingMiddle
             cell.addSubview(subtitleField)
 
-            let bellBadge = NSTextField(labelWithString: "")
+            let bellBadge = makeBadgeLabel()
             bellBadge.identifier = bellDotId
-            bellBadge.translatesAutoresizingMaskIntoConstraints = false
-            bellBadge.font = .boldSystemFont(ofSize: 10)
-            bellBadge.textColor = .white
-            bellBadge.alignment = .center
-            bellBadge.wantsLayer = true
-            bellBadge.layer?.backgroundColor = NSColor.systemRed.cgColor
-            bellBadge.layer?.cornerRadius = 7
-            bellBadge.layer?.masksToBounds = true
             cell.addSubview(bellBadge)
 
             NSLayoutConstraint.activate([
@@ -801,8 +782,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 colorStripe.topAnchor.constraint(equalTo: cell.topAnchor),
                 colorStripe.bottomAnchor.constraint(equalTo: cell.bottomAnchor),
                 colorStripe.widthAnchor.constraint(equalToConstant: 3),
-                bellBadge.widthAnchor.constraint(greaterThanOrEqualToConstant: 14),
-                bellBadge.heightAnchor.constraint(equalToConstant: 14),
                 bellBadge.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
                 bellBadge.topAnchor.constraint(equalTo: cell.topAnchor, constant: 4),
                 textField.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
@@ -821,8 +800,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
         if let bellBadge = cell.subviews.first(where: { $0.identifier == bellDotId }) as? NSTextField {
             let count = unreadAlertCount(for: tab, alerts: currentModel?.alerts ?? [])
-            bellBadge.stringValue = "\(count)"
-            bellBadge.isHidden = count == 0
+            updateBadgeLabel(bellBadge, count: count)
         }
 
         // Color stripe
