@@ -173,6 +173,43 @@ func exportTests() {
         try expect(store.token(for: PaneId()) == nil, "unknown pane should return nil")
     }
 
+    // MARK: - restore command behavior
+
+    test("restoreCommandBehavior defaults to prefill") {
+        let behavior = restoreCommandBehavior(from: ["DanTerm", "--init", "/tmp/state.json"])
+        try expectEqual(behavior, .prefill)
+    }
+
+    test("restoreCommandBehavior parses execute flag") {
+        let behavior = restoreCommandBehavior(from: ["DanTerm", "--init", "/tmp/state.json", "--restore-commands", "execute"])
+        try expectEqual(behavior, .execute)
+    }
+
+    test("restoreCommandBehavior falls back to prefill for unknown value") {
+        let behavior = restoreCommandBehavior(from: ["DanTerm", "--restore-commands", "bogus"])
+        try expectEqual(behavior, .prefill)
+    }
+
+    test("restoreInitialInput prefills without newline by default") {
+        let input = restoreInitialInput(for: "node server.js", behavior: .prefill)
+        try expectEqual(input, "node server.js")
+    }
+
+    test("restoreInitialInput execute appends trailing newline") {
+        let input = restoreInitialInput(for: "node server.js", behavior: .execute)
+        try expectEqual(input, "node server.js\n")
+    }
+
+    test("restoreInitialInput execute preserves existing trailing newline") {
+        let input = restoreInitialInput(for: "node server.js\n", behavior: .execute)
+        try expectEqual(input, "node server.js\n")
+    }
+
+    test("restoreInitialInput returns nil for empty command") {
+        let input = restoreInitialInput(for: "", behavior: .prefill)
+        try expect(input == nil, "empty command should not produce input")
+    }
+
     // MARK: - commandStarted Msg
 
     test("commandStarted sets lastCommand") {

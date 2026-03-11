@@ -82,7 +82,7 @@ screenshot:
 
     # Launch in background with init snapshot
     init_json="$(pwd)/docs/screenshot/init.json"
-    open -a "$app_path" --args --init "$init_json"
+    open -a "$app_path" --args --init "$init_json" --restore-commands execute
 
     outfile="$output_dir/screenshot1.png"
     captured=0

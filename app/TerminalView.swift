@@ -20,7 +20,13 @@ class TerminalView: NSView, NSTextInputClient {
 
     // MARK: - Init
 
-    init(ghosttyApp: GhosttyApp, workingDirectory: String? = nil, command: String? = nil, envVars: [(String, String)] = []) {
+    init(
+        ghosttyApp: GhosttyApp,
+        workingDirectory: String? = nil,
+        command: String? = nil,
+        restoreCommandBehavior: RestoreCommandBehavior = .execute,
+        envVars: [(String, String)] = []
+    ) {
         self.ghosttyApp = ghosttyApp
         self.bridge = SurfaceBridge() // set after super.init
         super.init(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
@@ -49,8 +55,9 @@ class TerminalView: NSView, NSTextInputClient {
         }
 
         // Launch commands should behave like typed shell input so the pane
-        // stays alive after command exit. We send them via initial_input.
-        let initialInput = Self.initialInputForCommand(command)
+        // stays alive after command exit. Restored snapshots may choose to
+        // prefill the command instead of executing it immediately.
+        let initialInput = restoreInitialInput(for: command, behavior: restoreCommandBehavior)
 
         // Build env var structs (strdup'd so pointers stay alive through createSurface)
         var envVarStructs = envVars.map { (key, value) in
@@ -521,11 +528,6 @@ class TerminalView: NSView, NSTextInputClient {
     }
 
     // MARK: - Helpers
-
-    private static func initialInputForCommand(_ command: String?) -> String? {
-        guard let command, !command.isEmpty else { return nil }
-        return command.hasSuffix("\n") ? command : command + "\n"
-    }
 
     static func ghosttyMods(_ flags: NSEvent.ModifierFlags) -> ghostty_input_mods_e {
         var mods: UInt32 = GHOSTTY_MODS_NONE.rawValue

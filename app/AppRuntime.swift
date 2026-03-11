@@ -388,7 +388,7 @@ class AppRuntime {
 
     // MARK: - Snapshot Bootstrap
 
-    func bootstrapFromSnapshot(_ snapshot: AppModelSnapshot) {
+    func bootstrapFromSnapshot(_ snapshot: AppModelSnapshot, restoreCommandBehavior: RestoreCommandBehavior = .prefill) {
         guard let built = validateAndBuildDetailed(snapshot) else {
             print("[init] Snapshot validation failed, falling back to default startup")
             send(.createTab(inGroupId: nil))
@@ -410,7 +410,13 @@ class AppRuntime {
                             envVars.append(("DANTERM_RESTORE_SCROLLBACK_FILE", replayURL.path))
                         }
                     }
-                    let view = TerminalView(ghosttyApp: ghosttyApp, workingDirectory: resolved?.cwd, command: resolved?.command, envVars: envVars)
+                    let view = TerminalView(
+                        ghosttyApp: ghosttyApp,
+                        workingDirectory: resolved?.cwd,
+                        command: resolved?.command,
+                        restoreCommandBehavior: restoreCommandBehavior,
+                        envVars: envVars
+                    )
                     view.bridge.paneId = paneId
                     view.runtime = self
                     surfaces[paneId] = view

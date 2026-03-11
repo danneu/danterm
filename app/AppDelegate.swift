@@ -12,6 +12,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
     var contentArea: NSView!
     var splitView: NSSplitView!
     var initSnapshot: AppModelSnapshot?
+    var restoreCommandBehavior: RestoreCommandBehavior = .prefill
     var alertsBellItem: NSToolbarItem?
 
     // NSApplicationDelegate: finish bootstrapping the Ghostty runtime, main
@@ -86,7 +87,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
 
         // Bootstrap from snapshot or create default tab
         if let snapshot = initSnapshot {
-            runtime.bootstrapFromSnapshot(snapshot)
+            runtime.bootstrapFromSnapshot(snapshot, restoreCommandBehavior: restoreCommandBehavior)
             initSnapshot = nil
         } else {
             runtime.send(.createTab(inGroupId: nil))

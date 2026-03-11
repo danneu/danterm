@@ -34,10 +34,18 @@ guard rc == GHOSTTY_SUCCESS else {
     exit(1)
 }
 
-// Parse --init <path> argument
+// Parse restore-related CLI arguments.
 var initSnapshot: AppModelSnapshot? = nil
+var restoreBehavior = RestoreCommandBehavior.prefill
 do {
     let args = CommandLine.arguments
+    restoreBehavior = restoreCommandBehavior(from: args)
+    if let idx = args.firstIndex(of: "--restore-commands"), idx + 1 < args.count {
+        let value = args[idx + 1]
+        if value != RestoreCommandBehavior.prefill.rawValue && value != RestoreCommandBehavior.execute.rawValue {
+            print("[init] Unknown --restore-commands value '\(value)'; defaulting to prefill")
+        }
+    }
     if let idx = args.firstIndex(of: "--init"), idx + 1 < args.count {
         let path = args[idx + 1]
         let url = URL(fileURLWithPath: path)
@@ -60,5 +68,6 @@ app.setActivationPolicy(.regular)
 
 let delegate = AppDelegate()
 delegate.initSnapshot = initSnapshot
+delegate.restoreCommandBehavior = restoreBehavior
 NSApp.delegate = delegate
 NSApp.run()

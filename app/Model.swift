@@ -103,6 +103,11 @@ struct AppModel: Equatable {
     var lastNotificationTime: [PaneId: [AlertKind: Date]] = [:]
 }
 
+enum RestoreCommandBehavior: String, Equatable {
+    case prefill
+    case execute
+}
+
 // MARK: - Init Snapshot Types
 
 struct AppInitFile: Codable {
