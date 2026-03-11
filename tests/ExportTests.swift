@@ -261,16 +261,19 @@ func exportTests() {
         try expect(truncateScrollback("  \n  \n  ") == nil, "whitespace should be nil")
     }
 
-    test("truncateScrollback: text under limits returned as-is") {
-        let text = "line1\nline2\nline3"
-        try expectEqual(truncateScrollback(text), text)
+    test("truncateScrollback: text under limits gets trailing newline") {
+        try expectEqual(truncateScrollback("line1\nline2\nline3"), "line1\nline2\nline3\n")
+    }
+
+    test("truncateScrollback: text already ending in newline preserved") {
+        try expectEqual(truncateScrollback("line1\nline2\n"), "line1\nline2\n")
     }
 
     test("truncateScrollback: keeps last maxLines lines") {
         let lines = (1...5000).map { "line \($0)" }
         let text = lines.joined(separator: "\n")
         let result = truncateScrollback(text, maxLines: 4000)!
-        let resultLines = result.split(separator: "\n", omittingEmptySubsequences: false)
+        let resultLines = result.split(separator: "\n")
         try expectEqual(resultLines.count, 4000)
         try expectEqual(String(resultLines.first!), "line 1001")
         try expectEqual(String(resultLines.last!), "line 5000")
@@ -286,6 +289,61 @@ func exportTests() {
         try expect(result.count <= 500, "result should be at most maxChars")
         // Should break at a newline boundary
         try expect(!result.hasPrefix("\n"), "should not start with newline")
+    }
+
+    test("truncateScrollback: exactly at limit") {
+        let result = truncateScrollback("a\nb", maxLines: 2)!
+        try expectEqual(result, "a\nb\n")
+    }
+
+    test("truncateScrollback: one over limit") {
+        let result = truncateScrollback("a\nb\nc", maxLines: 2)!
+        try expectEqual(result, "b\nc\n")
+    }
+
+    test("truncateScrollback: consecutive newlines count as empty lines") {
+        let result = truncateScrollback("a\n\n\nb", maxLines: 2)!
+        try expectEqual(result, "\nb\n")
+    }
+
+    test("truncateScrollback: trailing whitespace-only lines are stripped") {
+        let result = truncateScrollback("hello\nworld\n   \n   \n   \n")!
+        try expectEqual(result, "hello\nworld\n")
+    }
+
+    test("truncateScrollback: trailing empty lines are stripped") {
+        let result = truncateScrollback("hello\nworld\n\n\n\n")!
+        try expectEqual(result, "hello\nworld\n")
+    }
+
+    test("truncateScrollback: trailing whitespace-only lines without final newline") {
+        let result = truncateScrollback("hello\nworld\n   \n   ")!
+        try expectEqual(result, "hello\nworld\n")
+    }
+
+    test("truncateScrollback: trailing empty lines without final newline") {
+        let result = truncateScrollback("hello\nworld\n\n")!
+        try expectEqual(result, "hello\nworld\n")
+    }
+
+    test("truncateScrollback: all-whitespace without final newline returns nil") {
+        try expect(truncateScrollback("   \n   ") == nil, "only whitespace lines should be nil")
+    }
+
+    test("truncateScrollback: all-whitespace trailing lines returns nil") {
+        try expect(truncateScrollback("   \n   \n") == nil, "only whitespace lines should be nil")
+    }
+
+    test("truncateScrollback: real scrollback without final newline (ghostty format)") {
+        let input = "╭ repo:danterm                                                                         k8s:orbstack\n╰ $                                                                                                \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   "
+        let result = truncateScrollback(input)!
+        try expectEqual(result, "╭ repo:danterm                                                                         k8s:orbstack\n╰ $\n")
+    }
+
+    test("truncateScrollback: real scrollback with padded trailing blank lines") {
+        let input = "╭ repo:danterm                                                                         k8s:orbstack\n╰ $                                                                                                \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n"
+        let result = truncateScrollback(input)!
+        try expectEqual(result, "╭ repo:danterm                                                                         k8s:orbstack\n╰ $\n")
     }
 
     // MARK: - exportState Msg/Effect

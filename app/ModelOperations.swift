@@ -651,18 +651,25 @@ func deleteSessionLockFile() {
 // MARK: - Scrollback Truncation
 
 /// Truncate scrollback text to the last `maxLines` lines and `maxChars` characters.
-/// Returns nil for empty/whitespace-only input.
+/// Strips trailing whitespace-only lines. Returns nil for empty/whitespace-only input.
 func truncateScrollback(_ text: String, maxLines: Int = 4000, maxChars: Int = 400_000) -> String? {
+  // Strip trailing whitespace
   let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
   guard !trimmed.isEmpty else { return nil }
 
-  var result = text
-
-  // Keep the last maxLines lines
-  let lines = result.split(separator: "\n", omittingEmptySubsequences: false)
-  if lines.count > maxLines {
-    result = lines.suffix(maxLines).joined(separator: "\n")
+  // Keep the last maxLines lines via backward newline scan
+  var newlineCount = 0
+  var cutIndex: String.Index? = nil
+  for i in trimmed.indices.reversed() {
+    if trimmed[i] == "\n" {
+      newlineCount += 1
+      if newlineCount == maxLines {
+        cutIndex = trimmed.index(after: i)
+        break
+      }
+    }
   }
+  var result = cutIndex != nil ? String(trimmed[cutIndex!...]) + "\n" : trimmed + "\n"
 
   // If still over maxChars, take last maxChars breaking at nearest newline
   if result.count > maxChars {
