@@ -29,4 +29,8 @@ enum Effect {
     case dismissAlertsPopover
     case updateToolbarBellBadge(Int)
     case updateDockBadge(Int)
+
+    // Persistence — triggers a debounced write of the model snapshot to disk.
+    // Returned by state-mutating update() branches so the recovery file stays current.
+    case scheduleCheckpoint
 }

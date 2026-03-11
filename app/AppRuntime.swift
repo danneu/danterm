@@ -25,6 +25,17 @@ class AppRuntime {
     private var dragCoordinator: PaneDragCoordinator?
     private var replayFiles: [PaneId: URL] = [:]
     private static let replayDirectoryName = "danterm-scrollback"
+    // Session persistence uses two tiers of checkpoints:
+    //   Light  — pure model serialization (no scrollback), written after a 2s debounce
+    //            following any state-mutating Msg. Cheap and frequent.
+    //   Enriched — model + scrollback text read from live Ghostty surfaces, written on
+    //              a 60s repeating timer and once at clean termination. Expensive but
+    //              gives full restore fidelity including terminal history.
+    private var checkpointTimer: DispatchSourceTimer?          // debounce timer for light checkpoints
+    private var enrichedCheckpointTimer: DispatchSourceTimer?  // repeating timer for enriched checkpoints
+    private var checkpointPending = false                      // true while a debounced write is scheduled
+    private static let checkpointDebounceInterval: TimeInterval = 2.0
+    private static let enrichedCheckpointInterval: TimeInterval = 60.0
 
     init(ghosttyApp: GhosttyApp) {
         self.ghosttyApp = ghosttyApp
@@ -52,6 +63,9 @@ class AppRuntime {
         // notification observer fires out of order.
         if case .appResignedActive = translatedMsg {
             cancelPaneDrag()
+            // Flush pending light checkpoint so we don't lose state if the app
+            // is killed while backgrounded (e.g. memory pressure, force quit).
+            flushPendingCheckpoint()
         }
 
         // Refresh toolbar text after title/cwd/progress changes
@@ -225,7 +239,14 @@ class AppRuntime {
                 self.send(.cancelTerminate)
             }
 
+        case .scheduleCheckpoint:
+            scheduleDebouncedCheckpoint()
+
         case .terminate:
+            checkpointTimer?.cancel()
+            checkpointTimer = nil
+            enrichedCheckpointTimer?.cancel()
+            enrichedCheckpointTimer = nil
             for paneId in replayFiles.keys {
                 cleanupReplayFile(for: paneId)
             }
@@ -326,6 +347,91 @@ class AppRuntime {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent(Self.replayDirectoryName, isDirectory: true)
         try? FileManager.default.removeItem(at: dir)
+    }
+
+    // MARK: - Session Checkpointing
+
+    /// Schedule a light checkpoint after a debounce delay. Each call resets the
+    /// timer so rapid-fire model changes (e.g. dragging a split divider) coalesce
+    /// into a single disk write.
+    private func scheduleDebouncedCheckpoint() {
+        checkpointTimer?.cancel()
+        checkpointPending = true
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + Self.checkpointDebounceInterval)
+        timer.setEventHandler { [weak self] in
+            self?.performLightCheckpoint()
+        }
+        timer.resume()
+        checkpointTimer = timer
+    }
+
+    /// Flush a pending debounced checkpoint immediately. Called on appResignedActive
+    /// so we don't lose the last 2s of state changes when the user switches away.
+    func flushPendingCheckpoint() {
+        guard checkpointPending else { return }
+        checkpointTimer?.cancel()
+        checkpointTimer = nil
+        performLightCheckpoint()
+    }
+
+    /// Start a repeating 60s timer that writes enriched checkpoints (model +
+    /// scrollback from live surfaces). Called once from applicationDidFinishLaunching.
+    func startEnrichedCheckpointTimer() {
+        enrichedCheckpointTimer?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + Self.enrichedCheckpointInterval, repeating: Self.enrichedCheckpointInterval)
+        timer.setEventHandler { [weak self] in
+            self?.performEnrichedCheckpoint()
+        }
+        timer.resume()
+        enrichedCheckpointTimer = timer
+    }
+
+    /// Write a light checkpoint: pure model serialization with scrollback: nil.
+    /// Cheap — no Ghostty surface interaction.
+    private func performLightCheckpoint() {
+        checkpointPending = false
+        let initFile = toInitFile(model)
+        writeCheckpoint(initFile)
+    }
+
+    /// Write an enriched checkpoint: model snapshot + scrollback text read from
+    /// each live Ghostty surface. Expensive but gives full restore fidelity.
+    /// Called by the 60s periodic timer and once at clean termination.
+    func performEnrichedCheckpoint() {
+        let snapshot = toSnapshot(model)
+        let enrichedPanes: [PaneSnapshot] = snapshot.panes.map { ps in
+            guard let idStr = ps.id,
+                  let uuid = UUID(uuidString: idStr),
+                  let view = surfaces[PaneId(rawValue: uuid)],
+                  let surface = view.surface,
+                  let rawText = readScrollbackText(surface: surface),
+                  let scrollback = truncateScrollback(rawText) else {
+                return ps
+            }
+            return PaneSnapshot(
+                id: ps.id, title: ps.title, cwd: ps.cwd,
+                launch: ps.launch, scrollback: scrollback
+            )
+        }
+        let enrichedSnapshot = AppModelSnapshot(
+            groups: snapshot.groups,
+            panes: enrichedPanes,
+            selectedTabId: snapshot.selectedTabId
+        )
+        writeCheckpoint(AppInitFile(version: 1, model: enrichedSnapshot))
+    }
+
+    /// Encode and atomically write a checkpoint to Recovery/last.json.
+    /// Uses .sortedKeys for stable output (no .prettyPrinted — this is a machine file).
+    private func writeCheckpoint(_ initFile: AppInitFile) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(initFile) else { return }
+        let dir = recoveryDirectoryURL()
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? data.write(to: recoveryCheckpointURL(), options: .atomic)
     }
 
     // MARK: - State Import

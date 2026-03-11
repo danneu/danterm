@@ -84,7 +84,8 @@ func paneTests() {
         }
 
         let effects = update(&model, .splitRatioChanged(splitId: splitId, ratio: 0.3))
-        try expectEqual(effects.count, 0, "splitRatioChanged should produce no effects")
+        try expectEqual(effects.count, 1, "splitRatioChanged should only produce scheduleCheckpoint")
+        try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false })
 
         guard case .split(_, _, _, _, let ratio) = model.groups[0].tabs[0].rootNode else {
             throw TestFailure(message: "should still be a split")

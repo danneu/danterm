@@ -69,11 +69,33 @@ do {
     initSnapshot = nil
 }
 
+// Session recovery: detect crash (stale lock file) and load last checkpoint.
+var lastSessionSnapshot: AppModelSnapshot? = nil
+var previousSessionCrashed = false
+
+if initSnapshot == nil {
+    // Crash detection: lock file exists = previous exit was unclean.
+    // Don't delete it here — writeSessionLockFile() in applicationDidFinishLaunching
+    // atomically overwrites it, so there's no gap where a startup crash would be
+    // mistaken for a clean exit on the next launch.
+    if readSessionLockFile() != nil {
+        previousSessionCrashed = true
+    }
+
+    // Load last session checkpoint (exists for both clean and crash exits)
+    if let cpData = try? Data(contentsOf: recoveryCheckpointURL()),
+       let loaded = try? loadValidatedInitFile(from: cpData) {
+        lastSessionSnapshot = loaded.snapshot
+    }
+}
+
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 
 let delegate = AppDelegate()
 delegate.initSnapshot = initSnapshot
 delegate.restoreCommandBehavior = restoreBehavior
+delegate.lastSessionSnapshot = lastSessionSnapshot
+delegate.previousSessionCrashed = previousSessionCrashed
 NSApp.delegate = delegate
 NSApp.run()

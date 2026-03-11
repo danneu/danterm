@@ -576,6 +576,56 @@ private func toSplitNodeSnapshot(_ node: SplitNodeModel) -> SplitNodeSnapshot {
   }
 }
 
+// MARK: - Recovery Paths
+//
+// Session persistence lives in ~/Library/Application Support/DanTerm/Recovery/:
+//   last.json    — model snapshot, always kept across launches (the recovery file)
+//   session.json — lock file, written at launch and deleted on clean exit
+
+func recoveryDirectoryURL() -> URL {
+    FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("DanTerm", isDirectory: true)
+        .appendingPathComponent("Recovery", isDirectory: true)
+}
+
+func recoveryCheckpointURL() -> URL {
+    recoveryDirectoryURL().appendingPathComponent("last.json")
+}
+
+func sessionLockURL() -> URL {
+    recoveryDirectoryURL().appendingPathComponent("session.json")
+}
+
+// MARK: - Session Lock I/O
+//
+// All session lock serialization goes through these three helpers so the
+// JSON encoder/decoder date strategy (.iso8601) is configured in one place.
+
+/// Write a session lock file at launch. Its presence at next launch means the
+/// previous exit was unclean — no PID liveness check needed.
+func writeSessionLockFile() {
+    let lock = SessionLock(pid: ProcessInfo.processInfo.processIdentifier, startedAt: Date())
+    let encoder = JSONEncoder()
+    encoder.dateEncodingStrategy = .iso8601
+    guard let data = try? encoder.encode(lock) else { return }
+    let dir = recoveryDirectoryURL()
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    try? data.write(to: sessionLockURL(), options: .atomic)
+}
+
+/// Read the session lock if it exists (non-nil = previous exit was unclean).
+func readSessionLockFile() -> SessionLock? {
+    guard let data = try? Data(contentsOf: sessionLockURL()) else { return nil }
+    let decoder = JSONDecoder()
+    decoder.dateDecodingStrategy = .iso8601
+    return try? decoder.decode(SessionLock.self, from: data)
+}
+
+/// Delete the session lock on clean termination.
+func deleteSessionLockFile() {
+    try? FileManager.default.removeItem(at: sessionLockURL())
+}
+
 // MARK: - Scrollback Truncation
 
 /// Truncate scrollback text to the last `maxLines` lines and `maxChars` characters.

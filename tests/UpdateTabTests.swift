@@ -318,7 +318,7 @@ func tabTests() {
         let bogusId = TabId()
 
         let effects = update(&model, .setTabColor(tabId: bogusId, color: .green))
-        try expectEqual(effects.count, 1, "should still emit reloadSidebarRow even for unknown tab")
+        try expectEqual(effects.count, 2, "should emit reloadSidebarRow + scheduleCheckpoint")
     }
 
     test("testCloseTabNonSelected") {

@@ -48,6 +48,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         effects.append(.rebuildContentView)
         effects.append(.reloadSidebar)
         effects.append(contentsOf: selectionSyncEffects(for: model))
+        effects.append(.scheduleCheckpoint)
         return effects
 
     case .selectAdjacentTab(let direction):
@@ -74,6 +75,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         effects.append(.rebuildContentView)
         effects.append(.reloadSidebar)
         effects.append(contentsOf: selectionSyncEffects(for: model))
+        effects.append(.scheduleCheckpoint)
         return effects
 
     case .requestCloseTab(let id):
@@ -125,6 +127,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             effects.append(contentsOf: selectionSyncEffects(for: model))
         }
         effects.append(.reloadSidebar)
+        effects.append(.scheduleCheckpoint)
         return effects
 
     // MARK: - Pane Management
@@ -150,6 +153,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return [
             .createSurface(paneId: newPaneId, cwd: cwd, command: nil),
             .rebuildContentView,
+            .scheduleCheckpoint,
         ]
 
     case .closePane(let paneId):
@@ -181,6 +185,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
 
         effects.append(.rebuildContentView)
+        effects.append(.scheduleCheckpoint)
         return effects
 
     case .movePane(let source, let target, let intent):
@@ -210,7 +215,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             tab.focusedPaneId = source
             tab.isZoomed = false
         }
-        return [.rebuildContentView]
+        return [.rebuildContentView, .scheduleCheckpoint]
 
     case .movePaneToTab(let paneId, let targetTabId):
         // Find source tab containing this pane
@@ -267,6 +272,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         effects.append(.reloadSidebar)
         effects.append(contentsOf: selectionSyncEffects(for: model))
         effects.append(.makeFirstResponder(paneId: paneId))
+        effects.append(.scheduleCheckpoint)
         return effects
 
     case .movePaneToNewTab(let paneId, let inGroupId, let atIndex):
@@ -333,11 +339,12 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         effects.append(.reloadSidebar)
         effects.append(contentsOf: selectionSyncEffects(for: model))
         effects.append(.makeFirstResponder(paneId: paneId))
+        effects.append(.scheduleCheckpoint)
         return effects
 
     case .setTabColor(let tabId, let color):
         updateTab(tabId, in: &model) { t in t.color = color }
-        return [.reloadSidebarRow(tabId: tabId)]
+        return [.reloadSidebarRow(tabId: tabId), .scheduleCheckpoint]
 
     case .renameTab(let id, let name):
         let trimmed = name?.trimmingCharacters(in: .whitespaces)
@@ -347,6 +354,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         if id == model.selectedTabId {
             effects.append(contentsOf: selectionSyncEffects(for: model))
         }
+        effects.append(.scheduleCheckpoint)
         return effects
 
     case .focusDirection(let direction, let side):
@@ -386,13 +394,14 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 effects.append(.reloadSidebarGroupRow(groupId: group.id))
             }
         }
+        effects.append(.scheduleCheckpoint)
         return effects
 
     // MARK: - Command Tracking
 
     case .commandStarted(let paneId, let command):
         model.panes[paneId]?.lastCommand = command
-        return []
+        return [.scheduleCheckpoint]
 
     // MARK: - Export
 
@@ -404,7 +413,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
     case .surfaceTitle(let paneId, let title):
         model.panes[paneId]?.title = title
         guard let tab = tabForPane(paneId, in: model), tab.focusedPaneId == paneId else {
-            return []
+            return [.scheduleCheckpoint]
         }
         let abbrev = abbreviateHome(title)
         updateTab(tab.id, in: &model) { t in t.title = abbrev }
@@ -413,12 +422,13 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             let updatedTab = selectedTab(in: model)!
             effects.append(.setWindowTitle(windowTitle(for: updatedTab)))
         }
+        effects.append(.scheduleCheckpoint)
         return effects
 
     case .surfaceCwd(let paneId, let cwd):
         model.panes[paneId]?.cwd = cwd
         guard let tab = tabForPane(paneId, in: model), tab.focusedPaneId == paneId else {
-            return []
+            return [.scheduleCheckpoint]
         }
         let abbrev = abbreviateHome(cwd)
         updateTab(tab.id, in: &model) { t in t.subtitle = abbrev }
@@ -427,6 +437,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             let updatedTab = selectedTab(in: model)!
             effects.append(.setWindowTitle(windowTitle(for: updatedTab)))
         }
+        effects.append(.scheduleCheckpoint)
         return effects
 
     case .surfaceProgress(let paneId, let state):
@@ -504,6 +515,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 }
                 var effects: [Effect] = [.rebuildContentView, .reloadSidebar]
                 effects.append(contentsOf: selectionSyncEffects(for: model))
+                effects.append(.scheduleCheckpoint)
                 return effects
             }
         }
@@ -611,16 +623,17 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 effects.append(contentsOf: selectionSyncEffects(for: model))
             }
             effects.append(.reloadSidebar)
+            effects.append(.scheduleCheckpoint)
             return effects
         }
 
         model.groups.remove(at: idx)
-        return [.reloadSidebar]
+        return [.reloadSidebar, .scheduleCheckpoint]
 
     case .renameGroup(let id, let name):
         guard let idx = model.groups.firstIndex(where: { $0.id == id }) else { return [] }
         model.groups[idx].name = name
-        return [.reloadSidebar]
+        return [.reloadSidebar, .scheduleCheckpoint]
 
     case .moveTab(let tabId, let toGroupId, let atIndex):
         guard let (srcGroupIdx, tabIdx) = tabLocation(tabId, in: model),
@@ -633,7 +646,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         let clampedIndex = max(0, min(adjustedIndex, model.groups[dstGroupIdx].tabs.count))
         model.groups[dstGroupIdx].tabs.insert(tab, at: clampedIndex)
-        return [.reloadSidebar]
+        return [.reloadSidebar, .scheduleCheckpoint]
 
     case .reorderGroup(let groupId, let toIndex):
         guard let currentIdx = model.groups.firstIndex(where: { $0.id == groupId }),
@@ -641,22 +654,22 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let clamped = max(1, min(toIndex, model.groups.count - 1))
         let group = model.groups.remove(at: currentIdx)
         model.groups.insert(group, at: clamped)
-        return [.reloadSidebar]
+        return [.reloadSidebar, .scheduleCheckpoint]
 
     case .toggleGroupCollapse(let groupId):
         guard let idx = model.groups.firstIndex(where: { $0.id == groupId }) else { return [] }
         model.groups[idx].isCollapsed.toggle()
-        return []
+        return [.scheduleCheckpoint]
 
     case .toggleZoomPane:
         guard let tab = selectedTab(in: model) else { return [] }
         if tab.isZoomed {
             updateSelectedTab(&model) { t in t.isZoomed = false }
-            return [.rebuildContentView]
+            return [.rebuildContentView, .scheduleCheckpoint]
         }
         if case .split = tab.rootNode {
             updateSelectedTab(&model) { t in t.isZoomed = true }
-            return [.rebuildContentView]
+            return [.rebuildContentView, .scheduleCheckpoint]
         }
         return []
 
@@ -666,7 +679,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         updateSelectedTab(&model) { tab in
             tab.rootNode = setRatio(tab.rootNode, splitId: splitId, ratio: ratio)
         }
-        return []
+        return [.scheduleCheckpoint]
     }
 }
 

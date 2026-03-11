@@ -18,6 +18,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
     var chromeView: WindowChromeView!
     var initSnapshot: AppModelSnapshot?
     var restoreCommandBehavior: RestoreCommandBehavior = .prefill
+    // Session recovery state set by main.swift before app launch.
+    var lastSessionSnapshot: AppModelSnapshot?  // loaded from Recovery/last.json if it exists
+    var previousSessionCrashed: Bool = false     // true if session.json lock was still present
 
     // NSApplicationDelegate: finish bootstrapping the Ghostty runtime, main
     // window, and launch-time services once AppKit has started the app.
@@ -112,13 +115,43 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
         runtime.contentArea = contentArea
         runtime.chromeView = chromeView
 
+        // Write session lock (crash detection for next launch). Atomically
+        // overwrites any stale lock from a previous crash, so there's no window
+        // where a startup crash would lose the lock.
+        writeSessionLockFile()
+
+        // Start periodic enriched checkpoints (scrollback capture)
+        runtime.startEnrichedCheckpointTimer()
+
         // Clean up stale replay files from prior sessions
         runtime.cleanupStaleReplayDirectory()
 
-        // Bootstrap from snapshot or create default tab
+        // Bootstrap startup: --init CLI > crash/clean restore prompt > fresh
         if let snapshot = initSnapshot {
             runtime.bootstrapFromSnapshot(snapshot, restoreCommandBehavior: restoreCommandBehavior)
             initSnapshot = nil
+        } else if let lastSession = lastSessionSnapshot {
+            // Prompt the user before restoring so they know what's coming.
+            // Crash path gets a warning tone; clean exit is a neutral prompt.
+            let summary = sessionSummary(lastSession)
+            let alert = NSAlert()
+            alert.addButton(withTitle: "Restore")
+            alert.addButton(withTitle: "Start Fresh")
+            if previousSessionCrashed {
+                alert.messageText = "Restore Previous Session?"
+                alert.informativeText = "DanTerm did not exit cleanly last time.\n\(summary)"
+                alert.alertStyle = .warning
+            } else {
+                alert.messageText = "Restore Previous Session?"
+                alert.informativeText = summary
+            }
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                runtime.bootstrapFromSnapshot(lastSession, restoreCommandBehavior: .prefill)
+            } else {
+                runtime.send(.createTab(inGroupId: nil))
+            }
+            lastSessionSnapshot = nil
         } else {
             runtime.send(.createTab(inGroupId: nil))
         }
@@ -135,6 +168,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
             self?.requestNotificationAuthorizationIfNeeded()
         }
 
+    }
+
+    /// Build a human-readable summary like "12 tabs in 3 groups" for the restore prompt.
+    private func sessionSummary(_ snapshot: AppModelSnapshot) -> String {
+        let tabCount = snapshot.groups.flatMap(\.tabs).count
+        let groupCount = snapshot.groups.count
+        let tabs = tabCount == 1 ? "1 tab" : "\(tabCount) tabs"
+        let groups = groupCount == 1 ? "1 group" : "\(groupCount) groups"
+        return "\(tabs) in \(groups)"
     }
 
     private func requestNotificationAuthorizationIfNeeded() {
@@ -371,6 +413,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
     }
 
     // MARK: - App Lifecycle
+
+    // NSApplicationDelegate: write final enriched checkpoint (with scrollback) and
+    // delete the session lock so the next launch knows this was a clean exit.
+    func applicationWillTerminate(_ notification: Notification) {
+        runtime?.performEnrichedCheckpoint()
+        deleteSessionLockFile()
+    }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return true

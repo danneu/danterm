@@ -143,11 +143,12 @@ func groupTests() {
         try expectEqual(model.groups[1].isCollapsed, false)
         let effects1 = update(&model, .toggleGroupCollapse(groupId: workId))
         try expectEqual(model.groups[1].isCollapsed, true)
-        try expectEqual(effects1.count, 0, "toggleGroupCollapse should return no effects")
+        try expectEqual(effects1.count, 1, "toggleGroupCollapse should return only scheduleCheckpoint")
+        try expect(hasEffect(effects1) { if case .scheduleCheckpoint = $0 { return true }; return false })
 
         let effects2 = update(&model, .toggleGroupCollapse(groupId: workId))
         try expectEqual(model.groups[1].isCollapsed, false)
-        try expectEqual(effects2.count, 0)
+        try expectEqual(effects2.count, 1)
     }
 
     test("testCreateGroupCreatesTabAndFocuses") {

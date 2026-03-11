@@ -94,7 +94,8 @@ func ghosttyTests() {
         let effects = update(&model, .surfaceTitle(paneId: paneA, title: "htop"))
         try expectEqual(model.panes[paneA]?.title, "htop", "pane title should update")
         try expectEqual(model.groups[0].tabs[0].title, "Terminal", "tab title should not change")
-        try expectEqual(effects.count, 0, "no effects for unfocused pane title")
+        try expectEqual(effects.count, 1, "only scheduleCheckpoint for unfocused pane title")
+        try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false })
     }
 
     test("testSurfacePwdFocusedPane") {
@@ -125,7 +126,8 @@ func ghosttyTests() {
 
         let effects = update(&model, .surfaceCwd(paneId: paneA, cwd: "/tmp"))
         try expectEqual(model.panes[paneA]?.cwd, "/tmp", "pane cwd should update")
-        try expectEqual(effects.count, 0, "no effects for unfocused pane cwd")
+        try expectEqual(effects.count, 1, "only scheduleCheckpoint for unfocused pane cwd")
+        try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false })
     }
 
     test("testSurfaceTitleBackgroundTab") {
