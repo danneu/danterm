@@ -14,7 +14,7 @@ enum Msg {
     case createTab(inGroupId: GroupId?)
     case selectTab(id: TabId)
     case requestCloseTab(id: TabId)
-    case splitPane(direction: SplitNodeModel.Direction)
+    case splitPane(paneId: PaneId? = nil, direction: SplitNodeModel.Direction)
     case closePane(paneId: PaneId)
     case focusDirection(direction: SplitNodeModel.Direction, side: SplitNodeModel.Side)
     case createGroup(name: String)

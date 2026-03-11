@@ -362,6 +362,52 @@ func paneTests() {
         try expectEqual(effects.count, 0, "zoomed tab is no-op")
     }
 
+    test("testSplitPaneTargetsByPaneId") {
+        var model = makeModel()
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        // Split → [A, B], B is focused
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+        try expect(paneB != paneA)
+
+        // Split pane A by paneId while B is focused → should split A, not B
+        update(&model, .splitPane(paneId: paneA, direction: .vertical))
+        let tab = model.groups[0].tabs[0]
+
+        // Root should still be horizontal (the original split)
+        guard case .split(_, .horizontal, let first, let second, _) = tab.rootNode else {
+            throw TestFailure(message: "root should be horizontal split")
+        }
+
+        // First child should now be a vertical split (A was split)
+        guard case .split(_, .vertical, let innerFirst, let innerSecond, _) = first else {
+            throw TestFailure(message: "first child should be vertical split (pane A was split)")
+        }
+        if case .leaf(let fid) = innerFirst {
+            try expectEqual(fid, paneA, "inner first should be pane A")
+        } else {
+            throw TestFailure(message: "inner first should be a leaf")
+        }
+        // The new pane should be the focused pane
+        let paneC = tab.focusedPaneId
+        if case .leaf(let sid) = innerSecond {
+            try expectEqual(sid, paneC, "inner second should be new pane C")
+        } else {
+            throw TestFailure(message: "inner second should be a leaf")
+        }
+
+        // Second child should still be B (untouched)
+        if case .leaf(let bid) = second {
+            try expectEqual(bid, paneB, "second child should still be pane B")
+        } else {
+            throw TestFailure(message: "second child should be a leaf")
+        }
+
+        try expectEqual(model.panes.count, 3)
+    }
+
     test("testFocusDirectionThenFirstResponderUpdatesFocusAndRebuilds") {
         var model = makeModel()
         createTab(&model)

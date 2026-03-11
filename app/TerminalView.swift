@@ -247,13 +247,98 @@ class TerminalView: NSView, NSTextInputClient {
     override func rightMouseDown(with event: NSEvent) {
         guard let surface = surface else { return }
         let mods = Self.ghosttyMods(event.modifierFlags)
-        ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_RIGHT, mods)
+        let consumed = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_RIGHT, mods)
+        if !consumed { super.rightMouseDown(with: event) }
     }
 
     override func rightMouseUp(with event: NSEvent) {
         guard let surface = surface else { return }
         let mods = Self.ghosttyMods(event.modifierFlags)
-        ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_RIGHT, mods)
+        let consumed = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_RIGHT, mods)
+        if !consumed { super.rightMouseUp(with: event) }
+    }
+
+    // NSView: builds the right-click context menu. Called by AppKit from
+    // super.rightMouseDown (normal right-click) or before mouseDown (ctrl+click).
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let surface = surface else { return nil }
+
+        switch event.type {
+        case .rightMouseDown:
+            break
+
+        case .leftMouseDown:
+            // Ctrl+click: AppKit calls menu(for:) BEFORE mouse events.
+            // If mouse capture is active, return nil so the terminal app gets the event.
+            if !event.modifierFlags.contains(.control) { return nil }
+            if ghostty_surface_mouse_captured(surface) { return nil }
+            // Send synthetic right-button press since AppKit won't deliver mouseDown
+            // when we return a menu.
+            let mods = Self.ghosttyMods(event.modifierFlags)
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_RIGHT, mods)
+
+        default:
+            return nil
+        }
+
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        // Explicit target = self on every item so AppKit routes to this
+        // TerminalView, not up the responder chain to a different pane.
+        func item(_ title: String, _ action: Selector) -> NSMenuItem {
+            let mi = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            mi.target = self
+            return mi
+        }
+
+        if ghostty_surface_has_selection(surface) {
+            menu.addItem(item("Copy", #selector(copySelection(_:))))
+        }
+        menu.addItem(item("Paste", #selector(pasteClipboard(_:))))
+
+        menu.addItem(.separator())
+        menu.addItem(item("Split Right", #selector(contextSplitRight(_:))))
+        menu.addItem(item("Split Down", #selector(contextSplitDown(_:))))
+
+        menu.addItem(.separator())
+        menu.addItem(item("Close Pane", #selector(contextClosePane(_:))))
+
+        return menu
+    }
+
+    // MARK: - Context Menu Actions
+
+    /// Copy the current selection to the clipboard via ghostty's binding action.
+    @objc func copySelection(_ sender: Any?) {
+        guard let surface = surface else { return }
+        "copy_to_clipboard".withCString { ptr in
+            _ = ghostty_surface_binding_action(surface, ptr, UInt(strlen(ptr)))
+        }
+    }
+
+    /// Paste from the clipboard via ghostty's binding action.
+    @objc func pasteClipboard(_ sender: Any?) {
+        guard let surface = surface else { return }
+        "paste_from_clipboard".withCString { ptr in
+            _ = ghostty_surface_binding_action(surface, ptr, UInt(strlen(ptr)))
+        }
+    }
+
+    /// Split right, targeting this pane specifically (not the focused pane).
+    @objc func contextSplitRight(_ sender: Any?) {
+        runtime?.send(.splitPane(paneId: bridge.paneId, direction: .horizontal))
+    }
+
+    /// Split down, targeting this pane specifically (not the focused pane).
+    @objc func contextSplitDown(_ sender: Any?) {
+        runtime?.send(.splitPane(paneId: bridge.paneId, direction: .vertical))
+    }
+
+    /// Close this pane via ghostty's close request flow.
+    @objc func contextClosePane(_ sender: Any?) {
+        guard let surface = surface else { return }
+        ghostty_surface_request_close(surface)
     }
 
     override func mouseMoved(with event: NSEvent) {

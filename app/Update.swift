@@ -133,13 +133,13 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
     // MARK: - Pane Management
 
-    case .splitPane(let direction):
+    case .splitPane(let paneId, let direction):
         guard let tab = selectedTab(in: model) else { return [] }
-        let focusedId = tab.focusedPaneId
+        let targetPaneId = paneId ?? tab.focusedPaneId
         let newPaneId = PaneId()
-        let cwd = model.panes[focusedId]?.cwd
+        let cwd = model.panes[targetPaneId]?.cwd
 
-        guard let newRoot = splitLeaf(tab.rootNode, paneId: focusedId, direction: direction, newPaneId: newPaneId) else { return [] }
+        guard let newRoot = splitLeaf(tab.rootNode, paneId: targetPaneId, direction: direction, newPaneId: newPaneId) else { return [] }
 
         let newPane = PaneModel(id: newPaneId)
         model.panes[newPaneId] = newPane

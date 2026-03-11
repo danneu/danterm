@@ -247,11 +247,11 @@ class PaneWrapperView: NSView {
     }
 
     @objc private func splitRightAction() {
-        runtime?.send(.splitPane(direction: .horizontal))
+        runtime?.send(.splitPane(paneId: paneId, direction: .horizontal))
     }
 
     @objc private func splitDownAction() {
-        runtime?.send(.splitPane(direction: .vertical))
+        runtime?.send(.splitPane(paneId: paneId, direction: .vertical))
     }
 
     @objc private func copyCwdAction() {
