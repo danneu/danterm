@@ -21,8 +21,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         if let gid = inGroupId, let idx = model.groups.firstIndex(where: { $0.id == gid }) {
             targetGroupIndex = idx
         } else if let selId = model.selectedTabId,
-                  let idx = model.groups.firstIndex(where: { $0.tabs.contains(where: { $0.id == selId }) }) {
-            targetGroupIndex = idx
+                  let (gi, _) = tabLocation(selId, in: model) {
+            targetGroupIndex = gi
         } else {
             targetGroupIndex = 0
         }
@@ -88,8 +88,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return update(&model, .closeTab(id: id))
 
     case .closeTab(let id):
-        guard let groupIdx = model.groups.firstIndex(where: { $0.tabs.contains(where: { $0.id == id }) }),
-              let tabIdx = model.groups[groupIdx].tabs.firstIndex(where: { $0.id == id }) else { return [] }
+        guard let (groupIdx, tabIdx) = tabLocation(id, in: model) else { return [] }
 
         if wouldQuitFromClose(model) {
             return [.showTerminateConfirmation]
@@ -558,8 +557,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return [.reloadSidebar]
 
     case .moveTab(let tabId, let toGroupId, let atIndex):
-        guard let srcGroupIdx = model.groups.firstIndex(where: { $0.tabs.contains(where: { $0.id == tabId }) }),
-              let tabIdx = model.groups[srcGroupIdx].tabs.firstIndex(where: { $0.id == tabId }),
+        guard let (srcGroupIdx, tabIdx) = tabLocation(tabId, in: model),
               let dstGroupIdx = model.groups.firstIndex(where: { $0.id == toGroupId }) else { return [] }
 
         let tab = model.groups[srcGroupIdx].tabs.remove(at: tabIdx)
@@ -614,21 +612,13 @@ private func updateSelectedTab(_ model: inout AppModel, _ body: (inout TabModel)
 }
 
 private func updateTab(_ tabId: TabId, in model: inout AppModel, _ body: (inout TabModel) -> Void) {
-    for gi in model.groups.indices {
-        if let ti = model.groups[gi].tabs.firstIndex(where: { $0.id == tabId }) {
-            body(&model.groups[gi].tabs[ti])
-            return
-        }
-    }
+    guard let (gi, ti) = tabLocation(tabId, in: model) else { return }
+    body(&model.groups[gi].tabs[ti])
 }
 
 private func removeTab(_ tabId: TabId, from model: inout AppModel) {
-    for gi in model.groups.indices {
-        if let ti = model.groups[gi].tabs.firstIndex(where: { $0.id == tabId }) {
-            model.groups[gi].tabs.remove(at: ti)
-            return
-        }
-    }
+    guard let (gi, ti) = tabLocation(tabId, in: model) else { return }
+    model.groups[gi].tabs.remove(at: ti)
 }
 
 private func windowTitle(for tab: TabModel) -> String {
