@@ -156,11 +156,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
     }
 
-    @objc private func addTabToGroup(_ sender: NSButton) {
-        guard let rawId = objc_getAssociatedObject(sender, &AssociatedKeys.groupId) as? UUID else { return }
-        runtime?.send(.createTab(inGroupId: GroupId(rawValue: rawId)))
-    }
-
     @objc private func caretClicked(_ sender: NSButton) {
         guard let rawId = objc_getAssociatedObject(sender, &AssociatedKeys.groupId) as? UUID else { return }
         let groupId = GroupId(rawValue: rawId)
@@ -536,17 +531,25 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     // MARK: - Context Menus
 
     func contextMenu(for group: GroupModel) -> NSMenu? {
-        guard !group.isDefault else { return nil }
         let menu = NSMenu()
+
+        let newTabItem = NSMenuItem(title: "New Tab", action: #selector(contextNewTab(_:)), keyEquivalent: "")
+        newTabItem.target = self
+        newTabItem.representedObject = group.id.rawValue
+        menu.addItem(newTabItem)
+
+        menu.addItem(NSMenuItem.separator())
 
         let renameItem = NSMenuItem(title: "Rename Group", action: #selector(contextRenameGroup(_:)), keyEquivalent: "")
         renameItem.target = self
         renameItem.representedObject = group.id.rawValue
+        renameItem.isEnabled = !group.isDefault
         menu.addItem(renameItem)
 
         let deleteItem = NSMenuItem(title: "Delete Group", action: #selector(contextDeleteGroup(_:)), keyEquivalent: "")
         deleteItem.target = self
         deleteItem.representedObject = group.id.rawValue
+        deleteItem.isEnabled = !group.isDefault
         menu.addItem(deleteItem)
 
         return menu
@@ -628,6 +631,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         menu.addItem(closeItem)
 
         return menu
+    }
+
+    @objc private func contextNewTab(_ sender: NSMenuItem) {
+        guard let rawId = sender.representedObject as? UUID else { return }
+        runtime?.send(.createTab(inGroupId: GroupId(rawValue: rawId)))
     }
 
     @objc private func contextRenameGroup(_ sender: NSMenuItem) {
@@ -727,29 +735,16 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         caretButton.identifier = NSUserInterfaceItemIdentifier("groupCaretButton")
         cell.addSubview(caretButton)
 
-        let addButton = NSButton(image: NSImage(named: NSImage.addTemplateName)!, target: self, action: #selector(addTabToGroup(_:)))
-        addButton.translatesAutoresizingMaskIntoConstraints = false
-        addButton.bezelStyle = .accessoryBarAction
-        addButton.isBordered = false
-        addButton.imageScaling = .scaleProportionallyDown
-        addButton.toolTip = "New Tab in Group"
-        addButton.identifier = NSUserInterfaceItemIdentifier("groupAddButton")
-        cell.addSubview(addButton)
-
         NSLayoutConstraint.activate([
             textField.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
             textField.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             textField.trailingAnchor.constraint(lessThanOrEqualTo: bellBadge.leadingAnchor, constant: -4),
             bellBadge.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             bellBadge.trailingAnchor.constraint(equalTo: caretButton.leadingAnchor, constant: -2),
-            caretButton.trailingAnchor.constraint(equalTo: addButton.leadingAnchor, constant: 2),
+            caretButton.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -2),
             caretButton.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             caretButton.widthAnchor.constraint(equalToConstant: 16),
             caretButton.heightAnchor.constraint(equalToConstant: 16),
-            addButton.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -2),
-            addButton.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            addButton.widthAnchor.constraint(equalToConstant: 16),
-            addButton.heightAnchor.constraint(equalToConstant: 16),
         ])
 
         configureGroupCell(cell, group: group)
@@ -759,9 +754,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     private func configureGroupCell(_ cell: NSTableCellView, group: GroupModel) {
         cell.textField?.stringValue = group.name
         cell.textField?.tag = group.id.rawValue.hashValue
-        if let addButton = cell.subviews.first(where: { $0.identifier?.rawValue == "groupAddButton" }) as? NSButton {
-            objc_setAssociatedObject(addButton, &AssociatedKeys.groupId, group.id.rawValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-        }
         if let caretButton = cell.subviews.first(where: { $0.identifier?.rawValue == "groupCaretButton" }) as? NSButton {
             let symbolName = group.isCollapsed ? "chevron.right" : "chevron.down"
             caretButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Toggle Group")
