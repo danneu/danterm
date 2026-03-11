@@ -5,6 +5,9 @@ import GhosttyKit
 import UserNotifications
 
 class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolbarDelegate, UNUserNotificationCenterDelegate {
+    static let minWindowWidth: CGFloat = 600
+    static let minWindowHeight: CGFloat = 300
+
     var window: NSWindow!
     var ghosttyApp: GhosttyApp!
     var runtime: AppRuntime!
@@ -41,7 +44,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, NSToolb
             defer: false
         )
         window.title = "DanTerm"
-        window.minSize = NSSize(width: 600, height: 300)
+        window.minSize = NSSize(width: Self.minWindowWidth, height: Self.minWindowHeight)
         window.center()
 
         // Toolbar with sidebar toggle

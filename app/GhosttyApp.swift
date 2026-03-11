@@ -161,10 +161,10 @@ class GhosttyApp {
                 DispatchQueue.main.async { [weak view = bridge.view] in
                     guard let window = view?.window else { return }
                     if limits.min_width > 0 && limits.min_height > 0 {
-                        // Don't shrink below the app-level minimum set on the window
+                        // Use the reported limits but never go below the app-level floor
                         window.minSize = NSSize(
-                            width: max(CGFloat(limits.min_width), window.minSize.width),
-                            height: max(CGFloat(limits.min_height), window.minSize.height)
+                            width: max(CGFloat(limits.min_width), AppDelegate.minWindowWidth),
+                            height: max(CGFloat(limits.min_height), AppDelegate.minWindowHeight)
                         )
                     }
                     if limits.max_width > 0 && limits.max_height > 0 {
