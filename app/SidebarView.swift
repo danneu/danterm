@@ -408,6 +408,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     }
 
     func outlineView(_ outlineView: NSOutlineView, validateDrop info: NSDraggingInfo, proposedItem item: Any?, proposedChildIndex index: Int) -> NSDragOperation {
+        // Reject drops in empty space below all rows. NSOutlineView proposes
+        // item=nil, index=0 for this region which would show the insertion
+        // marker at the top of the list — confusing and not useful.
+        if isDragBelowContent(info) { return [] }
+
         let pb = info.draggingPasteboard
 
         if pb.string(forType: SidebarView.tabDragType) != nil {
@@ -848,6 +853,15 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
 
         return cell
+    }
+
+    /// Returns true if the drag cursor is in empty space below all outline view rows.
+    private func isDragBelowContent(_ info: NSDraggingInfo) -> Bool {
+        let location = outlineView.convert(info.draggingLocation, from: nil)
+        let rowCount = outlineView.numberOfRows
+        guard rowCount > 0 else { return true }
+        let lastRowRect = outlineView.rect(ofRow: rowCount - 1)
+        return location.y > lastRowRect.maxY
     }
 
     override var acceptsFirstResponder: Bool { false }
