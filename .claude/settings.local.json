@@ -7,7 +7,11 @@
       "Bash(grep:*)",
       "Bash(just test:*)",
       "Bash(just build:*)",
-      "Bash(find app:*)"
+      "Bash(find app:*)",
+      "Bash(gh search:*)",
+      "Bash(gh issue:*)",
+      "Bash(command -v claude)",
+      "Read(//private/tmp/**)"
     ]
   }
 }
