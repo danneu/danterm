@@ -179,22 +179,22 @@ end
 
 ## Keybinds
 
-| Action           | Shortcut |
-| ---------------- | -------- |
-| New Tab          | ⌘T       |
-| Next Tab         | ⇧⌘N      |
-| Previous Tab     | ⇧⌘P      |
-| Close Pane       | ⌘W       |
-| Split Pane Right | ⌘D       |
-| Split Pane Down  | ⇧⌘D      |
-| Focus Pane Left  | ⇧⌘H      |
-| Focus Pane Down  | ⇧⌘J      |
-| Focus Pane Up    | ⇧⌘K      |
-| Focus Pane Right | ⇧⌘L      |
-| Toggle Pane Zoom | ⇧⌘Enter  |
-| New Group        | ⇧⌘G      |
-| Go to Most Recent Unread Alert | ⇧⌘A |
-| Quit             | ⌘Q       |
+| Action                         | Shortcut |
+| ------------------------------ | -------- |
+| New Tab                        | ⌘T       |
+| Next Tab                       | ⇧⌘N      |
+| Previous Tab                   | ⇧⌘P      |
+| Close Pane                     | ⌘W       |
+| Split Pane Right               | ⌘D       |
+| Split Pane Down                | ⇧⌘D      |
+| Focus Pane Left                | ⇧⌘H      |
+| Focus Pane Down                | ⇧⌘J      |
+| Focus Pane Up                  | ⇧⌘K      |
+| Focus Pane Right               | ⇧⌘L      |
+| Toggle Pane Zoom               | ⇧⌘Enter  |
+| New Group                      | ⇧⌘G      |
+| Go to Most Recent Unread Alert | ⇧⌘A      |
+| Quit                           | ⌘Q       |
 
 ## Comparison
 

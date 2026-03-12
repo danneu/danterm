@@ -11,6 +11,13 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
     private let headerLabel = NSTextField(labelWithString: "Alerts")
     private let markAllButton = NSButton(title: "Mark All Read", target: nil, action: nil)
     private let emptyLabel = NSTextField(labelWithString: "No alerts")
+    private let showAllLabel = NSTextField(labelWithString: "Show all")
+    private let showAllSwitch = NSSwitch()
+    private var selectedTab: AlertTab = .unread
+
+    private var displayedAlerts: [AlertModel] {
+        filteredAlerts(runtime?.model.alerts ?? [], tab: selectedTab)
+    }
 
     override func loadView() {
         let size = NSSize(width: 320, height: 400)
@@ -35,6 +42,18 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
         markAllButton.font = .systemFont(ofSize: 11)
         markAllButton.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(markAllButton)
+
+        // Show all toggle
+        showAllLabel.font = .systemFont(ofSize: 11)
+        showAllLabel.textColor = .secondaryLabelColor
+        showAllLabel.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(showAllLabel)
+
+        showAllSwitch.target = self
+        showAllSwitch.action = #selector(showAllToggled)
+        showAllSwitch.controlSize = .mini
+        showAllSwitch.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(showAllSwitch)
 
         // Table view with single column, no header
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("alert"))
@@ -77,6 +96,10 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
             headerLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
             markAllButton.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
             markAllButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            showAllSwitch.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
+            showAllSwitch.leadingAnchor.constraint(equalTo: headerLabel.trailingAnchor, constant: 8),
+            showAllLabel.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
+            showAllLabel.leadingAnchor.constraint(equalTo: showAllSwitch.trailingAnchor, constant: 4),
             scrollView.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
@@ -90,41 +113,47 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
 
     override func viewWillAppear() {
         super.viewWillAppear()
+        selectedTab = .unread
+        showAllSwitch.state = .off
         rebuildRows()
     }
 
     private func rebuildRows() {
-        guard let alerts = runtime?.model.alerts, !alerts.isEmpty else {
+        let displayed = displayedAlerts
+        let allAlerts = runtime?.model.alerts ?? []
+
+        if displayed.isEmpty {
+            emptyLabel.stringValue = alertsEmptyText(tab: selectedTab)
             emptyLabel.isHidden = false
             scrollView.isHidden = true
-            markAllButton.isHidden = true
-            return
+        } else {
+            emptyLabel.isHidden = true
+            scrollView.isHidden = false
         }
 
-        emptyLabel.isHidden = true
-        scrollView.isHidden = false
-        markAllButton.isHidden = !alerts.contains(where: \.isUnread)
-
+        markAllButton.isHidden = !allAlerts.contains(where: \.isUnread)
         tableView.reloadData()
     }
 
     // MARK: - NSTableViewDataSource
 
     func numberOfRows(in tableView: NSTableView) -> Int {
-        return runtime?.model.alerts.count ?? 0
+        return displayedAlerts.count
     }
 
     // MARK: - NSTableViewDelegate
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard let alerts = runtime?.model.alerts, row < alerts.count else { return nil }
-        return makeAlertRow(alerts[row])
+        let displayed = displayedAlerts
+        guard row < displayed.count else { return nil }
+        return makeAlertRow(displayed[row])
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         let row = tableView.selectedRow
-        guard row >= 0, let alerts = runtime?.model.alerts, row < alerts.count else { return }
-        runtime?.send(.activateAlert(alertId: alerts[row].id))
+        let displayed = displayedAlerts
+        guard row >= 0, row < displayed.count else { return }
+        runtime?.send(.activateAlert(alertId: displayed[row].id))
         tableView.deselectRow(row)
     }
 
@@ -202,6 +231,11 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
         ])
 
         return row
+    }
+
+    @objc private func showAllToggled() {
+        selectedTab = showAllSwitch.state == .on ? .history : .unread
+        rebuildRows()
     }
 
     @objc private func markAllRead() {

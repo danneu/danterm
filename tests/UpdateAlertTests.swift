@@ -407,6 +407,48 @@ func alertTests() {
         }, "should focus the unread alert's pane")
     }
 
+    // MARK: - filteredAlerts / alertsEmptyText Tests
+
+    test("testFilteredAlertsUnreadReturnsOnlyUnread") {
+        let paneId = PaneId()
+        let alerts = [
+            AlertModel(id: AlertId(), kind: .bell, paneId: paneId, title: "T", body: "a", createdAt: Date(), isUnread: true),
+            AlertModel(id: AlertId(), kind: .bell, paneId: paneId, title: "T", body: "b", createdAt: Date(), isUnread: false),
+            AlertModel(id: AlertId(), kind: .bell, paneId: paneId, title: "T", body: "c", createdAt: Date(), isUnread: true),
+        ]
+        let result = filteredAlerts(alerts, tab: .unread)
+        try expectEqual(result.count, 2, "should return only unread alerts")
+        try expectEqual(result[0].body, "a")
+        try expectEqual(result[1].body, "c")
+    }
+
+    test("testFilteredAlertsHistoryReturnsAll") {
+        let paneId = PaneId()
+        let alerts = [
+            AlertModel(id: AlertId(), kind: .bell, paneId: paneId, title: "T", body: "a", createdAt: Date(), isUnread: true),
+            AlertModel(id: AlertId(), kind: .bell, paneId: paneId, title: "T", body: "b", createdAt: Date(), isUnread: false),
+        ]
+        let result = filteredAlerts(alerts, tab: .history)
+        try expectEqual(result.count, 2, "history should return all alerts")
+        try expectEqual(result[0].body, "a")
+        try expectEqual(result[1].body, "b")
+    }
+
+    test("testFilteredAlertsUnreadAllReadReturnsEmpty") {
+        let paneId = PaneId()
+        let alerts = [
+            AlertModel(id: AlertId(), kind: .bell, paneId: paneId, title: "T", body: "a", createdAt: Date(), isUnread: false),
+            AlertModel(id: AlertId(), kind: .bell, paneId: paneId, title: "T", body: "b", createdAt: Date(), isUnread: false),
+        ]
+        let result = filteredAlerts(alerts, tab: .unread)
+        try expectEqual(result.count, 0, "all-read list should return empty for unread tab")
+    }
+
+    test("testAlertsEmptyTextReturnsCorrectString") {
+        try expectEqual(alertsEmptyText(tab: .unread), "No unread alerts")
+        try expectEqual(alertsEmptyText(tab: .history), "No alerts")
+    }
+
     test("testGoToMostRecentAlertPaneUnzoomsIfNeeded") {
         var model = makeModel()
         createTab(&model)
