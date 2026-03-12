@@ -170,7 +170,7 @@ func alertTests() {
         _ = paneB
     }
 
-    test("testClosePaneMarksAlertsReadAndCleansUpThrottle") {
+    test("testClosePaneRemovesAlertsAndCleansUpThrottle") {
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
@@ -186,8 +186,56 @@ func alertTests() {
         model.lastNotificationTime[paneA] = [.bell: Date()]
 
         update(&model, .closePane(paneId: paneA))
-        try expectEqual(model.alerts[0].isUnread, false, "closing pane should mark its alerts read")
+        try expect(model.alerts.isEmpty, "closing pane should remove its alerts")
         try expect(model.lastNotificationTime[paneA] == nil, "closing pane should clean up throttle data")
+    }
+
+    test("testCloseTabRemovesAlertsForAllPanes") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        // Split to get a second pane
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+
+        // Create second tab so closing the first doesn't terminate
+        createTab(&model)
+
+        // Add alerts for both panes
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA, tabId: tabId,
+            title: "DanTerm", body: "a", createdAt: Date(), isUnread: true
+        ), at: 0)
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneB, tabId: tabId,
+            title: "DanTerm", body: "b", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        update(&model, .closeTab(id: tabId))
+        try expect(model.alerts.isEmpty, "closing tab should remove alerts for all its panes")
+    }
+
+    test("testSurfaceCreationFailedRemovesAlerts") {
+        var model = makeModel()
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+        let tabId = model.groups[0].tabs[0].id
+
+        // Create second tab so closing the first doesn't terminate
+        createTab(&model)
+
+        // Add alert and throttle data for paneA
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA, tabId: tabId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+        model.lastNotificationTime[paneA] = [.bell: Date()]
+
+        update(&model, .surfaceCreationFailed(paneId: paneA))
+        try expect(model.alerts.isEmpty, "surfaceCreationFailed should remove pane's alerts")
+        try expect(model.lastNotificationTime[paneA] == nil, "surfaceCreationFailed should clean up throttle data")
     }
 
     test("testThrottleIsPerPanePerKind") {

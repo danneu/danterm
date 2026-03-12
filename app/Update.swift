@@ -105,7 +105,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         var effects: [Effect] = []
         for pid in paneIds {
             effects.append(.destroySurface(paneId: pid))
-            markAlertsReadForPane(pid, in: &model)
+            removeAlertsForPane(pid, in: &model)
             model.lastNotificationTime.removeValue(forKey: pid)
             model.panes.removeValue(forKey: pid)
         }
@@ -174,7 +174,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
 
         var effects: [Effect] = [.destroySurface(paneId: paneId)]
-        markAlertsReadForPane(paneId, in: &model)
+        removeAlertsForPane(paneId, in: &model)
         model.lastNotificationTime.removeValue(forKey: paneId)
         model.panes.removeValue(forKey: paneId)
 
@@ -526,6 +526,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
     case .surfaceCreationFailed(let paneId):
         model.panes.removeValue(forKey: paneId)
+        removeAlertsForPane(paneId, in: &model)
+        model.lastNotificationTime.removeValue(forKey: paneId)
         // Find and remove the tab containing this pane
         for gi in model.groups.indices {
             if let ti = model.groups[gi].tabs.firstIndex(where: { allPaneIds($0.rootNode).contains(paneId) }) {
@@ -634,7 +636,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             for tab in group.tabs {
                 for pid in allPaneIds(tab.rootNode) {
                     effects.append(.destroySurface(paneId: pid))
-                    markAlertsReadForPane(pid, in: &model)
+                    removeAlertsForPane(pid, in: &model)
                     model.lastNotificationTime.removeValue(forKey: pid)
                     model.panes.removeValue(forKey: pid)
                 }
@@ -760,6 +762,11 @@ private func markAlertsReadForPane(_ paneId: PaneId, in model: inout AppModel) {
     for i in model.alerts.indices where model.alerts[i].paneId == paneId && model.alerts[i].isUnread {
         model.alerts[i].isUnread = false
     }
+}
+
+/// Remove all alerts for a pane that is being destroyed.
+private func removeAlertsForPane(_ paneId: PaneId, in model: inout AppModel) {
+    model.alerts.removeAll { $0.paneId == paneId }
 }
 
 /// Throttle macOS notification delivery: one per pane per kind every 5 seconds.
