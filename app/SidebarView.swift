@@ -97,6 +97,14 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     private var childItems: [GroupId: [SidebarItem]] = [:]
     private var currentModel: AppModel?
 
+    // Pending reloads deferred while a field editor is active (inline rename).
+    // Tracked by entity ID since row indices are unstable.
+    private enum PendingReload: Hashable {
+        case tab(TabId)
+        case group(GroupId)
+    }
+    private var pendingReloads: Set<PendingReload> = []
+
     private var isSingleGroupMode: Bool {
         currentModel?.groups.count == 1
     }
@@ -149,6 +157,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])
+
     }
 
     // MARK: - Actions
@@ -262,6 +271,13 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             reload(model: model)
             return
         }
+        // Defer reload if this row's text field has an active field editor (inline rename).
+        if let cellView = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView,
+           let textField = cellView.textField,
+           textField.currentEditor() != nil {
+            pendingReloads.insert(.tab(tabId))
+            return
+        }
         outlineView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
     }
 
@@ -273,6 +289,13 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         guard let item = groupItemCache[groupId] else { return }
         let row = outlineView.row(forItem: item)
         guard row >= 0 else { return }
+        // Defer reload if this row's text field has an active field editor (inline rename).
+        if let cellView = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView,
+           let textField = cellView.textField,
+           textField.currentEditor() != nil {
+            pendingReloads.insert(.group(groupId))
+            return
+        }
         outlineView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
     }
 
@@ -619,7 +642,10 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     @objc private func contextRenameGroup(_ sender: NSMenuItem) {
         guard let rawId = sender.representedObject as? UUID else { return }
-        beginRenamingGroup(GroupId(rawValue: rawId))
+        let groupId = GroupId(rawValue: rawId)
+        DispatchQueue.main.async { [weak self] in
+            self?.beginRenamingGroup(groupId)
+        }
     }
 
     @objc private func contextDeleteGroup(_ sender: NSMenuItem) {
@@ -663,7 +689,10 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     @objc private func contextRenameTab(_ sender: NSMenuItem) {
         guard let rawId = sender.representedObject as? UUID else { return }
-        beginRenamingTab(TabId(rawValue: rawId))
+        let tabId = TabId(rawValue: rawId)
+        DispatchQueue.main.async { [weak self] in
+            self?.beginRenamingTab(tabId)
+        }
     }
 
     @objc private func contextClearCustomTitle(_ sender: NSMenuItem) {
@@ -833,6 +862,42 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         return location.y > lastRowRect.maxY
     }
 
+    // MARK: - Inline Rename Cleanup
+
+    /// Shared cleanup for all rename-exit paths: disables editing, clears the
+    /// rename target, and flushes any deferred row reloads.
+    private func finishInlineRename(textField: NSTextField) {
+        textField.isEditable = false
+        objc_setAssociatedObject(textField, &AssociatedKeys.renameTarget, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        flushPendingReloads()
+    }
+
+    // MARK: - Pending Reload Flush
+
+    private func flushPendingReloads() {
+        let pending = pendingReloads
+        pendingReloads.removeAll()
+        guard !pending.isEmpty else { return }
+        var rows = IndexSet()
+        for item in pending {
+            switch item {
+            case .tab(let tabId):
+                if let sidebarItem = tabItemCache[tabId] {
+                    let row = outlineView.row(forItem: sidebarItem)
+                    if row >= 0 { rows.insert(row) }
+                }
+            case .group(let groupId):
+                if let sidebarItem = groupItemCache[groupId] {
+                    let row = outlineView.row(forItem: sidebarItem)
+                    if row >= 0 { rows.insert(row) }
+                }
+            }
+        }
+        if !rows.isEmpty {
+            outlineView.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integer: 0))
+        }
+    }
+
     override var acceptsFirstResponder: Bool { false }
 }
 
@@ -846,6 +911,9 @@ extension SidebarView: NSTextFieldDelegate {
         if commandSelector == #selector(NSResponder.insertNewline(_:)) ||
            commandSelector == #selector(NSResponder.cancelOperation(_:)) {
             window?.makeFirstResponder(nil)
+            if let textField = control as? NSTextField {
+                finishInlineRename(textField: textField)
+            }
             return true
         }
         return false
@@ -864,7 +932,8 @@ extension SidebarView: NSTextFieldDelegate {
                 self?.runtime?.send(.renameTab(id: tabId, name: name))
             }
         case .group(let groupId):
-            // Reject empty for groups (existing behavior)
+            // Reject empty for groups — return false to keep the field editor active.
+            // This path does its own cleanup since controlTextDidEndEditing won't fire.
             if newName.isEmpty {
                 objc_setAssociatedObject(textField, &AssociatedKeys.renameTarget, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
                 textField.isEditable = false
@@ -877,8 +946,7 @@ extension SidebarView: NSTextFieldDelegate {
             break
         }
 
-        objc_setAssociatedObject(textField, &AssociatedKeys.renameTarget, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-        textField.isEditable = false
+        finishInlineRename(textField: textField)
         return true
     }
 }

@@ -286,10 +286,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
     }
 
     @objc func newGroup(_ sender: Any?) {
+        let existingIds = Set(runtime.model.groups.map(\.id))
         runtime.send(.createGroup(name: "New group"))
-        // Begin renaming the last group
-        if let lastGroup = runtime.model.groups.last {
-            sidebarView.beginRenamingGroup(lastGroup.id)
+        if let newGroup = runtime.model.groups.first(where: { !existingIds.contains($0.id) }) {
+            let groupId = newGroup.id
+            DispatchQueue.main.async { [weak self] in
+                self?.sidebarView.beginRenamingGroup(groupId)
+            }
         }
     }
 
