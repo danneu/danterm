@@ -53,6 +53,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
         window.isMovableByWindowBackground = false
         window.minSize = NSSize(width: Self.minWindowWidth, height: Self.minWindowHeight)
         window.center()
+        window.setFrameAutosaveName("MainWindow")
 
         // Custom chrome view (replaces NSToolbar)
         chromeView = WindowChromeView()
