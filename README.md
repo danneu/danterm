@@ -65,6 +65,8 @@ For some reason, Claude Code seems to wait 1-2 minutes before sending an OSC 777
 
 To work around this, create a script (e.g. `~/.claude/hooks/claude-notify.sh`):
 
+(Must have [jq](https://jqlang.org/) installed)
+
 ```bash
 #!/usr/bin/env bash
 # Extracts Claude's last message and sends an OSC 777 notification.
@@ -94,6 +96,10 @@ Then add a `Stop` hook to your Claude Code settings (`~/.claude/settings.json`):
 
 DanTerm turns OSC 777 and OSC 9 messages into a macOS notification that, when
 clicked, will take you to the originating pane.
+
+## OpenAI Codex Integration
+
+Codex already works out of the box. Dunno what's wrong with Claude Code.
 
 ## Shell Integration
 
