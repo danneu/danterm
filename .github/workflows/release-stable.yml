@@ -18,7 +18,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set version from tag
         run: |
@@ -44,7 +44,7 @@ jobs:
 
       - name: Cache GhosttyKit
         id: cache-ghosttykit
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: lib/GhosttyKit.xcframework
           key: ghosttykit-${{ env.GHOSTTY_TAG }}-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
@@ -181,15 +181,24 @@ jobs:
         run: security delete-keychain "$RUNNER_TEMP/build.keychain-db" 2>/dev/null || true
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: ${{ github.ref_name }}
-          generate_release_notes: true
-          files: |
-            build/${{ env.DMG_NAME }}
-            build/${{ env.ZIP_NAME }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ github.ref_name }}"
+          if gh release view "$tag" &>/dev/null; then
+            gh release upload "$tag" \
+              build/${{ env.DMG_NAME }} \
+              build/${{ env.ZIP_NAME }} \
+              --clobber
+          else
+            gh release create "$tag" \
+              --title "$tag" \
+              --generate-notes \
+              build/${{ env.DMG_NAME }} \
+              build/${{ env.ZIP_NAME }}
+          fi
 
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/nix-installer-action@v21
 
       - name: Compute release zip hash
         run: |
@@ -201,7 +210,7 @@ jobs:
       # and .zig-cache). actions/cache saves in post-job cleanup, so those
       # paths must still exist when the job finishes.
       - name: Checkout master for package.nix update
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: master
           path: master-checkout
@@ -214,7 +223,7 @@ jobs:
 
       - name: Create PR with updated package.nix
         id: package_pr
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           path: master-checkout
           base: master
