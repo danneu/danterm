@@ -58,7 +58,7 @@ func expectEqual<T: Equatable>(_ a: T, _ b: T, _ message: String = "", file: Str
 func makeModel() -> AppModel {
     let generalId = GroupId()
     return AppModel(
-        groups: [GroupModel(id: generalId, name: "General", isDefault: true)],
+        groups: [GroupModel(id: generalId, name: "General")],
         panes: [:]
     )
 }

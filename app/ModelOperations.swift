@@ -488,9 +488,14 @@ enum DeleteGroupAction {
   case confirm(groupId: GroupId, name: String, tabCount: Int)
 }
 
+func adjacentGroupIndex(deletingAt idx: Int, count: Int) -> Int? {
+  guard count > 1 else { return nil }
+  return idx > 0 ? idx - 1 : 1
+}
+
 func deleteGroupAction(for groupId: GroupId, in model: AppModel) -> DeleteGroupAction? {
   guard let group = model.groups.first(where: { $0.id == groupId }),
-    !group.isDefault
+    model.groups.count > 1
   else { return nil }
   if group.tabs.isEmpty {
     return .deleteImmediately(groupId: groupId)

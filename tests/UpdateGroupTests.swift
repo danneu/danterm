@@ -34,11 +34,28 @@ func groupTests() {
         try expectEqual(model.groups[0].tabs.count, 0)
         try expectEqual(model.groups[1].tabs.count, 2)
 
+        // Deleting Temp (index 1) should move tabs to adjacent group (index 0 = General)
         update(&model, .deleteGroup(id: tempGroupId, moveTabs: true))
         try expectEqual(model.groups.count, 1, "only General should remain")
-        try expectEqual(model.groups[0].tabs.count, 2, "both tabs should be moved to General")
+        try expectEqual(model.groups[0].tabs.count, 2, "both tabs should be moved to adjacent group")
         try expect(model.groups[0].tabs.contains(where: { $0.id == tabId }), "original tab should be in General")
         try expect(model.groups[0].tabs.contains(where: { $0.id == autoTabId }), "auto-created tab should be in General")
+    }
+
+    test("testDeleteFirstGroupMovesTabsToNext") {
+        var model = makeModel()
+        createTab(&model)
+        let generalId = model.groups[0].id
+        let generalTabId = model.groups[0].tabs[0].id
+
+        update(&model, .createGroup(name: "Second"))
+        let secondGroupId = model.groups[1].id
+
+        // Delete groups[0] (General) — tabs should move to groups[1] (Second)
+        update(&model, .deleteGroup(id: generalId, moveTabs: true))
+        try expectEqual(model.groups.count, 1, "only Second should remain")
+        try expectEqual(model.groups[0].name, "Second")
+        try expect(model.groups[0].tabs.contains(where: { $0.id == generalTabId }), "tab should be moved to Second")
     }
 
     test("testDeleteGroupClosesTabs") {
@@ -86,12 +103,13 @@ func groupTests() {
         try expectEqual(model.groups.count, 2, "model should be unchanged")
     }
 
-    test("testDeleteDefaultGroupNoOp") {
+    test("testDeleteLastGroupNoOp") {
         var model = makeModel()
-        let defaultGroupId = model.groups[0].id
+        createTab(&model)
+        let onlyGroupId = model.groups[0].id
 
-        let effects = update(&model, .deleteGroup(id: defaultGroupId, moveTabs: true))
-        try expectEqual(effects.count, 0, "deleting default group should be no-op")
+        let effects = update(&model, .deleteGroup(id: onlyGroupId, moveTabs: true))
+        try expectEqual(effects.count, 0, "deleting last remaining group should be no-op")
         try expectEqual(model.groups.count, 1)
     }
 
@@ -125,14 +143,18 @@ func groupTests() {
         }, "should emit reloadSidebar")
     }
 
-    test("testReorderDefaultGroupNoOp") {
+    test("testReorderGroupToIndex0") {
         var model = makeModel()
         update(&model, .createGroup(name: "A"))
-        let defaultGroupId = model.groups[0].id
+        let aGroupId = model.groups[1].id
 
-        let effects = update(&model, .reorderGroup(groupId: defaultGroupId, toIndex: 1))
-        try expectEqual(effects.count, 0, "reordering default group should be no-op")
-        try expectEqual(model.groups[0].name, "General")
+        let effects = update(&model, .reorderGroup(groupId: aGroupId, toIndex: 0))
+        try expectEqual(model.groups[0].name, "A", "A should be at index 0")
+        try expectEqual(model.groups[1].name, "General")
+        try expect(hasEffect(effects) {
+            if case .reloadSidebar = $0 { return true }
+            return false
+        }, "should emit reloadSidebar")
     }
 
     test("testToggleGroupCollapse") {

@@ -358,47 +358,6 @@ func snapshotTests() {
         try expectEqual(model!.selectedTabId, TabId(rawValue: UUID(uuidString: "89B4C232-C840-42A8-8CA6-C133C8EBBFF2")!))
     }
 
-    test("validation always makes first group default") {
-        let json = """
-        {
-          "version": 1,
-          "model": {
-            "groups": [
-              {
-                "id": "AAAA0000-0000-0000-0000-000000000001",
-                "name": "First",
-                "isDefault": false,
-                "tabs": [{
-                  "id": "BBBB0000-0000-0000-0000-000000000001",
-                  "rootNode": { "type": "leaf", "paneId": "CCCC0000-0000-0000-0000-000000000001" }
-                }]
-              },
-              {
-                "id": "AAAA0000-0000-0000-0000-000000000002",
-                "name": "Second",
-                "isDefault": true,
-                "tabs": [{
-                  "id": "BBBB0000-0000-0000-0000-000000000002",
-                  "rootNode": { "type": "leaf", "paneId": "CCCC0000-0000-0000-0000-000000000002" }
-                }]
-              }
-            ],
-            "panes": [
-              { "id": "CCCC0000-0000-0000-0000-000000000001", "title": "T" },
-              { "id": "CCCC0000-0000-0000-0000-000000000002", "title": "T" }
-            ]
-          }
-        }
-        """
-        let data = json.data(using: .utf8)!
-        let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
-        let model = validateAndBuild(initFile.model)
-        try expect(model != nil, "should succeed")
-        try expect(model!.groups[0].isDefault, "first group should be default")
-        try expectEqual(model!.groups[0].name, "First")
-        try expectEqual(model!.groups[1].isDefault, false, "all non-first groups should be non-default")
-    }
-
     test("validation supports omitted IDs and focusedPaneId") {
         let json = """
         {
@@ -421,7 +380,6 @@ func snapshotTests() {
         let model = validateAndBuild(initFile.model)
         try expect(model != nil, "should succeed")
         let built = model!
-        try expect(built.groups[0].isDefault, "first group should be default")
         let firstTab = built.groups[0].tabs[0]
         try expectEqual(built.selectedTabId, firstTab.id, "selected tab should default to first group's first tab")
         let firstPane = firstLeafId(firstTab.rootNode)

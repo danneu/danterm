@@ -280,9 +280,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
     }
 
     @objc func newGroup(_ sender: Any?) {
-        runtime.send(.createGroup(name: "Untitled"))
+        runtime.send(.createGroup(name: "New group"))
         // Begin renaming the last group
-        if let lastGroup = runtime.model.groups.last, !lastGroup.isDefault {
+        if let lastGroup = runtime.model.groups.last {
             sidebarView.beginRenamingGroup(lastGroup.id)
         }
     }

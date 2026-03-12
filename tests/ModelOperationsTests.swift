@@ -506,11 +506,11 @@ func modelOperationsTests() {
         try expectEqual(tabCount, 1)
     }
 
-    test("testDeleteGroupActionDefaultGroup") {
+    test("testDeleteGroupActionLastGroup") {
         let model = makeModel()
-        let defaultGroup = model.groups.first(where: { $0.isDefault })!
-        let action = deleteGroupAction(for: defaultGroup.id, in: model)
-        try expect(action == nil, "default group should return nil")
+        let onlyGroup = model.groups[0]
+        let action = deleteGroupAction(for: onlyGroup.id, in: model)
+        try expect(action == nil, "last remaining group should return nil")
     }
 
     // MARK: - bellCount / groupBellCount
@@ -549,7 +549,7 @@ func modelOperationsTests() {
         let tabId1 = TabId(), tabId2 = TabId()
         let tab1 = TabModel(id: tabId1, focusedPaneId: a, rootNode: .leaf(a))
         let tab2 = TabModel(id: tabId2, focusedPaneId: b, rootNode: .leaf(b))
-        let group = GroupModel(id: GroupId(), name: "Test", isDefault: false, tabs: [tab1, tab2])
+        let group = GroupModel(id: GroupId(), name: "Test", tabs: [tab1, tab2])
         var alerts: [AlertModel] = []
 
         try expectEqual(groupUnreadAlertCount(for: group, alerts: alerts), 0)

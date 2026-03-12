@@ -90,7 +90,6 @@ struct TabModel: Equatable {
 struct GroupModel: Equatable {
     let id: GroupId
     var name: String
-    let isDefault: Bool
     var isCollapsed: Bool = false
     var tabs: [TabModel] = []
 }
@@ -335,7 +334,6 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel,
         let group = GroupModel(
             id: groupId,
             name: gs.name,
-            isDefault: parsedGroups.isEmpty,
             isCollapsed: gs.isCollapsed ?? false,
             tabs: tabs
         )

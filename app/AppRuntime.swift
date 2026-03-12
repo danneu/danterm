@@ -40,7 +40,7 @@ class AppRuntime {
     init(ghosttyApp: GhosttyApp) {
         self.ghosttyApp = ghosttyApp
         self.model = AppModel(
-            groups: [GroupModel(id: GroupId(), name: "General", isDefault: true)],
+            groups: [GroupModel(id: GroupId(), name: "General")],
             panes: [:]
         )
     }

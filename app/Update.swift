@@ -604,20 +604,21 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
     case .createGroup(let name):
         let groupId = GroupId()
-        let group = GroupModel(id: groupId, name: name, isDefault: false)
+        let group = GroupModel(id: groupId, name: name)
         model.groups.append(group)
         return update(&model, .createTab(inGroupId: groupId))
 
     case .deleteGroup(let id, let moveTabs):
         guard let idx = model.groups.firstIndex(where: { $0.id == id }),
-              !model.groups[idx].isDefault else { return [] }
+              model.groups.count > 1 else { return [] }
 
         let group = model.groups[idx]
         if !moveTabs && !group.tabs.isEmpty && totalTabCount(model) == group.tabs.count {
             return [.showTerminateConfirmation]
         }
         if moveTabs {
-            model.groups[0].tabs.append(contentsOf: group.tabs)
+            guard let adjIdx = adjacentGroupIndex(deletingAt: idx, count: model.groups.count) else { return [] }
+            model.groups[adjIdx].tabs.append(contentsOf: group.tabs)
         } else {
             // Close all tabs' surfaces
             var effects: [Effect] = []
@@ -671,9 +672,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return [.reloadSidebar, .scheduleCheckpoint]
 
     case .reorderGroup(let groupId, let toIndex):
-        guard let currentIdx = model.groups.firstIndex(where: { $0.id == groupId }),
-              !model.groups[currentIdx].isDefault else { return [] }
-        let clamped = max(1, min(toIndex, model.groups.count - 1))
+        guard let currentIdx = model.groups.firstIndex(where: { $0.id == groupId }) else { return [] }
+        let clamped = max(0, min(toIndex, model.groups.count - 1))
         let group = model.groups.remove(at: currentIdx)
         model.groups.insert(group, at: clamped)
         // Persist group ordering so sidebar layout survives a restart.

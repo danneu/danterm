@@ -151,7 +151,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         case .tab(let tab):
             beginRenamingTab(tab.id)
         case .group(let group):
-            guard !group.isDefault else { return }
             beginRenamingGroup(group.id)
         }
     }
@@ -394,11 +393,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             pbItem.setString(tab.id.rawValue.uuidString, forType: SidebarView.tabDragType)
             return pbItem
         case .group(let group):
-            if !group.isDefault {
-                pbItem.setString(group.id.rawValue.uuidString, forType: SidebarView.groupDragType)
-                return pbItem
-            }
-            return nil
+            pbItem.setString(group.id.rawValue.uuidString, forType: SidebarView.groupDragType)
+            return pbItem
         }
     }
 
@@ -429,7 +425,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
 
         if pb.string(forType: SidebarView.groupDragType) != nil {
-            if item == nil && index > 0 {
+            if item == nil && index >= 0 {
                 return .move
             }
             return []
@@ -543,13 +539,12 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let renameItem = NSMenuItem(title: "Rename Group", action: #selector(contextRenameGroup(_:)), keyEquivalent: "")
         renameItem.target = self
         renameItem.representedObject = group.id.rawValue
-        renameItem.isEnabled = !group.isDefault
         menu.addItem(renameItem)
 
         let deleteItem = NSMenuItem(title: "Delete Group", action: #selector(contextDeleteGroup(_:)), keyEquivalent: "")
         deleteItem.target = self
         deleteItem.representedObject = group.id.rawValue
-        deleteItem.isEnabled = !group.isDefault
+        deleteItem.isEnabled = (currentModel?.groups.count ?? 0) > 1
         menu.addItem(deleteItem)
 
         return menu
@@ -638,7 +633,10 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             let alert = NSAlert()
             alert.messageText = "Delete group \"\(name)\"?"
             alert.informativeText = "This group has \(tabCount) tab(s)."
-            alert.addButton(withTitle: "Move to General")
+            let groupIdx = model.groups.firstIndex(where: { $0.id == gid })!
+            let adjIdx = adjacentGroupIndex(deletingAt: groupIdx, count: model.groups.count)!
+            let destName = model.groups[adjIdx].name
+            alert.addButton(withTitle: "Move to \(destName)")
             alert.addButton(withTitle: "Close Tabs")
             alert.addButton(withTitle: "Cancel")
             guard let window = window else { return }
