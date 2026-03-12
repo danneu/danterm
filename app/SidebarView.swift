@@ -78,7 +78,7 @@ class SidebarOutlineView: NSOutlineView {
         return frame
     }
 
-    override var acceptsFirstResponder: Bool { false }
+override var acceptsFirstResponder: Bool { false }
 }
 
 // MARK: - SidebarView

@@ -211,6 +211,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)
 
+        // Edit menu
+        let editMenuItem = NSMenuItem()
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        let redoItem = NSMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+        redoItem.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(redoItem)
+        editMenu.addItem(NSMenuItem.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSResponder.selectAll(_:)), keyEquivalent: "a")
+        editMenuItem.submenu = editMenu
+        mainMenu.addItem(editMenuItem)
+
         // Shell menu
         let shellMenuItem = NSMenuItem()
         let shellMenu = NSMenu(title: "Shell")
