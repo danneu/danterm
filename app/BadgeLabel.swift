@@ -2,15 +2,15 @@
 import Cocoa
 
 extension NSTextField {
-    /// Create a red circle badge label with white count text.
-    static func makeBadge() -> NSTextField {
+    /// Create a circle badge label with white count text.
+    static func makeBadge(color: NSColor = .systemRed) -> NSTextField {
         let label = NSTextField(labelWithString: "")
         label.translatesAutoresizingMaskIntoConstraints = false
         label.font = .boldSystemFont(ofSize: 10)
         label.textColor = .white
         label.alignment = .center
         label.wantsLayer = true
-        label.layer?.backgroundColor = NSColor.systemRed.cgColor
+        label.layer?.backgroundColor = color.cgColor
         label.layer?.cornerRadius = 7
         label.layer?.masksToBounds = true
         label.isHidden = true

@@ -391,14 +391,20 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let row = outlineView.row(forItem: sidebarItem)
         guard row >= 0,
               let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) else { return }
-        if let caretButton = cell.subviews.first(where: { $0.identifier?.rawValue == "groupCaretButton" }) as? NSButton {
-            let symbolName = collapsed ? "chevron.right" : "chevron.down"
-            caretButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Toggle Group")
-        }
-        if let bellBadge = cell.subviews.first(where: { $0.identifier?.rawValue == "groupBellBadge" }) as? NSTextField {
-            let count = groupUnreadAlertCount(for: group, alerts: currentModel?.alerts ?? [])
-            bellBadge.updateBadge(count: count)
-            if !collapsed { bellBadge.isHidden = true }
+        if let stack = cell.subviews.first(where: { $0.identifier?.rawValue == "groupAccessoryStack" }) as? NSStackView {
+            if let caretButton = stack.arrangedSubviews.first(where: { $0.identifier?.rawValue == "groupCaretButton" }) as? NSButton {
+                let symbolName = collapsed ? "chevron.right" : "chevron.down"
+                caretButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Toggle Group")
+            }
+            if let bellBadge = stack.arrangedSubviews.first(where: { $0.identifier?.rawValue == "groupBellBadge" }) as? NSTextField {
+                let count = groupUnreadAlertCount(for: group, alerts: currentModel?.alerts ?? [])
+                bellBadge.updateBadge(count: count)
+                if !collapsed { bellBadge.isHidden = true }
+            }
+            if let tabCountBadge = stack.arrangedSubviews.first(where: { $0.identifier?.rawValue == "groupTabCountBadge" }) as? NSTextField {
+                tabCountBadge.stringValue = "\(group.tabs.count)"
+                tabCountBadge.isHidden = !collapsed
+            }
         }
     }
 
@@ -716,7 +722,9 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
         let bellBadge = NSTextField.makeBadge()
         bellBadge.identifier = NSUserInterfaceItemIdentifier("groupBellBadge")
-        cell.addSubview(bellBadge)
+
+        let tabCountBadge = NSTextField.makeBadge(color: .systemGray)
+        tabCountBadge.identifier = NSUserInterfaceItemIdentifier("groupTabCountBadge")
 
         let caretButton = NSButton(image: NSImage(systemSymbolName: "chevron.right", accessibilityDescription: "Toggle Group")!, target: self, action: #selector(caretClicked(_:)))
         caretButton.translatesAutoresizingMaskIntoConstraints = false
@@ -725,16 +733,21 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         caretButton.imageScaling = .scaleProportionallyDown
         caretButton.contentTintColor = .tertiaryLabelColor
         caretButton.identifier = NSUserInterfaceItemIdentifier("groupCaretButton")
-        cell.addSubview(caretButton)
+
+        let accessoryStack = NSStackView(views: [bellBadge, tabCountBadge, caretButton])
+        accessoryStack.translatesAutoresizingMaskIntoConstraints = false
+        accessoryStack.orientation = .horizontal
+        accessoryStack.alignment = .centerY
+        accessoryStack.spacing = 2
+        accessoryStack.identifier = NSUserInterfaceItemIdentifier("groupAccessoryStack")
+        cell.addSubview(accessoryStack)
 
         NSLayoutConstraint.activate([
             textField.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
             textField.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            textField.trailingAnchor.constraint(lessThanOrEqualTo: bellBadge.leadingAnchor, constant: -4),
-            bellBadge.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            bellBadge.trailingAnchor.constraint(equalTo: caretButton.leadingAnchor, constant: -2),
-            caretButton.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -2),
-            caretButton.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            textField.trailingAnchor.constraint(lessThanOrEqualTo: accessoryStack.leadingAnchor, constant: -4),
+            accessoryStack.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -2),
+            accessoryStack.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             caretButton.widthAnchor.constraint(equalToConstant: 16),
             caretButton.heightAnchor.constraint(equalToConstant: 16),
         ])
@@ -751,15 +764,21 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             cell.textField?.stringValue = group.name
         }
         cell.textField?.tag = group.id.rawValue.hashValue
-        if let caretButton = cell.subviews.first(where: { $0.identifier?.rawValue == "groupCaretButton" }) as? NSButton {
-            let symbolName = group.isCollapsed ? "chevron.right" : "chevron.down"
-            caretButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Toggle Group")
-            objc_setAssociatedObject(caretButton, &AssociatedKeys.groupId, group.id.rawValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-        }
-        if let bellBadge = cell.subviews.first(where: { $0.identifier?.rawValue == "groupBellBadge" }) as? NSTextField {
-            let count = groupUnreadAlertCount(for: group, alerts: currentModel?.alerts ?? [])
-            bellBadge.updateBadge(count: count)
-            if !group.isCollapsed { bellBadge.isHidden = true }
+        if let stack = cell.subviews.first(where: { $0.identifier?.rawValue == "groupAccessoryStack" }) as? NSStackView {
+            if let caretButton = stack.arrangedSubviews.first(where: { $0.identifier?.rawValue == "groupCaretButton" }) as? NSButton {
+                let symbolName = group.isCollapsed ? "chevron.right" : "chevron.down"
+                caretButton.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Toggle Group")
+                objc_setAssociatedObject(caretButton, &AssociatedKeys.groupId, group.id.rawValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            }
+            if let bellBadge = stack.arrangedSubviews.first(where: { $0.identifier?.rawValue == "groupBellBadge" }) as? NSTextField {
+                let count = groupUnreadAlertCount(for: group, alerts: currentModel?.alerts ?? [])
+                bellBadge.updateBadge(count: count)
+                if !group.isCollapsed { bellBadge.isHidden = true }
+            }
+            if let tabCountBadge = stack.arrangedSubviews.first(where: { $0.identifier?.rawValue == "groupTabCountBadge" }) as? NSTextField {
+                tabCountBadge.stringValue = "\(group.tabs.count)"
+                tabCountBadge.isHidden = !group.isCollapsed
+            }
         }
     }
 
