@@ -787,6 +787,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let subtitleId = NSUserInterfaceItemIdentifier("subtitle")
         let bellDotId = NSUserInterfaceItemIdentifier("bellDot")
         let colorStripeId = NSUserInterfaceItemIdentifier("colorStripe")
+        let accessoryStackId = NSUserInterfaceItemIdentifier("tabAccessoryStack")
 
         let cell: NSTableCellView
         if let existing = outlineView.makeView(withIdentifier: cellId, owner: nil) as? NSTableCellView {
@@ -822,20 +823,26 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
             let bellBadge = NSTextField.makeBadge()
             bellBadge.identifier = bellDotId
-            cell.addSubview(bellBadge)
+            let accessoryStack = NSStackView(views: [bellBadge])
+            accessoryStack.translatesAutoresizingMaskIntoConstraints = false
+            accessoryStack.orientation = .horizontal
+            accessoryStack.alignment = .top
+            accessoryStack.spacing = 0
+            accessoryStack.identifier = accessoryStackId
+            cell.addSubview(accessoryStack)
 
             NSLayoutConstraint.activate([
                 colorStripe.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
                 colorStripe.topAnchor.constraint(equalTo: cell.topAnchor),
                 colorStripe.bottomAnchor.constraint(equalTo: cell.bottomAnchor),
                 colorStripe.widthAnchor.constraint(equalToConstant: 3),
-                bellBadge.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
-                bellBadge.topAnchor.constraint(equalTo: cell.topAnchor, constant: 4),
+                accessoryStack.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
+                accessoryStack.topAnchor.constraint(equalTo: cell.topAnchor, constant: 4),
                 textField.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
-                textField.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
+                textField.trailingAnchor.constraint(lessThanOrEqualTo: accessoryStack.leadingAnchor, constant: -4),
                 textField.topAnchor.constraint(equalTo: cell.topAnchor, constant: 4),
                 subtitleField.leadingAnchor.constraint(equalTo: textField.leadingAnchor),
-                subtitleField.trailingAnchor.constraint(equalTo: textField.trailingAnchor),
+                subtitleField.trailingAnchor.constraint(lessThanOrEqualTo: accessoryStack.leadingAnchor, constant: -4),
                 subtitleField.topAnchor.constraint(equalTo: textField.bottomAnchor, constant: 1),
             ])
         }
@@ -852,6 +859,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let subtitleId = NSUserInterfaceItemIdentifier("subtitle")
         let bellDotId = NSUserInterfaceItemIdentifier("bellDot")
         let colorStripeId = NSUserInterfaceItemIdentifier("colorStripe")
+        let accessoryStackId = NSUserInterfaceItemIdentifier("tabAccessoryStack")
 
         if !skipTitle {
             cell.textField?.stringValue = tab.displayTitle
@@ -860,7 +868,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             subtitleField.stringValue = tab.subtitle ?? ""
             subtitleField.isHidden = tab.subtitle == nil
         }
-        if let bellBadge = cell.subviews.first(where: { $0.identifier == bellDotId }) as? NSTextField {
+        if let stack = cell.subviews.first(where: { $0.identifier == accessoryStackId }) as? NSStackView,
+           let bellBadge = stack.arrangedSubviews.first(where: { $0.identifier == bellDotId }) as? NSTextField {
             let count = unreadAlertCount(for: tab, alerts: currentModel?.alerts ?? [])
             bellBadge.updateBadge(count: count)
         }
