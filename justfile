@@ -43,6 +43,7 @@ init:
 release bump:
     #!/usr/bin/env bash
     set -euo pipefail
+    git pull --rebase || { echo "Pull failed — resolve conflicts first"; exit 1; }
     current="{{_current_version}}"
     IFS='.' read -r major minor patch <<< "$current"
     case "{{bump}}" in
