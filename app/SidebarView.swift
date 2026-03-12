@@ -14,6 +14,16 @@ extension TabColor {
         case .gray: return .systemGray
         }
     }
+
+    /// 12×12 filled circle image for use in menus.
+    var swatchImage: NSImage {
+        let size = NSSize(width: 12, height: 12)
+        return NSImage(size: size, flipped: false) { rect in
+            self.nsColor.setFill()
+            NSBezierPath(ovalIn: rect).fill()
+            return true
+        }
+    }
 }
 
 // MARK: - SidebarItem (reference-type wrapper for NSOutlineView identity stability)
@@ -570,24 +580,15 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         // Color submenu
         menu.addItem(NSMenuItem.separator())
         let colorItem = NSMenuItem(title: "Color", action: nil, keyEquivalent: "")
+        if let currentColor = tab.color {
+            colorItem.image = currentColor.swatchImage
+        }
         let colorSubmenu = NSMenu()
         for color in TabColor.allCases {
             let item = NSMenuItem(title: color.rawValue.capitalized, action: #selector(contextSetTabColor(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = SetTabColorInfo(tabId: tab.id, color: color)
-            // Show a filled circle swatch tinted to the color
-            let swatch = NSImage(systemSymbolName: "circle.fill", accessibilityDescription: color.rawValue)!
-            item.image = swatch.withSymbolConfiguration(.init(pointSize: 12, weight: .regular))
-            item.image?.isTemplate = false
-            // Apply color tint via a custom subclass isn't needed — use contentTintColor on the menu item's view
-            // Instead, create a colored swatch image
-            let size = NSSize(width: 12, height: 12)
-            let coloredImage = NSImage(size: size, flipped: false) { rect in
-                color.nsColor.setFill()
-                NSBezierPath(ovalIn: rect).fill()
-                return true
-            }
-            item.image = coloredImage
+            item.image = color.swatchImage
             if tab.color == color {
                 item.state = .on
             }
