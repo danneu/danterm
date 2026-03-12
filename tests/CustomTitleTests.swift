@@ -208,20 +208,14 @@ func customTitleTests() {
 
     test("testDeleteGroupEmitsSetWindowTitle") {
         var model = makeModel()
-        createTab(&model)
+        createTab(&model) // tab1 in General
+        createTab(&model) // tab2 keeps General alive after moveTab
         let tabA = model.groups[0].tabs[0].id
-        let generalGroupId = model.groups[0].id
 
         update(&model, .createGroup(name: "Temp"))
         let tempGroupId = model.groups[1].id
-        // Move tabA to Temp so General would otherwise be empty
+        // Move tabA to Temp — General keeps tab2
         update(&model, .moveTab(tabId: tabA, toGroupId: tempGroupId, atIndex: 0))
-
-        // Create a survivor tab in General explicitly, while autoTab (in Temp) is still selected.
-        // We must use inGroupId here because selectedTabId is in Temp, so a plain
-        // createTab() would insert into Temp — leaving General empty — and deletion
-        // of Temp would hit the "would quit" guard instead of falling back to a tab.
-        createTab(&model, inGroupId: generalGroupId)
 
         // Select tabA (in Temp) so the deletion triggers a selection change.
         update(&model, .selectTab(id: tabA))

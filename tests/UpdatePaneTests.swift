@@ -548,11 +548,12 @@ func paneTests() {
         // Move paneA from group0 to group1's tab
         update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
 
-        // Source tab should be removed (was single pane)
-        try expectEqual(model.groups[0].tabs.count, 0, "source group should have no tabs")
+        // Source group should be pruned (was single tab, now empty)
+        try expectEqual(model.groups.count, 1, "empty source group should be pruned")
+        try expectEqual(model.groups[0].id, group1Id, "only Work group should remain")
 
         // Target tab should have both panes
-        let targetTab = model.groups.first(where: { $0.id == group1Id })!.tabs.first(where: { $0.id == tab2Id })!
+        let targetTab = model.groups[0].tabs.first(where: { $0.id == tab2Id })!
         let targetPanes = allPaneIds(targetTab.rootNode)
         try expectEqual(targetPanes.count, 2)
         try expect(targetPanes.contains(paneA))

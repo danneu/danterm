@@ -478,18 +478,15 @@ func modelOperationsTests() {
 
     test("testDeleteGroupActionEmptyGroup") {
         var model = makeModel()
-        // Need at least one tab in General so closing Work's tab doesn't trigger terminate confirmation
         createTab(&model)
-        update(&model, .createGroup(name: "Work"))
-        let workGroup = model.groups.first(where: { $0.name == "Work" })!
-        // Remove auto-created tab so group is empty
-        let tabId = workGroup.tabs[0].id
-        update(&model, .closeTab(id: tabId))
-        let action = deleteGroupAction(for: workGroup.id, in: model)
+        // Construct an empty group directly (auto-pruning prevents this via update())
+        let workGroupId = GroupId()
+        model.groups.append(GroupModel(id: workGroupId, name: "Work"))
+        let action = deleteGroupAction(for: workGroupId, in: model)
         guard case .deleteImmediately(let gid) = action else {
             throw TestFailure(message: "expected .deleteImmediately, got \(String(describing: action))")
         }
-        try expectEqual(gid, workGroup.id)
+        try expectEqual(gid, workGroupId)
     }
 
     test("testDeleteGroupActionGroupWithTabs") {

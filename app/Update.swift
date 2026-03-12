@@ -99,6 +99,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
 
         let tab = model.groups[groupIdx].tabs[tabIdx]
+        let groupId = model.groups[groupIdx].id
         let paneIds = allPaneIds(tab.rootNode)
 
         var effects: [Effect] = []
@@ -110,6 +111,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
 
         model.groups[groupIdx].tabs.remove(at: tabIdx)
+        removeGroupIfEmpty(groupId, from: &model)
 
         // Check if all tabs gone
         let allTabs = model.groups.flatMap(\.tabs)
@@ -119,9 +121,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
         // Select adjacent tab if we closed the selected one
         if id == model.selectedTabId {
-            if !model.groups[groupIdx].tabs.isEmpty {
-                let newIdx = min(tabIdx, model.groups[groupIdx].tabs.count - 1)
-                model.selectedTabId = model.groups[groupIdx].tabs[newIdx].id
+            if let gIdx = model.groups.firstIndex(where: { $0.id == groupId }),
+               !model.groups[gIdx].tabs.isEmpty {
+                let newIdx = min(tabIdx, model.groups[gIdx].tabs.count - 1)
+                model.selectedTabId = model.groups[gIdx].tabs[newIdx].id
             } else {
                 model.selectedTabId = allTabs.first?.id
             }
@@ -229,6 +232,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         guard sourceTab.id != targetTabId else { return [] }
 
         guard tabById(targetTabId, in: model) != nil else { return [] }
+        let sourceGroupId = groupForTab(sourceTab.id, in: model)?.id
 
         // Remove pane from source tab's tree
         let (newSourceTree, nextFocus) = removeLeaf(sourceTab.rootNode, paneId: paneId)
@@ -262,6 +266,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             // Source tab is empty — remove it from its group
             removeTab(sourceTab.id, from: &model)
         }
+        if let sgid = sourceGroupId { removeGroupIfEmpty(sgid, from: &model) }
 
         // Mark alerts read for the moved pane (cross-tab move is a navigation action)
         markAlertsReadForPane(paneId, in: &model)
@@ -306,6 +311,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         if sourceHasOnlyThisPane {
             // Path A: Source tab has only this pane — move the tab entity
             guard let (srcGroupIdx, srcTabIdx) = tabLocation(sourceTab.id, in: model) else { return [] }
+            let srcGroupId = model.groups[srcGroupIdx].id
             let tab = model.groups[srcGroupIdx].tabs.remove(at: srcTabIdx)
             var adjustedIndex = atIndex
             if srcGroupIdx == dstGroupIdx && srcTabIdx < atIndex {
@@ -313,6 +319,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             }
             let clamped = max(0, min(adjustedIndex, model.groups[dstGroupIdx].tabs.count))
             model.groups[dstGroupIdx].tabs.insert(tab, at: clamped)
+            removeGroupIfEmpty(srcGroupId, from: &model)
             model.selectedTabId = tab.id
         } else {
             // Path B: Source tab has other panes — create new tab
@@ -523,7 +530,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         for gi in model.groups.indices {
             if let ti = model.groups[gi].tabs.firstIndex(where: { allPaneIds($0.rootNode).contains(paneId) }) {
                 let tabId = model.groups[gi].tabs[ti].id
+                let groupId = model.groups[gi].id
                 model.groups[gi].tabs.remove(at: ti)
+                removeGroupIfEmpty(groupId, from: &model)
                 if model.selectedTabId == tabId {
                     model.selectedTabId = model.groups.flatMap(\.tabs).first?.id
                 }
@@ -661,6 +670,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         guard let (srcGroupIdx, tabIdx) = tabLocation(tabId, in: model),
               let dstGroupIdx = model.groups.firstIndex(where: { $0.id == toGroupId }) else { return [] }
 
+        let srcGroupId = model.groups[srcGroupIdx].id
         let tab = model.groups[srcGroupIdx].tabs.remove(at: tabIdx)
         var adjustedIndex = atIndex
         if srcGroupIdx == dstGroupIdx && tabIdx < atIndex {
@@ -668,6 +678,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         let clampedIndex = max(0, min(adjustedIndex, model.groups[dstGroupIdx].tabs.count))
         model.groups[dstGroupIdx].tabs.insert(tab, at: clampedIndex)
+        removeGroupIfEmpty(srcGroupId, from: &model)
         // Persist tab's new group membership so it restores in the right group.
         return [.reloadSidebar, .scheduleCheckpoint]
 
@@ -723,6 +734,14 @@ private func updateTab(_ tabId: TabId, in model: inout AppModel, _ body: (inout 
 private func removeTab(_ tabId: TabId, from model: inout AppModel) {
     guard let (gi, ti) = tabLocation(tabId, in: model) else { return }
     model.groups[gi].tabs.remove(at: ti)
+}
+
+/// Remove a specific group if it has zero tabs, unless it's the sole group.
+private func removeGroupIfEmpty(_ groupId: GroupId, from model: inout AppModel) {
+    guard model.groups.count > 1,
+          let idx = model.groups.firstIndex(where: { $0.id == groupId }),
+          model.groups[idx].tabs.isEmpty else { return }
+    model.groups.remove(at: idx)
 }
 
 private func windowTitle(for tab: TabModel) -> String {
