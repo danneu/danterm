@@ -29,7 +29,6 @@ struct AlertModel: Equatable {
     let id: AlertId
     let kind: AlertKind
     let paneId: PaneId
-    let tabId: TabId
     let title: String
     let body: String
     let createdAt: Date

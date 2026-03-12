@@ -20,7 +20,7 @@ enum Effect {
     case exportState(AppModelSnapshot)
 
     // System
-    case sendNotification(alertId: AlertId, title: String, body: String, tabId: TabId, paneId: PaneId)
+    case sendNotification(alertId: AlertId, title: String, body: String)
     case showTerminateConfirmation
     case showCloseTabConfirmation(tabId: TabId, tabTitle: String, paneCount: Int, isLastTab: Bool)
     case terminate

@@ -54,6 +54,7 @@ enum Msg {
     case markAlertRead(alertId: AlertId)
     case markAllAlertsRead
     case activateAlert(alertId: AlertId)
+    case goToMostRecentAlertPane
 
     // Lifecycle
     case appBecameActive

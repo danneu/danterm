@@ -37,7 +37,7 @@ func lifecycleTests() {
         // Add an unread alert for the first tab's pane
         let alertId = AlertId()
         model.alerts.insert(AlertModel(
-            id: alertId, kind: .bell, paneId: firstPaneId, tabId: firstTabId,
+            id: alertId, kind: .bell, paneId: firstPaneId,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
@@ -61,13 +61,12 @@ func lifecycleTests() {
     test("testActivateAlertStalePane") {
         var model = makeModel()
         createTab(&model)
-        let tabId = model.groups[0].tabs[0].id
 
         // Create an alert referencing a pane that no longer exists
         let stalePaneId = PaneId()
         let alertId = AlertId()
         model.alerts.insert(AlertModel(
-            id: alertId, kind: .bell, paneId: stalePaneId, tabId: tabId,
+            id: alertId, kind: .bell, paneId: stalePaneId,
             title: "DanTerm", body: "stale", createdAt: Date(), isUnread: true
         ), at: 0)
 
@@ -86,7 +85,6 @@ func lifecycleTests() {
     test("testActivateAlertWhileZoomedClearsZoom") {
         var model = makeModel()
         createTab(&model)
-        let tabId = model.groups[0].tabs[0].id
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
         // Split and zoom paneB
@@ -98,7 +96,7 @@ func lifecycleTests() {
         // Alert targets paneA (not the focused paneB)
         let alertId = AlertId()
         model.alerts.insert(AlertModel(
-            id: alertId, kind: .bell, paneId: paneA, tabId: tabId,
+            id: alertId, kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
@@ -114,7 +112,6 @@ func lifecycleTests() {
     test("testActivateAlertWhileZoomedSamePaneKeepsZoom") {
         var model = makeModel()
         createTab(&model)
-        let tabId = model.groups[0].tabs[0].id
 
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
@@ -123,7 +120,7 @@ func lifecycleTests() {
         // Alert targets the already-focused paneB
         let alertId = AlertId()
         model.alerts.insert(AlertModel(
-            id: alertId, kind: .bell, paneId: paneB, tabId: tabId,
+            id: alertId, kind: .bell, paneId: paneB,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 

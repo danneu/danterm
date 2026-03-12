@@ -267,6 +267,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
         focusRight.keyEquivalentModifierMask = [.command, .shift]
         panesMenu.addItem(focusRight)
 
+        panesMenu.addItem(NSMenuItem.separator())
+
+        let goToAlert = NSMenuItem(title: "Go to Most Recent Unread Alert", action: #selector(goToMostRecentAlertPane(_:)), keyEquivalent: "a")
+        goToAlert.keyEquivalentModifierMask = [.command, .shift]
+        panesMenu.addItem(goToAlert)
+
         panesMenuItem.submenu = panesMenu
         mainMenu.addItem(panesMenuItem)
 
@@ -340,6 +346,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
 
     @objc func focusRight(_ sender: Any?) {
         runtime.send(.focusDirection(direction: .horizontal, side: .second))
+    }
+
+    @objc func goToMostRecentAlertPane(_ sender: Any?) {
+        runtime.send(.goToMostRecentAlertPane)
     }
 
     // MARK: - UNUserNotificationCenterDelegate

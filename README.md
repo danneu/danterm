@@ -193,6 +193,7 @@ end
 | Focus Pane Right | ⇧⌘L      |
 | Toggle Pane Zoom | ⇧⌘Enter  |
 | New Group        | ⇧⌘G      |
+| Go to Most Recent Unread Alert | ⇧⌘A |
 | Quit             | ⌘Q       |
 
 ## Comparison

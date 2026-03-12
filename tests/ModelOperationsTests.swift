@@ -529,13 +529,13 @@ func modelOperationsTests() {
         try expectEqual(unreadAlertCount(for: tab, alerts: alerts), 0)
 
         alerts.insert(AlertModel(
-            id: AlertId(), kind: .bell, paneId: a, tabId: tabId,
+            id: AlertId(), kind: .bell, paneId: a,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
         try expectEqual(unreadAlertCount(for: tab, alerts: alerts), 1)
 
         alerts.insert(AlertModel(
-            id: AlertId(), kind: .bell, paneId: b, tabId: tabId,
+            id: AlertId(), kind: .bell, paneId: b,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
         try expectEqual(unreadAlertCount(for: tab, alerts: alerts), 2)
@@ -551,7 +551,7 @@ func modelOperationsTests() {
 
         try expectEqual(groupUnreadAlertCount(for: group, alerts: alerts), 0)
         alerts.insert(AlertModel(
-            id: AlertId(), kind: .bell, paneId: b, tabId: tabId2,
+            id: AlertId(), kind: .bell, paneId: b,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
         try expectEqual(groupUnreadAlertCount(for: group, alerts: alerts), 1)

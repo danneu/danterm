@@ -152,9 +152,8 @@ func paneTests() {
         model.panes[paneA]?.cwd = "/tmp/foo"
 
         // Add an unread alert for paneA
-        let tabId = model.groups[0].tabs[0].id
         model.alerts.insert(AlertModel(
-            id: AlertId(), kind: .bell, paneId: paneA, tabId: tabId,
+            id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
@@ -785,13 +784,12 @@ func paneTests() {
     test("testMovePaneToNewTabAlertsClearedOnMove") {
         var model = makeModel()
         createTab(&model)
-        let tab1Id = model.groups[0].tabs[0].id
         let paneA = model.groups[0].tabs[0].focusedPaneId
         update(&model, .splitPane(direction: .horizontal))
         let groupId = model.groups[0].id
 
         let alert = AlertModel(
-            id: AlertId(), kind: .bell, paneId: paneA, tabId: tab1Id,
+            id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         )
         model.alerts.insert(alert, at: 0)
@@ -825,7 +823,6 @@ func paneTests() {
     test("testMovePaneToTabAlertsClearedOnMove") {
         var model = makeModel()
         createTab(&model)
-        let tab1Id = model.groups[0].tabs[0].id
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
         createTab(&model)
@@ -834,14 +831,14 @@ func paneTests() {
 
         // Create unread alert for paneA (the pane being moved)
         let alertA = AlertModel(
-            id: AlertId(), kind: .bell, paneId: paneA, tabId: tab1Id,
+            id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "alert A", createdAt: Date(), isUnread: true
         )
         model.alerts.insert(alertA, at: 0)
 
         // Create unread alert for paneB (unrelated)
         let alertB = AlertModel(
-            id: AlertId(), kind: .bell, paneId: paneB, tabId: tab2Id,
+            id: AlertId(), kind: .bell, paneId: paneB,
             title: "DanTerm", body: "alert B", createdAt: Date(), isUnread: true
         )
         model.alerts.insert(alertB, at: 0)

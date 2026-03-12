@@ -132,14 +132,12 @@ class AppRuntime {
             window?.title = title
             refreshContentTitlebar()
 
-        case .sendNotification(let alertId, let title, let body, let tabId, let paneId):
+        case .sendNotification(let alertId, let title, let body):
             let content = UNMutableNotificationContent()
             content.title = title
             content.body = body
             content.userInfo = [
                 "alertId": alertId.rawValue.uuidString,
-                "tabId": tabId.rawValue.uuidString,
-                "paneId": paneId.rawValue.uuidString,
             ]
             let request = UNNotificationRequest(
                 identifier: UUID().uuidString,

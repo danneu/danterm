@@ -478,7 +478,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let paneTitle = model.panes[paneId]?.title ?? "Terminal"
 
         let alert = AlertModel(
-            id: AlertId(), kind: .bell, paneId: paneId, tabId: tab.id,
+            id: AlertId(), kind: .bell, paneId: paneId,
             title: "DanTerm", body: paneTitle, createdAt: Date(), isUnread: true
         )
         model.alerts.insert(alert, at: 0)
@@ -491,7 +491,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
         effects.append(contentsOf: throttledNotification(
             alertId: alert.id, kind: .bell, paneId: paneId,
-            title: "DanTerm", body: paneTitle, tabId: tab.id, model: &model
+            title: "DanTerm", body: paneTitle, model: &model
         ))
         return effects
 
@@ -504,7 +504,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         guard let tab = tabForPane(paneId, in: model) else { return [] }
 
         let alert = AlertModel(
-            id: AlertId(), kind: .desktopNotification, paneId: paneId, tabId: tab.id,
+            id: AlertId(), kind: .desktopNotification, paneId: paneId,
             title: title, body: body, createdAt: Date(), isUnread: true
         )
         model.alerts.insert(alert, at: 0)
@@ -517,7 +517,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
         effects.append(contentsOf: throttledNotification(
             alertId: alert.id, kind: .desktopNotification, paneId: paneId,
-            title: title, body: body, tabId: tab.id, model: &model
+            title: title, body: body, model: &model
         ))
         return effects
 
@@ -572,9 +572,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
     case .activateAlert(let alertId):
         guard let alert = model.alerts.first(where: { $0.id == alertId }) else { return [] }
-        // Stale alert: pane or tab no longer exists — just mark read, no navigation
-        guard model.panes[alert.paneId] != nil,
-              tabForPane(alert.paneId, in: model) != nil else {
+        // Stale alert: pane no longer exists — just mark read, no navigation
+        guard model.panes[alert.paneId] != nil else {
             if let idx = model.alerts.firstIndex(where: { $0.id == alertId }) {
                 model.alerts[idx].isUnread = false
             }
@@ -584,20 +583,16 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         if let idx = model.alerts.firstIndex(where: { $0.id == alertId }) {
             model.alerts[idx].isUnread = false
         }
-        // Navigate: select tab, focus pane, clear zoom if needed, activate app
-        var effects = update(&model, .selectTab(id: alert.tabId))
-        if let tab = selectedTab(in: model), tab.isZoomed, alert.paneId != tab.focusedPaneId {
-            updateSelectedTab(&model) { t in t.isZoomed = false }
-        }
-        // Always emit refresh effects — selectTab is a no-op when already on
-        // the alert's tab, but we still need to clear the red border/badges
-        // after marking the alert read.
-        effects.append(.rebuildContentView)
-        effects.append(.reloadSidebar)
-        effects.append(.makeFirstResponder(paneId: alert.paneId))
+        var effects = navigateToPane(alert.paneId, in: &model)
         effects.append(.activateApp)
         effects.append(.dismissAlertsPopover)
         return effects
+
+    case .goToMostRecentAlertPane:
+        guard let alert = model.alerts.first(where: { $0.isUnread && model.panes[$0.paneId] != nil }) else {
+            return []
+        }
+        return navigateToPane(alert.paneId, in: &model)
 
     case .confirmTerminate:
         if wouldQuitFromClose(model) {
@@ -723,6 +718,21 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
 // MARK: - Helpers
 
+/// Navigate to a pane: select its current tab, clear zoom if needed, focus the pane.
+private func navigateToPane(_ paneId: PaneId, in model: inout AppModel) -> [Effect] {
+    guard let currentTab = tabForPane(paneId, in: model) else { return [] }
+    var effects = update(&model, .selectTab(id: currentTab.id))
+    if let tab = selectedTab(in: model), tab.isZoomed, paneId != tab.focusedPaneId {
+        updateSelectedTab(&model) { t in t.isZoomed = false }
+    }
+    // Always emit refresh effects — selectTab is a no-op when already on
+    // the pane's tab, but we still need to update borders/badges.
+    effects.append(.rebuildContentView)
+    effects.append(.reloadSidebar)
+    effects.append(.makeFirstResponder(paneId: paneId))
+    return effects
+}
+
 private func updateSelectedTab(_ model: inout AppModel, _ body: (inout TabModel) -> Void) {
     guard let selId = model.selectedTabId else { return }
     updateTab(selId, in: &model, body)
@@ -775,7 +785,7 @@ private let notificationThrottleInterval: TimeInterval = 1
 /// Throttle macOS notification delivery: one per pane per kind every throttle interval.
 private func throttledNotification(
     alertId: AlertId, kind: AlertKind, paneId: PaneId,
-    title: String, body: String, tabId: TabId, model: inout AppModel
+    title: String, body: String, model: inout AppModel
 ) -> [Effect] {
     let now = Date()
     let shouldNotify: Bool
@@ -789,7 +799,5 @@ private func throttledNotification(
 
     model.lastNotificationTime[paneId, default: [:]][kind] = now
 
-    return [.sendNotification(
-        alertId: alertId, title: title, body: body, tabId: tabId, paneId: paneId
-    )]
+    return [.sendNotification(alertId: alertId, title: title, body: body)]
 }

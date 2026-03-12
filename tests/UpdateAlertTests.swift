@@ -7,11 +7,10 @@ func alertTests() {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        let tabId = model.groups[0].tabs[0].id
 
         let alertId = AlertId()
         model.alerts.insert(AlertModel(
-            id: alertId, kind: .bell, paneId: paneId, tabId: tabId,
+            id: alertId, kind: .bell, paneId: paneId,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
@@ -31,11 +30,10 @@ func alertTests() {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        let tabId = model.groups[0].tabs[0].id
 
         for _ in 0..<3 {
             model.alerts.insert(AlertModel(
-                id: AlertId(), kind: .bell, paneId: paneId, tabId: tabId,
+                id: AlertId(), kind: .bell, paneId: paneId,
                 title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
             ), at: 0)
         }
@@ -59,7 +57,7 @@ func alertTests() {
 
         let alertId = AlertId()
         model.alerts.insert(AlertModel(
-            id: alertId, kind: .bell, paneId: paneId, tabId: tabId,
+            id: alertId, kind: .bell, paneId: paneId,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
@@ -83,12 +81,11 @@ func alertTests() {
     test("testActivateStaleAlertMarksReadButNoNavigation") {
         var model = makeModel()
         createTab(&model)
-        let tabId = model.groups[0].tabs[0].id
 
         let stalePaneId = PaneId()
         let alertId = AlertId()
         model.alerts.insert(AlertModel(
-            id: alertId, kind: .bell, paneId: stalePaneId, tabId: tabId,
+            id: alertId, kind: .bell, paneId: stalePaneId,
             title: "DanTerm", body: "stale", createdAt: Date(), isUnread: true
         ), at: 0)
 
@@ -108,7 +105,6 @@ func alertTests() {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        let tabId = model.groups[0].tabs[0].id
 
         // Create second tab so pane is in background
         createTab(&model)
@@ -116,7 +112,7 @@ func alertTests() {
         // Insert 100 alerts manually
         for i in 0..<100 {
             model.alerts.append(AlertModel(
-                id: AlertId(), kind: .bell, paneId: paneId, tabId: tabId,
+                id: AlertId(), kind: .bell, paneId: paneId,
                 title: "DanTerm", body: "alert \(i)", createdAt: Date(), isUnread: false
             ))
         }
@@ -141,7 +137,7 @@ func alertTests() {
 
         // Add unread alert for paneA
         model.alerts.insert(AlertModel(
-            id: AlertId(), kind: .bell, paneId: paneA, tabId: tabAId,
+            id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
@@ -153,14 +149,13 @@ func alertTests() {
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
-        let tabId = model.groups[0].tabs[0].id
 
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
         // Add unread alert for paneA
         model.alerts.insert(AlertModel(
-            id: AlertId(), kind: .bell, paneId: paneA, tabId: tabId,
+            id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
@@ -174,13 +169,12 @@ func alertTests() {
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
-        let tabId = model.groups[0].tabs[0].id
 
         update(&model, .splitPane(direction: .horizontal))
 
         // Add unread alert and throttle data for paneA
         model.alerts.insert(AlertModel(
-            id: AlertId(), kind: .bell, paneId: paneA, tabId: tabId,
+            id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
         model.lastNotificationTime[paneA] = [.bell: Date()]
@@ -205,11 +199,11 @@ func alertTests() {
 
         // Add alerts for both panes
         model.alerts.insert(AlertModel(
-            id: AlertId(), kind: .bell, paneId: paneA, tabId: tabId,
+            id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "a", createdAt: Date(), isUnread: true
         ), at: 0)
         model.alerts.insert(AlertModel(
-            id: AlertId(), kind: .bell, paneId: paneB, tabId: tabId,
+            id: AlertId(), kind: .bell, paneId: paneB,
             title: "DanTerm", body: "b", createdAt: Date(), isUnread: true
         ), at: 0)
 
@@ -221,14 +215,13 @@ func alertTests() {
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
-        let tabId = model.groups[0].tabs[0].id
 
         // Create second tab so closing the first doesn't terminate
         createTab(&model)
 
         // Add alert and throttle data for paneA
         model.alerts.insert(AlertModel(
-            id: AlertId(), kind: .bell, paneId: paneA, tabId: tabId,
+            id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
         model.lastNotificationTime[paneA] = [.bell: Date()]
@@ -278,7 +271,7 @@ func alertTests() {
 
         let alertId = AlertId()
         model.alerts.insert(AlertModel(
-            id: alertId, kind: .bell, paneId: paneId, tabId: tabId,
+            id: alertId, kind: .bell, paneId: paneId,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
@@ -289,5 +282,150 @@ func alertTests() {
             if case .activateApp = $0 { return true }
             return false
         }, "should activate app")
+    }
+
+    // MARK: - goToMostRecentAlertPane Tests
+
+    test("testGoToMostRecentAlertPaneNavigatesToPaneAndTab") {
+        var model = makeModel()
+        createTab(&model)  // tab1 with paneA
+        let tab1Id = model.groups[0].tabs[0].id
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model)  // tab2 (now selected)
+        try expect(model.selectedTabId != tab1Id, "tab2 should be selected")
+
+        // Add alert for paneA on tab1
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        let effects = update(&model, .goToMostRecentAlertPane)
+        try expectEqual(model.selectedTabId, tab1Id, "should switch to tab containing alert pane")
+        try expect(hasEffect(effects) {
+            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
+            return false
+        }, "should focus the alert's pane")
+    }
+
+    test("testGoToMostRecentAlertPaneSkipsStaleAlert") {
+        var model = makeModel()
+        createTab(&model)  // tab1
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model)  // tab2 (now selected)
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+
+        // Newest alert references a deleted pane (stale)
+        let stalePaneId = PaneId()
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: stalePaneId,
+            title: "DanTerm", body: "stale", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        // Second alert references valid paneA
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "valid", createdAt: Date(), isUnread: true
+        ), at: 1)
+
+        let effects = update(&model, .goToMostRecentAlertPane)
+        try expect(hasEffect(effects) {
+            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
+            return false
+        }, "should navigate to the first valid alert's pane")
+        _ = paneB
+    }
+
+    test("testGoToMostRecentAlertPaneNoAlerts") {
+        var model = makeModel()
+        createTab(&model)
+
+        let effects = update(&model, .goToMostRecentAlertPane)
+        try expectEqual(effects.count, 0, "no alerts should produce no effects")
+    }
+
+    test("testGoToMostRecentAlertPaneUsesCurrentTabAfterMove") {
+        var model = makeModel()
+        createTab(&model)  // tab1 with paneA
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model)  // tab2
+        let tab2Id = model.groups[0].tabs[1].id
+
+        // Add alert for paneA (while it's on tab1)
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        // Move paneA to tab2 (this marks paneA's alerts read)
+        update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
+        model.alerts[0].isUnread = true  // re-mark unread so goToMostRecentAlertPane finds it
+
+        // Now create tab3 so we're not already on tab2
+        createTab(&model)
+
+        // goToMostRecentAlertPane should use paneA's CURRENT tab (tab2), not the stale tab1
+        let effects = update(&model, .goToMostRecentAlertPane)
+        try expectEqual(model.selectedTabId, tab2Id, "should navigate to pane's current tab, not original tab")
+        try expect(hasEffect(effects) {
+            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
+            return false
+        }, "should focus the alert's pane")
+    }
+
+    test("testGoToMostRecentAlertPaneSkipsReadAlerts") {
+        var model = makeModel()
+        createTab(&model)  // tab1 with paneA
+        let tab1Id = model.groups[0].tabs[0].id
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model)  // tab2 with paneB
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model)  // tab3 (now selected)
+
+        // Newest alert (index 0) is read — should be skipped
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneB,
+            title: "DanTerm", body: "read", createdAt: Date(), isUnread: false
+        ), at: 0)
+
+        // Second alert (index 1) is unread — should be targeted
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "unread", createdAt: Date(), isUnread: true
+        ), at: 1)
+
+        let effects = update(&model, .goToMostRecentAlertPane)
+        try expectEqual(model.selectedTabId, tab1Id, "should navigate to the unread alert's tab, skipping read alert")
+        try expect(hasEffect(effects) {
+            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
+            return false
+        }, "should focus the unread alert's pane")
+    }
+
+    test("testGoToMostRecentAlertPaneUnzoomsIfNeeded") {
+        var model = makeModel()
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        // Split to get paneB, then zoom paneB
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .toggleZoomPane)
+        try expectEqual(model.groups[0].tabs[0].isZoomed, true)
+
+        // Alert targets paneA (not zoomed paneB)
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        update(&model, .goToMostRecentAlertPane)
+        try expectEqual(model.groups[0].tabs[0].isZoomed, false, "zoom should clear when navigating to different pane")
+        _ = paneB
     }
 }

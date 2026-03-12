@@ -188,7 +188,6 @@ func ghosttyTests() {
         var model = makeModel()
         createTab(&model)
         let firstTabPaneId = model.groups[0].tabs[0].focusedPaneId
-        let firstTabId = model.groups[0].tabs[0].id
 
         createTab(&model)
 
@@ -196,8 +195,8 @@ func ghosttyTests() {
         try expectEqual(model.alerts.count, 1, "should create alert")
         try expectEqual(model.alerts[0].isUnread, true, "background pane alert should be unread")
         try expect(hasEffect(effects) {
-            if case .sendNotification(_, let t, let b, let tid, let pid) = $0,
-               t == "Hello", b == "World", tid == firstTabId, pid == firstTabPaneId { return true }
+            if case .sendNotification(_, let t, let b) = $0,
+               t == "Hello", b == "World" { return true }
             return false
         }, "should send notification with OSC 777 title/body")
         try expect(hasEffect(effects) {
@@ -220,7 +219,7 @@ func ghosttyTests() {
         // Desktop notification should still fire (independent throttle)
         let effects = update(&model, .desktopNotification(paneId: firstTabPaneId, title: "Done", body: "Task finished"))
         try expect(hasEffect(effects) {
-            if case .sendNotification(_, let t, _, _, _) = $0, t == "Done" { return true }
+            if case .sendNotification(_, let t, _) = $0, t == "Done" { return true }
             return false
         }, "desktop notification should not be throttled by bell")
         try expect(model.lastNotificationTime[firstTabPaneId]?[.desktopNotification] != nil, "should set lastNotificationTime for desktopNotification")
