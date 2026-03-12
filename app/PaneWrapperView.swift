@@ -212,10 +212,12 @@ class PaneWrapperView: NSView {
 
         let splitRight = NSMenuItem(title: "Split Right", action: #selector(splitRightAction), keyEquivalent: "")
         splitRight.target = self
+        splitRight.image = NSImage(systemSymbolName: "rectangle.split.2x1", accessibilityDescription: "Split Right")
         menu.addItem(splitRight)
 
         let splitDown = NSMenuItem(title: "Split Down", action: #selector(splitDownAction), keyEquivalent: "")
         splitDown.target = self
+        splitDown.image = NSImage(systemSymbolName: "rectangle.split.1x2", accessibilityDescription: "Split Down")
         menu.addItem(splitDown)
 
         menu.addItem(.separator())
