@@ -130,6 +130,35 @@ func groupTests() {
         }, "should emit reloadSidebar")
     }
 
+    test("renameGroup rejects empty name") {
+        var model = makeModel()
+        update(&model, .createGroup(name: "Work"))
+        let workId = model.groups[1].id
+
+        let effects = update(&model, .renameGroup(id: workId, name: ""))
+        try expectEqual(model.groups[1].name, "Work", "name should be unchanged")
+        try expectEqual(effects.count, 0, "should emit no effects")
+    }
+
+    test("renameGroup rejects whitespace-only name") {
+        var model = makeModel()
+        update(&model, .createGroup(name: "Work"))
+        let workId = model.groups[1].id
+
+        let effects = update(&model, .renameGroup(id: workId, name: "   "))
+        try expectEqual(model.groups[1].name, "Work", "name should be unchanged")
+        try expectEqual(effects.count, 0, "should emit no effects")
+    }
+
+    test("renameGroup trims whitespace") {
+        var model = makeModel()
+        update(&model, .createGroup(name: "Work"))
+        let workId = model.groups[1].id
+
+        update(&model, .renameGroup(id: workId, name: "  Projects  "))
+        try expectEqual(model.groups[1].name, "Projects")
+    }
+
     test("testReorderGroup") {
         var model = makeModel()
         update(&model, .createGroup(name: "A"))

@@ -658,8 +658,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return [.reloadSidebar, .scheduleCheckpoint]
 
     case .renameGroup(let id, let name):
-        guard let idx = model.groups.firstIndex(where: { $0.id == id }) else { return [] }
-        model.groups[idx].name = name
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty,
+              let idx = model.groups.firstIndex(where: { $0.id == id }) else { return [] }
+        model.groups[idx].name = trimmed
         // Persist group name so it appears correctly on restore.
         return [.reloadSidebar, .scheduleCheckpoint]
 

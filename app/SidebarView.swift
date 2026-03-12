@@ -959,15 +959,11 @@ extension SidebarView: NSTextFieldDelegate {
                 self?.runtime?.send(.renameTab(id: tabId, name: name))
             }
         case .group(let groupId):
-            // Reject empty for groups — return false to keep the field editor active.
-            // This path does its own cleanup since controlTextDidEndEditing won't fire.
-            if newName.isEmpty {
-                objc_setAssociatedObject(textField, &AssociatedKeys.renameTarget, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-                textField.isEditable = false
-                return false
-            }
-            DispatchQueue.main.async { [weak self] in
-                self?.runtime?.send(.renameGroup(id: groupId, name: newName))
+            // Empty name is a no-op: let editing end normally, keep old name.
+            if !newName.isEmpty {
+                DispatchQueue.main.async { [weak self] in
+                    self?.runtime?.send(.renameGroup(id: groupId, name: newName))
+                }
             }
         case nil:
             break
