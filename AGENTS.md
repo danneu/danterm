@@ -132,12 +132,12 @@ verify the test passes.
 
 ### build-lib.sh
 
-- Clones Ghostty at a pinned tag (currently v1.2.3)
-- Builds with: `nix shell nixpkgs#zig_0_14 nixpkgs#gettext --command zig build`
+- Clones Ghostty at a pinned tag (currently v1.3.0)
+- Builds with: `nix shell nixpkgs#zig_0_15 nixpkgs#gettext --command zig build`
 - Flags: `-Demit-xcframework -Demit-macos-app=false -Dsentry=false -Doptimize=ReleaseFast`
 - XCFramework output path is `macos/GhosttyKit.xcframework/` (NOT `zig-out/`)
-- The iTerm2-Color-Schemes theme URL in `build.zig.zon` may go stale between
-  Ghostty releases — if build fails with a 404, update the URL and hash
+- As of v1.3.0, dependency URLs use a CDN (`deps.files.ghostty.org`), so the old
+  iTerm2-Color-Schemes URL staleness issue is resolved
 
 ### Swift compilation (dev-build.sh)
 
@@ -163,7 +163,7 @@ Required frameworks and libraries (libghostty depends on these):
 
 ## Requirements
 
-- nix (for `zig_0_14` and `gettext`)
+- nix (for `zig_0_15` and `gettext`)
 - Xcode with Metal toolchain: `xcodebuild -downloadComponent MetalToolchain`
 - The GhosttyKit xcframework must be built before compiling the Swift app
 

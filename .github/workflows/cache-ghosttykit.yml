@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
 
 env:
-  GHOSTTY_TAG: v1.2.3
+  GHOSTTY_TAG: v1.3.0
 
 jobs:
   cache:
@@ -32,18 +32,12 @@ jobs:
       - uses: mlugg/setup-zig@v2
         if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
         with:
-          version: 0.14.1
+          version: 0.15.2
 
       - name: Clone Ghostty source
         if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 --branch ${{ env.GHOSTTY_TAG }} https://github.com/ghostty-org/ghostty.git .ghostty-src
-          sed -i '' \
-            's|release-20251002-142451-4a5043e|release-20260216-151611-fc73ce3|' \
-            .ghostty-src/build.zig.zon
-          sed -i '' \
-            's|N-V-__8AALIsAwDyo88G5mGJGN2lSVmmFMx4YePfUvp_2o3Y|N-V-__8AABVbAwBwDRyZONfx553tvMW8_A2OKUoLzPUSRiLF|' \
-            .ghostty-src/build.zig.zon
 
       - name: Build GhosttyKit
         if: steps.cache-ghosttykit.outputs.cache-hit != 'true'

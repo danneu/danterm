@@ -9,7 +9,7 @@ env:
   APP_NAME: DanTerm
   BUNDLE_ID: com.danneu.danterm
   EXECUTABLE: DanTerm
-  GHOSTTY_TAG: v1.2.3
+  GHOSTTY_TAG: v1.3.0
 
 jobs:
   release:
@@ -29,18 +29,11 @@ jobs:
 
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.14.1
+          version: 0.15.2
 
       - name: Clone Ghostty source
         run: |
           git clone --depth 1 --branch ${{ env.GHOSTTY_TAG }} https://github.com/ghostty-org/ghostty.git .ghostty-src
-          # Patch stale iTerm2-Color-Schemes URL (removed upstream between Ghostty releases)
-          sed -i '' \
-            's|release-20251002-142451-4a5043e|release-20260216-151611-fc73ce3|' \
-            .ghostty-src/build.zig.zon
-          sed -i '' \
-            's|N-V-__8AALIsAwDyo88G5mGJGN2lSVmmFMx4YePfUvp_2o3Y|N-V-__8AABVbAwBwDRyZONfx553tvMW8_A2OKUoLzPUSRiLF|' \
-            .ghostty-src/build.zig.zon
 
       - name: Cache GhosttyKit
         id: cache-ghosttykit

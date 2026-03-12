@@ -48,12 +48,19 @@ class GhosttyApp {
                 guard let view = bridge.view, let surface = view.surface else { return }
                 ghostty_surface_complete_clipboard_request(surface, str, state, true)
             },
-            write_clipboard_cb: { userdata, data, location, confirm in
-                guard let data = data else { return }
-                let str = String(cString: data)
-                let pasteboard = NSPasteboard.general
-                pasteboard.clearContents()
-                pasteboard.setString(str, forType: .string)
+            write_clipboard_cb: { userdata, location, content, len, confirm in
+                guard let content = content, len > 0 else { return }
+                // Find the text/plain entry in the content array
+                for i in 0..<len {
+                    let item = content[i]
+                    guard let mime = item.mime, String(cString: mime) == "text/plain" else { continue }
+                    guard let data = item.data else { continue }
+                    let str = String(cString: data)
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString(str, forType: .string)
+                    break
+                }
             },
             close_surface_cb: { userdata, processAlive in
                 guard let userdata = userdata else { return }

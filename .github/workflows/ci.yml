@@ -11,25 +11,18 @@ jobs:
 
       - uses: mlugg/setup-zig@v2
         with:
-          version: 0.14.1
+          version: 0.15.2
 
       - name: Clone Ghostty source
         run: |
-          git clone --depth 1 --branch v1.2.3 https://github.com/ghostty-org/ghostty.git .ghostty-src
-          # Patch stale iTerm2-Color-Schemes URL (removed upstream between Ghostty releases)
-          sed -i '' \
-            's|release-20251002-142451-4a5043e|release-20260216-151611-fc73ce3|' \
-            .ghostty-src/build.zig.zon
-          sed -i '' \
-            's|N-V-__8AALIsAwDyo88G5mGJGN2lSVmmFMx4YePfUvp_2o3Y|N-V-__8AABVbAwBwDRyZONfx553tvMW8_A2OKUoLzPUSRiLF|' \
-            .ghostty-src/build.zig.zon
+          git clone --depth 1 --branch v1.3.0 https://github.com/ghostty-org/ghostty.git .ghostty-src
 
       - name: Cache GhosttyKit
         id: cache-ghosttykit
         uses: actions/cache@v5
         with:
           path: lib/GhosttyKit.xcframework
-          key: ghosttykit-v1.2.3-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
+          key: ghosttykit-v1.3.0-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
 
       - name: Build GhosttyKit
         if: steps.cache-ghosttykit.outputs.cache-hit != 'true'

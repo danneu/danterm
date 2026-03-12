@@ -8,15 +8,19 @@
 #
 # Requirements:
 #   - nix (for zig via nixpkgs)
-#   - Xcode with Metal toolchain (xcodebuild -downloadComponent MetalToolchain)
+#   - Xcode
 #
 # Output: lib/GhosttyKit.xcframework/
 #
 set -euo pipefail
 
+# Ensure Metal toolchain is available (idempotent — no-op if already installed)
+echo "Ensuring Metal toolchain is installed..."
+xcodebuild -downloadComponent MetalToolchain
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-GHOSTTY_TAG="v1.2.3"
-ZIG_PKG="nixpkgs#zig_0_14"  # Ghostty v1.2.x requires Zig 0.14.x
+GHOSTTY_TAG="v1.3.0"
+ZIG_PKG="nixpkgs#zig_0_15"  # Ghostty v1.3.x requires Zig 0.15.x
 GHOSTTY_REPO="https://github.com/ghostty-org/ghostty.git"
 CACHE_DIR="$SCRIPT_DIR/.ghostty-src"
 LIB_DIR="$SCRIPT_DIR/lib"

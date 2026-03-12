@@ -40,8 +40,8 @@ just version         # show current version
 
 ## Pinned versions
 
-- **Ghostty `v1.2.3`** — set via `GHOSTTY_TAG` env var in each workflow
-- **Zig `0.14.1`** — set in the `mlugg/setup-zig` action (Ghostty v1.2.x requires Zig 0.14)
+- **Ghostty `v1.3.0`** — set via `GHOSTTY_TAG` env var in each workflow
+- **Zig `0.15.2`** — set in the `mlugg/setup-zig` action (Ghostty v1.3.x requires Zig 0.15)
 
 When upgrading Ghostty, update both `GHOSTTY_TAG` in the workflows and potentially the Zig version if the new Ghostty requires it.
 
@@ -52,14 +52,9 @@ When upgrading Ghostty, update both `GHOSTTY_TAG` in the workflows and potential
 
 ## Troubleshooting
 
-### iTerm2-Color-Schemes 404
+### Dependency URL staleness
 
-Ghostty's `build.zig.zon` pins an iTerm2-Color-Schemes release URL that goes stale between Ghostty releases. The workflows patch this URL after cloning. If the patch itself goes stale:
-
-1. Find the latest release: `gh release list --repo mbadolato/iTerm2-Color-Schemes --limit 1`
-2. Get the asset URL: `gh release view <tag> --repo mbadolato/iTerm2-Color-Schemes --json assets --jq '.assets[] | select(.name | contains("ghostty")) | .url'`
-3. Update the `sed` commands in the "Clone Ghostty source" step of each workflow
-4. Get the new Zig hash by running `zig build` locally and reading the error output (it tells you the expected hash)
+As of Ghostty v1.3.0, dependency URLs use a CDN (`deps.files.ghostty.org`), so the old iTerm2-Color-Schemes URL patching is no longer needed. If a CDN URL goes stale in the future, a similar `sed` patch approach can be used.
 
 ### Re-triggering a release
 
