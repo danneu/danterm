@@ -119,6 +119,10 @@ class AppRuntime {
         case .rebuildContentView:
             rebuildContentView()
 
+        case .updatePaneAlertBorder(let paneId):
+            let hasBell = paneHasUnreadAlert(paneId, alerts: model.alerts)
+            surfaces[paneId]?.setFocusBorder(false, hasBell: hasBell)
+
         case .reloadSidebar:
             sidebarView?.reload(model: model)
 

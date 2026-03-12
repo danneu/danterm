@@ -484,7 +484,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         model.alerts.insert(alert, at: 0)
         if model.alerts.count > 100 { model.alerts.removeLast() }
 
-        var effects: [Effect] = [.rebuildContentView, .reloadSidebarRow(tabId: tab.id)]
+        var effects: [Effect] = [.updatePaneAlertBorder(paneId: paneId), .reloadSidebarRow(tabId: tab.id)]
         if let group = groupForTab(tab.id, in: model), group.isCollapsed {
             effects.append(.reloadSidebarGroupRow(groupId: group.id))
         }
@@ -510,7 +510,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         model.alerts.insert(alert, at: 0)
         if model.alerts.count > 100 { model.alerts.removeLast() }
 
-        var effects: [Effect] = [.rebuildContentView, .reloadSidebarRow(tabId: tab.id)]
+        var effects: [Effect] = [.updatePaneAlertBorder(paneId: paneId), .reloadSidebarRow(tabId: tab.id)]
         if let group = groupForTab(tab.id, in: model), group.isCollapsed {
             effects.append(.reloadSidebarGroupRow(groupId: group.id))
         }
