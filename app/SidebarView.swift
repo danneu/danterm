@@ -97,14 +97,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     private var childItems: [GroupId: [SidebarItem]] = [:]
     private var currentModel: AppModel?
 
-    // Pending reloads deferred while a field editor is active (inline rename).
-    // Tracked by entity ID since row indices are unstable.
-    private enum PendingReload: Hashable {
-        case tab(TabId)
-        case group(GroupId)
-    }
-    private var pendingReloads: Set<PendingReload> = []
-
     private var isSingleGroupMode: Bool {
         currentModel?.groups.count == 1
     }
@@ -253,7 +245,13 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
     }
 
-    func reloadRow(tabId: TabId, model: AppModel) {
+    /// Mutate an existing tab cell's subviews in place (title, subtitle, badge,
+    /// color stripe) without destroying the cell view. This avoids the view churn
+    /// of reloadData(forRowIndexes:) and preserves the field editor during inline
+    /// rename — skipTitle prevents clobbering the text being edited while still
+    /// updating badge/subtitle/color. Offscreen or uncached rows are silently
+    /// skipped; they'll render from current state when scrolled into view.
+    func updateTabRow(tabId: TabId, model: AppModel) {
         currentModel = model
         // Update cached item data
         for group in model.groups {
@@ -262,41 +260,29 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 break
             }
         }
-        guard let item = tabItemCache[tabId] else {
-            reload(model: model)
-            return
-        }
+        guard let item = tabItemCache[tabId] else { return }
         let row = outlineView.row(forItem: item)
-        guard row >= 0 else {
-            reload(model: model)
-            return
-        }
-        // Defer reload if this row's text field has an active field editor (inline rename).
-        if let cellView = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView,
-           let textField = cellView.textField,
-           textField.currentEditor() != nil {
-            pendingReloads.insert(.tab(tabId))
-            return
-        }
-        outlineView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
+        guard row >= 0,
+              let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView,
+              case .tab(let tab) = item.kind else { return }
+        let isEditing = cell.textField?.currentEditor() != nil
+        configureTabCell(cell, tab: tab, skipTitle: isEditing)
     }
 
-    func reloadGroupRow(groupId: GroupId, model: AppModel) {
+    /// In-place group row update — same rationale as updateTabRow. Updates the
+    /// group name, collapse caret, and bell badge without recreating the cell.
+    func updateGroupRow(groupId: GroupId, model: AppModel) {
         currentModel = model
         if let group = model.groups.first(where: { $0.id == groupId }) {
             groupItemCache[groupId]?.kind = .group(group)
         }
         guard let item = groupItemCache[groupId] else { return }
         let row = outlineView.row(forItem: item)
-        guard row >= 0 else { return }
-        // Defer reload if this row's text field has an active field editor (inline rename).
-        if let cellView = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView,
-           let textField = cellView.textField,
-           textField.currentEditor() != nil {
-            pendingReloads.insert(.group(groupId))
-            return
-        }
-        outlineView.reloadData(forRowIndexes: IndexSet(integer: row), columnIndexes: IndexSet(integer: 0))
+        guard row >= 0,
+              let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView,
+              case .group(let group) = item.kind else { return }
+        let isEditing = cell.textField?.currentEditor() != nil
+        configureGroupCell(cell, group: group, skipTitle: isEditing)
     }
 
     // MARK: - Inline Rename
@@ -389,7 +375,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         guard let sidebarItem = notification.userInfo?["NSObject"] as? SidebarItem,
               case .group(let group) = sidebarItem.kind else { return }
         runtime?.send(.toggleGroupCollapse(groupId: group.id))
-        updateGroupRow(for: sidebarItem, collapsed: true)
+        applyGroupCollapseState(for: sidebarItem, collapsed: true)
     }
 
     func outlineViewItemDidExpand(_ notification: Notification) {
@@ -397,10 +383,10 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         guard let sidebarItem = notification.userInfo?["NSObject"] as? SidebarItem,
               case .group(let group) = sidebarItem.kind else { return }
         runtime?.send(.toggleGroupCollapse(groupId: group.id))
-        updateGroupRow(for: sidebarItem, collapsed: false)
+        applyGroupCollapseState(for: sidebarItem, collapsed: false)
     }
 
-    private func updateGroupRow(for sidebarItem: SidebarItem, collapsed: Bool) {
+    private func applyGroupCollapseState(for sidebarItem: SidebarItem, collapsed: Bool) {
         guard case .group(let group) = sidebarItem.kind else { return }
         let row = outlineView.row(forItem: sidebarItem)
         guard row >= 0,
@@ -757,8 +743,13 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         return cell
     }
 
-    private func configureGroupCell(_ cell: NSTableCellView, group: GroupModel) {
-        cell.textField?.stringValue = group.name
+    /// Apply current group state to an existing cell's subviews. Shared by
+    /// makeGroupCell (initial population) and updateGroupRow (in-place refresh).
+    /// skipTitle protects the field editor during inline group rename.
+    private func configureGroupCell(_ cell: NSTableCellView, group: GroupModel, skipTitle: Bool = false) {
+        if !skipTitle {
+            cell.textField?.stringValue = group.name
+        }
         cell.textField?.tag = group.id.rawValue.hashValue
         if let caretButton = cell.subviews.first(where: { $0.identifier?.rawValue == "groupCaretButton" }) as? NSButton {
             let symbolName = group.isCollapsed ? "chevron.right" : "chevron.down"
@@ -830,7 +821,22 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             ])
         }
 
-        cell.textField?.stringValue = tab.displayTitle
+        configureTabCell(cell, tab: tab)
+        return cell
+    }
+
+    /// Apply current tab state to an existing cell's subviews. Shared by
+    /// makeTabCell (initial population) and updateTabRow (in-place refresh).
+    /// When skipTitle is true the text field is left untouched so the field
+    /// editor isn't clobbered during inline rename.
+    private func configureTabCell(_ cell: NSTableCellView, tab: TabModel, skipTitle: Bool = false) {
+        let subtitleId = NSUserInterfaceItemIdentifier("subtitle")
+        let bellDotId = NSUserInterfaceItemIdentifier("bellDot")
+        let colorStripeId = NSUserInterfaceItemIdentifier("colorStripe")
+
+        if !skipTitle {
+            cell.textField?.stringValue = tab.displayTitle
+        }
         if let subtitleField = cell.subviews.first(where: { $0.identifier == subtitleId }) as? NSTextField {
             subtitleField.stringValue = tab.subtitle ?? ""
             subtitleField.isHidden = tab.subtitle == nil
@@ -839,8 +845,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             let count = unreadAlertCount(for: tab, alerts: currentModel?.alerts ?? [])
             bellBadge.updateBadge(count: count)
         }
-
-        // Color stripe
         if let stripe = cell.subviews.first(where: { $0.identifier == colorStripeId }) {
             if let color = tab.color {
                 stripe.layer?.backgroundColor = color.nsColor.cgColor
@@ -849,8 +853,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 stripe.isHidden = true
             }
         }
-
-        return cell
     }
 
     /// Returns true if the drag cursor is in empty space below all outline view rows.
@@ -865,36 +867,33 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     // MARK: - Inline Rename Cleanup
 
     /// Shared cleanup for all rename-exit paths: disables editing, clears the
-    /// rename target, and flushes any deferred row reloads.
+    /// rename target, and resyncs the row from cached model state.
     private func finishInlineRename(textField: NSTextField) {
+        let target = objc_getAssociatedObject(textField, &AssociatedKeys.renameTarget) as? RenameTarget
         textField.isEditable = false
         objc_setAssociatedObject(textField, &AssociatedKeys.renameTarget, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-        flushPendingReloads()
-    }
 
-    // MARK: - Pending Reload Flush
-
-    private func flushPendingReloads() {
-        let pending = pendingReloads
-        pendingReloads.removeAll()
-        guard !pending.isEmpty else { return }
-        var rows = IndexSet()
-        for item in pending {
-            switch item {
-            case .tab(let tabId):
-                if let sidebarItem = tabItemCache[tabId] {
-                    let row = outlineView.row(forItem: sidebarItem)
-                    if row >= 0 { rows.insert(row) }
-                }
-            case .group(let groupId):
-                if let sidebarItem = groupItemCache[groupId] {
-                    let row = outlineView.row(forItem: sidebarItem)
-                    if row >= 0 { rows.insert(row) }
-                }
-            }
-        }
-        if !rows.isEmpty {
-            outlineView.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integer: 0))
+        // Resync the row's title from cached model state now that the field editor
+        // is gone. During rename, skipTitle prevented title updates; this ensures
+        // the cell reflects the current model regardless of whether a rename Msg
+        // follows.
+        switch target {
+        case .tab(let tabId):
+            guard let item = tabItemCache[tabId] else { return }
+            let row = outlineView.row(forItem: item)
+            guard row >= 0,
+                  let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView,
+                  case .tab(let tab) = item.kind else { return }
+            configureTabCell(cell, tab: tab)
+        case .group(let groupId):
+            guard let item = groupItemCache[groupId] else { return }
+            let row = outlineView.row(forItem: item)
+            guard row >= 0,
+                  let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView,
+                  case .group(let group) = item.kind else { return }
+            configureGroupCell(cell, group: group)
+        case nil:
+            break
         }
     }
 

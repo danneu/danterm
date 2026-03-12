@@ -13,8 +13,8 @@ enum Effect {
     case rebuildContentView
     case updatePaneAlertBorder(paneId: PaneId)
     case reloadSidebar
-    case reloadSidebarRow(tabId: TabId)
-    case reloadSidebarGroupRow(groupId: GroupId)
+    case updateSidebarTabRow(tabId: TabId)
+    case updateSidebarGroupRow(groupId: GroupId)
     case setWindowTitle(String)
 
     // Export

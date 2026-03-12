@@ -360,13 +360,13 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
     case .setTabColor(let tabId, let color):
         updateTab(tabId, in: &model) { t in t.color = color }
         // Persist tab color so it's restored on next launch.
-        return [.reloadSidebarRow(tabId: tabId), .scheduleCheckpoint]
+        return [.updateSidebarTabRow(tabId: tabId), .scheduleCheckpoint]
 
     case .renameTab(let id, let name):
         let trimmed = name?.trimmingCharacters(in: .whitespaces)
         let customTitle: String? = (trimmed?.isEmpty ?? true) ? nil : trimmed
         updateTab(id, in: &model) { t in t.customTitle = customTitle }
-        var effects: [Effect] = [.reloadSidebarRow(tabId: id)]
+        var effects: [Effect] = [.updateSidebarTabRow(tabId: id)]
         if id == model.selectedTabId {
             effects.append(contentsOf: selectionSyncEffects(for: model))
         }
@@ -406,9 +406,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         var effects: [Effect] = [.rebuildContentView]
         if let tab = selectedTab(in: model) {
             effects.append(.setWindowTitle(windowTitle(for: tab)))
-            effects.append(.reloadSidebarRow(tabId: tab.id))
+            effects.append(.updateSidebarTabRow(tabId: tab.id))
             if let group = groupForTab(tab.id, in: model), group.isCollapsed {
-                effects.append(.reloadSidebarGroupRow(groupId: group.id))
+                effects.append(.updateSidebarGroupRow(groupId: group.id))
             }
         }
         // Persist focused pane so restore opens the right pane within each tab.
@@ -437,7 +437,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         let abbrev = abbreviateHome(title)
         updateTab(tab.id, in: &model) { t in t.title = abbrev }
-        var effects: [Effect] = [.reloadSidebarRow(tabId: tab.id)]
+        var effects: [Effect] = [.updateSidebarTabRow(tabId: tab.id)]
         if tab.id == model.selectedTabId {
             let updatedTab = selectedTab(in: model)!
             effects.append(.setWindowTitle(windowTitle(for: updatedTab)))
@@ -455,7 +455,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         let abbrev = abbreviateHome(cwd)
         updateTab(tab.id, in: &model) { t in t.subtitle = abbrev }
-        var effects: [Effect] = [.reloadSidebarRow(tabId: tab.id)]
+        var effects: [Effect] = [.updateSidebarTabRow(tabId: tab.id)]
         if tab.id == model.selectedTabId {
             let updatedTab = selectedTab(in: model)!
             effects.append(.setWindowTitle(windowTitle(for: updatedTab)))
@@ -484,9 +484,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         model.alerts.insert(alert, at: 0)
         if model.alerts.count > 100 { model.alerts.removeLast() }
 
-        var effects: [Effect] = [.updatePaneAlertBorder(paneId: paneId), .reloadSidebarRow(tabId: tab.id)]
+        var effects: [Effect] = [.updatePaneAlertBorder(paneId: paneId), .updateSidebarTabRow(tabId: tab.id)]
         if let group = groupForTab(tab.id, in: model), group.isCollapsed {
-            effects.append(.reloadSidebarGroupRow(groupId: group.id))
+            effects.append(.updateSidebarGroupRow(groupId: group.id))
         }
 
         effects.append(contentsOf: throttledNotification(
@@ -510,9 +510,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         model.alerts.insert(alert, at: 0)
         if model.alerts.count > 100 { model.alerts.removeLast() }
 
-        var effects: [Effect] = [.updatePaneAlertBorder(paneId: paneId), .reloadSidebarRow(tabId: tab.id)]
+        var effects: [Effect] = [.updatePaneAlertBorder(paneId: paneId), .updateSidebarTabRow(tabId: tab.id)]
         if let group = groupForTab(tab.id, in: model), group.isCollapsed {
-            effects.append(.reloadSidebarGroupRow(groupId: group.id))
+            effects.append(.updateSidebarGroupRow(groupId: group.id))
         }
 
         effects.append(contentsOf: throttledNotification(

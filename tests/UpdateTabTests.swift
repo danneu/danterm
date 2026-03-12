@@ -293,9 +293,9 @@ func tabTests() {
         let effects = update(&model, .setTabColor(tabId: tabId, color: .red))
         try expectEqual(model.groups[0].tabs[0].color, .red)
         try expect(hasEffect(effects) {
-            if case .reloadSidebarRow(let tid) = $0, tid == tabId { return true }
+            if case .updateSidebarTabRow(let tid) = $0, tid == tabId { return true }
             return false
-        }, "should emit reloadSidebarRow")
+        }, "should emit updateSidebarTabRow")
     }
 
     test("testSetTabColorClear") {
@@ -307,9 +307,9 @@ func tabTests() {
         let effects = update(&model, .setTabColor(tabId: tabId, color: nil))
         try expect(model.groups[0].tabs[0].color == nil, "color should be nil")
         try expect(hasEffect(effects) {
-            if case .reloadSidebarRow(let tid) = $0, tid == tabId { return true }
+            if case .updateSidebarTabRow(let tid) = $0, tid == tabId { return true }
             return false
-        }, "should emit reloadSidebarRow")
+        }, "should emit updateSidebarTabRow")
     }
 
     test("testSetTabColorInvalidTab") {
@@ -318,7 +318,7 @@ func tabTests() {
         let bogusId = TabId()
 
         let effects = update(&model, .setTabColor(tabId: bogusId, color: .green))
-        try expectEqual(effects.count, 2, "should emit reloadSidebarRow + scheduleCheckpoint")
+        try expectEqual(effects.count, 2, "should emit updateSidebarTabRow + scheduleCheckpoint")
     }
 
     test("testCloseTabNonSelected") {

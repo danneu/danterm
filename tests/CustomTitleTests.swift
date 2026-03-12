@@ -31,9 +31,9 @@ func customTitleTests() {
         let effects = update(&model, .renameTab(id: tabId, name: "My App"))
         try expectEqual(model.groups[0].tabs[0].customTitle, "My App")
         try expect(hasEffect(effects) {
-            if case .reloadSidebarRow(let tid) = $0, tid == tabId { return true }
+            if case .updateSidebarTabRow(let tid) = $0, tid == tabId { return true }
             return false
-        }, "should emit reloadSidebarRow")
+        }, "should emit updateSidebarTabRow")
         // Tab is selected, so should also emit setWindowTitle
         try expect(hasEffect(effects) {
             if case .setWindowTitle = $0 { return true }
@@ -51,9 +51,9 @@ func customTitleTests() {
         let effects = update(&model, .renameTab(id: tabId, name: nil))
         try expect(model.groups[0].tabs[0].customTitle == nil, "customTitle should be nil")
         try expect(hasEffect(effects) {
-            if case .reloadSidebarRow(let tid) = $0, tid == tabId { return true }
+            if case .updateSidebarTabRow(let tid) = $0, tid == tabId { return true }
             return false
-        }, "should emit reloadSidebarRow")
+        }, "should emit updateSidebarTabRow")
         try expect(hasEffect(effects) {
             if case .setWindowTitle = $0 { return true }
             return false

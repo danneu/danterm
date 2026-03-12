@@ -168,9 +168,9 @@ func paneTests() {
             return false
         }, "should emit rebuildContentView")
         try expect(hasEffect(effects) {
-            if case .reloadSidebarRow = $0 { return true }
+            if case .updateSidebarTabRow = $0 { return true }
             return false
-        }, "should emit reloadSidebarRow")
+        }, "should emit updateSidebarTabRow")
         try expect(hasEffect(effects) {
             if case .setWindowTitle = $0 { return true }
             return false

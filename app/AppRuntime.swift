@@ -126,11 +126,11 @@ class AppRuntime {
         case .reloadSidebar:
             sidebarView?.reload(model: model)
 
-        case .reloadSidebarRow(let tabId):
-            sidebarView?.reloadRow(tabId: tabId, model: model)
+        case .updateSidebarTabRow(let tabId):
+            sidebarView?.updateTabRow(tabId: tabId, model: model)
 
-        case .reloadSidebarGroupRow(let groupId):
-            sidebarView?.reloadGroupRow(groupId: groupId, model: model)
+        case .updateSidebarGroupRow(let groupId):
+            sidebarView?.updateGroupRow(groupId: groupId, model: model)
 
         case .setWindowTitle(let title):
             window?.title = title

@@ -78,7 +78,7 @@ func ghosttyTests() {
         try expectEqual(model.panes[paneId]?.title, "vim")
         try expectEqual(model.groups[0].tabs[0].title, "vim")
         try expect(hasEffect(effects) {
-            if case .reloadSidebarRow(let tid) = $0, tid == tabId { return true }
+            if case .updateSidebarTabRow(let tid) = $0, tid == tabId { return true }
             return false
         }, "should reload sidebar row")
         try expect(hasEffect(effects) {
@@ -111,7 +111,7 @@ func ghosttyTests() {
         let effects = update(&model, .surfaceCwd(paneId: paneId, cwd: "/home/dan/projects"))
         try expectEqual(model.panes[paneId]?.cwd, "/home/dan/projects")
         try expect(hasEffect(effects) {
-            if case .reloadSidebarRow(let tid) = $0, tid == tabId { return true }
+            if case .updateSidebarTabRow(let tid) = $0, tid == tabId { return true }
             return false
         }, "should reload sidebar row")
         try expect(hasEffect(effects) {
@@ -147,7 +147,7 @@ func ghosttyTests() {
         try expectEqual(model.panes[paneA]?.title, "vim", "pane title should update")
         try expectEqual(model.groups[0].tabs[0].title, "vim", "background tab title should update")
         try expect(hasEffect(effects) {
-            if case .reloadSidebarRow(let tid) = $0, tid == tabAId { return true }
+            if case .updateSidebarTabRow(let tid) = $0, tid == tabAId { return true }
             return false
         }, "should reload sidebar row for background tab")
         try expect(!hasEffect(effects) {
@@ -169,7 +169,7 @@ func ghosttyTests() {
         try expectEqual(model.panes[paneA]?.cwd, "/tmp", "pane cwd should update")
         try expectEqual(model.groups[0].tabs[0].subtitle, "~" == abbreviateHome("/tmp") ? "~" : "/tmp", "background tab subtitle should update")
         try expect(hasEffect(effects) {
-            if case .reloadSidebarRow(let tid) = $0, tid == tabAId { return true }
+            if case .updateSidebarTabRow(let tid) = $0, tid == tabAId { return true }
             return false
         }, "should reload sidebar row for background tab")
         try expect(!hasEffect(effects) {
