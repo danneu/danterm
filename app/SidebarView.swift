@@ -599,6 +599,13 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             colorItem.image = currentColor.swatchImage
         }
         let colorSubmenu = NSMenu()
+        if tab.color != nil {
+            let clearItem = NSMenuItem(title: "Clear Color", action: #selector(contextSetTabColor(_:)), keyEquivalent: "")
+            clearItem.target = self
+            clearItem.representedObject = SetTabColorInfo(tabId: tab.id, color: nil)
+            colorSubmenu.addItem(clearItem)
+            colorSubmenu.addItem(NSMenuItem.separator())
+        }
         for color in TabColor.allCases {
             let item = NSMenuItem(title: color.rawValue.capitalized, action: #selector(contextSetTabColor(_:)), keyEquivalent: "")
             item.target = self
@@ -609,11 +616,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             }
             colorSubmenu.addItem(item)
         }
-        colorSubmenu.addItem(NSMenuItem.separator())
-        let clearItem = NSMenuItem(title: "Clear Color", action: #selector(contextSetTabColor(_:)), keyEquivalent: "")
-        clearItem.target = self
-        clearItem.representedObject = SetTabColorInfo(tabId: tab.id, color: nil)
-        colorSubmenu.addItem(clearItem)
         colorItem.submenu = colorSubmenu
         menu.addItem(colorItem)
 
@@ -835,7 +837,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 colorStripe.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
                 colorStripe.topAnchor.constraint(equalTo: cell.topAnchor),
                 colorStripe.bottomAnchor.constraint(equalTo: cell.bottomAnchor),
-                colorStripe.widthAnchor.constraint(equalToConstant: 3),
+                colorStripe.widthAnchor.constraint(equalToConstant: 5),
                 accessoryStack.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
                 accessoryStack.topAnchor.constraint(equalTo: cell.topAnchor, constant: 4),
                 textField.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
