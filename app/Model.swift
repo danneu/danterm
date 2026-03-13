@@ -44,6 +44,14 @@ enum ProgressState: Equatable {
     case pause(percent: UInt8?)
 }
 
+// MARK: - Search
+
+struct SearchModel: Equatable {
+    var needle: String = ""
+    var total: Int?      // nil = unknown/not yet reported
+    var selected: Int?   // nil = no selection
+}
+
 // MARK: - Model
 
 struct PaneModel: Equatable {
@@ -99,6 +107,7 @@ struct AppModel: Equatable {
     var selectedTabId: TabId?
     var alerts: [AlertModel] = []  // newest first, capped at 100
     var lastNotificationTime: [PaneId: [AlertKind: Date]] = [:]
+    var searchState: [PaneId: SearchModel] = [:]  // ephemeral — excluded from snapshots
 }
 
 // MARK: - Session Lock

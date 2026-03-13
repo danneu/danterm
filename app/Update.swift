@@ -106,6 +106,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         for pid in paneIds {
             effects.append(.destroySurface(paneId: pid))
             removeAlertsForPane(pid, in: &model)
+            removePaneSearchState(pid, from: &model)
             model.lastNotificationTime.removeValue(forKey: pid)
             model.panes.removeValue(forKey: pid)
         }
@@ -175,6 +176,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
         var effects: [Effect] = [.destroySurface(paneId: paneId)]
         removeAlertsForPane(paneId, in: &model)
+        removePaneSearchState(paneId, from: &model)
         model.lastNotificationTime.removeValue(forKey: paneId)
         model.panes.removeValue(forKey: paneId)
 
@@ -531,6 +533,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
     case .surfaceCreationFailed(let paneId):
         model.panes.removeValue(forKey: paneId)
         removeAlertsForPane(paneId, in: &model)
+        removePaneSearchState(paneId, from: &model)
         model.lastNotificationTime.removeValue(forKey: paneId)
         // Find and remove the tab containing this pane
         for gi in model.groups.indices {
@@ -636,6 +639,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 for pid in allPaneIds(tab.rootNode) {
                     effects.append(.destroySurface(paneId: pid))
                     removeAlertsForPane(pid, in: &model)
+                    removePaneSearchState(pid, from: &model)
                     model.lastNotificationTime.removeValue(forKey: pid)
                     model.panes.removeValue(forKey: pid)
                 }
@@ -719,6 +723,47 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         // Persist split ratio so pane proportions are restored accurately.
         return [.scheduleCheckpoint]
+
+    // MARK: - Search
+
+    case .startSearch:
+        guard let tab = selectedTab(in: model) else { return [] }
+        return [.sendStartSearch(paneId: tab.focusedPaneId)]
+
+    case .ghosttyStartSearch(let paneId, let needle):
+        if model.searchState[paneId] == nil {
+            model.searchState[paneId] = SearchModel()
+        }
+        if !needle.isEmpty {
+            model.searchState[paneId]?.needle = needle
+        }
+        return [.showSearchOverlay(paneId: paneId), .focusSearchField(paneId: paneId)]
+
+    case .searchNeedleChanged(let paneId, let needle):
+        guard model.searchState[paneId] != nil else { return [] }
+        model.searchState[paneId]?.needle = needle
+        model.searchState[paneId]?.total = nil
+        model.searchState[paneId]?.selected = nil
+        return [.sendSearchNeedle(paneId: paneId, needle: needle), .showSearchOverlay(paneId: paneId)]
+
+    case .searchNavigate(let paneId, let direction):
+        guard model.searchState[paneId] != nil else { return [] }
+        return [.sendSearchNavigate(paneId: paneId, direction: direction)]
+
+    case .endSearch(let paneId):
+        guard model.searchState[paneId] != nil else { return [] }
+        model.searchState.removeValue(forKey: paneId)
+        return [.hideSearchOverlay(paneId: paneId), .sendEndSearch(paneId: paneId), .makeFirstResponder(paneId: paneId)]
+
+    case .ghosttySearchTotal(let paneId, let total):
+        guard model.searchState[paneId] != nil else { return [] }
+        model.searchState[paneId]?.total = total
+        return [.showSearchOverlay(paneId: paneId)]
+
+    case .ghosttySearchSelected(let paneId, let selected):
+        guard model.searchState[paneId] != nil else { return [] }
+        model.searchState[paneId]?.selected = selected
+        return [.showSearchOverlay(paneId: paneId)]
     }
 }
 

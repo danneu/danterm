@@ -12,6 +12,9 @@ class PaneWrapperView: NSView {
     private let hasSplits: Bool
     private weak var runtime: AppRuntime?
 
+    // Search overlay
+    private(set) var searchOverlay: SearchOverlayView?
+
     // Progress indicator
     private let progressIndicator: ProgressIndicatorView
     private var currentProgress: ProgressState?
@@ -204,6 +207,30 @@ class PaneWrapperView: NSView {
                 progressIndicator.showDeterminate(percent: 100, color: .systemOrange)
             }
         }
+    }
+
+    // MARK: - Search Overlay
+
+    /// Show or update the search overlay. Creates it if absent, otherwise updates from model.
+    func showSearchOverlay(search: SearchModel, runtime: AppRuntime?) {
+        if let overlay = searchOverlay {
+            overlay.update(search: search)
+            return
+        }
+        let overlay = SearchOverlayView(paneId: paneId, runtime: runtime)
+        overlay.update(search: search)
+        addSubview(overlay)
+        NSLayoutConstraint.activate([
+            overlay.topAnchor.constraint(equalTo: toolbar.bottomAnchor, constant: 4),
+            overlay.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+        ])
+        searchOverlay = overlay
+    }
+
+    /// Remove the search overlay from the view hierarchy.
+    func hideSearchOverlay() {
+        searchOverlay?.removeFromSuperview()
+        searchOverlay = nil
     }
 
     @objc private func showPaneMenu() {

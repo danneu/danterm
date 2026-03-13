@@ -244,6 +244,46 @@ class GhosttyApp {
             }
             return true
 
+        case GHOSTTY_ACTION_START_SEARCH:
+            if let surface = Self.targetSurface(target),
+               let bridge = Self.surfaceBridge(from: surface),
+               let paneId = bridge.paneId {
+                let needle: String
+                if let ptr = action.action.start_search.needle {
+                    needle = String(cString: ptr)
+                } else {
+                    needle = ""
+                }
+                DispatchQueue.main.async { [weak self] in
+                    self?.runtime?.send(.ghosttyStartSearch(paneId: paneId, needle: needle))
+                }
+            }
+            return true
+
+        case GHOSTTY_ACTION_SEARCH_TOTAL:
+            if let surface = Self.targetSurface(target),
+               let bridge = Self.surfaceBridge(from: surface),
+               let paneId = bridge.paneId {
+                let raw = action.action.search_total.total
+                let total: Int? = raw >= 0 ? Int(raw) : nil
+                DispatchQueue.main.async { [weak self] in
+                    self?.runtime?.send(.ghosttySearchTotal(paneId: paneId, total: total))
+                }
+            }
+            return true
+
+        case GHOSTTY_ACTION_SEARCH_SELECTED:
+            if let surface = Self.targetSurface(target),
+               let bridge = Self.surfaceBridge(from: surface),
+               let paneId = bridge.paneId {
+                let raw = action.action.search_selected.selected
+                let selected: Int? = raw >= 0 ? Int(raw) : nil
+                DispatchQueue.main.async { [weak self] in
+                    self?.runtime?.send(.ghosttySearchSelected(paneId: paneId, selected: selected))
+                }
+            }
+            return true
+
         default:
             return false
         }

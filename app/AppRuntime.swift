@@ -34,6 +34,7 @@ class AppRuntime {
     private var checkpointTimer: DispatchSourceTimer?          // debounce timer for light checkpoints
     private var enrichedCheckpointTimer: DispatchSourceTimer?  // repeating timer for enriched checkpoints
     private var checkpointPending = false                      // true while a debounced write is scheduled
+    private var searchDebounceTimers: [PaneId: DispatchSourceTimer] = [:]
     private static let checkpointDebounceInterval: TimeInterval = 2.0
     private static let enrichedCheckpointInterval: TimeInterval = 60.0
 
@@ -102,6 +103,8 @@ class AppRuntime {
         case .destroySurface(let paneId):
             tokenStore.remove(paneId)
             cleanupReplayFile(for: paneId)
+            searchDebounceTimers[paneId]?.cancel()
+            searchDebounceTimers.removeValue(forKey: paneId)
             if let view = surfaces.removeValue(forKey: paneId) {
                 view.closeSurface()
             }
@@ -273,6 +276,75 @@ class AppRuntime {
         case .updateDockBadge(let count):
             NSApp.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
             NSApp.dockTile.display()
+
+        // Search effects
+
+        case .sendStartSearch(let paneId):
+            if let view = surfaces[paneId], let surface = view.surface {
+                let action = "start_search"
+                _ = action.withCString { ptr in
+                    ghostty_surface_binding_action(surface, ptr, UInt(action.utf8.count))
+                }
+            }
+
+        case .showSearchOverlay(let paneId):
+            guard let search = model.searchState[paneId],
+                  let contentArea = contentArea else { return }
+            findPaneWrapper(for: paneId, in: contentArea)?.showSearchOverlay(search: search, runtime: self)
+
+        case .hideSearchOverlay(let paneId):
+            guard let contentArea = contentArea else { return }
+            findPaneWrapper(for: paneId, in: contentArea)?.hideSearchOverlay()
+
+        case .focusSearchField(let paneId):
+            guard let contentArea = contentArea else { return }
+            if let field = findPaneWrapper(for: paneId, in: contentArea)?.searchOverlay?.searchField {
+                window?.makeFirstResponder(field)
+            }
+
+        case .sendSearchNeedle(let paneId, let needle):
+            // Debounce: immediate for empty or 3+ chars, 300ms for 1-2 chars
+            searchDebounceTimers[paneId]?.cancel()
+            searchDebounceTimers.removeValue(forKey: paneId)
+
+            let delay: TimeInterval = (needle.isEmpty || needle.count >= 3) ? 0 : 0.3
+            let sendNeedle = { [weak self] in
+                guard let self = self,
+                      let view = self.surfaces[paneId],
+                      let surface = view.surface else { return }
+                let action = "search:\(needle)"
+                _ = action.withCString { ptr in
+                    ghostty_surface_binding_action(surface, ptr, UInt(action.utf8.count))
+                }
+            }
+
+            if delay == 0 {
+                sendNeedle()
+            } else {
+                let timer = DispatchSource.makeTimerSource(queue: .main)
+                timer.schedule(deadline: .now() + delay)
+                timer.setEventHandler(handler: sendNeedle)
+                timer.resume()
+                searchDebounceTimers[paneId] = timer
+            }
+
+        case .sendSearchNavigate(let paneId, let direction):
+            if let view = surfaces[paneId], let surface = view.surface {
+                let action = direction == .next ? "navigate_search:next" : "navigate_search:previous"
+                _ = action.withCString { ptr in
+                    ghostty_surface_binding_action(surface, ptr, UInt(action.utf8.count))
+                }
+            }
+
+        case .sendEndSearch(let paneId):
+            searchDebounceTimers[paneId]?.cancel()
+            searchDebounceTimers.removeValue(forKey: paneId)
+            if let view = surfaces[paneId], let surface = view.surface {
+                let action = "end_search"
+                _ = action.withCString { ptr in
+                    ghostty_surface_binding_action(surface, ptr, UInt(action.utf8.count))
+                }
+            }
         }
     }
 
@@ -778,13 +850,25 @@ class AppRuntime {
             surfaces[paneId]?.setFocusBorder(isFocused, hasBell: hasBell)
         }
 
-        // Focus the right pane
-        if let focusedView = surfaces[focusedId] {
-            window?.makeFirstResponder(focusedView)
+        // Focus the right pane (unless search is active on it)
+        if model.searchState[focusedId] == nil {
+            if let focusedView = surfaces[focusedId] {
+                window?.makeFirstResponder(focusedView)
+            }
         }
 
         refreshPaneToolbars()
         refreshContentTitlebar()
+
+        // Rehydrate search overlays for panes with active search
+        for (paneId, search) in model.searchState {
+            findPaneWrapper(for: paneId, in: contentArea)?.showSearchOverlay(search: search, runtime: self)
+        }
+        // If search is active on the focused pane, focus its text field
+        if model.searchState[focusedId] != nil,
+           let field = findPaneWrapper(for: focusedId, in: contentArea)?.searchOverlay?.searchField {
+            window?.makeFirstResponder(field)
+        }
     }
 
     // MARK: - Alerts Popover

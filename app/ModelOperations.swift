@@ -19,6 +19,13 @@ func formatToolbarLabel(title: String, cwd: String?) -> String {
   }
 }
 
+// MARK: - Search Cleanup
+
+/// Remove search state for a pane being destroyed. Called from all pane-destruction paths.
+func removePaneSearchState(_ paneId: PaneId, from model: inout AppModel) {
+    model.searchState.removeValue(forKey: paneId)
+}
+
 // MARK: - SplitNodeModel Operations
 
 func allPaneIds(_ node: SplitNodeModel) -> [PaneId] {

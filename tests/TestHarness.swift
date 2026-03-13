@@ -17,6 +17,7 @@ struct TestRunner {
         dropZoneTests()
         customTitleTests()
         checkpointTests()
+        searchTests()
         print("\n\(total - failures)/\(total) passed")
         if failures > 0 { exit(1) }
     }

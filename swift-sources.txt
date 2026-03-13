@@ -13,6 +13,7 @@ app/AlertsPopoverView.swift
 app/SplitContainerView.swift
 app/PaneSplitView.swift
 app/PaneWrapperView.swift
+app/SearchOverlayView.swift
 app/BadgeLabel.swift
 app/BellToolbarButton.swift
 app/TitlebarDragView.swift

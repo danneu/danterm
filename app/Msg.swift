@@ -9,6 +9,11 @@ enum PaneDropIntent {
     case splitTop, splitBottom, splitLeft, splitRight, swap
 }
 
+enum SearchDirection {
+    case next
+    case previous
+}
+
 enum Msg {
     // User actions
     case createTab(inGroupId: GroupId?)
@@ -66,6 +71,16 @@ enum Msg {
 
     // View
     case splitRatioChanged(splitId: SplitId, ratio: CGFloat)
+
+    // Search
+    case startSearch
+    case searchNeedleChanged(paneId: PaneId, needle: String)
+    case searchNavigate(paneId: PaneId, direction: SearchDirection)
+    case endSearch(paneId: PaneId)
+    // Ghostty search callbacks
+    case ghosttyStartSearch(paneId: PaneId, needle: String)
+    case ghosttySearchTotal(paneId: PaneId, total: Int?)
+    case ghosttySearchSelected(paneId: PaneId, selected: Int?)
 }
 
 /// Which entity was being renamed (used by renameCompletionMessages).

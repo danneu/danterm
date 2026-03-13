@@ -34,4 +34,13 @@ enum Effect {
     // Persistence — triggers a debounced write of the model snapshot to disk.
     // Returned by state-mutating update() branches so the recovery file stays current.
     case scheduleCheckpoint
+
+    // Search
+    case sendStartSearch(paneId: PaneId)
+    case showSearchOverlay(paneId: PaneId)
+    case hideSearchOverlay(paneId: PaneId)
+    case focusSearchField(paneId: PaneId)
+    case sendSearchNeedle(paneId: PaneId, needle: String)
+    case sendSearchNavigate(paneId: PaneId, direction: SearchDirection)
+    case sendEndSearch(paneId: PaneId)
 }
