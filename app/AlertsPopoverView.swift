@@ -11,8 +11,7 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
     private let headerLabel = NSTextField(labelWithString: "Alerts")
     private let markAllButton = NSButton(title: "Mark All Read", target: nil, action: nil)
     private let emptyLabel = NSTextField(labelWithString: "No alerts")
-    private let showAllLabel = NSTextField(labelWithString: "Show all")
-    private let showAllSwitch = NSSwitch()
+    private let showAllCheckbox = NSButton(checkboxWithTitle: "Show all", target: nil, action: nil)
     private var selectedTab: AlertTab = .unread
 
     private var displayedAlerts: [AlertModel] {
@@ -44,16 +43,11 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
         container.addSubview(markAllButton)
 
         // Show all toggle
-        showAllLabel.font = .systemFont(ofSize: 11)
-        showAllLabel.textColor = .secondaryLabelColor
-        showAllLabel.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(showAllLabel)
-
-        showAllSwitch.target = self
-        showAllSwitch.action = #selector(showAllToggled)
-        showAllSwitch.controlSize = .mini
-        showAllSwitch.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(showAllSwitch)
+        showAllCheckbox.target = self
+        showAllCheckbox.action = #selector(showAllToggled)
+        showAllCheckbox.font = .systemFont(ofSize: 11)
+        showAllCheckbox.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(showAllCheckbox)
 
         // Table view with single column, no header
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("alert"))
@@ -96,10 +90,8 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
             headerLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
             markAllButton.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
             markAllButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
-            showAllSwitch.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
-            showAllSwitch.leadingAnchor.constraint(equalTo: headerLabel.trailingAnchor, constant: 8),
-            showAllLabel.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
-            showAllLabel.leadingAnchor.constraint(equalTo: showAllSwitch.trailingAnchor, constant: 4),
+            showAllCheckbox.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
+            showAllCheckbox.leadingAnchor.constraint(equalTo: headerLabel.trailingAnchor, constant: 8),
             scrollView.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
@@ -114,7 +106,7 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
     override func viewWillAppear() {
         super.viewWillAppear()
         selectedTab = .unread
-        showAllSwitch.state = .off
+        showAllCheckbox.state = .off
         rebuildRows()
     }
 
@@ -234,7 +226,7 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
     }
 
     @objc private func showAllToggled() {
-        selectedTab = showAllSwitch.state == .on ? .history : .unread
+        selectedTab = showAllCheckbox.state == .on ? .history : .unread
         rebuildRows()
     }
 
