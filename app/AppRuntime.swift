@@ -835,6 +835,7 @@ class AppRuntime {
             runtime: self,
             isZoomed: tab.isZoomed,
             hasSplits: { if case .leaf = tab.rootNode { return false } else { return true } }(),
+            scrollbarEnabled: ghosttyApp.scrollbarEnabled,
             frame: contentArea.bounds
         )
         container.autoresizingMask = [.width, .height]

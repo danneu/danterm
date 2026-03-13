@@ -724,6 +724,11 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         // Persist split ratio so pane proportions are restored accurately.
         return [.scheduleCheckpoint]
 
+    // MARK: - Config
+
+    case .configDidChange:
+        return [.rebuildContentView]
+
     // MARK: - Search
 
     case .startSearch:

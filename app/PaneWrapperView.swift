@@ -22,7 +22,7 @@ class PaneWrapperView: NSView {
     private var labelLeadingToIndicator: NSLayoutConstraint!
     private var labelLeadingToToolbar: NSLayoutConstraint!
 
-    init(paneId: PaneId, terminalView: TerminalView, isZoomed: Bool, hasSplits: Bool, runtime: AppRuntime?) {
+    init(paneId: PaneId, terminalView: TerminalView, isZoomed: Bool, hasSplits: Bool, scrollbarEnabled: Bool = true, runtime: AppRuntime?) {
         self.paneId = paneId
         self.terminalView = terminalView
         self.toolbar = NSView()
@@ -103,9 +103,10 @@ class PaneWrapperView: NSView {
             toolbar.addSubview(ub)
         }
 
-        // Terminal view
-        terminalView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(terminalView)
+        // Terminal view wrapped in scroll view for native scrollbar support
+        let scrollWrapper = ScrollableTerminalView(terminalView: terminalView, scrollbarEnabled: scrollbarEnabled)
+        scrollWrapper.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(scrollWrapper)
 
         // Label trailing anchors to the first trailing button
         let labelTrailingAnchor = unzoomButton?.leadingAnchor ?? menuButton.leadingAnchor
@@ -144,11 +145,11 @@ class PaneWrapperView: NSView {
             menuButton.widthAnchor.constraint(equalToConstant: 16),
             menuButton.heightAnchor.constraint(equalToConstant: 16),
 
-            // Terminal view below toolbar
-            terminalView.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
-            terminalView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            terminalView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            terminalView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            // Scroll wrapper (terminal + scrollbar) below toolbar
+            scrollWrapper.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            scrollWrapper.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scrollWrapper.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scrollWrapper.bottomAnchor.constraint(equalTo: bottomAnchor),
         ]
 
         if let ub = unzoomButton {

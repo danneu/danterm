@@ -18,6 +18,7 @@ struct TestRunner {
         customTitleTests()
         checkpointTests()
         searchTests()
+        scrollbarMathTests()
         print("\n\(total - failures)/\(total) passed")
         if failures > 0 { exit(1) }
     }

@@ -4,6 +4,18 @@ import GhosttyKit
 class GhosttyApp {
     var app: ghostty_app_t?
     weak var runtime: AppRuntime?
+    /// Retained clone of the ghostty config for runtime reads (e.g. scrollbar setting).
+    var config: ghostty_config_t?
+
+    /// Whether scrollbar is enabled based on ghostty config.
+    var scrollbarEnabled: Bool {
+        guard let config = config else { return true }
+        var v: UnsafePointer<Int8>?
+        let key = "scrollbar"
+        guard ghostty_config_get(config, &v, key, UInt(key.utf8.count)) else { return true }
+        guard let ptr = v else { return true }
+        return String(cString: ptr) != "never"
+    }
 
     init() {
         // Create and load config
@@ -80,14 +92,14 @@ class GhosttyApp {
         }
         self.app = newApp
 
-        // Config is copied by ghostty_app_new, we can free our reference
+        // Clone config for runtime reads (e.g. scrollbar setting), then free the original
+        self.config = ghostty_config_clone(config)
         ghostty_config_free(config)
     }
 
     deinit {
-        if let app = app {
-            ghostty_app_free(app)
-        }
+        if let config = config { ghostty_config_free(config) }
+        if let app = app { ghostty_app_free(app) }
     }
 
     /// Resolve a ghostty_surface_t to its SurfaceBridge via userdata.
@@ -198,6 +210,35 @@ class GhosttyApp {
             return true
 
         case GHOSTTY_ACTION_CELL_SIZE:
+            // Synchronous — action callback is already on main thread via wakeup_cb.
+            if let surface = Self.targetSurface(target),
+               let bridge = Self.surfaceBridge(from: surface),
+               let view = bridge.view {
+                let backingSize = NSSize(
+                    width: Double(action.action.cell_size.width),
+                    height: Double(action.action.cell_size.height)
+                )
+                view.cellSize = view.convertFromBacking(backingSize)
+            }
+            return true
+
+        case GHOSTTY_ACTION_SCROLLBAR:
+            // Synchronous — no async dispatch to avoid thumb lag during scrollbar drag.
+            if let surface = Self.targetSurface(target),
+               let bridge = Self.surfaceBridge(from: surface),
+               let view = bridge.view {
+                let sb = action.action.scrollbar
+                view.scrollbarState = (total: sb.total, offset: sb.offset, len: sb.len)
+            }
+            return true
+
+        case GHOSTTY_ACTION_CONFIG_CHANGE:
+            let newConfig = ghostty_config_clone(action.action.config_change.config)
+            if let old = self.config { ghostty_config_free(old) }
+            self.config = newConfig
+            DispatchQueue.main.async { [weak self] in
+                self?.runtime?.send(.configDidChange)
+            }
             return true
 
         case GHOSTTY_ACTION_RING_BELL:

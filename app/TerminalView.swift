@@ -16,6 +16,17 @@ class TerminalView: NSView, NSTextInputClient {
     private var markedText = NSMutableAttributedString()
     private var keyTextAccumulator: [String]?
 
+    // Scrollbar support: updated synchronously from ghostty action callbacks.
+    weak var scrollDelegate: ScrollableTerminalView?
+
+    var cellSize: NSSize = .zero {
+        didSet { scrollDelegate?.scrollbarStateDidChange() }
+    }
+
+    var scrollbarState: (total: UInt64, offset: UInt64, len: UInt64)? {
+        didSet { scrollDelegate?.scrollbarStateDidChange() }
+    }
+
     override var acceptsFirstResponder: Bool { true }
 
     // MARK: - Init
