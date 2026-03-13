@@ -256,7 +256,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
         shellMenu.addItem(prevTabItem)
 
         let zoomItem = NSMenuItem(title: "Toggle Zoom", action: #selector(toggleZoom(_:)), keyEquivalent: "\r")
-        zoomItem.keyEquivalentModifierMask = [.command, .shift]
+        zoomItem.keyEquivalentModifierMask = [.command]
         shellMenu.addItem(zoomItem)
 
         let renameTabItem = NSMenuItem(title: "Rename Tab", action: #selector(renameTab(_:)), keyEquivalent: "R")

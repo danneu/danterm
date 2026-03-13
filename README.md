@@ -191,7 +191,7 @@ end
 | Focus Pane Down                | ⇧⌘J      |
 | Focus Pane Up                  | ⇧⌘K      |
 | Focus Pane Right               | ⇧⌘L      |
-| Toggle Pane Zoom               | ⇧⌘Enter  |
+| Toggle Pane Zoom               | ⌘Enter   |
 | New Group                      | ⌘N       |
 | Go to Most Recent Unread Alert | ⇧⌘A      |
 | Quit                           | ⌘Q       |
