@@ -231,9 +231,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
         let shellMenu = NSMenu(title: "Shell")
         shellMenu.addItem(withTitle: "New Tab", action: #selector(newTab(_:)), keyEquivalent: "t")
 
-        let newGroupItem = NSMenuItem(title: "New Group", action: #selector(newGroup(_:)), keyEquivalent: "G")
-        newGroupItem.keyEquivalentModifierMask = [.command, .shift]
-        shellMenu.addItem(newGroupItem)
+        shellMenu.addItem(withTitle: "New Group", action: #selector(newGroup(_:)), keyEquivalent: "n")
 
         let splitRightItem = NSMenuItem(title: "Split Right", action: #selector(splitRight(_:)), keyEquivalent: "d")
         shellMenu.addItem(splitRightItem)
