@@ -7,8 +7,8 @@ class GhosttyApp {
     /// Retained clone of the ghostty config for runtime reads (e.g. scrollbar setting).
     var config: ghostty_config_t?
 
-    /// Whether scrollbar is enabled based on ghostty config.
-    var scrollbarEnabled: Bool {
+    /// Read the scrollbar setting from any config. Returns true unless set to "never".
+    static func readScrollbarEnabled(from config: ghostty_config_t?) -> Bool {
         guard let config = config else { return true }
         var v: UnsafePointer<Int8>?
         let key = "scrollbar"
@@ -17,14 +17,60 @@ class GhosttyApp {
         return String(cString: ptr) != "never"
     }
 
+    /// Whether scrollbar is enabled based on the current app config.
+    var scrollbarEnabled: Bool { Self.readScrollbarEnabled(from: config) }
+
+    /// Create a fresh config by loading default files. Used for both init and reload.
+    private static func loadConfig() -> ghostty_config_t? {
+        guard let config = ghostty_config_new() else { return nil }
+        ghostty_config_load_default_files(config)
+        ghostty_config_load_recursive_files(config)
+        ghostty_config_finalize(config)
+        return config
+    }
+
+    /// Return the path to the Ghostty config file (e.g. ~/.config/ghostty/config).
+    static func configFilePath() -> String? {
+        let gs = ghostty_config_open_path()
+        defer { ghostty_string_free(gs) }
+        guard let ptr = gs.ptr else { return nil }
+        return String(
+            bytes: UnsafeRawBufferPointer(start: ptr, count: Int(gs.len)),
+            encoding: .utf8
+        )
+    }
+
+    /// App-level config reload: re-reads config files from disk (or soft-applies the existing config).
+    func reloadConfig(soft: Bool = false) {
+        guard let app = app else { return }
+        if soft {
+            guard let config = config else { return }
+            ghostty_app_update_config(app, config)
+            return
+        }
+        guard let newConfig = Self.loadConfig() else { return }
+        ghostty_app_update_config(app, newConfig)
+        ghostty_config_free(newConfig)
+    }
+
+    /// Surface-level config reload.
+    func reloadConfig(surface: ghostty_surface_t, soft: Bool = false) {
+        if soft {
+            guard let config = config else { return }
+            ghostty_surface_update_config(surface, config)
+            return
+        }
+        guard let newConfig = Self.loadConfig() else { return }
+        ghostty_surface_update_config(surface, newConfig)
+        ghostty_config_free(newConfig)
+    }
+
     init() {
         // Create and load config
-        guard let config = ghostty_config_new() else {
+        guard let config = Self.loadConfig() else {
             print("ghostty_config_new failed")
             return
         }
-        ghostty_config_load_default_files(config)
-        ghostty_config_finalize(config)
 
         // Set up runtime config with C function pointer callbacks.
         // The userdata is a pointer to this GhosttyApp instance.
@@ -232,12 +278,47 @@ class GhosttyApp {
             }
             return true
 
+        case GHOSTTY_ACTION_RELOAD_CONFIG:
+            let soft = action.action.reload_config.soft
+            switch target.tag {
+            case GHOSTTY_TARGET_APP:
+                reloadConfig(soft: soft)
+            case GHOSTTY_TARGET_SURFACE:
+                if let surface = Self.targetSurface(target) {
+                    reloadConfig(surface: surface, soft: soft)
+                }
+            default:
+                break
+            }
+            return true
+
         case GHOSTTY_ACTION_CONFIG_CHANGE:
-            let newConfig = ghostty_config_clone(action.action.config_change.config)
-            if let old = self.config { ghostty_config_free(old) }
-            self.config = newConfig
-            DispatchQueue.main.async { [weak self] in
-                self?.runtime?.send(.configDidChange)
+            let changeConfig = action.action.config_change.config
+            switch target.tag {
+            case GHOSTTY_TARGET_APP:
+                let newConfig = ghostty_config_clone(changeConfig)
+                if let old = self.config { ghostty_config_free(old) }
+                self.config = newConfig
+                // Fan out scrollbar setting to all surfaces
+                let enabled = Self.readScrollbarEnabled(from: newConfig)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    for (_, view) in self.runtime?.surfaces ?? [:] {
+                        view.scrollbarEnabled = enabled
+                    }
+                }
+
+            case GHOSTTY_TARGET_SURFACE:
+                // Update only the addressed surface
+                if let surface = Self.targetSurface(target),
+                   let bridge = Self.surfaceBridge(from: surface),
+                   let view = bridge.view {
+                    let enabled = Self.readScrollbarEnabled(from: changeConfig)
+                    view.scrollbarEnabled = enabled
+                }
+
+            default:
+                break
             }
             return true
 

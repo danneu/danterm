@@ -36,13 +36,13 @@ class ScrollableTerminalView: NSView {
     /// actions when the user drags the scrollbar but stays on the same row.
     private var lastSentRow: Int?
 
-    init(terminalView: TerminalView, scrollbarEnabled: Bool) {
+    init(terminalView: TerminalView) {
         self.terminalView = terminalView
 
         // Set up scroll view with overlay scroller style
         scrollView = TerminalScrollView()
         scrollView.terminalView = terminalView
-        scrollView.hasVerticalScroller = scrollbarEnabled
+        scrollView.hasVerticalScroller = terminalView.scrollbarEnabled
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = false
         scrollView.usesPredominantAxisScrolling = true
@@ -138,6 +138,11 @@ class ScrollableTerminalView: NSView {
     /// Called by TerminalView when cellSize or scrollbarState changes.
     func scrollbarStateDidChange() {
         synchronizeScrollView()
+    }
+
+    /// Called by TerminalView when scrollbarEnabled changes (config reload).
+    func scrollbarConfigDidChange() {
+        scrollView.hasVerticalScroller = terminalView.scrollbarEnabled
     }
 
     // MARK: - Synchronization

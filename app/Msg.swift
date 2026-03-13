@@ -72,9 +72,6 @@ enum Msg {
     // View
     case splitRatioChanged(splitId: SplitId, ratio: CGFloat)
 
-    // Config
-    case configDidChange
-
     // Search
     case startSearch
     case searchNeedleChanged(paneId: PaneId, needle: String)

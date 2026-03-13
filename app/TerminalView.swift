@@ -27,6 +27,10 @@ class TerminalView: NSView, NSTextInputClient {
         didSet { scrollDelegate?.scrollbarStateDidChange() }
     }
 
+    var scrollbarEnabled: Bool = true {
+        didSet { scrollDelegate?.scrollbarConfigDidChange() }
+    }
+
     override var acceptsFirstResponder: Bool { true }
 
     // MARK: - Init

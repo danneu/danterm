@@ -22,7 +22,7 @@ class PaneWrapperView: NSView {
     private var labelLeadingToIndicator: NSLayoutConstraint!
     private var labelLeadingToToolbar: NSLayoutConstraint!
 
-    init(paneId: PaneId, terminalView: TerminalView, isZoomed: Bool, hasSplits: Bool, scrollbarEnabled: Bool = true, runtime: AppRuntime?) {
+    init(paneId: PaneId, terminalView: TerminalView, isZoomed: Bool, hasSplits: Bool, runtime: AppRuntime?) {
         self.paneId = paneId
         self.terminalView = terminalView
         self.toolbar = NSView()
@@ -104,7 +104,7 @@ class PaneWrapperView: NSView {
         }
 
         // Terminal view wrapped in scroll view for native scrollbar support
-        let scrollWrapper = ScrollableTerminalView(terminalView: terminalView, scrollbarEnabled: scrollbarEnabled)
+        let scrollWrapper = ScrollableTerminalView(terminalView: terminalView)
         scrollWrapper.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scrollWrapper)
 
