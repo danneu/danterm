@@ -895,9 +895,12 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     // MARK: - Inline Rename Cleanup
 
     /// Shared cleanup for all rename-exit paths: disables editing, clears the
-    /// rename target, and resyncs the row from cached model state.
-    private func finishInlineRename(textField: NSTextField) {
-        let target = objc_getAssociatedObject(textField, &AssociatedKeys.renameTarget) as? RenameTarget
+    /// rename target, and resyncs the row from cached model state. The optional
+    /// target parameter lets doCommandBy pass the saved target (since it clears
+    /// the associated object before calling).
+    private func finishInlineRename(textField: NSTextField, target: RenameTarget? = nil) {
+        let resolvedTarget = target
+            ?? objc_getAssociatedObject(textField, &AssociatedKeys.renameTarget) as? RenameTarget
         textField.isEditable = false
         objc_setAssociatedObject(textField, &AssociatedKeys.renameTarget, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
@@ -905,7 +908,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         // is gone. During rename, skipTitle prevented title updates; this ensures
         // the cell reflects the current model regardless of whether a rename Msg
         // follows.
-        switch target {
+        switch resolvedTarget {
         case .tab(let tabId):
             guard let item = tabItemCache[tabId] else { return }
             let row = outlineView.row(forItem: item)
@@ -931,21 +934,54 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 // MARK: - NSTextFieldDelegate (inline rename)
 
 extension SidebarView: NSTextFieldDelegate {
-    /// Force Enter/Escape to always end editing. By default, AppKit skips
-    /// textShouldEndEditing when the value hasn't changed, leaving the field
-    /// editor active. Resigning first responder ensures editing ends regardless.
+    /// Enter and Esc are the sole authority for inline rename completion.
+    /// Enter commits the rename; Esc cancels (reverts). Both restore focus to
+    /// the active terminal pane. The target is cleared before makeFirstResponder
+    /// so that textShouldEndEditing (if AppKit fires it during resign) is a no-op.
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        if commandSelector == #selector(NSResponder.insertNewline(_:)) ||
-           commandSelector == #selector(NSResponder.cancelOperation(_:)) {
-            window?.makeFirstResponder(nil)
-            if let textField = control as? NSTextField {
-                finishInlineRename(textField: textField)
+        let isConfirm = commandSelector == #selector(NSResponder.insertNewline(_:))
+        let isCancel  = commandSelector == #selector(NSResponder.cancelOperation(_:))
+        guard isConfirm || isCancel,
+              let textField = control as? NSTextField else { return false }
+
+        // 1. Capture rename context before clearing.
+        let target = objc_getAssociatedObject(
+            textField, &AssociatedKeys.renameTarget) as? RenameTarget
+        let newName = textField.stringValue.trimmingCharacters(in: .whitespaces)
+
+        // 2. Clear target so textShouldEndEditing (if AppKit fires it
+        //    during makeFirstResponder) is a no-op.
+        objc_setAssociatedObject(
+            textField, &AssociatedKeys.renameTarget, nil,
+            .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+
+        // 3. End editing (removes field editor, commits text to stringValue).
+        window?.makeFirstResponder(nil)
+
+        // 4. Resync cell from model (overwrites committed text for cancel;
+        //    for confirm the rename below will update it again immediately).
+        finishInlineRename(textField: textField, target: target)
+
+        // 5. Compute and dispatch messages synchronously.
+        let action: RenameAction? = {
+            switch target {
+            case .tab(let tabId): return .tab(tabId)
+            case .group(let groupId): return .group(groupId)
+            case nil: return nil
             }
-            return true
+        }()
+        for msg in renameCompletionMessages(
+            isConfirm: isConfirm, action: action, newName: newName
+        ) {
+            runtime?.send(msg)
         }
-        return false
+
+        return true
     }
 
+    /// Click-away path: commits the rename without restoring focus (user moved
+    /// focus intentionally). When doCommandBy already cleared the target, this
+    /// sees nil and is a no-op — preventing double-dispatch.
     func control(_ control: NSControl, textShouldEndEditing fieldEditor: NSText) -> Bool {
         guard let textField = control as? NSTextField else { return true }
         let target = objc_getAssociatedObject(textField, &AssociatedKeys.renameTarget) as? RenameTarget
@@ -953,13 +989,11 @@ extension SidebarView: NSTextFieldDelegate {
 
         switch target {
         case .tab(let tabId):
-            // Empty string clears custom title
             let name: String? = newName.isEmpty ? nil : newName
             DispatchQueue.main.async { [weak self] in
                 self?.runtime?.send(.renameTab(id: tabId, name: name))
             }
         case .group(let groupId):
-            // Empty name is a no-op: let editing end normally, keep old name.
             if !newName.isEmpty {
                 DispatchQueue.main.async { [weak self] in
                     self?.runtime?.send(.renameGroup(id: groupId, name: newName))

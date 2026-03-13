@@ -31,6 +31,7 @@ enum Msg {
     case movePaneToNewTab(paneId: PaneId, inGroupId: GroupId, atIndex: Int)
     case setTabColor(tabId: TabId, color: TabColor?)
     case renameTab(id: TabId, name: String?)
+    case sidebarRenameEnded
 
     // Internal (confirmed close — do not send from UI directly)
     case closeTab(id: TabId)
@@ -65,4 +66,35 @@ enum Msg {
 
     // View
     case splitRatioChanged(splitId: SplitId, ratio: CGFloat)
+}
+
+/// Which entity was being renamed (used by renameCompletionMessages).
+enum RenameAction {
+    case tab(TabId)
+    case group(GroupId)
+}
+
+/// Pure function: determines what messages doCommandBy should dispatch
+/// for Enter (confirm) vs Esc (cancel).
+func renameCompletionMessages(
+    isConfirm: Bool,
+    action: RenameAction?,
+    newName: String
+) -> [Msg] {
+    var msgs: [Msg] = []
+    if isConfirm {
+        switch action {
+        case .tab(let tabId):
+            let name: String? = newName.isEmpty ? nil : newName
+            msgs.append(.renameTab(id: tabId, name: name))
+        case .group(let groupId):
+            if !newName.isEmpty {
+                msgs.append(.renameGroup(id: groupId, name: newName))
+            }
+        case nil:
+            break
+        }
+    }
+    msgs.append(.sidebarRenameEnded)
+    return msgs
 }

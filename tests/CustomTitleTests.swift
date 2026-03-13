@@ -401,6 +401,129 @@ func customTitleTests() {
         try expectEqual(tab.subtitle, "~/projects")
     }
 
+    // MARK: - renameCompletionMessages
+
+    test("renameCompletion: Enter with change dispatches rename then focus") {
+        let tabId = TabId()
+        let msgs = renameCompletionMessages(
+            isConfirm: true, action: .tab(tabId), newName: "New Name")
+        try expectEqual(msgs.count, 2)
+        guard case .renameTab(let id, let name) = msgs[0] else {
+            return try expect(false, "expected renameTab")
+        }
+        try expectEqual(id, tabId)
+        try expectEqual(name, "New Name")
+        guard case .sidebarRenameEnded = msgs[1] else {
+            return try expect(false, "expected sidebarRenameEnded")
+        }
+    }
+
+    test("renameCompletion: Enter with unchanged text still dispatches rename") {
+        let tabId = TabId()
+        let msgs = renameCompletionMessages(
+            isConfirm: true, action: .tab(tabId), newName: "zsh")
+        try expectEqual(msgs.count, 2)
+        guard case .renameTab = msgs[0] else {
+            return try expect(false, "expected renameTab")
+        }
+        guard case .sidebarRenameEnded = msgs[1] else {
+            return try expect(false, "expected sidebarRenameEnded")
+        }
+    }
+
+    test("renameCompletion: Enter with empty tab name clears title") {
+        let tabId = TabId()
+        let msgs = renameCompletionMessages(
+            isConfirm: true, action: .tab(tabId), newName: "")
+        try expectEqual(msgs.count, 2)
+        guard case .renameTab(_, let name) = msgs[0] else {
+            return try expect(false, "expected renameTab")
+        }
+        try expect(name == nil, "empty name should clear custom title")
+    }
+
+    test("renameCompletion: Enter with empty group name skips rename") {
+        let groupId = GroupId()
+        let msgs = renameCompletionMessages(
+            isConfirm: true, action: .group(groupId), newName: "")
+        try expectEqual(msgs.count, 1)
+        guard case .sidebarRenameEnded = msgs[0] else {
+            return try expect(false, "expected sidebarRenameEnded")
+        }
+    }
+
+    test("renameCompletion: Esc dispatches only focus restore") {
+        let tabId = TabId()
+        let msgs = renameCompletionMessages(
+            isConfirm: false, action: .tab(tabId), newName: "Changed Text")
+        try expectEqual(msgs.count, 1)
+        guard case .sidebarRenameEnded = msgs[0] else {
+            return try expect(false, "expected sidebarRenameEnded")
+        }
+    }
+
+    test("renameCompletion: Esc group dispatches only focus restore") {
+        let groupId = GroupId()
+        let msgs = renameCompletionMessages(
+            isConfirm: false, action: .group(groupId), newName: "New Name")
+        try expectEqual(msgs.count, 1)
+        guard case .sidebarRenameEnded = msgs[0] else {
+            return try expect(false, "expected sidebarRenameEnded")
+        }
+    }
+
+    test("renameCompletion: nil target dispatches only focus restore") {
+        let msgs = renameCompletionMessages(
+            isConfirm: true, action: nil, newName: "text")
+        try expectEqual(msgs.count, 1)
+        guard case .sidebarRenameEnded = msgs[0] else {
+            return try expect(false, "expected sidebarRenameEnded")
+        }
+    }
+
+    // MARK: - sidebarRenameEnded update handler
+
+    test("sidebarRenameEnded restores focus to active pane") {
+        var model = makeModel()
+        createTab(&model)
+        let focusedPaneId = model.groups[0].tabs[0].focusedPaneId
+
+        let effects = update(&model, .sidebarRenameEnded)
+        try expect(hasEffect(effects) {
+            if case .makeFirstResponder(let pid) = $0, pid == focusedPaneId {
+                return true
+            }
+            return false
+        }, "should emit makeFirstResponder for focused pane")
+    }
+
+    test("renameTab does not emit makeFirstResponder") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+
+        let effects = update(&model, .renameTab(id: tabId, name: "New"))
+        try expect(!hasEffect(effects) {
+            if case .makeFirstResponder = $0 { return true }
+            return false
+        }, "renameTab should not restore focus (would steal from click-away)")
+    }
+
+    test("renameGroup does not emit makeFirstResponder") {
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .createGroup(name: "Work"))
+        let workId = model.groups[1].id
+
+        let effects = update(&model, .renameGroup(id: workId, name: "Projects"))
+        try expect(!hasEffect(effects) {
+            if case .makeFirstResponder = $0 { return true }
+            return false
+        }, "renameGroup should not restore focus (would steal from click-away)")
+    }
+
+    // MARK: - Snapshot
+
     test("testSnapshotCustomTitleOmitted") {
         // JSON without customTitle should decode to nil (backward compat)
         let json = """

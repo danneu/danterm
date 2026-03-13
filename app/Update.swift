@@ -374,6 +374,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         effects.append(.scheduleCheckpoint)
         return effects
 
+    case .sidebarRenameEnded:
+        guard let tab = selectedTab(in: model) else { return [] }
+        return [.makeFirstResponder(paneId: tab.focusedPaneId)]
+
     case .focusDirection(let direction, let side):
         guard let tab = selectedTab(in: model) else { return [] }
         if tab.isZoomed {
