@@ -246,69 +246,87 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
 
-        // Shell menu
-        let shellMenuItem = NSMenuItem()
-        let shellMenu = NSMenu(title: "Shell")
-        shellMenu.addItem(withTitle: "New Tab", action: #selector(newTab(_:)), keyEquivalent: "t")
-
-        shellMenu.addItem(withTitle: "New Group", action: #selector(newGroup(_:)), keyEquivalent: "n")
-
-        let splitRightItem = NSMenuItem(title: "Split Right", action: #selector(splitRight(_:)), keyEquivalent: "d")
-        shellMenu.addItem(splitRightItem)
-
-        let splitDownItem = NSMenuItem(title: "Split Down", action: #selector(splitDown(_:)), keyEquivalent: "d")
-        splitDownItem.keyEquivalentModifierMask = [.command, .shift]
-        shellMenu.addItem(splitDownItem)
-
-        let nextTabItem = NSMenuItem(title: "Next Tab", action: #selector(nextTab(_:)), keyEquivalent: "N")
-        nextTabItem.keyEquivalentModifierMask = [.command, .shift]
-        shellMenu.addItem(nextTabItem)
-
-        let prevTabItem = NSMenuItem(title: "Previous Tab", action: #selector(prevTab(_:)), keyEquivalent: "P")
-        prevTabItem.keyEquivalentModifierMask = [.command, .shift]
-        shellMenu.addItem(prevTabItem)
-
-        let zoomItem = NSMenuItem(title: "Toggle Zoom", action: #selector(toggleZoom(_:)), keyEquivalent: "\r")
-        zoomItem.keyEquivalentModifierMask = [.command]
-        shellMenu.addItem(zoomItem)
+        // Tab menu
+        let tabMenuItem = NSMenuItem()
+        let tabMenu = NSMenu(title: "Tab")
+        tabMenu.addItem(withTitle: "New Tab", action: #selector(newTab(_:)), keyEquivalent: "t")
+        tabMenu.addItem(withTitle: "New Group", action: #selector(newGroup(_:)), keyEquivalent: "n")
 
         let renameTabItem = NSMenuItem(title: "Rename Tab", action: #selector(renameTab(_:)), keyEquivalent: "R")
         renameTabItem.keyEquivalentModifierMask = [.command, .shift]
-        shellMenu.addItem(renameTabItem)
+        tabMenu.addItem(renameTabItem)
 
-        shellMenu.addItem(NSMenuItem.separator())
-        shellMenu.addItem(withTitle: "Close Pane", action: #selector(closePane(_:)), keyEquivalent: "w")
-        shellMenuItem.submenu = shellMenu
-        mainMenu.addItem(shellMenuItem)
+        let nextTabItem = NSMenuItem(title: "Next Tab", action: #selector(nextTab(_:)), keyEquivalent: "N")
+        nextTabItem.keyEquivalentModifierMask = [.command, .shift]
+        tabMenu.addItem(nextTabItem)
 
-        // Panes menu
-        let panesMenuItem = NSMenuItem()
-        let panesMenu = NSMenu(title: "Panes")
+        let prevTabItem = NSMenuItem(title: "Previous Tab", action: #selector(prevTab(_:)), keyEquivalent: "P")
+        prevTabItem.keyEquivalentModifierMask = [.command, .shift]
+        tabMenu.addItem(prevTabItem)
+
+        let zoomItem = NSMenuItem(title: "Toggle Zoom", action: #selector(toggleZoom(_:)), keyEquivalent: "\r")
+        zoomItem.keyEquivalentModifierMask = [.command]
+        tabMenu.addItem(zoomItem)
+
+        // Color submenu
+        tabMenu.addItem(NSMenuItem.separator())
+        let colorItem = NSMenuItem(title: "Color", action: nil, keyEquivalent: "")
+        let colorSubmenu = NSMenu()
+        let colors = TabColor.allCases
+        for (i, color) in colors.enumerated() {
+            let item = NSMenuItem(title: color.rawValue.capitalized, action: #selector(setTabColorFromMenu(_:)), keyEquivalent: i < 3 ? "\(i + 1)" : "")
+            item.tag = i
+            item.image = color.swatchImage
+            colorSubmenu.addItem(item)
+        }
+        colorSubmenu.addItem(NSMenuItem.separator())
+        colorSubmenu.addItem(withTitle: "Clear Color", action: #selector(clearTabColor(_:)), keyEquivalent: "0")
+        colorItem.submenu = colorSubmenu
+        tabMenu.addItem(colorItem)
+
+        tabMenuItem.submenu = tabMenu
+        mainMenu.addItem(tabMenuItem)
+
+        // Pane menu
+        let paneMenuItem = NSMenuItem()
+        let paneMenu = NSMenu(title: "Pane")
+
+        let splitRightItem = NSMenuItem(title: "Split Right", action: #selector(splitRight(_:)), keyEquivalent: "d")
+        paneMenu.addItem(splitRightItem)
+
+        let splitDownItem = NSMenuItem(title: "Split Down", action: #selector(splitDown(_:)), keyEquivalent: "d")
+        splitDownItem.keyEquivalentModifierMask = [.command, .shift]
+        paneMenu.addItem(splitDownItem)
+
+        paneMenu.addItem(NSMenuItem.separator())
 
         let focusLeft = NSMenuItem(title: "Focus Left", action: #selector(focusLeft(_:)), keyEquivalent: "H")
         focusLeft.keyEquivalentModifierMask = [.command, .shift]
-        panesMenu.addItem(focusLeft)
+        paneMenu.addItem(focusLeft)
 
         let focusDown = NSMenuItem(title: "Focus Down", action: #selector(focusDown(_:)), keyEquivalent: "J")
         focusDown.keyEquivalentModifierMask = [.command, .shift]
-        panesMenu.addItem(focusDown)
+        paneMenu.addItem(focusDown)
 
         let focusUp = NSMenuItem(title: "Focus Up", action: #selector(focusUp(_:)), keyEquivalent: "K")
         focusUp.keyEquivalentModifierMask = [.command, .shift]
-        panesMenu.addItem(focusUp)
+        paneMenu.addItem(focusUp)
 
         let focusRight = NSMenuItem(title: "Focus Right", action: #selector(focusRight(_:)), keyEquivalent: "L")
         focusRight.keyEquivalentModifierMask = [.command, .shift]
-        panesMenu.addItem(focusRight)
+        paneMenu.addItem(focusRight)
 
-        panesMenu.addItem(NSMenuItem.separator())
+        paneMenu.addItem(NSMenuItem.separator())
 
         let goToAlert = NSMenuItem(title: "Go to Most Recent Unread Alert", action: #selector(goToMostRecentAlertPane(_:)), keyEquivalent: "a")
         goToAlert.keyEquivalentModifierMask = [.command, .shift]
-        panesMenu.addItem(goToAlert)
+        paneMenu.addItem(goToAlert)
 
-        panesMenuItem.submenu = panesMenu
-        mainMenu.addItem(panesMenuItem)
+        paneMenu.addItem(NSMenuItem.separator())
+        paneMenu.addItem(withTitle: "Close Pane", action: #selector(closePane(_:)), keyEquivalent: "w")
+
+        paneMenuItem.submenu = paneMenu
+        mainMenu.addItem(paneMenuItem)
 
         NSApp.mainMenu = mainMenu
     }
@@ -353,6 +371,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     @objc func renameTab(_ sender: Any?) {
         guard let tabId = runtime.model.selectedTabId else { return }
         sidebarView.beginRenamingTab(tabId)
+    }
+
+    // Tab > Color submenu actions
+    @objc func setTabColorFromMenu(_ sender: NSMenuItem) {
+        guard let tabId = runtime.model.selectedTabId else { return }
+        let colors = TabColor.allCases
+        guard sender.tag >= 0, sender.tag < colors.count else { return }
+        runtime.send(.setTabColor(tabId: tabId, color: colors[sender.tag]))
+    }
+
+    @objc func clearTabColor(_ sender: Any?) {
+        guard let tabId = runtime.model.selectedTabId else { return }
+        runtime.send(.setTabColor(tabId: tabId, color: nil))
     }
 
     @objc func exportState(_ sender: Any?) {
