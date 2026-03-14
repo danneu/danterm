@@ -8,6 +8,20 @@ enum ThemeBrowserFocusTarget {
     case table
 }
 
+/// Theme list cell that follows AppKit's selected/unselected text contrast rules.
+private final class ThemeBrowserCellView: NSTableCellView {
+    override var backgroundStyle: NSView.BackgroundStyle {
+        didSet { updateTextColor() }
+    }
+
+    /// Use the system-selected text color for highlighted rows and the normal label color otherwise.
+    func updateTextColor() {
+        textField?.textColor = backgroundStyle == .emphasized
+            ? .alternateSelectedControlTextColor
+            : .labelColor
+    }
+}
+
 class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
     weak var runtime: AppRuntime?
 
@@ -207,11 +221,11 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let id = NSUserInterfaceItemIdentifier("ThemeCell")
-        let cell: NSTableCellView
-        if let existing = tableView.makeView(withIdentifier: id, owner: nil) as? NSTableCellView {
+        let cell: ThemeBrowserCellView
+        if let existing = tableView.makeView(withIdentifier: id, owner: nil) as? ThemeBrowserCellView {
             cell = existing
         } else {
-            cell = NSTableCellView()
+            cell = ThemeBrowserCellView()
             cell.identifier = id
             let text = NSTextField(labelWithString: "")
             text.translatesAutoresizingMaskIntoConstraints = false
@@ -228,11 +242,10 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         let name = filteredNames[row]
         if name == currentThemeName {
             cell.textField?.stringValue = "\u{2713} \(name)"
-            cell.textField?.textColor = .controlAccentColor
         } else {
             cell.textField?.stringValue = name
-            cell.textField?.textColor = .labelColor
         }
+        cell.updateTextColor()
         return cell
     }
 
