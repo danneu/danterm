@@ -301,7 +301,7 @@ func ghosttyTests() {
         let effects = update(&model, .surfaceClosed(paneId: paneId))
         try expect(model.panes[paneId] != nil, "pane should still exist (confirmation pending)")
         try expect(hasEffect(effects) {
-            if case .showTerminateConfirmation = $0 { return true }
+            if case .showTerminateConfirmation(let count) = $0, count == 1 { return true }
             return false
         }, "should show confirmation when last pane closed via surfaceClosed")
     }

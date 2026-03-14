@@ -223,8 +223,8 @@ class GhosttyApp {
             return true
 
         case GHOSTTY_ACTION_QUIT:
-            DispatchQueue.main.async {
-                NSApp.terminate(nil)
+            DispatchQueue.main.async { [weak self] in
+                self?.runtime?.send(.requestQuit)
             }
             return true
 

@@ -95,7 +95,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         guard let (groupIdx, tabIdx) = tabLocation(id, in: model) else { return [] }
 
         if wouldQuitFromClose(model) {
-            return [.showTerminateConfirmation]
+            return [.showTerminateConfirmation(paneCount: model.panes.count)]
         }
 
         let tab = model.groups[groupIdx].tabs[tabIdx]
@@ -181,7 +181,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let (newTree, nextFocus) = removeLeaf(tab.rootNode, paneId: paneId)
 
         if newTree == nil && wouldQuitFromClose(model) {
-            return [.showTerminateConfirmation]
+            return [.showTerminateConfirmation(paneCount: model.panes.count)]
         }
 
         var effects: [Effect] = [.destroySurface(paneId: paneId)]
@@ -579,6 +579,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
     case .appResignedActive:
         return [.setAppFocus(false)]
 
+    case .requestQuit:
+        return [.showTerminateConfirmation(paneCount: model.panes.count)]
+
     // MARK: - Alerts
 
     case .markAlertRead(let alertId):
@@ -616,10 +619,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return navigateToPane(alert.paneId, in: &model)
 
     case .confirmTerminate:
-        if wouldQuitFromClose(model) {
-            return [.terminate]
-        }
-        return []
+        return [.terminate]
 
     case .cancelTerminate:
         return []
@@ -641,7 +641,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
         let group = model.groups[idx]
         if !moveTabs && !group.tabs.isEmpty && totalTabCount(model) == group.tabs.count {
-            return [.showTerminateConfirmation]
+            return [.showTerminateConfirmation(paneCount: model.panes.count)]
         }
         if moveTabs {
             guard let adjIdx = adjacentGroupIndex(deletingAt: idx, count: model.groups.count) else { return [] }

@@ -4,7 +4,7 @@ import Cocoa
 import GhosttyKit
 import UserNotifications
 
-class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserNotificationCenterDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitViewDelegate, UNUserNotificationCenterDelegate {
     static let minWindowWidth: CGFloat = 600
     static let minWindowHeight: CGFloat = 300
     static let minSidebarWidth: CGFloat = 200
@@ -21,6 +21,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
     // Session recovery state set by main.swift before app launch.
     var lastSessionSnapshot: AppModelSnapshot?  // merged from Recovery/last-light.json + last-enriched.json
     var previousSessionCrashed: Bool = false     // true if session.json lock was still present
+    /// Set by the .terminate effect before calling NSApp.terminate to bypass the
+    /// applicationShouldTerminate safety net (user already confirmed).
+    var quitConfirmed = false
 
     // NSApplicationDelegate: finish bootstrapping the Ghostty runtime, main
     // window, and launch-time services once AppKit has started the app.
@@ -53,6 +56,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
         window.isMovableByWindowBackground = false
         window.minSize = NSSize(width: Self.minWindowWidth, height: Self.minWindowHeight)
         window.center()
+        window.delegate = self
         window.setFrameAutosaveName("MainWindow")
 
         // Custom chrome view (replaces NSToolbar)
@@ -212,7 +216,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
         reloadConfigItem.keyEquivalentModifierMask = [.command, .shift]
         appMenu.addItem(reloadConfigItem)
         appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "Quit DanTerm", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quit DanTerm", action: #selector(quitApp(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)
 
@@ -412,6 +416,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
         runtime.send(.goToMostRecentAlertPane)
     }
 
+    @objc func quitApp(_ sender: Any?) {
+        runtime?.send(.requestQuit)
+    }
+
     // MARK: - UNUserNotificationCenterDelegate
 
     func userNotificationCenter(
@@ -482,7 +490,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
         }
     }
 
+    // MARK: - NSWindowDelegate
+
+    // NSWindowDelegate: intercept the window close (X) button so we can route
+    // through the quit confirmation flow instead of closing immediately.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        runtime?.send(.requestQuit)
+        return false
+    }
+
     // MARK: - App Lifecycle
+
+    // NSApplicationDelegate: catch-all safety net for any NSApp.terminate call.
+    // Routes through the Elm quit confirmation unless the .terminate effect already
+    // set quitConfirmed.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let runtime = runtime else { return .terminateNow }
+        if quitConfirmed { return .terminateNow }
+        runtime.send(.requestQuit)
+        return .terminateCancel
+    }
 
     // NSApplicationDelegate: write final enriched checkpoint (with scrollback) and
     // delete the session lock so the next launch knows this was a clean exit.

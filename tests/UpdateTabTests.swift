@@ -82,7 +82,7 @@ func tabTests() {
         let effects = update(&model, .closePane(paneId: paneId))
         try expectEqual(effects.count, 1)
         try expect(hasEffect(effects) {
-            if case .showTerminateConfirmation = $0 { return true }
+            if case .showTerminateConfirmation(let count) = $0, count == 1 { return true }
             return false
         }, "should show confirmation when closing last pane")
         try expectEqual(model.groups[0].tabs.count, 1, "model should be unchanged")
@@ -97,7 +97,7 @@ func tabTests() {
         let effects = update(&model, .closeTab(id: tabId))
         try expectEqual(effects.count, 1)
         try expect(hasEffect(effects) {
-            if case .showTerminateConfirmation = $0 { return true }
+            if case .showTerminateConfirmation(let count) = $0, count == 1 { return true }
             return false
         }, "should show confirmation when closing last tab")
         try expectEqual(model.groups[0].tabs.count, 1, "model should be unchanged")
@@ -278,7 +278,7 @@ func tabTests() {
         let effects = update(&model, .requestCloseTab(id: tabId))
         try expectEqual(model.groups[0].tabs.count, 1, "tab should NOT be removed")
         try expect(hasEffect(effects) {
-            if case .showTerminateConfirmation = $0 { return true }
+            if case .showTerminateConfirmation(let count) = $0, count == 1 { return true }
             return false
         }, "should show terminate confirmation for last single-pane tab")
     }

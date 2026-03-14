@@ -139,23 +139,40 @@ func lifecycleTests() {
         }
     }
 
-    test("testConfirmTerminateWithOneTab") {
+    test("testRequestQuitWithOnePane") {
         var model = makeModel()
+        createTab(&model)
+        let effects = update(&model, .requestQuit)
+        try expectEqual(effects.count, 1)
+        try expect(hasEffect(effects) {
+            if case .showTerminateConfirmation(let count) = $0, count == 1 { return true }
+            return false
+        }, "should show confirmation with pane count 1")
+    }
+
+    test("testRequestQuitWithMultiplePanes") {
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .splitPane(direction: .horizontal))
+        createTab(&model)
+        let effects = update(&model, .requestQuit)
+        try expectEqual(effects.count, 1)
+        try expect(hasEffect(effects) {
+            if case .showTerminateConfirmation(let count) = $0, count == 3 { return true }
+            return false
+        }, "should show confirmation with correct pane count")
+    }
+
+    test("testConfirmTerminateAlwaysTerminates") {
+        var model = makeModel()
+        createTab(&model)
         createTab(&model)
         let effects = update(&model, .confirmTerminate)
         try expectEqual(effects.count, 1)
         try expect(hasEffect(effects) {
             if case .terminate = $0 { return true }
             return false
-        }, "should terminate when only one tab remains")
-    }
-
-    test("testConfirmTerminateWithMultipleTabs") {
-        var model = makeModel()
-        createTab(&model)
-        createTab(&model)
-        let effects = update(&model, .confirmTerminate)
-        try expectEqual(effects.count, 0, "should not terminate when multiple tabs exist")
+        }, "should unconditionally terminate after confirmation")
     }
 
     test("testCancelTerminate") {

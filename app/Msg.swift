@@ -66,6 +66,7 @@ enum Msg {
     // Lifecycle
     case appBecameActive
     case appResignedActive
+    case requestQuit
     case confirmTerminate
     case cancelTerminate
     case terminate

@@ -22,7 +22,7 @@ enum Effect {
 
     // System
     case sendNotification(alertId: AlertId, title: String, body: String)
-    case showTerminateConfirmation
+    case showTerminateConfirmation(paneCount: Int)
     case showCloseTabConfirmation(tabId: TabId, tabTitle: String, paneCount: Int, isLastTab: Bool)
     case terminate
     case activateApp

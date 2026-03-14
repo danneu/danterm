@@ -231,18 +231,29 @@ class AppRuntime {
                 }
             }
 
-        case .showTerminateConfirmation:
+        case .showTerminateConfirmation(let paneCount):
             let alert = NSAlert()
             alert.messageText = "Quit DanTerm?"
-            alert.informativeText = "Closing the last pane will quit the application."
+            let sessions = paneCount == 1 ? "1 terminal session" : "\(paneCount) terminal sessions"
+            alert.informativeText = "This will close \(sessions)."
             alert.addButton(withTitle: "Quit")
             alert.addButton(withTitle: "Cancel")
             alert.alertStyle = .warning
-            let response = alert.runModal()
-            if response == .alertFirstButtonReturn {
-                self.send(.confirmTerminate)
+            if let window = window {
+                alert.beginSheetModal(for: window) { [weak self] response in
+                    if response == .alertFirstButtonReturn {
+                        self?.send(.confirmTerminate)
+                    } else {
+                        self?.send(.cancelTerminate)
+                    }
+                }
             } else {
-                self.send(.cancelTerminate)
+                let response = alert.runModal()
+                if response == .alertFirstButtonReturn {
+                    self.send(.confirmTerminate)
+                } else {
+                    self.send(.cancelTerminate)
+                }
             }
 
         case .applyPaneTheme(let paneId):
@@ -259,6 +270,7 @@ class AppRuntime {
             for paneId in replayFiles.keys {
                 cleanupReplayFile(for: paneId)
             }
+            (NSApp.delegate as? AppDelegate)?.quitConfirmed = true
             NSApp.terminate(nil)
 
         case .activateApp:
