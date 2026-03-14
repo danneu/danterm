@@ -62,6 +62,14 @@ cp "$SRC_DIR/Info.plist" "$APP_PATH/Contents/"
 mkdir -p "$APP_PATH/Contents/Resources"
 cp "$SCRIPT_DIR/icon/AppIcon-dev/Assets.car" "$APP_PATH/Contents/Resources/"
 
+# Bundle all ghostty themes for per-pane theme switching and browsing.
+THEMES_SRC="$SCRIPT_DIR/.ghostty-src/zig-out/share/ghostty/themes"
+THEMES_DST="$APP_PATH/Contents/Resources/ghostty/themes"
+if [ -d "$THEMES_SRC" ]; then
+    mkdir -p "$THEMES_DST"
+    cp -R "$THEMES_SRC"/* "$THEMES_DST/"
+fi
+
 # Patch Info.plist for dev build
 plutil -replace CFBundleIdentifier -string "com.danneu.danterm-dev" "$APP_PATH/Contents/Info.plist"
 plutil -replace CFBundleName -string "DanTerm Dev" "$APP_PATH/Contents/Info.plist"

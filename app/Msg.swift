@@ -35,6 +35,7 @@ enum Msg {
     case movePaneToTab(paneId: PaneId, targetTabId: TabId)
     case movePaneToNewTab(paneId: PaneId, inGroupId: GroupId, atIndex: Int)
     case setTabColor(tabId: TabId, color: TabColor?)
+    case setPaneTheme(paneId: PaneId, themeName: String?)
     case renameTab(id: TabId, name: String?)
     case sidebarRenameEnded
 

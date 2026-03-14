@@ -257,6 +257,38 @@ class PaneWrapperView: NSView {
 
         menu.addItem(.separator())
 
+        // Theme submenu
+        let themeSubmenu = NSMenu()
+        let currentTheme = runtime?.model.panes[paneId]?.theme
+        let catalogNames = ThemeCatalog.shared.names
+
+        // Show first ~15 theme names from catalog
+        for name in catalogNames.prefix(15) {
+            let item = NSMenuItem(title: name, action: #selector(setPaneThemeAction(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = SetPaneThemeInfo(themeName: name)
+            if currentTheme == name { item.state = .on }
+            themeSubmenu.addItem(item)
+        }
+
+        themeSubmenu.addItem(.separator())
+
+        let defaultItem = NSMenuItem(title: "Default", action: #selector(setPaneThemeAction(_:)), keyEquivalent: "")
+        defaultItem.target = self
+        defaultItem.representedObject = SetPaneThemeInfo(themeName: nil)
+        if currentTheme == nil { defaultItem.state = .on }
+        themeSubmenu.addItem(defaultItem)
+
+        let browseItem = NSMenuItem(title: "Browse All Themes...", action: #selector(browseThemesAction), keyEquivalent: "")
+        browseItem.target = self
+        themeSubmenu.addItem(browseItem)
+
+        let themeItem = NSMenuItem(title: "Theme", action: nil, keyEquivalent: "")
+        themeItem.submenu = themeSubmenu
+        menu.addItem(themeItem)
+
+        menu.addItem(.separator())
+
         let zoomTitle = isZoomed ? "Unzoom Pane" : "Zoom Pane"
         let zoom = NSMenuItem(title: zoomTitle, action: #selector(zoomPaneAction), keyEquivalent: "")
         zoom.target = self
@@ -293,6 +325,21 @@ class PaneWrapperView: NSView {
     @objc private func zoomPaneAction() {
         runtime?.send(.toggleZoomPane)
     }
+
+    @objc private func setPaneThemeAction(_ sender: NSMenuItem) {
+        guard let info = sender.representedObject as? SetPaneThemeInfo else { return }
+        runtime?.send(.setPaneTheme(paneId: paneId, themeName: info.themeName))
+    }
+
+    @objc private func browseThemesAction() {
+        runtime?.toggleThemeBrowser()
+    }
+}
+
+/// Wrapper to carry an optional theme name through NSMenuItem's representedObject.
+class SetPaneThemeInfo: NSObject {
+    let themeName: String?
+    init(themeName: String?) { self.themeName = themeName }
 }
 
 // MARK: - Toolbar Drag Handle

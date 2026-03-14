@@ -233,6 +233,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
 
+        // View menu
+        let viewMenuItem = NSMenuItem()
+        let viewMenu = NSMenu(title: "View")
+        let toggleThemeItem = NSMenuItem(title: "Toggle Theme Panel", action: #selector(toggleThemePanel(_:)), keyEquivalent: "T")
+        toggleThemeItem.keyEquivalentModifierMask = [.command, .shift]
+        viewMenu.addItem(toggleThemeItem)
+        viewMenuItem.submenu = viewMenu
+        mainMenu.addItem(viewMenuItem)
+
         // Shell menu
         let shellMenuItem = NSMenuItem()
         let shellMenu = NSMenu(title: "Shell")
@@ -371,6 +380,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSSplitViewDelegate, UNUserN
 
     @objc func findInTerminal(_ sender: Any?) {
         runtime.send(.startSearch)
+    }
+
+    @objc func toggleThemePanel(_ sender: Any?) {
+        runtime.toggleThemeBrowser()
     }
 
     @objc func closePane(_ sender: Any?) {

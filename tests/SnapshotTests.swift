@@ -420,14 +420,14 @@ func snapshotTests() {
     }
 
     test("launch.cwd wins over cwd for surface creation") {
-        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: "~/fallback", launch: PaneLaunchSnapshot(command: nil, cwd: "~/override"), scrollback: nil)
+        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: "~/fallback", launch: PaneLaunchSnapshot(command: nil, cwd: "~/override"), scrollback: nil, theme: nil)
         let (cwd, _) = resolveLaunch(ps)
         let home = NSHomeDirectory()
         try expectEqual(cwd, home + "/override")
     }
 
     test("pane without launch uses expanded cwd") {
-        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: "~/mydir", launch: nil, scrollback: nil)
+        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: "~/mydir", launch: nil, scrollback: nil, theme: nil)
         let (cwd, command) = resolveLaunch(ps)
         let home = NSHomeDirectory()
         try expectEqual(cwd, home + "/mydir")
@@ -435,7 +435,7 @@ func snapshotTests() {
     }
 
     test("pane with launch.command passes command") {
-        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: nil, launch: PaneLaunchSnapshot(command: "lazygit", cwd: nil), scrollback: nil)
+        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: nil, launch: PaneLaunchSnapshot(command: "lazygit", cwd: nil), scrollback: nil, theme: nil)
         let (_, command) = resolveLaunch(ps)
         try expectEqual(command, "lazygit")
     }
@@ -494,14 +494,14 @@ func snapshotTests() {
     }
 
     test("round-trip encode/decode preserves scrollback") {
-        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: nil, launch: nil, scrollback: "line1\nline2\n")
+        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: nil, launch: nil, scrollback: "line1\nline2\n", theme: nil)
         let data = try JSONEncoder().encode(ps)
         let decoded = try JSONDecoder().decode(PaneSnapshot.self, from: data)
         try expectEqual(decoded.scrollback, "line1\nline2\n")
     }
 
     test("round-trip encode/decode preserves nil scrollback") {
-        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: nil, launch: nil, scrollback: nil)
+        let ps = PaneSnapshot(id: "AAAA0000-0000-0000-0000-000000000001", title: "T", cwd: nil, launch: nil, scrollback: nil, theme: nil)
         let data = try JSONEncoder().encode(ps)
         let decoded = try JSONDecoder().decode(PaneSnapshot.self, from: data)
         try expect(decoded.scrollback == nil, "nil scrollback should survive round-trip")

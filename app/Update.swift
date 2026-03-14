@@ -144,10 +144,12 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let targetPaneId = paneId ?? tab.focusedPaneId
         let newPaneId = PaneId()
         let cwd = model.panes[targetPaneId]?.cwd
+        let theme = model.panes[targetPaneId]?.theme
 
         guard let newRoot = splitLeaf(tab.rootNode, paneId: targetPaneId, direction: direction, newPaneId: newPaneId) else { return [] }
 
-        let newPane = PaneModel(id: newPaneId)
+        var newPane = PaneModel(id: newPaneId)
+        newPane.theme = theme
         model.panes[newPaneId] = newPane
 
         // Update the tab in place
@@ -157,12 +159,16 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             tab.isZoomed = false
         }
 
-        return [
+        var effects: [Effect] = [
             .createSurface(paneId: newPaneId, cwd: cwd, command: nil),
             .rebuildContentView,
             // Persist new split tree so the pane layout survives a crash.
             .scheduleCheckpoint,
         ]
+        if theme != nil {
+            effects.append(.applyPaneTheme(paneId: newPaneId))
+        }
+        return effects
 
     case .closePane(let paneId):
         guard let tabId = model.selectedTabId,
@@ -363,6 +369,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         updateTab(tabId, in: &model) { t in t.color = color }
         // Persist tab color so it's restored on next launch.
         return [.updateSidebarTabRow(tabId: tabId), .scheduleCheckpoint]
+
+    case .setPaneTheme(let paneId, let themeName):
+        model.panes[paneId]?.theme = themeName
+        return [.applyPaneTheme(paneId: paneId), .scheduleCheckpoint]
 
     case .renameTab(let id, let name):
         let trimmed = name?.trimmingCharacters(in: .whitespaces)

@@ -53,6 +53,24 @@ class GhosttyApp {
         ghostty_config_free(newConfig)
     }
 
+    /// Create a config with a specific theme applied.
+    /// Loads the theme file directly from the app bundle to override colors.
+    func loadConfigWithTheme(_ themeName: String) -> ghostty_config_t? {
+        guard let themeURL = Bundle.main.url(
+            forResource: themeName, withExtension: nil,
+            subdirectory: "ghostty/themes"
+        ) else {
+            print("[theme] Theme file not found in bundle: \(themeName)")
+            return nil
+        }
+        guard let config = ghostty_config_new() else { return nil }
+        ghostty_config_load_default_files(config)
+        ghostty_config_load_recursive_files(config)
+        themeURL.path.withCString { ghostty_config_load_file(config, $0) }
+        ghostty_config_finalize(config)
+        return config
+    }
+
     /// Surface-level config reload.
     func reloadConfig(surface: ghostty_surface_t, soft: Bool = false) {
         if soft {
@@ -283,9 +301,19 @@ class GhosttyApp {
             switch target.tag {
             case GHOSTTY_TARGET_APP:
                 reloadConfig(soft: soft)
+                // Re-apply per-pane themes so global reload doesn't reset overrides
+                DispatchQueue.main.async { [weak self] in
+                    self?.runtime?.reapplyAllPaneThemes()
+                }
             case GHOSTTY_TARGET_SURFACE:
                 if let surface = Self.targetSurface(target) {
                     reloadConfig(surface: surface, soft: soft)
+                    if let bridge = Self.surfaceBridge(from: surface),
+                       let paneId = bridge.paneId {
+                        DispatchQueue.main.async { [weak self] in
+                            self?.runtime?.applyPaneConfig(paneId: paneId)
+                        }
+                    }
                 }
             default:
                 break

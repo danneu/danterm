@@ -557,7 +557,8 @@ func toSnapshot(_ model: AppModel) -> AppModelSnapshot {
             title: pane.title,
             cwd: abbrevCwd,
             launch: launch,
-            scrollback: nil
+            scrollback: nil,
+            theme: pane.theme
           ))
       }
 
@@ -636,7 +637,7 @@ func mergeCheckpoints(light: AppModelSnapshot, enriched: AppModelSnapshot) -> Ap
     let mergedPanes: [PaneSnapshot] = light.panes.map { ps in
         guard let id = ps.id, let scrollback = scrollbackById[id] else { return ps }
         return PaneSnapshot(id: ps.id, title: ps.title, cwd: ps.cwd,
-                            launch: ps.launch, scrollback: scrollback)
+                            launch: ps.launch, scrollback: scrollback, theme: ps.theme)
     }
     return AppModelSnapshot(groups: light.groups, panes: mergedPanes,
                             selectedTabId: light.selectedTabId)

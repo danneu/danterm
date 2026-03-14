@@ -22,6 +22,7 @@ class AppRuntime {
     weak var contentArea: NSView?
     weak var chromeView: WindowChromeView?
     var alertsPopover: NSPopover?
+    private var themeBrowserView: ThemeBrowserView?
     private var dragCoordinator: PaneDragCoordinator?
     private var replayFiles: [PaneId: URL] = [:]
     private static let replayDirectoryName = "danterm-scrollback"
@@ -166,7 +167,7 @@ class AppRuntime {
                 }
                 return PaneSnapshot(
                     id: ps.id, title: ps.title, cwd: ps.cwd,
-                    launch: ps.launch, scrollback: scrollback
+                    launch: ps.launch, scrollback: scrollback, theme: ps.theme
                 )
             }
             let enrichedSnapshot = AppModelSnapshot(
@@ -243,6 +244,9 @@ class AppRuntime {
             } else {
                 self.send(.cancelTerminate)
             }
+
+        case .applyPaneTheme(let paneId):
+            applyPaneConfig(paneId: paneId)
 
         case .scheduleCheckpoint:
             scheduleDebouncedCheckpoint()
@@ -486,7 +490,7 @@ class AppRuntime {
             }
             return PaneSnapshot(
                 id: ps.id, title: ps.title, cwd: ps.cwd,
-                launch: ps.launch, scrollback: scrollback
+                launch: ps.launch, scrollback: scrollback, theme: ps.theme
             )
         }
         let enrichedSnapshot = AppModelSnapshot(
@@ -587,6 +591,59 @@ class AppRuntime {
         guard dragCoordinator != nil else { return }
         dragCoordinator?.teardown()
         dragCoordinator = nil
+    }
+
+    // MARK: - Per-Pane Theme
+
+    /// Apply the pane's current theme to its surface.
+    /// If theme is nil, reloads the base config (clearing any override).
+    /// If theme is non-nil, builds a themed config and applies it.
+    func applyPaneConfig(paneId: PaneId) {
+        guard let view = surfaces[paneId], let surface = view.surface else { return }
+        let theme = model.panes[paneId]?.theme
+        if let theme = theme {
+            guard let config = ghosttyApp.loadConfigWithTheme(theme) else { return }
+            ghostty_surface_update_config(surface, config)
+            ghostty_config_free(config)
+        } else {
+            ghosttyApp.reloadConfig(surface: surface, soft: false)
+        }
+    }
+
+    /// Re-apply config for all panes that have a non-nil theme.
+    /// Called after app-wide config reload.
+    func reapplyAllPaneThemes() {
+        for (paneId, pane) in model.panes where pane.theme != nil {
+            applyPaneConfig(paneId: paneId)
+        }
+    }
+
+    // MARK: - Theme Browser
+
+    /// Toggle the theme browser panel on the right side of the content area.
+    func toggleThemeBrowser() {
+        if let existing = themeBrowserView {
+            existing.removeFromSuperview()
+            themeBrowserView = nil
+            // Restore focus to the focused pane's surface
+            if let tab = selectedTab(in: model),
+               let view = surfaces[tab.focusedPaneId] {
+                window?.makeFirstResponder(view)
+            }
+            return
+        }
+        guard let contentArea = contentArea else { return }
+
+        let browser = ThemeBrowserView()
+        browser.runtime = self
+        contentArea.addSubview(browser)
+        NSLayoutConstraint.activate([
+            browser.topAnchor.constraint(equalTo: contentArea.topAnchor),
+            browser.bottomAnchor.constraint(equalTo: contentArea.bottomAnchor),
+            browser.trailingAnchor.constraint(equalTo: contentArea.trailingAnchor),
+        ])
+        browser.reloadFromRuntime()
+        themeBrowserView = browser
     }
 
     // MARK: - Snapshot Bootstrap
@@ -694,6 +751,9 @@ class AppRuntime {
         chromeView?.updateBellBadge(count: unreadCount)
         NSApp.dockTile.badgeLabel = unreadCount > 0 ? "\(unreadCount)" : nil
         NSApp.dockTile.display()
+
+        // Apply per-pane themes after surfaces are live
+        reapplyAllPaneThemes()
     }
 
     /// Dispose of a staged restore after a failed build so no temp state leaks into the live session.
@@ -809,6 +869,9 @@ class AppRuntime {
         cancelPaneDrag()
         guard let contentArea = contentArea else { return }
 
+        // Capture browser focus before subview removal so we can restore it after reattachment
+        let browserFocus = themeBrowserView?.captureFocusTarget()
+
         // Remove old content
         for subview in contentArea.subviews {
             subview.removeFromSuperview()
@@ -851,10 +914,13 @@ class AppRuntime {
             surfaces[paneId]?.setFocusBorder(isFocused, hasBell: hasBell)
         }
 
-        // Focus the right pane (unless search is active on it)
-        if model.searchState[focusedId] == nil {
-            if let focusedView = surfaces[focusedId] {
-                window?.makeFirstResponder(focusedView)
+        // Focus the right pane — but only if the theme browser doesn't own focus.
+        // This responder guard protects any overlay UI from being clobbered by rebuild.
+        if browserFocus == nil {
+            if model.searchState[focusedId] == nil {
+                if let focusedView = surfaces[focusedId] {
+                    window?.makeFirstResponder(focusedView)
+                }
             }
         }
 
@@ -865,10 +931,26 @@ class AppRuntime {
         for (paneId, search) in model.searchState {
             findPaneWrapper(for: paneId, in: contentArea)?.showSearchOverlay(search: search, runtime: self)
         }
-        // If search is active on the focused pane, focus its text field
-        if model.searchState[focusedId] != nil,
+        // If search is active on the focused pane, focus its text field (unless browser has focus)
+        if browserFocus == nil,
+           model.searchState[focusedId] != nil,
            let field = findPaneWrapper(for: focusedId, in: contentArea)?.searchOverlay?.searchField {
             window?.makeFirstResponder(field)
+        }
+
+        // Rehydrate theme browser panel if open
+        if let browser = themeBrowserView {
+            contentArea.addSubview(browser)
+            NSLayoutConstraint.activate([
+                browser.topAnchor.constraint(equalTo: contentArea.topAnchor),
+                browser.bottomAnchor.constraint(equalTo: contentArea.bottomAnchor),
+                browser.trailingAnchor.constraint(equalTo: contentArea.trailingAnchor),
+            ])
+            browser.reloadFromRuntime()
+            // Restore focus to browser if it owned focus before rebuild
+            if let target = browserFocus {
+                browser.restoreFocus(target)
+            }
         }
     }
 

@@ -257,7 +257,7 @@ func checkpointTests() {
                 TabSnapshot(id: "t1", customTitle: nil, focusedPaneId: "p1", rootNode:
                     SplitNodeSnapshot.leaf(paneId: "p1"), color: nil)
             ])],
-            panes: [PaneSnapshot(id: "p1", title: "light-title", cwd: "/light", launch: nil, scrollback: nil)],
+            panes: [PaneSnapshot(id: "p1", title: "light-title", cwd: "/light", launch: nil, scrollback: nil, theme: nil)],
             selectedTabId: "t1"
         )
         let enriched = AppModelSnapshot(
@@ -265,7 +265,7 @@ func checkpointTests() {
                 TabSnapshot(id: "t1", customTitle: nil, focusedPaneId: "p1", rootNode:
                     SplitNodeSnapshot.leaf(paneId: "p1"), color: nil)
             ])],
-            panes: [PaneSnapshot(id: "p1", title: "old-title", cwd: "/old", launch: nil, scrollback: "saved scrollback")],
+            panes: [PaneSnapshot(id: "p1", title: "old-title", cwd: "/old", launch: nil, scrollback: "saved scrollback", theme: nil)],
             selectedTabId: "t1"
         )
         let merged = mergeCheckpoints(light: light, enriched: enriched)
@@ -281,7 +281,7 @@ func checkpointTests() {
                 TabSnapshot(id: "t1", customTitle: nil, focusedPaneId: "p1", rootNode:
                     SplitNodeSnapshot.leaf(paneId: "p1"), color: nil)
             ])],
-            panes: [PaneSnapshot(id: "p1", title: "new", cwd: "/new", launch: nil, scrollback: nil)],
+            panes: [PaneSnapshot(id: "p1", title: "new", cwd: "/new", launch: nil, scrollback: nil, theme: nil)],
             selectedTabId: "t1"
         )
         let enriched = AppModelSnapshot(
@@ -301,7 +301,7 @@ func checkpointTests() {
                 TabSnapshot(id: "t1", customTitle: nil, focusedPaneId: "p1", rootNode:
                     SplitNodeSnapshot.leaf(paneId: "p1"), color: nil)
             ])],
-            panes: [PaneSnapshot(id: "p1", title: "old", cwd: "/old", launch: nil, scrollback: "old scrollback")],
+            panes: [PaneSnapshot(id: "p1", title: "old", cwd: "/old", launch: nil, scrollback: "old scrollback", theme: nil)],
             selectedTabId: "t1"
         )
         let merged = mergeCheckpoints(light: light, enriched: enriched)
@@ -315,7 +315,7 @@ func checkpointTests() {
                 TabSnapshot(id: "t1", customTitle: nil, focusedPaneId: "p1", rootNode:
                     SplitNodeSnapshot.leaf(paneId: "p1"), color: nil)
             ])],
-            panes: [PaneSnapshot(id: "p1", title: "fresh-title", cwd: "/fresh", launch: nil, scrollback: nil)],
+            panes: [PaneSnapshot(id: "p1", title: "fresh-title", cwd: "/fresh", launch: nil, scrollback: nil, theme: nil)],
             selectedTabId: "t1"
         )
         let enriched = AppModelSnapshot(
@@ -323,7 +323,7 @@ func checkpointTests() {
                 TabSnapshot(id: "t1", customTitle: nil, focusedPaneId: "p1", rootNode:
                     SplitNodeSnapshot.leaf(paneId: "p1"), color: nil)
             ])],
-            panes: [PaneSnapshot(id: "p1", title: "stale-title", cwd: "/stale", launch: nil, scrollback: "text")],
+            panes: [PaneSnapshot(id: "p1", title: "stale-title", cwd: "/stale", launch: nil, scrollback: "text", theme: nil)],
             selectedTabId: "t1"
         )
         let merged = mergeCheckpoints(light: light, enriched: enriched)
@@ -339,7 +339,7 @@ func checkpointTests() {
                 TabSnapshot(id: "t1", customTitle: nil, focusedPaneId: "p1", rootNode:
                     SplitNodeSnapshot.leaf(paneId: "p1"), color: nil)
             ])],
-            panes: [PaneSnapshot(id: "p1", title: "t", cwd: "/c", launch: nil, scrollback: nil)],
+            panes: [PaneSnapshot(id: "p1", title: "t", cwd: "/c", launch: nil, scrollback: nil, theme: nil)],
             selectedTabId: "t1"
         )
         let enriched = AppModelSnapshot(groups: [], panes: [], selectedTabId: nil)

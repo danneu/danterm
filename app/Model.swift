@@ -60,6 +60,7 @@ struct PaneModel: Equatable {
     var cwd: String?
     var lastCommand: String?
     var progress: ProgressState? = nil
+    var theme: String? = nil  // ghostty theme name; nil = app default
 }
 
 indirect enum SplitNodeModel: Equatable {
@@ -203,6 +204,8 @@ struct PaneSnapshot: Codable {
     let cwd: String?
     let launch: PaneLaunchSnapshot?
     let scrollback: String?  // optional for backward compat
+    let theme: String?       // raw ghostty theme name; nil = default
+
 }
 
 struct PaneLaunchSnapshot: Codable {
@@ -366,7 +369,7 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel,
     var panes: [PaneId: PaneModel] = [:]
     for (id, ps) in paneSnapshotById {
         let expandedCwd = ps.cwd.map { expandTilde($0) }
-        panes[id] = PaneModel(id: id, title: ps.title ?? "Terminal", cwd: expandedCwd)
+        panes[id] = PaneModel(id: id, title: ps.title ?? "Terminal", cwd: expandedCwd, theme: ps.theme)
     }
 
     // 6. Resolve selectedTabId. Default to first group's first tab.
