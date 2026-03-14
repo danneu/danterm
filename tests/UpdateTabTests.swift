@@ -339,4 +339,56 @@ func tabTests() {
             return false
         }, "should not rebuild content view when closing non-selected tab")
     }
+
+    // MARK: - Close Tab Selects Previous
+
+    test("testCloseMiddleTabSelectsPrevious") {
+        var model = makeModel()
+        createTab(&model) // tab A
+        createTab(&model) // tab B
+        createTab(&model) // tab C
+        let tabAId = model.groups[0].tabs[0].id
+        let tabBId = model.groups[0].tabs[1].id
+
+        // Select tab B (middle), then close it
+        update(&model, .selectTab(id: tabBId))
+        update(&model, .closeTab(id: tabBId))
+
+        try expectEqual(model.selectedTabId, tabAId, "closing middle tab should select predecessor")
+        try expectEqual(model.groups[0].tabs.count, 2)
+    }
+
+    test("testCloseFirstTabSelectsNext") {
+        var model = makeModel()
+        createTab(&model) // tab A
+        createTab(&model) // tab B
+        let tabAId = model.groups[0].tabs[0].id
+        let tabBId = model.groups[0].tabs[1].id
+
+        // Select tab A (first), then close it
+        update(&model, .selectTab(id: tabAId))
+        update(&model, .closeTab(id: tabAId))
+
+        try expectEqual(model.selectedTabId, tabBId, "closing first tab should select successor")
+        try expectEqual(model.groups[0].tabs.count, 1)
+    }
+
+    test("testCloseTabCrossGroupSelectsPrevious") {
+        var model = makeModel()
+        // General group gets tab A
+        createTab(&model)
+        let tabAId = model.groups[0].tabs[0].id
+
+        // Create Work group (auto-creates tab B)
+        update(&model, .createGroup(name: "Work"))
+        let tabBId = model.groups[1].tabs[0].id
+
+        // Select tab B (in Work group), then close it
+        update(&model, .selectTab(id: tabBId))
+        update(&model, .closeTab(id: tabBId))
+
+        // Work group should be pruned (was its only tab), selection goes to tab A
+        try expectEqual(model.groups.count, 1, "Work group should be pruned")
+        try expectEqual(model.selectedTabId, tabAId, "should select predecessor across group boundary")
+    }
 }

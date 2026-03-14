@@ -102,6 +102,16 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let groupId = model.groups[groupIdx].id
         let paneIds = allPaneIds(tab.rootNode)
 
+        // Compute fallback selection: prefer predecessor, then successor in flattened order.
+        let fallbackTabId: TabId? = {
+            guard id == model.selectedTabId else { return nil }
+            let allTabs = model.groups.flatMap(\.tabs)
+            guard let idx = allTabs.firstIndex(where: { $0.id == id }) else { return nil }
+            if idx > 0 { return allTabs[idx - 1].id }
+            if idx + 1 < allTabs.count { return allTabs[idx + 1].id }
+            return nil
+        }()
+
         var effects: [Effect] = []
         for pid in paneIds {
             effects.append(.destroySurface(paneId: pid))
@@ -120,15 +130,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             return effects + [.terminate]
         }
 
-        // Select adjacent tab if we closed the selected one
-        if id == model.selectedTabId {
-            if let gIdx = model.groups.firstIndex(where: { $0.id == groupId }),
-               !model.groups[gIdx].tabs.isEmpty {
-                let newIdx = min(tabIdx, model.groups[gIdx].tabs.count - 1)
-                model.selectedTabId = model.groups[gIdx].tabs[newIdx].id
-            } else {
-                model.selectedTabId = allTabs.first?.id
-            }
+        // Select fallback tab if we closed the selected one
+        if id == model.selectedTabId, let newId = fallbackTabId {
+            model.selectedTabId = newId
             effects.append(.rebuildContentView)
             effects.append(contentsOf: selectionSyncEffects(for: model))
         }
