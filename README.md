@@ -59,6 +59,11 @@ Like any other terminal, you probably want to grant DanTerm.app these macOS perm
 - Dump and restore danterm state from a json file
 - Restore danterm state if it detects non-graceful exit
 
+## General terminal features
+
+- Cmd-click to open URL and file paths
+  - Cmd-shift-click needed if program is capturing mouse events (vim, tmux, etc). The shift modifier tells ghostty the click is for you, not the program.
+
 ## Claude Code Integration
 
 For some reason, Claude Code seems to wait 1-2 minutes before sending an OSC 777 / OSC 9 notification when it's waiting for a response.
