@@ -9,6 +9,9 @@ on:
     branches: [master]
     paths:
       - 'build-lib.sh'
+      - '.github/workflows/cache-ghosttykit.yml'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/release-stable.yml'
 
   # Allow manual trigger to seed the cache
   workflow_dispatch:
@@ -26,8 +29,10 @@ jobs:
         id: cache-ghosttykit
         uses: actions/cache@v5
         with:
-          path: lib/GhosttyKit.xcframework
-          key: ghosttykit-${{ env.GHOSTTY_TAG }}-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            lib/GhosttyKit.xcframework
+            lib/ghostty-themes
+          key: ghosttykit-v2-${{ env.GHOSTTY_TAG }}-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
 
       - uses: mlugg/setup-zig@v2
         if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
@@ -52,3 +57,4 @@ jobs:
           cd ..
           mkdir -p lib
           cp -R .ghostty-src/macos/GhosttyKit.xcframework lib/
+          cp -R .ghostty-src/zig-out/share/ghostty/themes lib/ghostty-themes

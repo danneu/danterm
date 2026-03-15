@@ -21,8 +21,10 @@ jobs:
         id: cache-ghosttykit
         uses: actions/cache@v5
         with:
-          path: lib/GhosttyKit.xcframework
-          key: ghosttykit-v1.3.0-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            lib/GhosttyKit.xcframework
+            lib/ghostty-themes
+          key: ghosttykit-v2-v1.3.0-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
 
       - name: Build GhosttyKit
         if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
@@ -37,6 +39,7 @@ jobs:
           cd ..
           mkdir -p lib
           cp -R .ghostty-src/macos/GhosttyKit.xcframework lib/
+          cp -R .ghostty-src/zig-out/share/ghostty/themes lib/ghostty-themes
 
       - name: Build Swift app
         run: |
@@ -78,6 +81,16 @@ jobs:
           mkdir -p build/DanTerm.app/Contents/Resources
           cp icon/AppIcon/AppIcon.icns build/DanTerm.app/Contents/Resources/AppIcon.icns
           cp icon/AppIcon/Assets.car build/DanTerm.app/Contents/Resources/
+
+          mkdir -p build/DanTerm.app/Contents/Resources/ghostty
+          cp -R lib/ghostty-themes build/DanTerm.app/Contents/Resources/ghostty/themes
+
+          THEME_COUNT=$(ls build/DanTerm.app/Contents/Resources/ghostty/themes | wc -l | tr -d ' ')
+          echo "Bundled $THEME_COUNT themes"
+          if [ "$THEME_COUNT" -eq 0 ]; then
+              echo "Error: no themes bundled"
+              exit 1
+          fi
 
           # Ad-hoc sign only
           codesign --force --deep --sign - build/DanTerm.app
