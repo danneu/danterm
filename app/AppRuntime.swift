@@ -155,26 +155,7 @@ class AppRuntime {
             enqueueNotificationRequest(request)
 
         case .exportState(let snapshot):
-            // Enrich pane snapshots with scrollback from live surfaces
-            let enrichedPanes: [PaneSnapshot] = snapshot.panes.map { ps in
-                guard let idStr = ps.id,
-                      let uuid = UUID(uuidString: idStr),
-                      let view = surfaces[PaneId(rawValue: uuid)],
-                      let surface = view.surface,
-                      let rawText = readScrollbackText(surface: surface),
-                      let scrollback = truncateScrollback(rawText) else {
-                    return ps
-                }
-                return PaneSnapshot(
-                    id: ps.id, title: ps.title, cwd: ps.cwd,
-                    launch: ps.launch, scrollback: scrollback, theme: ps.theme
-                )
-            }
-            let enrichedSnapshot = AppModelSnapshot(
-                groups: snapshot.groups,
-                panes: enrichedPanes,
-                selectedTabId: snapshot.selectedTabId
-            )
+            let enrichedSnapshot = enrichSnapshot(snapshot)
             let initFile = AppInitFile(version: 1, model: enrichedSnapshot)
 
             let encoder = JSONEncoder()
@@ -486,11 +467,8 @@ class AppRuntime {
         writeCheckpoint(initFile, to: lightCheckpointURL())
     }
 
-    /// Write an enriched checkpoint: model snapshot + scrollback text read from
-    /// each live Ghostty surface. Expensive but gives full restore fidelity.
-    /// Called by the 60s periodic timer and once at clean termination.
-    func performEnrichedCheckpoint() {
-        let snapshot = toSnapshot(model)
+    /// Enrich a snapshot's panes with scrollback text read from live surfaces.
+    private func enrichSnapshot(_ snapshot: AppModelSnapshot) -> AppModelSnapshot {
         let enrichedPanes: [PaneSnapshot] = snapshot.panes.map { ps in
             guard let idStr = ps.id,
                   let uuid = UUID(uuidString: idStr),
@@ -505,11 +483,18 @@ class AppRuntime {
                 launch: ps.launch, scrollback: scrollback, theme: ps.theme
             )
         }
-        let enrichedSnapshot = AppModelSnapshot(
+        return AppModelSnapshot(
             groups: snapshot.groups,
             panes: enrichedPanes,
             selectedTabId: snapshot.selectedTabId
         )
+    }
+
+    /// Write an enriched checkpoint: model snapshot + scrollback text read from
+    /// each live Ghostty surface. Expensive but gives full restore fidelity.
+    /// Called by the 60s periodic timer and once at clean termination.
+    func performEnrichedCheckpoint() {
+        let enrichedSnapshot = enrichSnapshot(toSnapshot(model))
         writeCheckpoint(AppInitFile(version: 1, model: enrichedSnapshot), to: enrichedCheckpointURL())
     }
 
