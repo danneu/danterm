@@ -284,6 +284,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         colorItem.submenu = colorSubmenu
         tabMenu.addItem(colorItem)
 
+        tabMenu.addItem(NSMenuItem.separator())
+        let closeTabItem = NSMenuItem(title: "Close Tab", action: #selector(closeTab(_:)), keyEquivalent: "W")
+        closeTabItem.keyEquivalentModifierMask = [.command, .shift]
+        tabMenu.addItem(closeTabItem)
+
         tabMenuItem.submenu = tabMenu
         mainMenu.addItem(tabMenuItem)
 
@@ -371,6 +376,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     @objc func renameTab(_ sender: Any?) {
         guard let tabId = runtime.model.selectedTabId else { return }
         sidebarView.beginRenamingTab(tabId)
+    }
+
+    @objc func closeTab(_ sender: Any?) {
+        guard let tabId = runtime.model.selectedTabId else { return }
+        runtime.send(.requestCloseTab(id: tabId))
     }
 
     // Tab > Color submenu actions

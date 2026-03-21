@@ -190,6 +190,7 @@ end
 | Next Tab                       | ⇧⌘N      |
 | Previous Tab                   | ⇧⌘P      |
 | Close Pane                     | ⌘W       |
+| Close Tab                      | ⇧⌘W      |
 | Split Pane Right               | ⌘D       |
 | Split Pane Down                | ⇧⌘D      |
 | Focus Pane Left                | ⇧⌘H      |
