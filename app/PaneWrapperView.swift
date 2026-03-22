@@ -15,15 +15,12 @@ class PaneWrapperView: NSView {
     // Search overlay
     private(set) var searchOverlay: SearchOverlayView?
 
-    // Progress indicator
+    // Leading accessories stack: [remoteAccessory?, progressIndicator?, toolbarLabel]
+    private let leadingStack: NSStackView
+    private let remoteAccessory: NSView
+    private let remoteIcon: NSImageView
     private let progressIndicator: ProgressIndicatorView
     private var currentProgress: ProgressState?
-    // Constraint for label leading when indicator is visible vs hidden
-    private var labelLeadingToIndicator: NSLayoutConstraint!
-    private var labelLeadingToToolbar: NSLayoutConstraint!
-
-    // Pane color stripe: 3px vertical bar on the left edge of the toolbar
-    private let paneColorStripe: NSView
 
     init(paneId: PaneId, terminalView: TerminalView, isZoomed: Bool, hasSplits: Bool, runtime: AppRuntime?) {
         self.paneId = paneId
@@ -34,7 +31,9 @@ class PaneWrapperView: NSView {
         self.hasSplits = hasSplits
         self.runtime = runtime
         self.progressIndicator = ProgressIndicatorView()
-        self.paneColorStripe = NSView()
+        self.remoteAccessory = NSView()
+        self.remoteIcon = NSImageView()
+        self.leadingStack = NSStackView()
 
         // Menu button (always visible)
         let mb = NSButton()
@@ -81,16 +80,33 @@ class PaneWrapperView: NSView {
         toolbar.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.8).cgColor
         addSubview(toolbar)
 
-        // Pane color stripe: 3px vertical bar on toolbar left edge
-        paneColorStripe.translatesAutoresizingMaskIntoConstraints = false
-        paneColorStripe.wantsLayer = true
-        paneColorStripe.isHidden = true
-        toolbar.addSubview(paneColorStripe)
+        // Remote accessory: purple background with globe icon, hidden by default
+        remoteAccessory.translatesAutoresizingMaskIntoConstraints = false
+        remoteAccessory.wantsLayer = true
+        remoteAccessory.layer?.backgroundColor = NSColor.systemPurple.cgColor
+        remoteAccessory.isHidden = true
+        remoteAccessory.setContentHuggingPriority(.required, for: .horizontal)
 
-        // Progress indicator (before label)
+        remoteIcon.translatesAutoresizingMaskIntoConstraints = false
+        remoteIcon.image = NSImage(systemSymbolName: "globe", accessibilityDescription: "Remote session")
+        remoteIcon.contentTintColor = .white
+        remoteIcon.imageScaling = .scaleProportionallyDown
+        remoteAccessory.addSubview(remoteIcon)
+        NSLayoutConstraint.activate([
+            remoteIcon.centerXAnchor.constraint(equalTo: remoteAccessory.centerXAnchor),
+            remoteIcon.centerYAnchor.constraint(equalTo: remoteAccessory.centerYAnchor),
+            remoteIcon.widthAnchor.constraint(equalToConstant: 12),
+            remoteIcon.heightAnchor.constraint(equalToConstant: 12),
+            remoteAccessory.widthAnchor.constraint(equalToConstant: 22),
+        ])
+
+        // Progress indicator, hidden by default
         progressIndicator.translatesAutoresizingMaskIntoConstraints = false
         progressIndicator.isHidden = true
-        toolbar.addSubview(progressIndicator)
+        NSLayoutConstraint.activate([
+            progressIndicator.widthAnchor.constraint(equalToConstant: 12),
+            progressIndicator.heightAnchor.constraint(equalToConstant: 12),
+        ])
 
         // Label
         toolbarLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -98,7 +114,16 @@ class PaneWrapperView: NSView {
         toolbarLabel.textColor = NSColor.secondaryLabelColor
         toolbarLabel.lineBreakMode = .byTruncatingMiddle
         toolbarLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        toolbar.addSubview(toolbarLabel)
+
+        // Leading stack: arranges [remoteAccessory, progressIndicator, label] horizontally
+        leadingStack.translatesAutoresizingMaskIntoConstraints = false
+        leadingStack.orientation = .horizontal
+        leadingStack.spacing = 4
+        leadingStack.alignment = .centerY
+        leadingStack.addArrangedSubview(remoteAccessory)
+        leadingStack.addArrangedSubview(progressIndicator)
+        leadingStack.addArrangedSubview(toolbarLabel)
+        toolbar.addSubview(leadingStack)
 
         // Drag handle: fills toolbar, sits above label but below buttons
         let dragHandle = ToolbarDragHandleView()
@@ -118,13 +143,8 @@ class PaneWrapperView: NSView {
         scrollWrapper.translatesAutoresizingMaskIntoConstraints = false
         addSubview(scrollWrapper)
 
-        // Label trailing anchors to the first trailing button
-        let labelTrailingAnchor = unzoomButton?.leadingAnchor ?? menuButton.leadingAnchor
-
-        // Label leading constraints (swapped based on indicator visibility)
-        labelLeadingToToolbar = toolbarLabel.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 8)
-        labelLeadingToIndicator = toolbarLabel.leadingAnchor.constraint(equalTo: progressIndicator.trailingAnchor, constant: 4)
-        labelLeadingToToolbar.isActive = true
+        // Trailing button anchor for stack trailing constraint
+        let stackTrailingAnchor = unzoomButton?.leadingAnchor ?? menuButton.leadingAnchor
 
         var constraints = [
             // Toolbar
@@ -133,21 +153,14 @@ class PaneWrapperView: NSView {
             toolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
             toolbar.heightAnchor.constraint(equalToConstant: 22),
 
-            // Pane color stripe
-            paneColorStripe.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor),
-            paneColorStripe.topAnchor.constraint(equalTo: toolbar.topAnchor),
-            paneColorStripe.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor),
-            paneColorStripe.widthAnchor.constraint(equalToConstant: 3),
+            // Leading stack
+            leadingStack.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor),
+            leadingStack.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+            leadingStack.trailingAnchor.constraint(lessThanOrEqualTo: stackTrailingAnchor, constant: -4),
 
-            // Progress indicator
-            progressIndicator.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            progressIndicator.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 8),
-            progressIndicator.widthAnchor.constraint(equalToConstant: 12),
-            progressIndicator.heightAnchor.constraint(equalToConstant: 12),
-
-            // Label within toolbar
-            toolbarLabel.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
-            toolbarLabel.trailingAnchor.constraint(lessThanOrEqualTo: labelTrailingAnchor, constant: -4),
+            // Remote accessory fills toolbar height
+            remoteAccessory.topAnchor.constraint(equalTo: toolbar.topAnchor),
+            remoteAccessory.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor),
 
             // Drag handle fills toolbar
             dragHandle.topAnchor.constraint(equalTo: toolbar.topAnchor),
@@ -187,12 +200,7 @@ class PaneWrapperView: NSView {
     func updateToolbar(title: String, cwd: String?, progress: ProgressState? = nil, isRemote: Bool = false) {
         toolbarLabel.stringValue = formatToolbarLabel(title: title, cwd: cwd)
         applyProgressState(progress)
-        if isRemote {
-            paneColorStripe.layer?.backgroundColor = NSColor.systemPurple.cgColor
-            paneColorStripe.isHidden = false
-        } else {
-            paneColorStripe.isHidden = true
-        }
+        remoteAccessory.isHidden = !isRemote
     }
 
     private func applyProgressState(_ state: ProgressState?) {
@@ -200,17 +208,12 @@ class PaneWrapperView: NSView {
         currentProgress = state
 
         guard let state = state else {
-            // Remove indicator
             progressIndicator.isHidden = true
             progressIndicator.removeSpinAnimation()
-            labelLeadingToIndicator.isActive = false
-            labelLeadingToToolbar.isActive = true
             return
         }
 
         progressIndicator.isHidden = false
-        labelLeadingToToolbar.isActive = false
-        labelLeadingToIndicator.isActive = true
 
         switch state {
         case .set(let percent):
