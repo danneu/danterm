@@ -156,14 +156,19 @@ class WindowChromeView: NSView {
         fatalError("init(coder:) not implemented")
     }
 
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
     // MARK: - Lifecycle
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        let nc = NotificationCenter.default
+        nc.removeObserver(self)
         guard let window else { return }
         updateMetrics()
 
-        let nc = NotificationCenter.default
         nc.addObserver(self, selector: #selector(windowDidResize), name: NSWindow.didResizeNotification, object: window)
         nc.addObserver(self, selector: #selector(windowDidResize), name: NSWindow.didEnterFullScreenNotification, object: window)
         nc.addObserver(self, selector: #selector(windowDidResize), name: NSWindow.didExitFullScreenNotification, object: window)

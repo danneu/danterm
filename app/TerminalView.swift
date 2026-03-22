@@ -6,12 +6,19 @@ class SurfaceBridge {
     var paneId: PaneId?
     init() {}
     init(view: TerminalView) { self.view = view }
+
+    deinit {
+        #if DEBUG
+        print("[bridge] SurfaceBridge deallocated (paneId: \(paneId?.rawValue.uuidString.prefix(5) ?? "nil"))")
+        #endif
+    }
 }
 
 class TerminalView: NSView, NSTextInputClient {
     let ghosttyApp: GhosttyApp
     var surface: ghostty_surface_t?
     let bridge: SurfaceBridge
+    private var bridgeRetain: Unmanaged<SurfaceBridge>?
     weak var runtime: AppRuntime?
     private var markedText = NSMutableAttributedString()
     private var keyTextAccumulator: [String]?
@@ -51,7 +58,9 @@ class TerminalView: NSView, NSTextInputClient {
 
         // Create surface config
         var config = ghostty_surface_config_new()
-        config.userdata = Unmanaged.passRetained(bridge).toOpaque()
+        let retain = Unmanaged.passRetained(bridge)
+        config.userdata = retain.toOpaque()
+        bridgeRetain = retain
         config.platform_tag = GHOSTTY_PLATFORM_MACOS
         config.platform = ghostty_platform_u(
             macos: ghostty_platform_macos_s(
@@ -114,6 +123,12 @@ class TerminalView: NSView, NSTextInputClient {
             createSurface()
         }
 
+        // Surface creation failed — release the bridge retain immediately
+        if surface == nil {
+            bridgeRetain?.release()
+            bridgeRetain = nil
+        }
+
         // Register for file/URL/string drag-and-drop
         registerForDraggedTypes([.fileURL, .URL, .string])
 
@@ -128,10 +143,16 @@ class TerminalView: NSView, NSTextInputClient {
     func closeSurface() {
         guard let surface = surface else { return }
         self.surface = nil
-        ghostty_surface_free(surface)
-        // Bridge intentionally NOT released (~32 bytes). Stays alive so
-        // any in-flight callbacks can safely dereference it and find
-        // bridge.view == nil.
+        // Defer surface free to next main-actor turn to avoid re-entrant
+        // callback loops during free (Ghostty and cmux both do this).
+        // Bridge stays alive until after free completes so any in-flight
+        // callbacks can safely dereference it and find bridge.view == nil.
+        let retain = bridgeRetain
+        bridgeRetain = nil
+        Task { @MainActor in
+            ghostty_surface_free(surface)
+            retain?.release()
+        }
     }
 
     deinit {
