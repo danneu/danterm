@@ -226,3 +226,15 @@ I tried these after iTerm, but they have really bad tab systems. I want somethin
 Cmux is really good: https://github.com/manaflow-ai/cmux
 
 But it's more complicated than I'd like since it includes a browser, and its panes can contain tabs.
+
+## Development
+
+The dev loop is to make changes and `just build-run` to try them out.
+
+- `just build` or `bash ./dev-build.sh` to build a local dev app to
+  ".build/DanTerm Dev.app" and copy to "~/Applications/DanTerm Dev.app".
+- `just build-run` or `bash ./dev-build-run.sh` to build + run it.
+
+I don't remember why, but there was some benefit to running the app from the macOS applications folder during dev.
+
+I think so that it shows up in permissions lists in macOS settings.
