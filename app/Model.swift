@@ -61,6 +61,7 @@ struct PaneModel: Equatable {
     var lastCommand: String?
     var progress: ProgressState? = nil
     var theme: String? = nil  // ghostty theme name; nil = app default
+    var isRemote: Bool = false  // detected via shell wrapper; not persisted
 }
 
 indirect enum SplitNodeModel: Equatable {

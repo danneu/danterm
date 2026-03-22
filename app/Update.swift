@@ -442,6 +442,16 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         // Persist last command so restore can prefill it in the shell.
         return [.scheduleCheckpoint]
 
+    case .commandEnded(let paneId):
+        model.panes[paneId]?.isRemote = false
+        return []
+
+    // MARK: - Remote Detection
+
+    case .remoteSessionStarted(let paneId):
+        model.panes[paneId]?.isRemote = true
+        return []
+
     // MARK: - Export
 
     case .exportState:

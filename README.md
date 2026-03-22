@@ -145,6 +145,15 @@ if [[ -n "$DANTERM_TOKEN" ]]; then
   }
   preexec_functions+=(_danterm_preexec)
   precmd_functions+=(_danterm_precmd)
+  # Remote session detection: wraps ssh/mosh to emit REMOTE_START event
+  ssh() {
+    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' "$_danterm_tok"
+    command ssh "$@"
+  }
+  mosh() {
+    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' "$_danterm_tok"
+    command mosh "$@"
+  }
 fi
 ```
 
@@ -176,6 +185,15 @@ if set -q DANTERM_TOKEN
   function __danterm_postcmd --on-event fish_prompt
     printf '\e]0;__DANTERM_EVT__:%s:CMD_END\a' $_danterm_tok
     printf '\e]0;%s\a' (prompt_pwd)
+  end
+  # Remote session detection: wraps ssh/mosh to emit REMOTE_START event
+  function ssh --wraps ssh
+    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' $_danterm_tok
+    command ssh $argv
+  end
+  function mosh --wraps mosh
+    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' $_danterm_tok
+    command mosh $argv
   end
 end
 ```

@@ -718,6 +718,7 @@ func truncateScrollback(_ text: String, maxLines: Int = 4000, maxChars: Int = 40
 enum DantermEvent: Equatable {
   case commandStarted(command: String)
   case commandEnded
+  case remoteStart
 }
 
 /// Token store for pane-to-token mapping. Used by AppRuntime; extracted here for testability.
@@ -740,7 +741,7 @@ struct PaneTokenStore {
 }
 
 /// Translate a Msg through the event protocol layer.
-/// Returns nil when the message should be dropped (CMD_END, bad token, malformed event).
+/// Returns nil when the message should be dropped (bad token, malformed event).
 /// Normal (non-event) messages pass through unchanged.
 func translateMsg(_ msg: Msg, tokenForPane: (PaneId) -> String?) -> Msg? {
   guard case .surfaceTitle(let paneId, let title) = msg,
@@ -757,7 +758,9 @@ func translateMsg(_ msg: Msg, tokenForPane: (PaneId) -> String?) -> Msg? {
   case .commandStarted(let command):
     return .commandStarted(paneId: paneId, command: command)
   case .commandEnded:
-    return nil
+    return .commandEnded(paneId: paneId)
+  case .remoteStart:
+    return .remoteSessionStarted(paneId: paneId)
   }
 }
 
@@ -779,6 +782,8 @@ func parseDantermEvent(_ raw: String, expectedToken: String) -> DantermEvent? {
     return .commandStarted(command: cmd)
   } else if event == "CMD_END" {
     return .commandEnded
+  } else if event == "REMOTE_START" {
+    return .remoteStart
   }
   return nil
 }

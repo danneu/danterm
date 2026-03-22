@@ -70,9 +70,10 @@ class AppRuntime {
             flushPendingCheckpoint()
         }
 
-        // Refresh toolbar text after title/cwd/progress changes
+        // Refresh pane toolbar after title/cwd/progress/remote-state changes
         switch translatedMsg {
-        case .surfaceTitle(let paneId, _), .surfaceCwd(let paneId, _), .surfaceProgress(let paneId, _):
+        case .surfaceTitle(let paneId, _), .surfaceCwd(let paneId, _), .surfaceProgress(let paneId, _),
+             .remoteSessionStarted(let paneId), .commandEnded(let paneId):
             refreshPaneToolbar(for: paneId)
         default:
             break
@@ -828,7 +829,8 @@ class AppRuntime {
         forEachPaneWrapper(in: contentArea) { wrapper in
             let (title, cwd) = paneToolbarText(for: wrapper.paneId, in: model)
             let progress = model.panes[wrapper.paneId]?.progress
-            wrapper.updateToolbar(title: title, cwd: cwd, progress: progress)
+            let isRemote = model.panes[wrapper.paneId]?.isRemote ?? false
+            wrapper.updateToolbar(title: title, cwd: cwd, progress: progress, isRemote: isRemote)
         }
     }
 
@@ -836,7 +838,8 @@ class AppRuntime {
         guard let contentArea = contentArea else { return }
         let (title, cwd) = paneToolbarText(for: paneId, in: model)
         let progress = model.panes[paneId]?.progress
-        findPaneWrapper(for: paneId, in: contentArea)?.updateToolbar(title: title, cwd: cwd, progress: progress)
+        let isRemote = model.panes[paneId]?.isRemote ?? false
+        findPaneWrapper(for: paneId, in: contentArea)?.updateToolbar(title: title, cwd: cwd, progress: progress, isRemote: isRemote)
     }
 
     private func findPaneWrapper(for paneId: PaneId, in view: NSView) -> PaneWrapperView? {

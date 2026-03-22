@@ -51,6 +51,12 @@ func exportTests() {
         try expect(result == nil, "non-event title should return nil")
     }
 
+    test("parseDantermEvent: valid REMOTE_START") {
+        let raw = "__DANTERM_EVT__:tok123:REMOTE_START"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        try expectEqual(result, .remoteStart)
+    }
+
     test("parseDantermEvent: unknown event type returns nil") {
         let raw = "__DANTERM_EVT__:tok123:CMD_UNKNOWN"
         let result = parseDantermEvent(raw, expectedToken: "tok123")
@@ -82,14 +88,30 @@ func exportTests() {
         try expectEqual(cmd, "vim")
     }
 
-    test("translateMsg: CMD_END is dropped") {
+    test("translateMsg: CMD_END translates to commandEnded") {
         let paneId = PaneId()
         let token = "my-token"
         let title = "__DANTERM_EVT__:\(token):CMD_END"
         let result = translateMsg(.surfaceTitle(paneId: paneId, title: title)) { id in
             id == paneId ? token : nil
         }
-        try expect(result == nil, "CMD_END should be dropped")
+        guard case .commandEnded(let pid) = result else {
+            throw TestFailure(message: "expected .commandEnded, got \(String(describing: result))")
+        }
+        try expectEqual(pid, paneId)
+    }
+
+    test("translateMsg: REMOTE_START translates to remoteSessionStarted") {
+        let paneId = PaneId()
+        let token = "my-token"
+        let title = "__DANTERM_EVT__:\(token):REMOTE_START"
+        let result = translateMsg(.surfaceTitle(paneId: paneId, title: title)) { id in
+            id == paneId ? token : nil
+        }
+        guard case .remoteSessionStarted(let pid) = result else {
+            throw TestFailure(message: "expected .remoteSessionStarted, got \(String(describing: result))")
+        }
+        try expectEqual(pid, paneId)
     }
 
     test("translateMsg: wrong token drops message") {

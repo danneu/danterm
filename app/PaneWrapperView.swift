@@ -22,6 +22,9 @@ class PaneWrapperView: NSView {
     private var labelLeadingToIndicator: NSLayoutConstraint!
     private var labelLeadingToToolbar: NSLayoutConstraint!
 
+    // Pane color stripe: 3px vertical bar on the left edge of the toolbar
+    private let paneColorStripe: NSView
+
     init(paneId: PaneId, terminalView: TerminalView, isZoomed: Bool, hasSplits: Bool, runtime: AppRuntime?) {
         self.paneId = paneId
         self.terminalView = terminalView
@@ -31,6 +34,7 @@ class PaneWrapperView: NSView {
         self.hasSplits = hasSplits
         self.runtime = runtime
         self.progressIndicator = ProgressIndicatorView()
+        self.paneColorStripe = NSView()
 
         // Menu button (always visible)
         let mb = NSButton()
@@ -76,6 +80,12 @@ class PaneWrapperView: NSView {
         toolbar.wantsLayer = true
         toolbar.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.8).cgColor
         addSubview(toolbar)
+
+        // Pane color stripe: 3px vertical bar on toolbar left edge
+        paneColorStripe.translatesAutoresizingMaskIntoConstraints = false
+        paneColorStripe.wantsLayer = true
+        paneColorStripe.isHidden = true
+        toolbar.addSubview(paneColorStripe)
 
         // Progress indicator (before label)
         progressIndicator.translatesAutoresizingMaskIntoConstraints = false
@@ -123,6 +133,12 @@ class PaneWrapperView: NSView {
             toolbar.trailingAnchor.constraint(equalTo: trailingAnchor),
             toolbar.heightAnchor.constraint(equalToConstant: 22),
 
+            // Pane color stripe
+            paneColorStripe.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor),
+            paneColorStripe.topAnchor.constraint(equalTo: toolbar.topAnchor),
+            paneColorStripe.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            paneColorStripe.widthAnchor.constraint(equalToConstant: 3),
+
             // Progress indicator
             progressIndicator.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
             progressIndicator.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor, constant: 8),
@@ -168,9 +184,15 @@ class PaneWrapperView: NSView {
         fatalError("init(coder:) not implemented")
     }
 
-    func updateToolbar(title: String, cwd: String?, progress: ProgressState? = nil) {
+    func updateToolbar(title: String, cwd: String?, progress: ProgressState? = nil, isRemote: Bool = false) {
         toolbarLabel.stringValue = formatToolbarLabel(title: title, cwd: cwd)
         applyProgressState(progress)
+        if isRemote {
+            paneColorStripe.layer?.backgroundColor = NSColor.systemPurple.cgColor
+            paneColorStripe.isHidden = false
+        } else {
+            paneColorStripe.isHidden = true
+        }
     }
 
     private func applyProgressState(_ state: ProgressState?) {

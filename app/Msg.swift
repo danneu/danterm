@@ -44,6 +44,10 @@ enum Msg {
 
     // Command tracking
     case commandStarted(paneId: PaneId, command: String)
+    case commandEnded(paneId: PaneId)
+
+    // Remote detection
+    case remoteSessionStarted(paneId: PaneId)
 
     // Export
     case exportState
