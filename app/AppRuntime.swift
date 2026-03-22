@@ -593,13 +593,13 @@ class AppRuntime {
 
     // MARK: - Per-Pane Theme
 
-    /// Apply the pane's current theme to its surface.
-    /// If theme is nil, reloads the base config (clearing any override).
-    /// If theme is non-nil, builds a themed config and applies it.
+    /// Apply the pane's effective theme to its surface.
+    /// Uses remoteThemeOverride (if set) over the user's theme.
+    /// If effective theme is nil, reloads the base config (clearing any override).
     func applyPaneConfig(paneId: PaneId) {
-        guard let view = surfaces[paneId], let surface = view.surface else { return }
-        let theme = model.panes[paneId]?.theme
-        if let theme = theme {
+        guard let view = surfaces[paneId], let surface = view.surface,
+              let pane = model.panes[paneId] else { return }
+        if let theme = effectiveTheme(for: pane) {
             guard let config = ghosttyApp.loadConfigWithTheme(theme) else { return }
             ghostty_surface_update_config(surface, config)
             ghostty_config_free(config)
@@ -608,10 +608,10 @@ class AppRuntime {
         }
     }
 
-    /// Re-apply config for all panes that have a non-nil theme.
+    /// Re-apply config for all panes that have a non-nil effective theme.
     /// Called after app-wide config reload.
     func reapplyAllPaneThemes() {
-        for (paneId, pane) in model.panes where pane.theme != nil {
+        for (paneId, pane) in model.panes where effectiveTheme(for: pane) != nil {
             applyPaneConfig(paneId: paneId)
         }
     }

@@ -444,13 +444,17 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
     case .commandEnded(let paneId):
         model.panes[paneId]?.isRemote = false
-        return []
+        guard model.panes[paneId]?.remoteThemeOverride != nil else { return [] }
+        model.panes[paneId]?.remoteThemeOverride = nil
+        return [.applyPaneTheme(paneId: paneId)]
 
     // MARK: - Remote Detection
 
     case .remoteSessionStarted(let paneId):
+        guard model.panes[paneId] != nil else { return [] }
         model.panes[paneId]?.isRemote = true
-        return []
+        model.panes[paneId]?.remoteThemeOverride = "Purplepeter"
+        return [.applyPaneTheme(paneId: paneId)]
 
     // MARK: - Export
 

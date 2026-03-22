@@ -1,5 +1,13 @@
 import Foundation
 
+// MARK: - Pane Theme
+
+/// Returns the theme that should be applied to a pane's Ghostty surface.
+/// Remote override takes priority over user-set theme.
+func effectiveTheme(for pane: PaneModel) -> String? {
+  pane.remoteThemeOverride ?? pane.theme
+}
+
 // MARK: - Pane Toolbar
 
 func paneToolbarText(for paneId: PaneId, in model: AppModel) -> (title: String, cwd: String?) {
