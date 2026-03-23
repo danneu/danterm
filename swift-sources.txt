@@ -27,3 +27,4 @@ app/PaneDragCoordinator.swift
 app/ThemeColorParser.swift
 app/ThemeCatalog.swift
 app/ThemeBrowserView.swift
+app/DanTermConfig.swift

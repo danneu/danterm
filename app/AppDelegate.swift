@@ -211,8 +211,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         appMenu.addItem(withTitle: "Import State...", action: #selector(importState(_:)), keyEquivalent: "")
         appMenu.addItem(withTitle: "Export State...", action: #selector(exportState(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "Open Ghostty Config", action: #selector(openGhosttyConfig(_:)), keyEquivalent: ",")
-        let reloadConfigItem = NSMenuItem(title: "Reload Ghostty Config", action: #selector(reloadGhosttyConfig(_:)), keyEquivalent: ",")
+        appMenu.addItem(withTitle: "Open DanTerm Config", action: #selector(openDanTermConfig(_:)), keyEquivalent: ",")
+        let openGhosttyItem = NSMenuItem(title: "Open Ghostty Config", action: #selector(openGhosttyConfig(_:)), keyEquivalent: ",")
+        openGhosttyItem.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(openGhosttyItem)
+        let reloadConfigItem = NSMenuItem(title: "Reload Config", action: #selector(reloadConfig(_:)), keyEquivalent: ",")
         reloadConfigItem.keyEquivalentModifierMask = [.command, .shift]
         appMenu.addItem(reloadConfigItem)
         appMenu.addItem(NSMenuItem.separator())
@@ -404,10 +407,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         runtime.importStateFromPanel(restoreCommandBehavior: restoreCommandBehavior)
     }
 
+    @objc func openDanTermConfig(_ sender: Any?) {
+        let path = DanTermConfigParser.configFilePath()
+        let url = URL(fileURLWithPath: path)
+        // Create file + parent dirs if needed so the editor opens something
+        let fm = FileManager.default
+        let dir = url.deletingLastPathComponent().path
+        if !fm.fileExists(atPath: dir) {
+            try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        }
+        if !fm.fileExists(atPath: path) {
+            // Seed with a comment so macOS recognizes it as a text file
+            let seed = "# DanTerm config — Ghostty keys + DanTerm-specific keys\n# https://github.com/danneu/danterm\n"
+            fm.createFile(atPath: path, contents: seed.data(using: .utf8))
+        }
+        NSWorkspace.shared.open(url)
+    }
+
     @objc func openGhosttyConfig(_ sender: Any?) {
         guard let path = GhosttyApp.configFilePath() else { return }
         let url = URL(fileURLWithPath: path)
-        // Create file + parent dirs if needed so the editor opens something
         let fm = FileManager.default
         let dir = url.deletingLastPathComponent().path
         if !fm.fileExists(atPath: dir) {
@@ -419,8 +438,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         NSWorkspace.shared.open(url)
     }
 
-    @objc func reloadGhosttyConfig(_ sender: Any?) {
-        runtime.ghosttyApp.reloadConfig()
+    @objc func reloadConfig(_ sender: Any?) {
+        runtime.reloadAllConfig()
     }
 
     @objc func findInTerminal(_ sender: Any?) {

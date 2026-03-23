@@ -27,6 +27,16 @@ func remoteTests() {
         try expectEqual(model.panes[paneId]?.remoteThemeOverride, "Purplepeter", "remote override should be set")
     }
 
+    test("remoteSessionStarted uses config.remoteTheme") {
+        var model = makeModel()
+        model.config.remoteTheme = "Ocean"
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+
+        _ = update(&model, .remoteSessionStarted(paneId: paneId))
+        try expectEqual(model.panes[paneId]?.remoteThemeOverride, "Ocean", "should use config remote theme")
+    }
+
     test("commandEnded clears isRemote and remoteThemeOverride") {
         var model = makeModel()
         createTab(&model)
@@ -109,5 +119,44 @@ func remoteTests() {
         _ = update(&model, .setPaneTheme(paneId: paneId, themeName: "Solarized"))
         try expectEqual(model.panes[paneId]?.theme, "Solarized", "user theme should change")
         try expectEqual(model.panes[paneId]?.remoteThemeOverride, "Purplepeter", "override unchanged")
+    }
+
+    // MARK: - configLoaded
+
+    test("configLoaded updates model.config") {
+        var model = makeModel()
+        var newConfig = DanTermConfig()
+        newConfig.remoteTheme = "Grape"
+        let effects = update(&model, .configLoaded(newConfig))
+        try expectEqual(model.config.remoteTheme, "Grape")
+        try expectEqual(effects.count, 0, "no effects when no remote panes")
+    }
+
+    test("configLoaded reapplies remote theme to remote panes") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        _ = update(&model, .remoteSessionStarted(paneId: paneId))
+        try expectEqual(model.panes[paneId]?.remoteThemeOverride, "Purplepeter")
+
+        var newConfig = DanTermConfig()
+        newConfig.remoteTheme = "Grape"
+        let effects = update(&model, .configLoaded(newConfig))
+        try expectEqual(model.panes[paneId]?.remoteThemeOverride, "Grape", "remote pane should get new theme")
+        try expect(hasEffect(effects) {
+            if case .applyPaneTheme(let pid) = $0, pid == paneId { return true }
+            return false
+        }, "should emit applyPaneTheme")
+    }
+
+    test("configLoaded with same config produces no effects") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        _ = update(&model, .remoteSessionStarted(paneId: paneId))
+
+        // Reload with same default config — no change
+        let effects = update(&model, .configLoaded(DanTermConfig.default))
+        try expectEqual(effects.count, 0, "no effects when config unchanged")
     }
 }

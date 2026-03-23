@@ -43,6 +43,32 @@ Like any other terminal, you probably want to grant DanTerm.app these macOS perm
 - Settings -> Privacy & Security -> Full Disk Access
 - Settings -> Privacy & Security -> Developer Tools
 
+## Configuration
+
+DanTerm uses a config file at `~/.config/danterm/config` with the same `key = value`
+format as Ghostty. Open it with **Cmd+,** from the menu bar.
+
+This file is an **overlay** on top of Ghostty's own config (`~/.config/ghostty/config`).
+You can put any Ghostty terminal setting in it (fonts, colors, cursor style, etc.) and
+it will override the Ghostty config. You can also use DanTerm-specific keys listed below.
+
+```
+# Override Ghostty settings for DanTerm
+font-size = 14
+theme = Dracula
+
+# DanTerm-specific settings
+remote-theme = Purplepeter
+```
+
+Reload with **Cmd+Shift+,**. Open the underlying Ghostty config with **Cmd+Option+,**.
+
+### DanTerm-specific keys
+
+| Key | Default | Description |
+| --- | ------- | ----------- |
+| `remote-theme` | `Purplepeter` | Ghostty theme applied to panes during SSH/remote sessions |
+
 ## Non-negotiable features:
 
 - Vertical tab sidebar
@@ -219,6 +245,9 @@ end
 | Toggle Pane Zoom               | ⌘Enter   |
 | New Group                      | ⌘N       |
 | Go to Most Recent Unread Alert | ⇧⌘A      |
+| Open DanTerm Config            | ⌘,       |
+| Open Ghostty Config            | ⌥⌘,      |
+| Reload Config                  | ⇧⌘,      |
 | Quit                           | ⌘Q       |
 
 ## Comparison

@@ -45,6 +45,8 @@ class AppRuntime {
             groups: [GroupModel(id: GroupId(), name: "General")],
             panes: [:]
         )
+        // Load DanTerm config before any tabs are created
+        self.model.config = DanTermConfigParser.loadFromDisk()
     }
 
     func send(_ msg: Msg) {
@@ -614,6 +616,19 @@ class AppRuntime {
         for (paneId, pane) in model.panes where effectiveTheme(for: pane) != nil {
             applyPaneConfig(paneId: paneId)
         }
+    }
+
+    /// Full config reload: Ghostty files → pane theme re-application → DanTerm config.
+    func reloadAllConfig() {
+        ghosttyApp.reloadConfig()
+        reapplyAllPaneThemes()
+        reloadDanTermConfig()
+    }
+
+    /// Re-parse DanTerm-specific config keys and dispatch through the Elm loop.
+    func reloadDanTermConfig() {
+        let config = DanTermConfigParser.loadFromDisk()
+        send(.configLoaded(config))
     }
 
     // MARK: - Theme Browser

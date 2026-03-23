@@ -68,6 +68,9 @@ enum Msg {
     case goToMostRecentAlertPane
     case setShowAllAlerts(Bool)
 
+    // Config
+    case configLoaded(DanTermConfig)
+
     // Lifecycle
     case appBecameActive
     case appResignedActive

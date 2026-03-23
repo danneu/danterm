@@ -112,6 +112,7 @@ struct AppModel: Equatable {
     var lastNotificationTime: [PaneId: [AlertKind: Date]] = [:]
     var searchState: [PaneId: SearchModel] = [:]  // ephemeral — excluded from snapshots
     var showAllAlerts: Bool = false  // ephemeral — excluded from snapshots
+    var config: DanTermConfig = .default  // ephemeral — loaded from disk, not snapshots
 }
 
 // MARK: - Session Lock

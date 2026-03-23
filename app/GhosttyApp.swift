@@ -20,13 +20,23 @@ class GhosttyApp {
     /// Whether scrollbar is enabled based on the current app config.
     var scrollbarEnabled: Bool { Self.readScrollbarEnabled(from: config) }
 
-    /// Create a fresh config by loading default files. Used for both init and reload.
+    /// Create a fresh config by loading default files, then layering the DanTerm overlay.
     private static func loadConfig() -> ghostty_config_t? {
         guard let config = ghostty_config_new() else { return nil }
         ghostty_config_load_default_files(config)
         ghostty_config_load_recursive_files(config)
+        // Layer DanTerm config overlay on top of Ghostty defaults.
+        // No recursive file expansion — DanTerm overlay is flat key=value only.
+        loadDanTermOverlay(into: config)
         ghostty_config_finalize(config)
         return config
+    }
+
+    /// Load the DanTerm config overlay file into an existing ghostty config.
+    private static func loadDanTermOverlay(into config: ghostty_config_t) {
+        let path = DanTermConfigParser.configFilePath()
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        path.withCString { ghostty_config_load_file(config, $0) }
     }
 
     /// Return the path to the Ghostty config file (e.g. ~/.config/ghostty/config).
@@ -66,6 +76,8 @@ class GhosttyApp {
         guard let config = ghostty_config_new() else { return nil }
         ghostty_config_load_default_files(config)
         ghostty_config_load_recursive_files(config)
+        Self.loadDanTermOverlay(into: config)
+        // Theme overlay applied last so per-pane theme colors take priority
         themeURL.path.withCString { ghostty_config_load_file(config, $0) }
         ghostty_config_finalize(config)
         return config

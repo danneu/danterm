@@ -13,6 +13,7 @@ xcrun swiftc -o /tmp/danterm-tests \
     "$SCRIPT_DIR/app/DropZone.swift" \
     "$SCRIPT_DIR/app/ScrollbarMath.swift" \
     "$SCRIPT_DIR/app/ThemeColorParser.swift" \
+    "$SCRIPT_DIR/app/DanTermConfig.swift" \
     "$SCRIPT_DIR"/tests/*.swift
 echo "Running tests..."
 /tmp/danterm-tests

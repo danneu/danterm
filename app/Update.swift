@@ -453,8 +453,23 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
     case .remoteSessionStarted(let paneId):
         guard model.panes[paneId] != nil else { return [] }
         model.panes[paneId]?.isRemote = true
-        model.panes[paneId]?.remoteThemeOverride = "Purplepeter"
+        model.panes[paneId]?.remoteThemeOverride = model.config.remoteTheme
         return [.applyPaneTheme(paneId: paneId)]
+
+    // MARK: - Config
+
+    case .configLoaded(let newConfig):
+        let oldConfig = model.config
+        model.config = newConfig
+        var effects: [Effect] = []
+        // If remote theme changed, update all currently-remote panes
+        if newConfig.remoteTheme != oldConfig.remoteTheme {
+            for (paneId, pane) in model.panes where pane.isRemote {
+                model.panes[paneId]?.remoteThemeOverride = newConfig.remoteTheme
+                effects.append(.applyPaneTheme(paneId: paneId))
+            }
+        }
+        return effects
 
     // MARK: - Export
 
