@@ -8,8 +8,55 @@ enum ThemeBrowserFocusTarget {
     case table
 }
 
+/// Tiny terminal thumbnail: bg-colored rounded rect with "test" in fg and "█" in accent.
+private final class ColorSwatchView: NSView {
+    var colors: (bg: NSColor, fg: NSColor, accent: NSColor) = (.clear, .clear, .clear) {
+        didSet { needsDisplay = true }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let rect = bounds.insetBy(dx: 0, dy: 2)
+
+        // Background rounded rect
+        let path = NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3)
+        colors.bg.setFill()
+        path.fill()
+
+        // "test█" sized to fill the rect, with "test" bold for legibility.
+        let padding: CGFloat = 3
+        let available = rect.width - padding * 2
+        // Find the largest font size that fits within the available width.
+        var fontSize: CGFloat = rect.height
+        var textSize = NSSize.zero
+        var boldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
+        var regularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        while fontSize > 4 {
+            boldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
+            regularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+            let probe = NSMutableAttributedString(string: "test", attributes: [.font: boldFont])
+            probe.append(NSAttributedString(string: "\u{2588}", attributes: [.font: regularFont]))
+            textSize = probe.size()
+            if textSize.width <= available && textSize.height <= rect.height { break }
+            fontSize -= 0.5
+        }
+        let text = NSMutableAttributedString(
+            string: "test",
+            attributes: [.font: boldFont, .foregroundColor: colors.fg]
+        )
+        text.append(NSAttributedString(
+            string: "\u{2588}",
+            attributes: [.font: regularFont, .foregroundColor: colors.accent]
+        ))
+        let textX = rect.midX - textSize.width / 2
+        let textY = rect.midY - textSize.height / 2
+        text.draw(at: NSPoint(x: textX, y: textY))
+    }
+}
+
 /// Theme list cell that follows AppKit's selected/unselected text contrast rules.
 private final class ThemeBrowserCellView: NSTableCellView {
+    var swatchView: ColorSwatchView?
+
     override var backgroundStyle: NSView.BackgroundStyle {
         didSet { updateTextColor() }
     }
@@ -227,18 +274,31 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         } else {
             cell = ThemeBrowserCellView()
             cell.identifier = id
+
+            let swatch = ColorSwatchView()
+            swatch.translatesAutoresizingMaskIntoConstraints = false
+            cell.addSubview(swatch)
+            cell.swatchView = swatch
+
             let text = NSTextField(labelWithString: "")
             text.translatesAutoresizingMaskIntoConstraints = false
             text.font = NSFont.systemFont(ofSize: 12)
             text.lineBreakMode = .byTruncatingTail
             cell.addSubview(text)
             cell.textField = text
+
             NSLayoutConstraint.activate([
+                swatch.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
+                swatch.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                swatch.widthAnchor.constraint(equalToConstant: 50),
+                swatch.heightAnchor.constraint(equalTo: cell.heightAnchor),
                 text.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12),
-                text.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
+                text.trailingAnchor.constraint(equalTo: swatch.leadingAnchor, constant: -4),
                 text.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             ])
         }
+
+        // Configure cell content
         let name = filteredNames[row]
         if name == currentThemeName {
             cell.textField?.stringValue = "\u{2713} \(name)"
@@ -246,6 +306,11 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
             cell.textField?.stringValue = name
         }
         cell.updateTextColor()
+        if let tc = ThemeCatalog.shared.colors[name] {
+            cell.swatchView?.colors = (tc.background, tc.foreground, tc.accent)
+        } else {
+            cell.swatchView?.colors = (.clear, .clear, .clear)
+        }
         return cell
     }
 

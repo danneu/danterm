@@ -24,5 +24,6 @@ app/DragDropInput.swift
 app/DropZone.swift
 app/PaneDragOverlayView.swift
 app/PaneDragCoordinator.swift
+app/ThemeColorParser.swift
 app/ThemeCatalog.swift
 app/ThemeBrowserView.swift
