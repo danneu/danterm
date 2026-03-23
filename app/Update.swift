@@ -632,6 +632,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         return navigateToPane(alert.paneId, in: &model)
 
+    case .setShowAllAlerts(let showAll):
+        model.showAllAlerts = showAll
+        return []
+
     case .confirmTerminate:
         return [.terminate]
 

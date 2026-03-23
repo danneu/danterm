@@ -12,10 +12,13 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
     private let markAllButton = NSButton(title: "Mark All Read", target: nil, action: nil)
     private let emptyLabel = NSTextField(labelWithString: "No alerts")
     private let showAllCheckbox = NSButton(checkboxWithTitle: "Show all", target: nil, action: nil)
-    private var selectedTab: AlertTab = .unread
+
+    private var alertTab: AlertTab {
+        (runtime?.model.showAllAlerts ?? false) ? .history : .unread
+    }
 
     private var displayedAlerts: [AlertModel] {
-        filteredAlerts(runtime?.model.alerts ?? [], tab: selectedTab)
+        filteredAlerts(runtime?.model.alerts ?? [], tab: alertTab)
     }
 
     override func loadView() {
@@ -105,8 +108,7 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
 
     override func viewWillAppear() {
         super.viewWillAppear()
-        selectedTab = .unread
-        showAllCheckbox.state = .off
+        showAllCheckbox.state = (runtime?.model.showAllAlerts ?? false) ? .on : .off
         rebuildRows()
     }
 
@@ -115,7 +117,7 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
         let allAlerts = runtime?.model.alerts ?? []
 
         if displayed.isEmpty {
-            emptyLabel.stringValue = alertsEmptyText(tab: selectedTab)
+            emptyLabel.stringValue = alertsEmptyText(tab: alertTab)
             emptyLabel.isHidden = false
             scrollView.isHidden = true
         } else {
@@ -226,7 +228,7 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
     }
 
     @objc private func showAllToggled() {
-        selectedTab = showAllCheckbox.state == .on ? .history : .unread
+        runtime?.send(.setShowAllAlerts(showAllCheckbox.state == .on))
         rebuildRows()
     }
 

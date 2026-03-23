@@ -111,6 +111,7 @@ struct AppModel: Equatable {
     var alerts: [AlertModel] = []  // newest first, capped at 100
     var lastNotificationTime: [PaneId: [AlertKind: Date]] = [:]
     var searchState: [PaneId: SearchModel] = [:]  // ephemeral — excluded from snapshots
+    var showAllAlerts: Bool = false  // ephemeral — excluded from snapshots
 }
 
 // MARK: - Session Lock

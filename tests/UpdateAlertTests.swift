@@ -449,6 +449,15 @@ func alertTests() {
         try expectEqual(alertsEmptyText(tab: .history), "No alerts")
     }
 
+    test("testSetShowAllAlerts") {
+        var model = makeModel()
+        try expectEqual(model.showAllAlerts, false, "defaults to false")
+        update(&model, .setShowAllAlerts(true))
+        try expectEqual(model.showAllAlerts, true)
+        update(&model, .setShowAllAlerts(false))
+        try expectEqual(model.showAllAlerts, false)
+    }
+
     test("testGoToMostRecentAlertPaneUnzoomsIfNeeded") {
         var model = makeModel()
         createTab(&model)
