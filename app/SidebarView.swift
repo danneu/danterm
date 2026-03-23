@@ -134,6 +134,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
         outlineView.registerForDraggedTypes([SidebarView.tabDragType, SidebarView.groupDragType, paneDragType])
         outlineView.setDraggingSourceOperationMask(.move, forLocal: true)
+        outlineView.target = self
         outlineView.doubleAction = #selector(outlineViewDoubleClicked)
 
         scrollView.documentView = outlineView
