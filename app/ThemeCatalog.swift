@@ -8,6 +8,7 @@ struct ThemeColors {
     let background: NSColor
     let foreground: NSColor
     let accent: NSColor
+    let palette: [NSColor]  // ANSI colors 1-6: red, green, yellow, blue, magenta, cyan
 }
 
 class ThemeCatalog {
@@ -36,7 +37,9 @@ class ThemeCatalog {
             guard let bg = ThemeCatalog.colorFromHex(hex.background),
                   let fg = ThemeCatalog.colorFromHex(hex.foreground),
                   let accent = ThemeCatalog.colorFromHex(hex.accent) else { continue }
-            parsed[name] = ThemeColors(background: bg, foreground: fg, accent: accent)
+            let pal = hex.palette.compactMap { ThemeCatalog.colorFromHex($0) }
+            guard pal.count == 6 else { continue }
+            parsed[name] = ThemeColors(background: bg, foreground: fg, accent: accent, palette: pal)
         }
         colors = parsed
     }

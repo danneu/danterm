@@ -8,25 +8,45 @@ enum ThemeBrowserFocusTarget {
     case table
 }
 
-/// Tiny terminal thumbnail: bg-colored rounded rect with "test" in fg and "█" in accent.
+/// Tiny terminal thumbnail: bg-colored rounded rect with "test█" text in the upper area
+/// and a 6-color ANSI palette bar flush against the bottom edge.
 private final class ColorSwatchView: NSView {
-    var colors: (bg: NSColor, fg: NSColor, accent: NSColor) = (.clear, .clear, .clear) {
+    var colors: (bg: NSColor, fg: NSColor, accent: NSColor, palette: [NSColor]) =
+        (.clear, .clear, .clear, []) {
         didSet { needsDisplay = true }
     }
 
     override func draw(_ dirtyRect: NSRect) {
         let rect = bounds.insetBy(dx: 0, dy: 2)
+        let cornerRadius: CGFloat = 3
+        let barHeight: CGFloat = 3
 
-        // Background rounded rect
-        let path = NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3)
+        // Clip to rounded rect so the palette bar respects the corner radius.
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius).addClip()
+
+        // Background fill
         colors.bg.setFill()
-        path.fill()
+        NSBezierPath.fill(rect)
 
-        // "test█" sized to fill the rect, with "test" bold for legibility.
+        // Palette color bar flush against left/right/bottom edges
+        if colors.palette.count == 6 {
+            let barY = rect.minY
+            let segWidth = rect.width / 6
+            for (i, color) in colors.palette.enumerated() {
+                color.setFill()
+                // Last segment extends to the right edge to avoid rounding gaps.
+                let x = rect.minX + segWidth * CGFloat(i)
+                let w = (i == 5) ? rect.maxX - x : segWidth
+                NSBezierPath.fill(NSRect(x: x, y: barY, width: w, height: barHeight))
+            }
+        }
+
+        // "test█" sized to fill the area above the bar, with "test" bold.
+        let textArea = NSRect(x: rect.minX, y: rect.minY + barHeight, width: rect.width, height: rect.height - barHeight)
         let padding: CGFloat = 3
-        let available = rect.width - padding * 2
-        // Find the largest font size that fits within the available width.
-        var fontSize: CGFloat = rect.height
+        let available = textArea.width - padding * 2
+        var fontSize: CGFloat = textArea.height
         var textSize = NSSize.zero
         var boldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
         var regularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
@@ -36,7 +56,7 @@ private final class ColorSwatchView: NSView {
             let probe = NSMutableAttributedString(string: "test", attributes: [.font: boldFont])
             probe.append(NSAttributedString(string: "\u{2588}", attributes: [.font: regularFont]))
             textSize = probe.size()
-            if textSize.width <= available && textSize.height <= rect.height { break }
+            if textSize.width <= available && textSize.height <= textArea.height { break }
             fontSize -= 0.5
         }
         let text = NSMutableAttributedString(
@@ -47,9 +67,11 @@ private final class ColorSwatchView: NSView {
             string: "\u{2588}",
             attributes: [.font: regularFont, .foregroundColor: colors.accent]
         ))
-        let textX = rect.midX - textSize.width / 2
-        let textY = rect.midY - textSize.height / 2
+        let textX = textArea.midX - textSize.width / 2
+        let textY = textArea.midY - textSize.height / 2
         text.draw(at: NSPoint(x: textX, y: textY))
+
+        NSGraphicsContext.restoreGraphicsState()
     }
 }
 
@@ -307,9 +329,9 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         }
         cell.updateTextColor()
         if let tc = ThemeCatalog.shared.colors[name] {
-            cell.swatchView?.colors = (tc.background, tc.foreground, tc.accent)
+            cell.swatchView?.colors = (tc.background, tc.foreground, tc.accent, tc.palette)
         } else {
-            cell.swatchView?.colors = (.clear, .clear, .clear)
+            cell.swatchView?.colors = (.clear, .clear, .clear, [])
         }
         return cell
     }
