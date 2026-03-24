@@ -65,8 +65,8 @@ Reload with **Cmd+Shift+,**. Open the underlying Ghostty config with **Cmd+Optio
 
 ### DanTerm-specific keys
 
-| Key | Default | Description |
-| --- | ------- | ----------- |
+| Key            | Default       | Description                                               |
+| -------------- | ------------- | --------------------------------------------------------- |
 | `remote-theme` | `Purplepeter` | Ghostty theme applied to panes during SSH/remote sessions |
 
 ## Non-negotiable features:
@@ -81,7 +81,9 @@ Reload with **Cmd+Shift+,**. Open the underlying Ghostty config with **Cmd+Optio
 
 - Tabs can be grouped into collapsible sections
 - Lightweight: Built with AppKit (Swift) on top of ghostty (zig)
-- Remote session integration (ssh, mosh, etc) to make it more obvious when you're on a remote machine
+- Theme browser sidebar lets you change the current pane's theme on the fly
+- Remote session integration (ssh, mosh, etc)
+  - Give remote sessions a custom theme
 - Launch terminal with specific layout/tabs/panes/commands: `--init <model.json>`
 - Dump and restore danterm state from a json file
 - Restore danterm state if it detects non-graceful exit
