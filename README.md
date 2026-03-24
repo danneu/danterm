@@ -4,6 +4,10 @@ A macOS terminal built on ghostty with the behavior I want.
 
 ![DanTerm screenshot](docs/screenshot/screenshot1.png)
 
+*Built-in theme picker sidebar (Cmd+Shift+T):*
+
+![DanTerm theme picker](docs/screenshot/screenshot2.png)
+
 ## Install
 
 Download the latest `.dmg` from [Releases](https://github.com/danneu/danterm/releases/latest).

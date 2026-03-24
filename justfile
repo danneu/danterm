@@ -181,8 +181,25 @@ screenshot:
 
     echo "Saved: $(cd "$(dirname "$outfile")" && pwd)/$(basename "$outfile")"
 
+    # Open theme panel (Cmd+Shift+T) and take screenshot2
+    osascript -e '
+    tell application "System Events"
+        tell process "DanTerm Dev"
+            keystroke "T" using {command down, shift down}
+        end tell
+    end tell
+    '
+    sleep 2
+    outfile2="$output_dir/screenshot2.png"
+    if screencapture -x -l"$wid" "$outfile2"; then
+        echo "Saved: $(cd "$(dirname "$outfile2")" && pwd)/$(basename "$outfile2")"
+    else
+        echo "Failed to capture screenshot2"
+    fi
+
     # Kill the app
     pkill -x "$app_name" 2>/dev/null || true
 
-    # Open the screenshot
+    # Open the screenshots
     open "$outfile"
+    open "$outfile2"
