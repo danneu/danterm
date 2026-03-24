@@ -4,7 +4,7 @@ A macOS terminal built on ghostty with the behavior I want.
 
 ![DanTerm screenshot](docs/screenshot/screenshot1.png)
 
-*Built-in theme picker sidebar (Cmd+Shift+T):*
+_Built-in theme picker sidebar (Cmd+Shift+T):_
 
 ![DanTerm theme picker](docs/screenshot/screenshot2.png)
 
@@ -258,12 +258,18 @@ end
 
 ## Comparison
 
-| Feature       | DanTerm | [cmux](https://github.com/manaflow-ai/cmux) | iTerm2 | Kitty | WezTerm |
-| ------------- | ------- | ------------------------------------------- | ------ | ----- | ------- |
-| Vertical tabs | Yes     | Yes                                         | Yes    | --    | --      |
-| Tab groups    | Yes     | Yes                                         | --     | --    | --      |
-| Fast          | Yes     | Yes                                         | --     | Yes   | Yes     |
-| Dan           | Yes     | --                                          | --     | --    | --      |
+| Feature        | DanTerm | [cmux][cmux] | iTerm2 | Kitty |
+| -------------- | ------- | ------------ | ------ | ----- |
+| Vertical tabs  | Yes     | Yes          | Yes    | --    |
+| Tab groups     | Yes     | Yes          | --     | --    |
+| Fast           | Yes     | Yes          | --     | Yes   |
+| No browser     | Yes     | --           | --     | Yes   |
+| No nested tabs | Yes     | --           | Yes    | Yes   |
+| Dan            | Yes     | --           | --     | --    |
+
+[cmux]: https://github.com/manaflow-ai/cmux
+
+As you can see, DanTerm is the clear winner.
 
 ### iTerm2
 
@@ -277,7 +283,7 @@ I tried these after iTerm, but they have really bad tab systems. I want somethin
 
 ### cmux
 
-Cmux is really good: https://github.com/manaflow-ai/cmux
+Cmux is a really good idea: https://github.com/manaflow-ai/cmux
 
 But it's more complicated than I'd like since it includes a browser, and its panes can contain tabs.
 
