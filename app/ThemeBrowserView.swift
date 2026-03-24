@@ -96,6 +96,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
 
     private let backgroundView: NSVisualEffectView
     private let headerLabel: NSTextField
+    private let resetButton: NSButton
     private let closeButton: NSButton
     private let searchField: NSSearchField
     private let scrollView: NSScrollView
@@ -114,6 +115,13 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         headerLabel = NSTextField(labelWithString: "Themes")
         headerLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         headerLabel.textColor = .labelColor
+
+        // "Reset" clears the DanTerm theme override, reverting to the user's Ghostty config.
+        resetButton = NSButton(title: "Reset", target: nil, action: nil)
+        resetButton.bezelStyle = .inline
+        resetButton.controlSize = .small
+        resetButton.font = NSFont.systemFont(ofSize: 11)
+        resetButton.isHidden = true
 
         closeButton = NSButton()
         closeButton.bezelStyle = .inline
@@ -145,12 +153,14 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
 
         addSubview(backgroundView)
         addSubview(headerLabel)
+        addSubview(resetButton)
         addSubview(closeButton)
         addSubview(searchField)
         addSubview(scrollView)
 
         backgroundView.translatesAutoresizingMaskIntoConstraints = false
         headerLabel.translatesAutoresizingMaskIntoConstraints = false
+        resetButton.translatesAutoresizingMaskIntoConstraints = false
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         searchField.translatesAutoresizingMaskIntoConstraints = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -166,6 +176,9 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
             headerLabel.topAnchor.constraint(equalTo: topAnchor, constant: 8),
             headerLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
 
+            resetButton.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
+            resetButton.trailingAnchor.constraint(equalTo: closeButton.leadingAnchor, constant: -4),
+
             closeButton.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
             closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             closeButton.widthAnchor.constraint(equalToConstant: 16),
@@ -180,6 +193,9 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+
+        resetButton.target = self
+        resetButton.action = #selector(resetTheme)
 
         closeButton.target = self
         closeButton.action = #selector(closeBrowser)
@@ -210,6 +226,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         } else {
             currentThemeName = nil
         }
+        resetButton.isHidden = currentThemeName == nil
         tableView.reloadData()
         selectCurrentThemeRow()
     }
@@ -236,6 +253,17 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
     }
 
     // MARK: - Actions
+
+    /// Clear the DanTerm theme override, reverting to the user's Ghostty config.
+    @objc private func resetTheme() {
+        guard let runtime = runtime,
+              let tab = selectedTab(in: runtime.model) else { return }
+        runtime.send(.setPaneTheme(paneId: tab.focusedPaneId, themeName: nil))
+        currentThemeName = nil
+        resetButton.isHidden = true
+        tableView.deselectAll(nil)
+        tableView.reloadData()
+    }
 
     @objc private func closeBrowser() {
         runtime?.toggleThemeBrowser()
@@ -282,6 +310,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         runtime.send(.setPaneTheme(paneId: tab.focusedPaneId, themeName: name))
         let oldName = currentThemeName
         currentThemeName = name
+        resetButton.isHidden = false
         // Partial reload: update only affected rows so selection is not cleared
         var rows = IndexSet(integer: row)
         if let old = oldName, let idx = filteredNames.firstIndex(of: old) { rows.insert(idx) }
