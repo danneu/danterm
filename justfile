@@ -85,6 +85,19 @@ screenshot:
     init_json="$(pwd)/docs/screenshot/init.json"
     open -a "$app_path" --args --init "$init_json" --restore-commands execute
 
+    # Resize window to exact screenshot dimensions
+    sleep 1
+    osascript -e '
+    tell application "System Events"
+        tell process "DanTerm Dev"
+            tell window 1
+                set position to {100, 100}
+                set size to {1334, 750}
+            end tell
+        end tell
+    end tell
+    '
+
     outfile="$output_dir/screenshot1.png"
     captured=0
 

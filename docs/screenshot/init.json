@@ -23,17 +23,33 @@
           },
           {
             "id": "C1D2E3F4-A1B2-4C3D-9E8F-1A2B3C4D5E6F",
-            "focusedPaneId": "D4E5F6A7-B8C9-4D0E-AF12-3B4C5D6E7F80",
+            "focusedPaneId": "F6A7B8C9-D0E1-4F20-C134-5D6E7F8A91B2",
             "rootNode": {
               "type": "split",
               "direction": "horizontal",
               "first": {
-                "type": "leaf",
-                "paneId": "D4E5F6A7-B8C9-4D0E-AF12-3B4C5D6E7F80"
+                "type": "split",
+                "direction": "vertical",
+                "first": {
+                  "type": "leaf",
+                  "paneId": "D4E5F6A7-B8C9-4D0E-AF12-3B4C5D6E7F80"
+                },
+                "second": {
+                  "type": "leaf",
+                  "paneId": "F6A7B8C9-D0E1-4F20-C134-5D6E7F8A91B2"
+                }
               },
               "second": {
-                "type": "leaf",
-                "paneId": "E5F6A7B8-C9D0-4E1F-B023-4C5D6E7F8A91"
+                "type": "split",
+                "direction": "vertical",
+                "first": {
+                  "type": "leaf",
+                  "paneId": "E5F6A7B8-C9D0-4E1F-B023-4C5D6E7F8A91"
+                },
+                "second": {
+                  "type": "leaf",
+                  "paneId": "A1B2C3D4-E5F6-4A7B-8C9D-0E1F2A3B4C5D"
+                }
               }
             }
           }
@@ -103,11 +119,27 @@
         }
       },
       {
+        "id": "F6A7B8C9-D0E1-4F20-C134-5D6E7F8A91B2",
+        "title": "Terminal",
+        "launch": {
+          "command": "vim README.md",
+          "cwd": "~/world/my-apps/danterm"
+        }
+      },
+      {
         "id": "E5F6A7B8-C9D0-4E1F-B023-4C5D6E7F8A91",
         "title": "Terminal",
         "launch": {
-          "command": "codex 'say cheese'",
+          "command": "ssh dan@silverstone.local",
           "cwd": "~/world"
+        }
+      },
+      {
+        "id": "A1B2C3D4-E5F6-4A7B-8C9D-0E1F2A3B4C5D",
+        "title": "Terminal",
+        "launch": {
+          "command": "lazygit",
+          "cwd": "~/world/my-apps/danterm"
         }
       }
     ],
