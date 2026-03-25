@@ -165,6 +165,30 @@ func alertTests() {
         _ = paneB
     }
 
+    test("testCloseZoomedPaneClearsAlertOnNewlyFocusedPane") {
+        var model = makeModel()
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+
+        // Focus paneA and zoom it
+        update(&model, .paneBecameFirstResponder(paneId: paneA))
+        update(&model, .toggleZoomPane)
+
+        // paneB gets an alert while paneA is zoomed
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneB,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        // Close the zoomed pane — focus should move to paneB and clear its alerts
+        update(&model, .closePane(paneId: paneA))
+        try expect(model.groups[0].tabs[0].focusedPaneId == paneB, "paneB should be focused after closing paneA")
+        try expect(!model.alerts[0].isUnread, "alert on newly focused pane should be marked read")
+    }
+
     test("testClosePaneRemovesAlertsAndCleansUpThrottle") {
         var model = makeModel()
         createTab(&model)

@@ -195,6 +195,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             return update(&model, .closeTab(id: tabId))
         }
 
+        if let next = nextFocus {
+            markAlertsReadForPane(next, in: &model)
+        }
         updateSelectedTab(&model) { tab in
             tab.rootNode = newRoot
             tab.isZoomed = false
