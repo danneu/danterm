@@ -620,6 +620,14 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         colorItem.submenu = colorSubmenu
         menu.addItem(colorItem)
 
+        if let model = currentModel, unreadAlertCount(for: tab, alerts: model.alerts) > 0 {
+            menu.addItem(NSMenuItem.separator())
+            let clearAlertsItem = NSMenuItem(title: "Clear Alerts", action: #selector(contextClearAlerts(_:)), keyEquivalent: "")
+            clearAlertsItem.target = self
+            clearAlertsItem.representedObject = tab.id.rawValue
+            menu.addItem(clearAlertsItem)
+        }
+
         menu.addItem(NSMenuItem.separator())
 
         let closeItem = NSMenuItem(title: "Close Tab", action: #selector(contextCloseTab(_:)), keyEquivalent: "")
@@ -693,6 +701,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     @objc private func contextClearCustomTitle(_ sender: NSMenuItem) {
         guard let rawId = sender.representedObject as? UUID else { return }
         runtime?.send(.renameTab(id: TabId(rawValue: rawId), name: nil))
+    }
+
+    @objc private func contextClearAlerts(_ sender: NSMenuItem) {
+        guard let rawId = sender.representedObject as? UUID else { return }
+        runtime?.send(.clearAlertsForTab(tabId: TabId(rawValue: rawId)))
     }
 
     @objc private func contextCloseTab(_ sender: NSMenuItem) {

@@ -679,6 +679,15 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         return [.rebuildContentView, .reloadSidebar]
 
+    case .clearAlertsForTab(let tabId):
+        let paneIds = paneIdsForTab(tabId, in: model)
+        let hadUnread = model.alerts.contains { $0.isUnread && paneIds.contains($0.paneId) }
+        guard hadUnread else { return [] }
+        for paneId in paneIds {
+            markAlertsReadForPane(paneId, in: &model)
+        }
+        return [.rebuildContentView, .reloadSidebar]
+
     case .confirmTerminate:
         return [.terminate]
 

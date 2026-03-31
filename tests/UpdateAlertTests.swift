@@ -705,6 +705,51 @@ func alertTests() {
         try expectEqual(effects.count, 0, "ackTabAlerts with no unread alerts should be a no-op")
     }
 
+    // MARK: - clearAlertsForTab
+
+    test("testClearAlertsForTabClearsSpecificTab") {
+        var model = makeModel()
+        createTab(&model)
+        let tab1Id = model.groups[0].tabs[0].id
+        let tab1Pane = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model)
+        let tab2Pane = model.groups[0].tabs[1].focusedPaneId
+
+        // Add unread alerts for both tabs
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: tab1Pane,
+            title: "DanTerm", body: "tab1", createdAt: Date(), isUnread: true
+        ), at: 0)
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: tab2Pane,
+            title: "DanTerm", body: "tab2", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        let effects = update(&model, .clearAlertsForTab(tabId: tab1Id))
+        let tab1Alert = model.alerts.first { $0.paneId == tab1Pane }!
+        let tab2Alert = model.alerts.first { $0.paneId == tab2Pane }!
+        try expectEqual(tab1Alert.isUnread, false, "target tab's alerts should be cleared")
+        try expectEqual(tab2Alert.isUnread, true, "other tab's alerts should remain unread")
+        try expect(hasEffect(effects) {
+            if case .rebuildContentView = $0 { return true }
+            return false
+        }, "should rebuild content view")
+        try expect(hasEffect(effects) {
+            if case .reloadSidebar = $0 { return true }
+            return false
+        }, "should reload sidebar")
+    }
+
+    test("testClearAlertsForTabNoopsWhenNoUnreadAlerts") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+
+        let effects = update(&model, .clearAlertsForTab(tabId: tabId))
+        try expectEqual(effects.count, 0, "clearAlertsForTab with no unread alerts should be a no-op")
+    }
+
     test("testGoToMostRecentAlertPaneUnzoomsIfNeeded") {
         var model = makeModel()
         createTab(&model)

@@ -69,6 +69,7 @@ enum Msg {
     case setShowAllAlerts(Bool)
     case ackPaneAlerts
     case ackTabAlerts
+    case clearAlertsForTab(tabId: TabId)
 
     // Config
     case configLoaded(DanTermConfig)
