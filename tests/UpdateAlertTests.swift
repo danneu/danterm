@@ -633,6 +633,78 @@ func alertTests() {
         try expectEqual(effects.count, 0, "ackAlert with no unread alerts should be a no-op")
     }
 
+    // MARK: - ackTabAlerts
+
+    test("testAckTabAlertsClearsAllPaneAlertsInTab") {
+        var model = makeModel()
+        model.config.alertClearMode = .manual
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        // Split to create a second pane
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+        try expect(paneA != paneB, "split should create a new pane")
+
+        // Add unread alerts for both panes
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneB,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        let effects = update(&model, .ackTabAlerts)
+        try expectEqual(model.alerts.filter { $0.isUnread }.count, 0, "all tab alerts should be marked read")
+        try expect(hasEffect(effects) {
+            if case .rebuildContentView = $0 { return true }
+            return false
+        }, "should rebuild content view")
+        try expect(hasEffect(effects) {
+            if case .reloadSidebar = $0 { return true }
+            return false
+        }, "should reload sidebar")
+    }
+
+    test("testAckTabAlertsDoesNotAffectOtherTabs") {
+        var model = makeModel()
+        model.config.alertClearMode = .manual
+        createTab(&model)
+        let tab1PaneId = model.groups[0].tabs[0].focusedPaneId
+
+        // Create a second tab and add alerts to both
+        createTab(&model)
+        let tab2PaneId = model.groups[0].tabs[1].focusedPaneId
+
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: tab1PaneId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: tab2PaneId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        // Select tab 2 and clear its alerts
+        update(&model, .selectTab(id: model.groups[0].tabs[1].id))
+        update(&model, .ackTabAlerts)
+
+        let tab1Alert = model.alerts.first { $0.paneId == tab1PaneId }!
+        let tab2Alert = model.alerts.first { $0.paneId == tab2PaneId }!
+        try expectEqual(tab1Alert.isUnread, true, "other tab's alerts should remain unread")
+        try expectEqual(tab2Alert.isUnread, false, "selected tab's alerts should be cleared")
+    }
+
+    test("testAckTabAlertsNoopsWhenNoUnreadAlerts") {
+        var model = makeModel()
+        createTab(&model)
+
+        let effects = update(&model, .ackTabAlerts)
+        try expectEqual(effects.count, 0, "ackTabAlerts with no unread alerts should be a no-op")
+    }
+
     test("testGoToMostRecentAlertPaneUnzoomsIfNeeded") {
         var model = makeModel()
         createTab(&model)

@@ -72,9 +72,9 @@ Reload with **Cmd+Shift+,**. Open the underlying Ghostty config with **Cmd+Optio
 | Key                | Default       | Description                                               |
 | ------------------ | ------------- | --------------------------------------------------------- |
 | `remote-theme`     | `Purplepeter` | Ghostty theme applied to panes during SSH/remote sessions |
-| `alert-clear-mode` | `focus`       | When to clear pane alerts: `focus` (on pane focus) or `manual` (only via ⌘.) |
+| `alert-clear-mode` | `focus`       | When to clear pane alerts: `focus` (on pane focus) or `manual` (only via ⌘. / ⇧⌘.) |
 
-Set `alert-clear-mode = manual` to make alerts persist until you explicitly dismiss them with ⌘. This is useful when you want alerts to act as a to-do list — focusing a pane to check what triggered the alert won't clear it, so the badge stays visible as a reminder to come back to it.
+Set `alert-clear-mode = manual` to make alerts persist until you explicitly dismiss them with ⌘. (current pane) or ⇧⌘. (all panes in tab). This is useful when you want alerts to act as a to-do list — focusing a pane to check what triggered the alert won't clear it, so the badge stays visible as a reminder to come back to it.
 
 ## Non-negotiable features:
 
@@ -255,6 +255,7 @@ end
 | New Group                      | ⌘N       |
 | Go to Most Recent Unread Alert | ⇧⌘A      |
 | Clear Pane Alerts              | ⌘.       |
+| Clear Tab Alerts               | ⇧⌘.      |
 | Open DanTerm Config            | ⌘,       |
 | Open Ghostty Config            | ⌥⌘,      |
 | Reload Config                  | ⇧⌘,      |

@@ -333,6 +333,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         let ackAlertItem = NSMenuItem(title: "Clear Pane Alerts", action: #selector(ackAlert(_:)), keyEquivalent: ".")
         paneMenu.addItem(ackAlertItem)
 
+        let ackTabAlertsItem = NSMenuItem(title: "Clear Tab Alerts", action: #selector(ackTabAlerts(_:)), keyEquivalent: ".")
+        ackTabAlertsItem.keyEquivalentModifierMask = [.command, .shift]
+        paneMenu.addItem(ackTabAlertsItem)
+
         paneMenu.addItem(NSMenuItem.separator())
         paneMenu.addItem(withTitle: "Close Pane", action: #selector(closePane(_:)), keyEquivalent: "w")
 
@@ -481,6 +485,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
     @objc func ackAlert(_ sender: Any?) {
         runtime.send(.ackAlert)
+    }
+
+    @objc func ackTabAlerts(_ sender: Any?) {
+        runtime.send(.ackTabAlerts)
     }
 
     @objc func quitApp(_ sender: Any?) {
