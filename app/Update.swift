@@ -69,8 +69,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
 
         model.selectedTabId = id
-        // Mark alerts read on the newly focused pane
-        if let tab = selectedTab(in: model) {
+        // Mark alerts read on the newly focused pane (focus mode only)
+        if model.config.alertClearMode == .focus, let tab = selectedTab(in: model) {
             markAlertsReadForPane(tab.focusedPaneId, in: &model)
         }
         effects.append(.rebuildContentView)
@@ -195,7 +195,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             return update(&model, .closeTab(id: tabId))
         }
 
-        if let next = nextFocus {
+        if model.config.alertClearMode == .focus, let next = nextFocus {
             markAlertsReadForPane(next, in: &model)
         }
         updateSelectedTab(&model) { tab in
@@ -283,8 +283,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         if let sgid = sourceGroupId { removeGroupIfEmpty(sgid, from: &model) }
 
-        // Mark alerts read for the moved pane (cross-tab move is a navigation action)
-        markAlertsReadForPane(paneId, in: &model)
+        // Mark alerts read for the moved pane (focus mode only)
+        if model.config.alertClearMode == .focus {
+            markAlertsReadForPane(paneId, in: &model)
+        }
 
         // Build effects: defocus old tab's panes, select target tab, rebuild
         var effects: [Effect] = []
@@ -362,7 +364,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             model.selectedTabId = newTab.id
         }
 
-        markAlertsReadForPane(paneId, in: &model)
+        if model.config.alertClearMode == .focus {
+            markAlertsReadForPane(paneId, in: &model)
+        }
 
         effects.append(.rebuildContentView)
         effects.append(.reloadSidebar)
@@ -414,7 +418,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let oldFocusedId = tab.focusedPaneId
         guard paneId != oldFocusedId else { return [] }
 
-        markAlertsReadForPane(paneId, in: &model)
+        if model.config.alertClearMode == .focus {
+            markAlertsReadForPane(paneId, in: &model)
+        }
         updateSelectedTab(&model) { t in t.focusedPaneId = paneId }
 
         // Update tab title/subtitle from newly focused pane
@@ -653,6 +659,14 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
     case .setShowAllAlerts(let showAll):
         model.showAllAlerts = showAll
         return []
+
+    case .ackAlert:
+        guard let tab = selectedTab(in: model) else { return [] }
+        let paneId = tab.focusedPaneId
+        let hadUnread = model.alerts.contains { $0.paneId == paneId && $0.isUnread }
+        guard hadUnread else { return [] }
+        markAlertsReadForPane(paneId, in: &model)
+        return [.rebuildContentView, .reloadSidebar]
 
     case .confirmTerminate:
         return [.terminate]

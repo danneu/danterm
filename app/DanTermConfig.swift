@@ -4,9 +4,16 @@
 // (listed here) are parsed by DanTerm itself.
 import Foundation
 
+enum AlertClearMode: String, Equatable {
+    case focus   // auto-clear alerts when pane gains focus (default)
+    case manual  // require explicit Cmd+. to clear
+}
+
 struct DanTermConfig: Equatable {
     /// Theme applied to panes during SSH/remote sessions.
     var remoteTheme: String = "Purplepeter"
+    /// When alerts are cleared: on pane focus (.focus) or only via Cmd+. (.manual).
+    var alertClearMode: AlertClearMode = .focus
 
     static let `default` = DanTermConfig()
 }
@@ -44,6 +51,12 @@ enum DanTermConfigParser {
             switch key {
             case "remote-theme":
                 if !value.isEmpty { config.remoteTheme = value }
+            case "alert-clear-mode":
+                switch value {
+                case "focus": config.alertClearMode = .focus
+                case "manual": config.alertClearMode = .manual
+                default: break
+                }
             default:
                 break  // Ghostty keys and unknown keys silently ignored
             }

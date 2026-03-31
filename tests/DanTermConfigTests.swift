@@ -58,4 +58,24 @@ func danTermConfigTests() {
         let config = DanTermConfigParser.parse(content: "remote-theme = Solarized Light")
         try expectEqual(config.remoteTheme, "Solarized Light")
     }
+
+    test("parse alert-clear-mode focus") {
+        let config = DanTermConfigParser.parse(content: "alert-clear-mode = focus")
+        try expectEqual(config.alertClearMode, .focus)
+    }
+
+    test("parse alert-clear-mode manual") {
+        let config = DanTermConfigParser.parse(content: "alert-clear-mode = manual")
+        try expectEqual(config.alertClearMode, .manual)
+    }
+
+    test("parse invalid alert-clear-mode keeps default") {
+        let config = DanTermConfigParser.parse(content: "alert-clear-mode = bogus")
+        try expectEqual(config.alertClearMode, .focus)
+    }
+
+    test("parse empty alert-clear-mode keeps default") {
+        let config = DanTermConfigParser.parse(content: "alert-clear-mode = ")
+        try expectEqual(config.alertClearMode, .focus)
+    }
 }

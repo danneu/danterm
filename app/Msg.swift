@@ -67,6 +67,7 @@ enum Msg {
     case activateAlert(alertId: AlertId)
     case goToMostRecentAlertPane
     case setShowAllAlerts(Bool)
+    case ackAlert
 
     // Config
     case configLoaded(DanTermConfig)

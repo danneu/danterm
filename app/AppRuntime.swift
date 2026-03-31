@@ -845,7 +845,8 @@ class AppRuntime {
             let (title, cwd) = paneToolbarText(for: wrapper.paneId, in: model)
             let progress = model.panes[wrapper.paneId]?.progress
             let isRemote = model.panes[wrapper.paneId]?.isRemote ?? false
-            wrapper.updateToolbar(title: title, cwd: cwd, progress: progress, isRemote: isRemote)
+            let alertCount = model.alerts.count { $0.paneId == wrapper.paneId && $0.isUnread }
+            wrapper.updateToolbar(title: title, cwd: cwd, progress: progress, isRemote: isRemote, unreadAlertCount: alertCount)
         }
     }
 
@@ -854,7 +855,8 @@ class AppRuntime {
         let (title, cwd) = paneToolbarText(for: paneId, in: model)
         let progress = model.panes[paneId]?.progress
         let isRemote = model.panes[paneId]?.isRemote ?? false
-        findPaneWrapper(for: paneId, in: contentArea)?.updateToolbar(title: title, cwd: cwd, progress: progress, isRemote: isRemote)
+        let alertCount = model.alerts.count { $0.paneId == paneId && $0.isUnread }
+        findPaneWrapper(for: paneId, in: contentArea)?.updateToolbar(title: title, cwd: cwd, progress: progress, isRemote: isRemote, unreadAlertCount: alertCount)
     }
 
     private func findPaneWrapper(for paneId: PaneId, in view: NSView) -> PaneWrapperView? {

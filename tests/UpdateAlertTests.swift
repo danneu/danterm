@@ -482,6 +482,132 @@ func alertTests() {
         try expectEqual(model.showAllAlerts, false)
     }
 
+    // MARK: - alert-clear-mode = manual
+
+    test("testSelectTabDoesNotClearAlertsInManualMode") {
+        var model = makeModel()
+        model.config.alertClearMode = .manual
+        createTab(&model)
+        let tabAId = model.groups[0].tabs[0].id
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model)
+
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        update(&model, .selectTab(id: tabAId))
+        try expectEqual(model.alerts[0].isUnread, true, "manual mode: selecting tab should NOT mark alerts read")
+    }
+
+    test("testPaneBecameFirstResponderDoesNotClearAlertsInManualMode") {
+        var model = makeModel()
+        model.config.alertClearMode = .manual
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .splitPane(direction: .horizontal))
+
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        update(&model, .paneBecameFirstResponder(paneId: paneA))
+        try expectEqual(model.alerts[0].isUnread, true, "manual mode: focusing pane should NOT mark alerts read")
+    }
+
+    test("testCloseZoomedPaneDoesNotClearAlertsInManualMode") {
+        var model = makeModel()
+        model.config.alertClearMode = .manual
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .paneBecameFirstResponder(paneId: paneA))
+        update(&model, .toggleZoomPane)
+
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneB,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        update(&model, .closePane(paneId: paneA))
+        try expectEqual(model.alerts[0].isUnread, true, "manual mode: closePane should NOT clear alerts on newly focused pane")
+    }
+
+    test("testMovePaneToTabDoesNotClearAlertsInManualMode") {
+        var model = makeModel()
+        model.config.alertClearMode = .manual
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model)
+        let tab2Id = model.groups[0].tabs[1].id
+
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
+        try expectEqual(model.alerts[0].isUnread, true, "manual mode: movePaneToTab should NOT clear alerts")
+    }
+
+    test("testMovePaneToNewTabDoesNotClearAlertsInManualMode") {
+        var model = makeModel()
+        model.config.alertClearMode = .manual
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .splitPane(direction: .horizontal))
+        let groupId = model.groups[0].id
+
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 1))
+        try expectEqual(model.alerts[0].isUnread, true, "manual mode: movePaneToNewTab should NOT clear alerts")
+    }
+
+    // MARK: - ackAlert
+
+    test("testAckAlertClearsFocusedPaneAlerts") {
+        var model = makeModel()
+        model.config.alertClearMode = .manual
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        let effects = update(&model, .ackAlert)
+        try expectEqual(model.alerts[0].isUnread, false, "ackAlert should mark focused pane's alerts read")
+        try expect(hasEffect(effects) {
+            if case .rebuildContentView = $0 { return true }
+            return false
+        }, "should rebuild content view")
+        try expect(hasEffect(effects) {
+            if case .reloadSidebar = $0 { return true }
+            return false
+        }, "should reload sidebar")
+    }
+
+    test("testAckAlertNoopsWhenNoUnreadAlerts") {
+        var model = makeModel()
+        createTab(&model)
+
+        let effects = update(&model, .ackAlert)
+        try expectEqual(effects.count, 0, "ackAlert with no unread alerts should be a no-op")
+    }
+
     test("testGoToMostRecentAlertPaneUnzoomsIfNeeded") {
         var model = makeModel()
         createTab(&model)

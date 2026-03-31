@@ -330,6 +330,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         goToAlert.keyEquivalentModifierMask = [.command, .shift]
         paneMenu.addItem(goToAlert)
 
+        let ackAlertItem = NSMenuItem(title: "Clear Pane Alerts", action: #selector(ackAlert(_:)), keyEquivalent: ".")
+        paneMenu.addItem(ackAlertItem)
+
         paneMenu.addItem(NSMenuItem.separator())
         paneMenu.addItem(withTitle: "Close Pane", action: #selector(closePane(_:)), keyEquivalent: "w")
 
@@ -474,6 +477,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
     @objc func goToMostRecentAlertPane(_ sender: Any?) {
         runtime.send(.goToMostRecentAlertPane)
+    }
+
+    @objc func ackAlert(_ sender: Any?) {
+        runtime.send(.ackAlert)
     }
 
     @objc func quitApp(_ sender: Any?) {

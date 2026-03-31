@@ -15,8 +15,9 @@ class PaneWrapperView: NSView {
     // Search overlay
     private(set) var searchOverlay: SearchOverlayView?
 
-    // Leading accessories stack: [remoteAccessory?, progressIndicator?, toolbarLabel]
+    // Leading accessories stack: [alertBadge?, remoteAccessory?, progressIndicator?, toolbarLabel]
     private let leadingStack: NSStackView
+    private let alertBadge: NSTextField
     private let remoteAccessory: NSView
     private let remoteIcon: NSImageView
     private let progressIndicator: ProgressIndicatorView
@@ -30,6 +31,7 @@ class PaneWrapperView: NSView {
         self.isZoomed = isZoomed
         self.hasSplits = hasSplits
         self.runtime = runtime
+        self.alertBadge = NSTextField.makeBadge()
         self.progressIndicator = ProgressIndicatorView()
         self.remoteAccessory = NSView()
         self.remoteIcon = NSImageView()
@@ -115,11 +117,12 @@ class PaneWrapperView: NSView {
         toolbarLabel.lineBreakMode = .byTruncatingMiddle
         toolbarLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        // Leading stack: arranges [remoteAccessory, progressIndicator, label] horizontally
+        // Leading stack: arranges [alertBadge, remoteAccessory, progressIndicator, label] horizontally
         leadingStack.translatesAutoresizingMaskIntoConstraints = false
         leadingStack.orientation = .horizontal
         leadingStack.spacing = 4
         leadingStack.alignment = .centerY
+        leadingStack.addArrangedSubview(alertBadge)
         leadingStack.addArrangedSubview(remoteAccessory)
         leadingStack.addArrangedSubview(progressIndicator)
         leadingStack.addArrangedSubview(toolbarLabel)
@@ -197,10 +200,11 @@ class PaneWrapperView: NSView {
         fatalError("init(coder:) not implemented")
     }
 
-    func updateToolbar(title: String, cwd: String?, progress: ProgressState? = nil, isRemote: Bool = false) {
+    func updateToolbar(title: String, cwd: String?, progress: ProgressState? = nil, isRemote: Bool = false, unreadAlertCount: Int = 0) {
         toolbarLabel.stringValue = formatToolbarLabel(title: title, cwd: cwd)
         applyProgressState(progress)
         remoteAccessory.isHidden = !isRemote
+        alertBadge.updateBadge(count: unreadAlertCount)
     }
 
     private func applyProgressState(_ state: ProgressState?) {
