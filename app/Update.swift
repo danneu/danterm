@@ -641,8 +641,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             }
             return [.rebuildContentView, .reloadSidebar, .dismissAlertsPopover]
         }
-        // Mark read
-        if let idx = model.alerts.firstIndex(where: { $0.id == alertId }) {
+        // Mark read (unless manual mode — user must ack explicitly)
+        if model.config.alertClearMode != .manual,
+           let idx = model.alerts.firstIndex(where: { $0.id == alertId }) {
             model.alerts[idx].isUnread = false
         }
         var effects = navigateToPane(alert.paneId, in: &model)

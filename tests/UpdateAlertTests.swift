@@ -78,6 +78,31 @@ func alertTests() {
         }, "should dismiss popover")
     }
 
+    test("testActivateAlertDoesNotMarkReadInManualMode") {
+        var model = makeModel()
+        model.config.alertClearMode = .manual
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+
+        // Switch to second tab
+        createTab(&model)
+
+        let alertId = AlertId()
+        model.alerts.insert(AlertModel(
+            id: alertId, kind: .bell, paneId: paneId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        let effects = update(&model, .activateAlert(alertId: alertId))
+        try expectEqual(model.selectedTabId, tabId, "should still navigate to alert's tab")
+        try expectEqual(model.alerts[0].isUnread, true, "manual mode: activateAlert should NOT mark alert read")
+        try expect(hasEffect(effects) {
+            if case .makeFirstResponder(let pid) = $0, pid == paneId { return true }
+            return false
+        }, "should still focus alert's pane")
+    }
+
     test("testActivateStaleAlertMarksReadButNoNavigation") {
         var model = makeModel()
         createTab(&model)
