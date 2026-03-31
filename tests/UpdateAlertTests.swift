@@ -600,7 +600,7 @@ func alertTests() {
         try expectEqual(model.alerts[0].isUnread, true, "manual mode: movePaneToNewTab should NOT clear alerts")
     }
 
-    // MARK: - ackAlert
+    // MARK: - ackPaneAlerts
 
     test("testAckAlertClearsFocusedPaneAlerts") {
         var model = makeModel()
@@ -613,8 +613,8 @@ func alertTests() {
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .ackAlert)
-        try expectEqual(model.alerts[0].isUnread, false, "ackAlert should mark focused pane's alerts read")
+        let effects = update(&model, .ackPaneAlerts)
+        try expectEqual(model.alerts[0].isUnread, false, "ackPaneAlerts should mark focused pane's alerts read")
         try expect(hasEffect(effects) {
             if case .rebuildContentView = $0 { return true }
             return false
@@ -629,8 +629,8 @@ func alertTests() {
         var model = makeModel()
         createTab(&model)
 
-        let effects = update(&model, .ackAlert)
-        try expectEqual(effects.count, 0, "ackAlert with no unread alerts should be a no-op")
+        let effects = update(&model, .ackPaneAlerts)
+        try expectEqual(effects.count, 0, "ackPaneAlerts with no unread alerts should be a no-op")
     }
 
     // MARK: - ackTabAlerts
