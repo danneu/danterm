@@ -331,12 +331,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         goToAlert.keyEquivalentModifierMask = [.command, .shift]
         paneMenu.addItem(goToAlert)
 
-        let ackAlertItem = NSMenuItem(title: "Clear Pane Alerts", action: #selector(ackPaneAlerts(_:)), keyEquivalent: ".")
-        paneMenu.addItem(ackAlertItem)
-
         let ackTabAlertsItem = NSMenuItem(title: "Clear Tab Alerts", action: #selector(ackTabAlerts(_:)), keyEquivalent: ".")
-        ackTabAlertsItem.keyEquivalentModifierMask = [.command, .shift]
         paneMenu.addItem(ackTabAlertsItem)
+
+        let ackAlertItem = NSMenuItem(title: "Clear Pane Alerts", action: #selector(ackPaneAlerts(_:)), keyEquivalent: ".")
+        ackAlertItem.keyEquivalentModifierMask = [.command, .shift]
+        paneMenu.addItem(ackAlertItem)
 
         paneMenu.addItem(NSMenuItem.separator())
         paneMenu.addItem(withTitle: "Close Pane", action: #selector(closePane(_:)), keyEquivalent: "w")

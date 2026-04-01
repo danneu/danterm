@@ -6,13 +6,13 @@ import Foundation
 
 enum AlertClearMode: String, Equatable {
     case focus   // auto-clear alerts when pane gains focus (default)
-    case manual  // require explicit Cmd+. to clear
+    case manual  // require explicit Cmd+. (tab) or Cmd+Shift+. (pane) to clear
 }
 
 struct DanTermConfig: Equatable {
     /// Theme applied to panes during SSH/remote sessions.
     var remoteTheme: String = "Purplepeter"
-    /// When alerts are cleared: on pane focus (.focus) or only via Cmd+. (.manual).
+    /// When alerts are cleared: on pane focus (.focus) or only via Cmd+./Cmd+Shift+. (.manual).
     var alertClearMode: AlertClearMode = .focus
 
     static let `default` = DanTermConfig()
