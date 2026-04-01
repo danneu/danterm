@@ -616,6 +616,11 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         guard let tab = tabForPane(paneId, in: model) else { return [] }
         let paneTitle = model.panes[paneId]?.title ?? "Terminal"
 
+        // Hack: ack previous alerts so each pane has at most 1 unread alert.
+        // This keeps pane badges boolean and tab badges count panes-with-alerts
+        // rather than total alert volume. May replace with a better system later.
+        markAlertsReadForPane(paneId, in: &model)
+
         let alert = AlertModel(
             id: AlertId(), kind: .bell, paneId: paneId,
             title: "DanTerm", body: paneTitle, createdAt: Date(), isUnread: true
@@ -641,6 +646,11 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
 
         guard let tab = tabForPane(paneId, in: model) else { return [] }
+
+        // Hack: ack previous alerts so each pane has at most 1 unread alert.
+        // This keeps pane badges boolean and tab badges count panes-with-alerts
+        // rather than total alert volume. May replace with a better system later.
+        markAlertsReadForPane(paneId, in: &model)
 
         let alert = AlertModel(
             id: AlertId(), kind: .desktopNotification, paneId: paneId,
