@@ -194,4 +194,9 @@ jobs:
         if: ${{ steps.package_pr.outputs.pull-request-number != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh pr merge --auto --squash "${{ steps.package_pr.outputs.pull-request-number }}"
+        # --auto tells GitHub to merge once required checks pass.
+        # If the PR is already clean (no pending checks), GitHub rejects --auto,
+        # so we fall back to an immediate merge.
+        run: |
+          gh pr merge --auto --squash "${{ steps.package_pr.outputs.pull-request-number }}" \
+            || gh pr merge --squash "${{ steps.package_pr.outputs.pull-request-number }}"
