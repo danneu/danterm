@@ -31,6 +31,7 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
         )
         title = "Preferences"
         isReleasedWhenClosed = false
+        level = .normal  // don't float above modal dialogs
         delegate = self
         buildUI()
         center()
