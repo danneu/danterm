@@ -23,6 +23,7 @@ class AppRuntime {
     weak var chromeView: WindowChromeView?
     var alertsPopover: NSPopover?
     private var themeBrowserView: ThemeBrowserView?
+    private var preferencesPanel: PreferencesPanel?
     private var dragCoordinator: PaneDragCoordinator?
     private var replayFiles: [PaneId: URL] = [:]
     private static let replayDirectoryName = "danterm-scrollback"
@@ -242,6 +243,25 @@ class AppRuntime {
 
         case .applyPaneTheme(let paneId):
             applyPaneConfig(paneId: paneId)
+
+        case .saveDanTermConfigKey(let key, let value):
+            let path = DanTermConfigParser.configFilePath()
+            let url = URL(fileURLWithPath: path)
+            let fm = FileManager.default
+            let dir = url.deletingLastPathComponent().path
+            if !fm.fileExists(atPath: dir) {
+                try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            }
+            if !fm.fileExists(atPath: path) {
+                let seed = "# DanTerm config\n"
+                fm.createFile(atPath: path, contents: seed.data(using: .utf8))
+            }
+            let existing = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+            let updated = DanTermConfigWriter.setKey(key, value: value, in: existing)
+            try? updated.write(to: url, atomically: true, encoding: .utf8)
+
+        case .syncPreferencesPanel:
+            preferencesPanel?.syncFromConfig(model.config)
 
         case .scheduleCheckpoint:
             scheduleDebouncedCheckpoint()
@@ -631,6 +651,20 @@ class AppRuntime {
         send(.configLoaded(config))
     }
 
+    // MARK: - Preferences Panel
+
+    /// Show or re-focus the preferences panel. Created lazily on first call.
+    func showPreferencesPanel() {
+        if let panel = preferencesPanel {
+            panel.syncFromConfig(model.config)
+            panel.makeKeyAndOrderFront(nil)
+            return
+        }
+        let panel = PreferencesPanel(config: model.config, runtime: self)
+        preferencesPanel = panel
+        panel.makeKeyAndOrderFront(nil)
+    }
+
     // MARK: - Theme Browser
 
     /// Toggle the theme browser panel on the right side of the content area.
@@ -736,6 +770,8 @@ class AppRuntime {
         cancelPaneDrag()
         alertsPopover?.performClose(nil)
         alertsPopover = nil
+        preferencesPanel?.close()
+        preferencesPanel = nil
 
         for paneId in Array(surfaces.keys) {
             cleanupReplayFile(for: paneId)

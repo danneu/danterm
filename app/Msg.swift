@@ -73,6 +73,8 @@ enum Msg {
 
     // Config
     case configLoaded(DanTermConfig)
+    case setAlertClearMode(AlertClearMode)
+    case setRemoteTheme(String)
 
     // Lifecycle
     case appBecameActive

@@ -470,13 +470,37 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
     case .configLoaded(let newConfig):
         let oldConfig = model.config
         model.config = newConfig
-        var effects: [Effect] = []
+        var effects: [Effect] = [.syncPreferencesPanel]
         // If remote theme changed, update all currently-remote panes
         if newConfig.remoteTheme != oldConfig.remoteTheme {
             for (paneId, pane) in model.panes where pane.isRemote {
                 model.panes[paneId]?.remoteThemeOverride = newConfig.remoteTheme
                 effects.append(.applyPaneTheme(paneId: paneId))
             }
+        }
+        return effects
+
+    case .setAlertClearMode(let mode):
+        guard mode != model.config.alertClearMode else { return [] }
+        model.config.alertClearMode = mode
+        return [.saveDanTermConfigKey(key: "alert-clear-mode", value: mode.rawValue)]
+
+    case .setRemoteTheme(let rawTheme):
+        // Canonicalize: trim whitespace, fall back to default if empty.
+        let trimmed = rawTheme.trimmingCharacters(in: .whitespaces)
+        let resolved = trimmed.isEmpty ? DanTermConfig.default.remoteTheme : trimmed
+        let needsUISync = (rawTheme != resolved)
+        guard resolved != model.config.remoteTheme else {
+            return needsUISync ? [.syncPreferencesPanel] : []
+        }
+        model.config.remoteTheme = resolved
+        var effects: [Effect] = [
+            .saveDanTermConfigKey(key: "remote-theme", value: resolved),
+        ]
+        if needsUISync { effects.append(.syncPreferencesPanel) }
+        for (paneId, pane) in model.panes where pane.isRemote {
+            model.panes[paneId]?.remoteThemeOverride = resolved
+            effects.append(.applyPaneTheme(paneId: paneId))
         }
         return effects
 

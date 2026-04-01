@@ -64,3 +64,34 @@ enum DanTermConfigParser {
         return config
     }
 }
+
+/// Surgically updates a single key in config file content, preserving all other lines.
+enum DanTermConfigWriter {
+    /// Replace the last occurrence of `key = ...` with `key = value`, or append if absent.
+    /// Comments, blank lines, and Ghostty keys are preserved verbatim.
+    static func setKey(_ key: String, value: String, in content: String) -> String {
+        var lines = content.components(separatedBy: "\n")
+        // Find the last non-comment line matching this key.
+        var lastIndex: Int? = nil
+        for (i, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
+            guard let eqIndex = trimmed.firstIndex(of: "=") else { continue }
+            let lineKey = trimmed[trimmed.startIndex..<eqIndex].trimmingCharacters(in: .whitespaces)
+            if lineKey == key { lastIndex = i }
+        }
+        let newLine = "\(key) = \(value)"
+        if let idx = lastIndex {
+            lines[idx] = newLine
+        } else {
+            // Append. If content doesn't end with a newline, the last split element is "".
+            // Insert before that trailing empty element to avoid a double blank line.
+            if content.hasSuffix("\n") {
+                lines.insert(newLine, at: lines.count - 1)
+            } else {
+                lines.append(newLine)
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+}

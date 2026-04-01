@@ -34,6 +34,10 @@ enum Effect {
     // Theme
     case applyPaneTheme(paneId: PaneId)
 
+    // Config persistence
+    case saveDanTermConfigKey(key: String, value: String)
+    case syncPreferencesPanel
+
     // Persistence — triggers a debounced write of the model snapshot to disk.
     // Returned by state-mutating update() branches so the recovery file stays current.
     case scheduleCheckpoint

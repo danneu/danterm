@@ -28,3 +28,4 @@ app/ThemeColorParser.swift
 app/ThemeCatalog.swift
 app/ThemeBrowserView.swift
 app/DanTermConfig.swift
+app/PreferencesPanel.swift
