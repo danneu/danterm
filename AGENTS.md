@@ -200,6 +200,7 @@ See [docs/ci.md](docs/ci.md) for details on secrets, signing, and troubleshootin
 
 - [docs/scaling.md](docs/scaling.md) — Display scaling (HiDPI/Retina), content scale invariants, zero-frame guards
 - [docs/ci.md](docs/ci.md) — CI/CD pipeline, code signing, notarization, troubleshooting
+- [docs/upgrading-ghostty.md](docs/upgrading-ghostty.md) — Upgrading Ghostty version, CI cache
 
 ## GitHub API
 

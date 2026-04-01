@@ -3,6 +3,9 @@ name: CI
 on:
   pull_request:
 
+env:
+  GHOSTTY_TAG: v1.3.0
+
 jobs:
   build:
     runs-on: macos-26
@@ -15,7 +18,7 @@ jobs:
 
       - name: Clone Ghostty source
         run: |
-          git clone --depth 1 --branch v1.3.0 https://github.com/ghostty-org/ghostty.git .ghostty-src
+          git clone --depth 1 --branch ${{ env.GHOSTTY_TAG }} https://github.com/ghostty-org/ghostty.git .ghostty-src
 
       - name: Cache GhosttyKit
         id: cache-ghosttykit
@@ -24,7 +27,7 @@ jobs:
           path: |
             lib/GhosttyKit.xcframework
             lib/ghostty-themes
-          key: ghosttykit-v2-v1.3.0-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
+          key: ghosttykit-v2-${{ env.GHOSTTY_TAG }}-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
 
       - name: Build GhosttyKit
         if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
@@ -58,7 +61,7 @@ jobs:
 
       - name: Clone Ghostty source
         run: |
-          git clone --depth 1 --branch v1.3.0 https://github.com/ghostty-org/ghostty.git .ghostty-src
+          git clone --depth 1 --branch ${{ env.GHOSTTY_TAG }} https://github.com/ghostty-org/ghostty.git .ghostty-src
 
       - name: Cache GhosttyKit
         id: cache-ghosttykit
@@ -67,7 +70,7 @@ jobs:
           path: |
             lib/GhosttyKit.xcframework
             lib/ghostty-themes
-          key: ghosttykit-v2-v1.3.0-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
+          key: ghosttykit-v2-${{ env.GHOSTTY_TAG }}-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
 
       - name: Build GhosttyKit
         if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
