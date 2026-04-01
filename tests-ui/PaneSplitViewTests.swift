@@ -7,6 +7,7 @@ struct UITestRunner {
         let _ = NSApplication.shared
 
         paneSplitViewTests()
+        sidebarBadgeTests()
 
         print("\n\(uiTotal - uiFailures)/\(uiTotal) passed")
         if uiFailures > 0 { exit(1) }
@@ -15,10 +16,10 @@ struct UITestRunner {
 
 // MARK: - Test Harness
 
-private var uiFailures = 0
-private var uiTotal = 0
+var uiFailures = 0
+var uiTotal = 0
 
-private func uiTest(_ name: String, _ body: () throws -> Void) {
+func uiTest(_ name: String, _ body: () throws -> Void) {
     uiTotal += 1
     do {
         try body()
@@ -32,11 +33,11 @@ private func uiTest(_ name: String, _ body: () throws -> Void) {
     }
 }
 
-private struct UITestFailure: Error {
+struct UITestFailure: Error {
     let message: String
 }
 
-private func uiExpect(_ condition: Bool, _ message: String = "assertion failed", file: String = #file, line: Int = #line) throws {
+func uiExpect(_ condition: Bool, _ message: String = "assertion failed", file: String = #file, line: Int = #line) throws {
     guard condition else { throw UITestFailure(message: "\(message) (\(file):\(line))") }
 }
 

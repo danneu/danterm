@@ -78,6 +78,29 @@ class SidebarOutlineView: NSOutlineView {
         return frame
     }
 
+    /// Returns the tab whose alert badge contains `point` (in outline-view coords), or nil.
+    func tabForBadgeHit(at point: NSPoint) -> TabModel? {
+        let clickedRow = row(at: point)
+        guard clickedRow >= 0,
+              let sidebarItem = item(atRow: clickedRow) as? SidebarItem,
+              case .tab(let tab) = sidebarItem.kind,
+              let cell = view(atColumn: 0, row: clickedRow, makeIfNecessary: false),
+              let badge = visibleAlertBadge(in: cell)
+        else { return nil }
+        let badgePoint = badge.convert(point, from: self)
+        return badge.bounds.contains(badgePoint) ? tab : nil
+    }
+
+    /// Left-clicking the alert badge clears alerts for that tab.
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        if let tab = tabForBadgeHit(at: point) {
+            sidebarView?.runtime?.send(.clearAlertsForTab(tabId: tab.id))
+            return
+        }
+        super.mouseDown(with: event)
+    }
+
 override var acceptsFirstResponder: Bool { false }
 }
 

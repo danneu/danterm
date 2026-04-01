@@ -8,7 +8,10 @@ xcrun swiftc -o /tmp/danterm-ui-tests \
     "$SCRIPT_DIR/app/ModelOperations.swift" \
     "$SCRIPT_DIR/app/Msg.swift" \
     "$SCRIPT_DIR/app/Effect.swift" \
+    "$SCRIPT_DIR/app/DanTermConfig.swift" \
+    "$SCRIPT_DIR/app/BadgeLabel.swift" \
     "$SCRIPT_DIR/app/PaneSplitView.swift" \
+    "$SCRIPT_DIR/tests-ui/SidebarBadgeTests.swift" \
     "$SCRIPT_DIR/tests-ui/PaneSplitViewTests.swift" \
     -framework Cocoa
 echo "Running UI tests..."
