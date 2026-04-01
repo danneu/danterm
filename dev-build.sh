@@ -41,7 +41,8 @@ rm -rf "$APP_PATH"
 mkdir -p "$APP_PATH/Contents/MacOS"
 
 echo "Compiling..."
-xcrun swiftc -O \
+# -Onone skips optimization for faster dev builds (use -O for release).
+xcrun swiftc -Onone \
     -o "$APP_PATH/Contents/MacOS/DanTerm Dev" \
     "${SWIFT_FILES[@]}" \
     -I "$MACOS_DIR/Headers" \
