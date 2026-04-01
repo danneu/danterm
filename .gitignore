@@ -7,3 +7,8 @@ lib/
 # Dev build output
 .build/
 /result
+
+# SwiftPM
+.spm-build/
+.swiftpm/
+Package.resolved

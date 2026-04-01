@@ -18,46 +18,15 @@ if [ ! -d "$LIB_DIR/GhosttyKit.xcframework" ]; then
     exit 1
 fi
 
-# Find the macOS slice of the xcframework
-MACOS_DIR="$LIB_DIR/GhosttyKit.xcframework/macos-arm64_x86_64"
-if [ ! -d "$MACOS_DIR" ]; then
-    MACOS_DIR="$LIB_DIR/GhosttyKit.xcframework/macos-arm64"
-fi
-if [ ! -d "$MACOS_DIR" ]; then
-    echo "Error: Could not find macOS slice in XCFramework"
-    ls "$LIB_DIR/GhosttyKit.xcframework/"
-    exit 1
-fi
-
-# Read Swift source files from canonical list
-SWIFT_FILES=()
-while IFS= read -r line; do
-    [[ -z "$line" || "$line" == \#* ]] && continue
-    SWIFT_FILES+=("$SCRIPT_DIR/$line")
-done < "$SCRIPT_DIR/swift-sources.txt"
+# Build with SwiftPM (incremental — only recompiles changed files).
+echo "Compiling..."
+swift build --package-path "$SCRIPT_DIR" --build-path "$SCRIPT_DIR/.spm-build"
+BIN_PATH=$(swift build --package-path "$SCRIPT_DIR" --build-path "$SCRIPT_DIR/.spm-build" --show-bin-path)
 
 # Build app bundle
 rm -rf "$APP_PATH"
 mkdir -p "$APP_PATH/Contents/MacOS"
-
-echo "Compiling..."
-# -Onone skips optimization for faster dev builds (use -O for release).
-xcrun swiftc -Onone \
-    -o "$APP_PATH/Contents/MacOS/DanTerm Dev" \
-    "${SWIFT_FILES[@]}" \
-    -I "$MACOS_DIR/Headers" \
-    -Xcc -fmodule-map-file="$MACOS_DIR/Headers/module.modulemap" \
-    "$MACOS_DIR/libghostty.a" \
-    -framework Cocoa \
-    -framework Metal \
-    -framework MetalKit \
-    -framework QuartzCore \
-    -framework CoreText \
-    -framework IOKit \
-    -framework IOSurface \
-    -framework Carbon \
-    -framework UniformTypeIdentifiers \
-    -lc++
+cp "$BIN_PATH/DanTerm" "$APP_PATH/Contents/MacOS/DanTerm Dev"
 
 cp "$SRC_DIR/Info.plist" "$APP_PATH/Contents/"
 mkdir -p "$APP_PATH/Contents/Resources"
