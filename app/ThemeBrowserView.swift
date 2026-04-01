@@ -8,7 +8,7 @@ enum ThemeBrowserFocusTarget {
     case table
 }
 
-class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate {
+class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSMenuDelegate {
     weak var runtime: AppRuntime?
 
     private let backgroundView: NSVisualEffectView
@@ -124,6 +124,10 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         tableView.dataSource = self
         tableView.delegate = self
         tableView.target = self
+
+        let menu = NSMenu()
+        menu.delegate = self
+        tableView.menu = menu
 
         allNames = ThemeCatalog.shared.names
         filteredNames = allNames
@@ -286,5 +290,24 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
 
     func controlTextDidChange(_ obj: Notification) {
         searchChanged(searchField)
+    }
+
+    // MARK: - NSMenuDelegate
+
+    /// Build the context menu for the right-clicked row.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let clickedRow = tableView.clickedRow
+        guard clickedRow >= 0, clickedRow < filteredNames.count else { return }
+        let item = NSMenuItem(title: "Copy Name", action: #selector(copyThemeName(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = filteredNames[clickedRow]
+        menu.addItem(item)
+    }
+
+    @objc private func copyThemeName(_ sender: NSMenuItem) {
+        guard let name = sender.representedObject as? String else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(name, forType: .string)
     }
 }
