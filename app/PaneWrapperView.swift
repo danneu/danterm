@@ -133,6 +133,7 @@ class PaneWrapperView: NSView {
         dragHandle.translatesAutoresizingMaskIntoConstraints = false
         dragHandle.runtime = runtime
         dragHandle.paneId = paneId
+        dragHandle.alertBadge = alertBadge
         toolbar.addSubview(dragHandle)
 
         // Add buttons to toolbar (on top of drag handle)
@@ -335,9 +336,11 @@ let paneDragType = NSPasteboard.PasteboardType("com.danterm.pane")
 class ToolbarDragHandleView: NSView, NSDraggingSource {
     weak var runtime: AppRuntime?
     var paneId: PaneId?
+    weak var alertBadge: NSView?
     private var mouseDownEvent: NSEvent?
     private var dragOrigin: NSPoint?
     private var isDragging = false
+    private var badgeClickCandidate = false
 
     // Show open hand on hover to indicate draggability.
     override func resetCursorRects() {
@@ -350,7 +353,34 @@ class ToolbarDragHandleView: NSView, NSDraggingSource {
         dragOrigin = event.locationInWindow
         isDragging = false
         NSCursor.closedHand.set()
+
+        // Track whether the press started over the visible alert badge.
+        if let badge = alertBadge, !badge.isHidden {
+            let loc = convert(event.locationInWindow, from: nil)
+            let badgeFrame = convert(badge.bounds, from: badge)
+            badgeClickCandidate = badgeFrame.contains(loc)
+        } else {
+            badgeClickCandidate = false
+        }
+
         // Do not call super — prevent propagation to toolbar/wrapper
+    }
+
+    // Clear alerts for this pane when the user clicks (press + release) on the alert badge.
+    override func mouseUp(with event: NSEvent) {
+        if badgeClickCandidate, !isDragging,
+           let badge = alertBadge, !badge.isHidden, let paneId = paneId {
+            let loc = convert(event.locationInWindow, from: nil)
+            let badgeFrame = convert(badge.bounds, from: badge)
+            if badgeFrame.contains(loc) {
+                runtime?.send(.clearAlertsForPane(paneId: paneId))
+            }
+        }
+        badgeClickCandidate = false
+        dragOrigin = nil
+        mouseDownEvent = nil
+        isDragging = false
+        NSCursor.openHand.set()
     }
 
     override func mouseDragged(with event: NSEvent) {

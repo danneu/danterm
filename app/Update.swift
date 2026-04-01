@@ -661,9 +661,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         model.showAllAlerts = showAll
         return []
 
-    case .ackPaneAlerts:
-        guard let tab = selectedTab(in: model) else { return [] }
-        let paneId = tab.focusedPaneId
+    case .clearAlertsForPane(let paneId):
         let hadUnread = model.alerts.contains { $0.paneId == paneId && $0.isUnread }
         guard hadUnread else { return [] }
         markAlertsReadForPane(paneId, in: &model)

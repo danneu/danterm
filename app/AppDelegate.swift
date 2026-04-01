@@ -484,7 +484,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     }
 
     @objc func ackPaneAlerts(_ sender: Any?) {
-        runtime.send(.ackPaneAlerts)
+        guard let tab = selectedTab(in: runtime.model) else { return }
+        runtime.send(.clearAlertsForPane(paneId: tab.focusedPaneId))
     }
 
     @objc func ackTabAlerts(_ sender: Any?) {

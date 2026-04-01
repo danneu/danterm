@@ -67,7 +67,7 @@ enum Msg {
     case activateAlert(alertId: AlertId)
     case goToMostRecentAlertPane
     case setShowAllAlerts(Bool)
-    case ackPaneAlerts
+    case clearAlertsForPane(paneId: PaneId)
     case ackTabAlerts
     case clearAlertsForTab(tabId: TabId)
 

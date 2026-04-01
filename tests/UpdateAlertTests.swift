@@ -600,9 +600,9 @@ func alertTests() {
         try expectEqual(model.alerts[0].isUnread, true, "manual mode: movePaneToNewTab should NOT clear alerts")
     }
 
-    // MARK: - ackPaneAlerts
+    // MARK: - clearAlertsForPane
 
-    test("testAckAlertClearsFocusedPaneAlerts") {
+    test("testClearAlertsForPaneClearsAlerts") {
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
@@ -613,8 +613,8 @@ func alertTests() {
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .ackPaneAlerts)
-        try expectEqual(model.alerts[0].isUnread, false, "ackPaneAlerts should mark focused pane's alerts read")
+        let effects = update(&model, .clearAlertsForPane(paneId: paneA))
+        try expectEqual(model.alerts[0].isUnread, false, "clearAlertsForPane should mark pane's alerts read")
         try expect(hasEffect(effects) {
             if case .rebuildContentView = $0 { return true }
             return false
@@ -625,12 +625,36 @@ func alertTests() {
         }, "should reload sidebar")
     }
 
-    test("testAckAlertNoopsWhenNoUnreadAlerts") {
+    test("testClearAlertsForPaneNoopsWhenNoUnreadAlerts") {
         var model = makeModel()
         createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        let effects = update(&model, .ackPaneAlerts)
-        try expectEqual(effects.count, 0, "ackPaneAlerts with no unread alerts should be a no-op")
+        let effects = update(&model, .clearAlertsForPane(paneId: paneA))
+        try expectEqual(effects.count, 0, "clearAlertsForPane with no unread alerts should be a no-op")
+    }
+
+    test("testClearAlertsForNonFocusedPane") {
+        var model = makeModel()
+        model.config.alertClearMode = .manual
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        // Split to create a second pane (which becomes focused)
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+        try expect(paneA != paneB, "split should create a new pane")
+
+        // Add alert for the non-focused pane
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        // Clear alerts for paneA (not focused) while paneB is focused
+        let effects = update(&model, .clearAlertsForPane(paneId: paneA))
+        try expectEqual(model.alerts[0].isUnread, false, "clearAlertsForPane should clear non-focused pane's alerts")
+        try expect(effects.count > 0, "should produce effects")
     }
 
     // MARK: - ackTabAlerts
