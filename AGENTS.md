@@ -139,27 +139,23 @@ verify the test passes.
 - As of v1.3.0, dependency URLs use a CDN (`deps.files.ghostty.org`), so the old
   iTerm2-Color-Schemes URL staleness issue is resolved
 
-### Swift compilation (dev-build.sh)
+### Swift compilation
+
+Both build scripts use `swift build` via `Package.swift`, which is the single
+source of truth for Swift sources, framework dependencies, and linker flags.
+
+- **`dev-build.sh`** — debug mode (fast incremental rebuilds), dev icons, dev
+  bundle ID, installs to `~/Applications`
+- **`build-app.sh`** — release mode (`--configuration release`, applies `-O`),
+  production icons, optional `--version` stamping. Called by CI and release
+  workflows.
 
 The xcframework contains a **static library** (`libghostty.a`) + C headers with a
-module map, NOT a `.framework` bundle. Link with:
+module map, NOT a `.framework` bundle. `Package.swift` declares `GhosttyKit` as a
+`.binaryTarget` and specifies the required frameworks in `linkerSettings`:
 
-```
--I <MACOS_DIR>/Headers
--Xcc -fmodule-map-file=<MACOS_DIR>/Headers/module.modulemap
-<MACOS_DIR>/libghostty.a
-```
-
-Required frameworks and libraries (libghostty depends on these):
-
-```
--framework Cocoa -framework Metal -framework MetalKit -framework QuartzCore
--framework CoreText -framework IOKit -framework IOSurface -framework Carbon
--framework UniformTypeIdentifiers -lc++
-```
-
-`-lc++` is needed because libghostty statically links SPIRV-Cross and glslang (C++).
-`-framework Carbon` is needed for keyboard layout APIs (TIS\*).
+- `-lc++` is needed because libghostty statically links SPIRV-Cross and glslang (C++).
+- `-framework Carbon` is needed for keyboard layout APIs (TIS\*).
 
 ## Requirements
 

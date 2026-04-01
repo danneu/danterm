@@ -5,6 +5,7 @@ lib/
 .ghostty-src/
 
 # Dev build output
+build/
 .build/
 /result
 

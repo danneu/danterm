@@ -4,19 +4,8 @@
 
 | Workflow | Trigger | Signing | Output |
 |----------|---------|---------|--------|
-| `ci.yml` | Pull requests | Ad-hoc (`--sign -`) | Build verification only |
+| `ci.yml` | Pull requests | Ad-hoc (`--sign -`) | Build verification + release-build validation |
 | `release-stable.yml` | `v*` tags | Developer ID + notarized | GitHub Release with `.dmg` + `.zip` |
-| `release-nightly.yml` | Push to `main` | Developer ID + notarized | Rolling "nightly" prerelease |
-
-## Release channels
-
-Stable and nightly have separate app identities so both can coexist:
-
-| | Stable | Nightly |
-|-|--------|---------|
-| App name | DanTerm | DanTerm Dev |
-| Bundle ID | `com.danneu.danterm` | `com.danneu.danterm-dev` |
-| Version | From tag (`v1.2.3` → `1.2.3`) | `0.0.0-nightly+<sha>` |
 
 ## Releasing
 
@@ -47,7 +36,7 @@ When upgrading Ghostty, update both `GHOSTTY_TAG` in the workflows and potential
 
 ## Runner requirements
 
-- **`macos-15`** — required for Xcode 16+ SDK (Ghostty uses `kCVPixelFormatType_30RGB_r210` from CoreVideo, added in macOS 15 SDK)
+- **`macos-26`** — required for latest Xcode SDK (Ghostty uses `kCVPixelFormatType_30RGB_r210` from CoreVideo, added in macOS 15 SDK)
 - **`-Dxcframework-target=native`** — builds arm64 only; the universal (arm64+x86_64) build fails due to x86_64 cross-compilation SDK issues
 
 ## Troubleshooting

@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v6
 
@@ -41,58 +41,58 @@ jobs:
           cp -R .ghostty-src/macos/GhosttyKit.xcframework lib/
           cp -R .ghostty-src/zig-out/share/ghostty/themes lib/ghostty-themes
 
-      - name: Build Swift app
+      - name: Build app bundle
+        run: ./build-app.sh
+
+      - name: Codesign (ad-hoc)
+        run: codesign --force --deep --sign - build/DanTerm.app
+
+  release-build-check:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.15.2
+
+      - name: Clone Ghostty source
         run: |
-          # Find macOS slice
-          MACOS_DIR=$(find lib/GhosttyKit.xcframework -maxdepth 1 -type d -name 'macos-*' | head -1)
-          if [ -z "$MACOS_DIR" ]; then
-            echo "Error: no macOS slice found in xcframework"
-            exit 1
-          fi
+          git clone --depth 1 --branch v1.3.0 https://github.com/ghostty-org/ghostty.git .ghostty-src
 
-          # Read swift sources
-          SWIFT_FILES=()
-          while IFS= read -r line; do
-            [[ -z "$line" || "$line" == \#* ]] && continue
-            SWIFT_FILES+=("$line")
-          done < swift-sources.txt
+      - name: Cache GhosttyKit
+        id: cache-ghosttykit
+        uses: actions/cache@v5
+        with:
+          path: |
+            lib/GhosttyKit.xcframework
+            lib/ghostty-themes
+          key: ghosttykit-v2-v1.3.0-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
 
-          # Compile
-          mkdir -p build/DanTerm.app/Contents/MacOS
-          xcrun swiftc -O \
-            -o "build/DanTerm.app/Contents/MacOS/DanTerm" \
-            "${SWIFT_FILES[@]}" \
-            -I "$MACOS_DIR/Headers" \
-            -Xcc -fmodule-map-file="$MACOS_DIR/Headers/module.modulemap" \
-            "$MACOS_DIR"/libghostty*.a \
-            -framework Cocoa \
-            -framework Metal \
-            -framework MetalKit \
-            -framework QuartzCore \
-            -framework CoreText \
-            -framework IOKit \
-            -framework IOSurface \
-            -framework Carbon \
-            -framework UniformTypeIdentifiers \
-            -lc++
+      - name: Build GhosttyKit
+        if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
+        run: |
+          cd .ghostty-src
+          zig build \
+            -Demit-xcframework \
+            -Dxcframework-target=native \
+            -Demit-macos-app=false \
+            -Dsentry=false \
+            -Doptimize=ReleaseFast
+          cd ..
+          mkdir -p lib
+          cp -R .ghostty-src/macos/GhosttyKit.xcframework lib/
+          cp -R .ghostty-src/zig-out/share/ghostty/themes lib/ghostty-themes
 
-          cp app/Info.plist build/DanTerm.app/Contents/
+      - name: Build app bundle (release validation)
+        run: ./build-app.sh --version "0.0.0-test"
 
-          mkdir -p build/DanTerm.app/Contents/Resources
-          cp icon/AppIcon/AppIcon.icns build/DanTerm.app/Contents/Resources/AppIcon.icns
-          cp icon/AppIcon/Assets.car build/DanTerm.app/Contents/Resources/
-
-          mkdir -p build/DanTerm.app/Contents/Resources/ghostty
-          cp -R lib/ghostty-themes build/DanTerm.app/Contents/Resources/ghostty/themes
-
-          THEME_COUNT=$(ls build/DanTerm.app/Contents/Resources/ghostty/themes | wc -l | tr -d ' ')
-          echo "Bundled $THEME_COUNT themes"
-          if [ "$THEME_COUNT" -eq 0 ]; then
-              echo "Error: no themes bundled"
-              exit 1
-          fi
-
-          # Ad-hoc sign only
-          codesign --force --deep --sign - build/DanTerm.app
-
-          echo "Build succeeded"
+      - name: Verify release bundle
+        run: |
+          APP_PATH="build/DanTerm.app"
+          test -f "$APP_PATH/Contents/MacOS/DanTerm"
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PATH/Contents/Info.plist")
+          [ "$VERSION" = "0.0.0-test" ] || { echo "Version mismatch: $VERSION"; exit 1; }
+          codesign --force --deep --sign - "$APP_PATH"
+          codesign -v "$APP_PATH"
+          echo "Release build validation passed"

@@ -13,7 +13,7 @@ env:
 
 jobs:
   release:
-    runs-on: macos-15
+    runs-on: macos-26
     permissions:
       contents: write
       pull-requests: write
@@ -59,57 +59,8 @@ jobs:
           cp -R .ghostty-src/macos/GhosttyKit.xcframework lib/
           cp -R .ghostty-src/zig-out/share/ghostty/themes lib/ghostty-themes
 
-      - name: Build Swift app
-        run: |
-          # Find the macOS slice (name varies: macos-arm64_x86_64, macos-arm64, etc.)
-          MACOS_DIR=$(find lib/GhosttyKit.xcframework -maxdepth 1 -type d -name 'macos-*' | head -1)
-          if [ -z "$MACOS_DIR" ]; then
-            echo "Error: no macOS slice found in xcframework"
-            exit 1
-          fi
-
-          SWIFT_FILES=()
-          while IFS= read -r line; do
-            [[ -z "$line" || "$line" == \#* ]] && continue
-            SWIFT_FILES+=("$line")
-          done < swift-sources.txt
-
-          APP_PATH="build/${{ env.APP_NAME }}.app"
-          mkdir -p "$APP_PATH/Contents/MacOS"
-
-          xcrun swiftc -O \
-            -o "$APP_PATH/Contents/MacOS/${{ env.EXECUTABLE }}" \
-            "${SWIFT_FILES[@]}" \
-            -I "$MACOS_DIR/Headers" \
-            -Xcc -fmodule-map-file="$MACOS_DIR/Headers/module.modulemap" \
-            "$MACOS_DIR"/libghostty*.a \
-            -framework Cocoa \
-            -framework Metal \
-            -framework MetalKit \
-            -framework QuartzCore \
-            -framework CoreText \
-            -framework IOKit \
-            -framework IOSurface \
-            -framework Carbon \
-            -framework UniformTypeIdentifiers \
-            -lc++
-
-          cp app/Info.plist "$APP_PATH/Contents/"
-          plutil -replace CFBundleVersion -string "${{ env.VERSION }}" "$APP_PATH/Contents/Info.plist"
-          plutil -replace CFBundleShortVersionString -string "${{ env.VERSION }}" "$APP_PATH/Contents/Info.plist"
-
-          mkdir -p "$APP_PATH/Contents/Resources"
-          cp icon/AppIcon/Assets.car "$APP_PATH/Contents/Resources/"
-
-          mkdir -p "$APP_PATH/Contents/Resources/ghostty"
-          cp -R lib/ghostty-themes "$APP_PATH/Contents/Resources/ghostty/themes"
-
-          THEME_COUNT=$(ls "$APP_PATH/Contents/Resources/ghostty/themes" | wc -l | tr -d ' ')
-          echo "Bundled $THEME_COUNT themes"
-          if [ "$THEME_COUNT" -eq 0 ]; then
-              echo "Error: no themes bundled"
-              exit 1
-          fi
+      - name: Build app bundle
+        run: ./build-app.sh --version "${{ env.VERSION }}"
 
       - name: Import signing certificate
         env:
