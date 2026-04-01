@@ -364,7 +364,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
         guard let sidebarItem = item as? SidebarItem else { return 40 }
-        if case .group = sidebarItem.kind { return 24 }
+        if case .group = sidebarItem.kind { return 30 }
         return 40
     }
 
@@ -781,7 +781,17 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         accessoryStack.identifier = NSUserInterfaceItemIdentifier("groupAccessoryStack")
         cell.addSubview(accessoryStack)
 
+        // Thin separator line at top edge, hidden for the first group
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        separator.identifier = NSUserInterfaceItemIdentifier("groupSeparator")
+        cell.addSubview(separator)
+
         NSLayoutConstraint.activate([
+            separator.topAnchor.constraint(equalTo: cell.topAnchor),
+            separator.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
+            separator.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
             textField.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
             textField.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             textField.trailingAnchor.constraint(lessThanOrEqualTo: accessoryStack.leadingAnchor, constant: -4),
@@ -803,6 +813,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             cell.textField?.stringValue = group.name
         }
         cell.textField?.tag = group.id.rawValue.hashValue
+        // Hide separator for the first group
+        let isFirstGroup = group.id == currentModel?.groups.first?.id
+        if let separator = cell.subviews.first(where: { $0.identifier?.rawValue == "groupSeparator" }) {
+            separator.isHidden = isFirstGroup
+        }
         if let stack = cell.subviews.first(where: { $0.identifier?.rawValue == "groupAccessoryStack" }) as? NSStackView {
             if let caretButton = stack.arrangedSubviews.first(where: { $0.identifier?.rawValue == "groupCaretButton" }) as? NSButton {
                 let symbolName = group.isCollapsed ? "chevron.right" : "chevron.down"
