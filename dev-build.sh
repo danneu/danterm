@@ -78,7 +78,7 @@ plutil -replace CFBundleDisplayName -string "DanTerm Dev" "$APP_PATH/Contents/In
 plutil -replace CFBundleExecutable -string "DanTerm Dev" "$APP_PATH/Contents/Info.plist"
 plutil -replace CFBundleIconName -string "AppIcon-dev" "$APP_PATH/Contents/Info.plist"
 
-codesign --force --deep --sign - --entitlements "$SCRIPT_DIR/dev-entitlements.plist" "$APP_PATH"
+codesign --force --deep --sign "Apple Development" --entitlements "$SCRIPT_DIR/dev-entitlements.plist" "$APP_PATH"
 
 # Install the freshly built app so launchers using ~/Applications are in sync.
 mkdir -p "$HOME/Applications"
