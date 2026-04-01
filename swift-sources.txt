@@ -26,6 +26,8 @@ app/PaneDragOverlayView.swift
 app/PaneDragCoordinator.swift
 app/ThemeColorParser.swift
 app/ThemeCatalog.swift
+app/ThemeSwatchViews.swift
 app/ThemeBrowserView.swift
+app/RemoteThemePickerSheet.swift
 app/DanTermConfig.swift
 app/PreferencesPanel.swift

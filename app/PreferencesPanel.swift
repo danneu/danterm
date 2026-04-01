@@ -8,11 +8,12 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate {
 
     private let alertClearModePopup = NSPopUpButton()
     private let remoteThemeField = NSTextField()
+    private let browseButton = NSButton()
 
     init(config: DanTermConfig, runtime: AppRuntime) {
         self.runtime = runtime
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 180),
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 180),
             styleMask: [.titled, .closable, .utilityWindow],
             backing: .buffered,
             defer: false
@@ -56,10 +57,19 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate {
         themeLabel.frame = NSRect(x: padding, y: y, width: labelWidth, height: rowHeight)
         contentView.addSubview(themeLabel)
 
-        remoteThemeField.frame = NSRect(x: controlX, y: y, width: controlWidth, height: rowHeight)
+        let browseWidth: CGFloat = 75
+        let fieldWidth = controlWidth - browseWidth - 4
+        remoteThemeField.frame = NSRect(x: controlX, y: y, width: fieldWidth, height: rowHeight)
         remoteThemeField.delegate = self
         remoteThemeField.placeholderString = DanTermConfig.default.remoteTheme
         contentView.addSubview(remoteThemeField)
+
+        browseButton.title = "Browse…"
+        browseButton.bezelStyle = .push
+        browseButton.frame = NSRect(x: controlX + fieldWidth + 4, y: y, width: browseWidth, height: rowHeight)
+        browseButton.target = self
+        browseButton.action = #selector(browseRemoteTheme(_:))
+        contentView.addSubview(browseButton)
 
         y -= rowHeight + 20
 
@@ -106,6 +116,20 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate {
     func controlTextDidEndEditing(_ obj: Notification) {
         guard let field = obj.object as? NSTextField, field === remoteThemeField else { return }
         runtime?.send(.setRemoteTheme(field.stringValue))
+    }
+
+    /// Present the theme picker sheet so the user can browse and select a remote theme.
+    @objc private func browseRemoteTheme(_ sender: Any?) {
+        let picker = RemoteThemePickerSheet()
+        picker.currentThemeName = remoteThemeField.stringValue.isEmpty
+            ? runtime?.model.config.remoteTheme
+            : remoteThemeField.stringValue
+        picker.onSelect = { [weak self] themeName in
+            self?.runtime?.send(.setRemoteTheme(themeName))
+        }
+        let sheetWindow = NSWindow(contentViewController: picker)
+        sheetWindow.styleMask = [.titled]
+        beginSheet(sheetWindow) { _ in }
     }
 
     @objc private func openConfigFile(_ sender: Any?) {

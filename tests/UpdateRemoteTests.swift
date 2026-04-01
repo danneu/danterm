@@ -210,6 +210,15 @@ func remoteTests() {
         }, "should emit saveDanTermConfigKey")
     }
 
+    test("setRemoteTheme emits syncPreferencesPanel on change") {
+        var model = makeModel()
+        let effects = update(&model, .setRemoteTheme("Grape"))
+        try expect(hasEffect(effects) {
+            if case .syncPreferencesPanel = $0 { return true }
+            return false
+        }, "should emit syncPreferencesPanel when theme changes")
+    }
+
     test("setRemoteTheme trims whitespace") {
         var model = makeModel()
         let effects = update(&model, .setRemoteTheme("  Solarized  "))

@@ -496,8 +496,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         model.config.remoteTheme = resolved
         var effects: [Effect] = [
             .saveDanTermConfigKey(key: "remote-theme", value: resolved),
+            .syncPreferencesPanel,
         ]
-        if needsUISync { effects.append(.syncPreferencesPanel) }
         for (paneId, pane) in model.panes where pane.isRemote {
             model.panes[paneId]?.remoteThemeOverride = resolved
             effects.append(.applyPaneTheme(paneId: paneId))
