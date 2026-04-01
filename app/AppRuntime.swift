@@ -261,7 +261,7 @@ class AppRuntime {
             try? updated.write(to: url, atomically: true, encoding: .utf8)
 
         case .syncPreferencesPanel:
-            preferencesPanel?.syncFromConfig(model.config)
+            preferencesPanel?.sync(committed: model.config, draft: model.preferencesDraft)
 
         case .scheduleCheckpoint:
             scheduleDebouncedCheckpoint()
@@ -654,15 +654,14 @@ class AppRuntime {
     // MARK: - Preferences Panel
 
     /// Show or re-focus the preferences panel. Created lazily on first call.
+    /// Dispatches .preferencesOpened which is idempotent — only creates a draft
+    /// on the closed → open transition; re-focus just resyncs.
     func showPreferencesPanel() {
-        if let panel = preferencesPanel {
-            panel.syncFromConfig(model.config)
-            panel.makeKeyAndOrderFront(nil)
-            return
+        if preferencesPanel == nil {
+            preferencesPanel = PreferencesPanel(runtime: self)
         }
-        let panel = PreferencesPanel(config: model.config, runtime: self)
-        preferencesPanel = panel
-        panel.makeKeyAndOrderFront(nil)
+        send(.preferencesOpened)
+        preferencesPanel!.makeKeyAndOrderFront(nil)
     }
 
     // MARK: - Theme Browser

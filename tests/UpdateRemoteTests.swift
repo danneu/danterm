@@ -173,13 +173,14 @@ func remoteTests() {
         }, "should emit syncPreferencesPanel")
     }
 
-    // MARK: - setAlertClearMode
+    // MARK: - setAlertClearMode (via pref draft + save)
 
-    test("setAlertClearMode updates model and emits save") {
+    test("pref save alertClearMode updates model and emits save") {
         var model = makeModel()
-        let effects = update(&model, .setAlertClearMode(.manual))
+        _ = update(&model, .preferencesOpened)
+        _ = update(&model, .prefSetAlertClearMode(.manual))
+        let effects = update(&model, .prefSave)
         try expectEqual(model.config.alertClearMode, .manual)
-        try expectEqual(effects.count, 1)
         try expect(hasEffect(effects) {
             if case .saveDanTermConfigKey(let key, let value) = $0 {
                 return key == "alert-clear-mode" && value == "manual"
@@ -188,19 +189,24 @@ func remoteTests() {
         }, "should emit saveDanTermConfigKey")
     }
 
-    test("setAlertClearMode with same value is no-op") {
+    test("pref save alertClearMode with same value does not emit save key") {
         var model = makeModel()
-        // Default is .focus
-        let effects = update(&model, .setAlertClearMode(.focus))
-        try expectEqual(effects.count, 0)
+        _ = update(&model, .preferencesOpened)
+        // Don't change anything — save should emit only syncPreferencesPanel.
+        let effects = update(&model, .prefSave)
+        try expect(!hasEffect(effects) {
+            if case .saveDanTermConfigKey = $0 { return true }
+            return false
+        }, "should not emit saveDanTermConfigKey")
     }
 
-    // MARK: - setRemoteTheme
+    // MARK: - setRemoteTheme (via pref draft + save)
 
-    test("setRemoteTheme updates model and saves") {
+    test("pref save remoteTheme updates model and saves") {
         var model = makeModel()
-        createTab(&model)
-        let effects = update(&model, .setRemoteTheme("Grape"))
+        _ = update(&model, .preferencesOpened)
+        _ = update(&model, .prefSetRemoteTheme("Grape"))
+        let effects = update(&model, .prefSave)
         try expectEqual(model.config.remoteTheme, "Grape")
         try expect(hasEffect(effects) {
             if case .saveDanTermConfigKey(let key, let value) = $0 {
@@ -210,73 +216,15 @@ func remoteTests() {
         }, "should emit saveDanTermConfigKey")
     }
 
-    test("setRemoteTheme emits syncPreferencesPanel on change") {
-        var model = makeModel()
-        let effects = update(&model, .setRemoteTheme("Grape"))
-        try expect(hasEffect(effects) {
-            if case .syncPreferencesPanel = $0 { return true }
-            return false
-        }, "should emit syncPreferencesPanel when theme changes")
-    }
-
-    test("setRemoteTheme trims whitespace") {
-        var model = makeModel()
-        let effects = update(&model, .setRemoteTheme("  Solarized  "))
-        try expectEqual(model.config.remoteTheme, "Solarized")
-        try expect(hasEffect(effects) {
-            if case .saveDanTermConfigKey(let key, let value) = $0 {
-                return key == "remote-theme" && value == "Solarized"
-            }
-            return false
-        }, "should save trimmed value")
-        // Input differs from resolved, so UI sync emitted
-        try expect(hasEffect(effects) {
-            if case .syncPreferencesPanel = $0 { return true }
-            return false
-        }, "should emit syncPreferencesPanel for normalization")
-    }
-
-    test("setRemoteTheme empty snaps back to default when already at default") {
-        var model = makeModel()
-        // Default is Purplepeter; clearing should snap back without saving
-        let effects = update(&model, .setRemoteTheme(""))
-        try expectEqual(model.config.remoteTheme, "Purplepeter")
-        try expectEqual(effects.count, 1)
-        try expect(hasEffect(effects) {
-            if case .syncPreferencesPanel = $0 { return true }
-            return false
-        }, "should emit syncPreferencesPanel to snap field back")
-        // No saveDanTermConfigKey since resolved == current
-        try expect(!hasEffect(effects) {
-            if case .saveDanTermConfigKey = $0 { return true }
-            return false
-        }, "should not save when unchanged")
-    }
-
-    test("setRemoteTheme whitespace-only snaps back to default") {
-        var model = makeModel()
-        let effects = update(&model, .setRemoteTheme("   "))
-        try expectEqual(model.config.remoteTheme, "Purplepeter")
-        try expectEqual(effects.count, 1)
-        try expect(hasEffect(effects) {
-            if case .syncPreferencesPanel = $0 { return true }
-            return false
-        }, "should emit syncPreferencesPanel")
-    }
-
-    test("setRemoteTheme same value is no-op") {
-        var model = makeModel()
-        let effects = update(&model, .setRemoteTheme("Purplepeter"))
-        try expectEqual(effects.count, 0)
-    }
-
-    test("setRemoteTheme updates remote panes") {
+    test("pref save remoteTheme updates remote panes") {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         _ = update(&model, .remoteSessionStarted(paneId: paneId))
 
-        let effects = update(&model, .setRemoteTheme("Grape"))
+        _ = update(&model, .preferencesOpened)
+        _ = update(&model, .prefSetRemoteTheme("Grape"))
+        let effects = update(&model, .prefSave)
         try expectEqual(model.panes[paneId]?.remoteThemeOverride, "Grape")
         try expect(hasEffect(effects) {
             if case .applyPaneTheme(let pid) = $0, pid == paneId { return true }

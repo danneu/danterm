@@ -1,5 +1,17 @@
 import Foundation
 
+/// Normalize a raw remote theme string: trim whitespace, default empty to the config default.
+func resolveRemoteTheme(_ raw: String) -> String {
+    let trimmed = raw.trimmingCharacters(in: .whitespaces)
+    return trimmed.isEmpty ? DanTermConfig.default.remoteTheme : trimmed
+}
+
+/// Whether the preferences draft has any changes compared to the committed config.
+func isDraftDirty(_ draft: PreferencesDraft, vs config: DanTermConfig) -> Bool {
+    draft.alertClearMode != config.alertClearMode
+        || resolveRemoteTheme(draft.remoteTheme) != config.remoteTheme
+}
+
 @discardableResult
 func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
     switch msg {
@@ -465,13 +477,19 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         model.panes[paneId]?.remoteThemeOverride = model.config.remoteTheme
         return [.applyPaneTheme(paneId: paneId)]
 
-    // MARK: - Config
+    // MARK: - Config (external reload)
 
     case .configLoaded(let newConfig):
         let oldConfig = model.config
         model.config = newConfig
+        // Reset draft to match new config if panel is open.
+        if model.preferencesDraft != nil {
+            model.preferencesDraft = PreferencesDraft(
+                alertClearMode: newConfig.alertClearMode,
+                remoteTheme: newConfig.remoteTheme
+            )
+        }
         var effects: [Effect] = [.syncPreferencesPanel]
-        // If remote theme changed, update all currently-remote panes
         if newConfig.remoteTheme != oldConfig.remoteTheme {
             for (paneId, pane) in model.panes where pane.isRemote {
                 model.panes[paneId]?.remoteThemeOverride = newConfig.remoteTheme
@@ -480,28 +498,67 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         return effects
 
-    case .setAlertClearMode(let mode):
-        guard mode != model.config.alertClearMode else { return [] }
-        model.config.alertClearMode = mode
-        return [.saveDanTermConfigKey(key: "alert-clear-mode", value: mode.rawValue)]
+    // MARK: - Preferences Panel
 
-    case .setRemoteTheme(let rawTheme):
-        // Canonicalize: trim whitespace, fall back to default if empty.
-        let trimmed = rawTheme.trimmingCharacters(in: .whitespaces)
-        let resolved = trimmed.isEmpty ? DanTermConfig.default.remoteTheme : trimmed
-        let needsUISync = (rawTheme != resolved)
-        guard resolved != model.config.remoteTheme else {
-            return needsUISync ? [.syncPreferencesPanel] : []
+    case .preferencesOpened:
+        // Only create draft on closed → open transition; re-focus is a no-op.
+        if model.preferencesDraft == nil {
+            model.preferencesDraft = PreferencesDraft(
+                alertClearMode: model.config.alertClearMode,
+                remoteTheme: model.config.remoteTheme
+            )
         }
-        model.config.remoteTheme = resolved
-        var effects: [Effect] = [
-            .saveDanTermConfigKey(key: "remote-theme", value: resolved),
-            .syncPreferencesPanel,
-        ]
-        for (paneId, pane) in model.panes where pane.isRemote {
-            model.panes[paneId]?.remoteThemeOverride = resolved
-            effects.append(.applyPaneTheme(paneId: paneId))
+        return [.syncPreferencesPanel]
+
+    case .preferencesClosed:
+        model.preferencesDraft = nil
+        return []
+
+    case .prefSetAlertClearMode(let mode):
+        guard model.preferencesDraft != nil else { return [] }
+        model.preferencesDraft!.alertClearMode = mode
+        return [.syncPreferencesPanel]
+
+    case .prefSetRemoteTheme(let rawText):
+        guard model.preferencesDraft != nil else { return [] }
+        model.preferencesDraft!.remoteTheme = rawText
+        return [.syncPreferencesPanel]
+
+    case .prefResetAlertClearMode:
+        guard model.preferencesDraft != nil else { return [] }
+        model.preferencesDraft!.alertClearMode = model.config.alertClearMode
+        return [.syncPreferencesPanel]
+
+    case .prefResetRemoteTheme:
+        guard model.preferencesDraft != nil else { return [] }
+        model.preferencesDraft!.remoteTheme = model.config.remoteTheme
+        return [.syncPreferencesPanel]
+
+    case .prefSave:
+        guard let draft = model.preferencesDraft else { return [] }
+        let resolvedTheme = resolveRemoteTheme(draft.remoteTheme)
+        let oldConfig = model.config
+        var effects: [Effect] = []
+        // Save changed keys to disk.
+        if draft.alertClearMode != oldConfig.alertClearMode {
+            effects.append(.saveDanTermConfigKey(key: "alert-clear-mode", value: draft.alertClearMode.rawValue))
         }
+        if resolvedTheme != oldConfig.remoteTheme {
+            effects.append(.saveDanTermConfigKey(key: "remote-theme", value: resolvedTheme))
+        }
+        // Apply to model.
+        model.config.alertClearMode = draft.alertClearMode
+        model.config.remoteTheme = resolvedTheme
+        // Normalize draft to resolved values post-save.
+        model.preferencesDraft!.remoteTheme = resolvedTheme
+        // Update remote panes if theme changed.
+        if resolvedTheme != oldConfig.remoteTheme {
+            for (paneId, pane) in model.panes where pane.isRemote {
+                model.panes[paneId]?.remoteThemeOverride = resolvedTheme
+                effects.append(.applyPaneTheme(paneId: paneId))
+            }
+        }
+        effects.append(.syncPreferencesPanel)
         return effects
 
     // MARK: - Export

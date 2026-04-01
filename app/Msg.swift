@@ -71,10 +71,17 @@ enum Msg {
     case ackTabAlerts
     case clearAlertsForTab(tabId: TabId)
 
-    // Config
+    // Config (external reload)
     case configLoaded(DanTermConfig)
-    case setAlertClearMode(AlertClearMode)
-    case setRemoteTheme(String)
+
+    // Preferences panel
+    case preferencesOpened
+    case preferencesClosed
+    case prefSetAlertClearMode(AlertClearMode)
+    case prefSetRemoteTheme(String)
+    case prefResetAlertClearMode
+    case prefResetRemoteTheme
+    case prefSave
 
     // Lifecycle
     case appBecameActive

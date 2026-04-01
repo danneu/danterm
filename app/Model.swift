@@ -104,6 +104,13 @@ struct GroupModel: Equatable {
     var tabs: [TabModel] = []
 }
 
+/// Raw form state for the preferences panel. Stores what the user actually typed,
+/// not yet normalized. Normalization happens only on save.
+struct PreferencesDraft: Equatable {
+    var alertClearMode: AlertClearMode
+    var remoteTheme: String  // raw text from the field; may have whitespace or be empty
+}
+
 struct AppModel: Equatable {
     var groups: [GroupModel]
     var panes: [PaneId: PaneModel]
@@ -113,6 +120,7 @@ struct AppModel: Equatable {
     var searchState: [PaneId: SearchModel] = [:]  // ephemeral — excluded from snapshots
     var showAllAlerts: Bool = false  // ephemeral — excluded from snapshots
     var config: DanTermConfig = .default  // ephemeral — loaded from disk, not snapshots
+    var preferencesDraft: PreferencesDraft? = nil  // ephemeral — non-nil while prefs panel is open
 }
 
 // MARK: - Session Lock
