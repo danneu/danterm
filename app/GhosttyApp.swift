@@ -20,13 +20,32 @@ class GhosttyApp {
     /// Whether scrollbar is enabled based on the current app config.
     var scrollbarEnabled: Bool { Self.readScrollbarEnabled(from: config) }
 
-    /// Read a string value from the retained app config.
+    /// Read a C-string config value from the retained app config.
+    /// Only valid for keys whose C export type is a string pointer (e.g. theme, scrollbar).
     func readConfigString(key: String) -> String? {
         guard let config = config else { return nil }
         var v: UnsafePointer<Int8>?
         guard ghostty_config_get(config, &v, key, UInt(key.utf8.count)) else { return nil }
         guard let ptr = v else { return nil }
         return String(cString: ptr)
+    }
+
+    /// Read an f32 config value from the retained app config.
+    /// Only valid for keys whose C export type is f32 (e.g. font-size).
+    func readConfigFloat(key: String) -> Float? {
+        guard let config = config else { return nil }
+        var v: Float = 0
+        guard ghostty_config_get(config, &v, key, UInt(key.utf8.count)) else { return nil }
+        return v
+    }
+
+    /// Read an f32 config value and format it as a display string.
+    /// Integer values render without decimals (e.g. "14" not "14.0").
+    func readConfigFloatString(key: String) -> String? {
+        guard let v = readConfigFloat(key: key) else { return nil }
+        return v.truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "%.0f", v)
+            : String(v)
     }
 
     /// Create a fresh config by loading default files, then layering the DanTerm overlay.
@@ -353,7 +372,7 @@ class GhosttyApp {
                 // Read Ghostty prefs from the freshly-cloned config for the prefs panel.
                 let prefs = GhosttyPrefs(
                     theme: self.readConfigString(key: "theme"),
-                    fontSize: self.readConfigString(key: "font-size")
+                    fontSize: self.readConfigFloatString(key: "font-size")
                 )
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self else { return }

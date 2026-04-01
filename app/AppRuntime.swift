@@ -676,7 +676,7 @@ class AppRuntime {
         }
         let ghostty = GhosttyPrefs(
             theme: ghosttyApp.readConfigString(key: "theme"),
-            fontSize: ghosttyApp.readConfigString(key: "font-size")
+            fontSize: ghosttyApp.readConfigFloatString(key: "font-size")
         )
         send(.preferencesOpened(ghostty: ghostty))
         preferencesPanel!.makeKeyAndOrderFront(nil)
