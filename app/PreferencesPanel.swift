@@ -11,20 +11,20 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
     private let browseButton = NSButton()
 
     // Dirty indicators (hidden when clean)
+    private let alertClearModeDirtyRow = NSStackView()
     private let alertClearModePrevLabel = NSTextField(labelWithString: "")
     private let alertClearModeResetButton = NSButton()
+    private let remoteThemeDirtyRow = NSStackView()
     private let remoteThemePrevLabel = NSTextField(labelWithString: "")
     private let remoteThemeResetButton = NSButton()
 
     private let saveButton = NSButton()
 
-    /// Set during sync(); used by windowShouldClose to block dirty closes.
-    private var isDirty = false
 
     init(runtime: AppRuntime) {
         self.runtime = runtime
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 320),
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 10),  // height is auto-sized
             styleMask: [.titled, .closable, .utilityWindow],
             backing: .buffered,
             defer: false
@@ -32,150 +32,127 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
         title = "Preferences"
         isReleasedWhenClosed = false
         delegate = self
-        center()
         buildUI()
+        center()
     }
 
     // MARK: - Layout
 
     private func buildUI() {
         guard let contentView = contentView else { return }
-        contentView.wantsLayer = true
 
-        let padding: CGFloat = 20
-        let rowHeight: CGFloat = 24
-        let dirtyRowHeight: CGFloat = 18
-        let labelWidth: CGFloat = 120
-        let controlX = padding + labelWidth + 8
-        let controlWidth = contentView.bounds.width - controlX - padding
-        var y = contentView.bounds.height - padding - rowHeight
+        // -- Form grid --
+        let grid = NSGridView(views: [
+            formRow("Alert Clear Mode", alertClearModePopup),
+            dirtyRow(alertClearModeDirtyRow, alertClearModePrevLabel, alertClearModeResetButton,
+                     action: #selector(resetAlertClearMode(_:))),
+            formRow("Remote Theme", makeHStack([remoteThemeField, browseButton])),
+            dirtyRow(remoteThemeDirtyRow, remoteThemePrevLabel, remoteThemeResetButton,
+                     action: #selector(resetRemoteTheme(_:))),
+            formRow("Config file", makeHStack([
+                makeButton("Open in editor", action: #selector(openConfigFile(_:))),
+                makeButton("Reload", action: #selector(reloadConfig(_:))),
+            ])),
+        ])
+        grid.translatesAutoresizingMaskIntoConstraints = false
+        grid.column(at: 0).xPlacement = .trailing
+        grid.column(at: 0).width = 130  // fixed label column width
+        grid.column(at: 1).xPlacement = .fill
+        grid.rowSpacing = 4
+        // Add extra spacing before the "Config file" row.
+        grid.row(at: 4).topPadding = 8
 
-        // -- Alert Clear Mode --
-        let alertLabel = makeLabel("Alert Clear Mode")
-        alertLabel.frame = NSRect(x: padding, y: y, width: labelWidth, height: rowHeight)
-        contentView.addSubview(alertLabel)
-
+        // Configure controls.
         alertClearModePopup.removeAllItems()
         alertClearModePopup.addItems(withTitles: ["Focus", "Manual"])
-        alertClearModePopup.frame = NSRect(x: controlX, y: y, width: controlWidth, height: rowHeight)
         alertClearModePopup.target = self
         alertClearModePopup.action = #selector(alertClearModeChanged(_:))
-        contentView.addSubview(alertClearModePopup)
 
-        y -= dirtyRowHeight + 2
-
-        // Dirty indicator for alert clear mode
-        configureDirtyRow(
-            prevLabel: alertClearModePrevLabel,
-            resetButton: alertClearModeResetButton,
-            action: #selector(resetAlertClearMode(_:)),
-            y: y, controlX: controlX, controlWidth: controlWidth, height: dirtyRowHeight,
-            in: contentView
-        )
-
-        y -= rowHeight + 8
-
-        // -- Remote Theme --
-        let themeLabel = makeLabel("Remote Theme")
-        themeLabel.frame = NSRect(x: padding, y: y, width: labelWidth, height: rowHeight)
-        contentView.addSubview(themeLabel)
-
-        let browseWidth: CGFloat = 75
-        let fieldWidth = controlWidth - browseWidth - 4
-        remoteThemeField.frame = NSRect(x: controlX, y: y, width: fieldWidth, height: rowHeight)
         remoteThemeField.delegate = self
         remoteThemeField.placeholderString = DanTermConfig.default.remoteTheme
-        contentView.addSubview(remoteThemeField)
+        remoteThemeField.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         browseButton.title = "Browse…"
         browseButton.bezelStyle = .push
-        browseButton.frame = NSRect(x: controlX + fieldWidth + 4, y: y, width: browseWidth, height: rowHeight)
         browseButton.target = self
         browseButton.action = #selector(browseRemoteTheme(_:))
-        contentView.addSubview(browseButton)
-
-        y -= dirtyRowHeight + 2
-
-        // Dirty indicator for remote theme
-        configureDirtyRow(
-            prevLabel: remoteThemePrevLabel,
-            resetButton: remoteThemeResetButton,
-            action: #selector(resetRemoteTheme(_:)),
-            y: y, controlX: controlX, controlWidth: controlWidth, height: dirtyRowHeight,
-            in: contentView
-        )
-
-        y -= rowHeight + 8
-
-        // -- Config file --
-        let configLabel = makeLabel("Config file")
-        configLabel.frame = NSRect(x: padding, y: y, width: labelWidth, height: rowHeight)
-        contentView.addSubview(configLabel)
-
-        let openButton = NSButton(title: "Open in editor", target: self, action: #selector(openConfigFile(_:)))
-        openButton.bezelStyle = .push
-        openButton.frame = NSRect(x: controlX, y: y, width: 110, height: rowHeight)
-        contentView.addSubview(openButton)
-
-        let reloadButton = NSButton(title: "Reload", target: self, action: #selector(reloadConfig(_:)))
-        reloadButton.bezelStyle = .push
-        reloadButton.frame = NSRect(x: controlX + 110 + 4, y: y, width: 70, height: rowHeight)
-        contentView.addSubview(reloadButton)
-
-        y -= rowHeight + 12
+        browseButton.setContentHuggingPriority(.required, for: .horizontal)
+        browseButton.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         // -- Separator --
         let separator = NSBox()
         separator.boxType = .separator
-        separator.frame = NSRect(x: 0, y: y, width: contentView.bounds.width, height: 1)
-        contentView.addSubview(separator)
+        separator.translatesAutoresizingMaskIntoConstraints = false
 
-        let buttonHeight: CGFloat = 24
-        y -= buttonHeight + 8
-        let rightEdge = contentView.bounds.width - padding
-
-        // Footer: action buttons right-aligned (Cancel, Save)
+        // -- Footer buttons --
         saveButton.title = "Save"
         saveButton.bezelStyle = .push
-        saveButton.keyEquivalent = "\r"  // Return key — makes this the primary (blue) button
-        saveButton.frame = NSRect(x: rightEdge - 80, y: y, width: 80, height: buttonHeight)
+        saveButton.keyEquivalent = "\r"
         saveButton.target = self
         saveButton.action = #selector(savePreferences(_:))
         saveButton.isEnabled = false
-        contentView.addSubview(saveButton)
 
         let cancelButton = NSButton(title: "Cancel", target: self, action: #selector(cancelPreferences(_:)))
         cancelButton.bezelStyle = .push
-        cancelButton.keyEquivalent = "\u{1b}"  // Escape key
-        cancelButton.frame = NSRect(x: rightEdge - 80 - 8 - 80, y: y, width: 80, height: buttonHeight)
-        contentView.addSubview(cancelButton)
+        cancelButton.keyEquivalent = "\u{1b}"
+
+        let footerStack = NSStackView(views: [cancelButton, saveButton])
+        footerStack.translatesAutoresizingMaskIntoConstraints = false
+        footerStack.orientation = .horizontal
+        footerStack.spacing = 8
+
+        // -- Assemble --
+        contentView.addSubview(grid)
+        contentView.addSubview(separator)
+        contentView.addSubview(footerStack)
+
+        let padding: CGFloat = 20
+        NSLayoutConstraint.activate([
+            grid.topAnchor.constraint(equalTo: contentView.topAnchor, constant: padding),
+            grid.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: padding),
+            grid.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -padding),
+
+            separator.topAnchor.constraint(equalTo: grid.bottomAnchor, constant: 12),
+            separator.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+
+            footerStack.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: 12),
+            footerStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -padding),
+            footerStack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -padding),
+        ])
     }
 
-    /// Configure a dirty-indicator row: "Prev: {value}" label + "Reset" button.
-    private func configureDirtyRow(
-        prevLabel: NSTextField,
-        resetButton: NSButton,
-        action: Selector,
-        y: CGFloat, controlX: CGFloat, controlWidth: CGFloat, height: CGFloat,
-        in view: NSView
-    ) {
-        let resetWidth: CGFloat = 50
+    /// Build a [label, control] row for the grid.
+    private func formRow(_ labelText: String, _ control: NSView) -> [NSView] {
+        [makeLabel(labelText), control]
+    }
+
+    /// Build a dirty-indicator row: empty label column, [prevLabel, resetButton] in control column.
+    /// The row's container is hidden by default; sync() shows it when dirty.
+    private func dirtyRow(
+        _ container: NSStackView,
+        _ prevLabel: NSTextField,
+        _ resetButton: NSButton,
+        action: Selector
+    ) -> [NSView] {
         prevLabel.font = .systemFont(ofSize: 11)
         prevLabel.textColor = .secondaryLabelColor
-        prevLabel.alignment = .left
-        prevLabel.frame = NSRect(x: controlX, y: y, width: controlWidth - resetWidth - 4, height: height)
-        prevLabel.isHidden = true
-        view.addSubview(prevLabel)
+        prevLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         resetButton.title = "Reset"
         resetButton.bezelStyle = .inline
         resetButton.controlSize = .small
         resetButton.font = .systemFont(ofSize: 10)
-        resetButton.frame = NSRect(x: controlX + controlWidth - resetWidth, y: y, width: resetWidth, height: height)
         resetButton.target = self
         resetButton.action = action
-        resetButton.isHidden = true
-        view.addSubview(resetButton)
+        resetButton.setContentHuggingPriority(.required, for: .horizontal)
+
+        container.orientation = .horizontal
+        container.spacing = 4
+        container.addArrangedSubview(prevLabel)
+        container.addArrangedSubview(resetButton)
+        container.isHidden = true
+        return [NSGridCell.emptyContentView, container]
     }
 
     private func makeLabel(_ text: String) -> NSTextField {
@@ -185,15 +162,32 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
         return label
     }
 
+    private func makeHStack(_ views: [NSView]) -> NSStackView {
+        let stack = NSStackView(views: views)
+        stack.orientation = .horizontal
+        stack.spacing = 4
+        return stack
+    }
+
+    private func makeButton(_ title: String, action: Selector) -> NSButton {
+        let button = NSButton(title: title, target: self, action: action)
+        button.bezelStyle = .push
+        return button
+    }
+
     // MARK: - Sync from model
 
     /// Update controls and dirty indicators from committed config and draft state.
     func sync(committed: DanTermConfig, draft: PreferencesDraft?) {
         guard let draft = draft else {
-            // No draft — show committed values, hide all dirty indicators.
-            syncControls(from: committed)
-            hideDirtyIndicators()
-            isDirty = false
+            // No draft — show committed values, hide dirty indicators.
+            switch committed.alertClearMode {
+            case .focus: alertClearModePopup.selectItem(at: 0)
+            case .manual: alertClearModePopup.selectItem(at: 1)
+            }
+            remoteThemeField.stringValue = committed.remoteTheme
+            alertClearModeDirtyRow.isHidden = true
+            remoteThemeDirtyRow.isHidden = true
             saveButton.isEnabled = false
             return
         }
@@ -209,38 +203,18 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
         let alertDirty = draft.alertClearMode != committed.alertClearMode
         let themeDirty = resolveRemoteTheme(draft.remoteTheme) != committed.remoteTheme
 
-        // Alert clear mode dirty indicator.
-        alertClearModePrevLabel.isHidden = !alertDirty
-        alertClearModeResetButton.isHidden = !alertDirty
+        alertClearModeDirtyRow.isHidden = !alertDirty
         if alertDirty {
             let displayValue = committed.alertClearMode == .focus ? "Focus" : "Manual"
             alertClearModePrevLabel.stringValue = "Prev: \(displayValue)"
         }
 
-        // Remote theme dirty indicator.
-        remoteThemePrevLabel.isHidden = !themeDirty
-        remoteThemeResetButton.isHidden = !themeDirty
+        remoteThemeDirtyRow.isHidden = !themeDirty
         if themeDirty {
             remoteThemePrevLabel.stringValue = "Prev: \(committed.remoteTheme)"
         }
 
-        isDirty = alertDirty || themeDirty
-        saveButton.isEnabled = isDirty
-    }
-
-    private func syncControls(from config: DanTermConfig) {
-        switch config.alertClearMode {
-        case .focus: alertClearModePopup.selectItem(at: 0)
-        case .manual: alertClearModePopup.selectItem(at: 1)
-        }
-        remoteThemeField.stringValue = config.remoteTheme
-    }
-
-    private func hideDirtyIndicators() {
-        alertClearModePrevLabel.isHidden = true
-        alertClearModeResetButton.isHidden = true
-        remoteThemePrevLabel.isHidden = true
-        remoteThemeResetButton.isHidden = true
+        saveButton.isEnabled = alertDirty || themeDirty
     }
 
     // MARK: - NSWindowDelegate
