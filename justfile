@@ -4,6 +4,10 @@ _current_version := `git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' |
 default:
     @just --list
 
+# Remove build artifacts
+clean:
+    rm -rf .spm-build .build
+
 # Compile Icon Composer .icon files into Assets.car
 build-icons:
     ./icon/gen-dev-icon.sh
