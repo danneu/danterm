@@ -36,6 +36,8 @@ enum Effect {
 
     // Config persistence
     case saveDanTermConfigKey(key: String, value: String)
+    case removeDanTermConfigKey(key: String)
+    case reloadGhosttyConfig
     case syncPreferencesPanel
 
     // Persistence — triggers a debounced write of the model snapshot to disk.

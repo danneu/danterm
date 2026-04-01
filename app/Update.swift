@@ -7,9 +7,11 @@ func resolveRemoteTheme(_ raw: String) -> String {
 }
 
 /// Whether the preferences draft has any changes compared to the committed config.
-func isDraftDirty(_ draft: PreferencesDraft, vs config: DanTermConfig) -> Bool {
+func isDraftDirty(_ draft: PreferencesDraft, vs config: DanTermConfig, ghostty: GhosttyPrefs?) -> Bool {
     draft.alertClearMode != config.alertClearMode
         || resolveRemoteTheme(draft.remoteTheme) != config.remoteTheme
+        || draft.theme != ghostty?.theme
+        || draft.fontSize != ghostty?.fontSize
 }
 
 @discardableResult
@@ -483,11 +485,11 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let oldConfig = model.config
         model.config = newConfig
         // Reset draft to match new config if panel is open.
+        // Reset DanTerm draft fields to match new config; preserve Ghostty fields
+        // (ghosttyPrefsRefreshed handles those separately after CONFIG_CHANGE).
         if model.preferencesDraft != nil {
-            model.preferencesDraft = PreferencesDraft(
-                alertClearMode: newConfig.alertClearMode,
-                remoteTheme: newConfig.remoteTheme
-            )
+            model.preferencesDraft!.alertClearMode = newConfig.alertClearMode
+            model.preferencesDraft!.remoteTheme = newConfig.remoteTheme
         }
         var effects: [Effect] = [.syncPreferencesPanel]
         if newConfig.remoteTheme != oldConfig.remoteTheme {
@@ -500,18 +502,22 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
     // MARK: - Preferences Panel
 
-    case .preferencesOpened:
+    case .preferencesOpened(let ghostty):
         // Only create draft on closed → open transition; re-focus is a no-op.
         if model.preferencesDraft == nil {
             model.preferencesDraft = PreferencesDraft(
                 alertClearMode: model.config.alertClearMode,
-                remoteTheme: model.config.remoteTheme
+                remoteTheme: model.config.remoteTheme,
+                theme: ghostty.theme,
+                fontSize: ghostty.fontSize
             )
+            model.committedGhosttyPrefs = ghostty
         }
         return [.syncPreferencesPanel]
 
     case .preferencesClosed:
         model.preferencesDraft = nil
+        model.committedGhosttyPrefs = nil
         return []
 
     case .prefSetAlertClearMode(let mode):
@@ -533,6 +539,34 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         guard model.preferencesDraft != nil else { return [] }
         model.preferencesDraft!.remoteTheme = model.config.remoteTheme
         return [.syncPreferencesPanel]
+
+    case .prefSetTheme(let text):
+        guard model.preferencesDraft != nil else { return [] }
+        model.preferencesDraft!.theme = text
+        return [.syncPreferencesPanel]
+
+    case .prefSetFontSize(let text):
+        guard model.preferencesDraft != nil else { return [] }
+        model.preferencesDraft!.fontSize = text
+        return [.syncPreferencesPanel]
+
+    case .prefResetTheme:
+        guard model.preferencesDraft != nil else { return [] }
+        model.preferencesDraft!.theme = model.committedGhosttyPrefs?.theme
+        return [.syncPreferencesPanel]
+
+    case .prefResetFontSize:
+        guard model.preferencesDraft != nil else { return [] }
+        model.preferencesDraft!.fontSize = model.committedGhosttyPrefs?.fontSize
+        return [.syncPreferencesPanel]
+
+    case .ghosttyPrefsRefreshed(let ghostty):
+        model.committedGhosttyPrefs = ghostty
+        if model.preferencesDraft != nil {
+            model.preferencesDraft!.theme = ghostty.theme
+            model.preferencesDraft!.fontSize = ghostty.fontSize
+        }
+        return model.preferencesDraft != nil ? [.syncPreferencesPanel] : []
 
     case .prefSave:
         guard let draft = model.preferencesDraft else { return [] }
@@ -556,6 +590,41 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             for (paneId, pane) in model.panes where pane.isRemote {
                 model.panes[paneId]?.remoteThemeOverride = resolvedTheme
                 effects.append(.applyPaneTheme(paneId: paneId))
+            }
+        }
+        // Save changed Ghostty keys and trigger reload if any changed.
+        let committedGhostty = model.committedGhosttyPrefs ?? GhosttyPrefs()
+        var ghosttyChanged = false
+        if draft.theme != committedGhostty.theme {
+            if let theme = draft.theme {
+                effects.append(.saveDanTermConfigKey(key: "theme", value: theme))
+            } else {
+                effects.append(.removeDanTermConfigKey(key: "theme"))
+            }
+            ghosttyChanged = true
+        }
+        if draft.fontSize != committedGhostty.fontSize {
+            if let fs = draft.fontSize, let val = Double(fs), val > 0 {
+                effects.append(.saveDanTermConfigKey(key: "font-size", value: fs))
+                ghosttyChanged = true
+            } else if draft.fontSize == nil {
+                effects.append(.removeDanTermConfigKey(key: "font-size"))
+                ghosttyChanged = true
+            }
+            // else: invalid font-size — skip, leave dirty
+        }
+        if ghosttyChanged {
+            effects.append(.reloadGhosttyConfig)
+            // Optimistically update committed baselines for saved fields.
+            // The CONFIG_CHANGE callback will confirm with ghosttyPrefsRefreshed.
+            if draft.theme != committedGhostty.theme {
+                model.committedGhosttyPrefs?.theme = draft.theme
+            }
+            // Only update font-size baseline if it was actually saved (valid value or nil).
+            let fontSizeSaved = draft.fontSize == nil
+                || (draft.fontSize != nil && Double(draft.fontSize!) != nil && Double(draft.fontSize!)! > 0)
+            if fontSizeSaved && draft.fontSize != committedGhostty.fontSize {
+                model.committedGhosttyPrefs?.fontSize = draft.fontSize
             }
         }
         effects.append(.syncPreferencesPanel)

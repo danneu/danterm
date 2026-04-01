@@ -104,11 +104,20 @@ struct GroupModel: Equatable {
     var tabs: [TabModel] = []
 }
 
+/// Ghostty config values relevant to the preferences panel.
+/// Populated by the runtime from ghosttyApp.readConfigString; nil = Ghostty default.
+struct GhosttyPrefs: Equatable {
+    var theme: String?
+    var fontSize: String?
+}
+
 /// Raw form state for the preferences panel. Stores what the user actually typed,
 /// not yet normalized. Normalization happens only on save.
 struct PreferencesDraft: Equatable {
     var alertClearMode: AlertClearMode
     var remoteTheme: String  // raw text from the field; may have whitespace or be empty
+    var theme: String?       // nil = use Ghostty default (remove key from config)
+    var fontSize: String?    // nil = use Ghostty default (remove key from config)
 }
 
 struct AppModel: Equatable {
@@ -121,6 +130,7 @@ struct AppModel: Equatable {
     var showAllAlerts: Bool = false  // ephemeral — excluded from snapshots
     var config: DanTermConfig = .default  // ephemeral — loaded from disk, not snapshots
     var preferencesDraft: PreferencesDraft? = nil  // ephemeral — non-nil while prefs panel is open
+    var committedGhosttyPrefs: GhosttyPrefs? = nil  // ephemeral — non-nil while prefs panel is open
 }
 
 // MARK: - Session Lock

@@ -20,6 +20,15 @@ class GhosttyApp {
     /// Whether scrollbar is enabled based on the current app config.
     var scrollbarEnabled: Bool { Self.readScrollbarEnabled(from: config) }
 
+    /// Read a string value from the retained app config.
+    func readConfigString(key: String) -> String? {
+        guard let config = config else { return nil }
+        var v: UnsafePointer<Int8>?
+        guard ghostty_config_get(config, &v, key, UInt(key.utf8.count)) else { return nil }
+        guard let ptr = v else { return nil }
+        return String(cString: ptr)
+    }
+
     /// Create a fresh config by loading default files, then layering the DanTerm overlay.
     private static func loadConfig() -> ghostty_config_t? {
         guard let config = ghostty_config_new() else { return nil }
@@ -341,11 +350,17 @@ class GhosttyApp {
                 self.config = newConfig
                 // Fan out scrollbar setting to all surfaces
                 let enabled = Self.readScrollbarEnabled(from: newConfig)
+                // Read Ghostty prefs from the freshly-cloned config for the prefs panel.
+                let prefs = GhosttyPrefs(
+                    theme: self.readConfigString(key: "theme"),
+                    fontSize: self.readConfigString(key: "font-size")
+                )
                 DispatchQueue.main.async { [weak self] in
                     guard let self = self else { return }
                     for (_, view) in self.runtime?.surfaces ?? [:] {
                         view.scrollbarEnabled = enabled
                     }
+                    self.runtime?.send(.ghosttyPrefsRefreshed(prefs))
                 }
 
             case GHOSTTY_TARGET_SURFACE:

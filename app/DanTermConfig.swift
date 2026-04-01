@@ -94,4 +94,18 @@ enum DanTermConfigWriter {
         }
         return lines.joined(separator: "\n")
     }
+
+    /// Remove all occurrences of `key = ...` from config file content.
+    /// Comments, blank lines, and other keys are preserved verbatim.
+    static func removeKey(_ key: String, from content: String) -> String {
+        let lines = content.components(separatedBy: "\n")
+        let filtered = lines.filter { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty || trimmed.hasPrefix("#") { return true }
+            guard let eqIndex = trimmed.firstIndex(of: "=") else { return true }
+            let lineKey = trimmed[trimmed.startIndex..<eqIndex].trimmingCharacters(in: .whitespaces)
+            return lineKey != key
+        }
+        return filtered.joined(separator: "\n")
+    }
 }

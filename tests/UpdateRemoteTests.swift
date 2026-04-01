@@ -177,7 +177,7 @@ func remoteTests() {
 
     test("pref save alertClearMode updates model and emits save") {
         var model = makeModel()
-        _ = update(&model, .preferencesOpened)
+        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs()))
         _ = update(&model, .prefSetAlertClearMode(.manual))
         let effects = update(&model, .prefSave)
         try expectEqual(model.config.alertClearMode, .manual)
@@ -191,7 +191,7 @@ func remoteTests() {
 
     test("pref save alertClearMode with same value does not emit save key") {
         var model = makeModel()
-        _ = update(&model, .preferencesOpened)
+        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs()))
         // Don't change anything — save should emit only syncPreferencesPanel.
         let effects = update(&model, .prefSave)
         try expect(!hasEffect(effects) {
@@ -204,7 +204,7 @@ func remoteTests() {
 
     test("pref save remoteTheme updates model and saves") {
         var model = makeModel()
-        _ = update(&model, .preferencesOpened)
+        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs()))
         _ = update(&model, .prefSetRemoteTheme("Grape"))
         let effects = update(&model, .prefSave)
         try expectEqual(model.config.remoteTheme, "Grape")
@@ -222,7 +222,7 @@ func remoteTests() {
         let paneId = model.groups[0].tabs[0].focusedPaneId
         _ = update(&model, .remoteSessionStarted(paneId: paneId))
 
-        _ = update(&model, .preferencesOpened)
+        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs()))
         _ = update(&model, .prefSetRemoteTheme("Grape"))
         let effects = update(&model, .prefSave)
         try expectEqual(model.panes[paneId]?.remoteThemeOverride, "Grape")

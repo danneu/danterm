@@ -260,8 +260,22 @@ class AppRuntime {
             let updated = DanTermConfigWriter.setKey(key, value: value, in: existing)
             try? updated.write(to: url, atomically: true, encoding: .utf8)
 
+        case .removeDanTermConfigKey(let key):
+            let path = DanTermConfigParser.configFilePath()
+            let url = URL(fileURLWithPath: path)
+            guard let existing = try? String(contentsOfFile: path, encoding: .utf8) else { break }
+            let updated = DanTermConfigWriter.removeKey(key, from: existing)
+            try? updated.write(to: url, atomically: true, encoding: .utf8)
+
+        case .reloadGhosttyConfig:
+            reloadAllConfig()
+
         case .syncPreferencesPanel:
-            preferencesPanel?.sync(committed: model.config, draft: model.preferencesDraft)
+            preferencesPanel?.sync(
+                committed: model.config,
+                draft: model.preferencesDraft,
+                ghostty: model.committedGhosttyPrefs
+            )
 
         case .scheduleCheckpoint:
             scheduleDebouncedCheckpoint()
@@ -660,7 +674,11 @@ class AppRuntime {
         if preferencesPanel == nil {
             preferencesPanel = PreferencesPanel(runtime: self)
         }
-        send(.preferencesOpened)
+        let ghostty = GhosttyPrefs(
+            theme: ghosttyApp.readConfigString(key: "theme"),
+            fontSize: ghosttyApp.readConfigString(key: "font-size")
+        )
+        send(.preferencesOpened(ghostty: ghostty))
         preferencesPanel!.makeKeyAndOrderFront(nil)
     }
 

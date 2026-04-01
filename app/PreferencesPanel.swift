@@ -6,11 +6,23 @@ import Cocoa
 class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
     weak var runtime: AppRuntime?
 
+    // Ghostty settings
+    private let ghosttyThemeField = NSTextField()
+    private let ghosttyBrowseButton = NSButton()
+    private let fontSizeField = NSTextField()
+
+    // DanTerm settings
     private let alertClearModePopup = NSPopUpButton()
     private let remoteThemeField = NSTextField()
     private let browseButton = NSButton()
 
     // Dirty indicators (hidden when clean)
+    private let ghosttyThemeDirtyRow = NSStackView()
+    private let ghosttyThemePrevLabel = NSTextField(labelWithString: "")
+    private let ghosttyThemeResetButton = NSButton()
+    private let fontSizeDirtyRow = NSStackView()
+    private let fontSizePrevLabel = NSTextField(labelWithString: "")
+    private let fontSizeResetButton = NSButton()
     private let alertClearModeDirtyRow = NSStackView()
     private let alertClearModePrevLabel = NSTextField(labelWithString: "")
     private let alertClearModeResetButton = NSButton()
@@ -44,6 +56,14 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
 
         // -- Form grid --
         let grid = NSGridView(views: [
+            // Ghostty settings
+            formRow("Theme", makeHStack([ghosttyThemeField, ghosttyBrowseButton])),
+            dirtyRow(ghosttyThemeDirtyRow, ghosttyThemePrevLabel, ghosttyThemeResetButton,
+                     action: #selector(resetTheme(_:))),
+            formRow("Font Size", fontSizeField),
+            dirtyRow(fontSizeDirtyRow, fontSizePrevLabel, fontSizeResetButton,
+                     action: #selector(resetFontSize(_:))),
+            // DanTerm settings
             formRow("Alert Clear Mode", alertClearModePopup),
             dirtyRow(alertClearModeDirtyRow, alertClearModePrevLabel, alertClearModeResetButton,
                      action: #selector(resetAlertClearMode(_:))),
@@ -60,10 +80,31 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
         grid.column(at: 0).width = 130  // fixed label column width
         grid.column(at: 1).xPlacement = .fill
         grid.rowSpacing = 4
+        // Add extra spacing before DanTerm section (Alert Clear Mode row).
+        grid.row(at: 4).topPadding = 12
         // Add extra spacing before the "Config file" row.
-        grid.row(at: 4).topPadding = 8
+        grid.row(at: 8).topPadding = 8
 
-        // Configure controls.
+        // Configure Ghostty controls.
+        ghosttyThemeField.delegate = self
+        ghosttyThemeField.placeholderString = "Ghostty default"
+        ghosttyThemeField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        ghosttyBrowseButton.title = "Browse…"
+        ghosttyBrowseButton.bezelStyle = .push
+        ghosttyBrowseButton.target = self
+        ghosttyBrowseButton.action = #selector(browseGhosttyTheme(_:))
+        ghosttyBrowseButton.setContentHuggingPriority(.required, for: .horizontal)
+        ghosttyBrowseButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        fontSizeField.delegate = self
+        fontSizeField.placeholderString = "Ghostty default"
+        let fontSizeWidth = NSLayoutConstraint(item: fontSizeField, attribute: .width, relatedBy: .equal,
+                                                toItem: nil, attribute: .notAnAttribute, multiplier: 1, constant: 80)
+        fontSizeWidth.priority = .defaultHigh
+        fontSizeField.addConstraint(fontSizeWidth)
+
+        // Configure DanTerm controls.
         alertClearModePopup.removeAllItems()
         alertClearModePopup.addItems(withTitles: ["Focus", "Manual"])
         alertClearModePopup.target = self
@@ -178,8 +219,8 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
 
     // MARK: - Sync from model
 
-    /// Update controls and dirty indicators from committed config and draft state.
-    func sync(committed: DanTermConfig, draft: PreferencesDraft?) {
+    /// Update controls and dirty indicators from committed config, draft, and Ghostty prefs.
+    func sync(committed: DanTermConfig, draft: PreferencesDraft?, ghostty: GhosttyPrefs?) {
         guard let draft = draft else {
             // No draft — show committed values, hide dirty indicators.
             switch committed.alertClearMode {
@@ -187,6 +228,10 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
             case .manual: alertClearModePopup.selectItem(at: 1)
             }
             remoteThemeField.stringValue = committed.remoteTheme
+            ghosttyThemeField.stringValue = ghostty?.theme ?? ""
+            fontSizeField.stringValue = ghostty?.fontSize ?? ""
+            ghosttyThemeDirtyRow.isHidden = true
+            fontSizeDirtyRow.isHidden = true
             alertClearModeDirtyRow.isHidden = true
             remoteThemeDirtyRow.isHidden = true
             saveButton.isEnabled = false
@@ -199,10 +244,24 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
         case .manual: alertClearModePopup.selectItem(at: 1)
         }
         remoteThemeField.stringValue = draft.remoteTheme
+        ghosttyThemeField.stringValue = draft.theme ?? ""
+        fontSizeField.stringValue = draft.fontSize ?? ""
 
         // Compute per-field dirtiness.
+        let ghosttyThemeDirty = draft.theme != ghostty?.theme
+        let fontSizeDirty = draft.fontSize != ghostty?.fontSize
         let alertDirty = draft.alertClearMode != committed.alertClearMode
-        let themeDirty = resolveRemoteTheme(draft.remoteTheme) != committed.remoteTheme
+        let remoteThemeDirty = resolveRemoteTheme(draft.remoteTheme) != committed.remoteTheme
+
+        ghosttyThemeDirtyRow.isHidden = !ghosttyThemeDirty
+        if ghosttyThemeDirty {
+            ghosttyThemePrevLabel.stringValue = "Prev: \(ghostty?.theme ?? "(default)")"
+        }
+
+        fontSizeDirtyRow.isHidden = !fontSizeDirty
+        if fontSizeDirty {
+            fontSizePrevLabel.stringValue = "Prev: \(ghostty?.fontSize ?? "(default)")"
+        }
 
         alertClearModeDirtyRow.isHidden = !alertDirty
         if alertDirty {
@@ -210,12 +269,12 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
             alertClearModePrevLabel.stringValue = "Prev: \(displayValue)"
         }
 
-        remoteThemeDirtyRow.isHidden = !themeDirty
-        if themeDirty {
+        remoteThemeDirtyRow.isHidden = !remoteThemeDirty
+        if remoteThemeDirty {
             remoteThemePrevLabel.stringValue = "Prev: \(committed.remoteTheme)"
         }
 
-        saveButton.isEnabled = alertDirty || themeDirty
+        saveButton.isEnabled = ghosttyThemeDirty || fontSizeDirty || alertDirty || remoteThemeDirty
     }
 
     // MARK: - NSWindowDelegate
@@ -235,8 +294,16 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
 
     // NSTextFieldDelegate: update draft as the user types for live dirty tracking.
     func controlTextDidChange(_ obj: Notification) {
-        guard let field = obj.object as? NSTextField, field === remoteThemeField else { return }
-        runtime?.send(.prefSetRemoteTheme(field.stringValue))
+        guard let field = obj.object as? NSTextField else { return }
+        if field === remoteThemeField {
+            runtime?.send(.prefSetRemoteTheme(field.stringValue))
+        } else if field === ghosttyThemeField {
+            let text = field.stringValue
+            runtime?.send(.prefSetTheme(text.isEmpty ? nil : text))
+        } else if field === fontSizeField {
+            let text = field.stringValue
+            runtime?.send(.prefSetFontSize(text.isEmpty ? nil : text))
+        }
     }
 
     @objc private func savePreferences(_ sender: Any?) {
@@ -254,6 +321,28 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
 
     @objc private func resetRemoteTheme(_ sender: Any?) {
         runtime?.send(.prefResetRemoteTheme)
+    }
+
+    @objc private func resetTheme(_ sender: Any?) {
+        runtime?.send(.prefResetTheme)
+    }
+
+    @objc private func resetFontSize(_ sender: Any?) {
+        runtime?.send(.prefResetFontSize)
+    }
+
+    /// Present the theme picker sheet so the user can browse and select a Ghostty theme.
+    @objc private func browseGhosttyTheme(_ sender: Any?) {
+        let picker = RemoteThemePickerSheet()
+        picker.currentThemeName = ghosttyThemeField.stringValue.isEmpty
+            ? runtime?.model.committedGhosttyPrefs?.theme
+            : ghosttyThemeField.stringValue
+        picker.onSelect = { [weak self] themeName in
+            self?.runtime?.send(.prefSetTheme(themeName))
+        }
+        let sheetWindow = NSWindow(contentViewController: picker)
+        sheetWindow.styleMask = [.titled]
+        beginSheet(sheetWindow) { _ in }
     }
 
     /// Present the theme picker sheet so the user can browse and select a remote theme.

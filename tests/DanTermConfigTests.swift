@@ -141,4 +141,44 @@ func danTermConfigTests() {
         // Should append, not replace the comment
         try expectEqual(result, "# remote-theme = Old\nremote-theme = New\n")
     }
+
+    // MARK: - DanTermConfigWriter.removeKey
+
+    print("DanTermConfigWriter.removeKey")
+
+    test("removeKey removes all occurrences of a key") {
+        let input = "theme = Dracula\nfont-size = 14\ntheme = Solarized\n"
+        let result = DanTermConfigWriter.removeKey("theme", from: input)
+        try expectEqual(result, "font-size = 14\n")
+    }
+
+    test("removeKey preserves comments, blank lines, other keys") {
+        let input = """
+        # My config
+        font-size = 14
+
+        theme = Dracula
+        remote-theme = Grape
+        """
+        let result = DanTermConfigWriter.removeKey("theme", from: input)
+        let expected = """
+        # My config
+        font-size = 14
+
+        remote-theme = Grape
+        """
+        try expectEqual(result, expected)
+    }
+
+    test("removeKey on absent key returns content unchanged") {
+        let input = "font-size = 14\nremote-theme = Grape\n"
+        let result = DanTermConfigWriter.removeKey("theme", from: input)
+        try expectEqual(result, input)
+    }
+
+    test("removeKey does not remove commented-out keys") {
+        let input = "# theme = Old\nfont-size = 14\n"
+        let result = DanTermConfigWriter.removeKey("theme", from: input)
+        try expectEqual(result, input, "commented key should not be removed")
+    }
 }

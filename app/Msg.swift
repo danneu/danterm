@@ -75,13 +75,18 @@ enum Msg {
     case configLoaded(DanTermConfig)
 
     // Preferences panel
-    case preferencesOpened
+    case preferencesOpened(ghostty: GhosttyPrefs)
     case preferencesClosed
     case prefSetAlertClearMode(AlertClearMode)
     case prefSetRemoteTheme(String)
+    case prefSetTheme(String?)
+    case prefSetFontSize(String?)
     case prefResetAlertClearMode
     case prefResetRemoteTheme
+    case prefResetTheme
+    case prefResetFontSize
     case prefSave
+    case ghosttyPrefsRefreshed(GhosttyPrefs)
 
     // Lifecycle
     case appBecameActive
