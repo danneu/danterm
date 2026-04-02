@@ -27,25 +27,25 @@ app/
 ├── Effect.swift            # Side effects (createSurface, rebuildContentView, etc.)
 ├── Update.swift            # Pure update function: (inout AppModel, Msg) -> [Effect]
 ├── ModelOperations.swift   # Pure helpers: split tree ops, query helpers, bell counts
+├── DanTermConfig.swift     # User-facing config (init file, preferences)
 ├── GhosttyApp.swift        # Wraps ghostty_app_t, runtime callbacks → Msg
 ├── TerminalView.swift      # NSView subclass hosting ghostty_surface_t
 ├── SplitContainerView.swift # Renders split tree as nested NSSplitViews
 ├── SidebarView.swift       # NSOutlineView sidebar: tabs, groups, drag/drop
+├── ...                     # Pane views, drag/drop, search, themes, preferences, window chrome
 └── Info.plist              # App bundle metadata
 
 tests/
-├── TestHarness.swift       # Test runner, assertions, helpers
-├── UpdateTabTests.swift    # Tab create/select/close tests
-├── UpdatePaneTests.swift   # Split/close/focus pane tests
-├── UpdateGhosttyTests.swift # Bell, title, cwd, surface lifecycle tests
-├── UpdateGroupTests.swift  # Group create/delete/rename/reorder tests
-├── UpdateLifecycleTests.swift # App active/resign, notification click tests
+├── TestHarness.swift          # Test runner, assertions, helpers
+├── Update*Tests.swift         # Tests for each Msg domain (tab, pane, ghostty, group, lifecycle, search, theme, alert, preferences, remote)
 ├── ModelOperationsTests.swift # Split tree operation tests
-└── SnapshotTests.swift     # Init file decode/validate tests
+├── SnapshotTests.swift        # Init file decode/validate tests
+└── ...                        # Config, scrollbar math, drag/drop, theme parsing, export tests
 
 docs/
 ├── ci.md                   # CI/CD pipeline, code signing, notarization
-└── scaling.md              # Display scaling (HiDPI/Retina), content scale
+├── scaling.md              # Display scaling (HiDPI/Retina), content scale
+└── upgrading-ghostty.md    # Upgrading Ghostty version, CI cache
 ```
 
 ### Data flow
@@ -135,7 +135,7 @@ verify the test passes.
 - Clones Ghostty at a pinned tag (currently v1.3.0)
 - Builds with: `nix shell nixpkgs#zig_0_15 nixpkgs#gettext --command zig build`
 - Flags: `-Demit-xcframework -Demit-macos-app=false -Dsentry=false -Doptimize=ReleaseFast`
-- XCFramework output path is `macos/GhosttyKit.xcframework/` (NOT `zig-out/`)
+- XCFramework output path is `lib/GhosttyKit.xcframework/` (NOT `zig-out/`)
 - As of v1.3.0, dependency URLs use a CDN (`deps.files.ghostty.org`), so the old
   iTerm2-Color-Schemes URL staleness issue is resolved
 
@@ -190,7 +190,6 @@ GitHub Actions builds, signs, notarizes, and publishes `.dmg` + `.zip` releases.
 
 - **CI** (`.github/workflows/ci.yml`) — PRs: build only, ad-hoc signing
 - **Stable** (`.github/workflows/release-stable.yml`) — `v*` tags: signed + notarized GitHub Release
-- **Nightly** (`.github/workflows/release-nightly.yml`) — pushes to `master`: rolling "nightly" prerelease
 
 Release with: `just release patch|minor|major`
 
