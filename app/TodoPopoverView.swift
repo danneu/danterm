@@ -17,9 +17,7 @@ private class TodoRowView: NSView {
     let textField: NSTextField = {
         let tf = NSTextField(labelWithString: "")
         tf.font = .systemFont(ofSize: 12)
-        tf.focusRingType = .none
         tf.lineBreakMode = .byTruncatingTail
-        tf.maximumNumberOfLines = 1
         tf.translatesAutoresizingMaskIntoConstraints = false
         return tf
     }()
@@ -76,9 +74,6 @@ private class TodoRowView: NSView {
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        textField.cell?.wraps = false
-        textField.cell?.usesSingleLineMode = true
-
         if item.isDone {
             textField.attributedStringValue = NSAttributedString(string: oneLine, attributes: [
                 .strikethroughStyle: NSUnderlineStyle.single.rawValue,
@@ -99,7 +94,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     let paneId: PaneId
     private let tableView = NSTableView()
     private let scrollView = NSScrollView()
-    private let headerLabel = NSTextField(labelWithString: "TODOs")
+    private let headerLabel = NSTextField(labelWithString: "To-Do")
     private let clearButton = NSButton(title: "Clear completed", target: nil, action: nil)
     private let addField: NSTextField = {
         let tf = NSTextField()
@@ -172,7 +167,6 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
 
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = false
         scrollView.scrollerStyle = .overlay
         scrollView.drawsBackground = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
