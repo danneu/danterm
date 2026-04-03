@@ -1,4 +1,5 @@
 {
+  "autoMemoryDirectory": "~/world/my-apps/danterm/.claude/memory",
   "permissions": {
     "allow": [
       "Bash(just build-icon:*)",
@@ -9,10 +10,8 @@
       "Bash(just build:*)",
       "Bash(find app:*)",
       "Bash(gh search:*)",
-      "Bash(gh issue:*)",
       "Bash(command -v claude)",
-      "Read(//private/tmp/**)",
-      "Bash(gh release:*)"
+      "Read(//private/tmp/**)"
     ]
   }
 }
