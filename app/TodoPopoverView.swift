@@ -5,6 +5,112 @@
 import Cocoa
 
 private let todoRowDragType = NSPasteboard.PasteboardType("com.danneu.danterm.todo-row")
+private let todoRowId = NSUserInterfaceItemIdentifier("TodoRow")
+
+// MARK: - TodoRowView
+
+/// Reusable row view for a single TODO item: [checkbox | label | delete button].
+/// The text field starts non-editable; double-clicking the row enters edit mode.
+private class TodoRowView: NSView {
+    let checkbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    let textField: NSTextField = {
+        let tf = NSTextField(string: "")
+        tf.font = .systemFont(ofSize: 12)
+        tf.isBordered = false
+        tf.drawsBackground = false
+        tf.isEditable = false  // enabled on double-click
+        tf.focusRingType = .none
+        tf.lineBreakMode = .byTruncatingTail
+        tf.translatesAutoresizingMaskIntoConstraints = false
+        return tf
+    }()
+    let deleteButton: NSButton = {
+        let btn = NSButton()
+        btn.bezelStyle = .inline
+        btn.isBordered = false
+        btn.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Delete task")
+        btn.imageScaling = .scaleProportionallyDown
+        btn.contentTintColor = .tertiaryLabelColor
+        btn.translatesAutoresizingMaskIntoConstraints = false
+        return btn
+    }()
+
+    /// The UUID of the TodoItem this row is currently displaying.
+    var todoId: UUID?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+
+        checkbox.translatesAutoresizingMaskIntoConstraints = false
+        checkbox.setContentHuggingPriority(.required, for: .horizontal)
+        checkbox.setContentCompressionResistancePriority(.required, for: .horizontal)
+        addSubview(checkbox)
+        addSubview(textField)
+        addSubview(deleteButton)
+
+        NSLayoutConstraint.activate([
+            checkbox.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            checkbox.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            textField.leadingAnchor.constraint(equalTo: checkbox.trailingAnchor, constant: 4),
+            textField.centerYAnchor.constraint(equalTo: centerYAnchor),
+            textField.trailingAnchor.constraint(equalTo: deleteButton.leadingAnchor, constant: -4),
+
+            deleteButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            deleteButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            deleteButton.widthAnchor.constraint(equalToConstant: 16),
+            deleteButton.heightAnchor.constraint(equalToConstant: 16),
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) not implemented")
+    }
+
+    /// Configure this row for the given TodoItem. Resets editing state.
+    func configure(with item: TodoItem) {
+        todoId = item.id
+        checkbox.state = item.isDone ? .on : .off
+        textField.isEditable = false
+
+        if item.isDone {
+            textField.attributedStringValue = NSAttributedString(string: item.text, attributes: [
+                .strikethroughStyle: NSUnderlineStyle.single.rawValue,
+                .foregroundColor: NSColor.tertiaryLabelColor,
+                .font: NSFont.systemFont(ofSize: 12),
+            ])
+        } else {
+            textField.stringValue = item.text
+            textField.textColor = .labelColor
+        }
+    }
+
+    /// Enter inline editing mode for this row's text field.
+    func beginEditing() {
+        textField.isEditable = true
+        // Reset to plain string so the user edits raw text, not attributed
+        let plain = textField.stringValue
+        textField.stringValue = plain
+        textField.textColor = .labelColor
+        window?.makeFirstResponder(textField)
+        textField.currentEditor()?.selectAll(nil)
+    }
+
+    func endEditing() {
+        textField.isEditable = false
+    }
+
+    // Double-click anywhere on the row (except checkbox/delete) enters edit mode.
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            beginEditing()
+        } else {
+            super.mouseDown(with: event)
+        }
+    }
+}
+
+// MARK: - TodoPopoverViewController
 
 class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     weak var runtime: AppRuntime?
@@ -61,6 +167,8 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         tableView.dataSource = self
         tableView.delegate = self
         tableView.registerForDraggedTypes([todoRowDragType])
+        tableView.doubleAction = #selector(doubleClickRow(_:))
+        tableView.target = self
 
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
@@ -150,7 +258,25 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let items = todos
         guard row < items.count else { return nil }
-        return makeTodoRow(items[row])
+        let item = items[row]
+
+        // Reuse or create a TodoRowView
+        let rowView: TodoRowView
+        if let reused = tableView.makeView(withIdentifier: todoRowId, owner: self) as? TodoRowView {
+            rowView = reused
+        } else {
+            rowView = TodoRowView()
+            rowView.identifier = todoRowId
+        }
+
+        rowView.configure(with: item)
+        rowView.checkbox.target = self
+        rowView.checkbox.action = #selector(checkboxToggled(_:))
+        rowView.deleteButton.target = self
+        rowView.deleteButton.action = #selector(deleteTask(_:))
+        rowView.textField.delegate = self
+
+        return rowView
     }
 
     // MARK: - Drag reorder
@@ -177,84 +303,26 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         return true
     }
 
-    // MARK: - Row construction
-
-    private func makeTodoRow(_ item: TodoItem) -> NSView {
-        let row = NSView()
-
-        // Checkbox
-        let checkbox = NSButton(checkboxWithTitle: "", target: self, action: #selector(checkboxToggled(_:)))
-        checkbox.state = item.isDone ? .on : .off
-        checkbox.identifier = NSUserInterfaceItemIdentifier(item.id.uuidString)
-        checkbox.translatesAutoresizingMaskIntoConstraints = false
-        row.addSubview(checkbox)
-
-        // Text field (editable)
-        let textField = NSTextField(string: item.text)
-        textField.font = .systemFont(ofSize: 12)
-        textField.isBordered = false
-        textField.drawsBackground = false
-        textField.isEditable = true
-        textField.focusRingType = .none
-        textField.lineBreakMode = .byTruncatingTail
-        textField.translatesAutoresizingMaskIntoConstraints = false
-        textField.delegate = self
-        textField.identifier = NSUserInterfaceItemIdentifier(item.id.uuidString)
-
-        if item.isDone {
-            // Strikethrough + dimmed for completed items
-            let attributed = NSMutableAttributedString(string: item.text, attributes: [
-                .strikethroughStyle: NSUnderlineStyle.single.rawValue,
-                .foregroundColor: NSColor.tertiaryLabelColor,
-                .font: NSFont.systemFont(ofSize: 12),
-            ])
-            textField.attributedStringValue = attributed
-        }
-        row.addSubview(textField)
-
-        // Delete button
-        let deleteBtn = NSButton()
-        deleteBtn.bezelStyle = .inline
-        deleteBtn.isBordered = false
-        deleteBtn.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Delete task")
-        deleteBtn.imageScaling = .scaleProportionallyDown
-        deleteBtn.contentTintColor = .tertiaryLabelColor
-        deleteBtn.target = self
-        deleteBtn.action = #selector(deleteTask(_:))
-        deleteBtn.identifier = NSUserInterfaceItemIdentifier(item.id.uuidString)
-        deleteBtn.translatesAutoresizingMaskIntoConstraints = false
-        row.addSubview(deleteBtn)
-
-        NSLayoutConstraint.activate([
-            checkbox.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 8),
-            checkbox.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-
-            textField.leadingAnchor.constraint(equalTo: checkbox.trailingAnchor, constant: 4),
-            textField.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            textField.trailingAnchor.constraint(equalTo: deleteBtn.leadingAnchor, constant: -4),
-
-            deleteBtn.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -8),
-            deleteBtn.centerYAnchor.constraint(equalTo: row.centerYAnchor),
-            deleteBtn.widthAnchor.constraint(equalToConstant: 16),
-            deleteBtn.heightAnchor.constraint(equalToConstant: 16),
-        ])
-
-        return row
-    }
-
     // MARK: - Actions
 
+    /// Double-click a row to enter edit mode on its text field.
+    @objc private func doubleClickRow(_ sender: Any?) {
+        let row = tableView.clickedRow
+        guard row >= 0, let rowView = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? TodoRowView else { return }
+        rowView.beginEditing()
+    }
+
     @objc private func checkboxToggled(_ sender: NSButton) {
-        guard let idStr = sender.identifier?.rawValue,
-              let uuid = UUID(uuidString: idStr) else { return }
-        runtime?.send(.toggleTodoDone(paneId: paneId, todoId: uuid))
+        guard let rowView = sender.superview as? TodoRowView,
+              let todoId = rowView.todoId else { return }
+        runtime?.send(.toggleTodoDone(paneId: paneId, todoId: todoId))
         rebuildRows()
     }
 
     @objc private func deleteTask(_ sender: NSButton) {
-        guard let idStr = sender.identifier?.rawValue,
-              let uuid = UUID(uuidString: idStr) else { return }
-        runtime?.send(.deleteTodo(paneId: paneId, todoId: uuid))
+        guard let rowView = sender.superview as? TodoRowView,
+              let todoId = rowView.todoId else { return }
+        runtime?.send(.deleteTodo(paneId: paneId, todoId: todoId))
         rebuildRows()
     }
 
@@ -277,18 +345,19 @@ extension TodoPopoverViewController: NSTextFieldDelegate {
                 addField.stringValue = ""
                 rebuildRows()
                 return true
-            } else if let idStr = control.identifier?.rawValue, let uuid = UUID(uuidString: idStr) {
+            } else if let rowView = control.superview as? TodoRowView, let todoId = rowView.todoId {
                 // Inline edit: Enter commits the edit
                 let text = control.stringValue
-                runtime?.send(.editTodoText(paneId: paneId, todoId: uuid, text: text))
-                // Resign first responder to end editing
-                control.window?.makeFirstResponder(nil)
+                runtime?.send(.editTodoText(paneId: paneId, todoId: todoId, text: text))
+                rowView.endEditing()
                 rebuildRows()
                 return true
             }
         }
         if commandSelector == #selector(cancelOperation(_:)) {
-            // Escape: cancel editing, restore original text
+            if let rowView = control.superview as? TodoRowView {
+                rowView.endEditing()
+            }
             control.window?.makeFirstResponder(nil)
             rebuildRows()
             return true
@@ -299,10 +368,11 @@ extension TodoPopoverViewController: NSTextFieldDelegate {
     func controlTextDidEndEditing(_ obj: Notification) {
         guard let textField = obj.object as? NSTextField,
               textField !== addField,
-              let idStr = textField.identifier?.rawValue,
-              let uuid = UUID(uuidString: idStr) else { return }
+              let rowView = textField.superview as? TodoRowView,
+              let todoId = rowView.todoId else { return }
         let text = textField.stringValue
-        runtime?.send(.editTodoText(paneId: paneId, todoId: uuid, text: text))
+        runtime?.send(.editTodoText(paneId: paneId, todoId: todoId, text: text))
+        rowView.endEditing()
         rebuildRows()
     }
 }
