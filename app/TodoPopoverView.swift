@@ -63,7 +63,15 @@ private class TodoRowView: NSView {
         fatalError("init(coder:) not implemented")
     }
 
-    func configure(with item: TodoItem) {
+    func configure(with item: TodoItem, isEditing: Bool) {
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        if isEditing {
+            layer?.backgroundColor = NSColor.selectedContentBackgroundColor.withAlphaComponent(0.30).cgColor
+        } else {
+            layer?.backgroundColor = nil
+        }
+
         checkbox.state = item.isDone ? .on : .off
         textField.toolTip = item.text
 
@@ -248,8 +256,19 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
 
     // MARK: - Edit Mode
 
+    /// Update editingTodoId and reload only the affected rows (old + new).
+    private func setEditingTodoId(_ newId: UUID?) {
+        let oldId = editingTodoId
+        editingTodoId = newId
+        var rows = IndexSet()
+        if let oldId, let r = todos.firstIndex(where: { $0.id == oldId }) { rows.insert(r) }
+        if let newId, let r = todos.firstIndex(where: { $0.id == newId }) { rows.insert(r) }
+        guard !rows.isEmpty else { return }
+        tableView.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integer: 0))
+    }
+
     private func exitEditMode(restoreDraft: Bool) {
-        editingTodoId = nil
+        setEditingTodoId(nil)
         addField.stringValue = restoreDraft ? preEditDraft : ""
         preEditDraft = ""
         editLabel.isHidden = true
@@ -289,7 +308,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
             rowView.identifier = todoRowId
         }
 
-        rowView.configure(with: item)
+        rowView.configure(with: item, isEditing: item.id == editingTodoId)
         rowView.checkbox.target = self
         rowView.checkbox.action = #selector(checkboxToggled(_:))
         rowView.deleteButton.target = self
@@ -333,7 +352,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         if editingTodoId == nil {
             preEditDraft = addField.stringValue
         }
-        editingTodoId = item.id
+        setEditingTodoId(item.id)
         addField.stringValue = item.text
         editLabel.isHidden = false
         view.window?.makeFirstResponder(addField)
