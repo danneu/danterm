@@ -371,10 +371,10 @@ class TerminalView: NSView, NSTextInputClient {
         runtime?.send(.splitPane(paneId: bridge.paneId, direction: .vertical))
     }
 
-    /// Close this pane via ghostty's close request flow.
+    /// Close this pane, routing through requestClosePane for TODO confirmation.
     @objc func contextClosePane(_ sender: Any?) {
-        guard let surface = surface else { return }
-        ghostty_surface_request_close(surface)
+        guard let paneId = bridge.paneId else { return }
+        runtime?.send(.requestClosePane(paneId: paneId))
     }
 
     override func mouseMoved(with event: NSEvent) {

@@ -52,6 +52,14 @@ struct SearchModel: Equatable {
     var selected: Int?   // nil = no selection
 }
 
+// MARK: - TODO
+
+struct TodoItem: Equatable, Codable {
+    let id: UUID
+    var text: String
+    var isDone: Bool
+}
+
 // MARK: - Model
 
 struct PaneModel: Equatable {
@@ -63,6 +71,7 @@ struct PaneModel: Equatable {
     var theme: String? = nil  // ghostty theme name; nil = app default
     var isRemote: Bool = false              // detected via shell wrapper; not persisted
     var remoteThemeOverride: String? = nil   // ephemeral theme while remote; not persisted
+    var todos: [TodoItem] = []
 }
 
 indirect enum SplitNodeModel: Equatable {
@@ -131,6 +140,7 @@ struct AppModel: Equatable {
     var config: DanTermConfig = .default  // ephemeral — loaded from disk, not snapshots
     var preferencesDraft: PreferencesDraft? = nil  // ephemeral — non-nil while prefs panel is open
     var committedGhosttyPrefs: GhosttyPrefs? = nil  // ephemeral — non-nil while prefs panel is open
+    var todoPopoverPaneId: PaneId? = nil  // ephemeral — which pane's TODO popover is open
 }
 
 // MARK: - Session Lock
@@ -220,6 +230,12 @@ indirect enum SplitNodeSnapshot: Codable {
     }
 }
 
+struct TodoSnapshot: Codable {
+    let id: String
+    let text: String
+    let isDone: Bool
+}
+
 struct PaneSnapshot: Codable {
     let id: String?
     let title: String?
@@ -227,7 +243,7 @@ struct PaneSnapshot: Codable {
     let launch: PaneLaunchSnapshot?
     let scrollback: String?  // optional for backward compat
     let theme: String?       // raw ghostty theme name; nil = default
-
+    var todos: [TodoSnapshot]? = nil  // nil for backward compat
 }
 
 struct PaneLaunchSnapshot: Codable {
@@ -391,7 +407,14 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel,
     var panes: [PaneId: PaneModel] = [:]
     for (id, ps) in paneSnapshotById {
         let expandedCwd = ps.cwd.map { expandTilde($0) }
-        panes[id] = PaneModel(id: id, title: ps.title ?? "Terminal", cwd: expandedCwd, theme: ps.theme)
+        var paneModel = PaneModel(id: id, title: ps.title ?? "Terminal", cwd: expandedCwd, theme: ps.theme)
+        if let todoSnaps = ps.todos {
+            paneModel.todos = todoSnaps.compactMap { ts in
+                guard let uuid = UUID(uuidString: ts.id) else { return nil }
+                return TodoItem(id: uuid, text: ts.text, isDone: ts.isDone)
+            }
+        }
+        panes[id] = paneModel
     }
 
     // 6. Resolve selectedTabId. Default to first group's first tab.

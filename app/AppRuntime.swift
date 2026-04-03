@@ -22,6 +22,8 @@ class AppRuntime {
     weak var contentArea: NSView?
     weak var chromeView: WindowChromeView?
     var alertsPopover: NSPopover?
+    var todoPopover: NSPopover?
+    private var todoPopoverDelegate: TodoPopoverDelegateAdapter?
     private var themeBrowserView: ThemeBrowserView?
     private var preferencesPanel: PreferencesPanel?
     private var dragCoordinator: PaneDragCoordinator?
@@ -73,10 +75,13 @@ class AppRuntime {
             flushPendingCheckpoint()
         }
 
-        // Refresh pane toolbar after title/cwd/progress/remote-state changes
+        // Refresh pane toolbar after title/cwd/progress/remote-state/todo changes
         switch translatedMsg {
         case .surfaceTitle(let paneId, _), .surfaceCwd(let paneId, _), .surfaceProgress(let paneId, _),
-             .remoteSessionStarted(let paneId), .commandEnded(let paneId):
+             .remoteSessionStarted(let paneId), .commandEnded(let paneId),
+             .addTodo(let paneId, _), .toggleTodoDone(let paneId, _),
+             .editTodoText(let paneId, _, _), .deleteTodo(let paneId, _),
+             .reorderTodo(let paneId, _, _), .clearCompletedTodos(let paneId):
             refreshPaneToolbar(for: paneId)
         default:
             break
@@ -377,6 +382,53 @@ class AppRuntime {
                 let action = "end_search"
                 _ = action.withCString { ptr in
                     ghostty_surface_binding_action(surface, ptr, UInt(action.utf8.count))
+                }
+            }
+
+        // TODO popover
+
+        case .showTodoPopover(let paneId):
+            todoPopover?.performClose(nil)
+            todoPopover = nil
+            todoPopoverDelegate = nil
+            guard let contentArea = contentArea,
+                  let wrapper = findPaneWrapper(for: paneId, in: contentArea) else { return }
+            let anchor = wrapper.todoButtonView
+            let vc = TodoPopoverViewController(paneId: paneId, runtime: self)
+            let delegate = TodoPopoverDelegateAdapter(paneId: paneId, runtime: self)
+            let popover = NSPopover()
+            popover.contentViewController = vc
+            popover.behavior = .transient
+            popover.delegate = delegate
+            // If the button is hidden (0 tasks), anchor to the menu button area instead
+            if anchor.isHidden {
+                popover.show(relativeTo: wrapper.bounds, of: wrapper, preferredEdge: .minY)
+            } else {
+                popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
+            }
+            todoPopover = popover
+            todoPopoverDelegate = delegate
+
+        case .dismissTodoPopover:
+            todoPopover?.performClose(nil)
+            todoPopover = nil
+            todoPopoverDelegate = nil
+
+        case .showClosePaneConfirmation(let paneId, let uncompletedCount):
+            let alert = NSAlert()
+            let tasks = uncompletedCount == 1 ? "1 uncompleted task" : "\(uncompletedCount) uncompleted tasks"
+            alert.messageText = "Close pane?"
+            alert.informativeText = "This pane has \(tasks)."
+            alert.addButton(withTitle: "Close Pane")
+            alert.addButton(withTitle: "Cancel")
+            alert.alertStyle = .warning
+            if let window = window {
+                alert.beginSheetModal(for: window) { [weak self] response in
+                    if response == .alertFirstButtonReturn {
+                        if let surface = self?.surfaces[paneId]?.surface {
+                            ghostty_surface_request_close(surface)
+                        }
+                    }
                 }
             }
         }
@@ -787,6 +839,10 @@ class AppRuntime {
         cancelPaneDrag()
         alertsPopover?.performClose(nil)
         alertsPopover = nil
+        todoPopover?.performClose(nil)
+        todoPopover = nil
+        todoPopoverDelegate = nil
+        model.todoPopoverPaneId = nil
         preferencesPanel?.close()
         preferencesPanel = nil
 
@@ -899,7 +955,10 @@ class AppRuntime {
             let progress = model.panes[wrapper.paneId]?.progress
             let isRemote = model.panes[wrapper.paneId]?.isRemote ?? false
             let alertCount = model.alerts.count { $0.paneId == wrapper.paneId && $0.isUnread }
-            wrapper.updateToolbar(title: title, cwd: cwd, progress: progress, isRemote: isRemote, unreadAlertCount: alertCount)
+            let todos = model.panes[wrapper.paneId]?.todos ?? []
+            let totalTodo = todos.count
+            let uncompletedTodo = todos.count { !$0.isDone }
+            wrapper.updateToolbar(title: title, cwd: cwd, progress: progress, isRemote: isRemote, unreadAlertCount: alertCount, totalTodoCount: totalTodo, uncompletedTodoCount: uncompletedTodo)
         }
     }
 
@@ -909,7 +968,10 @@ class AppRuntime {
         let progress = model.panes[paneId]?.progress
         let isRemote = model.panes[paneId]?.isRemote ?? false
         let alertCount = model.alerts.count { $0.paneId == paneId && $0.isUnread }
-        findPaneWrapper(for: paneId, in: contentArea)?.updateToolbar(title: title, cwd: cwd, progress: progress, isRemote: isRemote, unreadAlertCount: alertCount)
+        let todos = model.panes[paneId]?.todos ?? []
+        let totalTodo = todos.count
+        let uncompletedTodo = todos.count { !$0.isDone }
+        findPaneWrapper(for: paneId, in: contentArea)?.updateToolbar(title: title, cwd: cwd, progress: progress, isRemote: isRemote, unreadAlertCount: alertCount, totalTodoCount: totalTodo, uncompletedTodoCount: uncompletedTodo)
     }
 
     private func findPaneWrapper(for paneId: PaneId, in view: NSView) -> PaneWrapperView? {
@@ -937,6 +999,10 @@ class AppRuntime {
 
     private func rebuildContentView() {
         cancelPaneDrag()
+        todoPopover?.performClose(nil)
+        todoPopover = nil
+        todoPopoverDelegate = nil
+        model.todoPopoverPaneId = nil
         guard let contentArea = contentArea else { return }
 
         // Capture browser focus before subview removal so we can restore it after reattachment
@@ -1040,6 +1106,21 @@ class AppRuntime {
         popover.behavior = .transient
         popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
         alertsPopover = popover
+    }
+}
+
+/// NSPopoverDelegate adapter for the TODO popover.
+/// Sends .todoPopoverClosed when the popover closes for any reason (click-away, programmatic, etc.)
+/// so model.todoPopoverPaneId stays in sync.
+private class TodoPopoverDelegateAdapter: NSObject, NSPopoverDelegate {
+    weak var runtime: AppRuntime?
+    let paneId: PaneId
+    init(paneId: PaneId, runtime: AppRuntime?) {
+        self.paneId = paneId
+        self.runtime = runtime
+    }
+    func popoverDidClose(_ notification: Notification) {
+        runtime?.send(.todoPopoverClosed(paneId: paneId))
     }
 }
 

@@ -108,6 +108,17 @@ enum Msg {
     case ghosttyStartSearch(paneId: PaneId, needle: String)
     case ghosttySearchTotal(paneId: PaneId, total: Int?)
     case ghosttySearchSelected(paneId: PaneId, selected: Int?)
+
+    // TODO
+    case toggleTodoPopover(paneId: PaneId)
+    case todoPopoverClosed(paneId: PaneId)
+    case addTodo(paneId: PaneId, text: String)
+    case toggleTodoDone(paneId: PaneId, todoId: UUID)
+    case editTodoText(paneId: PaneId, todoId: UUID, text: String)
+    case deleteTodo(paneId: PaneId, todoId: UUID)
+    case reorderTodo(paneId: PaneId, todoId: UUID, toIndex: Int)
+    case clearCompletedTodos(paneId: PaneId)
+    case requestClosePane(paneId: PaneId)
 }
 
 /// Which entity was being renamed (used by renameCompletionMessages).

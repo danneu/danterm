@@ -8,6 +8,7 @@ class PaneWrapperView: NSView {
     private let toolbarLabel: NonHitTestingLabel
     private let menuButton: NSButton
     private let unzoomButton: PaneToolbarButton?
+    private let todoButton: TodoToolbarButton
     private let isZoomed: Bool
     private let hasSplits: Bool
     private weak var runtime: AppRuntime?
@@ -66,10 +67,16 @@ class PaneWrapperView: NSView {
             self.unzoomButton = nil
         }
 
+        // TODO button (hidden when no tasks)
+        self.todoButton = TodoToolbarButton()
+
         super.init(frame: .zero)
 
         menuButton.target = self
         menuButton.action = #selector(showPaneMenu)
+
+        todoButton.target = self
+        todoButton.action = #selector(toggleTodoPopover)
 
         if let ub = unzoomButton {
             ub.target = self
@@ -137,6 +144,7 @@ class PaneWrapperView: NSView {
         toolbar.addSubview(dragHandle)
 
         // Add buttons to toolbar (on top of drag handle)
+        toolbar.addSubview(todoButton)
         toolbar.addSubview(menuButton)
         if let ub = unzoomButton {
             toolbar.addSubview(ub)
@@ -148,7 +156,7 @@ class PaneWrapperView: NSView {
         addSubview(scrollWrapper)
 
         // Trailing button anchor for stack trailing constraint
-        let stackTrailingAnchor = unzoomButton?.leadingAnchor ?? menuButton.leadingAnchor
+        let stackTrailingAnchor = todoButton.leadingAnchor
 
         var constraints = [
             // Toolbar
@@ -171,6 +179,10 @@ class PaneWrapperView: NSView {
             dragHandle.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor),
             dragHandle.leadingAnchor.constraint(equalTo: toolbar.leadingAnchor),
             dragHandle.trailingAnchor.constraint(equalTo: toolbar.trailingAnchor),
+
+            // TODO button (to the left of unzoom/menu buttons)
+            todoButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
+            todoButton.trailingAnchor.constraint(equalTo: unzoomButton?.leadingAnchor ?? menuButton.leadingAnchor, constant: -2),
 
             // Menu button
             menuButton.centerYAnchor.constraint(equalTo: toolbar.centerYAnchor),
@@ -201,12 +213,16 @@ class PaneWrapperView: NSView {
         fatalError("init(coder:) not implemented")
     }
 
-    func updateToolbar(title: String, cwd: String?, progress: ProgressState? = nil, isRemote: Bool = false, unreadAlertCount: Int = 0) {
+    func updateToolbar(title: String, cwd: String?, progress: ProgressState? = nil, isRemote: Bool = false, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0) {
         toolbarLabel.stringValue = formatToolbarLabel(title: title, cwd: cwd)
         applyProgressState(progress)
         remoteAccessory.isHidden = !isRemote
         alertBadge.updateBadge(count: unreadAlertCount)
+        todoButton.update(totalCount: totalTodoCount, uncompletedCount: uncompletedTodoCount)
     }
+
+    /// Anchor view for the TODO popover.
+    var todoButtonView: NSView { todoButton }
 
     private func applyProgressState(_ state: ProgressState?) {
         guard state != currentProgress else { return }
@@ -287,6 +303,13 @@ class PaneWrapperView: NSView {
 
         menu.addItem(.separator())
 
+        let todoItem = NSMenuItem(title: "Open TODOs", action: #selector(toggleTodoPopover), keyEquivalent: "")
+        todoItem.target = self
+        todoItem.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "TODOs")
+        menu.addItem(todoItem)
+
+        menu.addItem(.separator())
+
         let zoomTitle = isZoomed ? "Unzoom Pane" : "Zoom Pane"
         let zoom = NSMenuItem(title: zoomTitle, action: #selector(zoomPaneAction), keyEquivalent: "")
         zoom.target = self
@@ -302,8 +325,11 @@ class PaneWrapperView: NSView {
     }
 
     @objc private func closePaneAction() {
-        guard let surface = terminalView.surface else { return }
-        ghostty_surface_request_close(surface)
+        runtime?.send(.requestClosePane(paneId: paneId))
+    }
+
+    @objc private func toggleTodoPopover() {
+        runtime?.send(.toggleTodoPopover(paneId: paneId))
     }
 
     @objc private func splitRightAction() {
