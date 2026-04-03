@@ -322,6 +322,13 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         guard !isSyncingTableSelection else { return }
         let items = todos
         let row = tableView.selectedRow
+
+        // Clicked empty space while editing — cancel like Esc
+        if row < 0, editState.editingTodoId != nil {
+            exitEditMode(restoreDraft: true)
+            return
+        }
+
         guard row >= 0, row < items.count else { return }
         let newItem = items[row]
 

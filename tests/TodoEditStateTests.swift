@@ -73,6 +73,18 @@ func todoEditStateTests() {
         try expectEqual(state.preEditDraft, "")
     }
 
+    test("cancel after dirty edit restores original add-mode draft") {
+        var state = TodoEditState()
+        let item = TodoItem(id: UUID(), text: "task", isDone: false)
+        _ = state.beginEditing(item: item, fieldText: "unsaved add text")
+        // Simulate user modifying the field (state machine doesn't track field text,
+        // but cancel should still return the stashed draft, not the modified text)
+        let draft = state.cancel()
+        try expectEqual(draft, "unsaved add text")
+        try expect(state.editingTodoId == nil, "should be back in add mode")
+        try expectEqual(state.preEditDraft, "", "draft should be consumed")
+    }
+
     // MARK: - submit
 
     test("submit clears editing state and draft") {
