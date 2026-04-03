@@ -157,14 +157,23 @@ private class TodoRowView: NSView {
         checkbox.state = item.isDone ? .on : .off
         textField.toolTip = item.text
 
+        // Collapse multiline text to single display line
+        let oneLine = item.text
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        textField.cell?.wraps = false
+        textField.cell?.usesSingleLineMode = true
+
         if item.isDone {
-            textField.attributedStringValue = NSAttributedString(string: item.text, attributes: [
+            textField.attributedStringValue = NSAttributedString(string: oneLine, attributes: [
                 .strikethroughStyle: NSUnderlineStyle.single.rawValue,
                 .foregroundColor: NSColor.tertiaryLabelColor,
                 .font: NSFont.systemFont(ofSize: 12),
             ])
         } else {
-            textField.stringValue = item.text
+            textField.stringValue = oneLine
             textField.textColor = .labelColor
         }
     }
