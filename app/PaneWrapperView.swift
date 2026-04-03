@@ -303,13 +303,6 @@ class PaneWrapperView: NSView {
 
         menu.addItem(.separator())
 
-        let todoItem = NSMenuItem(title: "Open TODOs", action: #selector(toggleTodoPopover), keyEquivalent: "")
-        todoItem.target = self
-        todoItem.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: "TODOs")
-        menu.addItem(todoItem)
-
-        menu.addItem(.separator())
-
         let zoomTitle = isZoomed ? "Unzoom Pane" : "Zoom Pane"
         let zoom = NSMenuItem(title: zoomTitle, action: #selector(zoomPaneAction), keyEquivalent: "")
         zoom.target = self
