@@ -402,6 +402,18 @@ extension TodoPopoverViewController: NSTextFieldDelegate {
             }
             return true
         }
+        if commandSelector == #selector(deleteBackward(_:)) {
+            // Only in edit mode; in add mode, keep normal backspace behavior.
+            guard editingTodoId != nil else { return false }
+
+            // If field is already empty, treat Delete like Escape (cancel edit).
+            if textView.string.isEmpty {
+                exitEditMode(restoreDraft: true)
+                return true
+            }
+
+            return false
+        }
         return false
     }
 }
