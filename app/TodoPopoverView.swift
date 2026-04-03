@@ -1,7 +1,8 @@
 /// Popover view controller for a pane's TODO list.
 /// Shows a scrollable list of tasks with checkboxes, delete buttons,
 /// drag-to-reorder, a "Clear completed" button, and a multiline input
-/// that serves as both "add" and "edit" field.
+/// that serves as both "add" and "edit" field. Clicking a row uses native
+/// table selection to enter edit mode; Enter saves, Esc cancels.
 
 import Cocoa
 
@@ -11,7 +12,6 @@ private let todoRowId = NSUserInterfaceItemIdentifier("TodoRow")
 // MARK: - TodoRowView
 
 /// Reusable display-only row view: [checkbox | label | delete button].
-/// Double-click handling is on the table view controller, not the row.
 private class TodoRowView: NSView {
     let checkbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     let textField: NSTextField = {
@@ -63,15 +63,7 @@ private class TodoRowView: NSView {
         fatalError("init(coder:) not implemented")
     }
 
-    func configure(with item: TodoItem, isEditing: Bool) {
-        wantsLayer = true
-        layer?.cornerRadius = 6
-        if isEditing {
-            layer?.backgroundColor = NSColor.selectedContentBackgroundColor.withAlphaComponent(0.30).cgColor
-        } else {
-            layer?.backgroundColor = nil
-        }
-
+    func configure(with item: TodoItem) {
         checkbox.state = item.isDone ? .on : .off
         textField.toolTip = item.text
 
@@ -124,8 +116,8 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     }()
     private let emptyLabel = NSTextField(labelWithString: "No tasks yet")
 
-    private var editingTodoId: UUID? = nil
-    private var preEditDraft: String = ""
+    private var editState = TodoEditState()
+    private var isSyncingTableSelection = false
 
     private var todos: [TodoItem] { runtime?.model.panes[paneId]?.todos ?? [] }
 
@@ -165,12 +157,10 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         tableView.addTableColumn(column)
         tableView.headerView = nil
         tableView.style = .plain
-        tableView.selectionHighlightStyle = .none
+        tableView.selectionHighlightStyle = .regular
         tableView.dataSource = self
         tableView.delegate = self
         tableView.registerForDraggedTypes([todoRowDragType])
-        tableView.doubleAction = #selector(doubleClickRow(_:))
-        tableView.target = self
 
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
@@ -242,42 +232,42 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
 
     func rebuildRows() {
         let items = todos
-        let hasCompleted = items.contains(where: \.isDone)
-        clearButton.isHidden = !hasCompleted
+        clearButton.isHidden = !items.contains(where: \.isDone)
         emptyLabel.isHidden = !items.isEmpty
         scrollView.isHidden = items.isEmpty
+        let wasEditingId = editState.editingTodoId
+        isSyncingTableSelection = true
         tableView.reloadData()
-
-        // If the task being edited was deleted/cleared, cancel edit mode
-        if let editId = editingTodoId, !items.contains(where: { $0.id == editId }) {
-            exitEditMode(restoreDraft: true)
+        if wasEditingId != nil {
+            if editState.editingTodoWasDeleted(from: items) {
+                isSyncingTableSelection = false
+                exitEditMode(restoreDraft: true)
+            } else if let newIndex = items.firstIndex(where: { $0.id == wasEditingId }) {
+                tableView.selectRowIndexes(IndexSet(integer: newIndex), byExtendingSelection: false)
+                isSyncingTableSelection = false
+            } else {
+                isSyncingTableSelection = false
+            }
+        } else {
+            isSyncingTableSelection = false
         }
     }
 
     // MARK: - Edit Mode
 
-    /// Update editingTodoId and reload only the affected rows (old + new).
-    private func setEditingTodoId(_ newId: UUID?) {
-        let oldId = editingTodoId
-        editingTodoId = newId
-        var rows = IndexSet()
-        if let oldId, let r = todos.firstIndex(where: { $0.id == oldId }) { rows.insert(r) }
-        if let newId, let r = todos.firstIndex(where: { $0.id == newId }) { rows.insert(r) }
-        guard !rows.isEmpty else { return }
-        tableView.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integer: 0))
-    }
-
     private func exitEditMode(restoreDraft: Bool) {
-        setEditingTodoId(nil)
-        addField.stringValue = restoreDraft ? preEditDraft : ""
-        preEditDraft = ""
+        let restoredText = restoreDraft ? editState.cancel() : { editState.submit(); return "" }()
+        addField.stringValue = restoredText
         editLabel.isHidden = true
+        isSyncingTableSelection = true
+        tableView.deselectAll(nil)
+        isSyncingTableSelection = false
     }
 
     private func submitField() {
         let text = addField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        if let editId = editingTodoId {
+        if let editId = editState.editingTodoId {
             runtime?.send(.editTodoText(paneId: paneId, todoId: editId, text: text))
             exitEditMode(restoreDraft: false)
         } else {
@@ -308,13 +298,49 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
             rowView.identifier = todoRowId
         }
 
-        rowView.configure(with: item, isEditing: item.id == editingTodoId)
+        rowView.configure(with: item)
         rowView.checkbox.target = self
         rowView.checkbox.action = #selector(checkboxToggled(_:))
         rowView.deleteButton.target = self
         rowView.deleteButton.action = #selector(deleteTask(_:))
 
         return rowView
+    }
+
+    /// Prevent checkbox/delete clicks from selecting the row (and entering edit mode).
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        guard let event = NSApp.currentEvent, event.type == .leftMouseDown else { return true }
+        let point = tableView.convert(event.locationInWindow, from: nil)
+        guard let rowView = tableView.rowView(atRow: row, makeIfNecessary: false) else { return true }
+        let localPoint = rowView.convert(point, from: tableView)
+        if let hitView = rowView.hitTest(localPoint), hitView is NSButton { return false }
+        return true
+    }
+
+    /// Selection-based edit mode entry: selecting a row loads its text into the editor.
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        guard !isSyncingTableSelection else { return }
+        let items = todos
+        let row = tableView.selectedRow
+        guard row >= 0, row < items.count else { return }
+        let newItem = items[row]
+
+        let fieldText = addField.stringValue
+        if let autoSave = editState.beginEditing(item: newItem, fieldText: fieldText) {
+            runtime?.send(.editTodoText(paneId: paneId, todoId: autoSave.autoSaveId, text: autoSave.text))
+            // Refresh old row immediately so saved text is visible
+            if let oldIndex = items.firstIndex(where: { $0.id == autoSave.autoSaveId }) {
+                isSyncingTableSelection = true
+                tableView.reloadData(forRowIndexes: IndexSet(integer: oldIndex),
+                                     columnIndexes: IndexSet(integer: 0))
+                isSyncingTableSelection = false
+            }
+        }
+
+        addField.stringValue = newItem.text
+        editLabel.isHidden = false
+        view.window?.makeFirstResponder(addField)
+        addField.currentEditor()?.selectAll(nil)
     }
 
     // MARK: - Drag reorder
@@ -342,22 +368,6 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     }
 
     // MARK: - Actions
-
-    @objc private func doubleClickRow(_ sender: Any?) {
-        let row = tableView.clickedRow
-        let items = todos
-        guard row >= 0, row < items.count else { return }
-        let item = items[row]
-        // Only stash the add draft when entering edit mode from add mode
-        if editingTodoId == nil {
-            preEditDraft = addField.stringValue
-        }
-        setEditingTodoId(item.id)
-        addField.stringValue = item.text
-        editLabel.isHidden = false
-        view.window?.makeFirstResponder(addField)
-        addField.currentEditor()?.selectAll(nil)
-    }
 
     @objc private func checkboxToggled(_ sender: NSButton) {
         let row = tableView.row(for: sender)
@@ -397,14 +407,14 @@ extension TodoPopoverViewController: NSTextFieldDelegate {
             return true
         }
         if commandSelector == #selector(cancelOperation(_:)) {
-            if editingTodoId != nil {
+            if editState.editingTodoId != nil {
                 exitEditMode(restoreDraft: true)
             }
             return true
         }
         if commandSelector == #selector(deleteBackward(_:)) {
             // Only in edit mode; in add mode, keep normal backspace behavior.
-            guard editingTodoId != nil else { return false }
+            guard editState.editingTodoId != nil else { return false }
 
             // If field is already empty, treat Delete like Escape (cancel edit).
             if textView.string.isEmpty {

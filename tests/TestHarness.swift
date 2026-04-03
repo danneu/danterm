@@ -25,6 +25,7 @@ struct TestRunner {
         danTermConfigTests()
         preferencesTests()
         todoTests()
+        todoEditStateTests()
         print("\n\(total - failures)/\(total) passed")
         if failures > 0 { exit(1) }
     }
