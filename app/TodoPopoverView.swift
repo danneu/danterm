@@ -7,93 +7,6 @@ import Cocoa
 
 private let todoRowDragType = NSPasteboard.PasteboardType("com.danneu.danterm.todo-row")
 private let todoRowId = NSUserInterfaceItemIdentifier("TodoRow")
-private let maxInputHeight: CGFloat = 54  // ~3 lines at 12pt font
-
-// MARK: - TodoTextInput
-
-/// Reusable multiline text input: NSTextView inside NSScrollView.
-/// Grows up to maxInputHeight, then scrolls. Enter submits, Shift+Enter inserts newline.
-private class TodoTextInput: NSView {
-    let scrollView = NSScrollView()
-    let textView = NSTextView()
-
-    /// Called when the user presses Enter (without Shift).
-    var onSubmit: ((String) -> Void)?
-    /// Called when the user presses Escape.
-    var onCancel: (() -> Void)?
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-
-        textView.isRichText = false
-        textView.font = .systemFont(ofSize: 12)
-        textView.textColor = .labelColor
-        textView.insertionPointColor = .labelColor
-        textView.isVerticallyResizable = true
-        textView.isHorizontallyResizable = false
-        textView.textContainer?.widthTracksTextView = true
-        textView.textContainer?.lineBreakMode = .byWordWrapping
-        textView.drawsBackground = false
-        textView.textContainerInset = NSSize(width: 2, height: 3)
-        textView.delegate = self
-
-        scrollView.documentView = textView
-        scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = false
-        scrollView.scrollerStyle = .overlay
-        scrollView.drawsBackground = false
-        scrollView.borderType = .bezelBorder
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(scrollView)
-
-        translatesAutoresizingMaskIntoConstraints = false
-
-        NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: topAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 22),
-            scrollView.heightAnchor.constraint(lessThanOrEqualToConstant: maxInputHeight),
-        ])
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) not implemented")
-    }
-
-    var string: String {
-        get { textView.string }
-        set { textView.string = newValue }
-    }
-
-    func focus() {
-        window?.makeFirstResponder(textView)
-    }
-
-    func selectAll() {
-        textView.selectAll(nil)
-    }
-}
-
-extension TodoTextInput: NSTextViewDelegate {
-    func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        if commandSelector == #selector(insertNewline(_:)) {
-            // Shift+Enter inserts a newline; plain Enter submits
-            if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
-                textView.insertNewlineIgnoringFieldEditor(nil)
-                return true
-            }
-            onSubmit?(textView.string)
-            return true
-        }
-        if commandSelector == #selector(cancelOperation(_:)) {
-            onCancel?()
-            return true
-        }
-        return false
-    }
-}
 
 // MARK: - TodoRowView
 
@@ -134,14 +47,14 @@ private class TodoRowView: NSView {
         addSubview(deleteButton)
 
         NSLayoutConstraint.activate([
-            checkbox.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            checkbox.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
             checkbox.centerYAnchor.constraint(equalTo: centerYAnchor),
 
-            textField.leadingAnchor.constraint(equalTo: checkbox.trailingAnchor, constant: 4),
+            textField.leadingAnchor.constraint(equalTo: checkbox.trailingAnchor, constant: 6),
             textField.centerYAnchor.constraint(equalTo: centerYAnchor),
-            textField.trailingAnchor.constraint(equalTo: deleteButton.leadingAnchor, constant: -4),
+            textField.trailingAnchor.constraint(equalTo: deleteButton.leadingAnchor, constant: -2),
 
-            deleteButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            deleteButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             deleteButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             deleteButton.widthAnchor.constraint(equalToConstant: 16),
             deleteButton.heightAnchor.constraint(equalToConstant: 16),
@@ -188,7 +101,17 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     private let scrollView = NSScrollView()
     private let headerLabel = NSTextField(labelWithString: "TODOs")
     private let clearButton = NSButton(title: "Clear completed", target: nil, action: nil)
-    private let addInput = TodoTextInput()
+    private let addField: NSTextField = {
+        let tf = NSTextField()
+        tf.placeholderString = "Add a task…"
+        tf.font = .systemFont(ofSize: 12)
+        tf.cell?.wraps = true
+        tf.cell?.usesSingleLineMode = false
+        tf.lineBreakMode = .byWordWrapping
+        tf.maximumNumberOfLines = 3
+        tf.translatesAutoresizingMaskIntoConstraints = false
+        return tf
+    }()
     private let editLabel: NSTextField = {
         let tf = NSTextField(labelWithString: "Editing — Esc to cancel")
         tf.font = .systemFont(ofSize: 10)
@@ -237,7 +160,6 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
 
         // Table
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("todo"))
-        column.width = size.width
         tableView.addTableColumn(column)
         tableView.headerView = nil
         tableView.style = .plain
@@ -263,39 +185,20 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(emptyLabel)
 
-        // Separator
+        // Bottom stack: [separator, editLabel (collapsible), addField]
         let sep = NSBox()
         sep.boxType = .separator
-        sep.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(sep)
 
-        // Edit label (hidden by default)
-        container.addSubview(editLabel)
+        addField.delegate = self
 
-        // Add/edit input (multiline)
-        addInput.textView.setAccessibilityLabel("Add a task")
-        container.addSubview(addInput)
-
-        addInput.onSubmit = { [weak self] text in
-            guard let self = self else { return }
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return }
-            if let editId = self.editingTodoId {
-                self.runtime?.send(.editTodoText(paneId: self.paneId, todoId: editId, text: trimmed))
-                self.exitEditMode(restoreDraft: false)
-            } else {
-                self.runtime?.send(.addTodo(paneId: self.paneId, text: trimmed))
-                self.addInput.string = ""
-            }
-            self.rebuildRows()
-        }
-
-        addInput.onCancel = { [weak self] in
-            guard let self = self else { return }
-            if self.editingTodoId != nil {
-                self.exitEditMode(restoreDraft: true)
-            }
-        }
+        let bottomStack = NSStackView(views: [sep, editLabel, addField])
+        bottomStack.orientation = .vertical
+        bottomStack.alignment = .leading
+        bottomStack.spacing = 4
+        bottomStack.translatesAutoresizingMaskIntoConstraints = false
+        // NSStackView collapses hidden views automatically
+        bottomStack.detachesHiddenViews = true
+        container.addSubview(bottomStack)
 
         NSLayoutConstraint.activate([
             container.topAnchor.constraint(equalTo: wrapper.topAnchor),
@@ -313,21 +216,19 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
             scrollView.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: sep.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: bottomStack.topAnchor),
 
             emptyLabel.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
             emptyLabel.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
 
-            sep.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            sep.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            sep.bottomAnchor.constraint(equalTo: editLabel.topAnchor, constant: -4),
+            bottomStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            bottomStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            bottomStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
 
-            editLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            editLabel.bottomAnchor.constraint(equalTo: addInput.topAnchor, constant: -2),
-
-            addInput.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
-            addInput.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
-            addInput.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
+            sep.widthAnchor.constraint(equalTo: bottomStack.widthAnchor),
+            editLabel.leadingAnchor.constraint(equalTo: bottomStack.leadingAnchor, constant: 4),
+            addField.widthAnchor.constraint(equalTo: bottomStack.widthAnchor),
+            addField.heightAnchor.constraint(greaterThanOrEqualToConstant: 50),
         ])
 
         self.view = wrapper
@@ -356,9 +257,22 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
 
     private func exitEditMode(restoreDraft: Bool) {
         editingTodoId = nil
-        addInput.string = restoreDraft ? preEditDraft : ""
+        addField.stringValue = restoreDraft ? preEditDraft : ""
         preEditDraft = ""
         editLabel.isHidden = true
+    }
+
+    private func submitField() {
+        let text = addField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        if let editId = editingTodoId {
+            runtime?.send(.editTodoText(paneId: paneId, todoId: editId, text: text))
+            exitEditMode(restoreDraft: false)
+        } else {
+            runtime?.send(.addTodo(paneId: paneId, text: text))
+            addField.stringValue = ""
+        }
+        rebuildRows()
     }
 
     // MARK: - NSTableViewDataSource
@@ -424,13 +338,13 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         let item = items[row]
         // Only stash the add draft when entering edit mode from add mode
         if editingTodoId == nil {
-            preEditDraft = addInput.string
+            preEditDraft = addField.stringValue
         }
         editingTodoId = item.id
-        addInput.string = item.text
+        addField.stringValue = item.text
         editLabel.isHidden = false
-        addInput.focus()
-        addInput.selectAll()
+        view.window?.makeFirstResponder(addField)
+        addField.currentEditor()?.selectAll(nil)
     }
 
     @objc private func checkboxToggled(_ sender: NSButton) {
@@ -450,5 +364,32 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     @objc private func clearCompleted() {
         runtime?.send(.clearCompletedTodos(paneId: paneId))
         rebuildRows()
+    }
+}
+
+// MARK: - NSTextFieldDelegate
+
+extension TodoPopoverViewController: NSTextFieldDelegate {
+    /// Handle Enter (submit) vs Shift+Enter (newline) and Escape (cancel edit).
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard control === addField else { return false }
+
+        if commandSelector == #selector(insertNewline(_:)) {
+            if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
+                // Shift+Enter: insert a newline
+                textView.insertNewlineIgnoringFieldEditor(nil)
+                return true
+            }
+            // Plain Enter: submit
+            submitField()
+            return true
+        }
+        if commandSelector == #selector(cancelOperation(_:)) {
+            if editingTodoId != nil {
+                exitEditMode(restoreDraft: true)
+            }
+            return true
+        }
+        return false
     }
 }
