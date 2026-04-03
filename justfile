@@ -1,5 +1,5 @@
-# Get current version from latest git tag (or 0.0.0 if none)
-_current_version := `git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "0.0.0"`
+# Get current version from highest semver tag (regardless of branch reachability)
+_current_version := `git tag -l 'v*' | sed 's/^v//' | sort -V | tail -1 || echo "0.0.0"`
 
 default:
     @just --list
