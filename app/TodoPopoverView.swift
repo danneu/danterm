@@ -18,7 +18,6 @@ private class TodoRowView: NSView {
         let tf = NSTextField(labelWithString: "")
         tf.font = .systemFont(ofSize: 12)
         tf.lineBreakMode = .byTruncatingTail
-        tf.translatesAutoresizingMaskIntoConstraints = false
         return tf
     }()
     let deleteButton: NSButton = {
@@ -28,32 +27,33 @@ private class TodoRowView: NSView {
         btn.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Delete task")
         btn.imageScaling = .scaleProportionallyDown
         btn.contentTintColor = .tertiaryLabelColor
-        btn.translatesAutoresizingMaskIntoConstraints = false
         return btn
     }()
-
-    var todoId: UUID?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
 
-        checkbox.translatesAutoresizingMaskIntoConstraints = false
+        let stack = NSStackView(views: [checkbox, textField, deleteButton])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.distribution = .fill
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: 4, bottom: 0, right: 4)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+
+        textField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        textField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         checkbox.setContentHuggingPriority(.required, for: .horizontal)
         checkbox.setContentCompressionResistancePriority(.required, for: .horizontal)
-        addSubview(checkbox)
-        addSubview(textField)
-        addSubview(deleteButton)
+        deleteButton.setContentHuggingPriority(.required, for: .horizontal)
+        deleteButton.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         NSLayoutConstraint.activate([
-            checkbox.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            checkbox.centerYAnchor.constraint(equalTo: centerYAnchor),
-
-            textField.leadingAnchor.constraint(equalTo: checkbox.trailingAnchor, constant: 6),
-            textField.centerYAnchor.constraint(equalTo: centerYAnchor),
-            textField.trailingAnchor.constraint(equalTo: deleteButton.leadingAnchor, constant: -2),
-
-            deleteButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-            deleteButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
             deleteButton.widthAnchor.constraint(equalToConstant: 16),
             deleteButton.heightAnchor.constraint(equalToConstant: 16),
         ])
@@ -64,7 +64,6 @@ private class TodoRowView: NSView {
     }
 
     func configure(with item: TodoItem) {
-        todoId = item.id
         checkbox.state = item.isDone ? .on : .off
         textField.toolTip = item.text
 
@@ -342,16 +341,16 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     }
 
     @objc private func checkboxToggled(_ sender: NSButton) {
-        guard let rowView = sender.superview as? TodoRowView,
-              let todoId = rowView.todoId else { return }
-        runtime?.send(.toggleTodoDone(paneId: paneId, todoId: todoId))
+        let row = tableView.row(for: sender)
+        guard row >= 0, row < todos.count else { return }
+        runtime?.send(.toggleTodoDone(paneId: paneId, todoId: todos[row].id))
         rebuildRows()
     }
 
     @objc private func deleteTask(_ sender: NSButton) {
-        guard let rowView = sender.superview as? TodoRowView,
-              let todoId = rowView.todoId else { return }
-        runtime?.send(.deleteTodo(paneId: paneId, todoId: todoId))
+        let row = tableView.row(for: sender)
+        guard row >= 0, row < todos.count else { return }
+        runtime?.send(.deleteTodo(paneId: paneId, todoId: todos[row].id))
         rebuildRows()
     }
 
