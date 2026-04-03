@@ -456,6 +456,153 @@ func alertTests() {
         }, "should focus the unread alert's pane")
     }
 
+    test("testGoToMostRecentAlertPaneAcksCurrentTabFirst") {
+        var model = makeModel()
+        model.config.alertClearMode = .manual
+        createTab(&model)  // tab1 with paneA
+        let tab1Id = model.groups[0].tabs[0].id
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model)  // tab2 (selected) with paneB
+        let paneB = model.groups[0].tabs[1].focusedPaneId
+
+        // paneA's alert at index 0 (most recent), paneB's at index 1
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "tab1 alert", createdAt: Date(), isUnread: true
+        ), at: 0)
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneB,
+            title: "DanTerm", body: "tab2 alert", createdAt: Date(), isUnread: true
+        ), at: 1)
+
+        let effects = update(&model, .goToMostRecentAlertPane)
+        // tab2's alert should be acked
+        try expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false, "current tab's alert should be acked")
+        // paneA's alert should still be unread (manual mode, selectTab won't auto-clear)
+        try expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == true, "destination alert should still be unread")
+        // Should navigate to tab1/paneA
+        try expectEqual(model.selectedTabId, tab1Id, "should navigate to tab1")
+        try expect(hasEffect(effects) {
+            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
+            return false
+        }, "should focus paneA")
+    }
+
+    test("testGoToMostRecentAlertPaneAcksCurrentTabThenNoMoreAlerts") {
+        var model = makeModel()
+        model.config.alertClearMode = .manual
+        createTab(&model)  // single tab (selected)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "only alert", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        let effects = update(&model, .goToMostRecentAlertPane)
+        try expectEqual(model.alerts[0].isUnread, false, "alert should be acked")
+        try expect(!hasEffect(effects) {
+            if case .makeFirstResponder = $0 { return true }
+            return false
+        }, "should not navigate (no other unread alerts)")
+        try expect(hasEffect(effects) {
+            if case .rebuildContentView = $0 { return true }
+            return false
+        }, "should rebuild content view")
+        try expect(hasEffect(effects) {
+            if case .reloadSidebar = $0 { return true }
+            return false
+        }, "should reload sidebar")
+    }
+
+    test("testGoToMostRecentAlertPaneRepeatedPressWalksTabs") {
+        var model = makeModel()
+        model.config.alertClearMode = .manual
+        createTab(&model)  // tab1 with paneA
+        let tab1Id = model.groups[0].tabs[0].id
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model)  // tab2 with paneB
+        let tab2Id = model.groups[0].tabs[1].id
+        let paneB = model.groups[0].tabs[1].focusedPaneId
+
+        createTab(&model)  // tab3 (selected), no alerts
+
+        // paneA alert at index 0, paneB alert at index 1
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "tab1 alert", createdAt: Date(), isUnread: true
+        ), at: 0)
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneB,
+            title: "DanTerm", body: "tab2 alert", createdAt: Date(), isUnread: true
+        ), at: 1)
+
+        // First press: tab3 has no alerts (no-op ack), navigates to tab1 (index 0)
+        update(&model, .goToMostRecentAlertPane)
+        try expectEqual(model.selectedTabId, tab1Id, "first press should navigate to tab1")
+        try expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == true, "paneA alert still unread after first press")
+
+        // Second press: acks tab1, navigates to tab2 (index 1)
+        update(&model, .goToMostRecentAlertPane)
+        try expectEqual(model.selectedTabId, tab2Id, "second press should navigate to tab2")
+        try expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == false, "paneA alert should be acked after second press")
+        try expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == true, "paneB alert still unread after second press")
+
+        // Third press: acks tab2, no more unread alerts
+        let effects = update(&model, .goToMostRecentAlertPane)
+        try expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false, "paneB alert should be acked after third press")
+        try expect(hasEffect(effects) {
+            if case .rebuildContentView = $0 { return true }
+            return false
+        }, "third press should return refresh effects")
+        try expect(!hasEffect(effects) {
+            if case .makeFirstResponder = $0 { return true }
+            return false
+        }, "third press should not navigate")
+    }
+
+    test("testGoToMostRecentAlertPaneAcksAllPanesInSplit") {
+        var model = makeModel()
+        model.config.alertClearMode = .manual
+        createTab(&model)  // tab1 with paneA
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model)  // tab2 (selected), split into paneB + paneC
+        update(&model, .splitPane(direction: .horizontal))
+        let paneC = model.groups[0].tabs[1].focusedPaneId
+        // paneB is the other pane in the split
+        let tab2PaneIds = allPaneIds(model.groups[0].tabs[1].rootNode)
+        let paneB = tab2PaneIds.first(where: { $0 != paneC })!
+
+        // Alert on paneA (another tab), alerts on both split panes
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "tab1 alert", createdAt: Date(), isUnread: true
+        ), at: 0)
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneB,
+            title: "DanTerm", body: "split pane B", createdAt: Date(), isUnread: true
+        ), at: 1)
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneC,
+            title: "DanTerm", body: "split pane C", createdAt: Date(), isUnread: true
+        ), at: 2)
+
+        let effects = update(&model, .goToMostRecentAlertPane)
+        // Both split pane alerts should be acked
+        try expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false, "paneB alert should be acked")
+        try expect(model.alerts.first(where: { $0.paneId == paneC })?.isUnread == false, "paneC alert should be acked")
+        // paneA alert should still be unread
+        try expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == true, "paneA alert should still be unread")
+        // Should navigate to tab1/paneA
+        try expect(hasEffect(effects) {
+            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
+            return false
+        }, "should navigate to paneA")
+    }
+
     // MARK: - filteredAlerts / alertsEmptyText Tests
 
     test("testFilteredAlertsUnreadReturnsOnlyUnread") {
@@ -776,16 +923,19 @@ func alertTests() {
 
     test("testGoToMostRecentAlertPaneUnzoomsIfNeeded") {
         var model = makeModel()
-        createTab(&model)
+        createTab(&model)  // tab1 with paneA
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        // Split to get paneB, then zoom paneB
+        // Split tab1 to get paneB, then zoom paneB
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
         update(&model, .toggleZoomPane)
         try expectEqual(model.groups[0].tabs[0].isZoomed, true)
 
-        // Alert targets paneA (not zoomed paneB)
+        // Create tab2 so we navigate back to tab1 (acking tab2 first is a no-op)
+        createTab(&model)
+
+        // Alert targets paneA on tab1 (not the zoomed paneB)
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true

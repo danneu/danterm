@@ -812,8 +812,19 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return effects
 
     case .goToMostRecentAlertPane:
+        // Ack all alerts on the current tab so repeated presses walk through tabs
+        var ackedCurrentTab = false
+        if let tabId = model.selectedTabId {
+            let paneIds = paneIdsForTab(tabId, in: model)
+            if model.alerts.contains(where: { $0.isUnread && paneIds.contains($0.paneId) }) {
+                for paneId in paneIds {
+                    markAlertsReadForPane(paneId, in: &model)
+                }
+                ackedCurrentTab = true
+            }
+        }
         guard let alert = model.alerts.first(where: { $0.isUnread && model.panes[$0.paneId] != nil }) else {
-            return []
+            return ackedCurrentTab ? [.rebuildContentView, .reloadSidebar] : []
         }
         return navigateToPane(alert.paneId, in: &model)
 
