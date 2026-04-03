@@ -505,7 +505,7 @@ func alertTests() {
         try expect(!hasEffect(effects) {
             if case .makeFirstResponder = $0 { return true }
             return false
-        }, "should not navigate (no other unread alerts)")
+        }, "no unread alerts remained after acking current tab")
         try expect(hasEffect(effects) {
             if case .rebuildContentView = $0 { return true }
             return false
