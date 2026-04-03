@@ -400,12 +400,7 @@ class AppRuntime {
             popover.contentViewController = vc
             popover.behavior = .transient
             popover.delegate = delegate
-            // If the button is hidden (0 tasks), anchor to the menu button area instead
-            if anchor.isHidden {
-                popover.show(relativeTo: wrapper.bounds, of: wrapper, preferredEdge: .minY)
-            } else {
-                popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
-            }
+            popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
             todoPopover = popover
             todoPopoverDelegate = delegate
 

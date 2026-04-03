@@ -240,9 +240,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         column.width = size.width
         tableView.addTableColumn(column)
         tableView.headerView = nil
-        tableView.rowHeight = 32
         tableView.style = .plain
-        tableView.intercellSpacing = .zero
         tableView.selectionHighlightStyle = .none
         tableView.dataSource = self
         tableView.delegate = self

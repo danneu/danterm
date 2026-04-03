@@ -1,6 +1,6 @@
 /// Pane toolbar button for the TODO list.
 /// Displays as [count icon] or [✓ icon] inline in the pane toolbar.
-/// Hidden when no tasks exist. Yellow tint for incomplete, green when all done.
+/// Always visible: neutral icon when empty, yellow count for incomplete, green check when all done.
 
 import Cocoa
 
@@ -49,7 +49,8 @@ class TodoToolbarButton: NSButton {
             iconView.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])
 
-        isHidden = true
+        // Always visible so the TODO popover always has a stable toolbar anchor.
+        isHidden = false
     }
 
     required init?(coder: NSCoder) {
@@ -59,10 +60,11 @@ class TodoToolbarButton: NSButton {
     /// Update the button display based on task counts.
     func update(totalCount: Int, uncompletedCount: Int) {
         if totalCount == 0 {
-            isHidden = true
+            countLabel.stringValue = ""
+            countLabel.textColor = .secondaryLabelColor
+            iconView.contentTintColor = .secondaryLabelColor
             return
         }
-        isHidden = false
 
         if uncompletedCount == 0 {
             // All done — green checkmark

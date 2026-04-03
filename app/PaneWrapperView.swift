@@ -67,7 +67,7 @@ class PaneWrapperView: NSView {
             self.unzoomButton = nil
         }
 
-        // TODO button (hidden when no tasks)
+        // TODO button (always visible to provide a stable popover anchor)
         self.todoButton = TodoToolbarButton()
 
         super.init(frame: .zero)
