@@ -51,6 +51,7 @@ class TodoToolbarButton: NSButton {
 
         // Always visible so the TODO popover always has a stable toolbar anchor.
         isHidden = false
+        toolTip = "To-Do List"
     }
 
     required init?(coder: NSCoder) {
