@@ -1,16 +1,33 @@
-/// Auto-expanding text input for the todo popover.
+/// Fixed-height text input for the todo popover.
 /// Wraps an NSTextView inside an NSScrollView with a placeholder label.
-/// Starts at 1 line, grows up to 5 lines, then scrolls.
-/// Self-observes text changes via notification so placeholder visibility
-/// and height always stay in sync — callers just set `.string`.
+/// Always ~3 lines tall; scrolls when content overflows.
+/// Self-observes text changes via notification to keep placeholder in sync.
 
 import Cocoa
 
+/// NSScrollView subclass that draws the system focus ring when its
+/// document view (NSTextView) is the first responder. Standard NSScrollView
+/// doesn't do this automatically — only NSControl subclasses get it for free.
+private class FocusRingScrollView: NSScrollView {
+    override var needsPanelToBecomeKey: Bool { true }
+
+    override var focusRingMaskBounds: NSRect { bounds }
+
+    override func drawFocusRingMask() {
+        bounds.fill()
+    }
+
+    /// Redraw the focus ring when focus enters or leaves the text view.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        focusRingType = .exterior
+    }
+}
+
 class TodoInputView: NSView {
     let textView: NSTextView
-    private let scrollView: NSScrollView
+    private let scrollView: FocusRingScrollView
     private let placeholderLabel: NSTextField
-    private var heightConstraint: NSLayoutConstraint!
     private var textChangeObserver: Any?
 
     // MARK: - Height constants
@@ -18,8 +35,7 @@ class TodoInputView: NSView {
     private static let inputFont = NSFont.systemFont(ofSize: 12)
     private static let inputLineHeight: CGFloat = NSLayoutManager().defaultLineHeight(for: inputFont)
     private static let inputInsetY: CGFloat = 4
-    static let inputMinHeight = inputLineHeight + inputInsetY * 2
-    static let inputMaxHeight = inputLineHeight * 5 + inputInsetY * 2
+    static let inputHeight = inputLineHeight * 3 + inputInsetY * 2
 
     // MARK: - Public API
 
@@ -27,7 +43,7 @@ class TodoInputView: NSView {
         get { textView.string }
         set {
             textView.string = newValue
-            syncVisualState()
+            updatePlaceholder()
         }
     }
 
@@ -36,7 +52,7 @@ class TodoInputView: NSView {
     init(placeholder: String = "Add a task…") {
         // Must use NSTextView(frame:) to get a text container/layout manager.
         textView = NSTextView(frame: .zero)
-        scrollView = NSScrollView()
+        scrollView = FocusRingScrollView()
         placeholderLabel = NSTextField(labelWithString: placeholder)
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
@@ -46,7 +62,7 @@ class TodoInputView: NSView {
             object: textView,
             queue: .main
         ) { [weak self] _ in
-            self?.syncVisualState()
+            self?.updatePlaceholder()
         }
     }
 
@@ -75,6 +91,7 @@ class TodoInputView: NSView {
         textView.textContainerInset = NSSize(width: 4, height: Self.inputInsetY)
         textView.textContainer?.lineFragmentPadding = 5
         textView.drawsBackground = false
+        textView.insertionPointColor = .labelColor
 
         // Scroll view
         scrollView.documentView = textView
@@ -93,15 +110,12 @@ class TodoInputView: NSView {
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(placeholderLabel)
 
-        // Layout: scroll view fills this view, height controlled by constraint
-        heightConstraint = scrollView.heightAnchor.constraint(equalToConstant: Self.inputMinHeight)
-
         NSLayoutConstraint.activate([
             scrollView.topAnchor.constraint(equalTo: topAnchor),
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            heightConstraint,
+            scrollView.heightAnchor.constraint(equalToConstant: Self.inputHeight),
 
             // Placeholder inset: textContainerInset.height + lineFragmentPadding
             placeholderLabel.topAnchor.constraint(equalTo: scrollView.topAnchor, constant: Self.inputInsetY + 1),
@@ -109,22 +123,9 @@ class TodoInputView: NSView {
         ])
     }
 
-    // MARK: - Visual state sync
+    // MARK: - Placeholder
 
-    /// Single authoritative method that updates both placeholder and height.
-    /// Called by the string setter (programmatic) AND by the internal
-    /// NSText.didChangeNotification observer (user typing).
-    func syncVisualState() {
+    private func updatePlaceholder() {
         placeholderLabel.isHidden = !textView.string.isEmpty
-
-        guard let lm = textView.layoutManager, let tc = textView.textContainer else { return }
-        lm.ensureLayout(for: tc)
-        var usedHeight = lm.usedRect(for: tc).height
-        // Account for trailing newline: usedRect doesn't include the extra line fragment.
-        if lm.extraLineFragmentTextContainer != nil {
-            usedHeight += lm.extraLineFragmentRect.height
-        }
-        let total = usedHeight + Self.inputInsetY * 2
-        heightConstraint.constant = max(Self.inputMinHeight, min(total, Self.inputMaxHeight))
     }
 }
