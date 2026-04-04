@@ -559,15 +559,19 @@ func toSnapshot(_ model: AppModel) -> AppModelSnapshot {
         } else {
           launch = nil
         }
-        paneSnapshots.append(
-          PaneSnapshot(
+        let todoSnapshots: [TodoSnapshot]? = pane.todos.isEmpty ? nil : pane.todos.map {
+          TodoSnapshot(id: $0.id.uuidString, text: $0.text, isDone: $0.isDone)
+        }
+        var snapshot = PaneSnapshot(
             id: paneId.rawValue.uuidString,
             title: pane.title,
             cwd: abbrevCwd,
             launch: launch,
             scrollback: nil,
             theme: pane.theme
-          ))
+        )
+        snapshot.todos = todoSnapshots
+        paneSnapshots.append(snapshot)
       }
 
       return TabSnapshot(
@@ -644,8 +648,10 @@ func mergeCheckpoints(light: AppModelSnapshot, enriched: AppModelSnapshot) -> Ap
     }
     let mergedPanes: [PaneSnapshot] = light.panes.map { ps in
         guard let id = ps.id, let scrollback = scrollbackById[id] else { return ps }
-        return PaneSnapshot(id: ps.id, title: ps.title, cwd: ps.cwd,
+        var merged = PaneSnapshot(id: ps.id, title: ps.title, cwd: ps.cwd,
                             launch: ps.launch, scrollback: scrollback, theme: ps.theme)
+        merged.todos = ps.todos
+        return merged
     }
     return AppModelSnapshot(groups: light.groups, panes: mergedPanes,
                             selectedTabId: light.selectedTabId)

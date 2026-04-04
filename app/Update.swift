@@ -202,6 +202,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         removeAlertsForPane(paneId, in: &model)
         removePaneSearchState(paneId, from: &model)
         model.lastNotificationTime.removeValue(forKey: paneId)
+        if model.todoPopoverPaneId == paneId {
+            model.todoPopoverPaneId = nil
+            effects.append(.dismissTodoPopover)
+        }
         model.panes.removeValue(forKey: paneId)
 
         guard let newRoot = newTree else {
@@ -1017,6 +1021,70 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         guard model.searchState[paneId] != nil else { return [] }
         model.searchState[paneId]?.selected = selected
         return [.showSearchOverlay(paneId: paneId)]
+
+    // MARK: - TODO
+
+    case .toggleTodoPopover(let paneId):
+        guard model.panes[paneId] != nil else { return [] }
+        if model.todoPopoverPaneId == paneId {
+            model.todoPopoverPaneId = nil
+            return [.dismissTodoPopover]
+        }
+        model.todoPopoverPaneId = paneId
+        return [.showTodoPopover(paneId: paneId)]
+
+    case .todoPopoverClosed(let paneId):
+        if model.todoPopoverPaneId == paneId {
+            model.todoPopoverPaneId = nil
+        }
+        return []
+
+    case .addTodo(let paneId, let text):
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, model.panes[paneId] != nil else { return [] }
+        let item = TodoItem(id: UUID(), text: trimmed, isDone: false)
+        model.panes[paneId]!.todos.append(item)
+        return [.scheduleCheckpoint]
+
+    case .toggleTodoDone(let paneId, let todoId):
+        guard let idx = model.panes[paneId]?.todos.firstIndex(where: { $0.id == todoId }) else { return [] }
+        model.panes[paneId]!.todos[idx].isDone.toggle()
+        return [.scheduleCheckpoint]
+
+    case .editTodoText(let paneId, let todoId, let text):
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return [] }
+        guard let idx = model.panes[paneId]?.todos.firstIndex(where: { $0.id == todoId }) else { return [] }
+        model.panes[paneId]!.todos[idx].text = trimmed
+        return [.scheduleCheckpoint]
+
+    case .deleteTodo(let paneId, let todoId):
+        model.panes[paneId]?.todos.removeAll { $0.id == todoId }
+        return [.scheduleCheckpoint]
+
+    case .reorderTodo(let paneId, let todoId, let toIndex):
+        guard var todos = model.panes[paneId]?.todos,
+              let fromIndex = todos.firstIndex(where: { $0.id == todoId }),
+              toIndex >= 0, toIndex <= todos.count else { return [] }
+        let clampedTo = min(toIndex, todos.count - 1)
+        guard fromIndex != clampedTo else { return [] }
+        let item = todos.remove(at: fromIndex)
+        let insertAt = clampedTo > fromIndex ? clampedTo : clampedTo
+        todos.insert(item, at: min(insertAt, todos.count))
+        model.panes[paneId]!.todos = todos
+        return [.scheduleCheckpoint]
+
+    case .clearCompletedTodos(let paneId):
+        model.panes[paneId]?.todos.removeAll { $0.isDone }
+        return [.scheduleCheckpoint]
+
+    case .requestClosePane(let paneId):
+        guard let pane = model.panes[paneId] else { return [] }
+        let uncompletedCount = pane.todos.count { !$0.isDone }
+        if uncompletedCount > 0 {
+            return [.showClosePaneConfirmation(paneId: paneId, uncompletedCount: uncompletedCount)]
+        }
+        return update(&model, .closePane(paneId: paneId))
     }
 }
 

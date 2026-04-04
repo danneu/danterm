@@ -338,6 +338,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         ackAlertItem.keyEquivalentModifierMask = [.command, .shift]
         paneMenu.addItem(ackAlertItem)
 
+        let todoItem = NSMenuItem(title: "Open TODOs", action: #selector(openTodo(_:)), keyEquivalent: "t")
+        todoItem.keyEquivalentModifierMask = [.command, .option]
+        paneMenu.addItem(todoItem)
+
         paneMenu.addItem(NSMenuItem.separator())
         paneMenu.addItem(withTitle: "Close Pane", action: #selector(closePane(_:)), keyEquivalent: "w")
 
@@ -463,9 +467,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     }
 
     @objc func closePane(_ sender: Any?) {
-        guard let tab = selectedTab(in: runtime.model),
-              let surface = runtime.surfaces[tab.focusedPaneId]?.surface else { return }
-        ghostty_surface_request_close(surface)
+        guard let tab = selectedTab(in: runtime.model) else { return }
+        runtime.send(.requestClosePane(paneId: tab.focusedPaneId))
+    }
+
+    @objc func openTodo(_ sender: Any?) {
+        guard let tab = selectedTab(in: runtime.model) else { return }
+        runtime.send(.toggleTodoPopover(paneId: tab.focusedPaneId))
     }
 
     @objc func focusLeft(_ sender: Any?) {

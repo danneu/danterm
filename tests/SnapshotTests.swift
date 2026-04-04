@@ -564,4 +564,53 @@ func snapshotTests() {
         let model = validateAndBuild(initFile.model)
         try expect(model == nil, "should reject duplicate IDs across domains")
     }
+
+    // MARK: - TODO Snapshot
+
+    test("snapshot round-trip preserves todos") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        update(&model, .addTodo(paneId: paneId, text: "task one"))
+        update(&model, .addTodo(paneId: paneId, text: "task two"))
+        let todoId = model.panes[paneId]!.todos[0].id
+        update(&model, .toggleTodoDone(paneId: paneId, todoId: todoId))
+
+        let snapshot = toSnapshot(model)
+        let rebuilt = validateAndBuild(snapshot)
+        try expect(rebuilt != nil, "should rebuild from snapshot with todos")
+        let todos = rebuilt!.panes[paneId]!.todos
+        try expectEqual(todos.count, 2)
+        try expectEqual(todos[0].text, "task one")
+        try expectEqual(todos[0].isDone, true)
+        try expectEqual(todos[1].text, "task two")
+        try expectEqual(todos[1].isDone, false)
+    }
+
+    test("snapshot without todos field decodes with empty array") {
+        let json = """
+        {
+          "version": 1,
+          "model": {
+            "groups": [{
+              "name": "General",
+              "tabs": [{
+                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+              }]
+            }],
+            "panes": [{
+              "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
+              "title": "Terminal",
+              "cwd": "~/world"
+            }]
+          }
+        }
+        """
+        let data = json.data(using: .utf8)!
+        let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
+        let model = validateAndBuild(initFile.model)
+        try expect(model != nil, "should rebuild snapshot without todos field")
+        let panes = Array(model!.panes.values)
+        try expectEqual(panes[0].todos.count, 0, "todos should default to empty")
+    }
 }

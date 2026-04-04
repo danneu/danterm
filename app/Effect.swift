@@ -52,4 +52,9 @@ enum Effect {
     case sendSearchNeedle(paneId: PaneId, needle: String)
     case sendSearchNavigate(paneId: PaneId, direction: SearchDirection)
     case sendEndSearch(paneId: PaneId)
+
+    // TODO
+    case showTodoPopover(paneId: PaneId)
+    case dismissTodoPopover
+    case showClosePaneConfirmation(paneId: PaneId, uncompletedCount: Int)
 }
