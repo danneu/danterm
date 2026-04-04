@@ -194,9 +194,9 @@ jobs:
         if: ${{ steps.package_pr.outputs.pull-request-number != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
-        # --auto tells GitHub to merge once required checks pass.
-        # If the PR is already clean (no pending checks), GitHub rejects --auto,
-        # so we fall back to an immediate merge.
+        # Try immediate merge first (all conditions are trivially met: no
+        # required checks, 0 required reviews). Fall back to auto-merge if
+        # checks are still pending.
         run: |
-          gh pr merge --auto --squash "${{ steps.package_pr.outputs.pull-request-number }}" \
-            || gh pr merge --squash "${{ steps.package_pr.outputs.pull-request-number }}"
+          gh pr merge --squash "${{ steps.package_pr.outputs.pull-request-number }}" \
+            || gh pr merge --auto --squash "${{ steps.package_pr.outputs.pull-request-number }}"
