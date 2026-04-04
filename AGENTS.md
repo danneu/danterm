@@ -228,3 +228,7 @@ Example (single finding):
 - High: Plan stores tab state in both `Model.tabs` and each `TerminalView`.
   Impact: Dual source of truth causes state drift — closing a pane may leave stale entries in the tab list, leading to crashes on focus.
   Recommended fix: Keep `Model.tabs` as the single source of truth; `TerminalView` should read tab state from the model, never cache it locally.
+
+## Git commits
+
+Use Conventional Commits-style commit messages.
