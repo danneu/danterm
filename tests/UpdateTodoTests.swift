@@ -282,4 +282,53 @@ func todoTests() {
         // Parent still has its todo
         try expectEqual(model.panes[paneId]!.todos.count, 1)
     }
+
+    // MARK: - classifyInputAction
+
+    test("enter → submit") {
+        try expectEqual(classifyInputAction(key: .enter, isEditing: false, fieldEmpty: true), .submit)
+        try expectEqual(classifyInputAction(key: .enter, isEditing: true, fieldEmpty: false), .submit)
+    }
+
+    test("shiftEnter → insertNewline") {
+        try expectEqual(classifyInputAction(key: .shiftEnter, isEditing: false, fieldEmpty: true), .insertNewline)
+        try expectEqual(classifyInputAction(key: .shiftEnter, isEditing: true, fieldEmpty: false), .insertNewline)
+    }
+
+    test("escape while editing → cancelEdit") {
+        try expectEqual(classifyInputAction(key: .escape, isEditing: true, fieldEmpty: false), .cancelEdit)
+        try expectEqual(classifyInputAction(key: .escape, isEditing: true, fieldEmpty: true), .cancelEdit)
+    }
+
+    test("escape while not editing → dismiss") {
+        try expectEqual(classifyInputAction(key: .escape, isEditing: false, fieldEmpty: true), .dismiss)
+        try expectEqual(classifyInputAction(key: .escape, isEditing: false, fieldEmpty: false), .dismiss)
+    }
+
+    test("backspace on empty field in edit mode → cancelEdit") {
+        try expectEqual(classifyInputAction(key: .backspace, isEditing: true, fieldEmpty: true), .cancelEdit)
+    }
+
+    test("backspace on non-empty field in edit mode → unhandled") {
+        try expectEqual(classifyInputAction(key: .backspace, isEditing: true, fieldEmpty: false), .unhandled)
+    }
+
+    test("backspace when not editing → unhandled") {
+        try expectEqual(classifyInputAction(key: .backspace, isEditing: false, fieldEmpty: true), .unhandled)
+        try expectEqual(classifyInputAction(key: .backspace, isEditing: false, fieldEmpty: false), .unhandled)
+    }
+
+    test("tab → moveFocusForward") {
+        try expectEqual(classifyInputAction(key: .tab, isEditing: false, fieldEmpty: true), .moveFocusForward)
+        try expectEqual(classifyInputAction(key: .tab, isEditing: true, fieldEmpty: false), .moveFocusForward)
+    }
+
+    test("backtab → moveFocusBackward") {
+        try expectEqual(classifyInputAction(key: .backtab, isEditing: false, fieldEmpty: true), .moveFocusBackward)
+    }
+
+    test("other → unhandled") {
+        try expectEqual(classifyInputAction(key: .other, isEditing: false, fieldEmpty: false), .unhandled)
+        try expectEqual(classifyInputAction(key: .other, isEditing: true, fieldEmpty: true), .unhandled)
+    }
 }

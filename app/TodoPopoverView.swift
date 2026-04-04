@@ -95,17 +95,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     private let scrollView = NSScrollView()
     private let headerLabel = NSTextField(labelWithString: "To-Do")
     private let clearButton = NSButton(title: "Clear completed", target: nil, action: nil)
-    private let addField: NSTextField = {
-        let tf = NSTextField()
-        tf.placeholderString = "Add a task…"
-        tf.font = .systemFont(ofSize: 12)
-        tf.cell?.wraps = true
-        tf.cell?.usesSingleLineMode = false
-        tf.lineBreakMode = .byWordWrapping
-        tf.maximumNumberOfLines = 3
-        tf.translatesAutoresizingMaskIntoConstraints = false
-        return tf
-    }()
+    private let addInput = TodoInputView()
     private let editLabel: NSTextField = {
         let tf = NSTextField(labelWithString: "Editing — Esc to cancel")
         tf.font = .systemFont(ofSize: 10)
@@ -176,13 +166,13 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(emptyLabel)
 
-        // Bottom stack: [separator, editLabel (collapsible), addField]
+        // Bottom stack: [separator, editLabel (collapsible), addInput]
         let sep = NSBox()
         sep.boxType = .separator
 
-        addField.delegate = self
+        addInput.textView.delegate = self
 
-        let bottomStack = NSStackView(views: [sep, editLabel, addField])
+        let bottomStack = NSStackView(views: [sep, editLabel, addInput])
         bottomStack.orientation = .vertical
         bottomStack.alignment = .leading
         bottomStack.spacing = 4
@@ -218,8 +208,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
 
             sep.widthAnchor.constraint(equalTo: bottomStack.widthAnchor),
             editLabel.leadingAnchor.constraint(equalTo: bottomStack.leadingAnchor, constant: 4),
-            addField.widthAnchor.constraint(equalTo: bottomStack.widthAnchor),
-            addField.heightAnchor.constraint(greaterThanOrEqualToConstant: 50),
+            addInput.widthAnchor.constraint(equalTo: bottomStack.widthAnchor),
         ])
 
         self.view = wrapper
@@ -232,7 +221,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
 
     override func viewDidAppear() {
         super.viewDidAppear()
-        view.window?.makeFirstResponder(addField)
+        view.window?.makeFirstResponder(addInput.textView)
     }
 
     func rebuildRows() {
@@ -262,7 +251,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
 
     private func exitEditMode(restoreDraft: Bool) {
         let restoredText = restoreDraft ? editState.cancel() : { editState.submit(); return "" }()
-        addField.stringValue = restoredText
+        addInput.string = restoredText
         editLabel.isHidden = true
         isSyncingTableSelection = true
         tableView.deselectAll(nil)
@@ -270,14 +259,14 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     }
 
     private func submitField() {
-        let text = addField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = addInput.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         if let editId = editState.editingTodoId {
             runtime?.send(.editTodoText(paneId: paneId, todoId: editId, text: text))
             exitEditMode(restoreDraft: false)
         } else {
             runtime?.send(.addTodo(paneId: paneId, text: text))
-            addField.stringValue = ""
+            addInput.string = ""
         }
         rebuildRows()
     }
@@ -337,7 +326,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         guard row >= 0, row < items.count else { return }
         let newItem = items[row]
 
-        let fieldText = addField.stringValue
+        let fieldText = addInput.string
         if let autoSave = editState.beginEditing(item: newItem, fieldText: fieldText) {
             runtime?.send(.editTodoText(paneId: paneId, todoId: autoSave.autoSaveId, text: autoSave.text))
             // Refresh old row immediately so saved text is visible
@@ -349,10 +338,10 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
             }
         }
 
-        addField.stringValue = newItem.text
+        addInput.string = newItem.text
         editLabel.isHidden = false
-        view.window?.makeFirstResponder(addField)
-        addField.currentEditor()?.selectAll(nil)
+        view.window?.makeFirstResponder(addInput.textView)
+        addInput.textView.selectAll(nil)
     }
 
     // MARK: - Drag reorder
@@ -401,41 +390,55 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     }
 }
 
-// MARK: - NSTextFieldDelegate
+// MARK: - NSTextViewDelegate
 
-extension TodoPopoverViewController: NSTextFieldDelegate {
-    /// Handle Enter (submit) vs Shift+Enter (newline) and Escape (cancel edit).
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        guard control === addField else { return false }
+extension TodoPopoverViewController: NSTextViewDelegate {
+    /// NSTextViewDelegate: route keyboard commands through the pure classifier.
+    func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard textView === addInput.textView else { return false }
 
+        // Map ObjC selector + modifiers to domain-level InputKey
+        let key: InputKey
         if commandSelector == #selector(insertNewline(_:)) {
-            if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
-                // Shift+Enter: insert a newline
-                textView.insertNewlineIgnoringFieldEditor(nil)
-                return true
-            }
-            // Plain Enter: submit
+            key = NSApp.currentEvent?.modifierFlags.contains(.shift) == true ? .shiftEnter : .enter
+        } else if commandSelector == #selector(cancelOperation(_:)) {
+            key = .escape
+        } else if commandSelector == #selector(deleteBackward(_:)) {
+            key = .backspace
+        } else if commandSelector == #selector(insertTab(_:)) {
+            key = .tab
+        } else if commandSelector == #selector(insertBacktab(_:)) {
+            key = .backtab
+        } else {
+            key = .other
+        }
+
+        let action = classifyInputAction(
+            key: key,
+            isEditing: editState.editingTodoId != nil,
+            fieldEmpty: textView.string.isEmpty
+        )
+
+        switch action {
+        case .submit:
             submitField()
             return true
-        }
-        if commandSelector == #selector(cancelOperation(_:)) {
-            if editState.editingTodoId != nil {
-                exitEditMode(restoreDraft: true)
-            }
+        case .insertNewline:
+            textView.insertNewlineIgnoringFieldEditor(nil)
             return true
-        }
-        if commandSelector == #selector(deleteBackward(_:)) {
-            // Only in edit mode; in add mode, keep normal backspace behavior.
-            guard editState.editingTodoId != nil else { return false }
-
-            // If field is already empty, treat Delete like Escape (cancel edit).
-            if textView.string.isEmpty {
-                exitEditMode(restoreDraft: true)
-                return true
-            }
-
+        case .cancelEdit:
+            exitEditMode(restoreDraft: true)
+            return true
+        case .dismiss:
+            return true
+        case .moveFocusForward:
+            view.window?.selectNextKeyView(nil)
+            return true
+        case .moveFocusBackward:
+            view.window?.selectPreviousKeyView(nil)
+            return true
+        case .unhandled:
             return false
         }
-        return false
     }
 }
