@@ -230,6 +230,11 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         rebuildRows()
     }
 
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        view.window?.makeFirstResponder(addField)
+    }
+
     func rebuildRows() {
         let items = todos
         clearButton.isHidden = !items.contains(where: \.isDone)
