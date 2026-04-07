@@ -79,6 +79,10 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
         grid.column(at: 0).xPlacement = .trailing
         grid.column(at: 0).width = 130  // fixed label column width
         grid.column(at: 1).xPlacement = .fill
+        // Vertically center labels with their adjacent controls. NSGridView rows
+        // default to top alignment, which leaves labels sticking to the top of
+        // rows containing taller controls (text fields, popups).
+        grid.rowAlignment = .firstBaseline
         grid.rowSpacing = 4
         // Add extra spacing before DanTerm section (Alert Clear Mode row).
         grid.row(at: 4).topPadding = 12
