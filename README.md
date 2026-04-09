@@ -69,9 +69,9 @@ Reload with **Cmd+Shift+,**. Open the underlying Ghostty config with **Cmd+Optio
 
 ### DanTerm-specific keys
 
-| Key                | Default       | Description                                               |
-| ------------------ | ------------- | --------------------------------------------------------- |
-| `remote-theme`     | `Purplepeter` | Ghostty theme applied to panes during SSH/remote sessions |
+| Key                | Default       | Description                                                                        |
+| ------------------ | ------------- | ---------------------------------------------------------------------------------- |
+| `remote-theme`     | `Purplepeter` | Ghostty theme applied to panes during SSH/remote sessions                          |
 | `alert-clear-mode` | `focus`       | When to clear pane alerts: `focus` (on pane focus) or `manual` (only via ⌘. / ⇧⌘.) |
 
 Set `alert-clear-mode = manual` to make alerts persist until you explicitly dismiss them with ⌘. (all panes in tab) or ⇧⌘. (current pane only). This is useful when you want alerts to act as a to-do list — focusing a pane to check what triggered the alert won't clear it, so the badge stays visible as a reminder to come back to it.
@@ -270,9 +270,12 @@ end
 | Fast           | Yes     | Yes          | --     | Yes   |
 | No browser     | Yes     | --           | --     | Yes   |
 | No nested tabs | Yes     | --           | Yes    | Yes   |
+| \*To-do list   | Yes     | --           | --     | --    |
 | Dan            | Yes     | --           | --     | --    |
 
 [cmux]: https://github.com/manaflow-ai/cmux
+
+\* = Experimental bloat / scope creep
 
 As you can see, DanTerm is the clear winner.
 
