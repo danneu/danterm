@@ -224,6 +224,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             }
         }
 
+        if let next = nextFocus {
+            effects.append(contentsOf: syncFocusedPaneChrome(next, in: &model))
+        }
+
         effects.append(.rebuildContentView)
         // Persist pane removal + updated tree so closed panes stay closed on restore.
         effects.append(.scheduleCheckpoint)
@@ -441,23 +445,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         updateSelectedTab(&model) { t in t.focusedPaneId = paneId }
 
-        // Update tab title/subtitle from newly focused pane
-        if let pane = model.panes[paneId] {
-            let chrome = deriveTabChrome(from: pane)
-            updateSelectedTab(&model) { t in
-                t.title = chrome.title
-                t.subtitle = chrome.subtitle
-            }
-        }
-
         var effects: [Effect] = [.rebuildContentView]
-        if let tab = selectedTab(in: model) {
-            effects.append(.setWindowTitle(windowTitle(for: tab)))
-            effects.append(.updateSidebarTabRow(tabId: tab.id))
-            if let group = groupForTab(tab.id, in: model), group.isCollapsed {
-                effects.append(.updateSidebarGroupRow(groupId: group.id))
-            }
-        }
+        effects.append(contentsOf: syncFocusedPaneChrome(paneId, in: &model))
         // Persist focused pane so restore opens the right pane within each tab.
         effects.append(.scheduleCheckpoint)
         return effects
@@ -1133,6 +1122,27 @@ private func windowTitle(for tab: TabModel) -> String {
         return "\(tab.displayTitle) — \(subtitle)"
     }
     return tab.displayTitle
+}
+
+/// Sync the selected tab's title/subtitle from the given pane and return
+/// sidebar + window-title effects.
+private func syncFocusedPaneChrome(_ paneId: PaneId, in model: inout AppModel) -> [Effect] {
+    if let pane = model.panes[paneId] {
+        let chrome = deriveTabChrome(from: pane)
+        updateSelectedTab(&model) { t in
+            t.title = chrome.title
+            t.subtitle = chrome.subtitle
+        }
+    }
+    var effects: [Effect] = []
+    if let tab = selectedTab(in: model) {
+        effects.append(.setWindowTitle(windowTitle(for: tab)))
+        effects.append(.updateSidebarTabRow(tabId: tab.id))
+        if let group = groupForTab(tab.id, in: model), group.isCollapsed {
+            effects.append(.updateSidebarGroupRow(groupId: group.id))
+        }
+    }
+    return effects
 }
 
 private func selectionSyncEffects(for model: AppModel) -> [Effect] {

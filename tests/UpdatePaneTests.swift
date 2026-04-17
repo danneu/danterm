@@ -186,6 +186,56 @@ func paneTests() {
         try expectEqual(effects.count, 0, "same pane should return no effects")
     }
 
+    test("testClosePaneUpdatesSidebarAndWindowTitle") {
+        var model = makeModel()
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        model.panes[paneA]?.title = "pane-a-title"
+        model.panes[paneA]?.cwd = "/tmp/pane-a"
+
+        // Split to create paneB (becomes focused)
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+
+        // Close paneB — paneA should become focused and its chrome should appear on the tab
+        let effects = update(&model, .closePane(paneId: paneB))
+
+        let tab = model.groups[0].tabs[0]
+        try expectEqual(tab.focusedPaneId, paneA)
+        try expectEqual(tab.title, "pane-a-title")
+        try expectEqual(tab.subtitle, "/tmp/pane-a")
+        try expect(hasEffect(effects) {
+            if case .updateSidebarTabRow = $0 { return true }
+            return false
+        }, "should emit updateSidebarTabRow")
+        try expect(hasEffect(effects) {
+            if case .setWindowTitle = $0 { return true }
+            return false
+        }, "should emit setWindowTitle")
+    }
+
+    test("testClosePaneUpdatesCollapsedGroupRow") {
+        var model = makeModel()
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        model.panes[paneA]?.title = "pane-a-title"
+        model.groups[0].isCollapsed = true
+
+        // Split to create paneB (becomes focused)
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+
+        let groupId = model.groups[0].id
+        let effects = update(&model, .closePane(paneId: paneB))
+
+        try expect(hasEffect(effects) {
+            if case .updateSidebarGroupRow(let gid) = $0, gid == groupId { return true }
+            return false
+        }, "should emit updateSidebarGroupRow for collapsed group")
+    }
+
     // MARK: - Zoom Tests
 
     test("testToggleZoomOnSplit") {
