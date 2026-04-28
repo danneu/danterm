@@ -33,14 +33,16 @@ class AppRuntime {
     //   Light  — pure model serialization (no scrollback), written after a 2s debounce
     //            following any state-mutating Msg. Cheap and frequent.
     //   Enriched — model + scrollback text read from live Ghostty surfaces, written on
-    //              a 60s repeating timer and once at clean termination. Expensive but
+    //              a 10 min repeating timer and once at clean termination. Expensive but
     //              gives full restore fidelity including terminal history.
     private var checkpointTimer: DispatchSourceTimer?          // debounce timer for light checkpoints
     private var enrichedCheckpointTimer: DispatchSourceTimer?  // repeating timer for enriched checkpoints
     private var checkpointPending = false                      // true while a debounced write is scheduled
     private var searchDebounceTimers: [PaneId: DispatchSourceTimer] = [:]
     private static let checkpointDebounceInterval: TimeInterval = 2.0
-    private static let enrichedCheckpointInterval: TimeInterval = 60.0
+    // Slowed from 60s to 10min until the libghostty memory leak is fixed.
+    // https://github.com/danneu/danterm/issues/31
+    private static let enrichedCheckpointInterval: TimeInterval = 600.0
 
     init(ghosttyApp: GhosttyApp) {
         self.ghosttyApp = ghosttyApp
