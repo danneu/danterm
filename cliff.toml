@@ -1,0 +1,44 @@
+# git-cliff config for DanTerm release notes.
+# Renders the release range requested on the command line; the release
+# workflow passes `--current` for commits since the previous release tag.
+# Filters out automated `release vX.Y.Z` and `nix: update package.nix` commits.
+
+[changelog]
+header = ""
+body = """
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim }}
+
+{% for commit in commits -%}
+- {% if commit.scope %}*({{ commit.scope }})* {% endif %}\
+{{ commit.message | split(pat="\n") | first | upper_first }}
+{% endfor %}
+{% endfor %}
+"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+filter_commits = false
+tag_pattern = "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+topo_order = false
+sort_commits = "oldest"
+
+# Order matters: groups render in declaration order via the
+# `<!-- N -->Title` prefix that the `striptags` filter removes.
+commit_parsers = [
+    { message = "^release v[0-9]+\\.[0-9]+\\.[0-9]+", skip = true },
+    { message = "^nix: update package\\.nix", skip = true },
+    { message = "^feat(\\([^)]+\\))?!?:",     group = "<!-- 0 -->Features" },
+    { message = "^fix(\\([^)]+\\))?!?:",      group = "<!-- 1 -->Bug Fixes" },
+    { message = "^perf(\\([^)]+\\))?!?:",     group = "<!-- 2 -->Performance" },
+    { message = "^docs(\\([^)]+\\))?!?:",     group = "<!-- 3 -->Documentation" },
+    { message = "^refactor(\\([^)]+\\))?!?:", group = "<!-- 4 -->Refactor" },
+    { message = "^build(\\([^)]+\\))?!?:",    group = "<!-- 5 -->Build" },
+    { message = "^ci(\\([^)]+\\))?!?:",       group = "<!-- 6 -->CI" },
+    { message = "^test(\\([^)]+\\))?!?:",     group = "<!-- 7 -->Tests" },
+    { message = "^chore(\\([^)]+\\))?!?:",    group = "<!-- 8 -->Chore" },
+    { message = ".*",                          group = "<!-- 9 -->Other" },
+]

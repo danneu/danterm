@@ -19,6 +19,10 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: DeterminateSystems/nix-installer-action@v21
 
       - name: Set version from tag
         run: |
@@ -148,14 +152,20 @@ jobs:
               build/${{ env.ZIP_NAME }} \
               --clobber
           else
+            NOTES_FILE="$RUNNER_TEMP/release-notes.md"
+            nix run nixpkgs#git-cliff -- \
+              --current \
+              --strip all \
+              --output "$NOTES_FILE"
+            if [ ! -s "$NOTES_FILE" ]; then
+              printf '_No notable changes._\n' > "$NOTES_FILE"
+            fi
             gh release create "$tag" \
               --title "$tag" \
-              --generate-notes \
+              --notes-file "$NOTES_FILE" \
               build/${{ env.DMG_NAME }} \
               build/${{ env.ZIP_NAME }}
           fi
-
-      - uses: DeterminateSystems/nix-installer-action@v21
 
       - name: Compute release zip hash
         run: |

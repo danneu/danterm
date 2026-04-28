@@ -7,6 +7,95 @@ env:
   GHOSTTY_TAG: v1.3.0
 
 jobs:
+  cliff-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: DeterminateSystems/nix-installer-action@v21
+
+      - name: git-cliff smoke test (v0.0.41..v0.0.42)
+        run: |
+          out=$(nix run nixpkgs#git-cliff -- v0.0.41..v0.0.42 --strip all)
+          echo "$out"
+
+          # Must include expected real commits.
+          echo "$out" | grep -qF '*(sidebar)* Sync tab chrome' \
+            || { echo "missing fix(sidebar) entry"; exit 1; }
+          echo "$out" | grep -qF '*(readme)* Add todo list feature' \
+            || { echo "missing docs(readme) entry"; exit 1; }
+          echo "$out" | grep -qF '### Bug Fixes' \
+            || { echo "missing Bug Fixes section"; exit 1; }
+          echo "$out" | grep -qF '### Documentation' \
+            || { echo "missing Documentation section"; exit 1; }
+
+          # Must not include filtered commits.
+          if echo "$out" | grep -q 'release v0\.0\.42'; then
+            echo "release commit leaked"
+            exit 1
+          fi
+          if echo "$out" | grep -q 'nix: update package\.nix'; then
+            echo "nix-bump commit leaked"
+            exit 1
+          fi
+
+          # Section order: Bug Fixes must precede Documentation.
+          bugs_line=$(echo "$out" | grep -n '### Bug Fixes' | head -1 | cut -d: -f1)
+          docs_line=$(echo "$out" | grep -n '### Documentation' | head -1 | cut -d: -f1)
+          [ "$bugs_line" -lt "$docs_line" ] \
+            || { echo "section order wrong: Bug Fixes($bugs_line) >= Documentation($docs_line)"; exit 1; }
+
+      - name: git-cliff smoke test (v0.0.40..v0.0.41 - Other catchall)
+        # This range has only non-conventional commits (`update agents.md`
+        # and `Impl per-pane todo list feature (#49)`) plus the filtered
+        # `release v0.0.41`. Verifies the `.*` -> Other catchall keeps
+        # non-conventional commits visible instead of dropping them.
+        run: |
+          out=$(nix run nixpkgs#git-cliff -- v0.0.40..v0.0.41 --strip all)
+          echo "$out"
+
+          echo "$out" | grep -qF '### Other' \
+            || { echo "missing Other section for non-conventional commits"; exit 1; }
+          echo "$out" | grep -qF 'Update agents.md' \
+            || { echo "non-conventional commit dropped from Other"; exit 1; }
+          if echo "$out" | grep -q 'release v0\.0\.41'; then
+            echo "release commit leaked into Other"
+            exit 1
+          fi
+
+      - name: git-cliff smoke test (v0.0.39..v0.0.40 - tightened parser guard)
+        # This range contains both a conventional `fix: downgrade
+        # swift-tools-version ...` commit and a non-conventional `fix
+        # release workflow auto-merge step ...` commit (no colon after
+        # "fix"). With broad `^fix` parsers the latter would mis-group
+        # under Bug Fixes; the tightened `^fix(\([^)]+\))?!?:` parser
+        # must let it fall through to Other.
+        run: |
+          out=$(nix run nixpkgs#git-cliff -- v0.0.39..v0.0.40 --strip all)
+          echo "$out"
+
+          other_line=$(echo "$out" | grep -n '^### Other' | head -1 | cut -d: -f1)
+          bugs_line=$(echo "$out" | grep -n '^### Bug Fixes' | head -1 | cut -d: -f1)
+          target_line=$(echo "$out" | grep -nF 'Fix release workflow auto-merge step' | head -1 | cut -d: -f1)
+          fix_conv_line=$(echo "$out" | grep -nF 'Downgrade swift-tools-version' | head -1 | cut -d: -f1)
+
+          [ -n "$other_line" ] || { echo "missing Other section"; exit 1; }
+          [ -n "$bugs_line" ] || { echo "missing Bug Fixes section"; exit 1; }
+          [ -n "$target_line" ] || { echo "non-conventional 'fix release workflow ...' missing entirely"; exit 1; }
+          [ -n "$fix_conv_line" ] || { echo "conventional 'fix:' commit missing"; exit 1; }
+
+          # Non-conventional `fix release workflow ...` must be under Other,
+          # i.e. after the Other header.
+          [ "$target_line" -gt "$other_line" ] \
+            || { echo "non-conventional 'fix release workflow ...' leaked into Bug Fixes"; exit 1; }
+
+          # Conventional `fix:` must be in Bug Fixes, i.e. between the
+          # Bug Fixes header and the Other header.
+          [ "$fix_conv_line" -gt "$bugs_line" ] && [ "$fix_conv_line" -lt "$other_line" ] \
+            || { echo "conventional 'fix:' not in Bug Fixes section"; exit 1; }
+
   build:
     runs-on: macos-26
     steps:
