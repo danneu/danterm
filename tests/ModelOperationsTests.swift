@@ -556,4 +556,181 @@ func modelOperationsTests() {
         ), at: 0)
         try expectEqual(groupUnreadAlertCount(for: group, alerts: alerts), 1)
     }
+
+    // MARK: - moveToFront
+
+    test("moveToFront empty array is no-op") {
+        var arr: [Int] = []
+        moveToFront(&arr, 1)
+        try expectEqual(arr, [])
+    }
+
+    test("moveToFront missing element is no-op") {
+        var arr = [1, 2, 3]
+        moveToFront(&arr, 99)
+        try expectEqual(arr, [1, 2, 3])
+    }
+
+    test("moveToFront existing element moves to index 0") {
+        var arr = [1, 2, 3, 4]
+        moveToFront(&arr, 3)
+        try expectEqual(arr, [3, 1, 2, 4])
+    }
+
+    test("moveToFront idempotent when already at index 0") {
+        var arr = [1, 2, 3]
+        moveToFront(&arr, 1)
+        try expectEqual(arr, [1, 2, 3])
+    }
+
+    test("moveToFront removes prior occurrence (no duplicates)") {
+        var arr = [1, 2, 1, 3]
+        moveToFront(&arr, 1)
+        try expectEqual(arr, [1, 2, 3])
+    }
+
+    // MARK: - reconcileMru
+
+    test("reconcileMru on full live order is a no-op except possible hoist") {
+        let (m0, ids) = makeMruModel(tabCount: 3)
+        var model = m0
+        model.mruOrder = ids
+        model.selectedTabId = ids[0]
+        reconcileMru(&model)
+        try expectEqual(model.mruOrder, ids)
+    }
+
+    test("reconcileMru hoists selectedTabId to index 0 when not cycling") {
+        let (m0, ids) = makeMruModel(tabCount: 3)
+        var model = m0
+        model.mruOrder = ids               // [A, B, C]
+        model.selectedTabId = ids[2]       // C selected
+        reconcileMru(&model)
+        try expectEqual(model.mruOrder, [ids[2], ids[0], ids[1]])
+    }
+
+    test("reconcileMru does NOT hoist when cycling") {
+        let (m0, ids) = makeMruModel(tabCount: 3)
+        var model = m0
+        model.mruOrder = ids               // [A, B, C]
+        model.selectedTabId = ids[2]       // C selected
+        model.mruCycle = MruCycleState(frozenOrder: ids, cursorIndex: 1)
+        reconcileMru(&model)
+        try expectEqual(model.mruOrder, ids)  // unchanged
+    }
+
+    test("reconcileMru prunes stale ids") {
+        let (m0, ids) = makeMruModel(tabCount: 2)
+        var model = m0
+        let ghost = TabId()
+        model.mruOrder = [ghost, ids[0], ids[1]]
+        reconcileMru(&model)
+        try expect(!model.mruOrder.contains(ghost), "ghost id must be pruned")
+        try expectEqual(Set(model.mruOrder), Set(ids))
+    }
+
+    test("reconcileMru appends missing live tabs at the back") {
+        let (m0, ids) = makeMruModel(tabCount: 3)
+        var model = m0
+        model.mruOrder = [ids[0]]  // only one entry; B, C missing
+        reconcileMru(&model)
+        // Existing entry preserved at front; missing tabs appended in display order.
+        try expectEqual(model.mruOrder, [ids[0], ids[1], ids[2]])
+    }
+
+    test("reconcileMru deduplicates: first occurrence wins") {
+        let (m0, ids) = makeMruModel(tabCount: 3)
+        var model = m0
+        // Buggy state: same id appears twice. Reconcile must clean up.
+        model.mruOrder = [ids[1], ids[0], ids[1], ids[2]]
+        reconcileMru(&model)
+        try expectEqual(model.mruOrder, [ids[1], ids[0], ids[2]])
+    }
+
+    test("reconcileMru on empty mruOrder builds full list (restore-time)") {
+        let (m0, ids) = makeMruModel(tabCount: 3)
+        var model = m0
+        model.mruOrder = []
+        model.selectedTabId = ids[1]
+        reconcileMru(&model)
+        try expectEqual(model.mruOrder.count, 3)
+        try expectEqual(model.mruOrder[0], ids[1], "selected tab hoisted to front")
+        try expect(Set(model.mruOrder) == Set(ids), "all live tabs present")
+    }
+
+    // MARK: - resolveLiveCycle
+
+    test("resolveLiveCycle all live → identity") {
+        let (m0, ids) = makeMruModel(tabCount: 4)
+        let model = m0
+        let cycle = MruCycleState(frozenOrder: ids, cursorIndex: 2)
+        let resolved = resolveLiveCycle(cycle, in: model)
+        try expect(resolved != nil)
+        try expectEqual(resolved!.liveOrder, ids)
+        try expectEqual(resolved!.cursorIndex, 2)
+    }
+
+    test("resolveLiveCycle dead id before cursor → cursor remaps to same target") {
+        let (m0, ids) = makeMruModel(tabCount: 4)
+        var model = m0
+        let frozen = ids  // [A, B, C, D], cursor=2 → target C
+        // Remove B from the live model.
+        model.groups[0].tabs.removeAll { $0.id == ids[1] }
+        let cycle = MruCycleState(frozenOrder: frozen, cursorIndex: 2)
+        let resolved = resolveLiveCycle(cycle, in: model)
+        try expect(resolved != nil)
+        try expectEqual(resolved!.liveOrder, [ids[0], ids[2], ids[3]])
+        try expectEqual(resolved!.cursorIndex, 1, "C still pinned at its new live index")
+    }
+
+    test("resolveLiveCycle dead id at cursor → snap back to nearest preceding live") {
+        let (m0, ids) = makeMruModel(tabCount: 4)
+        var model = m0
+        let frozen = ids  // [A, B, C, D], cursor=2 → target C
+        // Remove C from the live model.
+        model.groups[0].tabs.removeAll { $0.id == ids[2] }
+        let cycle = MruCycleState(frozenOrder: frozen, cursorIndex: 2)
+        let resolved = resolveLiveCycle(cycle, in: model)
+        try expect(resolved != nil)
+        try expectEqual(resolved!.liveOrder, [ids[0], ids[1], ids[3]])
+        try expectEqual(resolved!.cursorIndex, 1, "snapped back to B")
+    }
+
+    test("resolveLiveCycle dead id at cursor with no preceding live → fallback to 0") {
+        let (m0, ids) = makeMruModel(tabCount: 4)
+        var model = m0
+        let frozen = ids
+        // Remove A (the only candidate before cursor=0).
+        model.groups[0].tabs.removeAll { $0.id == ids[0] }
+        let cycle = MruCycleState(frozenOrder: frozen, cursorIndex: 0)
+        let resolved = resolveLiveCycle(cycle, in: model)
+        try expect(resolved != nil)
+        try expectEqual(resolved!.liveOrder, [ids[1], ids[2], ids[3]])
+        try expectEqual(resolved!.cursorIndex, 0, "fell back to live index 0")
+    }
+
+    test("resolveLiveCycle all frozen ids dead → nil") {
+        let (m0, ids) = makeMruModel(tabCount: 1)
+        var model = m0
+        let frozen = ids
+        model.groups[0].tabs.removeAll()
+        let cycle = MruCycleState(frozenOrder: frozen, cursorIndex: 0)
+        let resolved = resolveLiveCycle(cycle, in: model)
+        try expect(resolved == nil, "no live tabs → nil")
+    }
+}
+
+/// Build a model with N tabs in one group; returns the tab ids in display order.
+/// Used by MRU/cycle tests in this file and tests/UpdateMruTests.swift.
+func makeMruModel(tabCount: Int) -> (model: AppModel, tabIds: [TabId]) {
+    var model = makeModel()
+    var ids: [TabId] = []
+    for _ in 0..<tabCount {
+        let paneId = PaneId()
+        let tabId = TabId()
+        ids.append(tabId)
+        model.panes[paneId] = PaneModel(id: paneId)
+        model.groups[0].tabs.append(TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(paneId)))
+    }
+    return (model, ids)
 }

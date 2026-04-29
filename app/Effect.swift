@@ -57,4 +57,8 @@ enum Effect {
     case showTodoPopover(paneId: PaneId)
     case dismissTodoPopover
     case showClosePaneConfirmation(paneId: PaneId, uncompletedCount: Int)
+
+    // MRU tab switcher overlay
+    case showSwitcherOverlay   // ensure panel is visible and redrawn from model
+    case hideSwitcherOverlay   // order panel out
 }

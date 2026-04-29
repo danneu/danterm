@@ -801,3 +801,130 @@ func parseDantermEvent(_ raw: String, expectedToken: String) -> DantermEvent? {
   }
   return nil
 }
+
+// MARK: - MRU Tab Switcher
+
+/// Move `value` to index 0 of the array, removing all other occurrences.
+/// No-op if the value is not present.
+func moveToFront<T: Equatable>(_ array: inout [T], _ value: T) {
+  guard array.contains(value) else { return }
+  array.removeAll { $0 == value }
+  array.insert(value, at: 0)
+}
+
+/// Reconcile mruOrder against the live tab set.
+/// Idempotent. Removes dead ids, deduplicates (first occurrence wins),
+/// appends missing live tabs at the back, and (when not cycling) hoists
+/// selectedTabId to index 0 so mruOrder[0] always equals the focused tab.
+func reconcileMru(_ model: inout AppModel) {
+  let liveTabs = Set(model.groups.flatMap(\.tabs).map(\.id))
+  var seen = Set<TabId>()
+  var rebuilt: [TabId] = []
+  for tabId in model.mruOrder {
+    guard liveTabs.contains(tabId), seen.insert(tabId).inserted else { continue }
+    rebuilt.append(tabId)
+  }
+  for tab in model.groups.flatMap(\.tabs) where !seen.contains(tab.id) {
+    rebuilt.append(tab.id)
+    seen.insert(tab.id)
+  }
+  model.mruOrder = rebuilt
+  if model.mruCycle == nil, let sel = model.selectedTabId {
+    moveToFront(&model.mruOrder, sel)
+  }
+}
+
+struct ResolvedCycle: Equatable {
+  var liveOrder: [TabId]
+  var cursorIndex: Int
+}
+
+/// Project frozenOrder through the current live tab set, with cursor remapping.
+/// Cursor remap rules:
+///   1. If the original cursor target is still live, point to its new index.
+///   2. Otherwise, walk backward from the cursor through frozenOrder for the
+///      nearest preceding live id (so the highlight does not skip forward).
+///   3. If no preceding live id exists, fall back to liveOrder index 0.
+/// Returns nil iff no tabs in frozenOrder remain live.
+func resolveLiveCycle(_ cycle: MruCycleState, in model: AppModel) -> ResolvedCycle? {
+  let liveTabs = Set(model.groups.flatMap(\.tabs).map(\.id))
+  let live = cycle.frozenOrder.filter { liveTabs.contains($0) }
+  guard !live.isEmpty else { return nil }
+
+  let originalIdx = max(0, min(cycle.cursorIndex, cycle.frozenOrder.count - 1))
+  let targetId = cycle.frozenOrder[originalIdx]
+  if let liveIdx = live.firstIndex(of: targetId) {
+    return ResolvedCycle(liveOrder: live, cursorIndex: liveIdx)
+  }
+  // Target was removed; walk backward through frozenOrder for the nearest
+  // preceding live id.
+  if originalIdx > 0 {
+    for i in stride(from: originalIdx - 1, through: 0, by: -1) {
+      if let liveIdx = live.firstIndex(of: cycle.frozenOrder[i]) {
+        return ResolvedCycle(liveOrder: live, cursorIndex: liveIdx)
+      }
+    }
+  }
+  // No earlier live entry; fall back to live index 0.
+  return ResolvedCycle(liveOrder: live, cursorIndex: 0)
+}
+
+// MARK: - Switcher Event Classifier
+
+enum SwitcherInputKind: Equatable {
+  case keyDown(keyCode: UInt16)
+  case flagsChanged
+}
+
+struct SwitcherModifiers: OptionSet, Hashable {
+  let rawValue: Int
+  static let command = SwitcherModifiers(rawValue: 1 << 0)
+  static let shift   = SwitcherModifiers(rawValue: 1 << 1)
+  static let option  = SwitcherModifiers(rawValue: 1 << 2)
+  static let control = SwitcherModifiers(rawValue: 1 << 3)
+}
+
+enum SwitcherAction: Equatable {
+  case passthrough
+  case stepOlder
+  case stepNewer
+  case cancel
+  case commit
+}
+
+private let kVK_ANSI_I: UInt16 = 0x22
+private let kVK_ANSI_O: UInt16 = 0x1F
+private let kVK_Escape: UInt16 = 0x35
+
+/// Pure classifier for the local NSEvent monitor. Domain-native types only;
+/// no AppKit. Maps (event kind, normalized modifiers, cycle-active state)
+/// to the action AppRuntime should take. Any non-passthrough result must be
+/// swallowed by the caller.
+func classifySwitcherInput(
+  kind: SwitcherInputKind,
+  modifiers: SwitcherModifiers,
+  cycleActive: Bool
+) -> SwitcherAction {
+  switch kind {
+  case .keyDown(let keyCode):
+    // Trigger combos require exactly cmd+shift; extra modifiers (option,
+    // control) pass through so user chord bindings keep working.
+    if modifiers == [.command, .shift] {
+      switch keyCode {
+      case kVK_ANSI_O: return .stepOlder  // primary direction (like cmd-tab)
+      case kVK_ANSI_I: return .stepNewer  // reverse / undo direction
+      default: return .passthrough
+      }
+    }
+    if cycleActive && keyCode == kVK_Escape { return .cancel }
+    return .passthrough
+
+  case .flagsChanged:
+    guard cycleActive else { return .passthrough }
+    // Releasing EITHER required modifier commits.
+    if !modifiers.contains(.command) || !modifiers.contains(.shift) {
+      return .commit
+    }
+    return .passthrough
+  }
+}

@@ -16,6 +16,14 @@ func isDraftDirty(_ draft: PreferencesDraft, vs config: DanTermConfig, ghostty: 
 
 @discardableResult
 func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
+    // Single chokepoint: every code path that mutates tab membership or
+    // selectedTabId reaches this point. `defer` fires after the matched case
+    // returns, and `inout model` makes the reconciled state visible to
+    // callers. Without this, MRU updates would have to be sprinkled into
+    // every handler that touches tabs (movePaneToTab, surfaceCreationFailed,
+    // deleteGroup, restore/import paths, etc.).
+    defer { reconcileMru(&model) }
+
     switch msg {
 
     // MARK: - Tab Management
@@ -71,28 +79,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return update(&model, .selectTab(id: targetId))
 
     case .selectTab(let id):
-        guard id != model.selectedTabId else { return [] }
-
-        var effects: [Effect] = []
-
-        // Defocus old tab's panes
-        if let oldTabId = model.selectedTabId {
-            for oldPaneId in paneIdsForTab(oldTabId, in: model) {
-                effects.append(.focusSurface(paneId: oldPaneId, focused: false))
-            }
-        }
-
-        model.selectedTabId = id
-        // Mark alerts read on the newly focused pane (focus mode only)
-        if model.config.alertClearMode == .focus, let tab = selectedTab(in: model) {
-            markAlertsReadForPane(tab.focusedPaneId, in: &model)
-        }
-        effects.append(.rebuildContentView)
-        effects.append(.reloadSidebar)
-        effects.append(contentsOf: selectionSyncEffects(for: model))
-        // Persist which tab is selected so restore opens the right one.
-        effects.append(.scheduleCheckpoint)
-        return effects
+        return applySelectTab(&model, id: id)
 
     case .requestCloseTab(let id):
         guard let tab = tabById(id, in: model) else { return [] }
@@ -1074,7 +1061,101 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             return [.showClosePaneConfirmation(paneId: paneId, uncompletedCount: uncompletedCount)]
         }
         return update(&model, .closePane(paneId: paneId))
+
+    // MRU tab switcher (real implementations follow in MRU section below)
+    case .mruCycleStepped(let direction):
+        return mruCycleStep(&model, direction: direction)
+
+    case .mruCycleCommitted:
+        return mruCycleCommit(&model)
+
+    case .mruCycleCanceled:
+        return mruCycleCancel(&model)
+
+    case .mruCycleOneShot(let direction):
+        var effects = mruCycleStep(&model, direction: direction)
+        effects.append(contentsOf: mruCycleCommit(&model))
+        return effects
     }
+}
+
+// MARK: - Tab Selection Helper
+
+/// Body of `.selectTab` extracted into a helper so `mruCycleCommitted` can
+/// reuse the focus / rebuild / checkpoint effects without duplicating logic.
+private func applySelectTab(_ model: inout AppModel, id: TabId) -> [Effect] {
+    guard id != model.selectedTabId else { return [] }
+
+    var effects: [Effect] = []
+    if let oldTabId = model.selectedTabId {
+        for oldPaneId in paneIdsForTab(oldTabId, in: model) {
+            effects.append(.focusSurface(paneId: oldPaneId, focused: false))
+        }
+    }
+    model.selectedTabId = id
+    if model.config.alertClearMode == .focus, let tab = selectedTab(in: model) {
+        markAlertsReadForPane(tab.focusedPaneId, in: &model)
+    }
+    effects.append(.rebuildContentView)
+    effects.append(.reloadSidebar)
+    effects.append(contentsOf: selectionSyncEffects(for: model))
+    effects.append(.scheduleCheckpoint)
+    return effects
+}
+
+// MARK: - MRU Cycle Handlers
+
+private func mruCycleStep(_ model: inout AppModel, direction: MruDirection) -> [Effect] {
+    // Empty MRU: nothing to cycle through. Avoids modulo-by-zero below.
+    guard !model.mruOrder.isEmpty else { return [] }
+
+    if model.mruCycle == nil {
+        // Freeze current order. cursorIndex starts at 0 (current tab); the
+        // step below moves it to the first cycle target.
+        model.mruCycle = MruCycleState(frozenOrder: model.mruOrder, cursorIndex: 0)
+    }
+
+    guard var cycle = model.mruCycle else { return [] }
+    let count = cycle.frozenOrder.count
+    // Full macOS Cmd-Tab parity: wrap in both directions, including on summon.
+    // First .older from idle: 0 -> 1 (next-most-recent).
+    // First .newer from idle: 0 -> count-1 (least-recently-used; like cmd-shift-tab).
+    // Mid-cycle past either end: wraps around.
+    switch direction {
+    case .older: cycle.cursorIndex = (cycle.cursorIndex + 1) % count
+    case .newer: cycle.cursorIndex = (cycle.cursorIndex - 1 + count) % count
+    }
+    model.mruCycle = cycle
+    return [.showSwitcherOverlay]
+}
+
+private func mruCycleCommit(_ model: inout AppModel) -> [Effect] {
+    guard let cycle = model.mruCycle else { return [] }
+
+    // Tabs may have been removed mid-cycle (closeTab, surfaceCreationFailed,
+    // last-pane closePane, automation). Filter frozenOrder against live tabs
+    // and remap the cursor before reading the chosen id.
+    guard let resolved = resolveLiveCycle(cycle, in: model) else {
+        // Every frozen tab is gone; treat as cancel.
+        model.mruCycle = nil
+        return [.hideSwitcherOverlay]
+    }
+
+    let chosenId = resolved.liveOrder[resolved.cursorIndex]
+    model.mruCycle = nil
+
+    var effects: [Effect] = []
+    if chosenId != model.selectedTabId {
+        effects.append(contentsOf: applySelectTab(&model, id: chosenId))
+    }
+    effects.append(.hideSwitcherOverlay)
+    return effects
+}
+
+private func mruCycleCancel(_ model: inout AppModel) -> [Effect] {
+    guard model.mruCycle != nil else { return [] }
+    model.mruCycle = nil
+    return [.hideSwitcherOverlay]
 }
 
 // MARK: - Helpers

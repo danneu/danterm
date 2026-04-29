@@ -26,6 +26,8 @@ class AppRuntime {
     private var todoPopoverDelegate: TodoPopoverDelegateAdapter?
     private var themeBrowserView: ThemeBrowserView?
     private var preferencesPanel: PreferencesPanel?
+    private var switcherPanel: SwitcherPanel?
+    private var switcherEventMonitor: Any?
     private var dragCoordinator: PaneDragCoordinator?
     private var replayFiles: [PaneId: URL] = [:]
     private static let replayDirectoryName = "danterm-scrollback"
@@ -52,6 +54,56 @@ class AppRuntime {
         )
         // Load DanTerm config before any tabs are created
         self.model.config = DanTermConfigParser.loadFromDisk()
+
+        // Build the MRU switcher panel eagerly — pay first-frame cost at
+        // launch instead of on every cmd-shift-i. Keep it offscreen until
+        // showSwitcherOverlay fires.
+        self.switcherPanel = SwitcherPanel()
+
+        // Install the local NSEvent monitor that drives the switcher.
+        // It reads model.mruCycle to know whether a cycle is active, but
+        // never mutates the model directly; mutations go through send().
+        installSwitcherEventMonitor()
+    }
+
+    deinit {
+        if let monitor = switcherEventMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+    }
+
+    // MARK: - Switcher Event Monitor
+
+    private func installSwitcherEventMonitor() {
+        switcherEventMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.keyDown, .flagsChanged]
+        ) { [weak self] event in
+            guard let self = self else { return event }
+
+            let kind: SwitcherInputKind = (event.type == .keyDown)
+                ? .keyDown(keyCode: event.keyCode)
+                : .flagsChanged
+            var mods: SwitcherModifiers = []
+            let raw = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            if raw.contains(.command) { mods.insert(.command) }
+            if raw.contains(.shift)   { mods.insert(.shift) }
+            if raw.contains(.option)  { mods.insert(.option) }
+            if raw.contains(.control) { mods.insert(.control) }
+
+            let action = classifySwitcherInput(
+                kind: kind,
+                modifiers: mods,
+                cycleActive: self.model.mruCycle != nil
+            )
+
+            switch action {
+            case .passthrough: return event
+            case .stepOlder:   self.send(.mruCycleStepped(direction: .older));  return nil
+            case .stepNewer:   self.send(.mruCycleStepped(direction: .newer));  return nil
+            case .cancel:      self.send(.mruCycleCanceled);                    return nil
+            case .commit:      self.send(.mruCycleCommitted);                   return nil
+            }
+        }
     }
 
     func send(_ msg: Msg) {
@@ -428,6 +480,16 @@ class AppRuntime {
                     }
                 }
             }
+
+        case .showSwitcherOverlay:
+            // Idempotent: render and order-front. Don't makeKeyAndOrderFront
+            // — the panel is non-activating; key would steal first responder.
+            switcherPanel?.render(from: model)
+            switcherPanel?.centerOnScreen(of: window)
+            switcherPanel?.orderFront(nil)
+
+        case .hideSwitcherOverlay:
+            switcherPanel?.orderOut(nil)
         }
     }
 
@@ -862,6 +924,10 @@ class AppRuntime {
         surfaces = staged.surfaces
         tokenStore = staged.tokenStore
         replayFiles = staged.replayFiles
+
+        // Restore bypasses update(); reconcile MRU here so the first
+        // cmd-shift-i after a restore sees a populated mruOrder.
+        reconcileMru(&model)
 
         refreshContentTitlebar()
         rebuildContentView()
