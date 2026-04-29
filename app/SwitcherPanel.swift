@@ -149,7 +149,7 @@ final class SwitcherContentView: NSView {
 final class SwitcherRowView: NSView {
     private let nameLabel: NSTextField
     private let badgeLabel: NSTextField
-    private let colorDot: NSView
+    private let colorStripe: NSView
     private let highlightLayer: CALayer
 
     override init(frame frameRect: NSRect) {
@@ -164,10 +164,11 @@ final class SwitcherRowView: NSView {
         badgeLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         badgeLabel.textColor = .secondaryLabelColor
 
-        colorDot = NSView()
-        colorDot.translatesAutoresizingMaskIntoConstraints = false
-        colorDot.wantsLayer = true
-        colorDot.layer?.cornerRadius = 4
+        // Full-height vertical bar at the leading edge, matching the
+        // sidebar's tab color stripe.
+        colorStripe = NSView()
+        colorStripe.translatesAutoresizingMaskIntoConstraints = false
+        colorStripe.wantsLayer = true
 
         highlightLayer = CALayer()
         highlightLayer.cornerRadius = 4
@@ -177,17 +178,17 @@ final class SwitcherRowView: NSView {
         wantsLayer = true
         layer?.addSublayer(highlightLayer)
 
-        addSubview(colorDot)
+        addSubview(colorStripe)
         addSubview(nameLabel)
         addSubview(badgeLabel)
 
         NSLayoutConstraint.activate([
-            colorDot.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
-            colorDot.centerYAnchor.constraint(equalTo: centerYAnchor),
-            colorDot.widthAnchor.constraint(equalToConstant: 8),
-            colorDot.heightAnchor.constraint(equalToConstant: 8),
+            colorStripe.leadingAnchor.constraint(equalTo: leadingAnchor),
+            colorStripe.topAnchor.constraint(equalTo: topAnchor),
+            colorStripe.bottomAnchor.constraint(equalTo: bottomAnchor),
+            colorStripe.widthAnchor.constraint(equalToConstant: 5),
 
-            nameLabel.leadingAnchor.constraint(equalTo: colorDot.trailingAnchor, constant: 8),
+            nameLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             nameLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
 
             badgeLabel.leadingAnchor.constraint(greaterThanOrEqualTo: nameLabel.trailingAnchor, constant: 8),
@@ -213,8 +214,12 @@ final class SwitcherRowView: NSView {
             badgeLabel.stringValue = ""
             badgeLabel.isHidden = true
         }
-        colorDot.layer?.backgroundColor = (row.color?.nsColor ?? .clear).cgColor
-        colorDot.isHidden = (row.color == nil)
+        if let color = row.color {
+            colorStripe.layer?.backgroundColor = color.nsColor.cgColor
+            colorStripe.isHidden = false
+        } else {
+            colorStripe.isHidden = true
+        }
         highlightLayer.backgroundColor = isCursor
             ? NSColor.selectedContentBackgroundColor.withAlphaComponent(0.35).cgColor
             : NSColor.clear.cgColor
