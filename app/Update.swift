@@ -386,8 +386,15 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return effects
 
     case .setTabColor(let tabId, let color):
-        updateTab(tabId, in: &model) { t in t.color = color }
-        // Persist tab color so it's restored on next launch.
+        // Re-applying the same color toggles it off, so cmd-1 (red) on an
+        // already-red tab clears the color without needing cmd-0.
+        updateTab(tabId, in: &model) { t in
+            if let new = color, t.color == new {
+                t.color = nil
+            } else {
+                t.color = color
+            }
+        }
         return [.updateSidebarTabRow(tabId: tabId), .scheduleCheckpoint]
 
     case .setPaneTheme(let paneId, let themeName):

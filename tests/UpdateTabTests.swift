@@ -312,6 +312,33 @@ func tabTests() {
         }, "should emit updateSidebarTabRow")
     }
 
+    test("testSetTabColorToggleSameColor") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        update(&model, .setTabColor(tabId: tabId, color: .red))
+        try expectEqual(model.groups[0].tabs[0].color, .red)
+
+        // Re-applying the same color clears it (toggle).
+        let effects = update(&model, .setTabColor(tabId: tabId, color: .red))
+        try expect(model.groups[0].tabs[0].color == nil, "re-applying same color should clear it")
+        try expect(hasEffect(effects) {
+            if case .updateSidebarTabRow(let tid) = $0, tid == tabId { return true }
+            return false
+        }, "should emit updateSidebarTabRow")
+    }
+
+    test("testSetTabColorReplaceDifferent") {
+        // Sanity: setting a different color replaces, not toggles off.
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        update(&model, .setTabColor(tabId: tabId, color: .red))
+
+        update(&model, .setTabColor(tabId: tabId, color: .blue))
+        try expectEqual(model.groups[0].tabs[0].color, .blue)
+    }
+
     test("testSetTabColorInvalidTab") {
         var model = makeModel()
         createTab(&model)
