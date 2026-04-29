@@ -295,6 +295,18 @@ Cmux is a really good idea: https://github.com/manaflow-ai/cmux
 
 But it's more complicated than I'd like since it includes a browser, and its panes can contain tabs.
 
+## Tips
+
+### Hold Shift to bypass terminal mouse capture\*\*
+
+Many TUI programs — tmux, vim, less, htop, fzf, btop, ranger, k9s — turn on "mouse reporting" so they can handle clicks, drags, and scrolls themselves. The downside: your terminal stops doing native click-drag selection, so highlighting text to copy with ⌘C suddenly doesn't work. Either nothing gets selected, or the program highlights text into its own internal buffer that ⌘C can't reach.
+
+Ghostty (and other modern terminals) reserve **Shift** as an override: hold it while click-dragging and the terminal ignores mouse reporting for that gesture and does its normal selection. Release, ⌘C, done.
+
+Example — tmux: with `set -g mouse on`, a plain drag enters tmux's copy-mode and clears on release without touching the system clipboard. Shift+drag bypasses tmux entirely and gives you a normal terminal selection you can ⌘C.
+
+Same trick works inside vim with `set mouse=a`, inside less, inside htop, etc.
+
 ## Development
 
 The dev loop is to make changes and `just build-run` to try them out.
