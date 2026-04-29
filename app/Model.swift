@@ -129,6 +129,16 @@ struct PreferencesDraft: Equatable {
     var fontSize: String?    // nil = use Ghostty default (remove key from config)
 }
 
+// MRU tab switcher state. Ephemeral — never serialized into AppModelSnapshot.
+// mruOrder[0] is the most-recently-used tab; reconcileMru maintains this
+// invariant whenever mruCycle is nil. While mruCycle is non-nil, mruOrder is
+// frozen so repeated cmd-shift-i taps walk back through history instead of
+// toggling between two tabs.
+struct MruCycleState: Equatable {
+    let frozenOrder: [TabId]
+    var cursorIndex: Int  // 0 = current tab, 1 = previous, etc.
+}
+
 struct AppModel: Equatable {
     var groups: [GroupModel]
     var panes: [PaneId: PaneModel]
@@ -141,6 +151,8 @@ struct AppModel: Equatable {
     var preferencesDraft: PreferencesDraft? = nil  // ephemeral — non-nil while prefs panel is open
     var committedGhosttyPrefs: GhosttyPrefs? = nil  // ephemeral — non-nil while prefs panel is open
     var todoPopoverPaneId: PaneId? = nil  // ephemeral — which pane's TODO popover is open
+    var mruOrder: [TabId] = []  // ephemeral — most-recently-used tab ordering
+    var mruCycle: MruCycleState? = nil  // ephemeral — non-nil while cmd-shift held
 }
 
 // MARK: - Session Lock

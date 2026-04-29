@@ -268,6 +268,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         prevTabItem.keyEquivalentModifierMask = [.command, .shift]
         tabMenu.addItem(prevTabItem)
 
+        // MRU switcher: cmd-shift-o (older, primary like cmd-tab) and
+        // cmd-shift-i (newer, reverse). The local NSEvent monitor in
+        // AppRuntime swallows these chords for the held-modifier path;
+        // these menu items provide discoverability and a one-shot fallback.
+        let recentOlderItem = NSMenuItem(title: "Recent Tab (Older)", action: #selector(mruRecentOlder(_:)), keyEquivalent: "o")
+        recentOlderItem.keyEquivalentModifierMask = [.command, .shift]
+        tabMenu.addItem(recentOlderItem)
+
+        let recentNewerItem = NSMenuItem(title: "Recent Tab (Newer)", action: #selector(mruRecentNewer(_:)), keyEquivalent: "i")
+        recentNewerItem.keyEquivalentModifierMask = [.command, .shift]
+        tabMenu.addItem(recentNewerItem)
+
         let zoomItem = NSMenuItem(title: "Toggle Zoom", action: #selector(toggleZoom(_:)), keyEquivalent: "\r")
         zoomItem.keyEquivalentModifierMask = [.command]
         tabMenu.addItem(zoomItem)
@@ -382,6 +394,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
     @objc func prevTab(_ sender: Any?) {
         runtime.send(.selectAdjacentTab(direction: .prev))
+    }
+
+    // Menu fallback for the MRU switcher: jumps once to the next/previous
+    // tab in MRU history. Atomic step+commit; doesn't leave the overlay open.
+    // The local NSEvent monitor consumes cmd-shift-i/o under normal operation,
+    // so these run only if the monitor is absent.
+    @objc func mruRecentOlder(_ sender: Any?) {
+        runtime.send(.mruCycleOneShot(direction: .older))
+    }
+
+    @objc func mruRecentNewer(_ sender: Any?) {
+        runtime.send(.mruCycleOneShot(direction: .newer))
     }
 
     @objc func toggleZoom(_ sender: Any?) {

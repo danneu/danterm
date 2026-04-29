@@ -14,6 +14,11 @@ enum SearchDirection {
     case previous
 }
 
+enum MruDirection {
+    case older  // step toward less-recently-used (advance cursorIndex)
+    case newer  // step toward more-recently-used (retreat cursorIndex)
+}
+
 enum Msg {
     // User actions
     case createTab(inGroupId: GroupId?)
@@ -119,6 +124,12 @@ enum Msg {
     case reorderTodo(paneId: PaneId, todoId: UUID, toIndex: Int)
     case clearCompletedTodos(paneId: PaneId)
     case requestClosePane(paneId: PaneId)
+
+    // MRU tab switcher
+    case mruCycleStepped(direction: MruDirection)  // hold path: tapped cmd-shift-i/-o
+    case mruCycleCommitted                          // hold path: released cmd or shift
+    case mruCycleCanceled                           // pressed Esc while cycling
+    case mruCycleOneShot(direction: MruDirection)  // menu fallback: step + commit atomically
 }
 
 /// Which entity was being renamed (used by renameCompletionMessages).
