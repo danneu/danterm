@@ -14,7 +14,7 @@ func groupTests() {
         try expectEqual(model.groups[1].tabs.count, 1, "new group should have auto-created tab")
 
         let workGroupId = model.groups[1].id
-        update(&model, .moveTab(tabId: tabId, toGroupId: workGroupId, atIndex: 0))
+        update(&model, .moveTabs(tabIds: [tabId], toGroupId: workGroupId, atIndex: 0))
 
         try expectEqual(model.groups.count, 1, "empty General should be pruned")
         try expectEqual(model.groups[0].id, workGroupId)
@@ -32,7 +32,7 @@ func groupTests() {
         update(&model, .createGroup(name: "Temp"))
         let tempGroupId = model.groups[1].id
         let autoTabId = model.groups[1].tabs[0].id
-        update(&model, .moveTab(tabId: tab1Id, toGroupId: tempGroupId, atIndex: 0))
+        update(&model, .moveTabs(tabIds: [tab1Id], toGroupId: tempGroupId, atIndex: 0))
 
         try expectEqual(model.groups[0].tabs.count, 1, "General should have 1 tab remaining")
         try expectEqual(model.groups[1].tabs.count, 2, "Temp should have moved tab + auto tab")
@@ -74,7 +74,7 @@ func groupTests() {
         // Temp has 1 auto-created tab
 
         // Move first tab to Temp (now Temp has 2 tabs)
-        update(&model, .moveTab(tabId: tabId1, toGroupId: tempGroupId, atIndex: 0))
+        update(&model, .moveTabs(tabIds: [tabId1], toGroupId: tempGroupId, atIndex: 0))
 
         // Delete Temp without moving tabs — destroys both tabs in Temp
         let effects = update(&model, .deleteGroup(id: tempGroupId, moveTabs: false))
@@ -97,7 +97,7 @@ func groupTests() {
 
         update(&model, .createGroup(name: "Only"))
         let onlyGroupId = model.groups[1].id
-        update(&model, .moveTab(tabId: tabId, toGroupId: onlyGroupId, atIndex: 0))
+        update(&model, .moveTabs(tabIds: [tabId], toGroupId: onlyGroupId, atIndex: 0))
 
         try expectEqual(model.groups.count, 1, "empty General should be pruned")
         try expectEqual(model.groups[0].id, onlyGroupId)
@@ -244,7 +244,7 @@ func groupTests() {
         // Target has 1 auto-created tab
 
         // Move with atIndex way beyond count — should clamp to end
-        update(&model, .moveTab(tabId: tabId, toGroupId: targetId, atIndex: 999))
+        update(&model, .moveTabs(tabIds: [tabId], toGroupId: targetId, atIndex: 999))
         // General was emptied and pruned; only Target remains
         let targetGroup = model.groups.first(where: { $0.id == targetId })!
         try expectEqual(targetGroup.tabs.count, 2, "should have auto-created tab + moved tab")
@@ -262,7 +262,7 @@ func groupTests() {
         let c = model.groups[0].tabs[2].id
 
         // Drag A to after B (outline view proposes child index 2)
-        update(&model, .moveTab(tabId: a, toGroupId: groupId, atIndex: 2))
+        update(&model, .moveTabs(tabIds: [a], toGroupId: groupId, atIndex: 2))
         try expectEqual(model.groups[0].tabs[0].id, b, "B should be first")
         try expectEqual(model.groups[0].tabs[1].id, a, "A should be second")
         try expectEqual(model.groups[0].tabs[2].id, c, "C should be third")
@@ -276,7 +276,7 @@ func groupTests() {
         update(&model, .createGroup(name: "Target"))
         let targetId = model.groups[1].id
 
-        update(&model, .moveTab(tabId: tabId, toGroupId: targetId, atIndex: -1))
+        update(&model, .moveTabs(tabIds: [tabId], toGroupId: targetId, atIndex: -1))
         // General was emptied and pruned; only Target remains
         let targetGroup = model.groups.first(where: { $0.id == targetId })!
         try expectEqual(targetGroup.tabs[0].id, tabId, "tab should land at clamped index 0")
@@ -317,7 +317,7 @@ func groupTests() {
         let workGroupId = model.groups[1].id
         let generalTabId = model.groups[0].tabs[0].id
 
-        update(&model, .moveTab(tabId: generalTabId, toGroupId: workGroupId, atIndex: 0))
+        update(&model, .moveTabs(tabIds: [generalTabId], toGroupId: workGroupId, atIndex: 0))
 
         try expectEqual(model.groups.count, 1, "empty General should be pruned")
         try expectEqual(model.groups[0].id, workGroupId)

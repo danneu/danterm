@@ -715,7 +715,7 @@ func paneTests() {
         let tab1Id = model.groups[0].tabs[0].id
         let paneA = model.groups[0].tabs[0].focusedPaneId
         // Give tab1 custom metadata
-        update(&model, .setTabColor(tabId: tab1Id, color: .red))
+        update(&model, .setTabColors(tabIds: [tab1Id], color: .red))
         update(&model, .renameTab(id: tab1Id, name: "MyTab"))
 
         createTab(&model) // tab2

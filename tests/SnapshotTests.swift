@@ -519,7 +519,7 @@ func snapshotTests() {
     test("testSnapshotPreservesTabColor") {
         var model = makeModel()
         createTab(&model)
-        update(&model, .setTabColor(tabId: model.groups[0].tabs[0].id, color: .purple))
+        update(&model, .setTabColors(tabIds: [model.groups[0].tabs[0].id], color: .purple))
 
         let snapshot = toSnapshot(model)
         let rebuilt = validateAndBuild(snapshot)

@@ -979,3 +979,14 @@ func resolveContextTargets(
         : [clickedRow]
     return rows.compactMap { tabIdAtRow($0) }
 }
+
+// MARK: - Tab Color
+
+// Re-applying the same color clears it (cmd-1 on a red tab clears without
+// needing cmd-0). This is keyboard-shortcut/single-tab UX, applied at the
+// dispatcher before sending .setTabColors so the Msg layer stays a plain
+// "set these tabs to this color" with no toggle policy.
+func toggleColorIfMatch(current: TabColor?, requested: TabColor?) -> TabColor? {
+    if let req = requested, req == current { return nil }
+    return requested
+}

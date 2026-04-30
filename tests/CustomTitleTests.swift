@@ -215,7 +215,7 @@ func customTitleTests() {
         update(&model, .createGroup(name: "Temp"))
         let tempGroupId = model.groups[1].id
         // Move tabA to Temp — General keeps tab2
-        update(&model, .moveTab(tabId: tabA, toGroupId: tempGroupId, atIndex: 0))
+        update(&model, .moveTabs(tabIds: [tabA], toGroupId: tempGroupId, atIndex: 0))
 
         // Select tabA (in Temp) so the deletion triggers a selection change.
         update(&model, .selectTab(id: tabA))

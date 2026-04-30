@@ -427,12 +427,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         guard let tabId = runtime.model.selectedTabId else { return }
         let colors = TabColor.allCases
         guard sender.tag >= 0, sender.tag < colors.count else { return }
-        runtime.send(.setTabColor(tabId: tabId, color: colors[sender.tag]))
+        // Re-applying the same color clears it (cmd-1 on a red tab clears).
+        let current = tabById(tabId, in: runtime.model)?.color
+        let resolved = toggleColorIfMatch(current: current, requested: colors[sender.tag])
+        runtime.send(.setTabColors(tabIds: [tabId], color: resolved))
     }
 
     @objc func clearTabColor(_ sender: Any?) {
         guard let tabId = runtime.model.selectedTabId else { return }
-        runtime.send(.setTabColor(tabId: tabId, color: nil))
+        runtime.send(.setTabColors(tabIds: [tabId], color: nil))
     }
 
     @objc func exportState(_ sender: Any?) {

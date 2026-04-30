@@ -290,7 +290,7 @@ func tabTests() {
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
 
-        let effects = update(&model, .setTabColor(tabId: tabId, color: .red))
+        let effects = update(&model, .setTabColors(tabIds: [tabId], color: .red))
         try expectEqual(model.groups[0].tabs[0].color, .red)
         try expect(hasEffect(effects) {
             if case .updateSidebarTabRow(let tid) = $0, tid == tabId { return true }
@@ -302,9 +302,9 @@ func tabTests() {
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        update(&model, .setTabColor(tabId: tabId, color: .blue))
+        update(&model, .setTabColors(tabIds: [tabId], color: .blue))
 
-        let effects = update(&model, .setTabColor(tabId: tabId, color: nil))
+        let effects = update(&model, .setTabColors(tabIds: [tabId], color: nil))
         try expect(model.groups[0].tabs[0].color == nil, "color should be nil")
         try expect(hasEffect(effects) {
             if case .updateSidebarTabRow(let tid) = $0, tid == tabId { return true }
@@ -312,40 +312,16 @@ func tabTests() {
         }, "should emit updateSidebarTabRow")
     }
 
-    test("testSetTabColorToggleSameColor") {
-        var model = makeModel()
-        createTab(&model)
-        let tabId = model.groups[0].tabs[0].id
-        update(&model, .setTabColor(tabId: tabId, color: .red))
-        try expectEqual(model.groups[0].tabs[0].color, .red)
-
-        // Re-applying the same color clears it (toggle).
-        let effects = update(&model, .setTabColor(tabId: tabId, color: .red))
-        try expect(model.groups[0].tabs[0].color == nil, "re-applying same color should clear it")
-        try expect(hasEffect(effects) {
-            if case .updateSidebarTabRow(let tid) = $0, tid == tabId { return true }
-            return false
-        }, "should emit updateSidebarTabRow")
-    }
-
     test("testSetTabColorReplaceDifferent") {
-        // Sanity: setting a different color replaces, not toggles off.
+        // Setting a different color replaces. Toggle-off (re-apply clears)
+        // is no longer Msg-layer behavior; see toggleColorIfMatch tests.
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        update(&model, .setTabColor(tabId: tabId, color: .red))
+        update(&model, .setTabColors(tabIds: [tabId], color: .red))
 
-        update(&model, .setTabColor(tabId: tabId, color: .blue))
+        update(&model, .setTabColors(tabIds: [tabId], color: .blue))
         try expectEqual(model.groups[0].tabs[0].color, .blue)
-    }
-
-    test("testSetTabColorInvalidTab") {
-        var model = makeModel()
-        createTab(&model)
-        let bogusId = TabId()
-
-        let effects = update(&model, .setTabColor(tabId: bogusId, color: .green))
-        try expectEqual(effects.count, 2, "should emit updateSidebarTabRow + scheduleCheckpoint")
     }
 
     test("testCloseTabNonSelected") {
@@ -434,20 +410,19 @@ func tabTests() {
             "every selected tab gets the new color")
     }
 
-    test("testSetTabColorsDoesNotToggleOff") {
-        // Single-tab .setTabColor toggles off when re-applied; the batch
-        // version intentionally does NOT (would produce inconsistent
-        // state when one selected tab already has the color and another
-        // doesn't).
+    test("testSetTabColorsAlwaysReplaces") {
+        // The Msg layer always replaces, never toggles. Toggle-off
+        // (re-apply same color clears) is dispatcher-side UX via
+        // toggleColorIfMatch -- not part of .setTabColors semantics.
         var model = makeModel()
-        createTab(&model) // tab1 — gets red below
-        createTab(&model) // tab2 — stays uncolored
+        createTab(&model) // tab1 -- gets red below
+        createTab(&model) // tab2 -- stays uncolored
         let id1 = model.groups[0].tabs[0].id
         let id2 = model.groups[0].tabs[1].id
-        update(&model, .setTabColor(tabId: id1, color: .red))
+        update(&model, .setTabColors(tabIds: [id1], color: .red))
         try expectEqual(model.groups[0].tabs[0].color, .red)
 
-        // Re-apply red to both via batch — both end up red, neither toggles off.
+        // Re-apply red to both via batch -- both end up red.
         update(&model, .setTabColors(tabIds: [id1, id2], color: .red))
         try expectEqual(model.groups[0].tabs[0].color, .red)
         try expectEqual(model.groups[0].tabs[1].color, .red)

@@ -89,13 +89,13 @@ func checkpointTests() {
                    "renameTab should emit scheduleCheckpoint")
     }
 
-    test("setTabColor emits scheduleCheckpoint") {
+    test("setTabColors emits scheduleCheckpoint") {
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        let effects = update(&model, .setTabColor(tabId: tabId, color: .red))
+        let effects = update(&model, .setTabColors(tabIds: [tabId], color: .red))
         try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
-                   "setTabColor should emit scheduleCheckpoint")
+                   "setTabColors should emit scheduleCheckpoint")
     }
 
     test("renameGroup emits scheduleCheckpoint") {

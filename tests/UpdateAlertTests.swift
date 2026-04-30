@@ -897,7 +897,7 @@ func alertTests() {
             title: "DanTerm", body: "tab2", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .clearAlertsForTab(tabId: tab1Id))
+        let effects = update(&model, .clearAlertsForTabs(tabIds: [tab1Id]))
         let tab1Alert = model.alerts.first { $0.paneId == tab1Pane }!
         let tab2Alert = model.alerts.first { $0.paneId == tab2Pane }!
         try expectEqual(tab1Alert.isUnread, false, "target tab's alerts should be cleared")
@@ -917,8 +917,8 @@ func alertTests() {
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
 
-        let effects = update(&model, .clearAlertsForTab(tabId: tabId))
-        try expectEqual(effects.count, 0, "clearAlertsForTab with no unread alerts should be a no-op")
+        let effects = update(&model, .clearAlertsForTabs(tabIds: [tabId]))
+        try expectEqual(effects.count, 0, "clearAlertsForTabs with no unread alerts should be a no-op")
     }
 
     test("testGoToMostRecentAlertPaneUnzoomsIfNeeded") {

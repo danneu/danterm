@@ -110,12 +110,12 @@ class SidebarOutlineView: NSOutlineView {
         return badge.bounds.contains(badgePoint) ? tab : nil
     }
 
-    // NSResponder: routes alert-badge clicks to .clearAlertsForTab, and pre-empts
+    // NSResponder: routes alert-badge clicks to .clearAlertsForTabs, and pre-empts
     // AppKit's deferred selection narrowing so multi-selection clicks feel snappy.
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         if let tab = tabForBadgeHit(at: point) {
-            sidebarView?.runtime?.send(.clearAlertsForTab(tabId: tab.id))
+            sidebarView?.runtime?.send(.clearAlertsForTabs(tabIds: [tab.id]))
             return
         }
         let plainClick = event.modifierFlags.intersection([.shift, .command]).isEmpty
@@ -902,19 +902,22 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
     }
 
-    /// Single-tab picks route through .setTabColor so the existing
-    /// "pick the same color again to clear it" toggle UX is preserved
-    /// (also used by the keyboard shortcut path). Multi-tab picks route
-    /// through .setTabColors which sets the color on every tab without
-    /// toggling.
+    /// Single-tab picks resolve toggle-off at the dispatcher (re-apply
+    /// same color clears it) before sending. The Msg layer always
+    /// replaces; the toggle UX lives here and in the keyboard-shortcut
+    /// path. Multi-tab picks skip toggle-off (mixed selection would yield
+    /// inconsistent results).
     @objc private func contextSetTabColors(_ sender: NSMenuItem) {
         guard let info = sender.representedObject as? SetTabColorsInfo,
               !info.tabIds.isEmpty else { return }
-        if info.tabIds.count == 1 {
-            runtime?.send(.setTabColor(tabId: info.tabIds[0], color: info.color))
+        let resolved: TabColor?
+        if info.tabIds.count == 1, let model = runtime?.model {
+            let current = tabById(info.tabIds[0], in: model)?.color
+            resolved = toggleColorIfMatch(current: current, requested: info.color)
         } else {
-            runtime?.send(.setTabColors(tabIds: info.tabIds, color: info.color))
+            resolved = info.color
         }
+        runtime?.send(.setTabColors(tabIds: info.tabIds, color: resolved))
     }
 
     @objc private func contextRenameTab(_ sender: NSMenuItem) {
@@ -928,21 +931,13 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     @objc private func contextClearCustomTitles(_ sender: NSMenuItem) {
         guard let box = sender.representedObject as? TabIdsBox,
               !box.ids.isEmpty else { return }
-        if box.ids.count == 1 {
-            runtime?.send(.renameTab(id: box.ids[0], name: nil))
-        } else {
-            runtime?.send(.clearCustomTitles(tabIds: box.ids))
-        }
+        runtime?.send(.clearCustomTitles(tabIds: box.ids))
     }
 
     @objc private func contextClearAlerts(_ sender: NSMenuItem) {
         guard let box = sender.representedObject as? TabIdsBox,
               !box.ids.isEmpty else { return }
-        if box.ids.count == 1 {
-            runtime?.send(.clearAlertsForTab(tabId: box.ids[0]))
-        } else {
-            runtime?.send(.clearAlertsForTabs(tabIds: box.ids))
-        }
+        runtime?.send(.clearAlertsForTabs(tabIds: box.ids))
     }
 
     /// Closing N tabs dispatches N .requestCloseTab calls so each tab's

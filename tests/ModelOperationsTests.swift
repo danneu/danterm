@@ -853,6 +853,24 @@ func modelOperationsTests() {
     test("shouldForceSidebarRowEmphasis false when both nil") {
         try expect(!shouldForceSidebarRowEmphasis(rowTabId: nil, focusedTabId: nil))
     }
+
+    // MARK: - toggleColorIfMatch
+
+    test("testToggleColorIfMatchReturnsNilOnSameColor") {
+        try expect(toggleColorIfMatch(current: .red, requested: .red) == nil)
+    }
+
+    test("testToggleColorIfMatchReturnsRequestedOnDifferent") {
+        try expectEqual(toggleColorIfMatch(current: .red, requested: .blue), .blue)
+    }
+
+    test("testToggleColorIfMatchReturnsRequestedFromNil") {
+        try expectEqual(toggleColorIfMatch(current: nil, requested: .red), .red)
+    }
+
+    test("testToggleColorIfMatchReturnsNilForExplicitClear") {
+        try expect(toggleColorIfMatch(current: .red, requested: nil) == nil)
+    }
 }
 
 /// Build a model with N tabs in one group; returns the tab ids in display order.

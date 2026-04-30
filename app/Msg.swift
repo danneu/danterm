@@ -30,7 +30,6 @@ enum Msg {
     case createGroup(name: String)
     case deleteGroup(id: GroupId, moveTabs: Bool)
     case renameGroup(id: GroupId, name: String)
-    case moveTab(tabId: TabId, toGroupId: GroupId, atIndex: Int)
     case moveTabs(tabIds: [TabId], toGroupId: GroupId, atIndex: Int)
     case extractTabsToNewGroup(tabIds: [TabId], groupName: String)
     case reorderGroup(groupId: GroupId, toIndex: Int)
@@ -41,7 +40,6 @@ enum Msg {
     case movePane(source: PaneId, target: PaneId, intent: PaneDropIntent)
     case movePaneToTab(paneId: PaneId, targetTabId: TabId)
     case movePaneToNewTab(paneId: PaneId, inGroupId: GroupId, atIndex: Int)
-    case setTabColor(tabId: TabId, color: TabColor?)
     case setTabColors(tabIds: [TabId], color: TabColor?)
     case clearCustomTitles(tabIds: [TabId])
     case clearAlertsForTabs(tabIds: [TabId])
@@ -79,7 +77,6 @@ enum Msg {
     case setShowAllAlerts(Bool)
     case clearAlertsForPane(paneId: PaneId)
     case ackTabAlerts
-    case clearAlertsForTab(tabId: TabId)
 
     // Config (external reload)
     case configLoaded(DanTermConfig)

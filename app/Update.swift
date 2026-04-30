@@ -385,22 +385,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         effects.append(.scheduleCheckpoint)
         return effects
 
-    case .setTabColor(let tabId, let color):
-        // Re-applying the same color toggles it off, so cmd-1 (red) on an
-        // already-red tab clears the color without needing cmd-0.
-        updateTab(tabId, in: &model) { t in
-            if let new = color, t.color == new {
-                t.color = nil
-            } else {
-                t.color = color
-            }
-        }
-        return [.updateSidebarTabRow(tabId: tabId), .scheduleCheckpoint]
-
     case .setTabColors(let tabIds, let color):
-        // Batch (multi-select context menu): apply the chosen color to
-        // every selected tab. No toggle-off semantics — that's for the
-        // single-tab keyboard shortcut path on .setTabColor.
+        // Apply the chosen color to every requested tab. No toggle-off
+        // semantics here -- the cmd-1-on-red-clears UX is resolved at the
+        // dispatcher via toggleColorIfMatch before this Msg is sent.
         var seen = Set<TabId>()
         let validIds = tabIds.filter { id in
             guard !seen.contains(id), tabLocation(id, in: model) != nil
@@ -898,15 +886,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         return [.rebuildContentView, .reloadSidebar]
 
-    case .clearAlertsForTab(let tabId):
-        let paneIds = paneIdsForTab(tabId, in: model)
-        let hadUnread = model.alerts.contains { $0.isUnread && paneIds.contains($0.paneId) }
-        guard hadUnread else { return [] }
-        for paneId in paneIds {
-            markAlertsReadForPane(paneId, in: &model)
-        }
-        return [.rebuildContentView, .reloadSidebar]
-
     case .confirmTerminate:
         return [.terminate]
 
@@ -976,22 +955,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         // Persist group name so it appears correctly on restore.
         return [.reloadSidebar, .scheduleCheckpoint]
 
-    case .moveTab(let tabId, let toGroupId, let atIndex):
-        guard let (srcGroupIdx, tabIdx) = tabLocation(tabId, in: model),
-              let dstGroupIdx = model.groups.firstIndex(where: { $0.id == toGroupId }) else { return [] }
-
-        let srcGroupId = model.groups[srcGroupIdx].id
-        let tab = model.groups[srcGroupIdx].tabs.remove(at: tabIdx)
-        var adjustedIndex = atIndex
-        if srcGroupIdx == dstGroupIdx && tabIdx < atIndex {
-            adjustedIndex -= 1
-        }
-        let clampedIndex = max(0, min(adjustedIndex, model.groups[dstGroupIdx].tabs.count))
-        model.groups[dstGroupIdx].tabs.insert(tab, at: clampedIndex)
-        removeGroupIfEmpty(srcGroupId, from: &model)
-        // Persist tab's new group membership so it restores in the right group.
-        return [.reloadSidebar, .scheduleCheckpoint]
-
     case .moveTabs(let tabIds, let toGroupId, let atIndex):
         var seen = Set<TabId>()
         let validIds = tabIds.filter { id in
@@ -1004,9 +967,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         else { return [] }
 
         // Pre-removal: how many of the moved tabs sit above atIndex in
-        // dst? Their removal will shift the anchor left. Generalizes the
-        // single-tab `if srcGroupIdx == dstGroupIdx && tabIdx < atIndex
-        // { adjustedIndex -= 1 }` adjustment from .moveTab over a batch.
+        // dst? Their removal will shift the anchor left.
         let validIdSet = Set(validIds)
         let dstTabsPre = model.groups[dstGroupIdx].tabs
         let prefixCount = max(0, min(atIndex, dstTabsPre.count))
@@ -1069,13 +1030,13 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let newGroupId = GroupId()
         model.groups.append(GroupModel(id: newGroupId, name: groupName))
 
-        // Reuse .moveTab for tabLocation lookup, index clamping, and
-        // removeGroupIfEmpty pruning. Discard nested effects — we emit
-        // one reloadSidebar + scheduleCheckpoint at the end.
-        for (idx, tabId) in validIds.enumerated() {
-            _ = update(&model, .moveTab(
-                tabId: tabId, toGroupId: newGroupId, atIndex: idx))
-        }
+        // Reuse .moveTabs for tabLocation lookup, clamping, and
+        // removeGroupIfEmpty pruning of vacated source groups. The new
+        // group is empty, so atIndex: 0 is unambiguous; ids are inserted
+        // in the order given. Discard nested effects -- we emit one
+        // reloadSidebar + scheduleCheckpoint at the end.
+        _ = update(&model, .moveTabs(
+            tabIds: validIds, toGroupId: newGroupId, atIndex: 0))
         return [.reloadSidebar, .scheduleCheckpoint]
 
     case .reorderGroup(let groupId, let toIndex):
