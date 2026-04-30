@@ -110,12 +110,30 @@ class SidebarOutlineView: NSOutlineView {
         return badge.bounds.contains(badgePoint) ? tab : nil
     }
 
-    /// Left-clicking the alert badge clears alerts for that tab.
+    // NSResponder: routes alert-badge clicks to .clearAlertsForTab, and pre-empts
+    // AppKit's deferred selection narrowing so multi-selection clicks feel snappy.
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
         if let tab = tabForBadgeHit(at: point) {
             sidebarView?.runtime?.send(.clearAlertsForTab(tabId: tab.id))
             return
+        }
+        let plainClick = event.modifierFlags.intersection([.shift, .command]).isEmpty
+        let clickedRow = row(at: point)
+        // Pre-empt AppKit's NSEvent.doubleClickInterval-deferred selection narrowing
+        // on a plain click into a multi-selection: AppKit waits ~500ms after mouseUp
+        // to disambiguate single vs. double click, which delays both the focus shift
+        // AND the visual deselection of the other rows. Narrowing now via
+        // selectRowIndexes synchronously fires selectionDidChange, which dispatches
+        // .selectTab through the existing handler. AppKit's eventual narrowing
+        // becomes a no-op.
+        if plainClick,
+           numberOfSelectedRows > 1,
+           clickedRow >= 0,
+           isRowSelected(clickedRow),
+           let sidebarItem = item(atRow: clickedRow) as? SidebarItem,
+           case .tab = sidebarItem.kind {
+            selectRowIndexes(IndexSet(integer: clickedRow), byExtendingSelection: false)
         }
         super.mouseDown(with: event)
     }
