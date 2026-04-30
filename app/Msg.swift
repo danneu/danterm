@@ -1,3 +1,4 @@
+// Message definitions for DanTerm's unidirectional update loop.
 import Foundation
 
 enum TabDirection {
@@ -56,6 +57,7 @@ enum Msg {
 
     // Remote detection
     case remoteSessionStarted(paneId: PaneId)
+    case remoteSessionReported(paneId: PaneId, session: RemoteSession)
 
     // Export
     case exportState

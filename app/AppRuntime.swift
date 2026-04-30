@@ -1,3 +1,4 @@
+// Runtime bridge that performs update effects and synchronizes AppKit/Ghostty views.
 import Cocoa
 import GhosttyKit
 import UniformTypeIdentifiers
@@ -132,7 +133,7 @@ class AppRuntime {
         // Refresh pane toolbar after title/cwd/progress/remote-state/todo changes
         switch translatedMsg {
         case .surfaceTitle(let paneId, _), .surfaceCwd(let paneId, _), .surfaceProgress(let paneId, _),
-             .remoteSessionStarted(let paneId), .commandEnded(let paneId),
+             .remoteSessionStarted(let paneId), .remoteSessionReported(let paneId, _), .commandEnded(let paneId),
              .addTodo(let paneId, _), .toggleTodoDone(let paneId, _),
              .editTodoText(let paneId, _, _), .deleteTodo(let paneId, _),
              .reorderTodo(let paneId, _, _), .clearCompletedTodos(let paneId):
@@ -1017,11 +1018,12 @@ class AppRuntime {
             let (title, cwd) = paneToolbarText(for: wrapper.paneId, in: model)
             let progress = model.panes[wrapper.paneId]?.progress
             let isRemote = model.panes[wrapper.paneId]?.isRemote ?? false
+            let remoteSession = model.panes[wrapper.paneId]?.remoteSession
             let alertCount = model.alerts.count { $0.paneId == wrapper.paneId && $0.isUnread }
             let todos = model.panes[wrapper.paneId]?.todos ?? []
             let totalTodo = todos.count
             let uncompletedTodo = todos.count { !$0.isDone }
-            wrapper.updateToolbar(title: title, cwd: cwd, progress: progress, isRemote: isRemote, unreadAlertCount: alertCount, totalTodoCount: totalTodo, uncompletedTodoCount: uncompletedTodo)
+            wrapper.updateToolbar(title: title, cwd: cwd, progress: progress, isRemote: isRemote, remoteSession: remoteSession, unreadAlertCount: alertCount, totalTodoCount: totalTodo, uncompletedTodoCount: uncompletedTodo)
         }
     }
 
@@ -1030,11 +1032,12 @@ class AppRuntime {
         let (title, cwd) = paneToolbarText(for: paneId, in: model)
         let progress = model.panes[paneId]?.progress
         let isRemote = model.panes[paneId]?.isRemote ?? false
+        let remoteSession = model.panes[paneId]?.remoteSession
         let alertCount = model.alerts.count { $0.paneId == paneId && $0.isUnread }
         let todos = model.panes[paneId]?.todos ?? []
         let totalTodo = todos.count
         let uncompletedTodo = todos.count { !$0.isDone }
-        findPaneWrapper(for: paneId, in: contentArea)?.updateToolbar(title: title, cwd: cwd, progress: progress, isRemote: isRemote, unreadAlertCount: alertCount, totalTodoCount: totalTodo, uncompletedTodoCount: uncompletedTodo)
+        findPaneWrapper(for: paneId, in: contentArea)?.updateToolbar(title: title, cwd: cwd, progress: progress, isRemote: isRemote, remoteSession: remoteSession, unreadAlertCount: alertCount, totalTodoCount: totalTodo, uncompletedTodoCount: uncompletedTodo)
     }
 
     private func findPaneWrapper(for paneId: PaneId, in view: NSView) -> PaneWrapperView? {

@@ -1,3 +1,4 @@
+// Pure update function for DanTerm's Elm-style state machine.
 import Foundation
 
 /// Normalize a raw remote theme string: trim whitespace, default empty to the config default.
@@ -505,6 +506,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
     case .commandEnded(let paneId):
         model.panes[paneId]?.isRemote = false
+        model.panes[paneId]?.remoteSession = nil
         guard model.panes[paneId]?.remoteThemeOverride != nil else { return [] }
         model.panes[paneId]?.remoteThemeOverride = nil
         return [.applyPaneTheme(paneId: paneId)]
@@ -514,8 +516,26 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
     case .remoteSessionStarted(let paneId):
         guard model.panes[paneId] != nil else { return [] }
         model.panes[paneId]?.isRemote = true
+        model.panes[paneId]?.remoteSession = nil
         model.panes[paneId]?.remoteThemeOverride = model.config.remoteTheme
         return [.applyPaneTheme(paneId: paneId)]
+
+    case .remoteSessionReported(let paneId, let session):
+        guard var pane = model.panes[paneId] else { return [] }
+        let wasRemote = pane.isRemote
+        let oldSession = pane.remoteSession
+        pane.isRemote = true
+        pane.remoteSession = session
+        if !wasRemote {
+            pane.remoteThemeOverride = model.config.remoteTheme
+        }
+        model.panes[paneId] = pane
+
+        guard !wasRemote || oldSession != session else { return [] }
+        if !wasRemote {
+            return [.applyPaneTheme(paneId: paneId)]
+        }
+        return []
 
     // MARK: - Config (external reload)
 

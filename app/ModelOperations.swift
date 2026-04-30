@@ -1,3 +1,4 @@
+// Pure model helpers for split trees, snapshots, title-channel events, and UI text.
 import Foundation
 
 // MARK: - Pane Theme
@@ -744,6 +745,7 @@ enum DantermEvent: Equatable {
   case commandStarted(command: String)
   case commandEnded
   case remoteStart
+  case remoteSession(value: RemoteSession)
 }
 
 /// Token store for pane-to-token mapping. Used by AppRuntime; extracted here for testability.
@@ -786,6 +788,8 @@ func translateMsg(_ msg: Msg, tokenForPane: (PaneId) -> String?) -> Msg? {
     return .commandEnded(paneId: paneId)
   case .remoteStart:
     return .remoteSessionStarted(paneId: paneId)
+  case .remoteSession(let value):
+    return .remoteSessionReported(paneId: paneId, session: value)
   }
 }
 
@@ -809,6 +813,22 @@ func parseDantermEvent(_ raw: String, expectedToken: String) -> DantermEvent? {
     return .commandEnded
   } else if event == "REMOTE_START" {
     return .remoteStart
+  } else if event.hasPrefix("REMOTE_HOST:") {
+    let payload = String(event.dropFirst("REMOTE_HOST:".count))
+    let parts = payload.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+    guard parts.count == 2 else { return nil }
+    let userB64 = String(parts[0])
+    let hostB64 = String(parts[1])
+    guard !userB64.isEmpty,
+      !hostB64.isEmpty,
+      let userData = Data(base64Encoded: userB64),
+      let user = String(data: userData, encoding: .utf8),
+      !user.isEmpty,
+      let hostData = Data(base64Encoded: hostB64),
+      let host = String(data: hostData, encoding: .utf8),
+      !host.isEmpty
+    else { return nil }
+    return .remoteSession(value: RemoteSession(user: user, host: host))
   }
   return nil
 }

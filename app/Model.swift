@@ -1,3 +1,4 @@
+// Core value types for the DanTerm Elm-style application model.
 import Foundation
 
 // MARK: - Typed ID Wrappers
@@ -52,6 +53,15 @@ struct SearchModel: Equatable {
     var selected: Int?   // nil = no selection
 }
 
+// MARK: - Remote Session
+
+struct RemoteSession: Equatable {
+    var user: String
+    var host: String
+
+    var displayString: String { "\(user)@\(host)" }
+}
+
 // MARK: - TODO
 
 struct TodoItem: Equatable, Codable {
@@ -70,6 +80,7 @@ struct PaneModel: Equatable {
     var progress: ProgressState? = nil
     var theme: String? = nil  // ghostty theme name; nil = app default
     var isRemote: Bool = false              // detected via shell wrapper; not persisted
+    var remoteSession: RemoteSession? = nil  // reported by remote shell; not persisted
     var remoteThemeOverride: String? = nil   // ephemeral theme while remote; not persisted
     var todos: [TodoItem] = []
 }

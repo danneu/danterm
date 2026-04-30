@@ -1,3 +1,4 @@
+// Tests remote detection state transitions and remote theme behavior.
 import Foundation
 
 func remoteTests() {
@@ -37,20 +38,108 @@ func remoteTests() {
         try expectEqual(model.panes[paneId]?.remoteThemeOverride, "Ocean", "should use config remote theme")
     }
 
+    test("remoteSessionStarted clears stale remoteSession") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        model.panes[paneId]?.remoteSession = RemoteSession(user: "dan", host: "caja")
+
+        _ = update(&model, .remoteSessionStarted(paneId: paneId))
+        try expectEqual(model.panes[paneId]?.remoteSession, nil, "stale remote session should be cleared")
+    }
+
+    test("remoteSessionReported sets remoteSession and isRemote on first call") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let session = RemoteSession(user: "dan", host: "caja")
+
+        let effects = update(&model, .remoteSessionReported(paneId: paneId, session: session))
+        try expectEqual(model.panes[paneId]?.isRemote, true, "pane should be remote")
+        try expectEqual(model.panes[paneId]?.remoteSession, session, "session should be stored")
+        try expect(hasEffect(effects) {
+            if case .applyPaneTheme(let pid) = $0, pid == paneId { return true }
+            return false
+        }, "should emit applyPaneTheme on first remote transition")
+    }
+
+    test("remoteSessionReported applies remoteThemeOverride only on first transition") {
+        var model = makeModel()
+        model.config.remoteTheme = "Ocean"
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+
+        let firstEffects = update(&model, .remoteSessionReported(paneId: paneId, session: RemoteSession(user: "dan", host: "caja")))
+        try expectEqual(model.panes[paneId]?.remoteThemeOverride, "Ocean")
+        try expect(hasEffect(firstEffects) {
+            if case .applyPaneTheme(let pid) = $0, pid == paneId { return true }
+            return false
+        }, "first transition should apply theme")
+
+        let secondEffects = update(&model, .remoteSessionReported(paneId: paneId, session: RemoteSession(user: "dan", host: "silverstone")))
+        try expectEqual(model.panes[paneId]?.remoteThemeOverride, "Ocean")
+        try expectEqual(secondEffects.count, 0, "remote-to-remote session update should not reapply theme")
+    }
+
+    test("remoteSessionReported with same session is no-op") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let session = RemoteSession(user: "dan", host: "caja")
+        _ = update(&model, .remoteSessionReported(paneId: paneId, session: session))
+
+        let effects = update(&model, .remoteSessionReported(paneId: paneId, session: session))
+        try expectEqual(model.panes[paneId]?.remoteSession, session)
+        try expectEqual(effects.count, 0, "unchanged session should produce no effects")
+    }
+
+    test("remoteSessionReported with different session updates without theme reapply") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        _ = update(&model, .remoteSessionReported(paneId: paneId, session: RemoteSession(user: "dan", host: "caja")))
+        let nextSession = RemoteSession(user: "root", host: "silverstone")
+
+        let effects = update(&model, .remoteSessionReported(paneId: paneId, session: nextSession))
+        try expectEqual(model.panes[paneId]?.remoteSession, nextSession)
+        try expectEqual(effects.count, 0, "changed session while already remote should not reapply theme")
+    }
+
+    test("remoteSessionReported on missing pane returns empty effects") {
+        var model = makeModel()
+        let effects = update(&model, .remoteSessionReported(paneId: PaneId(), session: RemoteSession(user: "dan", host: "caja")))
+        try expectEqual(effects.count, 0, "no effects for missing pane")
+    }
+
     test("commandEnded clears isRemote and remoteThemeOverride") {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         model.panes[paneId]?.isRemote = true
+        model.panes[paneId]?.remoteSession = RemoteSession(user: "dan", host: "caja")
         model.panes[paneId]?.remoteThemeOverride = "Purplepeter"
 
         let effects = update(&model, .commandEnded(paneId: paneId))
         try expectEqual(model.panes[paneId]?.isRemote, false)
+        try expectEqual(model.panes[paneId]?.remoteSession, nil, "remote session should be cleared")
         try expectEqual(model.panes[paneId]?.remoteThemeOverride, nil, "override should be cleared")
         try expect(hasEffect(effects) {
             if case .applyPaneTheme(let pid) = $0, pid == paneId { return true }
             return false
         }, "should emit applyPaneTheme to revert")
+    }
+
+    test("commandEnded clears remoteSession too") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        model.panes[paneId]?.isRemote = true
+        model.panes[paneId]?.remoteSession = RemoteSession(user: "dan", host: "caja")
+
+        let effects = update(&model, .commandEnded(paneId: paneId))
+        try expectEqual(model.panes[paneId]?.isRemote, false)
+        try expectEqual(model.panes[paneId]?.remoteSession, nil, "remote session should be cleared")
+        try expectEqual(effects.count, 0, "no theme effect when no override was set")
     }
 
     test("commandEnded on non-remote pane is no-op") {

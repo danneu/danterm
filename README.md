@@ -184,11 +184,26 @@ if [[ -n "$DANTERM_TOKEN" ]]; then
   # Remote session detection: wraps ssh/mosh to emit REMOTE_START event
   ssh() {
     printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' "$_danterm_tok"
-    command ssh "$@"
+    LC_DANTERM_TOKEN="$_danterm_tok" command ssh -o "SendEnv LC_DANTERM_TOKEN" "$@"
   }
   mosh() {
     printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' "$_danterm_tok"
     command mosh "$@"
+  }
+elif [[ -n "$LC_DANTERM_TOKEN" ]]; then
+  typeset -g _danterm_tok="$LC_DANTERM_TOKEN"
+  unset LC_DANTERM_TOKEN
+  _danterm_b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
+  _danterm_remote_host() {
+    local ub="$(_danterm_b64 "$(whoami)")"
+    local hb="$(_danterm_b64 "$(hostname)")"
+    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_HOST:%s:%s\a' \
+      "$_danterm_tok" "$ub" "$hb"
+  }
+  precmd_functions+=(_danterm_remote_host)
+  ssh() {
+    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' "$_danterm_tok"
+    LC_DANTERM_TOKEN="$_danterm_tok" command ssh -o "SendEnv LC_DANTERM_TOKEN" "$@"
   }
 fi
 ```
@@ -225,16 +240,55 @@ if set -q DANTERM_TOKEN
   # Remote session detection: wraps ssh/mosh to emit REMOTE_START event
   function ssh --wraps ssh
     printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' $_danterm_tok
-    command ssh $argv
+    set -lx LC_DANTERM_TOKEN $_danterm_tok
+    command ssh -o "SendEnv LC_DANTERM_TOKEN" $argv
   end
   function mosh --wraps mosh
     printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' $_danterm_tok
     command mosh $argv
   end
+else if set -q LC_DANTERM_TOKEN
+  set -g _danterm_tok $LC_DANTERM_TOKEN
+  set -e LC_DANTERM_TOKEN
+  function _danterm_remote_host --on-event fish_prompt
+    set -l ub (printf '%s' (whoami) | base64 | tr -d '\n')
+    set -l hb (printf '%s' (hostname) | base64 | tr -d '\n')
+    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_HOST:%s:%s\a' $_danterm_tok $ub $hb
+  end
+  function ssh --wraps ssh
+    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' $_danterm_tok
+    set -lx LC_DANTERM_TOKEN $_danterm_tok
+    command ssh -o "SendEnv LC_DANTERM_TOKEN" $argv
+  end
 end
 ```
 
 </details>
+
+For `user@host` labels, install the same snippet on the remote shell and ensure
+the remote sshd accepts `LC_*` environment variables. In `sshd_config`, use:
+
+```sshconfig
+AcceptEnv LC_*
+```
+
+On NixOS, use:
+
+```nix
+services.openssh.settings.AcceptEnv = "LC_*";
+```
+
+`AcceptEnv LANG LC_*` is also fine if you want normal locale forwarding. DanTerm
+only requires `LC_*`, because it forwards the per-pane token as
+`LC_DANTERM_TOKEN` with `SendEnv`. If the remote does not accept or source the
+snippet, DanTerm still shows the compact remote accessory from the local
+`REMOTE_START` event, but the host label stays empty.
+
+When changing the shell snippets in `~/world/scripts`, run:
+
+```sh
+bash ~/world/scripts/tests/danterm-integration_test.sh
+```
 
 ## Keybinds
 

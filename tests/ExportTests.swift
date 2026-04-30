@@ -1,3 +1,4 @@
+// Tests DanTerm export helpers and title-channel event translation.
 import Foundation
 
 func exportTests() {
@@ -57,6 +58,73 @@ func exportTests() {
         try expectEqual(result, .remoteStart)
     }
 
+    test("parseDantermEvent: valid REMOTE_HOST") {
+        let userB64 = Data("dan".utf8).base64EncodedString()
+        let hostB64 = Data("caja".utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST:\(userB64):\(hostB64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        try expectEqual(result, .remoteSession(value: RemoteSession(user: "dan", host: "caja")))
+    }
+
+    test("parseDantermEvent: REMOTE_HOST with missing user field rejected") {
+        let hostB64 = Data("caja".utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST::\(hostB64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        try expect(result == nil, "missing user field should be rejected")
+    }
+
+    test("parseDantermEvent: REMOTE_HOST with missing host field rejected") {
+        let userB64 = Data("dan".utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST:\(userB64):"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        try expect(result == nil, "missing host field should be rejected")
+    }
+
+    test("parseDantermEvent: REMOTE_HOST with no separator rejected") {
+        let userB64 = Data("dan".utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST:\(userB64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        try expect(result == nil, "missing separator should be rejected")
+    }
+
+    test("parseDantermEvent: REMOTE_HOST with invalid base64 user rejected") {
+        let hostB64 = Data("caja".utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST:!!!invalid!!!:\(hostB64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        try expect(result == nil, "invalid user base64 should be rejected")
+    }
+
+    test("parseDantermEvent: REMOTE_HOST with invalid base64 host rejected") {
+        let userB64 = Data("dan".utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST:\(userB64):!!!invalid!!!"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        try expect(result == nil, "invalid host base64 should be rejected")
+    }
+
+    test("parseDantermEvent: REMOTE_HOST with empty decoded user rejected") {
+        let userB64 = Data("".utf8).base64EncodedString()
+        let hostB64 = Data("caja".utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST:\(userB64):\(hostB64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        try expect(result == nil, "empty decoded user should be rejected")
+    }
+
+    test("parseDantermEvent: REMOTE_HOST with empty decoded host rejected") {
+        let userB64 = Data("dan".utf8).base64EncodedString()
+        let hostB64 = Data("".utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST:\(userB64):\(hostB64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        try expect(result == nil, "empty decoded host should be rejected")
+    }
+
+    test("parseDantermEvent: REMOTE_HOST wrong token rejected") {
+        let userB64 = Data("dan".utf8).base64EncodedString()
+        let hostB64 = Data("caja".utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:wrong-token:REMOTE_HOST:\(userB64):\(hostB64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        try expect(result == nil, "wrong token should be rejected")
+    }
+
     test("parseDantermEvent: unknown event type returns nil") {
         let raw = "__DANTERM_EVT__:tok123:CMD_UNKNOWN"
         let result = parseDantermEvent(raw, expectedToken: "tok123")
@@ -112,6 +180,22 @@ func exportTests() {
             throw TestFailure(message: "expected .remoteSessionStarted, got \(String(describing: result))")
         }
         try expectEqual(pid, paneId)
+    }
+
+    test("translateMsg: REMOTE_HOST translates to remoteSessionReported") {
+        let paneId = PaneId()
+        let token = "my-token"
+        let userB64 = Data("dan".utf8).base64EncodedString()
+        let hostB64 = Data("caja".utf8).base64EncodedString()
+        let title = "__DANTERM_EVT__:\(token):REMOTE_HOST:\(userB64):\(hostB64)"
+        let result = translateMsg(.surfaceTitle(paneId: paneId, title: title)) { id in
+            id == paneId ? token : nil
+        }
+        guard case .remoteSessionReported(let pid, let session) = result else {
+            throw TestFailure(message: "expected .remoteSessionReported, got \(String(describing: result))")
+        }
+        try expectEqual(pid, paneId)
+        try expectEqual(session, RemoteSession(user: "dan", host: "caja"))
     }
 
     test("translateMsg: wrong token drops message") {

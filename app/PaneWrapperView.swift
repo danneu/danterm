@@ -1,3 +1,4 @@
+// Pane container view that owns the toolbar, drag handling, search overlay, and terminal view.
 import Cocoa
 import GhosttyKit
 
@@ -21,6 +22,9 @@ class PaneWrapperView: NSView {
     private let alertBadge: NSTextField
     private let remoteAccessory: NSView
     private let remoteIcon: NSImageView
+    private let remoteSessionLabel: NonHitTestingLabel
+    private var compactRemoteConstraints: [NSLayoutConstraint] = []
+    private var expandedRemoteConstraints: [NSLayoutConstraint] = []
     private let progressIndicator: ProgressIndicatorView
     private var currentProgress: ProgressState?
 
@@ -36,6 +40,7 @@ class PaneWrapperView: NSView {
         self.progressIndicator = ProgressIndicatorView()
         self.remoteAccessory = NSView()
         self.remoteIcon = NSImageView()
+        self.remoteSessionLabel = NonHitTestingLabel(labelWithString: "")
         self.leadingStack = NSStackView()
 
         // Menu button (always visible)
@@ -101,13 +106,34 @@ class PaneWrapperView: NSView {
         remoteIcon.contentTintColor = .white
         remoteIcon.imageScaling = .scaleProportionallyDown
         remoteAccessory.addSubview(remoteIcon)
+
+        remoteSessionLabel.translatesAutoresizingMaskIntoConstraints = false
+        remoteSessionLabel.font = NSFont.systemFont(ofSize: 11)
+        remoteSessionLabel.textColor = .white
+        remoteSessionLabel.lineBreakMode = .byTruncatingTail
+        remoteSessionLabel.usesSingleLineMode = true
+        remoteSessionLabel.isHidden = true
+        remoteSessionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        remoteAccessory.addSubview(remoteSessionLabel)
+
         NSLayoutConstraint.activate([
-            remoteIcon.centerXAnchor.constraint(equalTo: remoteAccessory.centerXAnchor),
             remoteIcon.centerYAnchor.constraint(equalTo: remoteAccessory.centerYAnchor),
             remoteIcon.widthAnchor.constraint(equalToConstant: 12),
             remoteIcon.heightAnchor.constraint(equalToConstant: 12),
-            remoteAccessory.widthAnchor.constraint(equalToConstant: 22),
         ])
+        compactRemoteConstraints = [
+            remoteIcon.centerXAnchor.constraint(equalTo: remoteAccessory.centerXAnchor),
+            remoteAccessory.widthAnchor.constraint(equalToConstant: 22),
+        ]
+        expandedRemoteConstraints = [
+            remoteIcon.leadingAnchor.constraint(equalTo: remoteAccessory.leadingAnchor, constant: 4),
+            remoteSessionLabel.leadingAnchor.constraint(equalTo: remoteIcon.trailingAnchor, constant: 4),
+            remoteSessionLabel.trailingAnchor.constraint(equalTo: remoteAccessory.trailingAnchor, constant: -6),
+            remoteSessionLabel.centerYAnchor.constraint(equalTo: remoteAccessory.centerYAnchor),
+            remoteSessionLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 200),
+            remoteAccessory.widthAnchor.constraint(greaterThanOrEqualToConstant: 22),
+        ]
+        NSLayoutConstraint.activate(compactRemoteConstraints)
 
         // Progress indicator, hidden by default
         progressIndicator.translatesAutoresizingMaskIntoConstraints = false
@@ -213,10 +239,19 @@ class PaneWrapperView: NSView {
         fatalError("init(coder:) not implemented")
     }
 
-    func updateToolbar(title: String, cwd: String?, progress: ProgressState? = nil, isRemote: Bool = false, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0) {
+    func updateToolbar(title: String, cwd: String?, progress: ProgressState? = nil, isRemote: Bool = false, remoteSession: RemoteSession? = nil, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0) {
         toolbarLabel.stringValue = formatToolbarLabel(title: title, cwd: cwd)
         applyProgressState(progress)
         remoteAccessory.isHidden = !isRemote
+        remoteSessionLabel.stringValue = remoteSession?.displayString ?? ""
+        remoteSessionLabel.isHidden = remoteSession == nil
+        if remoteSession == nil {
+            NSLayoutConstraint.deactivate(expandedRemoteConstraints)
+            NSLayoutConstraint.activate(compactRemoteConstraints)
+        } else {
+            NSLayoutConstraint.deactivate(compactRemoteConstraints)
+            NSLayoutConstraint.activate(expandedRemoteConstraints)
+        }
         alertBadge.updateBadge(count: unreadAlertCount)
         todoButton.update(totalCount: totalTodoCount, uncompletedCount: uncompletedTodoCount)
     }
