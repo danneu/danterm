@@ -418,4 +418,82 @@ func tabTests() {
         try expectEqual(model.groups.count, 1, "Work group should be pruned")
         try expectEqual(model.selectedTabId, tabAId, "should select predecessor across group boundary")
     }
+
+    // MARK: - setTabColors (batch from multi-select context menu)
+
+    test("testSetTabColorsAppliesToAll") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        createTab(&model)
+        let ids = model.groups[0].tabs.map(\.id)
+
+        update(&model, .setTabColors(tabIds: ids, color: .blue))
+
+        try expect(model.groups[0].tabs.allSatisfy { $0.color == .blue },
+            "every selected tab gets the new color")
+    }
+
+    test("testSetTabColorsDoesNotToggleOff") {
+        // Single-tab .setTabColor toggles off when re-applied; the batch
+        // version intentionally does NOT (would produce inconsistent
+        // state when one selected tab already has the color and another
+        // doesn't).
+        var model = makeModel()
+        createTab(&model) // tab1 — gets red below
+        createTab(&model) // tab2 — stays uncolored
+        let id1 = model.groups[0].tabs[0].id
+        let id2 = model.groups[0].tabs[1].id
+        update(&model, .setTabColor(tabId: id1, color: .red))
+        try expectEqual(model.groups[0].tabs[0].color, .red)
+
+        // Re-apply red to both via batch — both end up red, neither toggles off.
+        update(&model, .setTabColors(tabIds: [id1, id2], color: .red))
+        try expectEqual(model.groups[0].tabs[0].color, .red)
+        try expectEqual(model.groups[0].tabs[1].color, .red)
+    }
+
+    test("testSetTabColorsClearsWithNil") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let ids = model.groups[0].tabs.map(\.id)
+        update(&model, .setTabColors(tabIds: ids, color: .green))
+
+        update(&model, .setTabColors(tabIds: ids, color: nil))
+        try expect(model.groups[0].tabs.allSatisfy { $0.color == nil },
+            "nil color clears all selected")
+    }
+
+    test("testSetTabColorsDedupesAndIgnoresStale") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let id1 = model.groups[0].tabs[0].id
+        let id2 = model.groups[0].tabs[1].id
+        let stale = TabId()
+
+        let effects = update(&model, .setTabColors(
+            tabIds: [id1, id1, stale, id2], color: .purple))
+
+        try expectEqual(model.groups[0].tabs[0].color, .purple)
+        try expectEqual(model.groups[0].tabs[1].color, .purple)
+        // updateSidebarTabRow per valid id (2) + scheduleCheckpoint (1)
+        try expectEqual(effects.count, 3,
+            "no double-dispatch for duplicates; stale dropped")
+    }
+
+    test("testSetTabColorsAllStaleIsNoop") {
+        var model = makeModel()
+        createTab(&model)
+        let snapshot = model.groups
+        let stale1 = TabId()
+        let stale2 = TabId()
+
+        let effects = update(&model, .setTabColors(
+            tabIds: [stale1, stale2], color: .red))
+
+        try expectEqual(model.groups, snapshot)
+        try expectEqual(effects.count, 0)
+    }
 }

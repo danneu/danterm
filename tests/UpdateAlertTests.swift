@@ -945,4 +945,72 @@ func alertTests() {
         try expectEqual(model.groups[0].tabs[0].isZoomed, false, "zoom should clear when navigating to different pane")
         _ = paneB
     }
+
+    // MARK: - clearAlertsForTabs (batch from multi-select context menu)
+
+    test("testClearAlertsForTabsClearsAllSelected") {
+        var model = makeModel()
+        createTab(&model) // tab1
+        createTab(&model) // tab2
+        createTab(&model) // tab3 — alerts should remain on this one
+        let id1 = model.groups[0].tabs[0].id
+        let id2 = model.groups[0].tabs[1].id
+        let id3 = model.groups[0].tabs[2].id
+        let pane1 = model.groups[0].tabs[0].focusedPaneId
+        let pane2 = model.groups[0].tabs[1].focusedPaneId
+        let pane3 = model.groups[0].tabs[2].focusedPaneId
+
+        for pid in [pane1, pane2, pane3] {
+            model.alerts.insert(AlertModel(
+                id: AlertId(), kind: .bell, paneId: pid,
+                title: "x", body: "y", createdAt: Date(), isUnread: true
+            ), at: 0)
+        }
+
+        let effects = update(&model, .clearAlertsForTabs(tabIds: [id1, id2]))
+
+        let unreadByPane: (PaneId) -> Bool = { pid in
+            model.alerts.contains { $0.paneId == pid && $0.isUnread }
+        }
+        try expect(!unreadByPane(pane1), "tab1 alerts cleared")
+        try expect(!unreadByPane(pane2), "tab2 alerts cleared")
+        try expect(unreadByPane(pane3), "tab3 alert preserved")
+        try expect(hasEffect(effects) {
+            if case .reloadSidebar = $0 { return true }; return false
+        })
+        try expect(hasEffect(effects) {
+            if case .rebuildContentView = $0 { return true }; return false
+        })
+        _ = id3
+    }
+
+    test("testClearAlertsForTabsNoUnreadIsNoop") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let id1 = model.groups[0].tabs[0].id
+        let id2 = model.groups[0].tabs[1].id
+        // No alerts inserted.
+
+        let effects = update(&model, .clearAlertsForTabs(tabIds: [id1, id2]))
+        try expectEqual(effects.count, 0,
+            "no unread alerts on any selected tab → no-op")
+    }
+
+    test("testClearAlertsForTabsAllStaleIsNoop") {
+        var model = makeModel()
+        createTab(&model)
+        let pane = model.groups[0].tabs[0].focusedPaneId
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: pane,
+            title: "x", body: "y", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        let effects = update(&model, .clearAlertsForTabs(
+            tabIds: [TabId(), TabId()]))
+
+        try expectEqual(effects.count, 0, "all stale ids → no-op")
+        try expect(model.alerts.contains { $0.isUnread },
+            "real alerts unaffected by stale-id batch")
+    }
 }

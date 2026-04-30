@@ -34,6 +34,17 @@ func removePaneSearchState(_ paneId: PaneId, from model: inout AppModel) {
     model.searchState.removeValue(forKey: paneId)
 }
 
+// MARK: - Sidebar Row Emphasis
+
+/// Decides whether a sidebar tab row should draw with AppKit's emphasized
+/// (accent-colored) selection regardless of first-responder state. Returns
+/// true only when the row is a tab whose id matches the model's focused
+/// tab; group rows pass `nil` for `rowTabId` and never qualify.
+func shouldForceSidebarRowEmphasis(rowTabId: TabId?, focusedTabId: TabId?) -> Bool {
+    guard let rowTabId, let focusedTabId else { return false }
+    return rowTabId == focusedTabId
+}
+
 // MARK: - SplitNodeModel Operations
 
 func allPaneIds(_ node: SplitNodeModel) -> [PaneId] {
@@ -927,4 +938,44 @@ func classifySwitcherInput(
     }
     return .passthrough
   }
+}
+
+// MARK: - Sidebar Pure Helpers
+
+/// Decide which tab rows the sidebar should select after a reload.
+/// Preserves the prior multi-selection iff its live subset still
+/// contains the model's focused tab; otherwise collapses to just the
+/// focused tab. Stale ids (closed tabs) are dropped via `liveTabIds`.
+func resolveReloadSelection(
+    priorSelectedTabIds: Set<TabId>,
+    liveTabIds: Set<TabId>,
+    selectedTabId: TabId?
+) -> Set<TabId> {
+    let livePrior = priorSelectedTabIds.intersection(liveTabIds)
+    if let sel = selectedTabId,
+       liveTabIds.contains(sel),
+       livePrior.contains(sel) {
+        return livePrior
+    }
+    if let sel = selectedTabId, liveTabIds.contains(sel) {
+        return [sel]
+    }
+    return []
+}
+
+/// Finder/Mail rule for a sidebar context menu: if the right-clicked
+/// row is part of the current selection, the menu targets the whole
+/// selection; otherwise just the clicked row. Group rows (and any row
+/// whose `tabIdAtRow` returns nil) are filtered out. Returned ids are
+/// in row order (i.e. the user's visual top-to-bottom order).
+func resolveContextTargets(
+    clickedRow: Int,
+    selectedRows: IndexSet,
+    tabIdAtRow: (Int) -> TabId?
+) -> [TabId] {
+    guard clickedRow >= 0 else { return [] }
+    let rows: [Int] = selectedRows.contains(clickedRow)
+        ? selectedRows.sorted()
+        : [clickedRow]
+    return rows.compactMap { tabIdAtRow($0) }
 }

@@ -42,6 +42,25 @@ class SidebarItem {
     }
 }
 
+// MARK: - SidebarRowView
+
+/// NSTableRowView subclass that lets us pin a single row to AppKit's
+/// emphasized (accent-colored) selection drawing regardless of first-
+/// responder state. The terminal pane always holds first responder, so
+/// without this the focused tab would draw grey instead of blue.
+final class SidebarRowView: NSTableRowView {
+    var forceEmphasizedSelection = false { didSet { needsDisplay = true } }
+
+    /// AppKit consults `isEmphasized` when drawing the selection: true
+    /// -> accent color, false -> secondary grey. We force true for the
+    /// focused row, otherwise pass through so genuine emphasis (e.g.
+    /// inline rename promoting the field editor) still works.
+    override var isEmphasized: Bool {
+        get { (isSelected && forceEmphasizedSelection) || super.isEmphasized }
+        set { super.isEmphasized = newValue }
+    }
+}
+
 // MARK: - SidebarOutlineView
 
 class SidebarOutlineView: NSOutlineView {
@@ -58,7 +77,7 @@ class SidebarOutlineView: NSOutlineView {
             case .group(let group):
                 return sidebarView?.contextMenu(for: group)
             case .tab(let tab):
-                return sidebarView?.contextMenu(for: tab)
+                return sidebarView?.contextMenu(forTab: tab, clickedRow: clickedRow)
             }
         }
         return nil
@@ -152,6 +171,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         outlineView.style = .fullWidth
         outlineView.selectionHighlightStyle = .regular
         outlineView.allowsEmptySelection = false
+        outlineView.allowsMultipleSelection = true
         outlineView.intercellSpacing = NSSize(width: 0, height: 0)
         outlineView.indentationPerLevel = 0
 
@@ -243,6 +263,14 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         isReloading = true
         defer { isReloading = false }
 
+        // Snapshot the user's multi-selection by tab id BEFORE reconcile.
+        let priorSelectedTabIds: Set<TabId> = Set(
+            outlineView.selectedRowIndexes.compactMap { row in
+                guard let item = outlineView.item(atRow: row) as? SidebarItem,
+                      case .tab(let tab) = item.kind else { return nil }
+                return tab.id
+            })
+
         reconcile(model: model)
         outlineView.reloadData()
 
@@ -259,13 +287,50 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             }
         }
 
-        // Select current tab and scroll it into view
-        if let selectedTabId = model.selectedTabId, let item = tabItemCache[selectedTabId] {
+        // Liveness derived from the model — NOT tabItemCache, which isn't
+        // pruned in reconcile and would carry stale ids of closed tabs.
+        let liveTabIds: Set<TabId> = Set(
+            model.groups.flatMap(\.tabs).map(\.id))
+        let restoreSet = resolveReloadSelection(
+            priorSelectedTabIds: priorSelectedTabIds,
+            liveTabIds: liveTabIds,
+            selectedTabId: model.selectedTabId)
+
+        // Restore in two phases so AppKit's `selectedRow` (the last
+        // selected row, per docs) ends up on `model.selectedTabId` —
+        // important for shift-click range start and arrow-key behavior.
+        var nonFocusRows = IndexSet()
+        var focusRow: Int? = nil
+        for id in restoreSet {
+            guard let item = tabItemCache[id] else { continue }
             let row = outlineView.row(forItem: item)
-            if row >= 0 {
-                outlineView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-                outlineView.scrollRowToVisible(row)
+            guard row >= 0 else { continue }
+            if id == model.selectedTabId {
+                focusRow = row
+            } else {
+                nonFocusRows.insert(row)
             }
+        }
+        if let f = focusRow {
+            if nonFocusRows.isEmpty {
+                outlineView.selectRowIndexes(
+                    IndexSet(integer: f), byExtendingSelection: false)
+            } else {
+                outlineView.selectRowIndexes(
+                    nonFocusRows, byExtendingSelection: false)
+                outlineView.selectRowIndexes(
+                    IndexSet(integer: f), byExtendingSelection: true)
+            }
+        } else if !nonFocusRows.isEmpty {
+            outlineView.selectRowIndexes(
+                nonFocusRows, byExtendingSelection: false)
+        }
+
+        // Scroll the model's currently-selected tab into view.
+        if let selectedTabId = model.selectedTabId,
+           let item = tabItemCache[selectedTabId] {
+            let row = outlineView.row(forItem: item)
+            if row >= 0 { outlineView.scrollRowToVisible(row) }
         }
     }
 
@@ -378,18 +443,40 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
     }
 
+    /// NSOutlineViewDelegate: provide our SidebarRowView so the focused
+    /// tab stays accent-colored even while the terminal pane holds first
+    /// responder. Called for every visible row after each reloadData.
+    func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
+        let rowView = SidebarRowView()
+        let rowTabId: TabId? = {
+            guard let sidebarItem = item as? SidebarItem,
+                  case .tab(let tab) = sidebarItem.kind else { return nil }
+            return tab.id
+        }()
+        rowView.forceEmphasizedSelection = shouldForceSidebarRowEmphasis(
+            rowTabId: rowTabId,
+            focusedTabId: currentModel?.selectedTabId)
+        return rowView
+    }
+
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
         guard let sidebarItem = item as? SidebarItem else { return false }
         if case .tab = sidebarItem.kind { return true }
         return false
     }
 
+    /// With multi-select enabled, AppKit fires this notification for every
+    /// row added/removed. `outlineView.selectedRow` is documented as the
+    /// last-selected row, which we treat as the "focused" tab. Only
+    /// dispatch `.selectTab` when that focus actually changed, so
+    /// shift-click range selection doesn't spam redundant messages.
     func outlineViewSelectionDidChange(_ notification: Notification) {
         guard !isReloading else { return }
         let row = outlineView.selectedRow
-        guard row >= 0 else { return }
-        if let sidebarItem = outlineView.item(atRow: row) as? SidebarItem,
-           case .tab(let tab) = sidebarItem.kind {
+        guard row >= 0,
+              let sidebarItem = outlineView.item(atRow: row) as? SidebarItem,
+              case .tab(let tab) = sidebarItem.kind else { return }
+        if tab.id != currentModel?.selectedTabId {
             runtime?.send(.selectTab(id: tab.id))
         }
     }
@@ -522,9 +609,15 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     func outlineView(_ outlineView: NSOutlineView, acceptDrop info: NSDraggingInfo, item: Any?, childIndex index: Int) -> Bool {
         let pb = info.draggingPasteboard
 
-        if let tabIdStr = pb.string(forType: SidebarView.tabDragType),
-           let rawId = UUID(uuidString: tabIdStr) {
-            let tabId = TabId(rawValue: rawId)
+        // Multi-row drags put one NSPasteboardItem per dragged row on the
+        // pasteboard; reading `pb.string(forType:)` would only return the
+        // first one. Iterate `pasteboardItems` to pick up every tab id.
+        let tabIds: [TabId] = (pb.pasteboardItems ?? []).compactMap { pbItem in
+            guard let str = pbItem.string(forType: SidebarView.tabDragType),
+                  let raw = UUID(uuidString: str) else { return nil }
+            return TabId(rawValue: raw)
+        }
+        if !tabIds.isEmpty {
             let targetGroupId: GroupId
             if isSingleGroupMode {
                 guard let model = currentModel else { return false }
@@ -534,7 +627,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             } else {
                 return false
             }
-            runtime?.send(.moveTab(tabId: tabId, toGroupId: targetGroupId, atIndex: index))
+            runtime?.send(.moveTabs(
+                tabIds: tabIds, toGroupId: targetGroupId, atIndex: index))
             return true
         }
 
@@ -599,43 +693,100 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         return menu
     }
 
-    func contextMenu(for tab: TabModel) -> NSMenu? {
-        guard currentModel != nil else { return nil }
+    /// Resolve the tab ids targeted by a context-menu action using the
+    /// Finder/Mail rule (helper lives in ModelOperations.swift so it's
+    /// unit-tested without AppKit).
+    private func contextTargetTabIds(clickedRow: Int) -> [TabId] {
+        return resolveContextTargets(
+            clickedRow: clickedRow,
+            selectedRows: outlineView.selectedRowIndexes,
+            tabIdAtRow: { [weak self] row in
+                guard let self = self,
+                      let item = self.outlineView.item(atRow: row) as? SidebarItem,
+                      case .tab(let tab) = item.kind else { return nil }
+                return tab.id
+            })
+    }
+
+    /// Build the tab context menu, applying the multi-select convention:
+    /// items that act on the whole selection get a `(N tabs)` suffix
+    /// when N > 1; singular form means "this clicked row only". The
+    /// `Rename Tab` action is singular-only and always targets the
+    /// clicked row.
+    func contextMenu(forTab tab: TabModel, clickedRow: Int) -> NSMenu? {
+        guard let model = currentModel else { return nil }
+
+        let targetIds = contextTargetTabIds(clickedRow: clickedRow)
+        guard !targetIds.isEmpty else { return nil }
+
+        // Look up live TabModels in visual order, dropping stale ids.
+        let targetSet = Set(targetIds)
+        var targetTabs: [TabModel] = []
+        for g in model.groups {
+            for t in g.tabs where targetSet.contains(t.id) {
+                targetTabs.append(t)
+            }
+        }
+        guard !targetTabs.isEmpty else { return nil }
+        let count = targetTabs.count
+        let suffix = count > 1 ? " (\(count) tabs)" : ""
 
         let menu = NSMenu()
 
-        let renameItem = NSMenuItem(title: "Rename Tab", action: #selector(contextRenameTab(_:)), keyEquivalent: "")
+        // Rename Tab — singular-only, always targets the clicked row.
+        let renameItem = NSMenuItem(
+            title: "Rename Tab",
+            action: #selector(contextRenameTab(_:)), keyEquivalent: "")
         renameItem.target = self
         renameItem.representedObject = tab.id.rawValue
         menu.addItem(renameItem)
 
-        if tab.customTitle != nil {
-            let clearItem = NSMenuItem(title: "Clear Custom Title", action: #selector(contextClearCustomTitle(_:)), keyEquivalent: "")
-            clearItem.target = self
-            clearItem.representedObject = tab.id.rawValue
-            menu.addItem(clearItem)
+        // Clear Custom Title — show if any selected tab has one.
+        if targetTabs.contains(where: { $0.customTitle != nil }) {
+            let item = NSMenuItem(
+                title: "Clear Custom Title\(suffix)",
+                action: #selector(contextClearCustomTitles(_:)),
+                keyEquivalent: "")
+            item.target = self
+            item.representedObject = TabIdsBox(ids: targetIds)
+            menu.addItem(item)
         }
 
         // Color submenu
         menu.addItem(NSMenuItem.separator())
-        let colorItem = NSMenuItem(title: "Color", action: nil, keyEquivalent: "")
-        if let currentColor = tab.color {
-            colorItem.image = currentColor.swatchImage
+        let colors = targetTabs.map(\.color)
+        let allSameColor = colors.allSatisfy { $0 == colors.first }
+        let sharedColor: TabColor? = allSameColor ? (colors.first ?? nil) : nil
+        let anyHasColor = colors.contains { $0 != nil }
+
+        let colorItem = NSMenuItem(
+            title: "Color\(suffix)", action: nil, keyEquivalent: "")
+        // Show parent swatch only when all selected tabs share the same
+        // non-nil color. Mixed selections leave the swatch off.
+        if let s = sharedColor {
+            colorItem.image = s.swatchImage
         }
         let colorSubmenu = NSMenu()
-        if tab.color != nil {
-            let clearItem = NSMenuItem(title: "Clear Color", action: #selector(contextSetTabColor(_:)), keyEquivalent: "")
+        if anyHasColor {
+            let clearItem = NSMenuItem(
+                title: "Clear Color",
+                action: #selector(contextSetTabColors(_:)),
+                keyEquivalent: "")
             clearItem.target = self
-            clearItem.representedObject = SetTabColorInfo(tabId: tab.id, color: nil)
+            clearItem.representedObject = SetTabColorsInfo(tabIds: targetIds, color: nil)
             colorSubmenu.addItem(clearItem)
             colorSubmenu.addItem(NSMenuItem.separator())
         }
         for color in TabColor.allCases {
-            let item = NSMenuItem(title: color.rawValue.capitalized, action: #selector(contextSetTabColor(_:)), keyEquivalent: "")
+            let item = NSMenuItem(
+                title: color.rawValue.capitalized,
+                action: #selector(contextSetTabColors(_:)),
+                keyEquivalent: "")
             item.target = self
-            item.representedObject = SetTabColorInfo(tabId: tab.id, color: color)
+            item.representedObject = SetTabColorsInfo(tabIds: targetIds, color: color)
             item.image = color.swatchImage
-            if tab.color == color {
+            // Checkmark only when all selected tabs share this color.
+            if allSameColor && sharedColor == color {
                 item.state = .on
             }
             colorSubmenu.addItem(item)
@@ -643,19 +794,44 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         colorItem.submenu = colorSubmenu
         menu.addItem(colorItem)
 
-        if let model = currentModel, unreadAlertCount(for: tab, alerts: model.alerts) > 0 {
+        // Clear Alerts — show if any selected tab has unread alerts.
+        let anyHasAlerts = targetTabs.contains {
+            unreadAlertCount(for: $0, alerts: model.alerts) > 0
+        }
+        if anyHasAlerts {
             menu.addItem(NSMenuItem.separator())
-            let clearAlertsItem = NSMenuItem(title: "Clear Alerts", action: #selector(contextClearAlerts(_:)), keyEquivalent: "")
-            clearAlertsItem.target = self
-            clearAlertsItem.representedObject = tab.id.rawValue
-            menu.addItem(clearAlertsItem)
+            let item = NSMenuItem(
+                title: "Clear Alerts\(suffix)",
+                action: #selector(contextClearAlerts(_:)),
+                keyEquivalent: "")
+            item.target = self
+            item.representedObject = TabIdsBox(ids: targetIds)
+            menu.addItem(item)
         }
 
         menu.addItem(NSMenuItem.separator())
 
-        let closeItem = NSMenuItem(title: "Close Tab", action: #selector(contextCloseTab(_:)), keyEquivalent: "")
+        // Move to New Group — same no-op rule as before: hide when the
+        // action would extract every live tab (rejected by update).
+        let totalTabs = model.groups.reduce(0) { $0 + $1.tabs.count }
+        let isAllLiveTabs = totalTabs > 0 && targetIds.count == totalTabs
+        if !isAllLiveTabs {
+            let item = NSMenuItem(
+                title: "Move to New Group\(suffix)",
+                action: #selector(contextExtractTabs(_:)),
+                keyEquivalent: "")
+            item.target = self
+            item.representedObject = TabIdsBox(ids: targetIds)
+            menu.addItem(item)
+        }
+
+        // Close — the "Tab" noun is dropped so the suffix doesn't read
+        // redundantly ("Close (3 tabs)" vs. "Close Tab (3 tabs)").
+        let closeItem = NSMenuItem(
+            title: "Close\(suffix)",
+            action: #selector(contextCloseTabs(_:)), keyEquivalent: "")
         closeItem.target = self
-        closeItem.representedObject = tab.id.rawValue
+        closeItem.representedObject = TabIdsBox(ids: targetIds)
         menu.addItem(closeItem)
 
         return menu
@@ -708,9 +884,19 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
     }
 
-    @objc private func contextSetTabColor(_ sender: NSMenuItem) {
-        guard let info = sender.representedObject as? SetTabColorInfo else { return }
-        runtime?.send(.setTabColor(tabId: info.tabId, color: info.color))
+    /// Single-tab picks route through .setTabColor so the existing
+    /// "pick the same color again to clear it" toggle UX is preserved
+    /// (also used by the keyboard shortcut path). Multi-tab picks route
+    /// through .setTabColors which sets the color on every tab without
+    /// toggling.
+    @objc private func contextSetTabColors(_ sender: NSMenuItem) {
+        guard let info = sender.representedObject as? SetTabColorsInfo,
+              !info.tabIds.isEmpty else { return }
+        if info.tabIds.count == 1 {
+            runtime?.send(.setTabColor(tabId: info.tabIds[0], color: info.color))
+        } else {
+            runtime?.send(.setTabColors(tabIds: info.tabIds, color: info.color))
+        }
     }
 
     @objc private func contextRenameTab(_ sender: NSMenuItem) {
@@ -721,20 +907,52 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
     }
 
-    @objc private func contextClearCustomTitle(_ sender: NSMenuItem) {
-        guard let rawId = sender.representedObject as? UUID else { return }
-        runtime?.send(.renameTab(id: TabId(rawValue: rawId), name: nil))
+    @objc private func contextClearCustomTitles(_ sender: NSMenuItem) {
+        guard let box = sender.representedObject as? TabIdsBox,
+              !box.ids.isEmpty else { return }
+        if box.ids.count == 1 {
+            runtime?.send(.renameTab(id: box.ids[0], name: nil))
+        } else {
+            runtime?.send(.clearCustomTitles(tabIds: box.ids))
+        }
     }
 
     @objc private func contextClearAlerts(_ sender: NSMenuItem) {
-        guard let rawId = sender.representedObject as? UUID else { return }
-        runtime?.send(.clearAlertsForTab(tabId: TabId(rawValue: rawId)))
+        guard let box = sender.representedObject as? TabIdsBox,
+              !box.ids.isEmpty else { return }
+        if box.ids.count == 1 {
+            runtime?.send(.clearAlertsForTab(tabId: box.ids[0]))
+        } else {
+            runtime?.send(.clearAlertsForTabs(tabIds: box.ids))
+        }
     }
 
-    @objc private func contextCloseTab(_ sender: NSMenuItem) {
-        guard let rawId = sender.representedObject as? UUID else { return }
-        let tabId = TabId(rawValue: rawId)
-        runtime?.send(.requestCloseTab(id: tabId))
+    /// Closing N tabs dispatches N .requestCloseTab calls so each tab's
+    /// per-pane "running command" confirmation flow runs independently.
+    @objc private func contextCloseTabs(_ sender: NSMenuItem) {
+        guard let box = sender.representedObject as? TabIdsBox else { return }
+        for id in box.ids {
+            runtime?.send(.requestCloseTab(id: id))
+        }
+    }
+
+    /// Mirrors AppDelegate.newGroup: send the action, then begin inline
+    /// rename on the freshly-created group (diffed via group-id snapshot
+    /// against currentModel, which the .reloadSidebar effect refreshed
+    /// during send).
+    @objc private func contextExtractTabs(_ sender: NSMenuItem) {
+        guard let box = sender.representedObject as? TabIdsBox,
+              !box.ids.isEmpty else { return }
+        let existingIds = Set(currentModel?.groups.map(\.id) ?? [])
+        runtime?.send(.extractTabsToNewGroup(
+            tabIds: box.ids, groupName: "New group"))
+        if let newGroup = currentModel?.groups.first(
+            where: { !existingIds.contains($0.id) }) {
+            let groupId = newGroup.id
+            DispatchQueue.main.async { [weak self] in
+                self?.beginRenamingGroup(groupId)
+            }
+        }
     }
 
     // MARK: - Cell Factories
@@ -1075,11 +1293,16 @@ private enum AssociatedKeys {
     static var renameTarget: UInt8 = 0
 }
 
-private class SetTabColorInfo: NSObject {
-    let tabId: TabId
+private class SetTabColorsInfo: NSObject {
+    let tabIds: [TabId]
     let color: TabColor?
-    init(tabId: TabId, color: TabColor?) {
-        self.tabId = tabId
+    init(tabIds: [TabId], color: TabColor?) {
+        self.tabIds = tabIds
         self.color = color
     }
+}
+
+private class TabIdsBox: NSObject {
+    let ids: [TabId]
+    init(ids: [TabId]) { self.ids = ids }
 }

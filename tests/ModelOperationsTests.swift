@@ -718,6 +718,141 @@ func modelOperationsTests() {
         let resolved = resolveLiveCycle(cycle, in: model)
         try expect(resolved == nil, "no live tabs → nil")
     }
+
+    // MARK: - resolveContextTargets (sidebar Finder/Mail rule)
+
+    test("resolveContextTargets clicked row in selection returns selection in row order") {
+        let id0 = TabId(); let id1 = TabId(); let id2 = TabId()
+        let map: [Int: TabId] = [0: id0, 1: id1, 2: id2]
+        let result = resolveContextTargets(
+            clickedRow: 1,
+            selectedRows: IndexSet([2, 0, 1]),
+            tabIdAtRow: { map[$0] })
+        try expectEqual(result, [id0, id1, id2])
+    }
+
+    test("resolveContextTargets clicked row outside selection returns clicked row only") {
+        let id0 = TabId(); let id3 = TabId()
+        let map: [Int: TabId] = [0: id0, 3: id3]
+        let result = resolveContextTargets(
+            clickedRow: 3,
+            selectedRows: IndexSet([0]),
+            tabIdAtRow: { map[$0] })
+        try expectEqual(result, [id3])
+    }
+
+    test("resolveContextTargets group row (nil mapping) returns empty") {
+        // clicked row 1 maps to nil (group row); selection covers only it.
+        let result = resolveContextTargets(
+            clickedRow: 1,
+            selectedRows: IndexSet([1]),
+            tabIdAtRow: { _ in nil })
+        try expectEqual(result, [])
+    }
+
+    test("resolveContextTargets selection mixes tab and group rows — group filtered") {
+        let id0 = TabId(); let id2 = TabId()
+        // Row 1 is a group row (returns nil). Selection {0,1,2}, click row 0.
+        let map: [Int: TabId?] = [0: id0, 1: nil, 2: id2]
+        let result = resolveContextTargets(
+            clickedRow: 0,
+            selectedRows: IndexSet([0, 1, 2]),
+            tabIdAtRow: { map[$0] ?? nil })
+        try expectEqual(result, [id0, id2])
+    }
+
+    test("resolveContextTargets negative clicked row returns empty") {
+        let result = resolveContextTargets(
+            clickedRow: -1,
+            selectedRows: IndexSet(),
+            tabIdAtRow: { _ in TabId() })
+        try expectEqual(result, [])
+    }
+
+    // MARK: - resolveReloadSelection (sidebar selection restore rule)
+
+    test("resolveReloadSelection preserves multi-selection when focus is in it") {
+        let a = TabId(); let b = TabId(); let c = TabId(); let d = TabId()
+        let result = resolveReloadSelection(
+            priorSelectedTabIds: [a, b, c],
+            liveTabIds: [a, b, c, d],
+            selectedTabId: a)
+        try expectEqual(result, [a, b, c])
+    }
+
+    test("resolveReloadSelection drops stale ids while preserving") {
+        let a = TabId(); let b = TabId(); let stale = TabId()
+        // prior {a, b, stale}; stale closed → dropped. Focus a is in live prior.
+        let result = resolveReloadSelection(
+            priorSelectedTabIds: [a, b, stale],
+            liveTabIds: [a, b],
+            selectedTabId: a)
+        try expectEqual(result, [a, b])
+    }
+
+    test("resolveReloadSelection collapses to focus when external focus change") {
+        let a = TabId(); let b = TabId(); let c = TabId()
+        // Prior {a, b}; model focus moves to c (outside prior selection).
+        let result = resolveReloadSelection(
+            priorSelectedTabIds: [a, b],
+            liveTabIds: [a, b, c],
+            selectedTabId: c)
+        try expectEqual(result, [c])
+    }
+
+    test("resolveReloadSelection collapses to focus when all prior ids stale") {
+        let a = TabId(); let b = TabId(); let c = TabId()
+        // prior {a, b} both closed; focus c is live.
+        let result = resolveReloadSelection(
+            priorSelectedTabIds: [a, b],
+            liveTabIds: [c],
+            selectedTabId: c)
+        try expectEqual(result, [c])
+    }
+
+    test("resolveReloadSelection returns empty when selectedTabId is itself stale") {
+        let a = TabId(); let b = TabId(); let stale = TabId()
+        let result = resolveReloadSelection(
+            priorSelectedTabIds: [a, b],
+            liveTabIds: [a, b],
+            selectedTabId: stale)
+        try expectEqual(result, [])
+    }
+
+    test("resolveReloadSelection returns empty when no selectedTabId") {
+        let a = TabId(); let b = TabId()
+        let result = resolveReloadSelection(
+            priorSelectedTabIds: [a, b],
+            liveTabIds: [a, b],
+            selectedTabId: nil)
+        try expectEqual(result, [])
+    }
+
+    // MARK: - shouldForceSidebarRowEmphasis
+
+    test("shouldForceSidebarRowEmphasis true when ids match") {
+        let id = TabId()
+        try expect(shouldForceSidebarRowEmphasis(rowTabId: id, focusedTabId: id))
+    }
+
+    test("shouldForceSidebarRowEmphasis false when ids differ") {
+        let row = TabId(); let focused = TabId()
+        try expect(!shouldForceSidebarRowEmphasis(rowTabId: row, focusedTabId: focused))
+    }
+
+    test("shouldForceSidebarRowEmphasis false for group rows (rowTabId nil)") {
+        let focused = TabId()
+        try expect(!shouldForceSidebarRowEmphasis(rowTabId: nil, focusedTabId: focused))
+    }
+
+    test("shouldForceSidebarRowEmphasis false when focusedTabId nil") {
+        let row = TabId()
+        try expect(!shouldForceSidebarRowEmphasis(rowTabId: row, focusedTabId: nil))
+    }
+
+    test("shouldForceSidebarRowEmphasis false when both nil") {
+        try expect(!shouldForceSidebarRowEmphasis(rowTabId: nil, focusedTabId: nil))
+    }
 }
 
 /// Build a model with N tabs in one group; returns the tab ids in display order.
