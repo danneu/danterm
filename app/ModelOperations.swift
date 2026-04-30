@@ -34,6 +34,17 @@ func removePaneSearchState(_ paneId: PaneId, from model: inout AppModel) {
     model.searchState.removeValue(forKey: paneId)
 }
 
+// MARK: - Sidebar Row Emphasis
+
+/// Decides whether a sidebar tab row should draw with AppKit's emphasized
+/// (accent-colored) selection regardless of first-responder state. Returns
+/// true only when the row is a tab whose id matches the model's focused
+/// tab; group rows pass `nil` for `rowTabId` and never qualify.
+func shouldForceSidebarRowEmphasis(rowTabId: TabId?, focusedTabId: TabId?) -> Bool {
+    guard let rowTabId, let focusedTabId else { return false }
+    return rowTabId == focusedTabId
+}
+
 // MARK: - SplitNodeModel Operations
 
 func allPaneIds(_ node: SplitNodeModel) -> [PaneId] {
@@ -927,4 +938,77 @@ func classifySwitcherInput(
     }
     return .passthrough
   }
+}
+
+// MARK: - Sidebar Pure Helpers
+
+/// Decide which tab rows the sidebar should select after a reload.
+/// Preserves the prior multi-selection iff its live subset still
+/// contains the model's focused tab; otherwise collapses to just the
+/// focused tab. Stale ids (closed tabs) are dropped via `liveTabIds`.
+func resolveReloadSelection(
+    priorSelectedTabIds: Set<TabId>,
+    liveTabIds: Set<TabId>,
+    selectedTabId: TabId?
+) -> Set<TabId> {
+    let livePrior = priorSelectedTabIds.intersection(liveTabIds)
+    if let sel = selectedTabId,
+       liveTabIds.contains(sel),
+       livePrior.contains(sel) {
+        return livePrior
+    }
+    if let sel = selectedTabId, liveTabIds.contains(sel) {
+        return [sel]
+    }
+    return []
+}
+
+/// Finder/Mail rule for a sidebar context menu: if the right-clicked
+/// row is part of the current selection, the menu targets the whole
+/// selection; otherwise just the clicked row. Group rows (and any row
+/// whose `tabIdAtRow` returns nil) are filtered out. Returned ids are
+/// in row order (i.e. the user's visual top-to-bottom order).
+func resolveContextTargets(
+    clickedRow: Int,
+    selectedRows: IndexSet,
+    tabIdAtRow: (Int) -> TabId?
+) -> [TabId] {
+    guard clickedRow >= 0 else { return [] }
+    let rows: [Int] = selectedRows.contains(clickedRow)
+        ? selectedRows.sorted()
+        : [clickedRow]
+    return rows.compactMap { tabIdAtRow($0) }
+}
+
+// MARK: - Tab Color
+
+// Resolves the TabColor to apply when a user-initiated color action targets
+// `tabIds`. Single source of truth for the dispatcher's toggle-off policy,
+// shared by AppDelegate (keyboard/menu) and SidebarView (right-click).
+//
+// Rule: re-applying a color that EVERY targeted tab already has clears them
+// all (toggle-off). Otherwise, set every tab to `requested`. This unifies
+// single- and multi-tab behavior:
+//   - 1 tab matching requested      -> nil (clear)
+//   - 1 tab differing from requested -> requested (set)
+//   - N tabs all matching requested -> nil (clear all)
+//   - N tabs mixed/none matching    -> requested (set all)
+//
+//   - count == 0:        returns nil (fail-closed; callers should guard).
+//   - requested == nil:  returns nil (explicit clear path; no toggle).
+//
+// Tabs whose ids don't resolve in `model` count as not-matching, so a
+// stale id never produces a spurious clear. Update.swift filters those
+// ids out before applying.
+func resolveColorForBatch(
+    tabIds: [TabId],
+    requested: TabColor?,
+    in model: AppModel
+) -> TabColor? {
+    guard !tabIds.isEmpty else { return nil }
+    guard let req = requested else { return nil }
+    let allShareRequested = tabIds.allSatisfy { id in
+        tabById(id, in: model)?.color == req
+    }
+    return allShareRequested ? nil : req
 }

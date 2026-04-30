@@ -14,7 +14,7 @@ func groupTests() {
         try expectEqual(model.groups[1].tabs.count, 1, "new group should have auto-created tab")
 
         let workGroupId = model.groups[1].id
-        update(&model, .moveTab(tabId: tabId, toGroupId: workGroupId, atIndex: 0))
+        update(&model, .moveTabs(tabIds: [tabId], toGroupId: workGroupId, atIndex: 0))
 
         try expectEqual(model.groups.count, 1, "empty General should be pruned")
         try expectEqual(model.groups[0].id, workGroupId)
@@ -32,7 +32,7 @@ func groupTests() {
         update(&model, .createGroup(name: "Temp"))
         let tempGroupId = model.groups[1].id
         let autoTabId = model.groups[1].tabs[0].id
-        update(&model, .moveTab(tabId: tab1Id, toGroupId: tempGroupId, atIndex: 0))
+        update(&model, .moveTabs(tabIds: [tab1Id], toGroupId: tempGroupId, atIndex: 0))
 
         try expectEqual(model.groups[0].tabs.count, 1, "General should have 1 tab remaining")
         try expectEqual(model.groups[1].tabs.count, 2, "Temp should have moved tab + auto tab")
@@ -74,7 +74,7 @@ func groupTests() {
         // Temp has 1 auto-created tab
 
         // Move first tab to Temp (now Temp has 2 tabs)
-        update(&model, .moveTab(tabId: tabId1, toGroupId: tempGroupId, atIndex: 0))
+        update(&model, .moveTabs(tabIds: [tabId1], toGroupId: tempGroupId, atIndex: 0))
 
         // Delete Temp without moving tabs — destroys both tabs in Temp
         let effects = update(&model, .deleteGroup(id: tempGroupId, moveTabs: false))
@@ -97,7 +97,7 @@ func groupTests() {
 
         update(&model, .createGroup(name: "Only"))
         let onlyGroupId = model.groups[1].id
-        update(&model, .moveTab(tabId: tabId, toGroupId: onlyGroupId, atIndex: 0))
+        update(&model, .moveTabs(tabIds: [tabId], toGroupId: onlyGroupId, atIndex: 0))
 
         try expectEqual(model.groups.count, 1, "empty General should be pruned")
         try expectEqual(model.groups[0].id, onlyGroupId)
@@ -244,7 +244,7 @@ func groupTests() {
         // Target has 1 auto-created tab
 
         // Move with atIndex way beyond count — should clamp to end
-        update(&model, .moveTab(tabId: tabId, toGroupId: targetId, atIndex: 999))
+        update(&model, .moveTabs(tabIds: [tabId], toGroupId: targetId, atIndex: 999))
         // General was emptied and pruned; only Target remains
         let targetGroup = model.groups.first(where: { $0.id == targetId })!
         try expectEqual(targetGroup.tabs.count, 2, "should have auto-created tab + moved tab")
@@ -262,7 +262,7 @@ func groupTests() {
         let c = model.groups[0].tabs[2].id
 
         // Drag A to after B (outline view proposes child index 2)
-        update(&model, .moveTab(tabId: a, toGroupId: groupId, atIndex: 2))
+        update(&model, .moveTabs(tabIds: [a], toGroupId: groupId, atIndex: 2))
         try expectEqual(model.groups[0].tabs[0].id, b, "B should be first")
         try expectEqual(model.groups[0].tabs[1].id, a, "A should be second")
         try expectEqual(model.groups[0].tabs[2].id, c, "C should be third")
@@ -276,7 +276,7 @@ func groupTests() {
         update(&model, .createGroup(name: "Target"))
         let targetId = model.groups[1].id
 
-        update(&model, .moveTab(tabId: tabId, toGroupId: targetId, atIndex: -1))
+        update(&model, .moveTabs(tabIds: [tabId], toGroupId: targetId, atIndex: -1))
         // General was emptied and pruned; only Target remains
         let targetGroup = model.groups.first(where: { $0.id == targetId })!
         try expectEqual(targetGroup.tabs[0].id, tabId, "tab should land at clamped index 0")
@@ -317,7 +317,7 @@ func groupTests() {
         let workGroupId = model.groups[1].id
         let generalTabId = model.groups[0].tabs[0].id
 
-        update(&model, .moveTab(tabId: generalTabId, toGroupId: workGroupId, atIndex: 0))
+        update(&model, .moveTabs(tabIds: [generalTabId], toGroupId: workGroupId, atIndex: 0))
 
         try expectEqual(model.groups.count, 1, "empty General should be pruned")
         try expectEqual(model.groups[0].id, workGroupId)
@@ -374,5 +374,326 @@ func groupTests() {
             if case .rebuildContentView = $0 { return true }
             return false
         }, "should emit rebuildContentView")
+    }
+
+    test("testExtractSingleTabToNewGroup") {
+        var model = makeModel()
+        createTab(&model) // tab1
+        createTab(&model) // tab2 — keeps source group non-empty after extract
+        let tab1Id = model.groups[0].tabs[0].id
+
+        let effects = update(&model, .extractTabsToNewGroup(
+            tabIds: [tab1Id], groupName: "Extracted"))
+
+        try expectEqual(model.groups.count, 2, "source group should survive (still has tab2)")
+        try expectEqual(model.groups[1].name, "Extracted")
+        try expectEqual(model.groups[1].tabs.count, 1)
+        try expectEqual(model.groups[1].tabs[0].id, tab1Id)
+        try expectEqual(model.groups[0].tabs.count, 1, "source has tab2 left")
+
+        try expectEqual(effects.count, 2, "should emit exactly reloadSidebar + scheduleCheckpoint")
+        try expect(hasEffect(effects) {
+            if case .reloadSidebar = $0 { return true }; return false
+        })
+        try expect(hasEffect(effects) {
+            if case .scheduleCheckpoint = $0 { return true }; return false
+        })
+    }
+
+    test("testExtractMultipleTabsSameGroup") {
+        var model = makeModel()
+        createTab(&model) // tab1
+        createTab(&model) // tab2
+        createTab(&model) // tab3 — stays in source group
+        let tab1Id = model.groups[0].tabs[0].id
+        let tab2Id = model.groups[0].tabs[1].id
+
+        let effects = update(&model, .extractTabsToNewGroup(
+            tabIds: [tab1Id, tab2Id], groupName: "Extracted"))
+
+        try expectEqual(model.groups.count, 2)
+        try expectEqual(model.groups[1].tabs.count, 2)
+        try expectEqual(model.groups[1].tabs[0].id, tab1Id, "order preserved")
+        try expectEqual(model.groups[1].tabs[1].id, tab2Id, "order preserved")
+        try expectEqual(model.groups[0].tabs.count, 1, "tab3 left in source")
+        try expectEqual(effects.count, 2)
+    }
+
+    test("testExtractMultipleTabsAcrossGroups") {
+        var model = makeModel()
+        createTab(&model) // generalTab1
+        createTab(&model) // generalTab2 — keeps General non-empty
+        let general1 = model.groups[0].tabs[0].id
+
+        update(&model, .createGroup(name: "Work"))
+        // Work has its auto-created tab
+        let workAuto = model.groups[1].tabs[0].id
+
+        let effects = update(&model, .extractTabsToNewGroup(
+            tabIds: [general1, workAuto], groupName: "Extracted"))
+
+        // General had 2 tabs (one extracted) → still has 1, survives
+        // Work had 1 tab (extracted) → empty, pruned
+        try expectEqual(model.groups.count, 2, "Work pruned, General + Extracted remain")
+        try expectEqual(model.groups[0].name, "General")
+        try expectEqual(model.groups[1].name, "Extracted")
+        try expectEqual(model.groups[1].tabs.count, 2)
+        try expectEqual(model.groups[1].tabs[0].id, general1, "input order preserved")
+        try expectEqual(model.groups[1].tabs[1].id, workAuto, "input order preserved")
+        try expectEqual(effects.count, 2)
+    }
+
+    test("testExtractAllTabsFromOnlyGroupIsNoop") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let tab1Id = model.groups[0].tabs[0].id
+        let tab2Id = model.groups[0].tabs[1].id
+        let snapshot = model.groups
+
+        let effects = update(&model, .extractTabsToNewGroup(
+            tabIds: [tab1Id, tab2Id], groupName: "Extracted"))
+
+        try expectEqual(model.groups.count, 1, "no new group created")
+        try expectEqual(model.groups, snapshot, "model.groups unchanged")
+        try expectEqual(effects.count, 0, "no-op should emit no effects")
+    }
+
+    test("testExtractAllTabsAcrossMultipleGroupsIsNoop") {
+        var model = makeModel()
+        createTab(&model) // generalTab
+        let generalTabId = model.groups[0].tabs[0].id
+
+        update(&model, .createGroup(name: "Work"))
+        let workTabId = model.groups[1].tabs[0].id
+
+        // 2 groups, 1 tab each: extracting both = every live tab.
+        let snapshotCount = model.groups.count
+        let effects = update(&model, .extractTabsToNewGroup(
+            tabIds: [generalTabId, workTabId], groupName: "Extracted"))
+
+        try expectEqual(model.groups.count, snapshotCount,
+            "no group destruction; structure preserved")
+        try expectEqual(effects.count, 0, "no-op should emit no effects")
+    }
+
+    test("testExtractDedupesAndIgnoresStaleIds") {
+        var model = makeModel()
+        createTab(&model) // tab1
+        createTab(&model) // tab2
+        createTab(&model) // tab3 — stays
+        let tab1Id = model.groups[0].tabs[0].id
+        let tab2Id = model.groups[0].tabs[1].id
+        let stale = TabId() // never existed
+
+        let effects = update(&model, .extractTabsToNewGroup(
+            tabIds: [tab1Id, tab1Id, stale, tab2Id], groupName: "Extracted"))
+
+        try expectEqual(model.groups.count, 2)
+        try expectEqual(model.groups[1].tabs.count, 2, "duplicate dropped, stale dropped")
+        try expectEqual(model.groups[1].tabs[0].id, tab1Id)
+        try expectEqual(model.groups[1].tabs[1].id, tab2Id)
+        try expectEqual(effects.count, 2)
+    }
+
+    test("testExtractAllStaleIdsIsNoop") {
+        var model = makeModel()
+        createTab(&model)
+        let snapshot = model.groups
+        let stale1 = TabId()
+        let stale2 = TabId()
+
+        let effects = update(&model, .extractTabsToNewGroup(
+            tabIds: [stale1, stale2], groupName: "Extracted"))
+
+        try expectEqual(model.groups, snapshot, "no group created when all ids stale")
+        try expectEqual(effects.count, 0)
+    }
+
+    test("testExtractPreservesSelectedTabIdWhenFocusedTabIsExtracted") {
+        // Spec: focused tab still exists, just under a new group;
+        // extract should not move selection.
+        var model = makeModel()
+        createTab(&model) // tab1
+        createTab(&model) // tab2 — auto-focused by createTab
+        createTab(&model) // tab3 — kept in source
+        let focusedId = model.selectedTabId
+        try expect(focusedId != nil)
+
+        update(&model, .extractTabsToNewGroup(
+            tabIds: [focusedId!], groupName: "Extracted"))
+
+        try expectEqual(model.selectedTabId, focusedId,
+            "selection must not move when the focused tab is extracted")
+    }
+
+    test("testExtractPreservesSelectedTabIdWhenOtherTabIsExtracted") {
+        var model = makeModel()
+        createTab(&model) // tab1
+        createTab(&model) // tab2
+        createTab(&model) // tab3 — auto-focused
+        let focusedId = model.selectedTabId
+        let otherId = model.groups[0].tabs[0].id
+
+        update(&model, .extractTabsToNewGroup(
+            tabIds: [otherId], groupName: "Extracted"))
+
+        try expectEqual(model.selectedTabId, focusedId,
+            "selection must not move when an unrelated tab is extracted")
+    }
+
+    // MARK: - moveTabs (batch drag)
+
+    test("testMoveTabsCrossGroup") {
+        var model = makeModel()
+        createTab(&model) // a0 in General
+        createTab(&model) // a1
+        createTab(&model) // a2 — keeps General non-empty
+        let a0 = model.groups[0].tabs[0].id
+        let a1 = model.groups[0].tabs[1].id
+
+        update(&model, .createGroup(name: "Work"))
+        let workId = model.groups[1].id
+        let b0 = model.groups[1].tabs[0].id // auto-created tab
+
+        // Drop {a0, a1} into Work at index 1 (between b0 and end).
+        let effects = update(&model, .moveTabs(
+            tabIds: [a0, a1], toGroupId: workId, atIndex: 1))
+
+        try expectEqual(model.groups.count, 2)
+        try expectEqual(model.groups[0].name, "General")
+        try expectEqual(model.groups[0].tabs.count, 1, "a2 left in General")
+        try expectEqual(model.groups[1].tabs.count, 3, "Work has b0 + moved a0,a1")
+        try expectEqual(model.groups[1].tabs[0].id, b0)
+        try expectEqual(model.groups[1].tabs[1].id, a0, "input order preserved")
+        try expectEqual(model.groups[1].tabs[2].id, a1, "input order preserved")
+
+        try expectEqual(effects.count, 2, "exactly reloadSidebar + scheduleCheckpoint")
+        try expect(hasEffect(effects) {
+            if case .reloadSidebar = $0 { return true }; return false
+        })
+        try expect(hasEffect(effects) {
+            if case .scheduleCheckpoint = $0 { return true }; return false
+        })
+    }
+
+    test("testMoveTabsIntraGroupShiftDown") {
+        // [a0, a1, a2, a3]; move {a1, a2} to atIndex=4 → [a0, a3, a1, a2]
+        var model = makeModel()
+        for _ in 0..<4 { createTab(&model) }
+        let groupId = model.groups[0].id
+        let ids = model.groups[0].tabs.map(\.id)
+        let a0 = ids[0]; let a1 = ids[1]; let a2 = ids[2]; let a3 = ids[3]
+
+        update(&model, .moveTabs(tabIds: [a1, a2], toGroupId: groupId, atIndex: 4))
+
+        let final = model.groups[0].tabs.map(\.id)
+        try expectEqual(final, [a0, a3, a1, a2])
+    }
+
+    test("testMoveTabsIntraGroupShiftUp") {
+        // [a0, a1, a2, a3]; move {a2, a3} to atIndex=0 → [a2, a3, a0, a1]
+        var model = makeModel()
+        for _ in 0..<4 { createTab(&model) }
+        let groupId = model.groups[0].id
+        let ids = model.groups[0].tabs.map(\.id)
+        let a0 = ids[0]; let a1 = ids[1]; let a2 = ids[2]; let a3 = ids[3]
+
+        update(&model, .moveTabs(tabIds: [a2, a3], toGroupId: groupId, atIndex: 0))
+
+        let final = model.groups[0].tabs.map(\.id)
+        try expectEqual(final, [a2, a3, a0, a1])
+    }
+
+    test("testMoveTabsIntraGroupAnchorBetweenSelected") {
+        // [a, b, c, d]; move {a, c} to atIndex=3.
+        // removedBeforeAnchor = 2 (a@0 and c@2 are < 3) → adjusted = 1.
+        // After removal: [b, d]. Insert {a, c} at idx 1 → [b, a, c, d].
+        var model = makeModel()
+        for _ in 0..<4 { createTab(&model) }
+        let groupId = model.groups[0].id
+        let ids = model.groups[0].tabs.map(\.id)
+        let a = ids[0]; let b = ids[1]; let c = ids[2]; let d = ids[3]
+
+        update(&model, .moveTabs(tabIds: [a, c], toGroupId: groupId, atIndex: 3))
+
+        let final = model.groups[0].tabs.map(\.id)
+        try expectEqual(final, [b, a, c, d])
+    }
+
+    test("testMoveTabsCrossGroupEmptiesSourceAndPrunes") {
+        var model = makeModel()
+        createTab(&model) // generalTab — only tab in General
+        let generalTab = model.groups[0].tabs[0].id
+
+        update(&model, .createGroup(name: "Work"))
+        let workId = model.groups[1].id
+        let workTab = model.groups[1].tabs[0].id
+
+        update(&model, .moveTabs(tabIds: [generalTab], toGroupId: workId, atIndex: 1))
+
+        try expectEqual(model.groups.count, 1, "empty General pruned")
+        try expectEqual(model.groups[0].id, workId)
+        try expectEqual(model.groups[0].tabs.map(\.id), [workTab, generalTab])
+    }
+
+    test("testMoveTabsDedupesAndIgnoresStaleIds") {
+        var model = makeModel()
+        createTab(&model) // a0
+        createTab(&model) // a1
+        createTab(&model) // a2 — keeps source non-empty
+        let a0 = model.groups[0].tabs[0].id
+        let a1 = model.groups[0].tabs[1].id
+
+        update(&model, .createGroup(name: "Work"))
+        let workId = model.groups[1].id
+        let workAuto = model.groups[1].tabs[0].id
+        let stale = TabId()
+
+        update(&model, .moveTabs(
+            tabIds: [a0, a0, stale, a1], toGroupId: workId, atIndex: 1))
+
+        try expectEqual(model.groups[0].tabs.count, 1, "a2 left in General")
+        try expectEqual(model.groups[1].tabs.map(\.id), [workAuto, a0, a1],
+            "duplicate + stale dropped; rest moved in order")
+    }
+
+    test("testMoveTabsAllStaleIdsIsNoop") {
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .createGroup(name: "Work"))
+        let workId = model.groups[1].id
+        let snapshot = model.groups
+        let stale1 = TabId()
+        let stale2 = TabId()
+
+        let effects = update(&model, .moveTabs(
+            tabIds: [stale1, stale2], toGroupId: workId, atIndex: 0))
+
+        try expectEqual(model.groups, snapshot, "groups unchanged")
+        try expectEqual(effects.count, 0)
+    }
+
+    test("testMoveTabsClampedAtIndex") {
+        var model = makeModel()
+        createTab(&model) // a0
+        createTab(&model) // a1 — kept in source
+        let a0 = model.groups[0].tabs[0].id
+
+        update(&model, .createGroup(name: "Work"))
+        let workId = model.groups[1].id
+        let workAuto = model.groups[1].tabs[0].id
+
+        // atIndex past end: clamps to append.
+        update(&model, .moveTabs(
+            tabIds: [a0], toGroupId: workId, atIndex: 999))
+        try expectEqual(model.groups[1].tabs.map(\.id), [workAuto, a0],
+            "past-end atIndex clamps to append")
+
+        // Now move it back at a negative atIndex: clamps to 0 (prepend).
+        update(&model, .moveTabs(
+            tabIds: [a0], toGroupId: workId, atIndex: -5))
+        try expectEqual(model.groups[1].tabs.map(\.id), [a0, workAuto],
+            "negative atIndex clamps to 0")
     }
 }

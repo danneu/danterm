@@ -215,7 +215,7 @@ func customTitleTests() {
         update(&model, .createGroup(name: "Temp"))
         let tempGroupId = model.groups[1].id
         // Move tabA to Temp — General keeps tab2
-        update(&model, .moveTab(tabId: tabA, toGroupId: tempGroupId, atIndex: 0))
+        update(&model, .moveTabs(tabIds: [tabA], toGroupId: tempGroupId, atIndex: 0))
 
         // Select tabA (in Temp) so the deletion triggers a selection change.
         update(&model, .selectTab(id: tabA))
@@ -548,5 +548,75 @@ func customTitleTests() {
         try expect(model != nil, "should decode without customTitle")
         try expect(model!.groups[0].tabs[0].customTitle == nil, "customTitle should be nil when omitted")
         try expectEqual(model!.groups[0].tabs[0].displayTitle, "Terminal")
+    }
+
+    // MARK: - clearCustomTitles (batch from multi-select context menu)
+
+    test("testClearCustomTitlesClearsAllSelected") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        createTab(&model)
+        let id1 = model.groups[0].tabs[0].id
+        let id2 = model.groups[0].tabs[1].id
+        let id3 = model.groups[0].tabs[2].id
+        update(&model, .renameTab(id: id1, name: "alpha"))
+        update(&model, .renameTab(id: id2, name: "beta"))
+        update(&model, .renameTab(id: id3, name: "gamma"))
+
+        update(&model, .clearCustomTitles(tabIds: [id1, id2]))
+
+        try expect(model.groups[0].tabs[0].customTitle == nil)
+        try expect(model.groups[0].tabs[1].customTitle == nil)
+        try expectEqual(model.groups[0].tabs[2].customTitle, "gamma",
+            "tabs not in the batch are unaffected")
+    }
+
+    test("testClearCustomTitlesDedupesAndIgnoresStale") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let id1 = model.groups[0].tabs[0].id
+        let id2 = model.groups[0].tabs[1].id
+        let stale = TabId()
+        update(&model, .renameTab(id: id1, name: "alpha"))
+        update(&model, .renameTab(id: id2, name: "beta"))
+
+        let effects = update(&model, .clearCustomTitles(
+            tabIds: [id1, id1, stale, id2]))
+
+        try expect(model.groups[0].tabs[0].customTitle == nil)
+        try expect(model.groups[0].tabs[1].customTitle == nil)
+        try expect(effects.count >= 3,
+            "at least 2 updateSidebarTabRow + 1 scheduleCheckpoint")
+    }
+
+    test("testClearCustomTitlesAllStaleIsNoop") {
+        var model = makeModel()
+        createTab(&model)
+        let snapshot = model.groups
+
+        let effects = update(&model, .clearCustomTitles(
+            tabIds: [TabId(), TabId()]))
+
+        try expectEqual(model.groups, snapshot)
+        try expectEqual(effects.count, 0)
+    }
+
+    test("testClearCustomTitlesEmitsSelectionSyncForSelectedTab") {
+        // Spec parity with single-tab .renameTab: when the focused tab's
+        // custom title is cleared, the toolbar/window-title needs to
+        // resync via selectionSyncEffects.
+        var model = makeModel()
+        createTab(&model)
+        let id = model.groups[0].tabs[0].id
+        update(&model, .renameTab(id: id, name: "alpha"))
+        try expectEqual(model.selectedTabId, id)
+
+        let effects = update(&model, .clearCustomTitles(tabIds: [id]))
+
+        try expect(model.groups[0].tabs[0].customTitle == nil)
+        try expect(effects.count >= 2,
+            "updateSidebarTabRow + scheduleCheckpoint plus selectionSyncEffects")
     }
 }

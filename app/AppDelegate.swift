@@ -422,17 +422,37 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         runtime.send(.requestCloseTab(id: tabId))
     }
 
-    // Tab > Color submenu actions
+    // Tab > Color submenu actions. The action target is the sidebar's full
+    // multi-selection (mirrors right-click context menu); the toggle-off
+    // policy ("re-apply clears when every targeted tab already shares the
+    // requested color") is delegated to resolveColorForBatch in
+    // ModelOperations.swift, which is shared with SidebarView's context menu.
     @objc func setTabColorFromMenu(_ sender: NSMenuItem) {
-        guard let tabId = runtime.model.selectedTabId else { return }
         let colors = TabColor.allCases
         guard sender.tag >= 0, sender.tag < colors.count else { return }
-        runtime.send(.setTabColor(tabId: tabId, color: colors[sender.tag]))
+        let tabIds = currentColorTargetTabIds()
+        guard !tabIds.isEmpty else { return }
+        let resolved = resolveColorForBatch(
+            tabIds: tabIds, requested: colors[sender.tag], in: runtime.model)
+        runtime.send(.setTabColors(tabIds: tabIds, color: resolved))
     }
 
     @objc func clearTabColor(_ sender: Any?) {
-        guard let tabId = runtime.model.selectedTabId else { return }
-        runtime.send(.setTabColor(tabId: tabId, color: nil))
+        let tabIds = currentColorTargetTabIds()
+        guard !tabIds.isEmpty else { return }
+        runtime.send(.setTabColors(tabIds: tabIds, color: nil))
+    }
+
+    // Action target for tab-color shortcuts. Prefers the sidebar's actual
+    // multi-selection; falls back to the focused tab if the sidebar isn't
+    // reachable (transient teardown only -- IUOs are set in
+    // applicationDidFinishLaunching before any menu can dispatch).
+    private func currentColorTargetTabIds() -> [TabId] {
+        if let sidebar = sidebarView {
+            let ids = sidebar.selectedTabIds()
+            if !ids.isEmpty { return ids }
+        }
+        return runtime.model.selectedTabId.map { [$0] } ?? []
     }
 
     @objc func exportState(_ sender: Any?) {
