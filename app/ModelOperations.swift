@@ -400,12 +400,12 @@ func deriveTabChromeFromSnapshot(_ ps: PaneSnapshot) -> (title: String, subtitle
 func adjacentTabId(direction: TabDirection, in model: AppModel) -> TabId? {
   let allTabs = model.groups.flatMap(\.tabs)
   guard let idx = allTabs.firstIndex(where: { $0.id == model.selectedTabId }) else { return nil }
+  let count = allTabs.count
   let newIdx: Int
   switch direction {
-  case .next: newIdx = idx + 1
-  case .prev: newIdx = idx - 1
+  case .next: newIdx = (idx + 1) % count
+  case .prev: newIdx = (idx - 1 + count) % count
   }
-  guard newIdx >= 0, newIdx < allTabs.count else { return nil }
   return allTabs[newIdx].id
 }
 

@@ -198,24 +198,92 @@ func tabTests() {
         try expect(effects.count > 0, "should have effects")
     }
 
-    test("testNextTabNoOpAtLastTab") {
+    test("testNextTabNoOpWithSingleTab") {
         var model = makeModel()
         createTab(&model)
         let lastTabId = model.groups[0].tabs[0].id
 
         let effects = update(&model, .selectAdjacentTab(direction: .next))
-        try expectEqual(effects.count, 0, "should be no-op at last tab")
+        try expectEqual(effects.count, 0, "wrap to self should be no-op")
         try expectEqual(model.selectedTabId, lastTabId)
     }
 
-    test("testPrevTabNoOpAtFirstTab") {
+    test("testPrevTabNoOpWithSingleTab") {
         var model = makeModel()
         createTab(&model)
         let firstTabId = model.groups[0].tabs[0].id
 
         let effects = update(&model, .selectAdjacentTab(direction: .prev))
-        try expectEqual(effects.count, 0, "should be no-op at first tab")
+        try expectEqual(effects.count, 0, "wrap to self should be no-op")
         try expectEqual(model.selectedTabId, firstTabId)
+    }
+
+    test("testNextTabWrapsFromLastToFirst") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let lastTabId  = model.groups[0].tabs[1].id
+        update(&model, .selectTab(id: lastTabId))
+
+        let effects = update(&model, .selectAdjacentTab(direction: .next))
+        try expectEqual(model.selectedTabId, firstTabId)
+        try expect(effects.count > 0, "should have effects")
+    }
+
+    test("testPrevTabWrapsFromFirstToLast") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let lastTabId  = model.groups[0].tabs[1].id
+        update(&model, .selectTab(id: firstTabId))
+
+        let effects = update(&model, .selectAdjacentTab(direction: .prev))
+        try expectEqual(model.selectedTabId, lastTabId)
+        try expect(effects.count > 0, "should have effects")
+    }
+
+    test("testNextTabWrapsAcrossGroups") {
+        var model = makeModel()
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .createGroup(name: "Work"))
+        let lastTabId = model.groups[1].tabs[0].id
+        update(&model, .selectTab(id: lastTabId))
+
+        update(&model, .selectAdjacentTab(direction: .next))
+        try expectEqual(model.selectedTabId, firstTabId)
+    }
+
+    test("testPrevTabWrapsAcrossGroups") {
+        var model = makeModel()
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .createGroup(name: "Work"))
+        let lastTabId = model.groups[1].tabs[0].id
+        update(&model, .selectTab(id: firstTabId))
+
+        update(&model, .selectAdjacentTab(direction: .prev))
+        try expectEqual(model.selectedTabId, lastTabId)
+    }
+
+    // Locks in the "collapsed groups are not skipped" non-goal of the wrap
+    // change: prev/next must still reach into collapsed groups, matching the
+    // existing non-wrap navigation policy.
+    test("testPrevTabWrapsIntoCollapsedGroup") {
+        var model = makeModel()
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .createGroup(name: "Work"))
+        let collapsedGroupId = model.groups[1].id
+        let lastTabId = model.groups[1].tabs[0].id
+        update(&model, .toggleGroupCollapse(groupId: collapsedGroupId))
+        update(&model, .selectTab(id: firstTabId))
+
+        update(&model, .selectAdjacentTab(direction: .prev))
+        try expectEqual(model.selectedTabId, lastTabId,
+            "wrap should reach tabs in collapsed groups")
     }
 
     test("testNextTabNoOpWithNoTabs") {
