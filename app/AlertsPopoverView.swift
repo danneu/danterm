@@ -173,7 +173,7 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
 
         // Body
         let bodyField = NSTextField(labelWithString: alert.body)
-        bodyField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        bodyField.font = .systemFont(ofSize: NSFont.systemFontSize)
         bodyField.textColor = .secondaryLabelColor
         bodyField.lineBreakMode = .byTruncatingTail
         bodyField.translatesAutoresizingMaskIntoConstraints = false

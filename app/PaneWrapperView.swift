@@ -108,7 +108,7 @@ class PaneWrapperView: NSView {
         remoteAccessory.addSubview(remoteIcon)
 
         remoteSessionLabel.translatesAutoresizingMaskIntoConstraints = false
-        remoteSessionLabel.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
+        remoteSessionLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         remoteSessionLabel.textColor = .white
         remoteSessionLabel.lineBreakMode = .byTruncatingTail
         remoteSessionLabel.usesSingleLineMode = true
@@ -118,8 +118,8 @@ class PaneWrapperView: NSView {
 
         NSLayoutConstraint.activate([
             remoteIcon.centerYAnchor.constraint(equalTo: remoteAccessory.centerYAnchor),
-            remoteIcon.widthAnchor.constraint(equalToConstant: 12),
-            remoteIcon.heightAnchor.constraint(equalToConstant: 12),
+            remoteIcon.widthAnchor.constraint(equalToConstant: 14),
+            remoteIcon.heightAnchor.constraint(equalToConstant: 14),
         ])
         compactRemoteConstraints = [
             remoteIcon.centerXAnchor.constraint(equalTo: remoteAccessory.centerXAnchor),
@@ -130,7 +130,7 @@ class PaneWrapperView: NSView {
             remoteSessionLabel.leadingAnchor.constraint(equalTo: remoteIcon.trailingAnchor, constant: 4),
             remoteSessionLabel.trailingAnchor.constraint(equalTo: remoteAccessory.trailingAnchor, constant: -6),
             remoteSessionLabel.centerYAnchor.constraint(equalTo: remoteAccessory.centerYAnchor),
-            remoteSessionLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 200),
+            remoteSessionLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 240),
             remoteAccessory.widthAnchor.constraint(greaterThanOrEqualToConstant: 22),
         ]
         NSLayoutConstraint.activate(compactRemoteConstraints)
