@@ -181,14 +181,14 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
         _ resetButton: NSButton,
         action: Selector
     ) -> [NSView] {
-        prevLabel.font = .systemFont(ofSize: 11)
+        prevLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         prevLabel.textColor = .secondaryLabelColor
         prevLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         resetButton.title = "Reset"
         resetButton.bezelStyle = .inline
         resetButton.controlSize = .small
-        resetButton.font = .systemFont(ofSize: 10)
+        resetButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         resetButton.target = self
         resetButton.action = action
         resetButton.setContentHuggingPriority(.required, for: .horizontal)

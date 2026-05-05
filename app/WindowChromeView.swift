@@ -64,7 +64,7 @@ class WindowChromeView: NSView {
         // Title label
         titleLabel = NSTextField(labelWithString: "")
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.font = NSFont.systemFont(ofSize: 13)
+        titleLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         titleLabel.textColor = NSColor.secondaryLabelColor
         titleLabel.lineBreakMode = .byTruncatingMiddle
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)

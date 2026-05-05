@@ -30,14 +30,14 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         backgroundView.state = .active
 
         headerLabel = NSTextField(labelWithString: "Themes")
-        headerLabel.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        headerLabel.font = .preferredFont(forTextStyle: .headline)
         headerLabel.textColor = .labelColor
 
         // "Reset" clears the DanTerm theme override, reverting to the user's Ghostty config.
         resetButton = NSButton(title: "Reset", target: nil, action: nil)
         resetButton.bezelStyle = .inline
         resetButton.controlSize = .small
-        resetButton.font = NSFont.systemFont(ofSize: 11)
+        resetButton.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
         resetButton.isHidden = true
 
         closeButton = NSButton()
@@ -254,7 +254,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
 
             let text = NSTextField(labelWithString: "")
             text.translatesAutoresizingMaskIntoConstraints = false
-            text.font = NSFont.systemFont(ofSize: 12)
+            text.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
             text.lineBreakMode = .byTruncatingTail
             cell.addSubview(text)
             cell.textField = text

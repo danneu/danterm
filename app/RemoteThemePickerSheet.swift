@@ -155,7 +155,7 @@ class RemoteThemePickerSheet: NSViewController, NSTableViewDataSource, NSTableVi
 
             let text = NSTextField(labelWithString: "")
             text.translatesAutoresizingMaskIntoConstraints = false
-            text.font = NSFont.systemFont(ofSize: 12)
+            text.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
             text.lineBreakMode = .byTruncatingTail
             cell.addSubview(text)
             cell.textField = text

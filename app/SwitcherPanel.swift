@@ -155,13 +155,13 @@ final class SwitcherRowView: NSView {
     override init(frame frameRect: NSRect) {
         nameLabel = NSTextField(labelWithString: "")
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
-        nameLabel.font = NSFont.systemFont(ofSize: 13)
+        nameLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         nameLabel.textColor = .labelColor
         nameLabel.lineBreakMode = .byTruncatingTail
 
         badgeLabel = NSTextField(labelWithString: "")
         badgeLabel.translatesAutoresizingMaskIntoConstraints = false
-        badgeLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        badgeLabel.font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
         badgeLabel.textColor = .secondaryLabelColor
 
         // Full-height vertical bar at the leading edge, matching the

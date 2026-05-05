@@ -16,7 +16,7 @@ private class TodoRowView: NSView {
     let checkbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     let textField: NSTextField = {
         let tf = NSTextField(labelWithString: "")
-        tf.font = .systemFont(ofSize: 12)
+        tf.font = .systemFont(ofSize: NSFont.systemFontSize)
         tf.lineBreakMode = .byTruncatingTail
         return tf
     }()
@@ -77,7 +77,7 @@ private class TodoRowView: NSView {
             textField.attributedStringValue = NSAttributedString(string: oneLine, attributes: [
                 .strikethroughStyle: NSUnderlineStyle.single.rawValue,
                 .foregroundColor: NSColor.tertiaryLabelColor,
-                .font: NSFont.systemFont(ofSize: 12),
+                .font: NSFont.systemFont(ofSize: NSFont.systemFontSize),
             ])
         } else {
             textField.stringValue = oneLine
@@ -98,7 +98,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     private let addInput = TodoInputView()
     private let editLabel: NSTextField = {
         let tf = NSTextField(labelWithString: "Editing — Esc to cancel")
-        tf.font = .systemFont(ofSize: 10)
+        tf.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         tf.textColor = .secondaryLabelColor
         tf.isHidden = true
         tf.translatesAutoresizingMaskIntoConstraints = false
@@ -131,14 +131,14 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         wrapper.addSubview(container)
 
         // Header
-        headerLabel.font = .boldSystemFont(ofSize: 13)
+        headerLabel.font = .preferredFont(forTextStyle: .headline)
         headerLabel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(headerLabel)
 
         clearButton.target = self
         clearButton.action = #selector(clearCompleted)
         clearButton.bezelStyle = .accessoryBarAction
-        clearButton.font = .systemFont(ofSize: 11)
+        clearButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         clearButton.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(clearButton)
 
@@ -161,7 +161,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
 
         // Empty state
         emptyLabel.textColor = .secondaryLabelColor
-        emptyLabel.font = .systemFont(ofSize: 13)
+        emptyLabel.font = .systemFont(ofSize: NSFont.systemFontSize)
         emptyLabel.alignment = .center
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(emptyLabel)

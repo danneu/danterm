@@ -108,7 +108,7 @@ class PaneWrapperView: NSView {
         remoteAccessory.addSubview(remoteIcon)
 
         remoteSessionLabel.translatesAutoresizingMaskIntoConstraints = false
-        remoteSessionLabel.font = NSFont.systemFont(ofSize: 11)
+        remoteSessionLabel.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
         remoteSessionLabel.textColor = .white
         remoteSessionLabel.lineBreakMode = .byTruncatingTail
         remoteSessionLabel.usesSingleLineMode = true
@@ -145,7 +145,7 @@ class PaneWrapperView: NSView {
 
         // Label
         toolbarLabel.translatesAutoresizingMaskIntoConstraints = false
-        toolbarLabel.font = NSFont.systemFont(ofSize: 11)
+        toolbarLabel.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
         toolbarLabel.textColor = NSColor.secondaryLabelColor
         toolbarLabel.lineBreakMode = .byTruncatingMiddle
         toolbarLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)

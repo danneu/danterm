@@ -34,21 +34,21 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
         wrapper.addSubview(container)
 
         // Header
-        headerLabel.font = .boldSystemFont(ofSize: 13)
+        headerLabel.font = .preferredFont(forTextStyle: .headline)
         headerLabel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(headerLabel)
 
         markAllButton.target = self
         markAllButton.action = #selector(markAllRead)
         markAllButton.bezelStyle = .accessoryBarAction
-        markAllButton.font = .systemFont(ofSize: 11)
+        markAllButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         markAllButton.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(markAllButton)
 
         // Show all toggle
         showAllCheckbox.target = self
         showAllCheckbox.action = #selector(showAllToggled)
-        showAllCheckbox.font = .systemFont(ofSize: 11)
+        showAllCheckbox.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         showAllCheckbox.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(showAllCheckbox)
 
@@ -74,7 +74,7 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
 
         // Empty state
         emptyLabel.textColor = .secondaryLabelColor
-        emptyLabel.font = .systemFont(ofSize: 13)
+        emptyLabel.font = .systemFont(ofSize: NSFont.systemFontSize)
         emptyLabel.alignment = .center
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(emptyLabel)
@@ -166,14 +166,14 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
 
         // Title
         let titleField = NSTextField(labelWithString: alert.title)
-        titleField.font = .boldSystemFont(ofSize: 12)
+        titleField.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
         titleField.lineBreakMode = .byTruncatingTail
         titleField.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(titleField)
 
         // Body
         let bodyField = NSTextField(labelWithString: alert.body)
-        bodyField.font = .systemFont(ofSize: 11)
+        bodyField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         bodyField.textColor = .secondaryLabelColor
         bodyField.lineBreakMode = .byTruncatingTail
         bodyField.translatesAutoresizingMaskIntoConstraints = false
@@ -181,7 +181,7 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
 
         // Time
         let timeField = NSTextField(labelWithString: relativeTime(alert.createdAt))
-        timeField.font = .systemFont(ofSize: 10)
+        timeField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         timeField.textColor = .tertiaryLabelColor
         timeField.translatesAutoresizingMaskIntoConstraints = false
         row.addSubview(timeField)

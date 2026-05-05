@@ -32,7 +32,7 @@ class TodoInputView: NSView {
 
     // MARK: - Height constants
 
-    private static let inputFont = NSFont.systemFont(ofSize: 12)
+    private static let inputFont = NSFont.systemFont(ofSize: NSFont.systemFontSize)
     private static let inputLineHeight: CGFloat = NSLayoutManager().defaultLineHeight(for: inputFont)
     private static let inputInsetY: CGFloat = 4
     static let inputHeight = inputLineHeight * 3 + inputInsetY * 2

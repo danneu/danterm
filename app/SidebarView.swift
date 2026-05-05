@@ -1013,7 +1013,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
         let textField = NSTextField(labelWithString: "")
         textField.translatesAutoresizingMaskIntoConstraints = false
-        textField.font = .boldSystemFont(ofSize: 11)
+        textField.font = .preferredFont(forTextStyle: .headline)
         textField.lineBreakMode = .byTruncatingTail
         textField.isEditable = false
         textField.delegate = self
@@ -1121,7 +1121,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
             let textField = NSTextField(labelWithString: "")
             textField.translatesAutoresizingMaskIntoConstraints = false
-            textField.font = .systemFont(ofSize: 13)
+            textField.font = .systemFont(ofSize: NSFont.systemFontSize)
             textField.lineBreakMode = .byTruncatingTail
             textField.isEditable = false
             textField.delegate = self
@@ -1131,7 +1131,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             let subtitleField = NSTextField(labelWithString: "")
             subtitleField.identifier = subtitleId
             subtitleField.translatesAutoresizingMaskIntoConstraints = false
-            subtitleField.font = .systemFont(ofSize: 10)
+            subtitleField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
             subtitleField.textColor = .secondaryLabelColor
             subtitleField.lineBreakMode = .byTruncatingMiddle
             cell.addSubview(subtitleField)

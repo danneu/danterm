@@ -35,7 +35,7 @@ class SearchOverlayView: NSView, NSSearchFieldDelegate {
         searchField = NSSearchField()
         searchField.translatesAutoresizingMaskIntoConstraints = false
         searchField.placeholderString = "Search..."
-        searchField.font = NSFont.systemFont(ofSize: 12)
+        searchField.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
         searchField.sendsWholeSearchString = false
         searchField.sendsSearchStringImmediately = false
         searchField.cell?.sendsActionOnEndEditing = false
@@ -43,7 +43,7 @@ class SearchOverlayView: NSView, NSSearchFieldDelegate {
         // Counter label (fixed width, right-aligned)
         counterLabel = NSTextField(labelWithString: "")
         counterLabel.translatesAutoresizingMaskIntoConstraints = false
-        counterLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        counterLabel.font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
         counterLabel.textColor = .secondaryLabelColor
         counterLabel.alignment = .right
         counterLabel.lineBreakMode = .byClipping
