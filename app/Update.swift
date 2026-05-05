@@ -833,7 +833,12 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return [.setAppFocus(true)]
 
     case .appResignedActive:
-        return [.setAppFocus(false)]
+        var effects: [Effect] = [.setAppFocus(false)]
+        if model.jumpMode != nil {
+            model.jumpMode = nil
+            effects.append(.reloadSidebar)
+        }
+        return effects
 
     case .requestQuit:
         return [.showTerminateConfirmation(paneCount: model.panes.count)]
@@ -1213,6 +1218,16 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         var effects = mruCycleStep(&model, direction: direction)
         effects.append(contentsOf: mruCycleCommit(&model))
         return effects
+
+    // Tab jump mode
+    case .jumpModeActivated(let visibleTabs):
+        return jumpModeActivate(&model, visibleTabs: visibleTabs)
+
+    case .jumpModeKeyPressed(let char):
+        return jumpModeCommit(&model, char: char)
+
+    case .jumpModeCanceled:
+        return jumpModeCancel(&model)
     }
 }
 
@@ -1293,6 +1308,39 @@ private func mruCycleCancel(_ model: inout AppModel) -> [Effect] {
     guard model.mruCycle != nil else { return [] }
     model.mruCycle = nil
     return [.hideSwitcherOverlay]
+}
+
+// MARK: - Tab Jump Mode Handlers
+
+private func jumpModeActivate(_ model: inout AppModel, visibleTabs: [TabId]) -> [Effect] {
+    var effects: [Effect] = []
+    if model.mruCycle != nil {
+        model.mruCycle = nil
+        effects.append(.hideSwitcherOverlay)
+    }
+    model.jumpMode = JumpModeState(keyMap: assignJumpKeys(visibleTabs: visibleTabs))
+    effects.append(.reloadSidebar)
+    return effects
+}
+
+private func jumpModeCommit(_ model: inout AppModel, char: Character) -> [Effect] {
+    guard let jumpMode = model.jumpMode else { return [] }
+    model.jumpMode = nil
+
+    guard let targetId = jumpMode.keyMap.first(where: { $0.value == char })?.key,
+          tabLocation(targetId, in: model) != nil else {
+        return [.reloadSidebar]
+    }
+
+    var effects = applySelectTab(&model, id: targetId)
+    effects.append(.reloadSidebar)
+    return effects
+}
+
+private func jumpModeCancel(_ model: inout AppModel) -> [Effect] {
+    guard model.jumpMode != nil else { return [] }
+    model.jumpMode = nil
+    return [.reloadSidebar]
 }
 
 // MARK: - Helpers

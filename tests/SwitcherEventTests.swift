@@ -166,3 +166,74 @@ func switcherEventTests() {
         try expectEqual(action, .commit)
     }
 }
+
+func jumpEventTests() {
+    print("Jump Event Classifier Tests...")
+
+    let kVK_ANSI_A: UInt16 = 0x00
+    let kVK_ANSI_F: UInt16 = 0x03
+    let kVK_Escape: UInt16 = 0x35
+
+    test("cmd-shift-f with jump inactive returns activate") {
+        let action = classifyJumpInput(
+            kind: .keyDown(keyCode: kVK_ANSI_F, character: "f"),
+            modifiers: [.command, .shift],
+            jumpActive: false
+        )
+        try expectEqual(action, .activate)
+    }
+
+    test("plain a with jump active returns commit") {
+        let action = classifyJumpInput(
+            kind: .keyDown(keyCode: kVK_ANSI_A, character: "a"),
+            modifiers: [],
+            jumpActive: true
+        )
+        try expectEqual(action, .commit(char: "a"))
+    }
+
+    test("escape with jump active returns cancel") {
+        let action = classifyJumpInput(
+            kind: .keyDown(keyCode: kVK_Escape, character: nil),
+            modifiers: [],
+            jumpActive: true
+        )
+        try expectEqual(action, .cancel)
+    }
+
+    test("modifier-bearing keyDown with jump active returns cancel") {
+        let action = classifyJumpInput(
+            kind: .keyDown(keyCode: kVK_ANSI_A, character: "a"),
+            modifiers: [.command],
+            jumpActive: true
+        )
+        try expectEqual(action, .cancel)
+    }
+
+    test("flagsChanged with jump active returns passthrough") {
+        let action = classifyJumpInput(
+            kind: .flagsChanged,
+            modifiers: [],
+            jumpActive: true
+        )
+        try expectEqual(action, .passthrough)
+    }
+
+    test("bare f with jump active commits instead of activating") {
+        let action = classifyJumpInput(
+            kind: .keyDown(keyCode: kVK_ANSI_F, character: "f"),
+            modifiers: [],
+            jumpActive: true
+        )
+        try expectEqual(action, .commit(char: "f"))
+    }
+
+    test("bare non-printing key with jump active returns cancel") {
+        let action = classifyJumpInput(
+            kind: .keyDown(keyCode: 0x7B, character: nil),
+            modifiers: [],
+            jumpActive: true
+        )
+        try expectEqual(action, .cancel)
+    }
+}

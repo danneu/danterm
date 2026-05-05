@@ -727,6 +727,25 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
     }
 
+    /// Public: returns visible tab ids in top-to-bottom row order.
+    /// Group rows and collapsed-group children are excluded by NSOutlineView's
+    /// visible row model.
+    func visibleTabIdsInRowOrder() -> [TabId] {
+        return (0..<outlineView.numberOfRows).compactMap { row in
+            guard let item = outlineView.item(atRow: row) as? SidebarItem,
+                  case .tab(let tab) = item.kind else { return nil }
+            return tab.id
+        }
+    }
+
+    /// Public: true when a screen point lands inside the sidebar view.
+    func containsScreenPoint(_ point: NSPoint) -> Bool {
+        guard let window else { return false }
+        let windowPoint = window.convertPoint(fromScreen: point)
+        let localPoint = convert(windowPoint, from: nil)
+        return bounds.contains(localPoint)
+    }
+
     /// Resolve the tab ids targeted by a context-menu action using the
     /// Finder/Mail rule (helper lives in ModelOperations.swift so it's
     /// unit-tested without AppKit).
@@ -1123,7 +1142,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             accessoryStack.translatesAutoresizingMaskIntoConstraints = false
             accessoryStack.orientation = .horizontal
             accessoryStack.alignment = .top
-            accessoryStack.spacing = 0
+            accessoryStack.spacing = 3
             accessoryStack.identifier = accessoryStackId
             cell.addSubview(accessoryStack)
 
@@ -1154,6 +1173,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     private func configureTabCell(_ cell: NSTableCellView, tab: TabModel, skipTitle: Bool = false) {
         let subtitleId = NSUserInterfaceItemIdentifier("subtitle")
         let bellDotId = NSUserInterfaceItemIdentifier("bellDot")
+        let jumpBadgeId = NSUserInterfaceItemIdentifier("jumpModeBadge")
         let colorStripeId = NSUserInterfaceItemIdentifier("colorStripe")
         let accessoryStackId = NSUserInterfaceItemIdentifier("tabAccessoryStack")
 
@@ -1164,10 +1184,28 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             subtitleField.stringValue = tab.subtitle ?? ""
             subtitleField.isHidden = tab.subtitle == nil
         }
-        if let stack = cell.subviews.first(where: { $0.identifier == accessoryStackId }) as? NSStackView,
-           let bellBadge = stack.arrangedSubviews.first(where: { $0.identifier == bellDotId }) as? NSTextField {
-            let count = unreadAlertCount(for: tab, alerts: currentModel?.alerts ?? [])
-            bellBadge.updateBadge(count: count)
+        if let stack = cell.subviews.first(where: { $0.identifier == accessoryStackId }) as? NSStackView {
+            if let bellBadge = stack.arrangedSubviews.first(where: { $0.identifier == bellDotId }) as? NSTextField {
+                let count = unreadAlertCount(for: tab, alerts: currentModel?.alerts ?? [])
+                bellBadge.updateBadge(count: count)
+            }
+
+            let existingJumpBadge = stack.arrangedSubviews.first(where: { $0.identifier == jumpBadgeId }) as? NSTextField
+            if let key = currentModel?.jumpMode?.keyMap[tab.id] {
+                let badge = existingJumpBadge ?? makeJumpModeBadge(identifier: jumpBadgeId)
+                badge.stringValue = String(key).uppercased()
+                badge.isHidden = false
+                if existingJumpBadge == nil {
+                    stack.addArrangedSubview(badge)
+                } else if stack.arrangedSubviews.last !== badge {
+                    stack.removeArrangedSubview(badge)
+                    badge.removeFromSuperview()
+                    stack.addArrangedSubview(badge)
+                }
+            } else if let existingJumpBadge {
+                stack.removeArrangedSubview(existingJumpBadge)
+                existingJumpBadge.removeFromSuperview()
+            }
         }
         if let stripe = cell.subviews.first(where: { $0.identifier == colorStripeId }) {
             if let color = tab.color {
@@ -1177,6 +1215,25 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 stripe.isHidden = true
             }
         }
+    }
+
+    private func makeJumpModeBadge(identifier: NSUserInterfaceItemIdentifier) -> NSTextField {
+        let label = NSTextField(labelWithString: "")
+        label.identifier = identifier
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
+        label.textColor = .alternateSelectedControlTextColor
+        label.alignment = .center
+        label.wantsLayer = true
+        label.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+        label.layer?.cornerRadius = 4
+        label.layer?.masksToBounds = true
+        label.setContentCompressionResistancePriority(.required, for: .horizontal)
+        NSLayoutConstraint.activate([
+            label.widthAnchor.constraint(greaterThanOrEqualToConstant: 18),
+            label.heightAnchor.constraint(equalToConstant: 16),
+        ])
+        return label
     }
 
     /// Returns true if the drag cursor is in empty space below all outline view rows.

@@ -923,8 +923,35 @@ enum SwitcherAction: Equatable {
   case commit
 }
 
+// MARK: - Tab Jump Mode
+
+let jumpModeKeySequence: [Character] = Array("asdfghjkl;qwertyuiop[]zxcvbnm,./")
+
+/// Assign one jump key to each visible tab row, capped by the fixed v1 key set.
+func assignJumpKeys(visibleTabs: [TabId]) -> [TabId: Character] {
+  var result: [TabId: Character] = [:]
+  for (tabId, key) in zip(visibleTabs, jumpModeKeySequence) {
+    result[tabId] = key
+  }
+  return result
+}
+
+enum JumpInputKind: Equatable {
+  case keyDown(keyCode: UInt16, character: Character?)
+  case flagsChanged
+  case mouseDown
+}
+
+enum JumpAction: Equatable {
+  case passthrough
+  case activate
+  case commit(char: Character)
+  case cancel
+}
+
 private let kVK_ANSI_I: UInt16 = 0x22
 private let kVK_ANSI_O: UInt16 = 0x1F
+private let kVK_ANSI_F: UInt16 = 0x03
 private let kVK_Escape: UInt16 = 0x35
 
 /// Pure classifier for the local NSEvent monitor. Domain-native types only;
@@ -957,6 +984,36 @@ func classifySwitcherInput(
       return .commit
     }
     return .passthrough
+  }
+}
+
+/// Pure classifier for tab jump mode. Modifier-only changes intentionally
+/// pass through while active so releasing cmd-shift after activation does not
+/// cancel the mode before the target key arrives.
+func classifyJumpInput(
+  kind: JumpInputKind,
+  modifiers: SwitcherModifiers,
+  jumpActive: Bool
+) -> JumpAction {
+  guard jumpActive else {
+    if case .keyDown(let keyCode, _) = kind,
+       keyCode == kVK_ANSI_F,
+       modifiers == [.command, .shift] {
+      return .activate
+    }
+    return .passthrough
+  }
+
+  switch kind {
+  case .flagsChanged:
+    return .passthrough
+  case .mouseDown:
+    return .cancel
+  case .keyDown(let keyCode, let character):
+    if keyCode == kVK_Escape { return .cancel }
+    if !modifiers.isEmpty { return .cancel }
+    guard let character else { return .cancel }
+    return .commit(char: character)
   }
 }
 

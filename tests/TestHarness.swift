@@ -27,7 +27,9 @@ struct TestRunner {
         todoTests()
         todoEditStateTests()
         switcherEventTests()
+        jumpEventTests()
         updateMruTests()
+        updateJumpTests()
         print("\n\(total - failures)/\(total) passed")
         if failures > 0 { exit(1) }
     }

@@ -268,6 +268,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         prevTabItem.keyEquivalentModifierMask = [.command, .shift]
         tabMenu.addItem(prevTabItem)
 
+        let jumpItem = NSMenuItem(title: "Jump to Tab...", action: #selector(jumpToTab(_:)), keyEquivalent: "f")
+        jumpItem.keyEquivalentModifierMask = [.command, .shift]
+        tabMenu.addItem(jumpItem)
+
         // MRU switcher: cmd-shift-o (older, primary like cmd-tab) and
         // cmd-shift-i (newer, reverse). The local NSEvent monitor in
         // AppRuntime swallows these chords for the held-modifier path;
@@ -394,6 +398,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
     @objc func prevTab(_ sender: Any?) {
         runtime.send(.selectAdjacentTab(direction: .prev))
+    }
+
+    @objc func jumpToTab(_ sender: Any?) {
+        runtime.enterJumpMode()
     }
 
     // Menu fallback for the MRU switcher: jumps once to the next/previous

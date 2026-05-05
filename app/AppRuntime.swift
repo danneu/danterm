@@ -61,9 +61,9 @@ class AppRuntime {
         // showSwitcherOverlay fires.
         self.switcherPanel = SwitcherPanel()
 
-        // Install the local NSEvent monitor that drives the switcher.
-        // It reads model.mruCycle to know whether a cycle is active, but
-        // never mutates the model directly; mutations go through send().
+        // Install the local NSEvent monitor that drives ephemeral keyboard modes.
+        // It reads model flags to know whether a mode is active, but never mutates
+        // the model directly; mutations go through send().
         installSwitcherEventMonitor()
     }
 
@@ -73,23 +73,80 @@ class AppRuntime {
         }
     }
 
-    // MARK: - Switcher Event Monitor
+    // MARK: - Ephemeral Mode Event Monitor
 
     private func installSwitcherEventMonitor() {
         switcherEventMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.keyDown, .flagsChanged]
+            matching: [.keyDown, .flagsChanged, .leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self] event in
             guard let self = self else { return event }
+
+            let mods = self.normalizedSwitcherModifiers(from: event)
+
+            if self.model.jumpMode != nil {
+                switch event.type {
+                case .keyDown:
+                    let character = event.charactersIgnoringModifiers?.lowercased().first
+                    let action = classifyJumpInput(
+                        kind: .keyDown(keyCode: event.keyCode, character: character),
+                        modifiers: mods,
+                        jumpActive: true
+                    )
+                    switch action {
+                    case .passthrough:
+                        return event
+                    case .activate:
+                        return nil
+                    case .commit(let char):
+                        self.send(.jumpModeKeyPressed(char: char))
+                        return nil
+                    case .cancel:
+                        self.send(.jumpModeCanceled)
+                        return nil
+                    }
+
+                case .flagsChanged:
+                    _ = classifyJumpInput(
+                        kind: .flagsChanged,
+                        modifiers: mods,
+                        jumpActive: true
+                    )
+                    return event
+
+                case .leftMouseDown, .rightMouseDown, .otherMouseDown:
+                    let action = classifyJumpInput(
+                        kind: .mouseDown,
+                        modifiers: mods,
+                        jumpActive: true
+                    )
+                    if case .cancel = action {
+                        return self.handleJumpModeMouseDown(event)
+                    }
+                    return event
+
+                default:
+                    return event
+                }
+            }
+
+            if event.type == .keyDown {
+                let character = event.charactersIgnoringModifiers?.lowercased().first
+                let jumpAction = classifyJumpInput(
+                    kind: .keyDown(keyCode: event.keyCode, character: character),
+                    modifiers: mods,
+                    jumpActive: false
+                )
+                if case .activate = jumpAction {
+                    self.enterJumpMode()
+                    return nil
+                }
+            }
+
+            guard event.type == .keyDown || event.type == .flagsChanged else { return event }
 
             let kind: SwitcherInputKind = (event.type == .keyDown)
                 ? .keyDown(keyCode: event.keyCode)
                 : .flagsChanged
-            var mods: SwitcherModifiers = []
-            let raw = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            if raw.contains(.command) { mods.insert(.command) }
-            if raw.contains(.shift)   { mods.insert(.shift) }
-            if raw.contains(.option)  { mods.insert(.option) }
-            if raw.contains(.control) { mods.insert(.control) }
 
             let action = classifySwitcherInput(
                 kind: kind,
@@ -105,6 +162,37 @@ class AppRuntime {
             case .commit:      self.send(.mruCycleCommitted);                   return nil
             }
         }
+    }
+
+    private func normalizedSwitcherModifiers(from event: NSEvent) -> SwitcherModifiers {
+        var mods: SwitcherModifiers = []
+        let raw = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if raw.contains(.command) { mods.insert(.command) }
+        if raw.contains(.shift)   { mods.insert(.shift) }
+        if raw.contains(.option)  { mods.insert(.option) }
+        if raw.contains(.control) { mods.insert(.control) }
+        return mods
+    }
+
+    private func screenPoint(for event: NSEvent) -> NSPoint {
+        if let window = event.window ?? self.window {
+            let screenRect = window.convertToScreen(NSRect(origin: event.locationInWindow, size: .zero))
+            return screenRect.origin
+        }
+        return NSEvent.mouseLocation
+    }
+
+    private func handleJumpModeMouseDown(_ event: NSEvent) -> NSEvent? {
+        // Mouse clicks always cancel jump mode but continue to the original
+        // target; SidebarView owns the hit-test details for sidebar clicks.
+        _ = sidebarView?.containsScreenPoint(screenPoint(for: event)) ?? false
+        send(.jumpModeCanceled)
+        return event
+    }
+
+    func enterJumpMode() {
+        let visibleTabs = sidebarView?.visibleTabIdsInRowOrder() ?? []
+        send(.jumpModeActivated(visibleTabs: visibleTabs))
     }
 
     func send(_ msg: Msg) {

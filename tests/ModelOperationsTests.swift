@@ -941,6 +941,32 @@ func modelOperationsTests() {
         model.groups[0].tabs[1].color = .red
         try expect(resolveColorForBatch(tabIds: [id1, id2], requested: nil, in: model) == nil)
     }
+
+    // MARK: - Tab Jump Mode
+
+    test("assignJumpKeys empty visible tab list returns empty map") {
+        let keyMap: [TabId: Character] = assignJumpKeys(visibleTabs: [])
+        try expectEqual(keyMap, [:])
+    }
+
+    test("assignJumpKeys assigns documented sequence in visible order") {
+        let ids = (0..<10).map { _ in TabId() }
+        let keyMap = assignJumpKeys(visibleTabs: ids)
+        let expected = Array("asdfghjkl;")
+        try expectEqual(keyMap.count, ids.count)
+        for (index, id) in ids.enumerated() {
+            try expectEqual(keyMap[id], expected[index])
+        }
+    }
+
+    test("assignJumpKeys caps mapping at jump key sequence count") {
+        let ids = (0..<(jumpModeKeySequence.count + 3)).map { _ in TabId() }
+        let keyMap = assignJumpKeys(visibleTabs: ids)
+        try expectEqual(keyMap.count, jumpModeKeySequence.count)
+        try expect(keyMap[ids[jumpModeKeySequence.count - 1]] != nil)
+        try expect(keyMap[ids[jumpModeKeySequence.count]] == nil)
+        try expect(keyMap[ids[jumpModeKeySequence.count + 2]] == nil)
+    }
 }
 
 /// Build a model with N tabs in one group; returns the tab ids in display order.

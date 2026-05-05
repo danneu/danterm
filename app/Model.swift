@@ -150,6 +150,13 @@ struct MruCycleState: Equatable {
     var cursorIndex: Int  // 0 = current tab, 1 = previous, etc.
 }
 
+// Tab jump mode state. Ephemeral -- never serialized into AppModelSnapshot.
+// The key map is frozen at activation so the displayed badges match the next
+// accepted keystroke even if sidebar rows refresh in place.
+struct JumpModeState: Equatable {
+    let keyMap: [TabId: Character]
+}
+
 struct AppModel: Equatable {
     var groups: [GroupModel]
     var panes: [PaneId: PaneModel]
@@ -164,6 +171,7 @@ struct AppModel: Equatable {
     var todoPopoverPaneId: PaneId? = nil  // ephemeral — which pane's TODO popover is open
     var mruOrder: [TabId] = []  // ephemeral — most-recently-used tab ordering
     var mruCycle: MruCycleState? = nil  // ephemeral — non-nil while cmd-shift held
+    var jumpMode: JumpModeState? = nil  // ephemeral — non-nil while tab jump mode is active
 }
 
 // MARK: - Session Lock

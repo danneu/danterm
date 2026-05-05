@@ -134,6 +134,11 @@ enum Msg {
     case mruCycleCommitted                          // hold path: released cmd or shift
     case mruCycleCanceled                           // pressed Esc while cycling
     case mruCycleOneShot(direction: MruDirection)  // menu fallback: step + commit atomically
+
+    // Tab jump mode
+    case jumpModeActivated(visibleTabs: [TabId])
+    case jumpModeKeyPressed(char: Character)
+    case jumpModeCanceled
 }
 
 /// Which entity was being renamed (used by renameCompletionMessages).
