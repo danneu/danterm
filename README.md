@@ -4,7 +4,7 @@ A macOS terminal built on ghostty with the behavior I want.
 
 ![DanTerm screenshot](docs/screenshot/screenshot1.png)
 
-_Built-in theme picker sidebar (Cmd+Shift+T):_
+_Built-in theme picker sidebar (Cmd+Shift+Y):_
 
 ![DanTerm theme picker](docs/screenshot/screenshot2.png)
 
@@ -295,6 +295,7 @@ bash ~/world/scripts/tests/danterm-integration_test.sh
 | Action                         | Shortcut |
 | ------------------------------ | -------- |
 | New Tab                        | ⌘T       |
+| New Tab at End of Group        | ⇧⌘T      |
 | Next Tab                       | ⇧⌘N      |
 | Previous Tab                   | ⇧⌘P      |
 | Close Pane                     | ⌘W       |
@@ -306,6 +307,7 @@ bash ~/world/scripts/tests/danterm-integration_test.sh
 | Focus Pane Up                  | ⇧⌘K      |
 | Focus Pane Right               | ⇧⌘L      |
 | Toggle Pane Zoom               | ⌘Enter   |
+| Toggle Theme Panel             | ⇧⌘Y      |
 | New Group                      | ⌘N       |
 | Go to Most Recent Unread Alert | ⇧⌘A      |
 | Clear Tab Alerts               | ⌘.       |

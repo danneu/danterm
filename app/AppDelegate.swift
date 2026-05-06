@@ -244,7 +244,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         // View menu
         let viewMenuItem = NSMenuItem()
         let viewMenu = NSMenu(title: "View")
-        let toggleThemeItem = NSMenuItem(title: "Toggle Theme Panel", action: #selector(toggleThemePanel(_:)), keyEquivalent: "T")
+        // Theme panel sits on Cmd-Shift-Y (Y is one key right of T) since
+        // Cmd-Shift-T is now reserved for "New Tab at End of Group".
+        let toggleThemeItem = NSMenuItem(title: "Toggle Theme Panel", action: #selector(toggleThemePanel(_:)), keyEquivalent: "Y")
         toggleThemeItem.keyEquivalentModifierMask = [.command, .shift]
         viewMenu.addItem(toggleThemeItem)
         viewMenuItem.submenu = viewMenu
@@ -254,6 +256,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         let tabMenuItem = NSMenuItem()
         let tabMenu = NSMenu(title: "Tab")
         tabMenu.addItem(withTitle: "New Tab", action: #selector(newTab(_:)), keyEquivalent: "t")
+        // Cmd-Shift-T appends to the current group, ignoring which tab is selected.
+        let newTabAtEndItem = NSMenuItem(title: "New Tab at End of Group", action: #selector(newTabAtGroupEnd(_:)), keyEquivalent: "T")
+        newTabAtEndItem.keyEquivalentModifierMask = [.command, .shift]
+        tabMenu.addItem(newTabAtEndItem)
         tabMenu.addItem(withTitle: "New Group", action: #selector(newGroup(_:)), keyEquivalent: "n")
 
         let renameTabItem = NSMenuItem(title: "Rename Tab", action: #selector(renameTab(_:)), keyEquivalent: "R")
@@ -371,6 +377,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
     @objc func newTab(_ sender: Any?) {
         runtime.send(.createTab(inGroupId: nil))
+    }
+
+    @objc func newTabAtGroupEnd(_ sender: Any?) {
+        runtime.send(.createTab(inGroupId: nil, position: .atGroupEnd))
     }
 
     @objc func newGroup(_ sender: Any?) {

@@ -20,9 +20,17 @@ enum MruDirection {
     case newer  // step toward more-recently-used (retreat cursorIndex)
 }
 
+// Where a newly-created tab lands within its target group.
+// `afterSelected` keeps the new tab next to the current one (Cmd-T).
+// `atGroupEnd` always appends, regardless of selection (Cmd-Shift-T).
+enum TabInsertPosition {
+    case afterSelected
+    case atGroupEnd
+}
+
 enum Msg {
     // User actions
-    case createTab(inGroupId: GroupId?)
+    case createTab(inGroupId: GroupId?, position: TabInsertPosition = .afterSelected)
     case selectTab(id: TabId)
     case requestCloseTab(id: TabId)
     case splitPane(paneId: PaneId? = nil, direction: SplitNodeModel.Direction)

@@ -137,6 +137,52 @@ func tabTests() {
         try expectEqual(model.groups[0].tabs[3].id, tabCId, "tab C should shift right")
     }
 
+    test("testCreateTabAtGroupEndAppendsRegardlessOfSelection") {
+        var model = makeModel()
+        createTab(&model) // tab A
+        createTab(&model) // tab B
+        createTab(&model) // tab C
+        let tabAId = model.groups[0].tabs[0].id
+        let tabBId = model.groups[0].tabs[1].id
+        let tabCId = model.groups[0].tabs[2].id
+
+        // Select the middle tab — atGroupEnd must still append, not insert after B.
+        update(&model, .selectTab(id: tabBId))
+        update(&model, .createTab(inGroupId: nil, position: .atGroupEnd))
+        let tabDId = model.groups[0].tabs[3].id
+
+        try expectEqual(model.groups[0].tabs.count, 4)
+        try expectEqual(model.groups[0].tabs[0].id, tabAId, "tab A stays first")
+        try expectEqual(model.groups[0].tabs[1].id, tabBId, "tab B keeps its slot")
+        try expectEqual(model.groups[0].tabs[2].id, tabCId, "tab C keeps its slot")
+        try expectEqual(model.groups[0].tabs[3].id, tabDId, "new tab lands at end")
+        try expectEqual(model.selectedTabId, tabDId, "newly created tab is selected")
+    }
+
+    test("testCreateTabAtGroupEndUsesSelectedTabsGroupWhenNoneSpecified") {
+        var model = makeModel()
+        // makeModel() leaves the default "General" group empty.
+        // createGroup auto-creates a tab in the new group, so Work begins
+        // with one tab; add two more so we can pick a non-tail selection.
+        update(&model, .createGroup(name: "Work"))
+        let workGroupId = model.groups[1].id
+        update(&model, .createTab(inGroupId: workGroupId))
+        update(&model, .createTab(inGroupId: workGroupId))
+        let workTab1 = model.groups[1].tabs[0].id
+        let workTab2 = model.groups[1].tabs[1].id
+
+        // Select the middle Work tab. atGroupEnd with inGroupId: nil should
+        // resolve to "the selected tab's group" and append there.
+        update(&model, .selectTab(id: workTab2))
+        update(&model, .createTab(inGroupId: nil, position: .atGroupEnd))
+
+        try expectEqual(model.groups[0].tabs.count, 0, "default group untouched")
+        try expectEqual(model.groups[1].tabs.count, 4, "work group grows by one")
+        try expectEqual(model.groups[1].tabs[0].id, workTab1, "first work tab unchanged")
+        try expectEqual(model.groups[1].tabs[1].id, workTab2, "selected work tab unchanged")
+        try expectEqual(model.groups[1].tabs.last?.id, model.selectedTabId, "new tab is last and selected")
+    }
+
     test("testSelectTabAlreadySelected") {
         var model = makeModel()
         createTab(&model)
