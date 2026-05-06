@@ -27,6 +27,7 @@ class AppRuntime {
     private var todoPopoverDelegate: TodoPopoverDelegateAdapter?
     private var themeBrowserView: ThemeBrowserView?
     private var preferencesPanel: PreferencesPanel?
+    private var quitConfirmationPanel: QuitConfirmationPanel?
     private var switcherPanel: SwitcherPanel?
     private var switcherEventMonitor: Any?
     private var dragCoordinator: PaneDragCoordinator?
@@ -203,6 +204,9 @@ class AppRuntime {
         for effect in effects {
             perform(effect)
         }
+        if model.pendingConfirmation == .terminate {
+            quitConfirmationPanel?.configure(paneCount: model.panes.count)
+        }
         let newUnreadCount = totalUnreadAlertCount(model: model)
         if newUnreadCount != oldUnreadCount {
             perform(.updateDockBadge(newUnreadCount))
@@ -363,29 +367,12 @@ class AppRuntime {
             }
 
         case .showTerminateConfirmation(let paneCount):
-            let alert = NSAlert()
-            alert.messageText = "Quit DanTerm?"
-            let sessions = paneCount == 1 ? "1 terminal session" : "\(paneCount) terminal sessions"
-            alert.informativeText = "This will close \(sessions)."
-            alert.addButton(withTitle: "Quit")
-            alert.addButton(withTitle: "Cancel")
-            alert.alertStyle = .warning
-            if let window = window {
-                alert.beginSheetModal(for: window) { [weak self] response in
-                    if response == .alertFirstButtonReturn {
-                        self?.send(.confirmTerminate)
-                    } else {
-                        self?.send(.cancelTerminate)
-                    }
-                }
-            } else {
-                let response = alert.runModal()
-                if response == .alertFirstButtonReturn {
-                    self.send(.confirmTerminate)
-                } else {
-                    self.send(.cancelTerminate)
-                }
+            if quitConfirmationPanel == nil {
+                quitConfirmationPanel = QuitConfirmationPanel(runtime: self)
             }
+            quitConfirmationPanel?.configure(paneCount: paneCount)
+            quitConfirmationPanel?.center(on: window)
+            quitConfirmationPanel?.makeKeyAndOrderFront(nil)
 
         case .applyPaneTheme(let paneId):
             applyPaneConfig(paneId: paneId)
@@ -991,6 +978,8 @@ class AppRuntime {
         model.todoPopoverPaneId = nil
         preferencesPanel?.close()
         preferencesPanel = nil
+        quitConfirmationPanel?.orderOut(nil)
+        quitConfirmationPanel = nil
 
         for paneId in Array(surfaces.keys) {
             cleanupReplayFile(for: paneId)
