@@ -244,9 +244,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         // View menu
         let viewMenuItem = NSMenuItem()
         let viewMenu = NSMenu(title: "View")
-        // Theme panel sits on Cmd-Shift-Y (Y is one key right of T) since
-        // Cmd-Shift-T is now reserved for "New Tab at End of Group".
-        let toggleThemeItem = NSMenuItem(title: "Toggle Theme Panel", action: #selector(toggleThemePanel(_:)), keyEquivalent: "Y")
+        // Theme browser sits on Cmd-Shift-B so the shortcut matches the menu noun.
+        // Cmd-Shift-T is reserved for "New Tab at End of Group".
+        let toggleThemeItem = NSMenuItem(title: "Toggle Theme Browser", action: #selector(toggleThemeBrowser(_:)), keyEquivalent: "B")
         toggleThemeItem.keyEquivalentModifierMask = [.command, .shift]
         viewMenu.addItem(toggleThemeItem)
         viewMenuItem.submenu = viewMenu
@@ -524,7 +524,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         runtime.send(.startSearch)
     }
 
-    @objc func toggleThemePanel(_ sender: Any?) {
+    @objc func toggleThemeBrowser(_ sender: Any?) {
         runtime.toggleThemeBrowser()
     }
 

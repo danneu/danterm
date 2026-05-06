@@ -10,15 +10,14 @@ parked at the tail of the list rather than wedged between two existing
 ones.
 
 The desired binding is `Cmd-Shift-T`, which today is bound to "Toggle Theme
-Panel" (`app/AppDelegate.swift:247-249`). That binding needs to move.
+Browser" (`app/AppDelegate.swift:247-249`). That binding needs to move.
 
-**Recommended replacement: `Cmd-Shift-Y`.** Reasoning:
+**Recommended replacement: `Cmd-Shift-B`.** Reasoning:
 
 - Free (not used anywhere in the app, no macOS system conflict).
-- One key to the right of `T` on QWERTY -- muscle memory transfers
-  immediately for users who already know the old chord.
-- Runner-up if you'd rather have a mnemonic: `Cmd-Shift-B` ("Browse
-  Themes"). One-line swap if you prefer it.
+- Mnemonic: `B` maps to "Browser", matching the menu title.
+- No released habit exists for the old `Cmd-Shift-T` theme binding, so
+  mnemonic value beats migration ergonomics.
 
 ## Approach
 
@@ -100,10 +99,16 @@ b. **Action handler (next to `newTab`, around line 372):**
 }
 ```
 
-c. **View menu (line 247):** change the "Toggle Theme Panel" key from
-`"T"` to `"Y"`. Modifier mask stays `[.command, .shift]`.
+c. **View menu (line 247):** rename "Toggle Theme Panel" to "Toggle Theme
+Browser" and change its key from `"T"` to `"B"`. Modifier mask stays
+`[.command, .shift]`.
 
-### 4. `tests/UpdateTabTests.swift`
+### 4. `README.md`
+
+Update the theme screenshot caption and shortcut table to use "Theme
+Browser" and `Cmd-Shift-B`.
+
+### 5. `tests/UpdateTabTests.swift`
 
 Two new tests in the same style as `testCreateTabInsertsAfterCurrentTab`:
 
@@ -154,7 +159,7 @@ call sites:
      selected and next (unchanged behavior).
    - Click the middle tab again. Press `Cmd-Shift-T` -> new tab appears
      at the **end** of the group, and is selected.
-   - Press `Cmd-Shift-Y` -> theme panel toggles open / closed.
+   - Press `Cmd-Shift-B` -> theme browser toggles open / closed.
    - Create a second group via `Cmd-N`, switch into it, press
      `Cmd-Shift-T` -> new tab appended to that group, not the first.
 
@@ -162,5 +167,6 @@ call sites:
 
 - `app/Msg.swift` -- add `TabInsertPosition`, extend `createTab` case
 - `app/Update.swift` -- branch on `position` in `.createTab` handler
-- `app/AppDelegate.swift` -- add menu item + action, move theme-panel key
+- `app/AppDelegate.swift` -- add menu item + action, move theme-browser key
+- `README.md` -- document the theme browser shortcut
 - `tests/UpdateTabTests.swift` -- two new tests
