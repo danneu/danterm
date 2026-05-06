@@ -419,6 +419,35 @@ func wouldQuitFromClose(_ model: AppModel) -> Bool {
   totalTabCount(model) == 1
 }
 
+// Single chokepoint for asking the user before quitting. Returns no effects
+// when any confirmation sheet is already in flight.
+func emitTerminateConfirmation(_ model: inout AppModel) -> [Effect] {
+  guard model.pendingConfirmation == nil else { return [] }
+  model.pendingConfirmation = .terminate
+  return [.showTerminateConfirmation(paneCount: model.panes.count)]
+}
+
+// Single chokepoint for asking before closing a multi-pane tab. It guards the
+// same slot as quit confirmation so close-tab and quit sheets cannot stack.
+func emitCloseTabConfirmation(
+  _ model: inout AppModel, tabId: TabId, tabTitle: String, paneCount: Int, isLastTab: Bool
+) -> [Effect] {
+  guard model.pendingConfirmation == nil else { return [] }
+  model.pendingConfirmation = .closeTab
+  return [.showCloseTabConfirmation(
+    tabId: tabId,
+    tabTitle: tabTitle,
+    paneCount: paneCount,
+    isLastTab: isLastTab
+  )]
+}
+
+// Converts the AppKit close-tab alert response into an explicit Msg so both
+// confirm and cancel paths can clear pending confirmation state.
+func closeTabConfirmationResponse(isConfirm: Bool, tabId: TabId) -> Msg {
+  isConfirm ? .confirmCloseTab(id: tabId) : .cancelCloseTab
+}
+
 // MARK: - Restore
 
 struct ValidatedAppRestore {

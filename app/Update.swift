@@ -88,7 +88,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
         if paneCount > 1 {
             let isLastTab = totalTabCount(model) == 1
-            return [.showCloseTabConfirmation(tabId: id, tabTitle: tab.displayTitle, paneCount: paneCount, isLastTab: isLastTab)]
+            return emitCloseTabConfirmation(
+                &model, tabId: id, tabTitle: tab.displayTitle,
+                paneCount: paneCount, isLastTab: isLastTab
+            )
         }
 
         return update(&model, .closeTab(id: id))
@@ -97,7 +100,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         guard let (groupIdx, tabIdx) = tabLocation(id, in: model) else { return [] }
 
         if wouldQuitFromClose(model) {
-            return [.showTerminateConfirmation(paneCount: model.panes.count)]
+            return emitTerminateConfirmation(&model)
         }
 
         let tab = model.groups[groupIdx].tabs[tabIdx]
@@ -183,7 +186,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let (newTree, nextFocus) = removeLeaf(tab.rootNode, paneId: paneId)
 
         if newTree == nil && wouldQuitFromClose(model) {
-            return [.showTerminateConfirmation(paneCount: model.panes.count)]
+            return emitTerminateConfirmation(&model)
         }
 
         var effects: [Effect] = [.destroySurface(paneId: paneId)]
@@ -841,7 +844,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return effects
 
     case .requestQuit:
-        return [.showTerminateConfirmation(paneCount: model.panes.count)]
+        return emitTerminateConfirmation(&model)
 
     // MARK: - Alerts
 
@@ -912,9 +915,19 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return [.rebuildContentView, .reloadSidebar]
 
     case .confirmTerminate:
+        model.pendingConfirmation = nil
         return [.terminate]
 
     case .cancelTerminate:
+        model.pendingConfirmation = nil
+        return []
+
+    case .confirmCloseTab(let id):
+        model.pendingConfirmation = nil
+        return update(&model, .closeTab(id: id))
+
+    case .cancelCloseTab:
+        model.pendingConfirmation = nil
         return []
 
     case .terminate:
@@ -934,7 +947,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
         let group = model.groups[idx]
         if !moveTabs && !group.tabs.isEmpty && totalTabCount(model) == group.tabs.count {
-            return [.showTerminateConfirmation(paneCount: model.panes.count)]
+            return emitTerminateConfirmation(&model)
         }
         if moveTabs {
             guard let adjIdx = adjacentGroupIndex(deletingAt: idx, count: model.groups.count) else { return [] }

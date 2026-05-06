@@ -157,6 +157,14 @@ struct JumpModeState: Equatable {
     let keyMap: [TabId: Character]
 }
 
+// Ephemeral -- never serialized into AppModelSnapshot. Non-nil while a
+// confirmation sheet is in flight. Quit and close-tab confirmations share this
+// single slot so neither kind can stack a sheet on top of the other.
+enum PendingConfirmation: Equatable {
+    case terminate
+    case closeTab
+}
+
 struct AppModel: Equatable {
     var groups: [GroupModel]
     var panes: [PaneId: PaneModel]
@@ -172,6 +180,7 @@ struct AppModel: Equatable {
     var mruOrder: [TabId] = []  // ephemeral — most-recently-used tab ordering
     var mruCycle: MruCycleState? = nil  // ephemeral — non-nil while cmd-shift held
     var jumpMode: JumpModeState? = nil  // ephemeral — non-nil while tab jump mode is active
+    var pendingConfirmation: PendingConfirmation? = nil  // ephemeral -- non-nil while a confirmation sheet is active
 }
 
 // MARK: - Session Lock

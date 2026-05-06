@@ -85,6 +85,7 @@ func tabTests() {
             if case .showTerminateConfirmation(let count) = $0, count == 1 { return true }
             return false
         }, "should show confirmation when closing last pane")
+        try expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
         try expectEqual(model.groups[0].tabs.count, 1, "model should be unchanged")
         try expect(model.panes[paneId] != nil, "pane should still exist")
     }
@@ -100,6 +101,7 @@ func tabTests() {
             if case .showTerminateConfirmation(let count) = $0, count == 1 { return true }
             return false
         }, "should show confirmation when closing last tab")
+        try expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
         try expectEqual(model.groups[0].tabs.count, 1, "model should be unchanged")
     }
 
@@ -336,6 +338,118 @@ func tabTests() {
             }
             return false
         }, "should show confirmation with correct args")
+        try expect(model.pendingConfirmation == .closeTab, "close-tab confirmation should be pending")
+    }
+
+    test("testRequestCloseTabMultiPaneSetsPending") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .selectTab(id: firstTabId))
+        update(&model, .splitPane(direction: .horizontal))
+
+        let effects = update(&model, .requestCloseTab(id: firstTabId))
+
+        try expectEqual(effects.count, 1)
+        if case .showCloseTabConfirmation = effects[0] {
+            // good
+        } else {
+            throw TestFailure(message: "expected showCloseTabConfirmation")
+        }
+        try expect(model.pendingConfirmation == .closeTab, "close-tab confirmation should be pending")
+    }
+
+    test("testRequestCloseTabWhileCloseTabPendingIsNoOp") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .selectTab(id: firstTabId))
+        update(&model, .splitPane(direction: .horizontal))
+        model.pendingConfirmation = .closeTab
+
+        let effects = update(&model, .requestCloseTab(id: firstTabId))
+
+        try expectEqual(effects.count, 0, "requestCloseTab should be blocked by pending close-tab confirmation")
+    }
+
+    test("testRequestCloseTabWhileQuitPendingIsNoOp") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .selectTab(id: firstTabId))
+        update(&model, .splitPane(direction: .horizontal))
+        model.pendingConfirmation = .terminate
+
+        let effects = update(&model, .requestCloseTab(id: firstTabId))
+
+        try expectEqual(effects.count, 0, "requestCloseTab should be blocked by pending quit confirmation")
+        try expect(!hasEffect(effects) {
+            if case .showCloseTabConfirmation = $0 { return true }
+            return false
+        }, "should not emit close-tab confirmation")
+    }
+
+    test("testConfirmCloseTabClearsPendingAndDispatches") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .selectTab(id: firstTabId))
+        update(&model, .splitPane(direction: .horizontal))
+        let paneIds = paneIdsForTab(firstTabId, in: model)
+        model.pendingConfirmation = .closeTab
+
+        let effects = update(&model, .confirmCloseTab(id: firstTabId))
+
+        try expect(model.pendingConfirmation == nil, "confirm should clear pending confirmation")
+        try expect(!model.groups[0].tabs.contains { $0.id == firstTabId }, "tab should be removed")
+        for paneId in paneIds {
+            try expect(hasEffect(effects) {
+                if case .destroySurface(let pid) = $0, pid == paneId { return true }
+                return false
+            }, "should destroy each pane in the tab")
+        }
+    }
+
+    test("testConfirmCloseTabLastMultiPaneRoutesToTerminate") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        update(&model, .splitPane(direction: .horizontal))
+        let paneIds = paneIdsForTab(tabId, in: model)
+        model.pendingConfirmation = .closeTab
+
+        let effects = update(&model, .confirmCloseTab(id: tabId))
+
+        try expectEqual(effects.count, 1)
+        if case .showTerminateConfirmation = effects[0] {
+            // good
+        } else {
+            throw TestFailure(message: "expected showTerminateConfirmation")
+        }
+        for paneId in paneIds {
+            try expect(!hasEffect(effects) {
+                if case .destroySurface(let pid) = $0, pid == paneId { return true }
+                return false
+            }, "should not destroy panes before quit confirmation")
+            try expect(model.panes[paneId] != nil, "pane should still exist")
+        }
+        try expect(model.groups[0].tabs.contains { $0.id == tabId }, "tab should still exist")
+        try expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
+    }
+
+    test("testCancelCloseTabClearsPending") {
+        var model = makeModel()
+        createTab(&model)
+        model.pendingConfirmation = .closeTab
+
+        let effects = update(&model, .cancelCloseTab)
+
+        try expectEqual(effects.count, 0, "cancel should produce no effects")
+        try expect(model.pendingConfirmation == nil, "cancel should clear pending confirmation")
     }
 
     test("testRequestCloseTabSinglePaneLastTabShowsTerminateConfirmation") {
@@ -349,6 +463,7 @@ func tabTests() {
             if case .showTerminateConfirmation(let count) = $0, count == 1 { return true }
             return false
         }, "should show terminate confirmation for last single-pane tab")
+        try expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
     }
 
     // MARK: - Tab Color

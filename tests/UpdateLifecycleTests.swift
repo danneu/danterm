@@ -148,6 +148,7 @@ func lifecycleTests() {
             if case .showTerminateConfirmation(let count) = $0, count == 1 { return true }
             return false
         }, "should show confirmation with pane count 1")
+        try expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
     }
 
     test("testRequestQuitWithMultiplePanes") {
@@ -161,6 +162,79 @@ func lifecycleTests() {
             if case .showTerminateConfirmation(let count) = $0, count == 3 { return true }
             return false
         }, "should show confirmation with correct pane count")
+        try expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
+    }
+
+    test("testRequestQuitSetsPending") {
+        var model = makeModel()
+        createTab(&model)
+
+        let effects = update(&model, .requestQuit)
+
+        try expectEqual(effects.count, 1)
+        if case .showTerminateConfirmation = effects[0] {
+            // good
+        } else {
+            throw TestFailure(message: "expected showTerminateConfirmation")
+        }
+        try expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
+    }
+
+    test("testRequestQuitWhileQuitPendingIsNoOp") {
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .requestQuit)
+
+        let effects = update(&model, .requestQuit)
+
+        try expectEqual(effects.count, 0, "second requestQuit should not emit another confirmation")
+    }
+
+    test("testCloseTabLastTabWhileQuitPendingIsNoOp") {
+        var model = makeModel()
+        createTab(&model)
+        let originalGroups = model.groups
+        let originalPanes = model.panes
+        let tabId = model.groups[0].tabs[0].id
+        model.pendingConfirmation = .terminate
+
+        let effects = update(&model, .closeTab(id: tabId))
+
+        try expectEqual(effects.count, 0, "closeTab should be blocked by pending quit confirmation")
+        try expectEqual(model.groups, originalGroups, "groups should be unchanged")
+        try expectEqual(model.panes, originalPanes, "panes should be unchanged")
+    }
+
+    test("testClosePaneLastPaneWhileQuitPendingIsNoOp") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let originalPanes = model.panes
+        model.pendingConfirmation = .terminate
+
+        let effects = update(&model, .closePane(paneId: paneId))
+
+        try expectEqual(effects.count, 0, "closePane should be blocked by pending quit confirmation")
+        try expect(!hasEffect(effects) {
+            if case .destroySurface = $0 { return true }
+            return false
+        }, "should not destroy a surface while confirmation is pending")
+        try expectEqual(model.panes, originalPanes, "panes should be unchanged")
+    }
+
+    test("testDeleteGroupLastGroupTabsWhileQuitPendingIsNoOp") {
+        var model = makeModel()
+        createTab(&model)
+        let tabsGroupId = model.groups[0].id
+        let emptyGroupId = GroupId()
+        model.groups.append(GroupModel(id: emptyGroupId, name: "Empty"))
+        model.pendingConfirmation = .terminate
+
+        let effects = update(&model, .deleteGroup(id: tabsGroupId, moveTabs: false))
+
+        try expectEqual(effects.count, 0, "deleteGroup should be blocked by pending quit confirmation")
+        try expect(model.groups.contains { $0.id == tabsGroupId }, "tabs group should remain")
+        try expect(model.groups.contains { $0.id == emptyGroupId }, "empty group should remain")
     }
 
     test("testConfirmTerminateAlwaysTerminates") {
@@ -175,10 +249,89 @@ func lifecycleTests() {
         }, "should unconditionally terminate after confirmation")
     }
 
+    test("testConfirmTerminateClearsPending") {
+        var model = makeModel()
+        createTab(&model)
+        model.pendingConfirmation = .terminate
+
+        let effects = update(&model, .confirmTerminate)
+
+        try expectEqual(effects.count, 1)
+        if case .terminate = effects[0] {
+            // good
+        } else {
+            throw TestFailure(message: "expected terminate effect")
+        }
+        try expect(model.pendingConfirmation == nil, "confirm should clear pending confirmation")
+    }
+
     test("testCancelTerminate") {
         var model = makeModel()
         createTab(&model)
         let effects = update(&model, .cancelTerminate)
         try expectEqual(effects.count, 0, "cancel should produce no effects")
+    }
+
+    test("testCancelTerminateClearsPending") {
+        var model = makeModel()
+        createTab(&model)
+        model.pendingConfirmation = .terminate
+
+        let effects = update(&model, .cancelTerminate)
+
+        try expectEqual(effects.count, 0, "cancel should produce no effects")
+        try expect(model.pendingConfirmation == nil, "cancel should clear pending confirmation")
+    }
+
+    test("testRequestQuitAgainAfterCancel") {
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .requestQuit)
+        _ = update(&model, .cancelTerminate)
+
+        let effects = update(&model, .requestQuit)
+
+        try expectEqual(effects.count, 1)
+        if case .showTerminateConfirmation = effects[0] {
+            // good
+        } else {
+            throw TestFailure(message: "expected showTerminateConfirmation")
+        }
+    }
+
+    test("testRequestQuitWhileCloseTabPendingIsNoOp") {
+        var model = makeModel()
+        createTab(&model)
+        model.pendingConfirmation = .closeTab
+
+        let effects = update(&model, .requestQuit)
+
+        try expectEqual(effects.count, 0, "requestQuit should be blocked by pending close-tab confirmation")
+        try expect(!hasEffect(effects) {
+            if case .showTerminateConfirmation = $0 { return true }
+            return false
+        }, "should not emit terminate confirmation")
+    }
+
+    test("testCloseTabConfirmationResponseConfirm") {
+        let tabId = TabId()
+
+        let msg = closeTabConfirmationResponse(isConfirm: true, tabId: tabId)
+
+        if case .confirmCloseTab(let returnedId) = msg {
+            try expectEqual(returnedId, tabId, "confirm should carry the tab id")
+        } else {
+            throw TestFailure(message: "expected confirmCloseTab")
+        }
+    }
+
+    test("testCloseTabConfirmationResponseCancel") {
+        let msg = closeTabConfirmationResponse(isConfirm: false, tabId: TabId())
+
+        if case .cancelCloseTab = msg {
+            // good
+        } else {
+            throw TestFailure(message: "expected cancelCloseTab")
+        }
     }
 }

@@ -353,15 +353,13 @@ class AppRuntime {
             alert.addButton(withTitle: "Cancel")
             if let window = window {
                 alert.beginSheetModal(for: window) { [weak self] response in
-                    if response == .alertFirstButtonReturn {
-                        self?.send(.closeTab(id: tabId))
-                    }
+                    let isConfirm = response == .alertFirstButtonReturn
+                    self?.send(closeTabConfirmationResponse(isConfirm: isConfirm, tabId: tabId))
                 }
             } else {
                 let response = alert.runModal()
-                if response == .alertFirstButtonReturn {
-                    self.send(.closeTab(id: tabId))
-                }
+                let isConfirm = response == .alertFirstButtonReturn
+                self.send(closeTabConfirmationResponse(isConfirm: isConfirm, tabId: tabId))
             }
 
         case .showTerminateConfirmation(let paneCount):

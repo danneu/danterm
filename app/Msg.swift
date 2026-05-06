@@ -50,6 +50,8 @@ enum Msg {
 
     // Internal (confirmed close — do not send from UI directly)
     case closeTab(id: TabId)
+    case confirmCloseTab(id: TabId)
+    case cancelCloseTab
 
     // Command tracking
     case commandStarted(paneId: PaneId, command: String)
