@@ -1221,17 +1221,17 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let label = NSTextField(labelWithString: "")
         label.identifier = identifier
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .monospacedSystemFont(ofSize: 10, weight: .semibold)
+        label.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
         label.textColor = .alternateSelectedControlTextColor
         label.alignment = .center
         label.wantsLayer = true
         label.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
-        label.layer?.cornerRadius = 4
+        label.layer?.cornerRadius = 5
         label.layer?.masksToBounds = true
         label.setContentCompressionResistancePriority(.required, for: .horizontal)
         NSLayoutConstraint.activate([
-            label.widthAnchor.constraint(greaterThanOrEqualToConstant: 18),
-            label.heightAnchor.constraint(equalToConstant: 16),
+            label.widthAnchor.constraint(greaterThanOrEqualToConstant: 22),
+            label.heightAnchor.constraint(equalToConstant: 20),
         ])
         return label
     }
