@@ -1,5 +1,6 @@
 // Message definitions for DanTerm's unidirectional update loop.
 import Foundation
+import DanTermProtocol
 
 enum TabDirection {
     case prev
@@ -55,6 +56,9 @@ enum Msg {
     case setPaneTheme(paneId: PaneId, themeName: String?)
     case renameTab(id: TabId, name: String?)
     case sidebarRenameEnded
+
+    // IPC
+    case ipcRequest(reqId: UUID, method: String, params: JSONValue, context: IpcRequestContext)
 
     // Internal (confirmed close — do not send from UI directly)
     case closeTab(id: TabId)
@@ -133,6 +137,7 @@ enum Msg {
     case todoPopoverClosed(paneId: PaneId)
     case addTodo(paneId: PaneId, text: String)
     case toggleTodoDone(paneId: PaneId, todoId: UUID)
+    case setTodoDone(paneId: PaneId, todoId: UUID, isDone: Bool)
     case editTodoText(paneId: PaneId, todoId: UUID, text: String)
     case deleteTodo(paneId: PaneId, todoId: UUID)
     case reorderTodo(paneId: PaneId, todoId: UUID, toIndex: Int)

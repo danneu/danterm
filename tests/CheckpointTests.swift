@@ -229,9 +229,16 @@ func checkpointTests() {
 
     // MARK: - Recovery path helpers
 
-    test("recoveryDirectoryURL ends with DanTerm/Recovery") {
-        let url = recoveryDirectoryURL()
-        try expect(url.path.hasSuffix("DanTerm/Recovery"), "expected DanTerm/Recovery, got \(url.path)")
+    test("recoveryDirectoryURL is namespaced by bundle identifier") {
+        // Dev and Prod bundles must map to distinct recovery directories so
+        // launching DanTerm Dev never reads DanTerm.app's session files.
+        let prodURL = recoveryDirectoryURL(bundleId: "com.danneu.danterm")
+        let devURL  = recoveryDirectoryURL(bundleId: "com.danneu.danterm-dev")
+        try expect(prodURL != devURL, "prod and dev paths must differ, both were \(prodURL.path)")
+        try expect(prodURL.path.hasSuffix("/Library/Application Support/com.danneu.danterm/Recovery"),
+                   "prod path wrong: \(prodURL.path)")
+        try expect(devURL.path.hasSuffix("/Library/Application Support/com.danneu.danterm-dev/Recovery"),
+                   "dev path wrong: \(devURL.path)")
     }
 
     test("lightCheckpointURL ends with last-light.json") {

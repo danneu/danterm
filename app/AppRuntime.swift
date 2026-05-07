@@ -1,11 +1,13 @@
 // Runtime bridge that performs update effects and synchronizes AppKit/Ghostty views.
 import Cocoa
+import DanTermProtocol
 import GhosttyKit
 import UniformTypeIdentifiers
-import UserNotifications
+@preconcurrency import UserNotifications
 
 // App runtime owns the mutable app model, performs side effects emitted by the
 // pure update function, and bridges model changes into AppKit/Ghostty objects.
+@MainActor
 class AppRuntime {
     private struct StagedRestoreSession {
         let model: AppModel
@@ -43,6 +45,8 @@ class AppRuntime {
     private var enrichedCheckpointTimer: DispatchSourceTimer?  // repeating timer for enriched checkpoints
     private var checkpointPending = false                      // true while a debounced write is scheduled
     private var searchDebounceTimers: [PaneId: DispatchSourceTimer] = [:]
+    private var ipcConnections: [UUID: IpcConnection] = [:]
+    private var ipcServer: IpcServer?
     private static let checkpointDebounceInterval: TimeInterval = 2.0
     // Slowed from 60s to 10min until the libghostty memory leak is fixed.
     // https://github.com/danneu/danterm/issues/31
@@ -66,6 +70,9 @@ class AppRuntime {
         // It reads model flags to know whether a mode is active, but never mutates
         // the model directly; mutations go through send().
         installSwitcherEventMonitor()
+
+        self.ipcServer = IpcServer(socketPath: controlSocketPath(), runtime: self)
+        Task { await self.ipcServer?.start() }
     }
 
     deinit {
@@ -227,6 +234,7 @@ class AppRuntime {
         case .surfaceTitle(let paneId, _), .surfaceCwd(let paneId, _), .surfaceProgress(let paneId, _),
              .remoteSessionStarted(let paneId), .remoteSessionReported(let paneId, _), .commandEnded(let paneId),
              .addTodo(let paneId, _), .toggleTodoDone(let paneId, _),
+             .setTodoDone(let paneId, _, _),
              .editTodoText(let paneId, _, _), .deleteTodo(let paneId, _),
              .reorderTodo(let paneId, _, _), .clearCompletedTodos(let paneId):
             refreshPaneToolbar(for: paneId)
@@ -239,18 +247,41 @@ class AppRuntime {
         return surfaces[paneId]
     }
 
+    var ipcSocketPath: URL {
+        ipcServer?.socketPath ?? controlSocketPath()
+    }
+
+    func registerIpcConnection(_ connection: IpcConnection, for reqId: UUID) {
+        ipcConnections[reqId] = connection
+    }
+
+    func stopIpcServer() {
+        let socketPath = ipcSocketPath
+        Task { await ipcServer?.stop() }
+        try? FileManager.default.removeItem(at: socketPath)
+    }
+
     // MARK: - Effect Performer
 
     private func perform(_ effect: Effect) {
         switch effect {
         case .createSurface(let paneId, let cwd, let command):
             let token = tokenStore.generate(for: paneId)
+            var envVars: [(String, String)] = [
+                (EnvVars.flag, "1"),
+                (EnvVars.sock, ipcSocketPath.path),
+                (EnvVars.pane, paneId.rawValue.uuidString),
+                ("DANTERM_TOKEN", token),
+            ]
+            if let tabId = tabForPane(paneId, in: model)?.id {
+                envVars.append((EnvVars.tab, tabId.rawValue.uuidString))
+            }
             let view = makeTerminalView(
                 paneId: paneId,
                 workingDirectory: cwd,
                 command: command,
                 restoreCommandBehavior: .execute,
-                envVars: [("DANTERM_TOKEN", token)]
+                envVars: envVars
             )
             surfaces[paneId] = view
             if view.surface == nil {
@@ -264,6 +295,13 @@ class AppRuntime {
             searchDebounceTimers.removeValue(forKey: paneId)
             if let view = surfaces.removeValue(forKey: paneId) {
                 view.closeSurface()
+            }
+
+        case .sendText(let paneId, let text):
+            guard !text.isEmpty,
+                  let surface = surfaces[paneId]?.surface else { break }
+            text.withCString { ptr in
+                ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
             }
 
         case .focusSurface(let paneId, let focused):
@@ -344,6 +382,14 @@ class AppRuntime {
                     }
                 }
             }
+
+        case .ipcReply(let reqId, let result):
+            guard let connection = ipcConnections.removeValue(forKey: reqId) else { break }
+            connection.writeSuccess(reqId: reqId, result: result)
+
+        case .ipcError(let reqId, let code, let message):
+            guard let connection = ipcConnections.removeValue(forKey: reqId) else { break }
+            connection.writeError(reqId: reqId, code: code, message: message)
 
         case .showCloseTabConfirmation(let tabId, let tabTitle, let paneCount, let isLastTab):
             let alert = NSAlert()
@@ -554,6 +600,9 @@ class AppRuntime {
                     }
                 }
             }
+
+        case .refreshPaneToolbar(let paneId):
+            refreshPaneToolbar(for: paneId)
 
         case .showSwitcherOverlay:
             // Idempotent: render and order-front. Don't makeKeyAndOrderFront
@@ -1060,17 +1109,10 @@ class AppRuntime {
     }
 
     private func showImportError(message: String) {
-        let presentAlert = {
-            let alert = NSAlert()
-            alert.messageText = "Import Failed"
-            alert.informativeText = message
-            alert.runModal()
-        }
-        if Thread.isMainThread {
-            presentAlert()
-        } else {
-            DispatchQueue.main.async(execute: presentAlert)
-        }
+        let alert = NSAlert()
+        alert.messageText = "Import Failed"
+        alert.informativeText = message
+        alert.runModal()
     }
 
     // MARK: - Content Titlebar

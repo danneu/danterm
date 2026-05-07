@@ -92,8 +92,11 @@ jobs:
       - name: Codesign app
         run: |
           APP_PATH="build/${{ env.APP_NAME }}.app"
+          codesign --force --options runtime \
+            --sign "${{ env.SIGNING_IDENTITY }}" "$APP_PATH/Contents/MacOS/danterm"
           codesign --force --deep --options runtime \
             --sign "${{ env.SIGNING_IDENTITY }}" "$APP_PATH"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
       - name: Create DMG
         run: |

@@ -39,6 +39,12 @@ When upgrading Ghostty, update both `GHOSTTY_TAG` in the workflows and potential
 - **`macos-26`** — required for latest Xcode SDK (Ghostty uses `kCVPixelFormatType_30RGB_r210` from CoreVideo, added in macOS 15 SDK)
 - **`-Dxcframework-target=native`** — builds arm64 only; the universal (arm64+x86_64) build fails due to x86_64 cross-compilation SDK issues
 
+## Nested helper signing
+
+The release bundle ships the `danterm` helper at `DanTerm.app/Contents/MacOS/danterm`.
+CI signs that nested executable before signing the outer `.app`, then verifies
+the full bundle with `codesign --verify --deep --strict --verbose=2`.
+
 ## Troubleshooting
 
 ### Dependency URL staleness

@@ -1,9 +1,11 @@
 import Foundation
+import DanTermProtocol
 
 enum Effect {
     // Surface
     case createSurface(paneId: PaneId, cwd: String?, command: String?)
     case destroySurface(paneId: PaneId)
+    case sendText(paneId: PaneId, text: String)
 
     // Focus
     case focusSurface(paneId: PaneId, focused: Bool)
@@ -19,6 +21,10 @@ enum Effect {
 
     // Export
     case exportState(AppModelSnapshot)
+
+    // IPC
+    case ipcReply(reqId: UUID, result: JSONValue)
+    case ipcError(reqId: UUID, code: Int, message: String)
 
     // System
     case sendNotification(alertId: AlertId, title: String, body: String)
@@ -57,6 +63,7 @@ enum Effect {
     case showTodoPopover(paneId: PaneId)
     case dismissTodoPopover
     case showClosePaneConfirmation(paneId: PaneId, uncompletedCount: Int)
+    case refreshPaneToolbar(paneId: PaneId)
 
     // MRU tab switcher overlay
     case showSwitcherOverlay   // ensure panel is visible and redrawn from model

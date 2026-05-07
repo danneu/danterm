@@ -19,11 +19,16 @@ build-icons:
 
 # Run all tests
 test:
+    swift test --package-path lib/DanTermProtocol --filter DanTermProtocolTests
     ./test.sh
 
 # Run UI tests (AppKit, requires display)
 test-ui:
     ./test-ui.sh
+
+# Run CLI smoke test (requires GUI access, jq, and DANTERM_CLI_TEST_ALLOW_APP_CONTROL=1)
+test-cli:
+    ./scripts/tests/danterm-cli_test.sh
 
 # Build local dev app to .build/DanTerm Dev.app
 build:

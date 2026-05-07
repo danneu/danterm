@@ -660,14 +660,22 @@ private func toSplitNodeSnapshot(_ node: SplitNodeModel) -> SplitNodeSnapshot {
 
 // MARK: - Recovery Paths
 //
-// Session persistence lives in ~/Library/Application Support/DanTerm/Recovery/:
+// Session persistence lives in
+// ~/Library/Application Support/<bundle-id>/Recovery/:
 //   last-light.json    — frequent structural checkpoint (no scrollback, 2s debounce)
 //   last-enriched.json — periodic full checkpoint (structure + scrollback, 60s timer)
 //   session.json       — lock file, written at launch and deleted on clean exit
+//
+// Namespacing by bundle ID isolates DanTerm.app (com.danneu.danterm) from
+// DanTerm Dev.app (com.danneu.danterm-dev) so the dev build never restores
+// from a prod session and vice versa. The bundleId parameter exists for
+// tests; production code always takes the default.
 
-func recoveryDirectoryURL() -> URL {
+func recoveryDirectoryURL(
+    bundleId: String = Bundle.main.bundleIdentifier ?? "com.danneu.danterm"
+) -> URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent("DanTerm", isDirectory: true)
+        .appendingPathComponent(bundleId, isDirectory: true)
         .appendingPathComponent("Recovery", isDirectory: true)
 }
 

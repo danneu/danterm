@@ -101,10 +101,13 @@ if initSnapshot == nil {
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
 
-let delegate = AppDelegate()
-delegate.initSnapshot = initSnapshot
-delegate.restoreCommandBehavior = restoreBehavior
-delegate.lastSessionSnapshot = lastSessionSnapshot
-delegate.previousSessionCrashed = previousSessionCrashed
-NSApp.delegate = delegate
+let delegate = MainActor.assumeIsolated { () -> AppDelegate in
+    let delegate = AppDelegate()
+    delegate.initSnapshot = initSnapshot
+    delegate.restoreCommandBehavior = restoreBehavior
+    delegate.lastSessionSnapshot = lastSessionSnapshot
+    delegate.previousSessionCrashed = previousSessionCrashed
+    NSApp.delegate = delegate
+    return delegate
+}
 NSApp.run()

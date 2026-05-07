@@ -185,7 +185,7 @@ struct AppModel: Equatable {
 
 // MARK: - Session Lock
 
-/// Written to ~/Library/Application Support/DanTerm/Recovery/session.json at launch
+/// Written to ~/Library/Application Support/<bundle-id>/Recovery/session.json at launch
 /// and deleted on clean exit. If this file exists at next launch, the previous exit
 /// was unclean (crash or kill -9) and we prompt before restoring.
 struct SessionLock: Codable {

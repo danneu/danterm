@@ -34,6 +34,8 @@ APP_PATH="$SCRIPT_DIR/build/DanTerm.app"
 rm -rf "$APP_PATH"
 mkdir -p "$APP_PATH/Contents/MacOS"
 cp "$BIN_PATH/DanTerm" "$APP_PATH/Contents/MacOS/DanTerm"
+cp "$BIN_PATH/DanTermCLI" "$APP_PATH/Contents/MacOS/danterm"
+chmod +x "$APP_PATH/Contents/MacOS/danterm"
 
 cp "$SCRIPT_DIR/app/Info.plist" "$APP_PATH/Contents/"
 

@@ -2,9 +2,10 @@
 // notification center delegation.
 import Cocoa
 import GhosttyKit
-import UserNotifications
+@preconcurrency import UserNotifications
 
-class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitViewDelegate, UNUserNotificationCenterDelegate {
+@MainActor
+class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitViewDelegate, @preconcurrency UNUserNotificationCenterDelegate {
     static let minWindowWidth: CGFloat = 600
     static let minWindowHeight: CGFloat = 300
     static let minSidebarWidth: CGFloat = 200
@@ -219,6 +220,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         let reloadConfigItem = NSMenuItem(title: "Reload Config", action: #selector(reloadConfig(_:)), keyEquivalent: ",")
         reloadConfigItem.keyEquivalentModifierMask = [.command, .shift]
         appMenu.addItem(reloadConfigItem)
+        appMenu.addItem(withTitle: "Install danterm Command in PATH", action: #selector(installDantermInPath(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Quit DanTerm", action: #selector(quitApp(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu
@@ -520,6 +522,26 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         runtime.reloadAllConfig()
     }
 
+    @objc func installDantermInPath(_ sender: Any?) {
+        do {
+            let outcome = try CLIPathInstaller.default.install()
+            let alert = NSAlert()
+            alert.messageText = "danterm Installed"
+            if outcome.usedAdministratorPrivileges {
+                alert.informativeText = "Installed \(outcome.destinationURL.path) with administrator privileges."
+            } else {
+                alert.informativeText = "Installed \(outcome.destinationURL.path)."
+            }
+            alert.runModal()
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Install Failed"
+            alert.informativeText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            alert.alertStyle = .warning
+            alert.runModal()
+        }
+    }
+
     @objc func findInTerminal(_ sender: Any?) {
         runtime.send(.startSearch)
     }
@@ -665,6 +687,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     // NSApplicationDelegate: write final enriched checkpoint (with scrollback) and
     // delete the session lock so the next launch knows this was a clean exit.
     func applicationWillTerminate(_ notification: Notification) {
+        runtime?.stopIpcServer()
         runtime?.performEnrichedCheckpoint()
         deleteSessionLockFile()
     }

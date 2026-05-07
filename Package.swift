@@ -4,14 +4,26 @@ import PackageDescription
 let package = Package(
     name: "DanTerm",
     platforms: [.macOS(.v26)],
+    products: [
+        .executable(name: "DanTerm", targets: ["DanTerm"]),
+        .executable(name: "DanTermCLI", targets: ["DanTermCLI"]),
+        .library(name: "DanTermProtocol", targets: ["DanTermProtocol"]),
+    ],
     targets: [
         .binaryTarget(
             name: "GhosttyKit",
             path: "lib/GhosttyKit.xcframework"
         ),
+        .target(
+            name: "DanTermProtocol",
+            path: "lib/DanTermProtocol/Sources/DanTermProtocol",
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ]
+        ),
         .executableTarget(
             name: "DanTerm",
-            dependencies: ["GhosttyKit"],
+            dependencies: ["GhosttyKit", "DanTermProtocol"],
             path: "app",
             exclude: ["Info.plist"],
             swiftSettings: [
@@ -28,6 +40,22 @@ let package = Package(
                 .linkedFramework("Carbon"),
                 .linkedFramework("UniformTypeIdentifiers"),
                 .linkedLibrary("c++"),
+            ]
+        ),
+        .executableTarget(
+            name: "DanTermCLI",
+            dependencies: ["DanTermProtocol"],
+            path: "cli",
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ]
+        ),
+        .testTarget(
+            name: "DanTermProtocolTests",
+            dependencies: ["DanTermProtocol"],
+            path: "lib/DanTermProtocol/Tests/DanTermProtocolTests",
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
             ]
         ),
     ]
