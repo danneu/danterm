@@ -41,7 +41,7 @@ When upgrading Ghostty, update both `GHOSTTY_TAG` in the workflows and potential
 
 ## Nested helper signing
 
-The release bundle ships the `danterm` helper at `DanTerm.app/Contents/MacOS/danterm`.
+The release bundle ships the `danterm` helper at `DanTerm.app/Contents/Helpers/danterm`.
 CI signs that nested executable before signing the outer `.app`, then verifies
 the full bundle with `codesign --verify --deep --strict --verbose=2`.
 

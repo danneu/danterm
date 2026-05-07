@@ -182,8 +182,12 @@ jobs:
       - name: Verify release bundle
         run: |
           APP_PATH="build/DanTerm.app"
-          test -f "$APP_PATH/Contents/MacOS/DanTerm"
-          test -x "$APP_PATH/Contents/MacOS/danterm"
+          test -x "$APP_PATH/Contents/MacOS/DanTerm"
+          test -x "$APP_PATH/Contents/Helpers/danterm"
+          if cmp -s "$APP_PATH/Contents/MacOS/DanTerm" "$APP_PATH/Contents/Helpers/danterm"; then
+            echo "Error: GUI and CLI bundle binaries have identical content" >&2
+            exit 1
+          fi
           VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP_PATH/Contents/Info.plist")
           [ "$VERSION" = "0.0.0-test" ] || { echo "Version mismatch: $VERSION"; exit 1; }
           codesign --force --deep --sign - "$APP_PATH"

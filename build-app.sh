@@ -34,8 +34,25 @@ APP_PATH="$SCRIPT_DIR/build/DanTerm.app"
 rm -rf "$APP_PATH"
 mkdir -p "$APP_PATH/Contents/MacOS"
 cp "$BIN_PATH/DanTerm" "$APP_PATH/Contents/MacOS/DanTerm"
-cp "$BIN_PATH/DanTermCLI" "$APP_PATH/Contents/MacOS/danterm"
-chmod +x "$APP_PATH/Contents/MacOS/danterm"
+mkdir -p "$APP_PATH/Contents/Helpers"
+cp "$BIN_PATH/DanTermCLI" "$APP_PATH/Contents/Helpers/danterm"
+chmod +x "$APP_PATH/Contents/Helpers/danterm"
+
+# Defense in depth. A case-insensitive filesystem can collapse paths
+# that differ only by case, and a copy-source mistake can write the CLI
+# bytes into both files. Either produces a signed bundle that will not launch.
+GUI="$APP_PATH/Contents/MacOS/DanTerm"
+CLI="$APP_PATH/Contents/Helpers/danterm"
+GUI_INODE=$(stat -f %i "$GUI")
+CLI_INODE=$(stat -f %i "$CLI")
+if [ "$GUI_INODE" = "$CLI_INODE" ]; then
+    echo "Error: GUI and CLI bundle paths collided (same inode)" >&2
+    exit 1
+fi
+if cmp -s "$GUI" "$CLI"; then
+    echo "Error: GUI and CLI bundle binaries have identical content" >&2
+    exit 1
+fi
 
 cp "$SCRIPT_DIR/app/Info.plist" "$APP_PATH/Contents/"
 

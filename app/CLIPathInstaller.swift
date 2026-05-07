@@ -25,11 +25,8 @@ final class CLIPathInstaller {
             Dependencies(
                 destinationURL: URL(fileURLWithPath: "/usr/local/bin/danterm"),
                 sourceURL: {
-                    if let executableURL = Bundle.main.executableURL {
-                        return executableURL.deletingLastPathComponent().appendingPathComponent("danterm")
-                    }
                     return Bundle.main.bundleURL
-                        .appendingPathComponent("Contents/MacOS/danterm", isDirectory: false)
+                        .appendingPathComponent("Contents/Helpers/danterm", isDirectory: false)
                 },
                 bundleURL: { Bundle.main.bundleURL },
                 fileManager: .default,

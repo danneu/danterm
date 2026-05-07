@@ -27,8 +27,9 @@ BIN_PATH=$(swift build --package-path "$SCRIPT_DIR" --build-path "$SCRIPT_DIR/.s
 rm -rf "$APP_PATH"
 mkdir -p "$APP_PATH/Contents/MacOS"
 cp "$BIN_PATH/DanTerm" "$APP_PATH/Contents/MacOS/DanTerm Dev"
-cp "$BIN_PATH/DanTermCLI" "$APP_PATH/Contents/MacOS/danterm"
-chmod +x "$APP_PATH/Contents/MacOS/danterm"
+mkdir -p "$APP_PATH/Contents/Helpers"
+cp "$BIN_PATH/DanTermCLI" "$APP_PATH/Contents/Helpers/danterm"
+chmod +x "$APP_PATH/Contents/Helpers/danterm"
 
 cp "$SRC_DIR/Info.plist" "$APP_PATH/Contents/"
 mkdir -p "$APP_PATH/Contents/Resources"

@@ -114,7 +114,7 @@ private func makeInstallerFixture(bundlePath: String? = nil) throws -> Installer
         .appendingPathComponent("danterm-installer-\(UUID().uuidString)", isDirectory: true)
     let binDir = root.appendingPathComponent("bin", isDirectory: true)
     try FileManager.default.createDirectory(at: binDir, withIntermediateDirectories: true)
-    let sourceURL = root.appendingPathComponent("DanTerm.app/Contents/MacOS/danterm")
+    let sourceURL = root.appendingPathComponent("DanTerm.app/Contents/Helpers/danterm")
     try FileManager.default.createDirectory(at: sourceURL.deletingLastPathComponent(), withIntermediateDirectories: true)
     FileManager.default.createFile(atPath: sourceURL.path, contents: Data("cli".utf8))
     let destinationURL = binDir.appendingPathComponent("danterm")
