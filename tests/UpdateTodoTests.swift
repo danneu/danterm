@@ -158,20 +158,23 @@ func todoTests() {
 
     // MARK: - requestClosePane
 
-    test("requestClosePane with uncompleted todos emits confirmation") {
+    test("requestClosePane with uncompleted todos on a non-last pane emits per-pane confirmation") {
         var model = makeModel()
         createTab(&model)
-        let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .addTodo(paneId: paneId, text: "incomplete task"))
-        let effects = update(&model, .requestClosePane(paneId: paneId))
+        let firstPaneId = selectedTab(in: model)!.focusedPaneId
+        // Split so the target pane is not the only pane in the tab; the
+        // last-pane gate would otherwise route to close-tab confirmation.
+        update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
+        update(&model, .addTodo(paneId: firstPaneId, text: "incomplete task"))
+        let effects = update(&model, .requestClosePane(paneId: firstPaneId))
         try expect(hasEffect(effects) {
             if case .showClosePaneConfirmation(let pid, let count) = $0 {
-                return pid == paneId && count == 1
+                return pid == firstPaneId && count == 1
             }
             return false
         }, "expected showClosePaneConfirmation with count 1")
         // Pane should still exist
-        try expect(model.panes[paneId] != nil, "pane should not be removed")
+        try expect(model.panes[firstPaneId] != nil, "pane should not be removed")
     }
 
     test("requestClosePane with all todos completed proceeds to closePane") {
@@ -211,15 +214,15 @@ func todoTests() {
 
     // MARK: - closePane + popover cleanup
 
-    test("closePane clears todoPopoverPaneId and emits dismissTodoPopover") {
+    test("closePane clears todoPopover and emits dismissTodoPopover") {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         // Split so closing one pane doesn't close the tab (which discards effects)
         update(&model, .splitPane(paneId: paneId, direction: .horizontal))
-        model.todoPopoverPaneId = paneId
+        model.todoPopover = .pane(paneId)
         let effects = update(&model, .closePane(paneId: paneId))
-        try expect(model.todoPopoverPaneId == nil, "todoPopoverPaneId should be nil")
+        try expect(model.todoPopover == nil, "todoPopover should be nil")
         try expect(hasEffect(effects) {
             if case .dismissTodoPopover = $0 { return true }
             return false
@@ -234,14 +237,14 @@ func todoTests() {
         let paneId = selectedTab(in: model)!.focusedPaneId
         // Open
         let openEffects = update(&model, .toggleTodoPopover(paneId: paneId))
-        try expectEqual(model.todoPopoverPaneId, paneId)
+        try expectEqual(model.todoPopover, .pane(paneId))
         try expect(hasEffect(openEffects) {
             if case .showTodoPopover(let pid) = $0 { return pid == paneId }
             return false
         }, "expected showTodoPopover")
         // Close
         let closeEffects = update(&model, .toggleTodoPopover(paneId: paneId))
-        try expect(model.todoPopoverPaneId == nil, "should be nil after close")
+        try expect(model.todoPopover == nil, "should be nil after close")
         try expect(hasEffect(closeEffects) {
             if case .dismissTodoPopover = $0 { return true }
             return false
@@ -259,11 +262,11 @@ func todoTests() {
         let tab = selectedTab(in: model)!
         let paneB = tab.focusedPaneId
         // Popover is open for pane B
-        model.todoPopoverPaneId = paneB
+        model.todoPopover = .pane(paneB)
         // Stale close event arrives for pane A
         let paneA = paneId
         update(&model, .todoPopoverClosed(paneId: paneA))
-        try expectEqual(model.todoPopoverPaneId, paneB, "paneB popover should still be open")
+        try expectEqual(model.todoPopover, .pane(paneB), "paneB popover should still be open")
     }
 
     // MARK: - splitPane starts empty

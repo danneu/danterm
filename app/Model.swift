@@ -113,8 +113,17 @@ struct TabModel: Equatable {
     var rootNode: SplitNodeModel
     var isZoomed: Bool = false
     var color: TabColor? = nil
+    var todos: [TodoItem] = []
 
     var displayTitle: String { customTitle ?? title }
+}
+
+/// Which TODO popover (if any) is currently open. Replaces the old
+/// `todoPopoverPaneId` slot so opening a tab popover and a pane popover are
+/// mutually exclusive by construction.
+enum TodoPopoverScope: Equatable {
+    case pane(PaneId)
+    case tab(TabId)
 }
 
 struct GroupModel: Equatable {
@@ -176,7 +185,7 @@ struct AppModel: Equatable {
     var config: DanTermConfig = .default  // ephemeral — loaded from disk, not snapshots
     var preferencesDraft: PreferencesDraft? = nil  // ephemeral — non-nil while prefs panel is open
     var committedGhosttyPrefs: GhosttyPrefs? = nil  // ephemeral — non-nil while prefs panel is open
-    var todoPopoverPaneId: PaneId? = nil  // ephemeral — which pane's TODO popover is open
+    var todoPopover: TodoPopoverScope? = nil  // ephemeral — which TODO popover (pane or tab) is open
     var mruOrder: [TabId] = []  // ephemeral — most-recently-used tab ordering
     var mruCycle: MruCycleState? = nil  // ephemeral — non-nil while cmd-shift held
     var jumpMode: JumpModeState? = nil  // ephemeral — non-nil while tab jump mode is active
@@ -224,6 +233,7 @@ struct TabSnapshot: Codable {
     let focusedPaneId: String?
     let rootNode: SplitNodeSnapshot
     let color: TabColor?
+    var todos: [TodoSnapshot]? = nil  // nil for backward compat
 }
 
 indirect enum SplitNodeSnapshot: Codable {
@@ -407,7 +417,7 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel,
             let focusedPs = paneSnapshotById[focusedPaneId]!
             let chrome = deriveTabChromeFromSnapshot(focusedPs)
 
-            let tab = TabModel(
+            var tab = TabModel(
                 id: tabId,
                 title: chrome.title,
                 subtitle: chrome.subtitle,
@@ -416,6 +426,12 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel,
                 rootNode: rootNode,
                 color: ts.color
             )
+            if let todoSnaps = ts.todos {
+                tab.todos = todoSnaps.compactMap { ts in
+                    guard let uuid = UUID(uuidString: ts.id) else { return nil }
+                    return TodoItem(id: uuid, text: ts.text, isDone: ts.isDone)
+                }
+            }
             tabs.append(tab)
             allTabIds.append(tabId)
         }

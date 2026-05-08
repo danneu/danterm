@@ -144,6 +144,17 @@ enum Msg {
     case clearCompletedTodos(paneId: PaneId)
     case requestClosePane(paneId: PaneId)
 
+    // Tab-level TODO
+    case toggleTodoPopoverForTab(tabId: TabId)
+    case todoPopoverForTabClosed(tabId: TabId)
+    case addTabTodo(tabId: TabId, text: String)
+    case toggleTabTodoDone(tabId: TabId, todoId: UUID)
+    case setTabTodoDone(tabId: TabId, todoId: UUID, isDone: Bool)
+    case editTabTodoText(tabId: TabId, todoId: UUID, text: String)
+    case deleteTabTodo(tabId: TabId, todoId: UUID)
+    case reorderTabTodo(tabId: TabId, todoId: UUID, toIndex: Int)
+    case clearCompletedTabTodos(tabId: TabId)
+
     // MRU tab switcher
     case mruCycleStepped(direction: MruDirection)  // hold path: tapped cmd-shift-i/-o
     case mruCycleCommitted                          // hold path: released cmd or shift

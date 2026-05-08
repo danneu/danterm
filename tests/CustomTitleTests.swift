@@ -164,7 +164,7 @@ func customTitleTests() {
             return false
         })
         try expect(confirmEffect != nil, "should show confirmation")
-        if case .showCloseTabConfirmation(_, let tabTitle, _, _) = confirmEffect! {
+        if case .showCloseTabConfirmation(_, let tabTitle, _, _, _) = confirmEffect! {
             try expectEqual(tabTitle, "My Server", "confirmation should use displayTitle")
         }
     }

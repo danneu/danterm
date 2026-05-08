@@ -25,6 +25,7 @@ struct TestRunner {
         danTermConfigTests()
         preferencesTests()
         todoTests()
+        updateTabTodoTests()
         ipcUpdateTests()
         ipcConnectionTests()
         cliPathInstallerTests()

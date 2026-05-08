@@ -27,6 +27,8 @@ class AppRuntime {
     var alertsPopover: NSPopover?
     var todoPopover: NSPopover?
     private var todoPopoverDelegate: TodoPopoverDelegateAdapter?
+    var tabTodoPopover: NSPopover?
+    private var tabTodoPopoverDelegate: TabTodoPopoverDelegateAdapter?
     private var themeBrowserView: ThemeBrowserView?
     private var preferencesPanel: PreferencesPanel?
     private var quitConfirmationPanel: QuitConfirmationPanel?
@@ -229,22 +231,67 @@ class AppRuntime {
             flushPendingCheckpoint()
         }
 
-        // Refresh pane toolbar after title/cwd/progress/remote-state/todo changes
+        // Refresh pane toolbar after title/cwd/progress/remote-state/todo changes,
+        // and refresh the chrome's tab-todo badge when a pane todo change lives in
+        // the active tab (the badge rolls up tab + every pane in that tab).
         switch translatedMsg {
         case .surfaceTitle(let paneId, _), .surfaceCwd(let paneId, _), .surfaceProgress(let paneId, _),
-             .remoteSessionStarted(let paneId), .remoteSessionReported(let paneId, _), .commandEnded(let paneId),
-             .addTodo(let paneId, _), .toggleTodoDone(let paneId, _),
+             .remoteSessionStarted(let paneId), .remoteSessionReported(let paneId, _), .commandEnded(let paneId):
+            refreshPaneToolbar(for: paneId)
+
+        case .addTodo(let paneId, _), .toggleTodoDone(let paneId, _),
              .setTodoDone(let paneId, _, _),
              .editTodoText(let paneId, _, _), .deleteTodo(let paneId, _),
              .reorderTodo(let paneId, _, _), .clearCompletedTodos(let paneId):
             refreshPaneToolbar(for: paneId)
+            if paneIsInActiveTab(paneId) { refreshTabTodoButton() }
+
+        case .addTabTodo(let tabId, _), .toggleTabTodoDone(let tabId, _),
+             .setTabTodoDone(let tabId, _, _),
+             .editTabTodoText(let tabId, _, _), .deleteTabTodo(let tabId, _),
+             .reorderTabTodo(let tabId, _, _), .clearCompletedTabTodos(let tabId):
+            if tabId == model.selectedTabId { refreshTabTodoButton() }
+
+        case .selectTab, .closeTab, .closePane, .createTab, .splitPane,
+             .movePaneToTab, .movePaneToNewTab, .mruCycleCommitted, .mruCycleOneShot,
+             .jumpModeKeyPressed:
+            // Selection or tab-membership changes shift which tab the chrome
+            // badge represents. Selection-affecting branches refresh too.
+            refreshTabTodoButton()
+
         default:
             break
         }
     }
 
+    private func paneIsInActiveTab(_ paneId: PaneId) -> Bool {
+        guard let selId = model.selectedTabId else { return false }
+        return tabForPane(paneId, in: model)?.id == selId
+    }
+
+    /// Push the active tab's roll-up counts into the chrome's right-side button.
+    /// Renders neutral when there's no active tab so the badge isn't stale.
+    func refreshTabTodoButton() {
+        guard let button = chromeView?.tabTodoButton else { return }
+        if let tabId = model.selectedTabId {
+            let rollup = tabTodoRollup(tabId, in: model)
+            button.update(totalCount: rollup.total, uncompletedCount: rollup.uncompleted)
+        } else {
+            button.update(totalCount: 0, uncompletedCount: 0)
+        }
+    }
+
     func terminalView(for paneId: PaneId) -> TerminalView? {
         return surfaces[paneId]
+    }
+
+    /// Make the given pane's surface the first responder. The view dispatches
+    /// `.paneBecameFirstResponder` from its becomeFirstResponder override, so
+    /// the model update + chrome refresh follow naturally. No-op when the
+    /// surface isn't live.
+    func focusPaneSurface(_ paneId: PaneId) {
+        guard let view = surfaces[paneId] else { return }
+        window?.makeFirstResponder(view)
     }
 
     var ipcSocketPath: URL {
@@ -427,14 +474,14 @@ class AppRuntime {
             guard let connection = ipcConnections.removeValue(forKey: reqId) else { break }
             connection.writeError(reqId: reqId, code: code, message: message)
 
-        case .showCloseTabConfirmation(let tabId, let tabTitle, let paneCount, let isLastTab):
+        case .showCloseTabConfirmation(let tabId, let tabTitle, let paneCount, let isLastTab, let uncompletedTodoCount):
             let alert = NSAlert()
             alert.messageText = "Close tab \"\(tabTitle)\"?"
-            if isLastTab {
-                alert.informativeText = "This tab has \(paneCount) terminal panes. Closing it will quit DanTerm."
-            } else {
-                alert.informativeText = "This tab has \(paneCount) terminal panes."
-            }
+            alert.informativeText = closeTabConfirmationCopy(
+                paneCount: paneCount,
+                uncompletedTodoCount: uncompletedTodoCount,
+                isLastTab: isLastTab
+            )
             alert.addButton(withTitle: "Close Tab")
             alert.addButton(withTitle: "Cancel")
             if let window = window {
@@ -618,6 +665,26 @@ class AppRuntime {
             todoPopover?.performClose(nil)
             todoPopover = nil
             todoPopoverDelegate = nil
+
+        case .showTodoPopoverForTab(let tabId):
+            tabTodoPopover?.performClose(nil)
+            tabTodoPopover = nil
+            tabTodoPopoverDelegate = nil
+            guard let anchor = chromeView?.tabTodoButton else { return }
+            let vc = TabTodoPopoverViewController(tabId: tabId, runtime: self)
+            let delegate = TabTodoPopoverDelegateAdapter(tabId: tabId, runtime: self)
+            let popover = NSPopover()
+            popover.contentViewController = vc
+            popover.behavior = .transient
+            popover.delegate = delegate
+            popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
+            tabTodoPopover = popover
+            tabTodoPopoverDelegate = delegate
+
+        case .dismissTodoPopoverForTab:
+            tabTodoPopover?.performClose(nil)
+            tabTodoPopover = nil
+            tabTodoPopoverDelegate = nil
 
         case .showClosePaneConfirmation(let paneId, let uncompletedCount):
             let alert = NSAlert()
@@ -1060,7 +1127,10 @@ class AppRuntime {
         todoPopover?.performClose(nil)
         todoPopover = nil
         todoPopoverDelegate = nil
-        model.todoPopoverPaneId = nil
+        tabTodoPopover?.performClose(nil)
+        tabTodoPopover = nil
+        tabTodoPopoverDelegate = nil
+        model.todoPopover = nil
         preferencesPanel?.close()
         preferencesPanel = nil
         quitConfirmationPanel?.orderOut(nil)
@@ -1221,7 +1291,10 @@ class AppRuntime {
         todoPopover?.performClose(nil)
         todoPopover = nil
         todoPopoverDelegate = nil
-        model.todoPopoverPaneId = nil
+        tabTodoPopover?.performClose(nil)
+        tabTodoPopover = nil
+        tabTodoPopoverDelegate = nil
+        model.todoPopover = nil
         guard let contentArea = contentArea else { return }
 
         // Capture browser focus before subview removal so we can restore it after reattachment
@@ -1281,6 +1354,10 @@ class AppRuntime {
 
         refreshPaneToolbars()
         refreshContentTitlebar()
+        // Refresh the chrome's tab-todo badge: restore-from-snapshot bypasses
+        // update() and lands here, so without this the badge would render
+        // neutral until the next refresh-emitting message.
+        refreshTabTodoButton()
 
         // Rehydrate search overlays for panes with active search
         for (paneId, search) in model.searchState {
@@ -1328,9 +1405,9 @@ class AppRuntime {
     }
 }
 
-/// NSPopoverDelegate adapter for the TODO popover.
-/// Sends .todoPopoverClosed when the popover closes for any reason (click-away, programmatic, etc.)
-/// so model.todoPopoverPaneId stays in sync.
+/// NSPopoverDelegate adapter for the per-pane TODO popover.
+/// Sends .todoPopoverClosed when the popover closes for any reason (click-away,
+/// programmatic, etc.) so model.todoPopover stays in sync.
 private class TodoPopoverDelegateAdapter: NSObject, NSPopoverDelegate {
     weak var runtime: AppRuntime?
     let paneId: PaneId
@@ -1341,6 +1418,46 @@ private class TodoPopoverDelegateAdapter: NSObject, NSPopoverDelegate {
     func popoverDidClose(_ notification: Notification) {
         runtime?.send(.todoPopoverClosed(paneId: paneId))
     }
+}
+
+/// NSPopoverDelegate adapter for the tab-level TODO popover. Mirrors the pane
+/// adapter; sends .todoPopoverForTabClosed so model.todoPopover stays in sync.
+class TabTodoPopoverDelegateAdapter: NSObject, NSPopoverDelegate {
+    weak var runtime: AppRuntime?
+    let tabId: TabId
+    init(tabId: TabId, runtime: AppRuntime?) {
+        self.tabId = tabId
+        self.runtime = runtime
+    }
+    func popoverDidClose(_ notification: Notification) {
+        runtime?.send(.todoPopoverForTabClosed(tabId: tabId))
+    }
+}
+
+/// Build the close-tab confirmation copy. Mentions panes when there is more
+/// than one, and unfinished tasks when the rollup is non-zero, so the warning
+/// matches what the chrome badge advertises.
+func closeTabConfirmationCopy(paneCount: Int, uncompletedTodoCount: Int, isLastTab: Bool) -> String {
+    var parts: [String] = []
+    if paneCount > 1 {
+        parts.append("\(paneCount) terminal panes")
+    }
+    if uncompletedTodoCount > 0 {
+        let label = uncompletedTodoCount == 1 ? "1 unfinished task" : "\(uncompletedTodoCount) unfinished tasks"
+        parts.append(label)
+    }
+    let prefix: String
+    if parts.isEmpty {
+        prefix = "This tab will be closed."
+    } else if parts.count == 1 {
+        prefix = "This tab has \(parts[0])."
+    } else {
+        prefix = "This tab has \(parts[0]) and \(parts[1])."
+    }
+    if isLastTab {
+        return prefix + " Closing it will quit DanTerm."
+    }
+    return prefix
 }
 
 private enum RestoreBuildError: Error {

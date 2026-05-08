@@ -429,8 +429,10 @@ func emitTerminateConfirmation(_ model: inout AppModel) -> [Effect] {
 
 // Single chokepoint for asking before closing a multi-pane tab. It guards the
 // same slot as quit confirmation so close-tab and quit sheets cannot stack.
+// `uncompletedTodoCount` is the full tab + pane rollup (see `tabTodoRollup`).
 func emitCloseTabConfirmation(
-  _ model: inout AppModel, tabId: TabId, tabTitle: String, paneCount: Int, isLastTab: Bool
+  _ model: inout AppModel, tabId: TabId, tabTitle: String, paneCount: Int, isLastTab: Bool,
+  uncompletedTodoCount: Int
 ) -> [Effect] {
   guard model.pendingConfirmation == nil else { return [] }
   model.pendingConfirmation = .closeTab
@@ -438,8 +440,23 @@ func emitCloseTabConfirmation(
     tabId: tabId,
     tabTitle: tabTitle,
     paneCount: paneCount,
-    isLastTab: isLastTab
+    isLastTab: isLastTab,
+    uncompletedTodoCount: uncompletedTodoCount
   )]
+}
+
+/// Total + uncompleted count for a tab's own to-dos plus every pane's
+/// to-dos inside that tab. Pure: same input -> same output.
+func tabTodoRollup(_ tabId: TabId, in model: AppModel) -> (total: Int, uncompleted: Int) {
+  guard let tab = tabById(tabId, in: model) else { return (0, 0) }
+  var total = tab.todos.count
+  var uncompleted = tab.todos.count { !$0.isDone }
+  for paneId in allPaneIds(tab.rootNode) {
+    guard let todos = model.panes[paneId]?.todos else { continue }
+    total += todos.count
+    uncompleted += todos.count { !$0.isDone }
+  }
+  return (total, uncompleted)
 }
 
 // Converts the AppKit close-tab alert response into an explicit Msg so both
@@ -615,13 +632,18 @@ func toSnapshot(_ model: AppModel) -> AppModelSnapshot {
         paneSnapshots.append(snapshot)
       }
 
-      return TabSnapshot(
+      let tabTodoSnapshots: [TodoSnapshot]? = tab.todos.isEmpty ? nil : tab.todos.map {
+        TodoSnapshot(id: $0.id.uuidString, text: $0.text, isDone: $0.isDone)
+      }
+      var tabSnapshot = TabSnapshot(
         id: tab.id.rawValue.uuidString,
         customTitle: tab.customTitle,
         focusedPaneId: tab.focusedPaneId.rawValue.uuidString,
         rootNode: toSplitNodeSnapshot(tab.rootNode),
         color: tab.color
       )
+      tabSnapshot.todos = tabTodoSnapshots
+      return tabSnapshot
     }
     return GroupSnapshot(
       id: group.id.rawValue.uuidString,

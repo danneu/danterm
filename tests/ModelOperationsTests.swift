@@ -959,6 +959,47 @@ func modelOperationsTests() {
         }
     }
 
+    // MARK: - tabTodoRollup
+
+    test("tabTodoRollup empty tab returns zero") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = selectedTab(in: model)!.id
+        let rollup = tabTodoRollup(tabId, in: model)
+        try expectEqual(rollup.total, 0)
+        try expectEqual(rollup.uncompleted, 0)
+    }
+
+    test("tabTodoRollup sums tab + all panes; ignores other tabs' panes") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let tabA = model.groups[0].tabs[0]
+        let tabB = model.groups[0].tabs[1]
+        update(&model, .selectTab(id: tabA.id))
+        let paneA = selectedTab(in: model)!.focusedPaneId
+        update(&model, .splitPane(paneId: paneA, direction: .horizontal))
+        let paneA2 = selectedTab(in: model)!.focusedPaneId
+
+        update(&model, .addTabTodo(tabId: tabA.id, text: "tab task"))
+        update(&model, .addTodo(paneId: paneA, text: "p1 a"))
+        update(&model, .addTodo(paneId: paneA, text: "p1 b done"))
+        let pAdone = model.panes[paneA]!.todos[1].id
+        update(&model, .toggleTodoDone(paneId: paneA, todoId: pAdone))
+        update(&model, .addTodo(paneId: paneA2, text: "p2 a"))
+
+        // Tab B has its own pane todo that should not bleed in
+        update(&model, .addTodo(paneId: tabB.focusedPaneId, text: "tab B pane task"))
+
+        let rollup = tabTodoRollup(tabA.id, in: model)
+        try expectEqual(rollup.total, 4, "1 tab + 2 paneA + 1 paneA2")
+        try expectEqual(rollup.uncompleted, 3, "one pane todo is done")
+
+        let rollupB = tabTodoRollup(tabB.id, in: model)
+        try expectEqual(rollupB.total, 1)
+        try expectEqual(rollupB.uncompleted, 1)
+    }
+
     test("assignJumpKeys caps mapping at jump key sequence count") {
         let ids = (0..<(jumpModeKeySequence.count + 3)).map { _ in TabId() }
         let keyMap = assignJumpKeys(visibleTabs: ids)

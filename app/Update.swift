@@ -103,12 +103,14 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
     case .requestCloseTab(let id):
         guard let tab = tabById(id, in: model) else { return [] }
         let paneCount = allPaneIds(tab.rootNode).count
+        let uncompletedTodos = tabTodoRollup(id, in: model).uncompleted
 
-        if paneCount > 1 {
+        if paneCount > 1 || uncompletedTodos > 0 {
             let isLastTab = totalTabCount(model) == 1
             return emitCloseTabConfirmation(
                 &model, tabId: id, tabTitle: tab.displayTitle,
-                paneCount: paneCount, isLastTab: isLastTab
+                paneCount: paneCount, isLastTab: isLastTab,
+                uncompletedTodoCount: uncompletedTodos
             )
         }
 
@@ -142,6 +144,17 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             removePaneSearchState(pid, from: &model)
             model.lastNotificationTime.removeValue(forKey: pid)
             model.panes.removeValue(forKey: pid)
+            if model.todoPopover == .pane(pid) {
+                model.todoPopover = nil
+                effects.append(.dismissTodoPopover)
+            }
+        }
+        // Tab popover open against this tab dies with the tab. Emit the dismiss
+        // effect even though no `todoPopoverForTabClosed` will fire, so AppRuntime
+        // closes the floating NSPopover.
+        if model.todoPopover == .tab(id) {
+            model.todoPopover = nil
+            effects.append(.dismissTodoPopoverForTab)
         }
 
         model.groups[groupIdx].tabs.remove(at: tabIdx)
@@ -218,8 +231,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         removeAlertsForPane(paneId, in: &model)
         removePaneSearchState(paneId, from: &model)
         model.lastNotificationTime.removeValue(forKey: paneId)
-        if model.todoPopoverPaneId == paneId {
-            model.todoPopoverPaneId = nil
+        if model.todoPopover == .pane(paneId) {
+            model.todoPopover = nil
             effects.append(.dismissTodoPopover)
         }
         model.panes.removeValue(forKey: paneId)
@@ -1182,18 +1195,105 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
     case .toggleTodoPopover(let paneId):
         guard model.panes[paneId] != nil else { return [] }
-        if model.todoPopoverPaneId == paneId {
-            model.todoPopoverPaneId = nil
+        if model.todoPopover == .pane(paneId) {
+            model.todoPopover = nil
             return [.dismissTodoPopover]
         }
-        model.todoPopoverPaneId = paneId
-        return [.showTodoPopover(paneId: paneId)]
+        // Close any other open popover (pane or tab) before showing the new one.
+        var effects: [Effect] = []
+        if case .tab = model.todoPopover {
+            effects.append(.dismissTodoPopoverForTab)
+        }
+        model.todoPopover = .pane(paneId)
+        effects.append(.showTodoPopover(paneId: paneId))
+        return effects
 
     case .todoPopoverClosed(let paneId):
-        if model.todoPopoverPaneId == paneId {
-            model.todoPopoverPaneId = nil
+        if model.todoPopover == .pane(paneId) {
+            model.todoPopover = nil
         }
         return []
+
+    case .toggleTodoPopoverForTab(let tabId):
+        guard tabById(tabId, in: model) != nil else { return [] }
+        if model.todoPopover == .tab(tabId) {
+            model.todoPopover = nil
+            return [.dismissTodoPopoverForTab]
+        }
+        var effects: [Effect] = []
+        if case .pane = model.todoPopover {
+            effects.append(.dismissTodoPopover)
+        }
+        model.todoPopover = .tab(tabId)
+        effects.append(.showTodoPopoverForTab(tabId: tabId))
+        return effects
+
+    case .todoPopoverForTabClosed(let tabId):
+        if model.todoPopover == .tab(tabId) {
+            model.todoPopover = nil
+        }
+        return []
+
+    case .addTabTodo(let tabId, let text):
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, tabById(tabId, in: model) != nil else { return [] }
+        updateTab(tabId, in: &model) { t in
+            t.todos.append(TodoItem(id: UUID(), text: trimmed, isDone: false))
+        }
+        return [.scheduleCheckpoint]
+
+    case .toggleTabTodoDone(let tabId, let todoId):
+        guard let tab = tabById(tabId, in: model),
+              let idx = tab.todos.firstIndex(where: { $0.id == todoId }) else { return [] }
+        updateTab(tabId, in: &model) { t in
+            t.todos[idx].isDone.toggle()
+        }
+        return [.scheduleCheckpoint]
+
+    case .setTabTodoDone(let tabId, let todoId, let isDone):
+        guard let tab = tabById(tabId, in: model),
+              let idx = tab.todos.firstIndex(where: { $0.id == todoId }),
+              tab.todos[idx].isDone != isDone else { return [] }
+        updateTab(tabId, in: &model) { t in
+            t.todos[idx].isDone = isDone
+        }
+        return [.scheduleCheckpoint]
+
+    case .editTabTodoText(let tabId, let todoId, let text):
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty,
+              let tab = tabById(tabId, in: model),
+              let idx = tab.todos.firstIndex(where: { $0.id == todoId }) else { return [] }
+        updateTab(tabId, in: &model) { t in
+            t.todos[idx].text = trimmed
+        }
+        return [.scheduleCheckpoint]
+
+    case .deleteTabTodo(let tabId, let todoId):
+        guard tabById(tabId, in: model) != nil else { return [] }
+        updateTab(tabId, in: &model) { t in
+            t.todos.removeAll { $0.id == todoId }
+        }
+        return [.scheduleCheckpoint]
+
+    case .reorderTabTodo(let tabId, let todoId, let toIndex):
+        guard let tab = tabById(tabId, in: model) else { return [] }
+        var todos = tab.todos
+        guard let fromIndex = todos.firstIndex(where: { $0.id == todoId }),
+              toIndex >= 0, toIndex <= todos.count else { return [] }
+        let clampedTo = min(toIndex, todos.count - 1)
+        guard fromIndex != clampedTo else { return [] }
+        let item = todos.remove(at: fromIndex)
+        todos.insert(item, at: min(clampedTo, todos.count))
+        updateTab(tabId, in: &model) { t in t.todos = todos }
+        return [.scheduleCheckpoint]
+
+    case .clearCompletedTabTodos(let tabId):
+        guard tabById(tabId, in: model) != nil else { return [] }
+        updateTab(tabId, in: &model) { t in
+            t.todos.removeAll { $0.isDone }
+        }
+        return [.scheduleCheckpoint]
 
     case .addTodo(let paneId, let text):
         guard appendTodo(&model, paneId: paneId, text: text, id: UUID()) != nil else { return [] }
@@ -1239,6 +1339,24 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
     case .requestClosePane(let paneId):
         guard let pane = model.panes[paneId] else { return [] }
+        // If this is the only pane in its tab, the close cascades into closeTab
+        // (destroying tab todos + every pane's todos). Route through the
+        // close-tab confirmation when the full rollup has any uncompleted item;
+        // the rollup subsumes per-pane todos at the last-pane boundary, so
+        // there's no double-prompt with the per-pane sheet.
+        if let tab = tabForPane(paneId, in: model),
+           allPaneIds(tab.rootNode).count == 1 {
+            let rollup = tabTodoRollup(tab.id, in: model)
+            if rollup.uncompleted > 0 {
+                let isLastTab = totalTabCount(model) == 1
+                return emitCloseTabConfirmation(
+                    &model, tabId: tab.id, tabTitle: tab.displayTitle,
+                    paneCount: 1, isLastTab: isLastTab,
+                    uncompletedTodoCount: rollup.uncompleted
+                )
+            }
+            return update(&model, .closePane(paneId: paneId))
+        }
         let uncompletedCount = pane.todos.count { !$0.isDone }
         if uncompletedCount > 0 {
             return [.showClosePaneConfirmation(paneId: paneId, uncompletedCount: uncompletedCount)]

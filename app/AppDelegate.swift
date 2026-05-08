@@ -70,6 +70,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         chromeView.addTabButton.action = #selector(newTab(_:))
         chromeView.addGroupButton.target = self
         chromeView.addGroupButton.action = #selector(newGroup(_:))
+        chromeView.tabTodoButton.target = self
+        chromeView.tabTodoButton.action = #selector(toggleTabTodoPopover(_:))
 
         // Create split view (sidebar | content)
         splitView = NSSplitView()
@@ -558,6 +560,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     @objc func openTodo(_ sender: Any?) {
         guard let tab = selectedTab(in: runtime.model) else { return }
         runtime.send(.toggleTodoPopover(paneId: tab.focusedPaneId))
+    }
+
+    @objc func toggleTabTodoPopover(_ sender: Any?) {
+        guard let tabId = runtime.model.selectedTabId else { return }
+        runtime.send(.toggleTodoPopoverForTab(tabId: tabId))
     }
 
     @objc func focusLeft(_ sender: Any?) {

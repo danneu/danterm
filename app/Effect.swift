@@ -40,7 +40,9 @@ enum Effect {
     // System
     case sendNotification(alertId: AlertId, title: String, body: String)
     case showTerminateConfirmation(paneCount: Int)
-    case showCloseTabConfirmation(tabId: TabId, tabTitle: String, paneCount: Int, isLastTab: Bool)
+    // `uncompletedTodoCount` rolls up the tab's own todos plus every pane's
+    // todos in that tab (the same number the chrome's tab-todo badge shows).
+    case showCloseTabConfirmation(tabId: TabId, tabTitle: String, paneCount: Int, isLastTab: Bool, uncompletedTodoCount: Int)
     case terminate
     case activateApp
     case setAppFocus(Bool)
@@ -73,6 +75,8 @@ enum Effect {
     // TODO
     case showTodoPopover(paneId: PaneId)
     case dismissTodoPopover
+    case showTodoPopoverForTab(tabId: TabId)
+    case dismissTodoPopoverForTab
     case showClosePaneConfirmation(paneId: PaneId, uncompletedCount: Int)
     case refreshPaneToolbar(paneId: PaneId)
 

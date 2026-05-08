@@ -587,6 +587,61 @@ func snapshotTests() {
         try expectEqual(todos[1].isDone, false)
     }
 
+    test("snapshot round-trip preserves tab todos") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = selectedTab(in: model)!.id
+        update(&model, .addTabTodo(tabId: tabId, text: "tab one"))
+        update(&model, .addTabTodo(tabId: tabId, text: "tab two"))
+        let id1 = tabById(tabId, in: model)!.todos[0].id
+        update(&model, .toggleTabTodoDone(tabId: tabId, todoId: id1))
+
+        let snapshot = toSnapshot(model)
+        let rebuilt = validateAndBuild(snapshot)
+        try expect(rebuilt != nil, "should rebuild from snapshot with tab todos")
+        let todos = tabById(tabId, in: rebuilt!)!.todos
+        try expectEqual(todos.count, 2)
+        try expectEqual(todos[0].text, "tab one")
+        try expectEqual(todos[0].isDone, true)
+        try expectEqual(todos[1].text, "tab two")
+        try expectEqual(todos[1].isDone, false)
+    }
+
+    test("toSnapshot emits nil for empty tab todos") {
+        var model = makeModel()
+        createTab(&model)
+        let snapshot = toSnapshot(model)
+        let tabSnap = snapshot.groups[0].tabs[0]
+        try expect(tabSnap.todos == nil, "empty tab todos should encode as nil")
+    }
+
+    test("snapshot without tab todos field decodes with empty list") {
+        let json = """
+        {
+          "version": 1,
+          "model": {
+            "groups": [{
+              "name": "General",
+              "tabs": [{
+                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+              }]
+            }],
+            "panes": [{
+              "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
+              "title": "Terminal",
+              "cwd": "~/world"
+            }]
+          }
+        }
+        """
+        let data = json.data(using: .utf8)!
+        let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
+        let model = validateAndBuild(initFile.model)
+        try expect(model != nil, "should rebuild snapshot without tab todos field")
+        let tabs = model!.groups.flatMap(\.tabs)
+        try expectEqual(tabs[0].todos.count, 0, "tab todos should default to empty")
+    }
+
     test("snapshot without todos field decodes with empty array") {
         let json = """
         {

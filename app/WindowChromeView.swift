@@ -9,6 +9,7 @@ class WindowChromeView: NSView {
     let bellButton: BellToolbarButton
     let addTabButton: NSButton
     let addGroupButton: NSButton
+    let tabTodoButton: TodoToolbarButton
     private let titleLabel: NSTextField
     private let dragView: TitlebarDragView
 
@@ -61,6 +62,11 @@ class WindowChromeView: NSView {
         addGroupButton.imagePosition = .imageOnly
         addGroupButton.toolTip = "New Group"
 
+        // Tab todos button on the right edge of the chrome. Always shown so
+        // the trailing edge always has the badge, in both sidebar states.
+        tabTodoButton = TodoToolbarButton()
+        tabTodoButton.toolTip = "Tab To-Dos"
+
         // Title label
         titleLabel = NSTextField(labelWithString: "")
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -91,6 +97,7 @@ class WindowChromeView: NSView {
         addSubview(bellButton)
         addSubview(addTabButton)
         addSubview(addGroupButton)
+        addSubview(tabTodoButton)
         addSubview(titleLabel)
 
         // Height: will be updated from titlebar geometry
@@ -146,9 +153,15 @@ class WindowChromeView: NSView {
             addTabButton.widthAnchor.constraint(equalToConstant: 28),
             addTabButton.heightAnchor.constraint(equalToConstant: 28),
 
-            // Title label
+            // Tab todos button (trailing edge). TodoToolbarButton self-pins
+            // height to 16pt; do NOT add a 28pt height constraint here or AL
+            // will report a conflict.
+            tabTodoButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            tabTodoButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            // Title label — keep it from drawing under the tab-todo button.
             titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: tabTodoButton.leadingAnchor, constant: -8),
         ])
     }
 

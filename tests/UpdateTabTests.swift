@@ -379,7 +379,7 @@ func tabTests() {
         let effects = update(&model, .requestCloseTab(id: firstTabId))
         try expectEqual(model.groups[0].tabs.count, 2, "tab should NOT be removed yet")
         try expect(hasEffect(effects) {
-            if case .showCloseTabConfirmation(let tid, _, let count, let last) = $0 {
+            if case .showCloseTabConfirmation(let tid, _, let count, let last, _) = $0 {
                 return tid == firstTabId && count == 2 && !last
             }
             return false
