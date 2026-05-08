@@ -28,9 +28,54 @@ private struct CLICommand {
 struct DanTermCLI {
     private static let socketTimeoutSeconds = 5
 
+    // Top-level help text. Kept in sync by hand with `parseCommand` and
+    // the `EnvVars` constants used in `request(...)` -- there is no
+    // automated check, so any change to either touches this string too.
+    private static let usageText: String = """
+        danterm -- control DanTerm from the shell
+
+        Usage:
+          danterm <command> [args]
+
+        Commands:
+          ls                          Print the full app snapshot as JSON
+          tab title [text]            Get or set the current tab title
+          tab rename <name>           Rename the current tab
+          pane focus <pane-id>        Focus a pane by id
+          pane split -h|-v            Split the current pane (horizontal/vertical)
+          new-tab [--group <name>]    Open a new tab, optionally in a named group
+          send-keys <text>            Send keystrokes to the current pane
+          theme set <name>|--clear    Set or clear the current theme
+          todo list                   List todos as JSON
+          todo add <text>             Add a todo
+          todo edit <id> <text>       Edit a todo's text
+          todo done <id>              Mark a todo done
+          todo open <id>              Reopen a completed todo
+          todo delete <id>            Delete a todo
+          todo clear-completed        Remove all completed todos
+          help, --help, -h            Print this message
+
+        Environment:
+          DANTERM_SOCK   Path to the DanTerm control socket
+          DANTERM_PANE   Pane id for context-aware commands (set by shell integration)
+          DANTERM_TAB    Tab id for context-aware commands (set by shell integration)
+
+        """
+
     static func main() {
         do {
-            let command = try parseCommand(Array(CommandLine.arguments.dropFirst()))
+            // Intercept help before parseCommand so we never touch the IPC
+            // socket for pure local arg handling.
+            let rawArgs = Array(CommandLine.arguments.dropFirst())
+            if rawArgs.isEmpty {
+                fputs(usageText, stderr)
+                exit(1)
+            }
+            if rawArgs == ["help"] || rawArgs == ["--help"] || rawArgs == ["-h"] {
+                print(usageText, terminator: "")
+                exit(0)
+            }
+            let command = try parseCommand(rawArgs)
             let environment = ProcessInfo.processInfo.environment
             let socketPath = nonEmpty(environment[EnvVars.sock]) ?? controlSocketPath().path
             let response = try request(command, socketPath: socketPath, environment: environment)
@@ -52,8 +97,8 @@ struct DanTermCLI {
         guard let head = args.first else { throw CLIError("missing command") }
         switch head {
         case "ls":
-            guard args.count == 1 || args == ["ls", "--json"] else {
-                throw CLIError("usage: danterm ls [--json]")
+            guard args.count == 1 else {
+                throw CLIError("usage: danterm ls")
             }
             return CLICommand(method: Methods.ls, params: [:], outputMode: .json)
 

@@ -14,6 +14,51 @@ fi
 
 "$SCRIPT_DIR/dev-build.sh"
 
+# Help-text smoke tests. These run against the freshly built helper but
+# do not require the app to be running -- help is local arg handling.
+out=$(mktemp); err=$(mktemp)
+run_cli() {
+    : >"$out"
+    : >"$err"
+    if "$CLI_PATH" "$@" >"$out" 2>"$err"; then
+        status=0
+    else
+        status=$?
+    fi
+}
+
+# Bare `danterm`: usage on stderr, exit 1, stdout silent. We assert
+# stderr does NOT carry the old `danterm:` error-line prefix so that a
+# regression which prepends `danterm: missing command` before/with the
+# usage block fails loudly.
+run_cli
+[[ $status -eq 1 ]]
+[[ ! -s "$out" ]]
+[[ -s "$err" ]]
+if grep -q '^danterm:' "$err"; then
+    echo "regression: bare invocation prefixed with 'danterm:'" >&2
+    exit 1
+fi
+grep -qF 'Usage:' "$err"
+grep -qF 'ls' "$err"
+grep -qF 'pane split -h|-v' "$err"
+grep -qF 'todo clear-completed' "$err"
+grep -qF 'DANTERM_SOCK' "$err"
+
+# Explicit help requests: usage on stdout, exit 0, stderr silent. Same
+# stable tokens checked across each flag form.
+for help_arg in help --help -h; do
+    run_cli "$help_arg"
+    [[ $status -eq 0 ]]
+    [[ ! -s "$err" ]]
+    [[ -s "$out" ]]
+    grep -qF 'Usage:' "$out"
+    grep -qF 'ls' "$out"
+    grep -qF 'pane split -h|-v' "$out"
+    grep -qF 'todo clear-completed' "$out"
+    grep -qF 'DANTERM_SOCK' "$out"
+done
+
 pkill -x "$APP_NAME" 2>/dev/null || true
 open -a "$APP_PATH"
 
@@ -60,7 +105,7 @@ export DANTERM_TAB="$tab_id"
 todo_id="$("$CLI_PATH" todo add 'ship cli' | jq -r .id)"
 "$CLI_PATH" todo list | jq -e --arg id "$todo_id" '.[] | select(.id == $id)' >/dev/null
 "$CLI_PATH" todo edit "$todo_id" 'ship cli v2'
-"$CLI_PATH" todo done "$todo_id"
+"$CLI_PATH" todo "done" "$todo_id"
 "$CLI_PATH" todo delete "$todo_id"
 
 /usr/bin/python3 - "$DANTERM_SOCK" <<'PY'
