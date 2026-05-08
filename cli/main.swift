@@ -44,7 +44,11 @@ struct DanTermCLI {
           pane focus <pane-id>        Focus a pane by id
           pane split -h|-v            Split the current pane (horizontal/vertical)
           new-tab [--group <name>]    Open a new tab, optionally in a named group
-          send-keys <text>            Send keystrokes to the current pane
+          send-keys [--pane <id>] [--literal] -- <token>...
+                                      Send keystrokes to a pane (tmux-style:
+                                      "ls" Enter, C-c, Up, Escape). Use --pane
+                                      to target a specific pane (default:
+                                      caller's via $DANTERM_PANE).
           theme set <name>|--clear    Set or clear the current theme
           todo list                   List todos as JSON
           todo add <text>             Add a todo
@@ -148,9 +152,7 @@ struct DanTermCLI {
             return CLICommand(method: Methods.newTab, params: ["group": .string(name)], outputMode: .none)
 
         case "send-keys":
-            let text = args.dropFirst().joined(separator: " ")
-            guard !text.isEmpty else { throw CLIError("usage: danterm send-keys <text>") }
-            return CLICommand(method: Methods.sendKeys, params: ["text": .string(text)], outputMode: .none)
+            return try parseSendKeysCommand(Array(args.dropFirst()))
 
         case "theme":
             guard args.count >= 3, args[1] == "set" else {
@@ -200,6 +202,85 @@ struct DanTermCLI {
             return CLICommand(method: Methods.todoClearCompleted, params: [:], outputMode: .none)
         default:
             throw CLIError("unknown todo command")
+        }
+    }
+
+    private static func parseSendKeysCommand(_ args: [String]) throws -> CLICommand {
+        let parsed: ParsedSendKeys
+        do {
+            parsed = try parseSendKeysArgs(args)
+        } catch SendKeysParseError.unknownFlag(let flag) {
+            throw CLIError("unknown flag: \(flag)")
+        } catch SendKeysParseError.missingPaneArg {
+            throw CLIError("usage: danterm send-keys --pane <id> ...")
+        } catch SendKeysParseError.literalRequiresSeparator {
+            throw CLIError("--literal requires -- before the tokens")
+        } catch SendKeysParseError.missingArguments {
+            throw CLIError("usage: danterm send-keys [--pane <id>] [--literal] -- <token>...")
+        } catch SendKeysParseError.keyToken(.unknownKey(let token)) {
+            throw CLIError("unknown key: \(token)")
+        }
+
+        var params: [String: JSONValue] = [:]
+        if let pane = parsed.pane {
+            params["pane"] = .string(pane)
+        }
+        params["input"] = .array(parsed.events.map(inputEventToJSON))
+        return CLICommand(method: Methods.sendKeys, params: params, outputMode: .none)
+    }
+
+    // Map a single InputEvent to its JSON-RPC wire form. Inverse of
+    // Update.swift's parseInputEvent — keep them in sync.
+    private static func inputEventToJSON(_ event: InputEvent) -> JSONValue {
+        switch event {
+        case .text(let text):
+            return .object(["text": .string(text)])
+        case .key(let key, let mods):
+            var object: [String: JSONValue] = ["key": .string(wireName(for: key))]
+            if !mods.isEmpty {
+                var modNames: [JSONValue] = []
+                if mods.contains(.ctrl) { modNames.append(.string("ctrl")) }
+                if mods.contains(.alt)  { modNames.append(.string("alt")) }
+                object["mods"] = .array(modNames)
+            }
+            return .object(object)
+        }
+    }
+
+    // Canonical wire name for a KeyName. Aliases (Backspace -> BSpace, Esc ->
+    // Escape) collapse to one canonical form on the way out.
+    private static func wireName(for key: KeyName) -> String {
+        switch key {
+        case .letter(let c):
+            return String(c)
+        case .named(let n):
+            switch n {
+            case .enter:  return "Enter"
+            case .tab:    return "Tab"
+            case .bspace: return "BSpace"
+            case .escape: return "Escape"
+            case .up:     return "Up"
+            case .down:   return "Down"
+            case .left:   return "Left"
+            case .right:  return "Right"
+            case .home:   return "Home"
+            case .end:    return "End"
+            case .pgUp:   return "PgUp"
+            case .pgDn:   return "PgDn"
+            case .delete: return "Delete"
+            case .f1:  return "F1"
+            case .f2:  return "F2"
+            case .f3:  return "F3"
+            case .f4:  return "F4"
+            case .f5:  return "F5"
+            case .f6:  return "F6"
+            case .f7:  return "F7"
+            case .f8:  return "F8"
+            case .f9:  return "F9"
+            case .f10: return "F10"
+            case .f11: return "F11"
+            case .f12: return "F12"
+            }
         }
     }
 

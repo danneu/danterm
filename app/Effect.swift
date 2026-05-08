@@ -5,7 +5,18 @@ enum Effect {
     // Surface
     case createSurface(paneId: PaneId, cwd: String?, command: String?)
     case destroySurface(paneId: PaneId)
+    // Paste path (ghostty_surface_text). Strips control bytes and applies
+    // bracketed-paste mode if active. Used by direct IPC callers that send
+    // the top-level `text` field.
     case sendText(paneId: PaneId, text: String)
+    // Structured-input text run, dispatched as a key event with keycode=0
+    // through ghostty_surface_key. Bypasses paste-stripping and bracketed
+    // paste so vim/htop see characters as if typed.
+    case sendInputText(paneId: PaneId, text: String)
+    // Single named/letter key event with optional modifiers, dispatched
+    // through ghostty_surface_key so escape sequences (arrows, F-keys, C-c,
+    // Esc) actually reach the PTY.
+    case sendInputKey(paneId: PaneId, key: KeyName, mods: KeyMods)
 
     // Focus
     case focusSurface(paneId: PaneId, focused: Bool)

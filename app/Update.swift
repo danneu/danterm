@@ -1381,17 +1381,50 @@ private func handleIpcRequest(
         return effects + [.ipcReply(reqId: reqId, result: .object(["ok": .bool(true)]))]
 
     case Methods.sendKeys:
-        guard let paneId = resolveIpcPaneId(context, in: model),
-              case .object(let object) = params,
-              case .string(let text)? = object["text"],
-              !text.isEmpty
-        else {
-            return ipcInvalidParams(reqId, "invalid text")
+        do {
+            let paneId = try resolveSendKeysPane(params: params, context: context, in: model)
+            guard case .object(let object) = params else {
+                throw IpcParamsError("text or input required")
+            }
+            let textValue = object["text"]
+            let inputValue = object["input"]
+            switch (textValue, inputValue) {
+            case (.some, .some):
+                throw IpcParamsError("text or input required, not both")
+            case (.none, .none):
+                throw IpcParamsError("text or input required")
+            case (.some(let t), .none):
+                // Top-level IPC text keeps paste-path semantics.
+                guard case .string(let text) = t, !text.isEmpty else {
+                    throw IpcParamsError("invalid text")
+                }
+                return [
+                    .sendText(paneId: paneId, text: text),
+                    .ipcReply(reqId: reqId, result: .object(["ok": .bool(true)])),
+                ]
+            case (.none, .some(let i)):
+                guard case .array(let arr) = i else {
+                    throw IpcParamsError("input must be an array")
+                }
+                var effects: [Effect] = []
+                effects.reserveCapacity(arr.count + 1)
+                for value in arr {
+                    let event = try parseInputEvent(value)
+                    switch event {
+                    case .text(let text):
+                        effects.append(.sendInputText(paneId: paneId, text: text))
+                    case .key(let key, let mods):
+                        effects.append(.sendInputKey(paneId: paneId, key: key, mods: mods))
+                    }
+                }
+                effects.append(.ipcReply(reqId: reqId, result: .object(["ok": .bool(true)])))
+                return effects
+            }
+        } catch let error as IpcParamsError {
+            return ipcInvalidParams(reqId, error.message)
+        } catch {
+            return ipcInvalidParams(reqId, "invalid params")
         }
-        return [
-            .sendText(paneId: paneId, text: text),
-            .ipcReply(reqId: reqId, result: .object(["ok": .bool(true)])),
-        ]
 
     case Methods.todoList:
         guard let paneId = resolveIpcPaneId(context, in: model),
@@ -1508,6 +1541,82 @@ private func resolveIpcPaneId(_ context: IpcRequestContext, in model: AppModel) 
         return nil
     }
     return paneId
+}
+
+private struct IpcParamsError: Error {
+    let message: String
+    init(_ message: String) { self.message = message }
+}
+
+// `send-keys`-specific pane resolver. Honours an explicit `pane` field in
+// params (cross-pane targeting) and never silently falls back to the request
+// context when the explicit pane is malformed or unknown — the caller asked
+// for a specific pane and got something wrong, so they should hear about it.
+private func resolveSendKeysPane(
+    params: JSONValue,
+    context: IpcRequestContext,
+    in model: AppModel
+) throws -> PaneId {
+    if case .object(let object) = params, let raw = object["pane"] {
+        guard case .string(let str) = raw else {
+            throw IpcParamsError("pane must be a string")
+        }
+        guard let id = parsePaneId(str), model.panes[id] != nil else {
+            throw IpcParamsError("pane not found")
+        }
+        return id
+    }
+    if let id = resolveIpcPaneId(context, in: model) {
+        return id
+    }
+    throw IpcParamsError("no pane in context")
+}
+
+// Parses a single `input[i]` JSON object into an InputEvent. All structural
+// validation happens here so by the time the runtime handles
+// `.sendInputKey(...)`, the KeyName has already been confirmed against the
+// closed enum.
+private func parseInputEvent(_ value: JSONValue) throws -> InputEvent {
+    guard case .object(let object) = value else {
+        throw IpcParamsError("input event must be an object")
+    }
+    let textPresent = object["text"] != nil
+    let keyPresent = object["key"] != nil
+    if textPresent == keyPresent {
+        throw IpcParamsError("input event must have text xor key")
+    }
+    if textPresent {
+        guard case .string(let text)? = object["text"] else {
+            throw IpcParamsError("input event text must be a string")
+        }
+        return .text(text)
+    }
+    guard case .string(let keyName)? = object["key"] else {
+        throw IpcParamsError("input event key must be a string")
+    }
+    guard let key = KeyName(wireName: keyName) else {
+        throw IpcParamsError("unknown key \(keyName)")
+    }
+    var mods: KeyMods = []
+    if let modsValue = object["mods"] {
+        guard case .array(let arr) = modsValue else {
+            throw IpcParamsError("mods must be an array")
+        }
+        var modNames: [String] = []
+        modNames.reserveCapacity(arr.count)
+        for entry in arr {
+            guard case .string(let name) = entry else {
+                throw IpcParamsError("mods entries must be strings")
+            }
+            modNames.append(name)
+        }
+        do {
+            mods = try KeyMods.decode(wire: modNames)
+        } catch KeyModsDecodeError.unknown(let name) {
+            throw IpcParamsError("unknown mod \(name)")
+        }
+    }
+    return .key(key, mods)
 }
 
 private func resolveIpcTabId(_ context: IpcRequestContext, in model: AppModel) -> TabId? {

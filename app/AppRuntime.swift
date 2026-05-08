@@ -304,6 +304,42 @@ class AppRuntime {
                 ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
             }
 
+        case .sendInputText(let paneId, let text):
+            // Send a press-only key event with keycode 0 and the literal
+            // UTF-8 text attached. Avoids paste stripping and bracketed-paste
+            // markers so TUIs receive characters as if typed.
+            guard !text.isEmpty,
+                  let surface = surfaces[paneId]?.surface else { break }
+            var ev = ghostty_input_key_s()
+            ev.action = GHOSTTY_ACTION_PRESS
+            ev.keycode = 0
+            ev.mods = GHOSTTY_MODS_NONE
+            ev.consumed_mods = GHOSTTY_MODS_NONE
+            ev.unshifted_codepoint = 0
+            ev.composing = false
+            text.withCString { ptr in
+                ev.text = ptr
+                _ = ghostty_surface_key(surface, ev)
+            }
+
+        case .sendInputKey(let paneId, let key, let mods):
+            // Press + matching release so a follow-up key event isn't
+            // interpreted as auto-repeat. Ghostty's keymap layer handles
+            // terminal encoding and DECCKM for us.
+            guard let surface = surfaces[paneId]?.surface else { break }
+            let (keycode, codepoint) = macKeyMapping(for: key)
+            var ev = ghostty_input_key_s()
+            ev.action = GHOSTTY_ACTION_PRESS
+            ev.keycode = keycode
+            ev.mods = ghosttyMods(mods)
+            ev.consumed_mods = GHOSTTY_MODS_NONE
+            ev.unshifted_codepoint = codepoint
+            ev.composing = false
+            ev.text = nil
+            _ = ghostty_surface_key(surface, ev)
+            ev.action = GHOSTTY_ACTION_RELEASE
+            _ = ghostty_surface_key(surface, ev)
+
         case .focusSurface(let paneId, let focused):
             if let view = surfaces[paneId], let surface = view.surface {
                 ghostty_surface_set_focus(surface, focused)
@@ -1309,4 +1345,60 @@ private class TodoPopoverDelegateAdapter: NSObject, NSPopoverDelegate {
 
 private enum RestoreBuildError: Error {
     case surfaceCreationFailed
+}
+
+// macOS hardware keycodes (kVK_*) for the closed `KeyName` set, plus the ASCII
+// codepoint for letters so Ghostty's keymap layer encodes the right terminal
+// bytes. Total: every enum case maps to a concrete (keycode, codepoint) pair.
+private func macKeyMapping(for key: KeyName) -> (UInt32, UInt32) {
+    switch key {
+    case .named(let n):
+        switch n {
+        case .enter:  return (36, 0)
+        case .tab:    return (48, 0)
+        case .bspace: return (51, 0)
+        case .escape: return (53, 0)
+        case .up:     return (126, 0)
+        case .down:   return (125, 0)
+        case .left:   return (123, 0)
+        case .right:  return (124, 0)
+        case .home:   return (115, 0)
+        case .end:    return (119, 0)
+        case .pgUp:   return (116, 0)
+        case .pgDn:   return (121, 0)
+        case .delete: return (117, 0)
+        case .f1:  return (122, 0)
+        case .f2:  return (120, 0)
+        case .f3:  return (99, 0)
+        case .f4:  return (118, 0)
+        case .f5:  return (96, 0)
+        case .f6:  return (97, 0)
+        case .f7:  return (98, 0)
+        case .f8:  return (100, 0)
+        case .f9:  return (101, 0)
+        case .f10: return (109, 0)
+        case .f11: return (103, 0)
+        case .f12: return (111, 0)
+        }
+    case .letter(let c):
+        let keycode = letterKeycodes[c] ?? 0
+        let codepoint = UInt32(c.asciiValue ?? 0)
+        return (keycode, codepoint)
+    }
+}
+
+// kVK_ANSI_* keycodes for a-z. Non-sequential — these come from the original
+// ADB keyboard layout and have stuck around.
+private let letterKeycodes: [Character: UInt32] = [
+    "a": 0,  "s": 1,  "d": 2,  "f": 3,  "h": 4,  "g": 5,  "z": 6,  "x": 7,
+    "c": 8,  "v": 9,  "b": 11, "q": 12, "w": 13, "e": 14, "r": 15, "y": 16,
+    "t": 17, "o": 31, "u": 32, "i": 34, "p": 35, "l": 37, "j": 38, "k": 40,
+    "n": 45, "m": 46,
+]
+
+private func ghosttyMods(_ mods: KeyMods) -> ghostty_input_mods_e {
+    var raw: UInt32 = GHOSTTY_MODS_NONE.rawValue
+    if mods.contains(.ctrl) { raw |= GHOSTTY_MODS_CTRL.rawValue }
+    if mods.contains(.alt)  { raw |= GHOSTTY_MODS_ALT.rawValue }
+    return ghostty_input_mods_e(raw)
 }

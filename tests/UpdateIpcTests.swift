@@ -223,6 +223,356 @@ func ipcUpdateTests() {
             return false
         }, "expected sendText effect")
     }
+
+    test("send-keys input array emits ordered Effects via the key path") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let effects = sendIpc(
+            &model,
+            method: Methods.sendKeys,
+            params: .object([
+                "input": .array([
+                    .object(["text": .string("ls")]),
+                    .object(["key": .string("Enter")]),
+                ])
+            ]),
+            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        )
+        // Three effects in order: sendInputText, sendInputKey, ipcReply.
+        try expectEqual(effects.count, 3)
+        guard case .sendInputText(let p0, let t0) = effects[0] else {
+            throw TestFailure(message: "expected first effect = sendInputText")
+        }
+        try expectEqual(p0, paneId)
+        try expectEqual(t0, "ls")
+        guard case .sendInputKey(let p1, let key1, let mods1) = effects[1] else {
+            throw TestFailure(message: "expected second effect = sendInputKey")
+        }
+        try expectEqual(p1, paneId)
+        try expectEqual(key1, KeyName.named(.enter))
+        try expectEqual(mods1, KeyMods())
+        guard case .ipcReply = effects[2] else {
+            throw TestFailure(message: "expected third effect = ipcReply")
+        }
+        try expect(!hasEffect(effects) {
+            if case .sendText = $0 { return true }
+            return false
+        }, "input path must not emit .sendText")
+    }
+
+    test("send-keys explicit empty mods equals omitted mods") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let effects = sendIpc(
+            &model,
+            method: Methods.sendKeys,
+            params: .object([
+                "input": .array([
+                    .object([
+                        "key": .string("Enter"),
+                        "mods": .array([]),
+                    ])
+                ])
+            ]),
+            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        )
+        try expect(hasEffect(effects) {
+            if case .sendInputKey(let p, let k, let m) = $0 {
+                return p == paneId && k == .named(.enter) && m == KeyMods()
+            }
+            return false
+        }, "expected sendInputKey with empty mods")
+    }
+
+    test("send-keys non-array mods is invalid params") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let effects = sendIpc(
+            &model,
+            method: Methods.sendKeys,
+            params: .object([
+                "input": .array([
+                    .object([
+                        "key": .string("Enter"),
+                        "mods": .string("ctrl"),
+                    ])
+                ])
+            ]),
+            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        )
+        let error = try requireIpcError(effects)
+        try expectEqual(error.code, -32602)
+        try expect(error.message.contains("mods must be an array"),
+                   "message should describe non-array mods, got: \(error.message)")
+    }
+
+    test("send-keys key with ctrl mod emits sendInputKey") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let effects = sendIpc(
+            &model,
+            method: Methods.sendKeys,
+            params: .object([
+                "input": .array([
+                    .object([
+                        "key": .string("c"),
+                        "mods": .array([.string("ctrl")]),
+                    ])
+                ])
+            ]),
+            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        )
+        try expect(hasEffect(effects) {
+            if case .sendInputKey(let p, let k, let m) = $0 {
+                return p == paneId && k == .letter("c") && m == [.ctrl]
+            }
+            return false
+        }, "expected sendInputKey for C-c")
+    }
+
+    test("send-keys with both text and input is invalid params") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let effects = sendIpc(
+            &model,
+            method: Methods.sendKeys,
+            params: .object([
+                "text": .string("hi"),
+                "input": .array([.object(["text": .string("hi")])]),
+            ]),
+            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        )
+        let error = try requireIpcError(effects)
+        try expectEqual(error.code, -32602)
+    }
+
+    test("send-keys with neither text nor input is invalid params") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let effects = sendIpc(
+            &model,
+            method: Methods.sendKeys,
+            params: .object([:]),
+            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        )
+        let error = try requireIpcError(effects)
+        try expectEqual(error.code, -32602)
+    }
+
+    test("send-keys input event missing both text and key is invalid params") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let effects = sendIpc(
+            &model,
+            method: Methods.sendKeys,
+            params: .object([
+                "input": .array([.object([:])])
+            ]),
+            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        )
+        let error = try requireIpcError(effects)
+        try expectEqual(error.code, -32602)
+    }
+
+    test("send-keys input event with both text and key is invalid params") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let effects = sendIpc(
+            &model,
+            method: Methods.sendKeys,
+            params: .object([
+                "input": .array([
+                    .object([
+                        "text": .string("x"),
+                        "key": .string("Enter"),
+                    ])
+                ])
+            ]),
+            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        )
+        let error = try requireIpcError(effects)
+        try expectEqual(error.code, -32602)
+    }
+
+    // Load-bearing assertion: a wire-level "Bogus" key never makes it past the
+    // IPC handler. No .sendInputKey is emitted; the response is an error.
+    test("send-keys unknown key name is rejected before any Effect") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let effects = sendIpc(
+            &model,
+            method: Methods.sendKeys,
+            params: .object([
+                "input": .array([
+                    .object(["key": .string("Bogus")])
+                ])
+            ]),
+            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        )
+        let error = try requireIpcError(effects)
+        try expectEqual(error.code, -32602)
+        try expect(error.message.contains("unknown key Bogus"),
+                   "message should mention unknown key Bogus, got: \(error.message)")
+        try expect(!hasEffect(effects) {
+            if case .sendInputKey = $0 { return true }
+            return false
+        }, "no .sendInputKey should be emitted")
+    }
+
+    test("send-keys non-string key value is invalid params") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let effects = sendIpc(
+            &model,
+            method: Methods.sendKeys,
+            params: .object([
+                "input": .array([
+                    .object(["key": .number(5)])
+                ])
+            ]),
+            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        )
+        let error = try requireIpcError(effects)
+        try expectEqual(error.code, -32602)
+    }
+
+    test("send-keys unknown mod name is invalid params") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let effects = sendIpc(
+            &model,
+            method: Methods.sendKeys,
+            params: .object([
+                "input": .array([
+                    .object([
+                        "key": .string("Enter"),
+                        "mods": .array([.string("bogus")]),
+                    ])
+                ])
+            ]),
+            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        )
+        let error = try requireIpcError(effects)
+        try expectEqual(error.code, -32602)
+        try expect(error.message.contains("unknown mod bogus"),
+                   "message should mention unknown mod bogus, got: \(error.message)")
+    }
+
+    test("send-keys shift mod is rejected") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let effects = sendIpc(
+            &model,
+            method: Methods.sendKeys,
+            params: .object([
+                "input": .array([
+                    .object([
+                        "key": .string("Tab"),
+                        "mods": .array([.string("shift")]),
+                    ])
+                ])
+            ]),
+            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        )
+        let error = try requireIpcError(effects)
+        try expectEqual(error.code, -32602)
+        try expect(error.message.contains("shift"),
+                   "message should mention shift, got: \(error.message)")
+    }
+
+    test("send-keys explicit pane targets that pane regardless of context") {
+        var model = makeModel()
+        createTab(&model)
+        let backgroundPaneId = selectedTab(in: model)!.focusedPaneId
+        createTab(&model)
+        let foregroundPaneId = selectedTab(in: model)!.focusedPaneId
+        // Context says foreground; explicit pane param overrides to background.
+        let effects = sendIpc(
+            &model,
+            method: Methods.sendKeys,
+            params: .object([
+                "pane": .string(backgroundPaneId.rawValue.uuidString),
+                "input": .array([.object(["text": .string("hi")])]),
+            ]),
+            context: IpcRequestContext(paneId: foregroundPaneId.rawValue.uuidString)
+        )
+        try expect(hasEffect(effects) {
+            if case .sendInputText(let p, let t) = $0 {
+                return p == backgroundPaneId && t == "hi"
+            }
+            return false
+        }, "expected effect targeting explicit pane")
+    }
+
+    test("send-keys explicit pane that doesn't exist returns pane not found") {
+        var model = makeModel()
+        createTab(&model)
+        let realPaneId = selectedTab(in: model)!.focusedPaneId
+        let effects = sendIpc(
+            &model,
+            method: Methods.sendKeys,
+            params: .object([
+                "pane": .string(UUID().uuidString),
+                "input": .array([.object(["text": .string("hi")])]),
+            ]),
+            // Context pane exists, but explicit pane shouldn't fall back.
+            context: IpcRequestContext(paneId: realPaneId.rawValue.uuidString)
+        )
+        let error = try requireIpcError(effects)
+        try expectEqual(error.code, -32602)
+        try expect(error.message.contains("pane not found"),
+                   "expected 'pane not found', got: \(error.message)")
+        try expect(!hasEffect(effects) {
+            if case .sendInputText = $0 { return true }
+            return false
+        }, "no input effect should be emitted")
+    }
+
+    test("send-keys non-string pane is invalid params and does not fall back") {
+        var model = makeModel()
+        createTab(&model)
+        let realPaneId = selectedTab(in: model)!.focusedPaneId
+        let effects = sendIpc(
+            &model,
+            method: Methods.sendKeys,
+            params: .object([
+                "pane": .number(5),
+                "input": .array([.object(["text": .string("hi")])]),
+            ]),
+            context: IpcRequestContext(paneId: realPaneId.rawValue.uuidString)
+        )
+        let error = try requireIpcError(effects)
+        try expectEqual(error.code, -32602)
+        try expect(error.message.contains("pane must be a string"),
+                   "expected 'pane must be a string', got: \(error.message)")
+    }
+
+    test("send-keys with no pane in context and no explicit pane errors") {
+        var model = makeModel()
+        createTab(&model)
+        let effects = sendIpc(
+            &model,
+            method: Methods.sendKeys,
+            params: .object(["input": .array([.object(["text": .string("hi")])])]),
+            context: IpcRequestContext()
+        )
+        let error = try requireIpcError(effects)
+        try expectEqual(error.code, -32602)
+        try expect(error.message.contains("no pane in context"),
+                   "expected 'no pane in context', got: \(error.message)")
+    }
 }
 
 private struct IpcErrorResult: Equatable {
