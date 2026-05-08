@@ -9,6 +9,7 @@ public enum Methods {
     public static let paneSplit = "pane.split"
     public static let newTab = "new-tab"
     public static let sendKeys = "send-keys"
+    public static let readPane = "read-pane"
     public static let themeSet = "theme.set"
     public static let todoList = "todo.list"
     public static let todoAdd = "todo.add"

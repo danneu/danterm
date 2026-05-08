@@ -17,6 +17,7 @@ private enum OutputMode {
     case none
     case json
     case tabTitle
+    case text
 }
 
 private struct CLICommand {
@@ -49,6 +50,9 @@ struct DanTermCLI {
                                       "ls" Enter, C-c, Up, Escape). Use --pane
                                       to target a specific pane (default:
                                       caller's via $DANTERM_PANE).
+          read-pane --pane <id> [--lines <n>]
+                                      Print a pane's visible text, or the last
+                                      n lines of scrollback when --lines is set.
           theme set <name>|--clear    Set or clear the current theme
           todo list                   List todos as JSON
           todo add <text>             Add a todo
@@ -154,6 +158,9 @@ struct DanTermCLI {
         case "send-keys":
             return try parseSendKeysCommand(Array(args.dropFirst()))
 
+        case "read-pane":
+            return try parseReadPaneCommand(Array(args.dropFirst()))
+
         case "theme":
             guard args.count >= 3, args[1] == "set" else {
                 throw CLIError("usage: danterm theme set <name>|--clear")
@@ -227,6 +234,30 @@ struct DanTermCLI {
         }
         params["input"] = .array(parsed.events.map(inputEventToJSON))
         return CLICommand(method: Methods.sendKeys, params: params, outputMode: .none)
+    }
+
+    private static func parseReadPaneCommand(_ args: [String]) throws -> CLICommand {
+        let parsed: ParsedReadPane
+        do {
+            parsed = try parseReadPaneArgs(args)
+        } catch let error as ReadPaneParseError {
+            switch error {
+            case .missingPane, .missingPaneArg:
+                throw CLIError("usage: danterm read-pane --pane <uuid> [--lines <n>]")
+            case .missingLinesArg, .invalidLines(_):
+                throw CLIError("--lines must be a positive integer")
+            case .unknownFlag(let flag):
+                throw CLIError("unknown flag: \(flag)")
+            case .unexpectedArgument(let argument):
+                throw CLIError("unexpected argument: \(argument)")
+            }
+        }
+
+        var params: [String: JSONValue] = ["pane": .string(parsed.pane)]
+        if let lineLimit = parsed.lineLimit {
+            params["lines"] = .number(Double(lineLimit))
+        }
+        return CLICommand(method: Methods.readPane, params: params, outputMode: .text)
     }
 
     // Map a single InputEvent to its JSON-RPC wire form. Inverse of
@@ -453,6 +484,11 @@ struct DanTermCLI {
             print(try compactJson(result))
         case .tabTitle:
             print(result["title"]?.asString ?? "")
+        case .text:
+            guard let text = renderReadPaneResult(result) else {
+                throw CLIError("malformed response")
+            }
+            FileHandle.standardOutput.write(Data(text.utf8))
         }
     }
 

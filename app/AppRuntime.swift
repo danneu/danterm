@@ -474,6 +474,18 @@ class AppRuntime {
             guard let connection = ipcConnections.removeValue(forKey: reqId) else { break }
             connection.writeError(reqId: reqId, code: code, message: message)
 
+        case .readPaneText(let reqId, let paneId, let lineLimit):
+            guard let connection = ipcConnections.removeValue(forKey: reqId) else { break }
+            guard let surface = surfaces[paneId]?.surface else {
+                connection.writeError(reqId: reqId, code: -32603, message: "pane no longer available")
+                break
+            }
+            guard let text = capturePaneText(surface: surface, lineLimit: lineLimit) else {
+                connection.writeError(reqId: reqId, code: -32603, message: "failed to read pane text")
+                break
+            }
+            connection.writeSuccess(reqId: reqId, result: .object(["text": .string(text)]))
+
         case .showCloseTabConfirmation(let tabId, let tabTitle, let paneCount, let isLastTab, let uncompletedTodoCount):
             let alert = NSAlert()
             alert.messageText = "Close tab \"\(tabTitle)\"?"
@@ -754,19 +766,40 @@ class AppRuntime {
 
     // MARK: - Scrollback Replay Files
 
-    /// Read full scrollback text from a ghostty surface using line-based selection.
-    private func readScrollbackText(surface: ghostty_surface_t) -> String? {
-        let topLeft = ghostty_point_s(tag: GHOSTTY_POINT_SCREEN, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0)
-        let bottomRight = ghostty_point_s(tag: GHOSTTY_POINT_SCREEN, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0)
+    /// Read text from one Ghostty point tag using line-based selection.
+    private func readSurfaceRegion(
+        surface: ghostty_surface_t,
+        tag: ghostty_point_tag_e
+    ) -> String? {
+        let topLeft = ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0)
+        let bottomRight = ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0)
         let selection = ghostty_selection_s(top_left: topLeft, bottom_right: bottomRight, rectangle: false)
         var text = ghostty_text_s()
         guard ghostty_surface_read_text(surface, selection, &text) else { return nil }
         defer { ghostty_surface_free_text(surface, &text) }
-        guard let ptr = text.text, text.text_len > 0 else { return nil }
+        guard text.text_len > 0 else { return "" }
+        guard let ptr = text.text else { return nil }
         let len = Int(text.text_len)
         return ptr.withMemoryRebound(to: UInt8.self, capacity: len) { reboundPtr in
             String(bytes: UnsafeBufferPointer(start: reboundPtr, count: len), encoding: .utf8)
         }
+    }
+
+    /// Capture visible text, or full written text tailed to a requested line count.
+    private func capturePaneText(surface: ghostty_surface_t, lineLimit: Int?) -> String? {
+        let tag: ghostty_point_tag_e = lineLimit == nil ? GHOSTTY_POINT_VIEWPORT : GHOSTTY_POINT_SCREEN
+        guard let raw = readSurfaceRegion(surface: surface, tag: tag) else {
+            return nil
+        }
+        guard let n = lineLimit else {
+            return raw
+        }
+        return tailLines(raw, n: n)
+    }
+
+    /// Read full scrollback text from a ghostty surface using line-based selection.
+    private func readScrollbackText(surface: ghostty_surface_t) -> String? {
+        return readSurfaceRegion(surface: surface, tag: GHOSTTY_POINT_SCREEN)
     }
 
     /// Write scrollback text to a temp file for shell replay. Returns the file URL.

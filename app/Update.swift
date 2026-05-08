@@ -1544,6 +1544,37 @@ private func handleIpcRequest(
             return ipcInvalidParams(reqId, "invalid params")
         }
 
+    case Methods.readPane:
+        do {
+            guard case .object(let object) = params else {
+                throw IpcParamsError("invalid params")
+            }
+            guard case .string(let rawPane)? = object["pane"] else {
+                throw IpcParamsError("pane required")
+            }
+            guard let paneId = parsePaneId(rawPane), model.panes[paneId] != nil else {
+                throw IpcParamsError("pane not found")
+            }
+
+            let lineLimit: Int?
+            switch object["lines"] {
+            case .none, .some(.null):
+                lineLimit = nil
+            case .some(.number(let n)):
+                guard let i = Int(exactly: n), i > 0 else {
+                    throw IpcParamsError("lines must be a positive integer")
+                }
+                lineLimit = i
+            default:
+                throw IpcParamsError("lines must be a positive integer")
+            }
+            return [.readPaneText(reqId: reqId, paneId: paneId, lineLimit: lineLimit)]
+        } catch let error as IpcParamsError {
+            return ipcInvalidParams(reqId, error.message)
+        } catch {
+            return ipcInvalidParams(reqId, "invalid params")
+        }
+
     case Methods.todoList:
         guard let paneId = resolveIpcPaneId(context, in: model),
               let todos = model.panes[paneId]?.todos

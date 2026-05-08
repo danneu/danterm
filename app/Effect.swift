@@ -36,6 +36,7 @@ enum Effect {
     // IPC
     case ipcReply(reqId: UUID, result: JSONValue)
     case ipcError(reqId: UUID, code: Int, message: String)
+    case readPaneText(reqId: UUID, paneId: PaneId, lineLimit: Int?)
 
     // System
     case sendNotification(alertId: AlertId, title: String, body: String)

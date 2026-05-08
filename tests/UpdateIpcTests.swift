@@ -573,6 +573,108 @@ func ipcUpdateTests() {
         try expect(error.message.contains("no pane in context"),
                    "expected 'no pane in context', got: \(error.message)")
     }
+
+    test("read-pane emits viewport read effect without immediate reply") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let effects = sendIpc(
+            &model,
+            method: Methods.readPane,
+            params: .object(["pane": .string(paneId.rawValue.uuidString)])
+        )
+
+        try expectEqual(effects.count, 1)
+        guard case .readPaneText(_, let effectPaneId, let lineLimit) = effects[0] else {
+            throw TestFailure(message: "expected readPaneText effect")
+        }
+        try expectEqual(effectPaneId, paneId)
+        try expectEqual(lineLimit, nil)
+        try expect(!hasEffect(effects) {
+            if case .ipcReply = $0 { return true }
+            return false
+        }, "read-pane success should not emit an immediate ipcReply")
+    }
+
+    test("read-pane emits scrollback tail read effect with line limit") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let effects = sendIpc(
+            &model,
+            method: Methods.readPane,
+            params: .object([
+                "pane": .string(paneId.rawValue.uuidString),
+                "lines": .number(200),
+            ])
+        )
+
+        try expectEqual(effects.count, 1)
+        guard case .readPaneText(_, let effectPaneId, let lineLimit) = effects[0] else {
+            throw TestFailure(message: "expected readPaneText effect")
+        }
+        try expectEqual(effectPaneId, paneId)
+        try expectEqual(lineLimit, 200)
+    }
+
+    test("read-pane missing pane param errors") {
+        var model = makeModel()
+        createTab(&model)
+        let effects = sendIpc(&model, method: Methods.readPane, params: .object([:]))
+        let error = try requireIpcError(effects)
+        try expectEqual(error.code, -32602)
+        try expectEqual(error.message, "pane required")
+    }
+
+    test("read-pane non-string pane param errors") {
+        for paneValue in [JSONValue.number(5), .array([]), .object([:])] {
+            var model = makeModel()
+            createTab(&model)
+            let effects = sendIpc(
+                &model,
+                method: Methods.readPane,
+                params: .object(["pane": paneValue])
+            )
+            let error = try requireIpcError(effects)
+            try expectEqual(error.code, -32602)
+            try expectEqual(error.message, "pane required")
+        }
+    }
+
+    test("read-pane unknown pane errors") {
+        for rawPane in ["bogus", UUID().uuidString] {
+            var model = makeModel()
+            createTab(&model)
+            let effects = sendIpc(
+                &model,
+                method: Methods.readPane,
+                params: .object(["pane": .string(rawPane)])
+            )
+            let error = try requireIpcError(effects)
+            try expectEqual(error.code, -32602)
+            try expectEqual(error.message, "pane not found")
+        }
+    }
+
+    test("read-pane invalid line limits error") {
+        let invalidValues: [JSONValue] = [.number(0), .number(-5), .string("5"), .number(1.5)]
+        for linesValue in invalidValues {
+            var model = makeModel()
+            createTab(&model)
+            let paneId = selectedTab(in: model)!.focusedPaneId
+            let effects = sendIpc(
+                &model,
+                method: Methods.readPane,
+                params: .object([
+                    "pane": .string(paneId.rawValue.uuidString),
+                    "lines": linesValue,
+                ])
+            )
+            let error = try requireIpcError(effects)
+            try expectEqual(error.code, -32602)
+            try expectEqual(error.message, "lines must be a positive integer")
+        }
+    }
 }
 
 private struct IpcErrorResult: Equatable {
