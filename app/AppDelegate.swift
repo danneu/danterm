@@ -292,10 +292,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         recentNewerItem.keyEquivalentModifierMask = [.command, .shift]
         tabMenu.addItem(recentNewerItem)
 
-        let zoomItem = NSMenuItem(title: "Toggle Zoom", action: #selector(toggleZoom(_:)), keyEquivalent: "\r")
-        zoomItem.keyEquivalentModifierMask = [.command]
-        tabMenu.addItem(zoomItem)
-
         // Color submenu
         tabMenu.addItem(NSMenuItem.separator())
         let colorItem = NSMenuItem(title: "Color", action: nil, keyEquivalent: "")
@@ -330,6 +326,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         let splitDownItem = NSMenuItem(title: "Split Down", action: #selector(splitDown(_:)), keyEquivalent: "d")
         splitDownItem.keyEquivalentModifierMask = [.command, .shift]
         paneMenu.addItem(splitDownItem)
+
+        let zoomItem = NSMenuItem(title: "Toggle Zoom", action: #selector(toggleZoom(_:)), keyEquivalent: "\r")
+        zoomItem.keyEquivalentModifierMask = [.command]
+        paneMenu.addItem(zoomItem)
 
         paneMenu.addItem(NSMenuItem.separator())
 
