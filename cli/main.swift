@@ -43,7 +43,8 @@ struct DanTermCLI {
           tab title [text]            Get or set the current tab title
           tab rename <name>           Rename the current tab
           pane focus <pane-id>        Focus a pane by id
-          pane split -h|-v            Split the current pane (horizontal/vertical)
+          pane split [--pane <id>] -h|-v
+                                      Split a pane (horizontal/vertical)
           new-tab [--group <name>]    Open a new tab, optionally in a named group
           send-keys [--pane <id>] [--literal] -- <token>...
                                       Send keystrokes to a pane (tmux-style:
@@ -132,14 +133,7 @@ struct DanTermCLI {
                 guard args.count == 3 else { throw CLIError("usage: danterm pane focus <pane-id>") }
                 return CLICommand(method: Methods.paneFocus, params: ["paneId": .string(args[2])], outputMode: .none)
             case "split":
-                guard args.count == 3 else { throw CLIError("usage: danterm pane split -h|-v") }
-                let direction: String
-                switch args[2] {
-                case "-h": direction = "horizontal"
-                case "-v": direction = "vertical"
-                default: throw CLIError("usage: danterm pane split -h|-v")
-                }
-                return CLICommand(method: Methods.paneSplit, params: ["direction": .string(direction)], outputMode: .none)
+                return try parsePaneSplitCommand(Array(args.dropFirst(2)))
             default:
                 throw CLIError("unknown pane command")
             }
@@ -210,6 +204,30 @@ struct DanTermCLI {
         default:
             throw CLIError("unknown todo command")
         }
+    }
+
+    private static func parsePaneSplitCommand(_ args: [String]) throws -> CLICommand {
+        let parsed: ParsedPaneSplit
+        do {
+            parsed = try parsePaneSplitArgs(args)
+        } catch let error as PaneSplitParseError {
+            switch error {
+            case .missingDirection, .missingPaneArg:
+                throw CLIError("usage: danterm pane split [--pane <id>] -h|-v")
+            case .unknownFlag(let flag):
+                throw CLIError("unknown flag: \(flag)")
+            case .unexpectedArgument(let argument):
+                throw CLIError("unexpected argument: \(argument)")
+            }
+        }
+
+        var params: [String: JSONValue] = [
+            "direction": .string(parsed.direction == .horizontal ? "horizontal" : "vertical")
+        ]
+        if let pane = parsed.pane {
+            params["pane"] = .string(pane)
+        }
+        return CLICommand(method: Methods.paneSplit, params: params, outputMode: .json)
     }
 
     private static func parseSendKeysCommand(_ args: [String]) throws -> CLICommand {

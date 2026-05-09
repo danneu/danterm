@@ -72,6 +72,7 @@ func ipcUpdateTests() {
         let backgroundPaneId = selectedTab(in: model)!.focusedPaneId
         createTab(&model)
         let foregroundTabId = selectedTab(in: model)!.id
+        let beforePaneIds = Set(model.panes.keys)
 
         let effects = sendIpc(
             &model,
@@ -82,7 +83,127 @@ func ipcUpdateTests() {
 
         try expectEqual(model.selectedTabId, foregroundTabId)
         try expectEqual(allPaneIds(tabById(backgroundTabId, in: model)!.rootNode).count, 2)
-        try expect(hasEffect(effects) { if case .ipcReply = $0 { return true }; return false })
+        let reply = try requireIpcReply(effects)
+        let returnedPaneId = try requirePaneId(reply["paneId"], "pane.split should return the new pane id")
+        try expect(!beforePaneIds.contains(returnedPaneId), "returned pane id should be new")
+        try expectEqual(Set(model.panes.keys).subtracting(beforePaneIds), Set([returnedPaneId]))
+    }
+
+    test("pane.split explicit pane targets sibling instead of caller context") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = selectedTab(in: model)!.id
+        let callerPaneId = selectedTab(in: model)!.focusedPaneId
+        _ = update(&model, .splitPane(paneId: callerPaneId, direction: .horizontal))
+        let siblingPaneId = selectedTab(in: model)!.focusedPaneId
+        let beforePaneIds = Set(model.panes.keys)
+
+        let effects = sendIpc(
+            &model,
+            method: Methods.paneSplit,
+            params: .object([
+                "pane": .string(siblingPaneId.rawValue.uuidString),
+                "direction": .string("vertical"),
+            ]),
+            context: IpcRequestContext(paneId: callerPaneId.rawValue.uuidString)
+        )
+
+        let reply = try requireIpcReply(effects)
+        let returnedPaneId = try requirePaneId(reply["paneId"], "pane.split should return the sibling split pane id")
+        try expect(!beforePaneIds.contains(returnedPaneId), "returned pane id should be new")
+        try expectEqual(Set(model.panes.keys).subtracting(beforePaneIds), Set([returnedPaneId]))
+        guard case .split(_, .horizontal, .leaf(let first), .split(_, .vertical, .leaf(let second), .leaf(let third), _), _) =
+            tabById(tabId, in: model)!.rootNode
+        else {
+            throw TestFailure(message: "expected explicit sibling pane to be split")
+        }
+        try expectEqual(first, callerPaneId)
+        try expectEqual(second, siblingPaneId)
+        try expectEqual(third, returnedPaneId)
+    }
+
+    test("pane.split malformed explicit pane does not fall back to context") {
+        var model = makeModel()
+        createTab(&model)
+        let callerPaneId = selectedTab(in: model)!.focusedPaneId
+        let beforePaneIds = Set(model.panes.keys)
+
+        let effects = sendIpc(
+            &model,
+            method: Methods.paneSplit,
+            params: .object([
+                "pane": .string("not-a-uuid"),
+                "direction": .string("horizontal"),
+            ]),
+            context: IpcRequestContext(paneId: callerPaneId.rawValue.uuidString)
+        )
+
+        let error = try requireIpcError(effects)
+        try expectEqual(error.code, -32602)
+        try expectEqual(Set(model.panes.keys), beforePaneIds)
+    }
+
+    test("pane.split non-string explicit pane does not fall back to context") {
+        var model = makeModel()
+        createTab(&model)
+        let callerPaneId = selectedTab(in: model)!.focusedPaneId
+        let beforePaneIds = Set(model.panes.keys)
+
+        let effects = sendIpc(
+            &model,
+            method: Methods.paneSplit,
+            params: .object([
+                "pane": .number(42),
+                "direction": .string("horizontal"),
+            ]),
+            context: IpcRequestContext(paneId: callerPaneId.rawValue.uuidString)
+        )
+
+        let error = try requireIpcError(effects)
+        try expectEqual(error.code, -32602)
+        try expect(error.message.contains("pane must be a string"),
+                   "message should describe non-string pane, got: \(error.message)")
+        try expectEqual(Set(model.panes.keys), beforePaneIds)
+    }
+
+    test("pane.split unknown explicit pane does not fall back to context") {
+        var model = makeModel()
+        createTab(&model)
+        let callerPaneId = selectedTab(in: model)!.focusedPaneId
+        let beforePaneIds = Set(model.panes.keys)
+
+        let effects = sendIpc(
+            &model,
+            method: Methods.paneSplit,
+            params: .object([
+                "pane": .string(UUID().uuidString),
+                "direction": .string("horizontal"),
+            ]),
+            context: IpcRequestContext(paneId: callerPaneId.rawValue.uuidString)
+        )
+
+        let error = try requireIpcError(effects)
+        try expectEqual(error.code, -32602)
+        try expectEqual(Set(model.panes.keys), beforePaneIds)
+    }
+
+    test("pane.split no-op target returns null pane id") {
+        var model = makeModel()
+        createTab(&model)
+        let orphanPaneId = PaneId()
+        model.panes[orphanPaneId] = PaneModel(id: orphanPaneId)
+        let beforePaneIds = Set(model.panes.keys)
+
+        let effects = sendIpc(
+            &model,
+            method: Methods.paneSplit,
+            params: .object(["direction": .string("horizontal")]),
+            context: IpcRequestContext(paneId: orphanPaneId.rawValue.uuidString)
+        )
+
+        let reply = try requireIpcReply(effects)
+        try expectEqual(reply["paneId"], .null)
+        try expectEqual(Set(model.panes.keys), beforePaneIds)
     }
 
     test("pane.focus selects target tab and requests first responder") {
@@ -722,4 +843,12 @@ private func requireString(_ value: JSONValue?, _ message: String) throws -> Str
         throw TestFailure(message: message)
     }
     return string
+}
+
+private func requirePaneId(_ value: JSONValue?, _ message: String) throws -> PaneId {
+    let raw = try requireString(value, message)
+    guard let uuid = UUID(uuidString: raw) else {
+        throw TestFailure(message: message)
+    }
+    return PaneId(rawValue: uuid)
 }

@@ -1432,15 +1432,23 @@ private func handleIpcRequest(
         return [.ipcReply(reqId: reqId, result: .object(["title": .string(current)]))]
 
     case Methods.paneSplit:
-        guard let paneId = resolveIpcPaneId(context, in: model),
-              case .object(let object) = params,
-              case .string(let rawDirection)? = object["direction"],
-              let direction = ipcSplitDirection(rawDirection)
-        else {
+        do {
+            guard case .object(let object) = params,
+                  case .string(let rawDirection)? = object["direction"],
+                  let direction = ipcSplitDirection(rawDirection)
+            else {
+                throw IpcParamsError("invalid pane split params")
+            }
+            let paneId = try resolvePaneSplitTarget(params: params, context: context, in: model)
+            let before = Set(model.panes.keys)
+            let effects = update(&model, .splitPane(paneId: paneId, direction: direction))
+            let newPaneId = model.panes.keys.first(where: { !before.contains($0) })
+            return effects + [.ipcReply(reqId: reqId, result: paneIdResult(newPaneId))]
+        } catch let error as IpcParamsError {
+            return ipcInvalidParams(reqId, error.message)
+        } catch {
             return ipcInvalidParams(reqId, "invalid pane split params")
         }
-        let effects = update(&model, .splitPane(paneId: paneId, direction: direction))
-        return effects + [.ipcReply(reqId: reqId, result: .object(["ok": .bool(true)]))]
 
     case Methods.newTab:
         guard case .object(let object) = params else {
@@ -1697,6 +1705,28 @@ private struct IpcParamsError: Error {
     init(_ message: String) { self.message = message }
 }
 
+// `pane split`-specific pane resolver. An explicit pane targets a sibling and
+// must be valid; only an absent pane falls back to the request context.
+private func resolvePaneSplitTarget(
+    params: JSONValue,
+    context: IpcRequestContext,
+    in model: AppModel
+) throws -> PaneId {
+    if case .object(let object) = params, let raw = object["pane"] {
+        guard case .string(let str) = raw else {
+            throw IpcParamsError("pane must be a string")
+        }
+        guard let id = parsePaneId(str), model.panes[id] != nil else {
+            throw IpcParamsError("pane not found")
+        }
+        return id
+    }
+    if let id = resolveIpcPaneId(context, in: model) {
+        return id
+    }
+    throw IpcParamsError("no pane in context")
+}
+
 // `send-keys`-specific pane resolver. Honours an explicit `pane` field in
 // params (cross-pane targeting) and never silently falls back to the request
 // context when the explicit pane is malformed or unknown — the caller asked
@@ -1793,6 +1823,11 @@ private func newestTabId(excluding before: Set<TabId>, in model: AppModel) -> Ta
 private func tabIdResult(_ tabId: TabId?) -> JSONValue {
     guard let tabId else { return .object([:]) }
     return .object(["tabId": .string(tabId.rawValue.uuidString)])
+}
+
+private func paneIdResult(_ paneId: PaneId?) -> JSONValue {
+    guard let paneId else { return .object(["paneId": .null]) }
+    return .object(["paneId": .string(paneId.rawValue.uuidString)])
 }
 
 private func appendTodo(_ model: inout AppModel, paneId: PaneId, text: String, id: UUID) -> TodoItem? {
