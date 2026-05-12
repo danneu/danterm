@@ -288,9 +288,9 @@ func todoTests() {
 
     // MARK: - classifyInputAction
 
-    test("enter → submit") {
-        try expectEqual(classifyInputAction(key: .enter, isEditing: false, fieldEmpty: true), .submit)
-        try expectEqual(classifyInputAction(key: .enter, isEditing: true, fieldEmpty: false), .submit)
+    test("enter → insertNewline") {
+        try expectEqual(classifyInputAction(key: .enter, isEditing: false, fieldEmpty: true), .insertNewline)
+        try expectEqual(classifyInputAction(key: .enter, isEditing: true, fieldEmpty: false), .insertNewline)
     }
 
     test("shiftEnter → insertNewline") {
@@ -321,17 +321,144 @@ func todoTests() {
         try expectEqual(classifyInputAction(key: .backspace, isEditing: false, fieldEmpty: false), .unhandled)
     }
 
-    test("tab → moveFocusForward") {
+    test("tab while not editing → moveFocusForward") {
         try expectEqual(classifyInputAction(key: .tab, isEditing: false, fieldEmpty: true), .moveFocusForward)
-        try expectEqual(classifyInputAction(key: .tab, isEditing: true, fieldEmpty: false), .moveFocusForward)
     }
 
-    test("backtab → moveFocusBackward") {
-        try expectEqual(classifyInputAction(key: .backtab, isEditing: false, fieldEmpty: true), .moveFocusBackward)
+    test("tab while editing → submit") {
+        try expectEqual(classifyInputAction(key: .tab, isEditing: true, fieldEmpty: false), .submit)
+    }
+
+    test("backtab while editing → cancelEdit") {
+        try expectEqual(classifyInputAction(key: .backtab, isEditing: true, fieldEmpty: false), .cancelEdit)
+    }
+
+    test("backtab while not editing → unhandled") {
+        try expectEqual(classifyInputAction(key: .backtab, isEditing: false, fieldEmpty: true), .unhandled)
     }
 
     test("other → unhandled") {
         try expectEqual(classifyInputAction(key: .other, isEditing: false, fieldEmpty: false), .unhandled)
         try expectEqual(classifyInputAction(key: .other, isEditing: true, fieldEmpty: true), .unhandled)
+    }
+
+    // MARK: - classifyListAction
+
+    test("list navigation keys move selection") {
+        try expectEqual(classifyListAction(key: .j, modifiers: KeyModifiers()), .moveSelection(delta: 1))
+        try expectEqual(classifyListAction(key: .downArrow, modifiers: KeyModifiers()), .moveSelection(delta: 1))
+        try expectEqual(classifyListAction(key: .k, modifiers: KeyModifiers()), .moveSelection(delta: -1))
+        try expectEqual(classifyListAction(key: .upArrow, modifiers: KeyModifiers()), .moveSelection(delta: -1))
+    }
+
+    test("list tab and enter enter edit") {
+        try expectEqual(classifyListAction(key: .tab, modifiers: KeyModifiers()), .enterEdit)
+        try expectEqual(classifyListAction(key: .enter, modifiers: KeyModifiers()), .enterEdit)
+    }
+
+    test("list space toggles done") {
+        try expectEqual(classifyListAction(key: .space, modifiers: KeyModifiers()), .toggleDone)
+    }
+
+    test("list cmd backspace deletes row") {
+        try expectEqual(classifyListAction(key: .backspace, modifiers: [.command]), .deleteRow)
+        try expectEqual(classifyListAction(key: .backspace, modifiers: KeyModifiers()), .unhandled)
+    }
+
+    test("list shift j and shift k reorder") {
+        try expectEqual(classifyListAction(key: .j, modifiers: [.shift]), .reorder(delta: 1))
+        try expectEqual(classifyListAction(key: .k, modifiers: [.shift]), .reorder(delta: -1))
+    }
+
+    test("list cmd n focuses input") {
+        try expectEqual(classifyListAction(key: .n, modifiers: [.command]), .focusInput)
+    }
+
+    test("list shift tab focuses input") {
+        try expectEqual(classifyListAction(key: .backtab, modifiers: [.shift]), .focusInput)
+        try expectEqual(classifyListAction(key: .tab, modifiers: [.shift]), .focusInput)
+    }
+
+    test("list unmodified text keys are unhandled") {
+        try expectEqual(classifyListAction(key: .n, modifiers: KeyModifiers()), .unhandled)
+        try expectEqual(classifyListAction(key: .other, modifiers: KeyModifiers()), .unhandled)
+    }
+
+    // MARK: - selectable row helpers
+
+    test("firstSelectableRow finds the first selectable row") {
+        try expectEqual(firstSelectableRow(in: [Int](), canSelect: { _ in true }), nil)
+        try expectEqual(firstSelectableRow(in: [false, false], canSelect: { $0 }), nil)
+        try expectEqual(firstSelectableRow(in: [false, true, true], canSelect: { $0 }), 1)
+        try expectEqual(firstSelectableRow(in: [true, true], canSelect: { $0 }), 0)
+    }
+
+    test("nextSelectableRow skips unselectable rows without wrapping") {
+        let rows = [true, false, true, false, true]
+        try expectEqual(nextSelectableRow(in: rows, from: 0, delta: 1, canSelect: { $0 }), 2)
+        try expectEqual(nextSelectableRow(in: rows, from: 2, delta: 1, canSelect: { $0 }), 4)
+        try expectEqual(nextSelectableRow(in: rows, from: 4, delta: 1, canSelect: { $0 }), nil)
+        try expectEqual(nextSelectableRow(in: rows, from: 4, delta: -1, canSelect: { $0 }), 2)
+        try expectEqual(nextSelectableRow(in: rows, from: 2, delta: -1, canSelect: { $0 }), 0)
+        try expectEqual(nextSelectableRow(in: rows, from: 0, delta: -1, canSelect: { $0 }), nil)
+    }
+
+    test("nextSelectableRow crosses sections while skipping headers") {
+        let rows = [false, true, false, true]
+        try expectEqual(nextSelectableRow(in: rows, from: 1, delta: 1, canSelect: { $0 }), 3)
+        try expectEqual(nextSelectableRow(in: rows, from: 3, delta: -1, canSelect: { $0 }), 1)
+    }
+
+    // MARK: - sectionLocalIndex
+
+    struct SectionRow {
+        let isHeader: Bool
+        let section: String?
+    }
+
+    test("sectionLocalIndex returns nil for headers") {
+        let rows = [SectionRow(isHeader: true, section: "tab"), SectionRow(isHeader: false, section: "tab")]
+        try expectEqual(sectionLocalIndex(rows: rows, at: 0, isHeader: { $0.isHeader }, sectionId: { $0.section.map(AnyHashable.init) }), nil)
+    }
+
+    test("sectionLocalIndex returns section-relative positions") {
+        let rows = [
+            SectionRow(isHeader: true, section: "tab"),
+            SectionRow(isHeader: false, section: "tab"),
+            SectionRow(isHeader: false, section: "tab"),
+            SectionRow(isHeader: true, section: "pane-a"),
+            SectionRow(isHeader: false, section: "pane-a"),
+            SectionRow(isHeader: false, section: "pane-a"),
+            SectionRow(isHeader: true, section: "pane-b"),
+            SectionRow(isHeader: false, section: "pane-b"),
+        ]
+        try expectEqual(sectionLocalIndex(rows: rows, at: 1, isHeader: { $0.isHeader }, sectionId: { $0.section.map(AnyHashable.init) }), 0)
+        try expectEqual(sectionLocalIndex(rows: rows, at: 2, isHeader: { $0.isHeader }, sectionId: { $0.section.map(AnyHashable.init) }), 1)
+        try expectEqual(sectionLocalIndex(rows: rows, at: 4, isHeader: { $0.isHeader }, sectionId: { $0.section.map(AnyHashable.init) }), 0)
+        try expectEqual(sectionLocalIndex(rows: rows, at: 5, isHeader: { $0.isHeader }, sectionId: { $0.section.map(AnyHashable.init) }), 1)
+        try expectEqual(sectionLocalIndex(rows: rows, at: 7, isHeader: { $0.isHeader }, sectionId: { $0.section.map(AnyHashable.init) }), 0)
+    }
+
+    test("sectionLocalIndex handles a single flat section") {
+        let rows = [
+            SectionRow(isHeader: false, section: nil),
+            SectionRow(isHeader: false, section: nil),
+            SectionRow(isHeader: false, section: nil),
+        ]
+        try expectEqual(sectionLocalIndex(rows: rows, at: 0, isHeader: { $0.isHeader }, sectionId: { $0.section.map(AnyHashable.init) }), 0)
+        try expectEqual(sectionLocalIndex(rows: rows, at: 2, isHeader: { $0.isHeader }, sectionId: { $0.section.map(AnyHashable.init) }), 2)
+    }
+
+    test("sectionLocalIndex supports clamped reorder destinations") {
+        let rows = [
+            SectionRow(isHeader: true, section: "pane"),
+            SectionRow(isHeader: false, section: "pane"),
+            SectionRow(isHeader: false, section: "pane"),
+            SectionRow(isHeader: false, section: "pane"),
+            SectionRow(isHeader: true, section: "next"),
+            SectionRow(isHeader: false, section: "next"),
+        ]
+        let clampedDestinationRow = 3
+        try expectEqual(sectionLocalIndex(rows: rows, at: clampedDestinationRow, isHeader: { $0.isHeader }, sectionId: { $0.section.map(AnyHashable.init) }), 2)
     }
 }

@@ -1,13 +1,37 @@
 /// Popover view controller for the tab-level TODO list, anchored to the
 /// chrome's right-side button. Shows the active tab's own to-dos plus a
-/// read-only roll-up section per pane in the tab. Tab items are full-featured
-/// (add/edit/delete/reorder); pane items are check/uncheck only.
+/// roll-up section per pane in the tab. Tab items and pane roll-up items are
+/// editable from the keyboard; new items are added to the tab section.
 
 import Cocoa
 
 private let tabTodoRowDragType = NSPasteboard.PasteboardType("com.danneu.danterm.tab-todo-row")
 private let tabHeaderRowId = NSUserInterfaceItemIdentifier("TabTodoHeader")
 private let paneHeaderRowId = NSUserInterfaceItemIdentifier("PaneTodoHeader")
+
+private final class TabTodoPopoverRootView: NSView {
+    var handleKeyEquivalent: ((NSEvent) -> Bool)?
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if handleKeyEquivalent?(event) == true { return true }
+        return super.performKeyEquivalent(with: event)
+    }
+}
+
+private final class TabTodoTableView: NSTableView {
+    var handleListKeyDown: ((NSEvent) -> Bool)?
+    var handleCancelOperation: (() -> Bool)?
+
+    override func keyDown(with event: NSEvent) {
+        if handleListKeyDown?(event) == true { return }
+        super.keyDown(with: event)
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        if handleCancelOperation?() == true { return }
+        super.cancelOperation(sender)
+    }
+}
 
 // MARK: - Row enum
 
@@ -16,6 +40,57 @@ enum TabTodoRow {
     case tabItem(TodoItem)
     case paneSectionHeader(paneId: PaneId, title: String)
     case paneItem(paneId: PaneId, item: TodoItem)
+}
+
+private enum TabTodoEditTarget: Equatable {
+    case tab(todoId: UUID)
+    case pane(paneId: PaneId, todoId: UUID)
+}
+
+private extension TabTodoRow {
+    var isHeader: Bool {
+        switch self {
+        case .tabSectionHeader, .paneSectionHeader:
+            return true
+        case .tabItem, .paneItem:
+            return false
+        }
+    }
+
+    var isSelectable: Bool { !isHeader }
+
+    var editTarget: TabTodoEditTarget? {
+        switch self {
+        case .tabItem(let item):
+            return .tab(todoId: item.id)
+        case .paneItem(let paneId, let item):
+            return .pane(paneId: paneId, todoId: item.id)
+        case .tabSectionHeader, .paneSectionHeader:
+            return nil
+        }
+    }
+
+    var itemText: String? {
+        switch self {
+        case .tabItem(let item), .paneItem(_, let item):
+            return item.text
+        case .tabSectionHeader, .paneSectionHeader:
+            return nil
+        }
+    }
+
+    var sectionIdentifier: AnyHashable? {
+        switch self {
+        case .tabItem:
+            return AnyHashable("tab")
+        case .paneItem(let paneId, _):
+            return AnyHashable(paneId)
+        case .tabSectionHeader:
+            return AnyHashable("tab")
+        case .paneSectionHeader(let paneId, _):
+            return AnyHashable(paneId)
+        }
+    }
 }
 
 // MARK: - Header row view
@@ -57,13 +132,13 @@ private final class TabTodoHeaderRowView: NSView {
 class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     weak var runtime: AppRuntime?
     let tabId: TabId
-    private let tableView = NSTableView()
+    private let tableView = TabTodoTableView()
     private let scrollView = NSScrollView()
     private let headerLabel = NSTextField(labelWithString: "Tab To-Do")
     private let clearButton = NSButton(title: "Clear completed", target: nil, action: nil)
     private let addInput = TodoInputView(placeholder: "Add a tab task…")
     private let editLabel: NSTextField = {
-        let tf = NSTextField(labelWithString: "Editing — Esc to cancel")
+        let tf = NSTextField(labelWithString: "Editing — Esc to cancel · ⌘⏎ to save")
         tf.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         tf.textColor = .secondaryLabelColor
         tf.isHidden = true
@@ -72,7 +147,8 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
     }()
     private let emptyLabel = NSTextField(labelWithString: "No tasks yet")
 
-    private var editState = TodoEditState()
+    private var editTarget: TabTodoEditTarget?
+    private var composeDraft = ""
     private var isSyncingTableSelection = false
     private var rows: [TabTodoRow] = []
 
@@ -125,7 +201,10 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         let size = NSSize(width: 320, height: 400)
         preferredContentSize = size
 
-        let wrapper = NSView(frame: NSRect(origin: .zero, size: size))
+        let wrapper = TabTodoPopoverRootView(frame: NSRect(origin: .zero, size: size))
+        wrapper.handleKeyEquivalent = { [weak self] event in
+            self?.performTodoKeyEquivalent(with: event) ?? false
+        }
         let container = NSView()
         container.translatesAutoresizingMaskIntoConstraints = false
         wrapper.addSubview(container)
@@ -148,6 +227,15 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         tableView.selectionHighlightStyle = .regular
         tableView.dataSource = self
         tableView.delegate = self
+        tableView.target = self
+        tableView.doubleAction = #selector(tableRowDoubleClicked(_:))
+        tableView.handleListKeyDown = { [weak self] event in
+            self?.handleListKeyDown(event) ?? false
+        }
+        tableView.handleCancelOperation = { [weak self] in
+            self?.closePopoverFromList()
+            return true
+        }
         tableView.registerForDraggedTypes([tabTodoRowDragType])
 
         scrollView.documentView = tableView
@@ -216,57 +304,210 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
 
     override func viewDidAppear() {
         super.viewDidAppear()
-        view.window?.makeFirstResponder(addInput.textView)
+        focusInitialMode()
     }
 
     func rebuildRows() {
+        let selectedTarget = selectedEditTarget()
+        let selectedRowBeforeReload = tableView.selectedRow
         rows = buildRows()
         let tabItems = tabTodos
         clearButton.isHidden = !tabItems.contains(where: \.isDone)
         let totalRows = rows.count
         emptyLabel.isHidden = totalRows > 1 // > 1 means we have items beyond the tab header
         scrollView.isHidden = totalRows <= 1
-        let wasEditingId = editState.editingTodoId
+        let wasEditingTarget = editTarget
         isSyncingTableSelection = true
         tableView.reloadData()
-        if wasEditingId != nil {
-            if editState.editingTodoWasDeleted(from: tabItems) {
+        if let target = wasEditingTarget {
+            if item(for: target) == nil {
+                editTarget = nil
+                editLabel.isHidden = true
                 isSyncingTableSelection = false
-                exitEditMode(restoreDraft: true)
-            } else if let newIndex = rows.firstIndex(where: {
-                if case .tabItem(let item) = $0 { return item.id == wasEditingId }
-                return false
-            }) {
+                selectNearestSelectableRow(near: selectedRowBeforeReload)
+            } else if let newIndex = rowIndex(for: target) {
                 tableView.selectRowIndexes(IndexSet(integer: newIndex), byExtendingSelection: false)
                 isSyncingTableSelection = false
             } else {
                 isSyncingTableSelection = false
             }
+        } else if let selectedTarget,
+                  let newIndex = rowIndex(for: selectedTarget) {
+            tableView.selectRowIndexes(IndexSet(integer: newIndex), byExtendingSelection: false)
+            isSyncingTableSelection = false
         } else {
             isSyncingTableSelection = false
         }
     }
 
-    private func exitEditMode(restoreDraft: Bool) {
-        let restoredText = restoreDraft ? editState.cancel() : { editState.submit(); return "" }()
-        addInput.string = restoredText
-        editLabel.isHidden = true
+    // MARK: - Focus and edit transitions
+
+    private var isEditing: Bool { editTarget != nil }
+
+    private func selectedEditTarget() -> TabTodoEditTarget? {
+        let row = tableView.selectedRow
+        guard rows.indices.contains(row) else { return nil }
+        return rows[row].editTarget
+    }
+
+    private func item(for target: TabTodoEditTarget) -> TodoItem? {
+        switch target {
+        case .tab(let todoId):
+            return tabTodos.first { $0.id == todoId }
+        case .pane(let paneId, let todoId):
+            return runtime?.model.panes[paneId]?.todos.first { $0.id == todoId }
+        }
+    }
+
+    private func rowIndex(for target: TabTodoEditTarget) -> Int? {
+        rows.firstIndex { $0.editTarget == target }
+    }
+
+    private func setSelectedRow(_ row: Int) {
+        guard rows.indices.contains(row), rows[row].isSelectable else { return }
         isSyncingTableSelection = true
-        tableView.deselectAll(nil)
+        tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        tableView.scrollRowToVisible(row)
         isSyncingTableSelection = false
     }
 
-    private func submitField() {
+    private func selectTarget(_ target: TabTodoEditTarget) -> Bool {
+        guard let row = rowIndex(for: target) else { return false }
+        setSelectedRow(row)
+        return true
+    }
+
+    private func populateInputFromSelection() {
+        let row = tableView.selectedRow
+        guard rows.indices.contains(row), let text = rows[row].itemText else { return }
+        addInput.string = text
+    }
+
+    private func selectNearestSelectableRow(near row: Int) {
+        if rows.indices.contains(row), rows[row].isSelectable {
+            setSelectedRow(row)
+            populateInputFromSelection()
+            view.window?.makeFirstResponder(tableView)
+            return
+        }
+        if let next = nextSelectableRow(in: rows, from: row, delta: 1, canSelect: { $0.isSelectable }) {
+            setSelectedRow(next)
+            populateInputFromSelection()
+            view.window?.makeFirstResponder(tableView)
+            return
+        }
+        if let previous = nextSelectableRow(in: rows, from: min(row, rows.count), delta: -1, canSelect: { $0.isSelectable }) {
+            setSelectedRow(previous)
+            populateInputFromSelection()
+            view.window?.makeFirstResponder(tableView)
+            return
+        }
+        focusComposeInput()
+    }
+
+    private func focusInitialMode() {
+        guard let row = firstSelectableRow(in: rows, canSelect: { $0.isSelectable }) else {
+            focusComposeInput()
+            return
+        }
+        setSelectedRow(row)
+        populateInputFromSelection()
+        view.window?.makeFirstResponder(tableView)
+    }
+
+    @discardableResult
+    private func focusListFromInput() -> Bool {
+        composeDraft = addInput.string
+        var row = tableView.selectedRow
+        if !rows.indices.contains(row) || !rows[row].isSelectable {
+            guard let firstRow = firstSelectableRow(in: rows, canSelect: { $0.isSelectable }) else { return false }
+            row = firstRow
+        }
+        setSelectedRow(row)
+        populateInputFromSelection()
+        editLabel.isHidden = true
+        view.window?.makeFirstResponder(tableView)
+        return true
+    }
+
+    private func focusComposeInput() {
+        if isEditing {
+            editTarget = nil
+            editLabel.isHidden = true
+        }
+        addInput.string = composeDraft
+        view.window?.makeFirstResponder(addInput.textView)
+        addInput.textView.moveToEndOfDocument(nil)
+    }
+
+    private func enterEditForSelectedRow() {
+        guard let target = selectedEditTarget(), let item = item(for: target) else { return }
+        if let oldTarget = editTarget, oldTarget != target {
+            saveEdit(target: oldTarget, text: addInput.string)
+        }
+        editTarget = target
+        addInput.string = item.text
+        editLabel.isHidden = false
+        view.window?.makeFirstResponder(addInput.textView)
+        addInput.textView.selectAll(nil)
+    }
+
+    @discardableResult
+    private func saveEditThenReturnToList() -> Bool {
+        guard let target = editTarget else { return false }
+        let text = addInput.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return false }
+        saveEdit(target: target, text: text)
+        editTarget = nil
+        editLabel.isHidden = true
+        rebuildRows()
+        _ = selectTarget(target)
+        addInput.string = text
+        view.window?.makeFirstResponder(tableView)
+        return true
+    }
+
+    private func addTodoThenReturnToList() {
         let text = addInput.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        if let editId = editState.editingTodoId {
-            runtime?.send(.editTabTodoText(tabId: tabId, todoId: editId, text: text))
-            exitEditMode(restoreDraft: false)
-        } else {
-            runtime?.send(.addTabTodo(tabId: tabId, text: text))
-            addInput.string = ""
-        }
+        runtime?.send(.addTabTodo(tabId: tabId, text: text))
+        composeDraft = ""
+        addInput.string = ""
         rebuildRows()
+        if let todoId = tabTodos.last?.id {
+            let target = TabTodoEditTarget.tab(todoId: todoId)
+            _ = selectTarget(target)
+            populateInputFromSelection()
+            view.window?.makeFirstResponder(tableView)
+        }
+    }
+
+    private func cancelEditAndReturnToList() {
+        guard let target = editTarget else { return }
+        editTarget = nil
+        editLabel.isHidden = true
+        if selectTarget(target) {
+            populateInputFromSelection()
+            view.window?.makeFirstResponder(tableView)
+        } else {
+            focusListFromInput()
+        }
+    }
+
+    private func saveEditThenFocusCompose() {
+        guard saveEditThenReturnToList() else { return }
+        focusComposeInput()
+    }
+
+    private func saveEdit(target: TabTodoEditTarget, text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        switch target {
+        case .tab(let todoId):
+            runtime?.send(.editTabTodoText(tabId: tabId, todoId: todoId, text: trimmed))
+        case .pane(let paneId, let todoId):
+            runtime?.send(.editTodoText(paneId: paneId, todoId: todoId, text: trimmed))
+        }
     }
 
     // MARK: - NSTableViewDataSource
@@ -315,9 +556,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         }
     }
 
-    /// Only tab items are selectable (selection drives the edit-mode entry).
-    /// Pane section headers fire a focus-pane side effect on click without
-    /// becoming selected. Other rows do nothing on click.
+    /// NSTableViewDelegate: only todo item rows are selectable; headers stay inert.
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
         guard row < rows.count else { return false }
         // Block clicks on checkboxes/delete buttons from also selecting the row.
@@ -328,7 +567,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
             if let hit = rowView.hitTest(localPoint), hit is NSButton { return false }
         }
         switch rows[row] {
-        case .tabItem:
+        case .tabItem, .paneItem:
             return true
         case .paneSectionHeader(let paneId, _):
             // Side-effect on click: focus the pane and dismiss the popover so
@@ -337,37 +576,39 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
             runtime?.focusPaneSurface(paneId)
             view.window?.close()
             return false
-        case .tabSectionHeader, .paneItem:
+        case .tabSectionHeader:
             return false
         }
     }
 
+    /// NSTableViewDelegate: render section headers with AppKit's group-row style.
+    func tableView(_ tableView: NSTableView, isGroupRow row: Int) -> Bool {
+        guard rows.indices.contains(row) else { return false }
+        return rows[row].isHeader
+    }
+
+    /// NSTableViewDelegate: selection changes update the passive input preview.
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard !isSyncingTableSelection else { return }
         let row = tableView.selectedRow
-        if row < 0, editState.editingTodoId != nil {
-            exitEditMode(restoreDraft: true)
+        if row < 0, editTarget != nil {
+            cancelEditAndReturnToList()
             return
         }
-        guard row >= 0, row < rows.count, case .tabItem(let newItem) = rows[row] else { return }
+        guard row >= 0, row < rows.count,
+              let newTarget = rows[row].editTarget,
+              let newText = rows[row].itemText else { return }
 
-        let fieldText = addInput.string
-        if let autoSave = editState.beginEditing(item: newItem, fieldText: fieldText) {
-            runtime?.send(.editTabTodoText(tabId: tabId, todoId: autoSave.autoSaveId, text: autoSave.text))
-            if let oldIndex = rows.firstIndex(where: {
-                if case .tabItem(let item) = $0 { return item.id == autoSave.autoSaveId }
-                return false
-            }) {
-                isSyncingTableSelection = true
-                tableView.reloadData(forRowIndexes: IndexSet(integer: oldIndex),
-                                     columnIndexes: IndexSet(integer: 0))
-                isSyncingTableSelection = false
-            }
+        if let oldTarget = editTarget, oldTarget != newTarget {
+            saveEdit(target: oldTarget, text: addInput.string)
+            editTarget = nil
+            editLabel.isHidden = true
+            rebuildRows()
+            _ = selectTarget(newTarget)
+            addInput.string = newText
+            return
         }
-        addInput.string = newItem.text
-        editLabel.isHidden = false
-        view.window?.makeFirstResponder(addInput.textView)
-        addInput.textView.selectAll(nil)
+        addInput.string = newText
     }
 
     // MARK: - Drag reorder (tab items only)
@@ -436,6 +677,130 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         runtime?.send(.clearCompletedTabTodos(tabId: tabId))
         rebuildRows()
     }
+
+    @objc private func tableRowDoubleClicked(_ sender: Any?) {
+        guard tableView.clickedRow >= 0 else { return }
+        enterEditForSelectedRow()
+    }
+
+    private func toggleSelectedTodoDone() {
+        guard let target = selectedEditTarget() else { return }
+        let previewText = addInput.string
+        switch target {
+        case .tab(let todoId):
+            runtime?.send(.toggleTabTodoDone(tabId: tabId, todoId: todoId))
+        case .pane(let paneId, let todoId):
+            runtime?.send(.toggleTodoDone(paneId: paneId, todoId: todoId))
+        }
+        rebuildRows()
+        _ = selectTarget(target)
+        addInput.string = previewText
+        view.window?.makeFirstResponder(tableView)
+    }
+
+    private func deleteSelectedTodo() {
+        let row = tableView.selectedRow
+        guard let target = selectedEditTarget() else { return }
+        switch target {
+        case .tab(let todoId):
+            runtime?.send(.deleteTabTodo(tabId: tabId, todoId: todoId))
+        case .pane(let paneId, let todoId):
+            runtime?.send(.deleteTodo(paneId: paneId, todoId: todoId))
+        }
+        rebuildRows()
+        selectNearestSelectableRow(near: row)
+    }
+
+    private func reorderSelectedTodo(delta: Int) {
+        let row = tableView.selectedRow
+        let destinationRow = row + delta
+        guard rows.indices.contains(row),
+              rows.indices.contains(destinationRow),
+              rows[destinationRow].isSelectable,
+              rows[row].sectionIdentifier == rows[destinationRow].sectionIdentifier,
+              let target = selectedEditTarget(),
+              let destination = sectionLocalIndex(
+                  rows: rows,
+                  at: destinationRow,
+                  isHeader: { $0.isHeader },
+                  sectionId: { $0.sectionIdentifier }
+              ) else { return }
+
+        switch target {
+        case .tab(let todoId):
+            runtime?.send(.reorderTabTodo(tabId: tabId, todoId: todoId, toIndex: destination))
+        case .pane(let paneId, let todoId):
+            runtime?.send(.reorderTodo(paneId: paneId, todoId: todoId, toIndex: destination))
+        }
+        rebuildRows()
+        _ = selectTarget(target)
+        populateInputFromSelection()
+        view.window?.makeFirstResponder(tableView)
+    }
+
+    private func moveSelection(delta: Int) {
+        let row = tableView.selectedRow
+        guard let nextRow = nextSelectableRow(in: rows, from: row, delta: delta, canSelect: { $0.isSelectable }) else { return }
+        setSelectedRow(nextRow)
+        populateInputFromSelection()
+    }
+
+    private func handleListKeyDown(_ event: NSEvent) -> Bool {
+        let action = classifyListAction(key: tabListKey(from: event), modifiers: tabKeyModifiers(from: event))
+        switch action {
+        case .moveSelection(let delta):
+            moveSelection(delta: delta)
+            return true
+        case .enterEdit:
+            enterEditForSelectedRow()
+            return true
+        case .toggleDone:
+            toggleSelectedTodoDone()
+            return true
+        case .deleteRow:
+            deleteSelectedTodo()
+            return true
+        case .reorder(let delta):
+            reorderSelectedTodo(delta: delta)
+            return true
+        case .focusInput:
+            focusComposeInput()
+            return true
+        case .unhandled:
+            return false
+        }
+    }
+
+    private func performTodoKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = tabKeyModifiers(from: event)
+        guard modifiers == [.command] else { return false }
+        switch tabListKey(from: event) {
+        case .enter:
+            if isEditing {
+                _ = saveEditThenReturnToList()
+            } else if view.window?.firstResponder === addInput.textView {
+                addTodoThenReturnToList()
+            }
+            return true
+        case .n:
+            if isEditing {
+                saveEditThenFocusCompose()
+            } else {
+                focusComposeInput()
+            }
+            return true
+        case .backspace:
+            guard view.window?.firstResponder === tableView else { return false }
+            deleteSelectedTodo()
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func closePopoverFromList() {
+        runtime?.send(.toggleTodoPopoverForTab(tabId: tabId))
+    }
 }
 
 // MARK: - NSTextViewDelegate
@@ -443,6 +808,15 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
 extension TabTodoPopoverViewController: NSTextViewDelegate {
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         guard textView === addInput.textView else { return false }
+        if commandSelector == #selector(insertNewline(_:)),
+           let event = NSApp.currentEvent,
+           event.modifierFlags.contains(.command) {
+            return performTodoKeyEquivalent(with: event)
+        }
+        if commandSelector == #selector(deleteBackward(_:)),
+           NSApp.currentEvent?.modifierFlags.contains(.command) == true {
+            return false
+        }
 
         let key: InputKey
         if commandSelector == #selector(insertNewline(_:)) {
@@ -461,30 +835,77 @@ extension TabTodoPopoverViewController: NSTextViewDelegate {
 
         let action = classifyInputAction(
             key: key,
-            isEditing: editState.editingTodoId != nil,
+            isEditing: editTarget != nil,
             fieldEmpty: textView.string.isEmpty
         )
 
         switch action {
         case .submit:
-            submitField()
+            _ = saveEditThenReturnToList()
             return true
         case .insertNewline:
             textView.insertNewlineIgnoringFieldEditor(nil)
             return true
         case .cancelEdit:
-            exitEditMode(restoreDraft: true)
+            cancelEditAndReturnToList()
             return true
         case .dismiss:
+            if !focusListFromInput() {
+                closePopoverFromList()
+            }
             return true
         case .moveFocusForward:
-            view.window?.selectNextKeyView(nil)
+            _ = focusListFromInput()
             return true
         case .moveFocusBackward:
-            view.window?.selectPreviousKeyView(nil)
             return true
         case .unhandled:
+            if key == .backtab { return true }
             return false
         }
+    }
+
+    /// NSTextViewDelegate: keep the compose draft live while adding a tab item.
+    func textDidChange(_ notification: Notification) {
+        guard view.window?.firstResponder === addInput.textView, !isEditing else { return }
+        composeDraft = addInput.string
+    }
+}
+
+private func tabKeyModifiers(from event: NSEvent) -> KeyModifiers {
+    var modifiers = KeyModifiers()
+    let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+    if flags.contains(.command) { modifiers.insert(.command) }
+    if flags.contains(.shift) { modifiers.insert(.shift) }
+    return modifiers
+}
+
+private func tabListKey(from event: NSEvent) -> ListKey {
+    switch event.keyCode {
+    case 36, 76:
+        return .enter
+    case 48:
+        return event.modifierFlags.contains(.shift) ? .backtab : .tab
+    case 49:
+        return .space
+    case 51:
+        return .backspace
+    case 125:
+        return .downArrow
+    case 126:
+        return .upArrow
+    default:
+        break
+    }
+
+    switch event.charactersIgnoringModifiers?.lowercased() {
+    case "j":
+        return .j
+    case "k":
+        return .k
+    case "n":
+        return .n
+    default:
+        return .other
     }
 }
