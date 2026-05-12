@@ -310,6 +310,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         colorItem.submenu = colorSubmenu
         tabMenu.addItem(colorItem)
 
+        let tabTodoItem = NSMenuItem(title: "Toggle To-do List", action: #selector(toggleTabTodoPopover(_:)), keyEquivalent: "'")
+        tabTodoItem.keyEquivalentModifierMask = [.command]
+        tabMenu.addItem(tabTodoItem)
+
         tabMenu.addItem(NSMenuItem.separator())
         let closeTabItem = NSMenuItem(title: "Close Tab", action: #selector(closeTab(_:)), keyEquivalent: "W")
         closeTabItem.keyEquivalentModifierMask = [.command, .shift]
@@ -364,8 +368,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         ackAlertItem.keyEquivalentModifierMask = [.command, .shift]
         paneMenu.addItem(ackAlertItem)
 
-        let todoItem = NSMenuItem(title: "Open TODOs", action: #selector(openTodo(_:)), keyEquivalent: "t")
-        todoItem.keyEquivalentModifierMask = [.command, .option]
+        let todoItem = NSMenuItem(title: "Toggle To-do List", action: #selector(openTodo(_:)), keyEquivalent: "'")
+        todoItem.keyEquivalentModifierMask = [.command, .shift]
         paneMenu.addItem(todoItem)
 
         paneMenu.addItem(NSMenuItem.separator())

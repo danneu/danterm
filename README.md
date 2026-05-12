@@ -321,6 +321,8 @@ bash ~/world/scripts/tests/danterm-integration_test.sh
 | Go to Most Recent Unread Alert | ⇧⌘A      |
 | Clear Tab Alerts               | ⌘.       |
 | Clear Pane Alerts              | ⇧⌘.      |
+| Toggle Tab To-do List          | ⌘'       |
+| Toggle Pane To-do List         | ⇧⌘'      |
 | Open DanTerm Config            | ⌘,       |
 | Open Ghostty Config            | ⌥⌘,      |
 | Reload Config                  | ⇧⌘,      |
