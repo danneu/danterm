@@ -111,7 +111,16 @@ To work around this, create a script (e.g. `~/.claude/hooks/claude-notify.sh`):
 ```bash
 #!/usr/bin/env bash
 # Extracts Claude's last message and sends an OSC 777 notification.
-MSG=$(cat | jq -r '.last_assistant_message // empty' | head -c 200)
+
+# Stop hooks also fire inside subagent contexts (Task tool / Explore / Plan /
+# etc.). The docs say `agent_id` is "Present only when the hook fires inside
+# a subagent call" -- skip those so only the main agent's turn notifies.
+INPUT=$(cat)
+if [ -n "$(printf '%s' "$INPUT" | jq -r '.agent_id // empty')" ]; then
+  exit 0
+fi
+
+MSG=$(printf '%s' "$INPUT" | jq -r '.last_assistant_message // empty' | head -c 200)
 printf '\e]777;notify;Claude Code;%s\a' "${MSG:-Claude finished responding}" > /dev/tty
 ```
 
