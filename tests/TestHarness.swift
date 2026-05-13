@@ -29,7 +29,7 @@ struct TestRunner {
         ipcUpdateTests()
         ipcConnectionTests()
         cliPathInstallerTests()
-        todoEditStateTests()
+        todoPopoverStateTests()
         switcherEventTests()
         jumpEventTests()
         updateMruTests()

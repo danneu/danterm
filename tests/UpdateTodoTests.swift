@@ -325,16 +325,16 @@ func todoTests() {
         try expectEqual(classifyInputAction(key: .tab, isEditing: false, fieldEmpty: true), .moveFocusForward)
     }
 
-    test("tab while editing → submit") {
-        try expectEqual(classifyInputAction(key: .tab, isEditing: true, fieldEmpty: false), .submit)
+    test("tab while editing → moveFocusForward") {
+        try expectEqual(classifyInputAction(key: .tab, isEditing: true, fieldEmpty: false), .moveFocusForward)
     }
 
-    test("backtab while editing → cancelEdit") {
-        try expectEqual(classifyInputAction(key: .backtab, isEditing: true, fieldEmpty: false), .cancelEdit)
+    test("backtab while editing → moveFocusBackward") {
+        try expectEqual(classifyInputAction(key: .backtab, isEditing: true, fieldEmpty: false), .moveFocusBackward)
     }
 
-    test("backtab while not editing → unhandled") {
-        try expectEqual(classifyInputAction(key: .backtab, isEditing: false, fieldEmpty: true), .unhandled)
+    test("backtab while not editing → moveFocusBackward") {
+        try expectEqual(classifyInputAction(key: .backtab, isEditing: false, fieldEmpty: true), .moveFocusBackward)
     }
 
     test("other → unhandled") {
@@ -351,8 +351,8 @@ func todoTests() {
         try expectEqual(classifyListAction(key: .upArrow, modifiers: KeyModifiers()), .moveSelection(delta: -1))
     }
 
-    test("list tab and enter enter edit") {
-        try expectEqual(classifyListAction(key: .tab, modifiers: KeyModifiers()), .enterEdit)
+    test("list tab focuses input and enter enters edit") {
+        try expectEqual(classifyListAction(key: .tab, modifiers: KeyModifiers()), .focusInput)
         try expectEqual(classifyListAction(key: .enter, modifiers: KeyModifiers()), .enterEdit)
     }
 

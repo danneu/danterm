@@ -1,6 +1,6 @@
 /// Fixed-height text input for the todo popover.
 /// Wraps an NSTextView inside an NSScrollView with a placeholder label.
-/// Always ~3 lines tall; scrolls when content overflows.
+/// The visible line count is configurable; scrolls when content overflows.
 /// Self-observes text changes via notification to keep placeholder in sync.
 
 import Cocoa
@@ -24,35 +24,25 @@ private class FocusRingScrollView: NSScrollView {
     }
 }
 
-/// NSTextView subclass that reports only mouse clicks that acquire focus.
-private final class TodoInputTextView: NSTextView {
-    var onMouseDownAcquireFocus: (() -> Void)?
-
-    /// NSTextView: detects when this click makes the editor first responder.
-    override func mouseDown(with event: NSEvent) {
-        let wasFirstResponder = window?.firstResponder === self
-        if !wasFirstResponder {
-            _ = window?.makeFirstResponder(self)
-        }
-        super.mouseDown(with: event)
-        guard !wasFirstResponder, window?.firstResponder === self else { return }
-        onMouseDownAcquireFocus?()
-    }
-}
-
 class TodoInputView: NSView {
     let textView: NSTextView
-    private let todoTextView: TodoInputTextView
     private let scrollView: FocusRingScrollView
     private let placeholderLabel: NSTextField
     private var textChangeObserver: Any?
+    private let visibleLineCount: Int
 
     // MARK: - Height constants
 
-    private static let inputFont = NSFont.systemFont(ofSize: NSFont.systemFontSize)
-    private static let inputLineHeight: CGFloat = NSLayoutManager().defaultLineHeight(for: inputFont)
-    private static let inputInsetY: CGFloat = 4
-    static let inputHeight = inputLineHeight * 3 + inputInsetY * 2
+    static let defaultVisibleLineCount = 3
+    static let editVisibleLineCount = 8
+    static let inputFont = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+    static let inputLineHeight: CGFloat = NSLayoutManager().defaultLineHeight(for: inputFont)
+    static let inputInsetY: CGFloat = 4
+    static let inputHeight = height(visibleLineCount: defaultVisibleLineCount)
+
+    static func height(visibleLineCount: Int) -> CGFloat {
+        inputLineHeight * CGFloat(visibleLineCount) + inputInsetY * 2
+    }
 
     // MARK: - Public API
 
@@ -64,20 +54,14 @@ class TodoInputView: NSView {
         }
     }
 
-    var onTextViewMouseDownAcquireFocus: (() -> Void)? {
-        get { todoTextView.onMouseDownAcquireFocus }
-        set { todoTextView.onMouseDownAcquireFocus = newValue }
-    }
-
     // MARK: - Init
 
-    init(placeholder: String = "Add a task…") {
+    init(placeholder: String = "Add a task…", visibleLineCount: Int = defaultVisibleLineCount) {
         // Must use NSTextView(frame:) to get a text container/layout manager.
-        let inputTextView = TodoInputTextView(frame: .zero)
-        todoTextView = inputTextView
-        textView = inputTextView
+        textView = NSTextView(frame: .zero)
         scrollView = FocusRingScrollView()
         placeholderLabel = NSTextField(labelWithString: placeholder)
+        self.visibleLineCount = visibleLineCount
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         setupViews()
@@ -139,7 +123,7 @@ class TodoInputView: NSView {
             scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
-            scrollView.heightAnchor.constraint(equalToConstant: Self.inputHeight),
+            scrollView.heightAnchor.constraint(equalToConstant: Self.height(visibleLineCount: visibleLineCount)),
 
             // Placeholder inset: textContainerInset.height + lineFragmentPadding
             placeholderLabel.topAnchor.constraint(equalTo: scrollView.topAnchor, constant: Self.inputInsetY + 1),

@@ -75,9 +75,9 @@ func classifyInputAction(key: InputKey, isEditing: Bool, fieldEmpty: Bool) -> In
         if isEditing && fieldEmpty { return .cancelEdit }
         return .unhandled
     case .tab:
-        return isEditing ? .submit : .moveFocusForward
+        return .moveFocusForward
     case .backtab:
-        return isEditing ? .cancelEdit : .unhandled
+        return .moveFocusBackward
     case .other:
         return .unhandled
     }
@@ -119,8 +119,10 @@ func classifyListAction(key: ListKey, modifiers: KeyModifiers) -> ListAction {
         return .moveSelection(delta: 1)
     case .k, .upArrow:
         return .moveSelection(delta: -1)
-    case .tab, .enter:
+    case .enter:
         return .enterEdit
+    case .tab:
+        return .focusInput
     case .space:
         return .toggleDone
     default:

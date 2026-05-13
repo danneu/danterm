@@ -1,7 +1,8 @@
 /// Popover view controller for the tab-level TODO list, anchored to the
 /// chrome's right-side button. Shows the active tab's own to-dos plus a
 /// roll-up section per pane in the tab. Tab items and pane roll-up items are
-/// editable from the keyboard; new items are added to the tab section.
+/// edited in an explicit editor mode; new items are added to the tab section
+/// from the list-mode compose field.
 
 import Cocoa
 
@@ -149,20 +150,21 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
     private let clearButton = NSButton(title: "Clear completed", target: nil, action: nil)
     private let newButton = NSButton(title: "New (\u{2318}N)", target: nil, action: nil)
     private let addInput = TodoInputView(placeholder: "Add a tab task…")
-    private let editLabel: NSTextField = {
-        let tf = NSTextField(labelWithString: "Editing - Esc to cancel - Enter to save")
-        tf.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        tf.textColor = .secondaryLabelColor
-        tf.isHidden = true
-        tf.translatesAutoresizingMaskIntoConstraints = false
+    private let editTitleLabel: NSTextField = {
+        let tf = NSTextField(labelWithString: "Edit tab task")
+        tf.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        tf.textColor = .labelColor
+        tf.lineBreakMode = .byTruncatingTail
         return tf
     }()
+    private let editInput = TodoInputView(placeholder: "Edit task...", visibleLineCount: TodoInputView.editVisibleLineCount)
+    private let saveButton = NSButton(title: "Save", target: nil, action: nil)
+    private let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
+    private var bottomStack: NSStackView!
+    private var editContainer: NSStackView!
 
-    private var editTarget: TabTodoEditTarget?
-    private var composeDraft = ""
+    private var popoverState = TodoPopoverState<TabTodoEditTarget>()
     private var isSyncingTableSelection = false
-    // True only while addInput mirrors the currently selected row's text.
-    private var isPreviewingSelectedRow = false
     private var rows: [TabTodoRow] = []
 
     init(tabId: TabId, runtime: AppRuntime?) {
@@ -252,12 +254,32 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         let sep = NSBox()
         sep.boxType = .separator
 
-        addInput.textView.delegate = self
-        addInput.onTextViewMouseDownAcquireFocus = { [weak self] in
-            self?.enterEditFromInputClick()
-        }
+        saveButton.target = self
+        saveButton.action = #selector(saveEditButtonClicked(_:))
+        saveButton.bezelStyle = .rounded
 
-        let bottomStack = NSStackView(views: [sep, editLabel, addInput])
+        cancelButton.target = self
+        cancelButton.action = #selector(cancelEditButtonClicked(_:))
+        cancelButton.bezelStyle = .rounded
+
+        editInput.textView.delegate = self
+
+        let editButtons = NSStackView(views: [saveButton, cancelButton])
+        editButtons.orientation = .horizontal
+        editButtons.alignment = .centerY
+        editButtons.spacing = 8
+
+        editContainer = NSStackView(views: [editTitleLabel, editInput, editButtons])
+        editContainer.orientation = .vertical
+        editContainer.alignment = .leading
+        editContainer.spacing = 8
+        editContainer.translatesAutoresizingMaskIntoConstraints = false
+        editContainer.isHidden = true
+        container.addSubview(editContainer)
+
+        addInput.textView.delegate = self
+
+        bottomStack = NSStackView(views: [sep, addInput])
         bottomStack.orientation = .vertical
         bottomStack.alignment = .leading
         bottomStack.spacing = 4
@@ -284,12 +306,17 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomStack.topAnchor),
 
+            editContainer.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 12),
+            editContainer.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            editContainer.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            editContainer.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -12),
+            editInput.widthAnchor.constraint(equalTo: editContainer.widthAnchor),
+
             bottomStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
             bottomStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
             bottomStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
 
             sep.widthAnchor.constraint(equalTo: bottomStack.widthAnchor),
-            editLabel.leadingAnchor.constraint(equalTo: bottomStack.leadingAnchor, constant: 4),
             addInput.widthAnchor.constraint(equalTo: bottomStack.widthAnchor),
         ])
 
@@ -309,41 +336,37 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
     func rebuildRows() {
         let selectedTarget = selectedEditTarget()
         let selectedRowBeforeReload = tableView.selectedRow
-        let wasPreviewingSelectedRow = isPreviewingSelectedRow
-        isPreviewingSelectedRow = false
         rows = buildRows()
         let tabItems = tabTodos
-        clearButton.isHidden = !tabItems.contains(where: \.isDone)
-        let wasEditingTarget = editTarget
+        let wasEditing = popoverState.isEditing
+        popoverState.rebuild { [weak self] target in
+            self?.item(for: target) != nil
+        }
+        syncModeVisibility(tabItems: tabItems)
         isSyncingTableSelection = true
         tableView.reloadData()
-        if let target = wasEditingTarget {
-            if item(for: target) == nil {
-                editTarget = nil
-                editLabel.isHidden = true
-                isSyncingTableSelection = false
-                selectNearestSelectableRow(near: selectedRowBeforeReload)
-            } else if let newIndex = rowIndex(for: target) {
+        if let target = popoverState.editTarget {
+            if let newIndex = rowIndex(for: target) {
                 tableView.selectRowIndexes(IndexSet(integer: newIndex), byExtendingSelection: false)
-                isSyncingTableSelection = false
             } else {
-                isSyncingTableSelection = false
+                tableView.deselectAll(nil)
             }
         } else if let selectedTarget,
                   let newIndex = rowIndex(for: selectedTarget) {
             tableView.selectRowIndexes(IndexSet(integer: newIndex), byExtendingSelection: false)
-            isSyncingTableSelection = false
-            if wasPreviewingSelectedRow {
-                populateInputFromSelection()
-            }
         } else {
-            isSyncingTableSelection = false
+            tableView.deselectAll(nil)
+        }
+        isSyncingTableSelection = false
+
+        if wasEditing && !popoverState.isEditing {
+            selectNearestSelectableRow(near: selectedRowBeforeReload)
         }
     }
 
     // MARK: - Focus and edit transitions
 
-    private var isEditing: Bool { editTarget != nil }
+    private var isEditing: Bool { popoverState.isEditing }
 
     private func selectedEditTarget() -> TabTodoEditTarget? {
         let row = tableView.selectedRow
@@ -378,29 +401,19 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         return true
     }
 
-    private func populateInputFromSelection() {
-        let row = tableView.selectedRow
-        guard rows.indices.contains(row), let text = rows[row].itemText else { return }
-        addInput.string = text
-        isPreviewingSelectedRow = true
-    }
-
     private func selectNearestSelectableRow(near row: Int) {
         if rows.indices.contains(row), rows[row].isSelectable {
             setSelectedRow(row)
-            populateInputFromSelection()
             view.window?.makeFirstResponder(tableView)
             return
         }
         if let next = nextSelectableRow(in: rows, from: row, delta: 1, canSelect: { $0.isSelectable }) {
             setSelectedRow(next)
-            populateInputFromSelection()
             view.window?.makeFirstResponder(tableView)
             return
         }
         if let previous = nextSelectableRow(in: rows, from: min(row, rows.count), delta: -1, canSelect: { $0.isSelectable }) {
             setSelectedRow(previous)
-            populateInputFromSelection()
             view.window?.makeFirstResponder(tableView)
             return
         }
@@ -413,75 +426,58 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
 
     @discardableResult
     private func focusListFromInput() -> Bool {
-        composeDraft = addInput.string
+        popoverState.setComposeDraft(addInput.string)
         var row = tableView.selectedRow
         if !rows.indices.contains(row) || !rows[row].isSelectable {
             guard let firstRow = firstSelectableRow(in: rows, canSelect: { $0.isSelectable }) else { return false }
             row = firstRow
         }
         setSelectedRow(row)
-        populateInputFromSelection()
-        editLabel.isHidden = true
+        popoverState.selectRow(selectedEditTarget())
+        syncModeVisibility(tabItems: tabTodos)
         view.window?.makeFirstResponder(tableView)
         return true
     }
 
     private func focusComposeInput() {
-        if isEditing {
-            editTarget = nil
-            editLabel.isHidden = true
-        }
-        addInput.string = composeDraft
-        isPreviewingSelectedRow = false
+        addInput.string = popoverState.composeDraft
+        syncModeVisibility(tabItems: tabTodos)
         view.window?.makeFirstResponder(addInput.textView)
         addInput.textView.moveToEndOfDocument(nil)
     }
 
-    /// Promote a passive row preview into an edit when the input is clicked.
-    private func enterEditFromInputClick() {
-        guard !isEditing else { return }
-        guard isPreviewingSelectedRow else { return }
-        guard let target = selectedEditTarget() else { return }
-        editTarget = target
-        editLabel.isHidden = false
-    }
-
     private func enterEditForSelectedRow() {
         guard let target = selectedEditTarget(), let item = item(for: target) else { return }
-        if let oldTarget = editTarget, oldTarget != target {
-            saveEdit(target: oldTarget, text: addInput.string)
-        }
-        editTarget = target
-        addInput.string = item.text
-        isPreviewingSelectedRow = false
-        editLabel.isHidden = false
-        view.window?.makeFirstResponder(addInput.textView)
-        addInput.textView.selectAll(nil)
+        popoverState.enterEdit(target: target, itemText: item.text)
+        editInput.string = item.text
+        editTitleLabel.stringValue = editTitle(for: target)
+        syncModeVisibility(tabItems: tabTodos)
+        view.window?.makeFirstResponder(editInput.textView)
+        editInput.textView.moveToEndOfDocument(nil)
     }
 
     @discardableResult
     private func saveEditThenReturnToList() -> Bool {
-        guard let target = editTarget else { return false }
-        let text = addInput.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return false }
-        saveEdit(target: target, text: text)
-        editTarget = nil
-        editLabel.isHidden = true
-        rebuildRows()
-        _ = selectTarget(target)
-        addInput.string = text
-        isPreviewingSelectedRow = true
-        view.window?.makeFirstResponder(tableView)
-        return true
+        switch popoverState.saveEdit(text: editInput.string) {
+        case .saved(let target, let text):
+            saveEdit(target: target, text: text)
+            syncModeVisibility(tabItems: tabTodos)
+            rebuildRows()
+            _ = selectTarget(target)
+            view.window?.makeFirstResponder(tableView)
+            return true
+        case .rejected:
+            view.window?.makeFirstResponder(editInput.textView)
+            return false
+        }
     }
 
     private func addTodoAndStayInCompose() {
         let text = addInput.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         runtime?.send(.addTabTodo(tabId: tabId, text: text))
-        composeDraft = ""
+        popoverState.clearComposeDraft()
         addInput.string = ""
-        isPreviewingSelectedRow = false
         rebuildRows()
         // Pre-select the new item so Tab from compose lands on it.
         if let newId = tab?.todos.last?.id,
@@ -492,26 +488,28 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
     }
 
     private func cancelEditAndReturnToList() {
-        guard let target = editTarget else { return }
-        editTarget = nil
-        editLabel.isHidden = true
+        guard let target = popoverState.editTarget else { return }
+        popoverState.cancelEdit()
+        syncModeVisibility(tabItems: tabTodos)
         if selectTarget(target) {
-            populateInputFromSelection()
             view.window?.makeFirstResponder(tableView)
         } else {
             focusListFromInput()
         }
     }
 
-    private func saveEditThenFocusCompose() {
+    private func saveEditThenFocusCompose(clearingDraft: Bool) {
         guard saveEditThenReturnToList() else { return }
+        if clearingDraft {
+            popoverState.clearComposeDraft()
+        }
         focusComposeInput()
     }
 
     // Shared command/button path: save an active edit before moving to compose.
     private func focusComposeFromShortcut() {
         if isEditing {
-            saveEditThenFocusCompose()
+            saveEditThenFocusCompose(clearingDraft: true)
         } else {
             focusComposeInput()
         }
@@ -530,6 +528,43 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         case .pane(let paneId, let todoId):
             runtime?.send(.editTodoText(paneId: paneId, todoId: todoId, text: trimmed))
         }
+    }
+
+    private func editTitle(for target: TabTodoEditTarget) -> String {
+        switch target {
+        case .tab:
+            return "Edit tab task"
+        case .pane(let paneId, _):
+            let title = runtime?.model.panes[paneId]?.title ?? "pane"
+            return "Edit pane task: \(title)"
+        }
+    }
+
+    private func syncModeVisibility(tabItems: [TodoItem]) {
+        let editMode = popoverState.isEditing
+        clearButton.isHidden = editMode || !tabItems.contains(where: \.isDone)
+        newButton.isHidden = editMode
+        editContainer.isHidden = !editMode
+        scrollView.isHidden = editMode
+        bottomStack.isHidden = editMode
+        if editMode {
+            installEditKeyLoop()
+        } else {
+            tearDownEditKeyLoop()
+            addInput.string = popoverState.composeDraft
+        }
+    }
+
+    private func installEditKeyLoop() {
+        editInput.textView.nextKeyView = saveButton
+        saveButton.nextKeyView = cancelButton
+        cancelButton.nextKeyView = editInput.textView
+    }
+
+    private func tearDownEditKeyLoop() {
+        editInput.textView.nextKeyView = nil
+        saveButton.nextKeyView = nil
+        cancelButton.nextKeyView = nil
     }
 
     // MARK: - NSTableViewDataSource
@@ -621,30 +656,14 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         return rows[row].isHeader
     }
 
-    /// NSTableViewDelegate: selection changes update the passive input preview.
+    /// NSTableViewDelegate: row selection stays in list mode and never edits
+    /// the compose draft.
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard !isSyncingTableSelection else { return }
         let row = tableView.selectedRow
-        if row < 0, editTarget != nil {
-            cancelEditAndReturnToList()
-            return
-        }
         guard row >= 0, row < rows.count,
-              let newTarget = rows[row].editTarget,
-              let newText = rows[row].itemText else { return }
-
-        if let oldTarget = editTarget, oldTarget != newTarget {
-            saveEdit(target: oldTarget, text: addInput.string)
-            editTarget = nil
-            editLabel.isHidden = true
-            rebuildRows()
-            _ = selectTarget(newTarget)
-            addInput.string = newText
-            isPreviewingSelectedRow = true
-            return
-        }
-        addInput.string = newText
-        isPreviewingSelectedRow = true
+              let newTarget = rows[row].editTarget else { return }
+        popoverState.selectRow(newTarget)
     }
 
     // MARK: - Drag move/reorder
@@ -757,9 +776,16 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         enterEditForSelectedRow()
     }
 
+    @objc private func saveEditButtonClicked(_ sender: Any?) {
+        _ = saveEditThenReturnToList()
+    }
+
+    @objc private func cancelEditButtonClicked(_ sender: Any?) {
+        cancelEditAndReturnToList()
+    }
+
     private func toggleSelectedTodoDone() {
         guard let target = selectedEditTarget() else { return }
-        let previewText = addInput.string
         switch target {
         case .tab(let todoId):
             runtime?.send(.toggleTabTodoDone(tabId: tabId, todoId: todoId))
@@ -768,7 +794,6 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         }
         rebuildRows()
         _ = selectTarget(target)
-        addInput.string = previewText
         view.window?.makeFirstResponder(tableView)
     }
 
@@ -847,7 +872,6 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         }
         rebuildRows()
         _ = selectTarget(targetToSelect)
-        populateInputFromSelection()
         view.window?.makeFirstResponder(tableView)
     }
 
@@ -855,7 +879,6 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         let row = tableView.selectedRow
         guard let nextRow = nextSelectableRow(in: rows, from: row, delta: delta, canSelect: { $0.isSelectable }) else { return }
         setSelectedRow(nextRow)
-        populateInputFromSelection()
     }
 
     private func moveSelectedTodoToAdjacentBucket(delta: Int) -> Bool {
@@ -891,7 +914,6 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
             newTarget = .pane(paneId: paneId, todoId: item.id)
         }
         _ = selectTarget(newTarget)
-        populateInputFromSelection()
         view.window?.makeFirstResponder(tableView)
         return true
     }
@@ -965,7 +987,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
 
 extension TabTodoPopoverViewController: NSTextViewDelegate {
     func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        guard textView === addInput.textView else { return false }
+        guard textView === addInput.textView || textView === editInput.textView else { return false }
         if commandSelector == #selector(insertNewline(_:)),
            let event = NSApp.currentEvent,
            event.modifierFlags.contains(.command) {
@@ -993,7 +1015,7 @@ extension TabTodoPopoverViewController: NSTextViewDelegate {
 
         let action = classifyInputAction(
             key: key,
-            isEditing: editTarget != nil,
+            isEditing: isEditing,
             fieldEmpty: textView.string.isEmpty
         )
 
@@ -1017,9 +1039,18 @@ extension TabTodoPopoverViewController: NSTextViewDelegate {
             }
             return true
         case .moveFocusForward:
-            _ = focusListFromInput()
+            if isEditing {
+                view.window?.selectNextKeyView(nil)
+            } else {
+                _ = focusListFromInput()
+            }
             return true
         case .moveFocusBackward:
+            if isEditing {
+                view.window?.selectPreviousKeyView(nil)
+            } else {
+                _ = focusListFromInput()
+            }
             return true
         case .unhandled:
             if key == .backtab { return true }
@@ -1029,10 +1060,9 @@ extension TabTodoPopoverViewController: NSTextViewDelegate {
 
     /// NSTextViewDelegate: keep the compose draft live while adding a tab item.
     func textDidChange(_ notification: Notification) {
-        guard view.window?.firstResponder === addInput.textView else { return }
-        isPreviewingSelectedRow = false
+        guard notification.object as AnyObject? === addInput.textView else { return }
         guard !isEditing else { return }
-        composeDraft = addInput.string
+        popoverState.setComposeDraft(addInput.string)
     }
 }
 

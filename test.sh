@@ -32,7 +32,7 @@ echo "Compiling tests..."
         "$SCRIPT_DIR/app/ScrollbarMath.swift" \
         "$SCRIPT_DIR/app/ThemeColorParser.swift" \
         "$SCRIPT_DIR/app/DanTermConfig.swift" \
-        "$SCRIPT_DIR/app/TodoEditState.swift" \
+        "$SCRIPT_DIR/app/TodoPopoverState.swift" \
         "$SCRIPT_DIR/app/TodoInputCommand.swift" \
         "$SCRIPT_DIR"/tests/*.swift
 )
