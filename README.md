@@ -120,8 +120,48 @@ if [ -n "$(printf '%s' "$INPUT" | jq -r '.agent_id // empty')" ]; then
   exit 0
 fi
 
-MSG=$(printf '%s' "$INPUT" | jq -r '.last_assistant_message // empty' | head -c 200)
-printf '\e]777;notify;Claude Code;%s\a' "${MSG:-Claude finished responding}" > /dev/tty
+MSG=$(printf '%s' "$INPUT" | jq -r '.last_assistant_message // empty' | head -c 200 | tr -d '[:cntrl:]')
+MSG=${MSG:-Claude finished responding}
+
+: "${CLAUDE_NOTIFY_DEV_DIR:=/dev}"
+
+find_ancestor_tty() {
+  local pid=$PPID
+  local i tty parent
+
+  for ((i = 0; i < 20; i++)); do
+    if [ -z "$pid" ] || [ "$pid" -le 1 ]; then
+      return 1
+    fi
+
+    tty=$(ps -o tty= -p "$pid" 2>/dev/null | tr -d ' ')
+    case "$tty" in
+      ""|"?"|"??"|"-") ;;
+      *)
+        printf '%s/%s\n' "$CLAUDE_NOTIFY_DEV_DIR" "$tty"
+        return 0
+        ;;
+    esac
+
+    parent=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    if [ -z "$parent" ]; then
+      return 1
+    fi
+    pid=$parent
+  done
+
+  return 1
+}
+
+if [ -z "${CLAUDE_NOTIFY_TTY:-}" ]; then
+  CLAUDE_NOTIFY_TTY=$(find_ancestor_tty) || exit 0
+fi
+
+if [ -n "$TMUX" ]; then
+  printf '\ePtmux;\e\e]777;notify;Claude Code;%s\a\e\\' "$MSG" > "$CLAUDE_NOTIFY_TTY"
+else
+  printf '\e]777;notify;Claude Code;%s\a' "$MSG" > "$CLAUDE_NOTIFY_TTY"
+fi
 ```
 
 Then add a `Stop` hook to your Claude Code settings (`~/.claude/settings.json`):
