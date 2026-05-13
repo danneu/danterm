@@ -459,6 +459,11 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         composeDraft = ""
         addInput.string = ""
         rebuildRows()
+        // Pre-select the new item so Tab from compose lands on it.
+        if let newId = tab?.todos.last?.id,
+           let row = rowIndex(for: .tab(todoId: newId)) {
+            setSelectedRow(row)
+        }
         view.window?.makeFirstResponder(addInput.textView)
     }
 
