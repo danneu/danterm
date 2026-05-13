@@ -27,8 +27,10 @@ enum InputAction: Equatable {
 
 /// Domain-level key action for row/list mode, decoupled from AppKit events.
 enum ListKey: Equatable {
+    case h
     case j
     case k
+    case l
     case downArrow
     case upArrow
     case tab
@@ -55,6 +57,7 @@ enum ListAction: Equatable {
     case toggleDone
     case deleteRow
     case reorder(delta: Int)
+    case moveBucket(delta: Int)
     case focusInput
     case unhandled
 }
@@ -100,6 +103,10 @@ func classifyListAction(key: ListKey, modifiers: KeyModifiers) -> ListAction {
             return .reorder(delta: 1)
         case .k:
             return .reorder(delta: -1)
+        case .h:
+            return .moveBucket(delta: -1)
+        case .l:
+            return .moveBucket(delta: 1)
         case .tab, .backtab:
             return .focusInput
         default:

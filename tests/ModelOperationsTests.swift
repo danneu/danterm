@@ -1281,6 +1281,192 @@ func modelOperationsTests() {
         try expect(destination == nil)
     }
 
+    // MARK: - resolveTabTodoReorderStep
+
+    test("resolveTabTodoReorderStep middle of tab section with delta=+1 reorders down") {
+        let tabId = TabId()
+
+        let step = resolveTabTodoReorderStep(
+            current: .tab(todoId: UUID()),
+            paneOrder: [PaneId(), PaneId()],
+            tabId: tabId,
+            currentIndex: 1,
+            currentSectionCount: 3,
+            destinationSectionCount: { _ in 0 },
+            delta: 1
+        )
+
+        try expectEqual(step, .reorderInSection(toIndex: 2))
+    }
+
+    test("resolveTabTodoReorderStep middle of tab section with delta=-1 reorders up") {
+        let tabId = TabId()
+
+        let step = resolveTabTodoReorderStep(
+            current: .tab(todoId: UUID()),
+            paneOrder: [PaneId(), PaneId()],
+            tabId: tabId,
+            currentIndex: 1,
+            currentSectionCount: 3,
+            destinationSectionCount: { _ in 0 },
+            delta: -1
+        )
+
+        try expectEqual(step, .reorderInSection(toIndex: 0))
+    }
+
+    test("resolveTabTodoReorderStep last tab item with delta=+1 moves to first pane at start") {
+        let tabId = TabId()
+        let paneA = PaneId()
+        let paneB = PaneId()
+
+        let step = resolveTabTodoReorderStep(
+            current: .tab(todoId: UUID()),
+            paneOrder: [paneA, paneB],
+            tabId: tabId,
+            currentIndex: 2,
+            currentSectionCount: 3,
+            destinationSectionCount: { destination in
+                destination == .pane(paneA) ? 2 : 0
+            },
+            delta: 1
+        )
+
+        try expectEqual(step, .moveToBucket(destination: .pane(paneA), atIndex: 0))
+    }
+
+    test("resolveTabTodoReorderStep last tab item with delta=+1 moves to empty first pane at start") {
+        let tabId = TabId()
+        let paneA = PaneId()
+        let paneB = PaneId()
+
+        let step = resolveTabTodoReorderStep(
+            current: .tab(todoId: UUID()),
+            paneOrder: [paneA, paneB],
+            tabId: tabId,
+            currentIndex: 2,
+            currentSectionCount: 3,
+            destinationSectionCount: { _ in 0 },
+            delta: 1
+        )
+
+        try expectEqual(step, .moveToBucket(destination: .pane(paneA), atIndex: 0))
+    }
+
+    test("resolveTabTodoReorderStep first pane0 item with delta=-1 moves to tab end") {
+        let tabId = TabId()
+        let paneA = PaneId()
+        let paneB = PaneId()
+
+        let step = resolveTabTodoReorderStep(
+            current: .pane(paneId: paneA, todoId: UUID()),
+            paneOrder: [paneA, paneB],
+            tabId: tabId,
+            currentIndex: 0,
+            currentSectionCount: 2,
+            destinationSectionCount: { destination in
+                destination == .tab(tabId) ? 3 : 0
+            },
+            delta: -1
+        )
+
+        try expectEqual(step, .moveToBucket(destination: .tab(tabId), atIndex: 3))
+    }
+
+    test("resolveTabTodoReorderStep first pane0 item with delta=-1 moves to empty tab at start") {
+        let tabId = TabId()
+        let paneA = PaneId()
+        let paneB = PaneId()
+
+        let step = resolveTabTodoReorderStep(
+            current: .pane(paneId: paneA, todoId: UUID()),
+            paneOrder: [paneA, paneB],
+            tabId: tabId,
+            currentIndex: 0,
+            currentSectionCount: 2,
+            destinationSectionCount: { _ in 0 },
+            delta: -1
+        )
+
+        try expectEqual(step, .moveToBucket(destination: .tab(tabId), atIndex: 0))
+    }
+
+    test("resolveTabTodoReorderStep last pane0 item with delta=+1 moves to pane1 start") {
+        let tabId = TabId()
+        let paneA = PaneId()
+        let paneB = PaneId()
+
+        let step = resolveTabTodoReorderStep(
+            current: .pane(paneId: paneA, todoId: UUID()),
+            paneOrder: [paneA, paneB],
+            tabId: tabId,
+            currentIndex: 3,
+            currentSectionCount: 4,
+            destinationSectionCount: { destination in
+                destination == .pane(paneB) ? 2 : 0
+            },
+            delta: 1
+        )
+
+        try expectEqual(step, .moveToBucket(destination: .pane(paneB), atIndex: 0))
+    }
+
+    test("resolveTabTodoReorderStep first pane1 item with delta=-1 moves to pane0 end") {
+        let tabId = TabId()
+        let paneA = PaneId()
+        let paneB = PaneId()
+
+        let step = resolveTabTodoReorderStep(
+            current: .pane(paneId: paneB, todoId: UUID()),
+            paneOrder: [paneA, paneB],
+            tabId: tabId,
+            currentIndex: 0,
+            currentSectionCount: 2,
+            destinationSectionCount: { destination in
+                destination == .pane(paneA) ? 4 : 0
+            },
+            delta: -1
+        )
+
+        try expectEqual(step, .moveToBucket(destination: .pane(paneA), atIndex: 4))
+    }
+
+    test("resolveTabTodoReorderStep first tab item with delta=-1 stops at top") {
+        let tabId = TabId()
+        let paneA = PaneId()
+        let paneB = PaneId()
+
+        let step = resolveTabTodoReorderStep(
+            current: .tab(todoId: UUID()),
+            paneOrder: [paneA, paneB],
+            tabId: tabId,
+            currentIndex: 0,
+            currentSectionCount: 3,
+            destinationSectionCount: { _ in 0 },
+            delta: -1
+        )
+
+        try expect(step == nil)
+    }
+
+    test("resolveTabTodoReorderStep last last-pane item with delta=+1 stops at bottom") {
+        let tabId = TabId()
+        let paneA = PaneId()
+        let paneB = PaneId()
+
+        let step = resolveTabTodoReorderStep(
+            current: .pane(paneId: paneB, todoId: UUID()),
+            paneOrder: [paneA, paneB],
+            tabId: tabId,
+            currentIndex: 1,
+            currentSectionCount: 2,
+            destinationSectionCount: { _ in 0 },
+            delta: 1
+        )
+
+        try expect(step == nil)
+    }
+
     test("assignJumpKeys caps mapping at jump key sequence count") {
         let ids = (0..<(jumpModeKeySequence.count + 3)).map { _ in TabId() }
         let keyMap = assignJumpKeys(visibleTabs: ids)

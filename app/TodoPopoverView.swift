@@ -523,6 +523,8 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         case .reorder(let delta):
             reorderSelectedTodo(delta: delta)
             return true
+        case .moveBucket:
+            return false
         case .focusInput:
             focusComposeInput()
             return true
@@ -665,10 +667,14 @@ private func listKey(from event: NSEvent) -> ListKey {
     }
 
     switch event.charactersIgnoringModifiers?.lowercased() {
+    case "h":
+        return .h
     case "j":
         return .j
     case "k":
         return .k
+    case "l":
+        return .l
     case "n":
         return .n
     default:

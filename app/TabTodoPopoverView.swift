@@ -147,6 +147,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
     private let scrollView = NSScrollView()
     private let headerLabel = NSTextField(labelWithString: "Tab To-Do")
     private let clearButton = NSButton(title: "Clear completed", target: nil, action: nil)
+    private let newButton = NSButton(title: "New (\u{2318}N)", target: nil, action: nil)
     private let addInput = TodoInputView(placeholder: "Add a tab task…")
     private let editLabel: NSTextField = {
         let tf = NSTextField(labelWithString: "Editing - Esc to cancel - Enter to save")
@@ -206,7 +207,20 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         clearButton.bezelStyle = .accessoryBarAction
         clearButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         clearButton.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(clearButton)
+
+        newButton.target = self
+        newButton.action = #selector(focusComposeAction(_:))
+        newButton.bezelStyle = .accessoryBarAction
+        newButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        newButton.translatesAutoresizingMaskIntoConstraints = false
+
+        let headerActions = NSStackView(views: [clearButton, newButton])
+        headerActions.orientation = .horizontal
+        headerActions.alignment = .centerY
+        headerActions.spacing = 6
+        headerActions.detachesHiddenViews = true
+        headerActions.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(headerActions)
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("tabtodo"))
         tableView.addTableColumn(column)
@@ -256,8 +270,9 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
 
             headerLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
             headerLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            clearButton.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
-            clearButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            headerLabel.trailingAnchor.constraint(lessThanOrEqualTo: headerActions.leadingAnchor, constant: -8),
+            headerActions.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
+            headerActions.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
 
             scrollView.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -462,6 +477,19 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
     private func saveEditThenFocusCompose() {
         guard saveEditThenReturnToList() else { return }
         focusComposeInput()
+    }
+
+    // Shared command/button path: save an active edit before moving to compose.
+    private func focusComposeFromShortcut() {
+        if isEditing {
+            saveEditThenFocusCompose()
+        } else {
+            focusComposeInput()
+        }
+    }
+
+    @objc private func focusComposeAction(_ sender: Any?) {
+        focusComposeFromShortcut()
     }
 
     private func saveEdit(target: TabTodoEditTarget, text: String) {
@@ -728,27 +756,66 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
 
     private func reorderSelectedTodo(delta: Int) {
         let row = tableView.selectedRow
-        let destinationRow = row + delta
         guard rows.indices.contains(row),
-              rows.indices.contains(destinationRow),
-              rows[destinationRow].isSelectable,
-              rows[row].sectionIdentifier == rows[destinationRow].sectionIdentifier,
               let target = selectedEditTarget(),
-              let destination = sectionLocalIndex(
+              let tab = tab,
+              let currentIndex = sectionLocalIndex(
                   rows: rows,
-                  at: destinationRow,
+                  at: row,
                   isHeader: { $0.isHeader },
                   sectionId: { $0.sectionIdentifier }
               ) else { return }
 
-        switch target {
-        case .tab(let todoId):
-            runtime?.send(.reorderTabTodo(tabId: tabId, todoId: todoId, toIndex: destination))
-        case .pane(let paneId, let todoId):
-            runtime?.send(.reorderTodo(paneId: paneId, todoId: todoId, toIndex: destination))
+        let sectionIdentifier = rows[row].sectionIdentifier
+        let currentSectionCount = rows.count {
+            $0.isSelectable && $0.sectionIdentifier == sectionIdentifier
+        }
+        guard let step = resolveTabTodoReorderStep(
+            current: target,
+            paneOrder: allPaneIds(tab.rootNode),
+            tabId: tabId,
+            currentIndex: currentIndex,
+            currentSectionCount: currentSectionCount,
+            destinationSectionCount: { destination in
+                switch destination {
+                case .tab:
+                    return tab.todos.count
+                case .pane(let paneId):
+                    return runtime?.model.panes[paneId]?.todos.count ?? 0
+                }
+            },
+            delta: delta
+        ) else { return }
+
+        let targetToSelect: TabTodoEditTarget
+        switch step {
+        case .reorderInSection(let destination):
+            switch target {
+            case .tab(let todoId):
+                runtime?.send(.reorderTabTodo(tabId: tabId, todoId: todoId, toIndex: destination))
+            case .pane(let paneId, let todoId):
+                runtime?.send(.reorderTodo(paneId: paneId, todoId: todoId, toIndex: destination))
+            }
+            targetToSelect = target
+        case .moveToBucket(let destination, let atIndex):
+            guard let item = item(for: target) else { return }
+            let source: TodoSource
+            switch target {
+            case .tab:
+                source = .tab(tabId)
+            case .pane(let paneId, _):
+                source = .pane(paneId)
+            }
+            runtime?.send(.moveTodo(from: source, todoId: item.id, to: destination, atIndex: atIndex))
+            switch destination {
+            case .tab:
+                targetToSelect = .tab(todoId: item.id)
+            case .pane(let paneId):
+                targetToSelect = .pane(paneId: paneId, todoId: item.id)
+            }
         }
         rebuildRows()
-        _ = selectTarget(target)
+        _ = selectTarget(targetToSelect)
         populateInputFromSelection()
         view.window?.makeFirstResponder(tableView)
     }
@@ -816,6 +883,8 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         case .reorder(let delta):
             reorderSelectedTodo(delta: delta)
             return true
+        case .moveBucket(let delta):
+            return moveSelectedTodoToAdjacentBucket(delta: delta)
         case .focusInput:
             focusComposeInput()
             return true
@@ -828,10 +897,8 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         let modifiers = tabKeyModifiers(from: event)
         if modifiers == [.command, .shift] {
             switch event.charactersIgnoringModifiers?.lowercased() {
-            case "h":
-                return moveSelectedTodoToAdjacentBucket(delta: -1)
-            case "l":
-                return moveSelectedTodoToAdjacentBucket(delta: 1)
+            case "h", "l":
+                return true
             default:
                 return false
             }
@@ -847,11 +914,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
             }
             return true
         case .n:
-            if isEditing {
-                saveEditThenFocusCompose()
-            } else {
-                focusComposeInput()
-            }
+            focusComposeFromShortcut()
             return true
         case .backspace:
             guard view.window?.firstResponder === tableView else { return false }
@@ -998,10 +1061,14 @@ private func tabListKey(from event: NSEvent) -> ListKey {
     }
 
     switch event.charactersIgnoringModifiers?.lowercased() {
+    case "h":
+        return .h
     case "j":
         return .j
     case "k":
         return .k
+    case "l":
+        return .l
     case "n":
         return .n
     default:

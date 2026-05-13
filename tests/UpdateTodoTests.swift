@@ -370,6 +370,22 @@ func todoTests() {
         try expectEqual(classifyListAction(key: .k, modifiers: [.shift]), .reorder(delta: -1))
     }
 
+    test("list shift h moves bucket left") {
+        try expectEqual(classifyListAction(key: .h, modifiers: [.shift]), .moveBucket(delta: -1))
+    }
+
+    test("list shift l moves bucket right") {
+        try expectEqual(classifyListAction(key: .l, modifiers: [.shift]), .moveBucket(delta: 1))
+    }
+
+    test("list cmd shift h is unhandled") {
+        try expectEqual(classifyListAction(key: .h, modifiers: [.command, .shift]), .unhandled)
+    }
+
+    test("list plain h is unhandled") {
+        try expectEqual(classifyListAction(key: .h, modifiers: KeyModifiers()), .unhandled)
+    }
+
     test("list cmd n focuses input") {
         try expectEqual(classifyListAction(key: .n, modifiers: [.command]), .focusInput)
     }

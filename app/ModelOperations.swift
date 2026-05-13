@@ -480,6 +480,11 @@ enum TabTodoDropOperation: Equatable {
   case above
 }
 
+enum TabTodoReorderStep: Equatable {
+  case reorderInSection(toIndex: Int)
+  case moveToBucket(destination: TodoDestination, atIndex: Int)
+}
+
 extension TabTodoRow {
   var isHeader: Bool {
     switch self {
@@ -647,6 +652,46 @@ func resolveTabTodoBucketStep(
   guard destinationIndex >= 0, destinationIndex <= paneOrder.count else { return nil }
   if destinationIndex == 0 { return .tab(tabId) }
   return .pane(paneOrder[destinationIndex - 1])
+}
+
+// Resolves Shift-J/K as movement through the tab section and pane sections as
+// one continuous list, leaving the caller to dispatch the matching Msg.
+func resolveTabTodoReorderStep(
+  current: TabTodoEditTarget,
+  paneOrder: [PaneId],
+  tabId: TabId,
+  currentIndex: Int,
+  currentSectionCount: Int,
+  destinationSectionCount: (TodoDestination) -> Int,
+  delta: Int
+) -> TabTodoReorderStep? {
+  guard delta == 1 || delta == -1,
+        currentIndex >= 0,
+        currentIndex < currentSectionCount else { return nil }
+
+  if delta > 0 {
+    if currentIndex + 1 < currentSectionCount {
+      return .reorderInSection(toIndex: currentIndex + 1)
+    }
+    guard let destination = resolveTabTodoBucketStep(
+      current: current,
+      paneOrder: paneOrder,
+      tabId: tabId,
+      delta: delta
+    ) else { return nil }
+    return .moveToBucket(destination: destination, atIndex: 0)
+  }
+
+  if currentIndex > 0 {
+    return .reorderInSection(toIndex: currentIndex - 1)
+  }
+  guard let destination = resolveTabTodoBucketStep(
+    current: current,
+    paneOrder: paneOrder,
+    tabId: tabId,
+    delta: delta
+  ) else { return nil }
+  return .moveToBucket(destination: destination, atIndex: destinationSectionCount(destination))
 }
 
 private func tabTodoDestination(for row: TabTodoRow, tabId: TabId) -> TodoDestination? {
