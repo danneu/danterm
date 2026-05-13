@@ -161,6 +161,8 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
     private var editTarget: TabTodoEditTarget?
     private var composeDraft = ""
     private var isSyncingTableSelection = false
+    // True only while addInput mirrors the currently selected row's text.
+    private var isPreviewingSelectedRow = false
     private var rows: [TabTodoRow] = []
 
     init(tabId: TabId, runtime: AppRuntime?) {
@@ -251,6 +253,9 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         sep.boxType = .separator
 
         addInput.textView.delegate = self
+        addInput.onTextViewMouseDownAcquireFocus = { [weak self] in
+            self?.enterEditFromInputClick()
+        }
 
         let bottomStack = NSStackView(views: [sep, editLabel, addInput])
         bottomStack.orientation = .vertical
@@ -304,6 +309,8 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
     func rebuildRows() {
         let selectedTarget = selectedEditTarget()
         let selectedRowBeforeReload = tableView.selectedRow
+        let wasPreviewingSelectedRow = isPreviewingSelectedRow
+        isPreviewingSelectedRow = false
         rows = buildRows()
         let tabItems = tabTodos
         clearButton.isHidden = !tabItems.contains(where: \.isDone)
@@ -326,6 +333,9 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
                   let newIndex = rowIndex(for: selectedTarget) {
             tableView.selectRowIndexes(IndexSet(integer: newIndex), byExtendingSelection: false)
             isSyncingTableSelection = false
+            if wasPreviewingSelectedRow {
+                populateInputFromSelection()
+            }
         } else {
             isSyncingTableSelection = false
         }
@@ -372,6 +382,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         let row = tableView.selectedRow
         guard rows.indices.contains(row), let text = rows[row].itemText else { return }
         addInput.string = text
+        isPreviewingSelectedRow = true
     }
 
     private func selectNearestSelectableRow(near row: Int) {
@@ -421,8 +432,18 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
             editLabel.isHidden = true
         }
         addInput.string = composeDraft
+        isPreviewingSelectedRow = false
         view.window?.makeFirstResponder(addInput.textView)
         addInput.textView.moveToEndOfDocument(nil)
+    }
+
+    /// Promote a passive row preview into an edit when the input is clicked.
+    private func enterEditFromInputClick() {
+        guard !isEditing else { return }
+        guard isPreviewingSelectedRow else { return }
+        guard let target = selectedEditTarget() else { return }
+        editTarget = target
+        editLabel.isHidden = false
     }
 
     private func enterEditForSelectedRow() {
@@ -432,6 +453,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         }
         editTarget = target
         addInput.string = item.text
+        isPreviewingSelectedRow = false
         editLabel.isHidden = false
         view.window?.makeFirstResponder(addInput.textView)
         addInput.textView.selectAll(nil)
@@ -448,6 +470,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         rebuildRows()
         _ = selectTarget(target)
         addInput.string = text
+        isPreviewingSelectedRow = true
         view.window?.makeFirstResponder(tableView)
         return true
     }
@@ -458,6 +481,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         runtime?.send(.addTabTodo(tabId: tabId, text: text))
         composeDraft = ""
         addInput.string = ""
+        isPreviewingSelectedRow = false
         rebuildRows()
         // Pre-select the new item so Tab from compose lands on it.
         if let newId = tab?.todos.last?.id,
@@ -616,9 +640,11 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
             rebuildRows()
             _ = selectTarget(newTarget)
             addInput.string = newText
+            isPreviewingSelectedRow = true
             return
         }
         addInput.string = newText
+        isPreviewingSelectedRow = true
     }
 
     // MARK: - Drag move/reorder
@@ -1003,7 +1029,9 @@ extension TabTodoPopoverViewController: NSTextViewDelegate {
 
     /// NSTextViewDelegate: keep the compose draft live while adding a tab item.
     func textDidChange(_ notification: Notification) {
-        guard view.window?.firstResponder === addInput.textView, !isEditing else { return }
+        guard view.window?.firstResponder === addInput.textView else { return }
+        isPreviewingSelectedRow = false
+        guard !isEditing else { return }
         composeDraft = addInput.string
     }
 }

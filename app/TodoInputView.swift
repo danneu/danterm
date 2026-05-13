@@ -24,8 +24,25 @@ private class FocusRingScrollView: NSScrollView {
     }
 }
 
+/// NSTextView subclass that reports only mouse clicks that acquire focus.
+private final class TodoInputTextView: NSTextView {
+    var onMouseDownAcquireFocus: (() -> Void)?
+
+    /// NSTextView: detects when this click makes the editor first responder.
+    override func mouseDown(with event: NSEvent) {
+        let wasFirstResponder = window?.firstResponder === self
+        if !wasFirstResponder {
+            _ = window?.makeFirstResponder(self)
+        }
+        super.mouseDown(with: event)
+        guard !wasFirstResponder, window?.firstResponder === self else { return }
+        onMouseDownAcquireFocus?()
+    }
+}
+
 class TodoInputView: NSView {
     let textView: NSTextView
+    private let todoTextView: TodoInputTextView
     private let scrollView: FocusRingScrollView
     private let placeholderLabel: NSTextField
     private var textChangeObserver: Any?
@@ -47,11 +64,18 @@ class TodoInputView: NSView {
         }
     }
 
+    var onTextViewMouseDownAcquireFocus: (() -> Void)? {
+        get { todoTextView.onMouseDownAcquireFocus }
+        set { todoTextView.onMouseDownAcquireFocus = newValue }
+    }
+
     // MARK: - Init
 
     init(placeholder: String = "Add a task…") {
         // Must use NSTextView(frame:) to get a text container/layout manager.
-        textView = NSTextView(frame: .zero)
+        let inputTextView = TodoInputTextView(frame: .zero)
+        todoTextView = inputTextView
+        textView = inputTextView
         scrollView = FocusRingScrollView()
         placeholderLabel = NSTextField(labelWithString: placeholder)
         super.init(frame: .zero)

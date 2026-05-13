@@ -55,6 +55,8 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     private var editState = TodoEditState()
     private var composeDraft = ""
     private var isSyncingTableSelection = false
+    // True only while addInput mirrors the currently selected row's text.
+    private var isPreviewingSelectedRow = false
 
     private var todos: [TodoItem] { runtime?.model.panes[paneId]?.todos ?? [] }
 
@@ -130,6 +132,9 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         sep.boxType = .separator
 
         addInput.textView.delegate = self
+        addInput.onTextViewMouseDownAcquireFocus = { [weak self] in
+            self?.enterEditFromInputClick()
+        }
 
         let bottomStack = NSStackView(views: [sep, editLabel, addInput])
         bottomStack.orientation = .vertical
@@ -183,10 +188,12 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         focusInitialMode()
     }
 
-    func rebuildRows() {
+    func rebuildRows(preservingSelectedId selectedIdOverride: UUID? = nil) {
         let items = todos
-        let selectedId = selectedTodo()?.id
+        let selectedId = selectedIdOverride ?? selectedTodo()?.id
         let selectedRowBeforeReload = tableView.selectedRow
+        let wasPreviewingSelectedRow = isPreviewingSelectedRow
+        isPreviewingSelectedRow = false
         clearButton.isHidden = !items.contains(where: \.isDone)
         emptyLabel.isHidden = !items.isEmpty
         scrollView.isHidden = items.isEmpty
@@ -209,6 +216,9 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
                   let newIndex = items.firstIndex(where: { $0.id == selectedId }) {
             tableView.selectRowIndexes(IndexSet(integer: newIndex), byExtendingSelection: false)
             isSyncingTableSelection = false
+            if wasPreviewingSelectedRow {
+                populateInputFromSelection()
+            }
         } else {
             isSyncingTableSelection = false
         }
@@ -242,6 +252,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     private func populateInputFromSelection() {
         guard let item = selectedTodo() else { return }
         addInput.string = item.text
+        isPreviewingSelectedRow = true
     }
 
     private func selectNearestSelectableRow(near row: Int) {
@@ -287,8 +298,18 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
             editLabel.isHidden = true
         }
         addInput.string = composeDraft
+        isPreviewingSelectedRow = false
         view.window?.makeFirstResponder(addInput.textView)
         addInput.textView.moveToEndOfDocument(nil)
+    }
+
+    /// Promote a passive row preview into an edit when the input is clicked.
+    private func enterEditFromInputClick() {
+        guard !isEditing else { return }
+        guard isPreviewingSelectedRow else { return }
+        guard let item = selectedTodo() else { return }
+        editState.editingTodoId = item.id
+        editLabel.isHidden = false
     }
 
     private func enterEditForSelectedRow() {
@@ -298,6 +319,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         }
         editState.editingTodoId = item.id
         addInput.string = item.text
+        isPreviewingSelectedRow = false
         editLabel.isHidden = false
         view.window?.makeFirstResponder(addInput.textView)
         addInput.textView.selectAll(nil)
@@ -314,6 +336,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         rebuildRows()
         _ = selectTodo(id: editId)
         addInput.string = text
+        isPreviewingSelectedRow = true
         view.window?.makeFirstResponder(tableView)
         return true
     }
@@ -324,6 +347,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         runtime?.send(.addTodo(paneId: paneId, text: text))
         composeDraft = ""
         addInput.string = ""
+        isPreviewingSelectedRow = false
         rebuildRows()
         view.window?.makeFirstResponder(addInput.textView)
     }
@@ -412,10 +436,12 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
             rebuildRows()
             _ = selectTodo(id: newItem.id)
             addInput.string = newItem.text
+            isPreviewingSelectedRow = true
             return
         }
 
         addInput.string = newItem.text
+        isPreviewingSelectedRow = true
     }
 
     // MARK: - Drag reorder
@@ -437,8 +463,9 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         guard let pbItem = info.draggingPasteboard.pasteboardItems?.first,
               let idStr = pbItem.string(forType: todoRowDragType),
               let uuid = UUID(uuidString: idStr) else { return false }
+        let selectedIdBeforeMutation = selectedTodo()?.id
         runtime?.send(.reorderTodo(paneId: paneId, todoId: uuid, toIndex: row))
-        rebuildRows()
+        rebuildRows(preservingSelectedId: selectedIdBeforeMutation)
         return true
     }
 
@@ -447,20 +474,23 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     @objc private func checkboxToggled(_ sender: NSButton) {
         let row = tableView.row(for: sender)
         guard row >= 0, row < todos.count else { return }
+        let selectedIdBeforeMutation = selectedTodo()?.id
         runtime?.send(.toggleTodoDone(paneId: paneId, todoId: todos[row].id))
-        rebuildRows()
+        rebuildRows(preservingSelectedId: selectedIdBeforeMutation)
     }
 
     @objc private func deleteTask(_ sender: NSButton) {
         let row = tableView.row(for: sender)
         guard row >= 0, row < todos.count else { return }
+        let selectedIdBeforeMutation = selectedTodo()?.id
         runtime?.send(.deleteTodo(paneId: paneId, todoId: todos[row].id))
-        rebuildRows()
+        rebuildRows(preservingSelectedId: selectedIdBeforeMutation)
     }
 
     @objc private func clearCompleted() {
+        let selectedIdBeforeMutation = selectedTodo()?.id
         runtime?.send(.clearCompletedTodos(paneId: paneId))
-        rebuildRows()
+        rebuildRows(preservingSelectedId: selectedIdBeforeMutation)
     }
 
     @objc private func tableRowDoubleClicked(_ sender: Any?) {
@@ -472,7 +502,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         guard let item = selectedTodo() else { return }
         let previewText = addInput.string
         runtime?.send(.toggleTodoDone(paneId: paneId, todoId: item.id))
-        rebuildRows()
+        rebuildRows(preservingSelectedId: item.id)
         _ = selectTodo(id: item.id)
         addInput.string = previewText
         view.window?.makeFirstResponder(tableView)
@@ -482,7 +512,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         let row = tableView.selectedRow
         guard let item = selectedTodo() else { return }
         runtime?.send(.deleteTodo(paneId: paneId, todoId: item.id))
-        rebuildRows()
+        rebuildRows(preservingSelectedId: item.id)
         selectNearestSelectableRow(near: row)
     }
 
@@ -491,7 +521,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         let destination = row + delta
         guard let item = selectedTodo(), todos.indices.contains(destination) else { return }
         runtime?.send(.reorderTodo(paneId: paneId, todoId: item.id, toIndex: destination))
-        rebuildRows()
+        rebuildRows(preservingSelectedId: item.id)
         _ = selectTodo(id: item.id)
         populateInputFromSelection()
         view.window?.makeFirstResponder(tableView)
@@ -635,7 +665,9 @@ extension TodoPopoverViewController: NSTextViewDelegate {
 
     /// NSTextViewDelegate: keep the compose draft live while adding a new item.
     func textDidChange(_ notification: Notification) {
-        guard view.window?.firstResponder === addInput.textView, !isEditing else { return }
+        guard view.window?.firstResponder === addInput.textView else { return }
+        isPreviewingSelectedRow = false
+        guard !isEditing else { return }
         composeDraft = addInput.string
     }
 }
