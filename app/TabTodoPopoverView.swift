@@ -809,23 +809,27 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
     /// Close shortcut help before the parent popover closes or reanchors.
     func closeShortcutHelpPopover() {
         guard let popover = shortcutHelpPopover else { return }
-        shortcutHelpPopover = nil
         popover.performClose(nil)
     }
 
     /// Show tab-scope help while preserving the parent popover's dismissal behavior.
     private func showShortcutHelpPopover() {
+        guard shortcutHelpPopover == nil else {
+            closeShortcutHelpPopover()
+            return
+        }
         guard let parentPopover = runtime?.tabTodoPopover else { return }
         let savedResponder = view.window?.firstResponder
+        let popover = NSPopover()
         let controller = TodoShortcutHelpViewController(
             scope: .tab,
             parentPopover: parentPopover,
             parentView: view,
             savedResponder: savedResponder
-        ) { [weak self] in
-            self?.shortcutHelpPopover = nil
+        ) { [weak self, weak popover] in
+            guard let self, self.shortcutHelpPopover === popover else { return }
+            self.shortcutHelpPopover = nil
         }
-        let popover = NSPopover()
         popover.contentViewController = controller
         popover.behavior = .applicationDefined
         popover.delegate = controller
