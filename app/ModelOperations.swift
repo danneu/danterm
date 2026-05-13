@@ -459,6 +459,187 @@ func tabTodoRollup(_ tabId: TabId, in model: AppModel) -> (total: Int, uncomplet
   return (total, uncompleted)
 }
 
+// MARK: - Tab Todo Popover
+
+enum TabTodoRow: Equatable {
+  case tabSectionHeader
+  case tabItem(TodoItem)
+  case paneSectionHeader(paneId: PaneId, title: String)
+  case paneItem(paneId: PaneId, item: TodoItem)
+}
+
+enum TabTodoEditTarget: Equatable {
+  case tab(todoId: UUID)
+  case pane(paneId: PaneId, todoId: UUID)
+}
+
+enum TabTodoDropOperation: Equatable {
+  case on
+  case above
+}
+
+extension TabTodoRow {
+  var isHeader: Bool {
+    switch self {
+    case .tabSectionHeader, .paneSectionHeader:
+      return true
+    case .tabItem, .paneItem:
+      return false
+    }
+  }
+
+  var isSelectable: Bool { !isHeader }
+
+  var editTarget: TabTodoEditTarget? {
+    switch self {
+    case .tabItem(let item):
+      return .tab(todoId: item.id)
+    case .paneItem(let paneId, let item):
+      return .pane(paneId: paneId, todoId: item.id)
+    case .tabSectionHeader, .paneSectionHeader:
+      return nil
+    }
+  }
+
+  var itemText: String? {
+    switch self {
+    case .tabItem(let item), .paneItem(_, let item):
+      return item.text
+    case .tabSectionHeader, .paneSectionHeader:
+      return nil
+    }
+  }
+
+  var sectionIdentifier: AnyHashable? {
+    switch self {
+    case .tabSectionHeader, .tabItem:
+      return AnyHashable("tab")
+    case .paneSectionHeader(let paneId, _), .paneItem(let paneId, _):
+      return AnyHashable(paneId)
+    }
+  }
+}
+
+func tabTodoItemCount(_ tabId: TabId, in model: AppModel) -> Int {
+  guard let tab = tabById(tabId, in: model) else { return 0 }
+  var total = tab.todos.count
+  for paneId in allPaneIds(tab.rootNode) {
+    total += model.panes[paneId]?.todos.count ?? 0
+  }
+  return total
+}
+
+func buildTabTodoRows(model: AppModel, tabId: TabId) -> [TabTodoRow] {
+  guard let tab = tabById(tabId, in: model) else { return [] }
+  var rows: [TabTodoRow] = [.tabSectionHeader]
+  for item in tab.todos {
+    rows.append(.tabItem(item))
+  }
+  for paneId in allPaneIds(tab.rootNode) {
+    guard let pane = model.panes[paneId] else { continue }
+    rows.append(.paneSectionHeader(paneId: paneId, title: pane.title))
+    for item in pane.todos {
+      rows.append(.paneItem(paneId: paneId, item: item))
+    }
+  }
+  return rows
+}
+
+func resolveTabTodoDropTarget(
+  rows: [TabTodoRow],
+  model: AppModel,
+  tabId: TabId,
+  proposedRow: Int,
+  dropOperation: TabTodoDropOperation
+) -> (destination: TodoDestination, atIndex: Int)? {
+  switch dropOperation {
+  case .on:
+    guard rows.indices.contains(proposedRow) else { return nil }
+    switch rows[proposedRow] {
+    case .tabSectionHeader:
+      guard let tab = tabById(tabId, in: model) else { return nil }
+      return (.tab(tabId), tab.todos.count)
+    case .paneSectionHeader(let paneId, _):
+      guard let pane = model.panes[paneId] else { return nil }
+      return (.pane(paneId), pane.todos.count)
+    case .tabItem, .paneItem:
+      return nil
+    }
+
+  case .above:
+    guard proposedRow >= 0, proposedRow <= rows.count else { return nil }
+    if proposedRow == rows.count {
+      guard let last = rows.last,
+            let destination = tabTodoDestination(for: last, tabId: tabId),
+            let count = tabTodoCount(for: destination, in: model) else { return nil }
+      return (destination, count)
+    }
+
+    switch rows[proposedRow] {
+    case .tabSectionHeader:
+      return nil
+    case .paneSectionHeader:
+      guard proposedRow > 0,
+            let destination = tabTodoDestination(for: rows[proposedRow - 1], tabId: tabId),
+            let count = tabTodoCount(for: destination, in: model) else { return nil }
+      return (destination, count)
+    case .tabItem:
+      let atIndex = rows[..<proposedRow].count { row in
+        if case .tabItem = row { return true }
+        return false
+      }
+      return (.tab(tabId), atIndex)
+    case .paneItem(let paneId, _):
+      guard model.panes[paneId] != nil else { return nil }
+      let atIndex = rows[..<proposedRow].count { row in
+        if case .paneItem(let rowPaneId, _) = row { return rowPaneId == paneId }
+        return false
+      }
+      return (.pane(paneId), atIndex)
+    }
+  }
+}
+
+func resolveTabTodoBucketStep(
+  current: TabTodoEditTarget,
+  paneOrder: [PaneId],
+  tabId: TabId,
+  delta: Int
+) -> TodoDestination? {
+  guard delta != 0 else { return nil }
+  let currentIndex: Int
+  switch current {
+  case .tab:
+    currentIndex = 0
+  case .pane(let paneId, _):
+    guard let paneIndex = paneOrder.firstIndex(of: paneId) else { return nil }
+    currentIndex = paneIndex + 1
+  }
+
+  let destinationIndex = currentIndex + delta
+  guard destinationIndex >= 0, destinationIndex <= paneOrder.count else { return nil }
+  if destinationIndex == 0 { return .tab(tabId) }
+  return .pane(paneOrder[destinationIndex - 1])
+}
+
+private func tabTodoDestination(for row: TabTodoRow, tabId: TabId) -> TodoDestination? {
+  switch row {
+  case .tabSectionHeader, .tabItem:
+    return .tab(tabId)
+  case .paneSectionHeader(let paneId, _), .paneItem(let paneId, _):
+    return .pane(paneId)
+  }
+}
+
+private func tabTodoCount(for destination: TodoDestination, in model: AppModel) -> Int? {
+  switch destination {
+  case .tab(let tabId):
+    return tabById(tabId, in: model)?.todos.count
+  case .pane(let paneId):
+    return model.panes[paneId]?.todos.count
+  }
+}
+
 // Converts the AppKit close-tab alert response into an explicit Msg so both
 // confirm and cancel paths can clear pending confirmation state.
 func closeTabConfirmationResponse(isConfirm: Bool, tabId: TabId) -> Msg {

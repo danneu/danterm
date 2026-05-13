@@ -9,6 +9,49 @@ private let tabTodoRowDragType = NSPasteboard.PasteboardType("com.danneu.danterm
 private let tabHeaderRowId = NSUserInterfaceItemIdentifier("TabTodoHeader")
 private let paneHeaderRowId = NSUserInterfaceItemIdentifier("PaneTodoHeader")
 
+private struct TabTodoDragPayload: Codable {
+    enum Source: Equatable {
+        case tab
+        case pane(UUID)
+    }
+
+    let source: Source
+    let todoId: UUID
+}
+
+extension TabTodoDragPayload.Source: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case paneId
+    }
+
+    private enum Kind: String, Codable {
+        case tab
+        case pane
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(Kind.self, forKey: .kind) {
+        case .tab:
+            self = .tab
+        case .pane:
+            self = .pane(try container.decode(UUID.self, forKey: .paneId))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .tab:
+            try container.encode(Kind.tab, forKey: .kind)
+        case .pane(let paneId):
+            try container.encode(Kind.pane, forKey: .kind)
+            try container.encode(paneId, forKey: .paneId)
+        }
+    }
+}
+
 private final class TabTodoPopoverRootView: NSView {
     var handleKeyEquivalent: ((NSEvent) -> Bool)?
 
@@ -30,66 +73,6 @@ private final class TabTodoTableView: NSTableView {
     override func cancelOperation(_ sender: Any?) {
         if handleCancelOperation?() == true { return }
         super.cancelOperation(sender)
-    }
-}
-
-// MARK: - Row enum
-
-enum TabTodoRow {
-    case tabSectionHeader
-    case tabItem(TodoItem)
-    case paneSectionHeader(paneId: PaneId, title: String)
-    case paneItem(paneId: PaneId, item: TodoItem)
-}
-
-private enum TabTodoEditTarget: Equatable {
-    case tab(todoId: UUID)
-    case pane(paneId: PaneId, todoId: UUID)
-}
-
-private extension TabTodoRow {
-    var isHeader: Bool {
-        switch self {
-        case .tabSectionHeader, .paneSectionHeader:
-            return true
-        case .tabItem, .paneItem:
-            return false
-        }
-    }
-
-    var isSelectable: Bool { !isHeader }
-
-    var editTarget: TabTodoEditTarget? {
-        switch self {
-        case .tabItem(let item):
-            return .tab(todoId: item.id)
-        case .paneItem(let paneId, let item):
-            return .pane(paneId: paneId, todoId: item.id)
-        case .tabSectionHeader, .paneSectionHeader:
-            return nil
-        }
-    }
-
-    var itemText: String? {
-        switch self {
-        case .tabItem(let item), .paneItem(_, let item):
-            return item.text
-        case .tabSectionHeader, .paneSectionHeader:
-            return nil
-        }
-    }
-
-    var sectionIdentifier: AnyHashable? {
-        switch self {
-        case .tabItem:
-            return AnyHashable("tab")
-        case .paneItem(let paneId, _):
-            return AnyHashable(paneId)
-        case .tabSectionHeader:
-            return AnyHashable("tab")
-        case .paneSectionHeader(let paneId, _):
-            return AnyHashable(paneId)
-        }
     }
 }
 
@@ -171,30 +154,8 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
 
     /// Build the row enum from the current model.
     private func buildRows() -> [TabTodoRow] {
-        guard let runtime = runtime, let tab = tab else { return [] }
-        var result: [TabTodoRow] = []
-        result.append(.tabSectionHeader)
-        for item in tab.todos {
-            result.append(.tabItem(item))
-        }
-        for paneId in allPaneIds(tab.rootNode) {
-            guard let pane = runtime.model.panes[paneId] else { continue }
-            guard !pane.todos.isEmpty else { continue }
-            result.append(.paneSectionHeader(paneId: paneId, title: pane.title))
-            for item in pane.todos {
-                result.append(.paneItem(paneId: paneId, item: item))
-            }
-        }
-        return result
-    }
-
-    /// Index range (start, endExclusive) of tab items in `rows`. Used to clamp
-    /// drag-reorder drops so a tab item can't be dropped inside a pane section.
-    private func tabItemRange() -> (start: Int, end: Int)? {
-        guard !rows.isEmpty, case .tabSectionHeader = rows[0] else { return nil }
-        var end = 1
-        while end < rows.count, case .tabItem = rows[end] { end += 1 }
-        return (1, end)
+        guard let runtime = runtime else { return [] }
+        return buildTabTodoRows(model: runtime.model, tabId: tabId)
     }
 
     override func loadView() {
@@ -313,9 +274,9 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         rows = buildRows()
         let tabItems = tabTodos
         clearButton.isHidden = !tabItems.contains(where: \.isDone)
-        let totalRows = rows.count
-        emptyLabel.isHidden = totalRows > 1 // > 1 means we have items beyond the tab header
-        scrollView.isHidden = totalRows <= 1
+        let itemCount = runtime.map { tabTodoItemCount(tabId, in: $0.model) } ?? 0
+        emptyLabel.isHidden = itemCount > 0
+        scrollView.isHidden = itemCount == 0
         let wasEditingTarget = editTarget
         isSyncingTableSelection = true
         tableView.reloadData()
@@ -611,32 +572,70 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         addInput.string = newText
     }
 
-    // MARK: - Drag reorder (tab items only)
+    // MARK: - Drag move/reorder
 
     func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
-        guard row < rows.count, case .tabItem(let item) = rows[row] else { return nil }
+        guard row < rows.count else { return nil }
+        let payload: TabTodoDragPayload
+        switch rows[row] {
+        case .tabItem(let item):
+            payload = TabTodoDragPayload(source: .tab, todoId: item.id)
+        case .paneItem(let paneId, let item):
+            payload = TabTodoDragPayload(source: .pane(paneId.rawValue), todoId: item.id)
+        case .tabSectionHeader, .paneSectionHeader:
+            return nil
+        }
+        guard let data = try? JSONEncoder().encode(payload),
+              let json = String(data: data, encoding: .utf8) else { return nil }
         let pbItem = NSPasteboardItem()
-        pbItem.setString(item.id.uuidString, forType: tabTodoRowDragType)
+        pbItem.setString(json, forType: tabTodoRowDragType)
         return pbItem
     }
 
     func tableView(_ tableView: NSTableView, validateDrop info: NSDraggingInfo, proposedRow row: Int, proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation {
-        guard dropOperation == .above else { return [] }
-        guard let range = tabItemRange() else { return [] }
-        // Allow drops between any two tab items, plus the slot just before the
-        // tab section header's first child and just after the last tab item.
-        if row >= range.start && row <= range.end { return .move }
-        return []
+        guard let runtime = runtime,
+              let operation = tabTodoDropOperation(from: dropOperation),
+              resolveTabTodoDropTarget(
+                rows: rows,
+                model: runtime.model,
+                tabId: tabId,
+                proposedRow: row,
+                dropOperation: operation
+              ) != nil else { return [] }
+        return .move
     }
 
     func tableView(_ tableView: NSTableView, acceptDrop info: NSDraggingInfo, row: Int, dropOperation: NSTableView.DropOperation) -> Bool {
         guard let pbItem = info.draggingPasteboard.pasteboardItems?.first,
-              let idStr = pbItem.string(forType: tabTodoRowDragType),
-              let uuid = UUID(uuidString: idStr),
-              let range = tabItemRange() else { return false }
-        // Translate table row -> tab-todo array index by subtracting the section header offset.
-        let tabIndex = max(0, row - range.start)
-        runtime?.send(.reorderTabTodo(tabId: tabId, todoId: uuid, toIndex: tabIndex))
+              let json = pbItem.string(forType: tabTodoRowDragType),
+              let data = json.data(using: .utf8),
+              let payload = try? JSONDecoder().decode(TabTodoDragPayload.self, from: data),
+              let runtime = runtime,
+              let operation = tabTodoDropOperation(from: dropOperation),
+              let target = resolveTabTodoDropTarget(
+                rows: rows,
+                model: runtime.model,
+                tabId: tabId,
+                proposedRow: row,
+                dropOperation: operation
+              ) else { return false }
+
+        let source = todoSource(from: payload.source, tabId: tabId)
+        if sameTodoBucket(source: source, destination: target.destination) {
+            switch source {
+            case .tab(let sourceTabId):
+                runtime.send(.reorderTabTodo(tabId: sourceTabId, todoId: payload.todoId, toIndex: target.atIndex))
+            case .pane(let sourcePaneId):
+                runtime.send(.reorderTodo(paneId: sourcePaneId, todoId: payload.todoId, toIndex: target.atIndex))
+            }
+        } else {
+            runtime.send(.moveTodo(
+                from: source,
+                todoId: payload.todoId,
+                to: target.destination,
+                atIndex: target.atIndex
+            ))
+        }
         rebuildRows()
         return true
     }
@@ -745,6 +744,44 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         populateInputFromSelection()
     }
 
+    private func moveSelectedTodoToAdjacentBucket(delta: Int) -> Bool {
+        guard view.window?.firstResponder === tableView || isEditing else { return false }
+        if isEditing {
+            _ = saveEditThenReturnToList()
+        }
+        guard let current = selectedEditTarget(),
+              let item = item(for: current),
+              let tab = tab,
+              let destination = resolveTabTodoBucketStep(
+                current: current,
+                paneOrder: allPaneIds(tab.rootNode),
+                tabId: tabId,
+                delta: delta
+              ) else { return true }
+
+        let source: TodoSource
+        switch current {
+        case .tab:
+            source = .tab(tabId)
+        case .pane(let paneId, _):
+            source = .pane(paneId)
+        }
+
+        runtime?.send(.moveTodo(from: source, todoId: item.id, to: destination, atIndex: 0))
+        rebuildRows()
+        let newTarget: TabTodoEditTarget
+        switch destination {
+        case .tab:
+            newTarget = .tab(todoId: item.id)
+        case .pane(let paneId):
+            newTarget = .pane(paneId: paneId, todoId: item.id)
+        }
+        _ = selectTarget(newTarget)
+        populateInputFromSelection()
+        view.window?.makeFirstResponder(tableView)
+        return true
+    }
+
     private func handleListKeyDown(_ event: NSEvent) -> Bool {
         let action = classifyListAction(key: tabListKey(from: event), modifiers: tabKeyModifiers(from: event))
         switch action {
@@ -773,6 +810,17 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
 
     private func performTodoKeyEquivalent(with event: NSEvent) -> Bool {
         let modifiers = tabKeyModifiers(from: event)
+        if modifiers == [.command, .shift] {
+            switch event.charactersIgnoringModifiers?.lowercased() {
+            case "h":
+                return moveSelectedTodoToAdjacentBucket(delta: -1)
+            case "l":
+                return moveSelectedTodoToAdjacentBucket(delta: 1)
+            default:
+                return false
+            }
+        }
+
         guard modifiers == [.command] else { return false }
         switch tabListKey(from: event) {
         case .enter:
@@ -878,6 +926,37 @@ private func tabKeyModifiers(from event: NSEvent) -> KeyModifiers {
     if flags.contains(.command) { modifiers.insert(.command) }
     if flags.contains(.shift) { modifiers.insert(.shift) }
     return modifiers
+}
+
+private func tabTodoDropOperation(from operation: NSTableView.DropOperation) -> TabTodoDropOperation? {
+    switch operation {
+    case .on:
+        return .on
+    case .above:
+        return .above
+    default:
+        return nil
+    }
+}
+
+private func todoSource(from payloadSource: TabTodoDragPayload.Source, tabId: TabId) -> TodoSource {
+    switch payloadSource {
+    case .tab:
+        return .tab(tabId)
+    case .pane(let uuid):
+        return .pane(PaneId(rawValue: uuid))
+    }
+}
+
+private func sameTodoBucket(source: TodoSource, destination: TodoDestination) -> Bool {
+    switch (source, destination) {
+    case (.tab(let sourceId), .tab(let destinationId)):
+        return sourceId == destinationId
+    case (.pane(let sourceId), .pane(let destinationId)):
+        return sourceId == destinationId
+    case (.tab, .pane), (.pane, .tab):
+        return false
+    }
 }
 
 private func tabListKey(from event: NSEvent) -> ListKey {

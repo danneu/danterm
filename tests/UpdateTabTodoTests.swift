@@ -7,6 +7,16 @@ import Foundation
 func updateTabTodoTests() {
     print("Tab TODO tests:")
 
+    func makeTwoPaneTabForMoveTests() -> (model: AppModel, tabId: TabId, paneA: PaneId, paneB: PaneId) {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = selectedTab(in: model)!.id
+        let paneA = selectedTab(in: model)!.focusedPaneId
+        update(&model, .splitPane(paneId: paneA, direction: .horizontal))
+        let paneOrder = allPaneIds(selectedTab(in: model)!.rootNode)
+        return (model, tabId, paneOrder[0], paneOrder[1])
+    }
+
     // MARK: - addTabTodo
 
     test("addTabTodo appends to the tab and leaves panes/other tabs untouched") {
@@ -120,6 +130,130 @@ func updateTabTodoTests() {
         let idA = tabById(tabId, in: model)!.todos[1].id
         let effects = update(&model, .reorderTabTodo(tabId: tabId, todoId: idA, toIndex: 99))
         try expect(effects.isEmpty, "out of bounds is no-op")
+    }
+
+    // MARK: - moveTodo
+
+    test("moveTodo pane -> tab inserts at index and removes from pane") {
+        var (model, tabId, paneA, _) = makeTwoPaneTabForMoveTests()
+        update(&model, .addTabTodo(tabId: tabId, text: "tab A"))
+        update(&model, .addTabTodo(tabId: tabId, text: "tab B"))
+        update(&model, .addTodo(paneId: paneA, text: "pane task"))
+        let todoId = model.panes[paneA]!.todos[0].id
+
+        update(&model, .moveTodo(from: .pane(paneA), todoId: todoId, to: .tab(tabId), atIndex: 1))
+
+        try expectEqual(tabById(tabId, in: model)!.todos.map(\.text), ["tab A", "pane task", "tab B"])
+        try expectEqual(model.panes[paneA]!.todos.count, 0)
+    }
+
+    test("moveTodo tab -> pane inserts at index and removes from tab") {
+        var (model, tabId, paneA, _) = makeTwoPaneTabForMoveTests()
+        update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
+        update(&model, .addTodo(paneId: paneA, text: "pane A"))
+        update(&model, .addTodo(paneId: paneA, text: "pane B"))
+        let todoId = tabById(tabId, in: model)!.todos[0].id
+
+        update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(paneA), atIndex: 1))
+
+        try expectEqual(tabById(tabId, in: model)!.todos.count, 0)
+        try expectEqual(model.panes[paneA]!.todos.map(\.text), ["pane A", "tab task", "pane B"])
+    }
+
+    test("moveTodo pane -> pane removes from source pane and inserts into dest pane") {
+        var (model, _, paneA, paneB) = makeTwoPaneTabForMoveTests()
+        update(&model, .addTodo(paneId: paneA, text: "source"))
+        update(&model, .addTodo(paneId: paneB, text: "dest A"))
+        let todoId = model.panes[paneA]!.todos[0].id
+
+        update(&model, .moveTodo(from: .pane(paneA), todoId: todoId, to: .pane(paneB), atIndex: 0))
+
+        try expectEqual(model.panes[paneA]!.todos.count, 0)
+        try expectEqual(model.panes[paneB]!.todos.map(\.text), ["source", "dest A"])
+    }
+
+    test("moveTodo with atIndex > destination.count clamps to count") {
+        var (model, tabId, paneA, _) = makeTwoPaneTabForMoveTests()
+        update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
+        update(&model, .addTodo(paneId: paneA, text: "pane A"))
+        let todoId = tabById(tabId, in: model)!.todos[0].id
+
+        update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(paneA), atIndex: 99))
+
+        try expectEqual(model.panes[paneA]!.todos.map(\.text), ["pane A", "tab task"])
+    }
+
+    test("moveTodo with atIndex < 0 clamps to 0") {
+        var (model, tabId, paneA, _) = makeTwoPaneTabForMoveTests()
+        update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
+        update(&model, .addTodo(paneId: paneA, text: "pane A"))
+        let todoId = tabById(tabId, in: model)!.todos[0].id
+
+        update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(paneA), atIndex: -5))
+
+        try expectEqual(model.panes[paneA]!.todos.map(\.text), ["tab task", "pane A"])
+    }
+
+    test("moveTodo where source == destination is a no-op") {
+        var (model, tabId, _, _) = makeTwoPaneTabForMoveTests()
+        update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
+        let todoId = tabById(tabId, in: model)!.todos[0].id
+
+        let effects = update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .tab(tabId), atIndex: 0))
+
+        try expect(effects.isEmpty, "same bucket should not checkpoint")
+        try expectEqual(tabById(tabId, in: model)!.todos.map(\.text), ["tab task"])
+    }
+
+    test("moveTodo with unknown todoId is a no-op") {
+        var (model, tabId, paneA, _) = makeTwoPaneTabForMoveTests()
+        update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
+
+        let effects = update(&model, .moveTodo(from: .tab(tabId), todoId: UUID(), to: .pane(paneA), atIndex: 0))
+
+        try expect(effects.isEmpty, "unknown todo should not checkpoint")
+        try expectEqual(tabById(tabId, in: model)!.todos.map(\.text), ["tab task"])
+        try expectEqual(model.panes[paneA]!.todos.count, 0)
+    }
+
+    test("moveTodo with missing destination pane is a no-op and leaves source intact") {
+        var (model, tabId, _, _) = makeTwoPaneTabForMoveTests()
+        update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
+        let todoId = tabById(tabId, in: model)!.todos[0].id
+
+        let effects = update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(PaneId()), atIndex: 0))
+
+        try expect(effects.isEmpty, "missing destination should not checkpoint")
+        try expectEqual(tabById(tabId, in: model)!.todos.map(\.text), ["tab task"])
+    }
+
+    test("moveTodo across different tabs is a no-op and leaves source intact") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let tabA = model.groups[0].tabs[0]
+        let tabB = model.groups[0].tabs[1]
+        update(&model, .addTabTodo(tabId: tabA.id, text: "tab A task"))
+        let todoId = tabById(tabA.id, in: model)!.todos[0].id
+
+        let effects = update(&model, .moveTodo(from: .tab(tabA.id), todoId: todoId, to: .tab(tabB.id), atIndex: 0))
+
+        try expect(effects.isEmpty, "cross-tab move should not checkpoint")
+        try expectEqual(tabById(tabA.id, in: model)!.todos.map(\.text), ["tab A task"])
+        try expectEqual(tabById(tabB.id, in: model)!.todos.count, 0)
+    }
+
+    test("moveTodo returns scheduleCheckpoint on success") {
+        var (model, tabId, paneA, _) = makeTwoPaneTabForMoveTests()
+        update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
+        let todoId = tabById(tabId, in: model)!.todos[0].id
+
+        let effects = update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(paneA), atIndex: 0))
+
+        try expect(hasEffect(effects) {
+            if case .scheduleCheckpoint = $0 { return true }
+            return false
+        }, "expected scheduleCheckpoint")
     }
 
     // MARK: - clearCompletedTabTodos

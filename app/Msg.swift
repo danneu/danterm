@@ -29,6 +29,16 @@ enum TabInsertPosition {
     case atGroupEnd
 }
 
+enum TodoSource: Equatable {
+    case tab(TabId)
+    case pane(PaneId)
+}
+
+enum TodoDestination: Equatable {
+    case tab(TabId)
+    case pane(PaneId)
+}
+
 enum Msg {
     // User actions
     case createTab(inGroupId: GroupId?, position: TabInsertPosition = .afterSelected)
@@ -153,6 +163,7 @@ enum Msg {
     case editTabTodoText(tabId: TabId, todoId: UUID, text: String)
     case deleteTabTodo(tabId: TabId, todoId: UUID)
     case reorderTabTodo(tabId: TabId, todoId: UUID, toIndex: Int)
+    case moveTodo(from: TodoSource, todoId: UUID, to: TodoDestination, atIndex: Int)
     case clearCompletedTabTodos(tabId: TabId)
 
     // MRU tab switcher

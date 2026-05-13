@@ -3,6 +3,16 @@ import Foundation
 func modelOperationsTests() {
     print("ModelOperations Tests...")
 
+    func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, paneA: PaneId, paneB: PaneId) {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = selectedTab(in: model)!.id
+        let paneA = selectedTab(in: model)!.focusedPaneId
+        update(&model, .splitPane(paneId: paneA, direction: .horizontal))
+        let paneOrder = allPaneIds(selectedTab(in: model)!.rootNode)
+        return (model, tabId, paneOrder[0], paneOrder[1])
+    }
+
     // MARK: - allPaneIds
 
     test("testAllPaneIdsFlatLeaf") {
@@ -998,6 +1008,159 @@ func modelOperationsTests() {
         let rollupB = tabTodoRollup(tabB.id, in: model)
         try expectEqual(rollupB.total, 1)
         try expectEqual(rollupB.uncompleted, 1)
+    }
+
+    // MARK: - Tab Todo Popover Rows
+
+    test("buildTabTodoRows emits a header for every pane regardless of empty todos") {
+        var (model, tabId, paneA, paneB) = makeTwoPaneTabTodoRowsModel()
+        update(&model, .addTodo(paneId: paneA, text: "pane A task"))
+
+        let rows = buildTabTodoRows(model: model, tabId: tabId)
+        let paneHeaders = rows.compactMap { row -> PaneId? in
+            if case .paneSectionHeader(let paneId, _) = row { return paneId }
+            return nil
+        }
+
+        try expectEqual(paneHeaders, [paneA, paneB])
+    }
+
+    test("resolveTabTodoDropTarget .on tabSectionHeader appends to tab") {
+        var (model, tabId, _, _) = makeTwoPaneTabTodoRowsModel()
+        update(&model, .addTabTodo(tabId: tabId, text: "tab A"))
+        update(&model, .addTabTodo(tabId: tabId, text: "tab B"))
+        let rows = buildTabTodoRows(model: model, tabId: tabId)
+
+        let target = resolveTabTodoDropTarget(rows: rows, model: model, tabId: tabId, proposedRow: 0, dropOperation: .on)
+
+        try expectEqual(target?.destination, .tab(tabId))
+        try expectEqual(target?.atIndex, 2)
+    }
+
+    test("resolveTabTodoDropTarget .on paneSectionHeader appends to pane") {
+        var (model, tabId, paneA, _) = makeTwoPaneTabTodoRowsModel()
+        update(&model, .addTodo(paneId: paneA, text: "pane A"))
+        let rows = buildTabTodoRows(model: model, tabId: tabId)
+        let headerRow = rows.firstIndex {
+            if case .paneSectionHeader(let paneId, _) = $0 { return paneId == paneA }
+            return false
+        }!
+
+        let target = resolveTabTodoDropTarget(rows: rows, model: model, tabId: tabId, proposedRow: headerRow, dropOperation: .on)
+
+        try expectEqual(target?.destination, .pane(paneA))
+        try expectEqual(target?.atIndex, 1)
+    }
+
+    test("resolveTabTodoDropTarget .above first tabItem inserts at tab index 0") {
+        var (model, tabId, _, _) = makeTwoPaneTabTodoRowsModel()
+        update(&model, .addTabTodo(tabId: tabId, text: "tab A"))
+        let rows = buildTabTodoRows(model: model, tabId: tabId)
+
+        let target = resolveTabTodoDropTarget(rows: rows, model: model, tabId: tabId, proposedRow: 1, dropOperation: .above)
+
+        try expectEqual(target?.destination, .tab(tabId))
+        try expectEqual(target?.atIndex, 0)
+    }
+
+    test("resolveTabTodoDropTarget .above between two tabItems uses local index") {
+        var (model, tabId, _, _) = makeTwoPaneTabTodoRowsModel()
+        update(&model, .addTabTodo(tabId: tabId, text: "tab A"))
+        update(&model, .addTabTodo(tabId: tabId, text: "tab B"))
+        let rows = buildTabTodoRows(model: model, tabId: tabId)
+
+        let target = resolveTabTodoDropTarget(rows: rows, model: model, tabId: tabId, proposedRow: 2, dropOperation: .above)
+
+        try expectEqual(target?.destination, .tab(tabId))
+        try expectEqual(target?.atIndex, 1)
+    }
+
+    test("resolveTabTodoDropTarget .above paneSectionHeader appends to previous section") {
+        var (model, tabId, _, _) = makeTwoPaneTabTodoRowsModel()
+        update(&model, .addTabTodo(tabId: tabId, text: "tab A"))
+        update(&model, .addTabTodo(tabId: tabId, text: "tab B"))
+        let rows = buildTabTodoRows(model: model, tabId: tabId)
+        let firstPaneHeader = rows.firstIndex {
+            if case .paneSectionHeader = $0 { return true }
+            return false
+        }!
+
+        let target = resolveTabTodoDropTarget(rows: rows, model: model, tabId: tabId, proposedRow: firstPaneHeader, dropOperation: .above)
+
+        try expectEqual(target?.destination, .tab(tabId))
+        try expectEqual(target?.atIndex, 2)
+    }
+
+    test("resolveTabTodoDropTarget .above one-past-end appends to last section") {
+        var (model, tabId, _, paneB) = makeTwoPaneTabTodoRowsModel()
+        update(&model, .addTodo(paneId: paneB, text: "pane B"))
+        let rows = buildTabTodoRows(model: model, tabId: tabId)
+
+        let target = resolveTabTodoDropTarget(rows: rows, model: model, tabId: tabId, proposedRow: rows.count, dropOperation: .above)
+
+        try expectEqual(target?.destination, .pane(paneB))
+        try expectEqual(target?.atIndex, 1)
+    }
+
+    test("resolveTabTodoDropTarget .above tabSectionHeader row 0 returns nil") {
+        let (model, tabId, _, _) = makeTwoPaneTabTodoRowsModel()
+        let rows = buildTabTodoRows(model: model, tabId: tabId)
+
+        let target = resolveTabTodoDropTarget(rows: rows, model: model, tabId: tabId, proposedRow: 0, dropOperation: .above)
+
+        try expect(target == nil)
+    }
+
+    test("resolveTabTodoBucketStep tab + delta=+1 returns pane0") {
+        let (_, tabId, paneA, paneB) = makeTwoPaneTabTodoRowsModel()
+
+        let destination = resolveTabTodoBucketStep(
+            current: .tab(todoId: UUID()),
+            paneOrder: [paneA, paneB],
+            tabId: tabId,
+            delta: 1
+        )
+
+        try expectEqual(destination, .pane(paneA))
+    }
+
+    test("resolveTabTodoBucketStep pane0 + delta=-1 returns tab") {
+        let (_, tabId, paneA, paneB) = makeTwoPaneTabTodoRowsModel()
+
+        let destination = resolveTabTodoBucketStep(
+            current: .pane(paneId: paneA, todoId: UUID()),
+            paneOrder: [paneA, paneB],
+            tabId: tabId,
+            delta: -1
+        )
+
+        try expectEqual(destination, .tab(tabId))
+    }
+
+    test("resolveTabTodoBucketStep tab + delta=-1 stops at start") {
+        let (_, tabId, paneA, paneB) = makeTwoPaneTabTodoRowsModel()
+
+        let destination = resolveTabTodoBucketStep(
+            current: .tab(todoId: UUID()),
+            paneOrder: [paneA, paneB],
+            tabId: tabId,
+            delta: -1
+        )
+
+        try expect(destination == nil)
+    }
+
+    test("resolveTabTodoBucketStep lastPane + delta=+1 stops at end") {
+        let (_, tabId, paneA, paneB) = makeTwoPaneTabTodoRowsModel()
+
+        let destination = resolveTabTodoBucketStep(
+            current: .pane(paneId: paneB, todoId: UUID()),
+            paneOrder: [paneA, paneB],
+            tabId: tabId,
+            delta: 1
+        )
+
+        try expect(destination == nil)
     }
 
     test("assignJumpKeys caps mapping at jump key sequence count") {

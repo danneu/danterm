@@ -252,6 +252,21 @@ class AppRuntime {
              .reorderTabTodo(let tabId, _, _), .clearCompletedTabTodos(let tabId):
             if tabId == model.selectedTabId { refreshTabTodoButton() }
 
+        case .moveTodo(let from, _, let to, _):
+            if case .pane(let paneId) = from { refreshPaneToolbar(for: paneId) }
+            if case .pane(let paneId) = to { refreshPaneToolbar(for: paneId) }
+            let movedTabId: TabId? = {
+                switch (from, to) {
+                case (.tab(let tabId), _), (_, .tab(let tabId)):
+                    return tabId
+                case (.pane(let paneId), _):
+                    return tabForPane(paneId, in: model)?.id
+                }
+            }()
+            if let tabId = movedTabId, tabId == model.selectedTabId {
+                refreshTabTodoButton()
+            }
+
         case .selectTab, .closeTab, .closePane, .createTab, .splitPane,
              .movePaneToTab, .movePaneToNewTab, .mruCycleCommitted, .mruCycleOneShot,
              .jumpModeKeyPressed:

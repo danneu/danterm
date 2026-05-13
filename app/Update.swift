@@ -1288,6 +1288,74 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         updateTab(tabId, in: &model) { t in t.todos = todos }
         return [.scheduleCheckpoint]
 
+    case .moveTodo(let source, let todoId, let destination, let atIndex):
+        let sameBucket: Bool = {
+            switch (source, destination) {
+            case (.tab(let sourceId), .tab(let destinationId)):
+                return sourceId == destinationId
+            case (.pane(let sourceId), .pane(let destinationId)):
+                return sourceId == destinationId
+            case (.tab, .pane), (.pane, .tab):
+                return false
+            }
+        }()
+        guard !sameBucket else { return [] }
+
+        let sourceTabId: TabId
+        let sourceItem: TodoItem
+        let sourceIndex: Int
+        switch source {
+        case .tab(let tabId):
+            guard let tab = tabById(tabId, in: model),
+                  let idx = tab.todos.firstIndex(where: { $0.id == todoId }) else { return [] }
+            sourceTabId = tabId
+            sourceItem = tab.todos[idx]
+            sourceIndex = idx
+        case .pane(let paneId):
+            guard let pane = model.panes[paneId],
+                  let idx = pane.todos.firstIndex(where: { $0.id == todoId }),
+                  let tab = tabForPane(paneId, in: model) else { return [] }
+            sourceTabId = tab.id
+            sourceItem = pane.todos[idx]
+            sourceIndex = idx
+        }
+
+        let destinationTabId: TabId
+        let destinationCount: Int
+        switch destination {
+        case .tab(let tabId):
+            guard let tab = tabById(tabId, in: model) else { return [] }
+            destinationTabId = tabId
+            destinationCount = tab.todos.count
+        case .pane(let paneId):
+            guard let pane = model.panes[paneId],
+                  let tab = tabForPane(paneId, in: model) else { return [] }
+            destinationTabId = tab.id
+            destinationCount = pane.todos.count
+        }
+
+        guard sourceTabId == destinationTabId else { return [] }
+        let insertAt = max(0, min(atIndex, destinationCount))
+
+        switch source {
+        case .tab(let tabId):
+            updateTab(tabId, in: &model) { t in
+                t.todos.remove(at: sourceIndex)
+            }
+        case .pane(let paneId):
+            model.panes[paneId]!.todos.remove(at: sourceIndex)
+        }
+
+        switch destination {
+        case .tab(let tabId):
+            updateTab(tabId, in: &model) { t in
+                t.todos.insert(sourceItem, at: insertAt)
+            }
+        case .pane(let paneId):
+            model.panes[paneId]!.todos.insert(sourceItem, at: insertAt)
+        }
+        return [.scheduleCheckpoint]
+
     case .clearCompletedTabTodos(let tabId):
         guard tabById(tabId, in: model) != nil else { return [] }
         updateTab(tabId, in: &model) { t in
