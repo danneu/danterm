@@ -39,7 +39,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     let paneId: PaneId
     private let tableView = PaneTodoTableView()
     private let scrollView = NSScrollView()
-    private let headerLabel = NSTextField(labelWithString: "To-Do")
+    private let headerLabel = NSTextField(labelWithString: "Pane To-Do")
     private let clearButton = NSButton(title: "Clear completed", target: nil, action: nil)
     private let addInput = TodoInputView()
     private let editTitleLabel: NSTextField = {
