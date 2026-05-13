@@ -104,67 +104,18 @@ Set `alert-clear-mode = manual` to make alerts persist until you explicitly dism
 
 For some reason, Claude Code seems to wait 1-2 minutes before sending an OSC 777 / OSC 9 notification when it's waiting for a response.
 
-To work around this, create a script (e.g. `~/.claude/hooks/claude-notify.sh`):
+To work around this, DanTerm ships a Claude Code Stop hook package that emits
+an OSC 777 notification as soon as Claude finishes a turn.
 
-(Must have [jq](https://jqlang.org/) installed)
+With Nix, add `danterm.overlays.default` to your `nixpkgs.overlays`, then point
+Claude Code at the packaged hook:
 
-```bash
-#!/usr/bin/env bash
-# Extracts Claude's last message and sends an OSC 777 notification.
-
-# Stop hooks also fire inside subagent contexts (Task tool / Explore / Plan /
-# etc.). The docs say `agent_id` is "Present only when the hook fires inside
-# a subagent call" -- skip those so only the main agent's turn notifies.
-INPUT=$(cat)
-if [ -n "$(printf '%s' "$INPUT" | jq -r '.agent_id // empty')" ]; then
-  exit 0
-fi
-
-MSG=$(printf '%s' "$INPUT" | jq -r '.last_assistant_message // empty' | head -c 200 | tr -d '[:cntrl:]')
-MSG=${MSG:-Claude finished responding}
-
-: "${CLAUDE_NOTIFY_DEV_DIR:=/dev}"
-
-find_ancestor_tty() {
-  local pid=$PPID
-  local i tty parent
-
-  for ((i = 0; i < 20; i++)); do
-    if [ -z "$pid" ] || [ "$pid" -le 1 ]; then
-      return 1
-    fi
-
-    tty=$(ps -o tty= -p "$pid" 2>/dev/null | tr -d ' ')
-    case "$tty" in
-      ""|"?"|"??"|"-") ;;
-      *)
-        printf '%s/%s\n' "$CLAUDE_NOTIFY_DEV_DIR" "$tty"
-        return 0
-        ;;
-    esac
-
-    parent=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
-    if [ -z "$parent" ]; then
-      return 1
-    fi
-    pid=$parent
-  done
-
-  return 1
-}
-
-if [ -z "${CLAUDE_NOTIFY_TTY:-}" ]; then
-  CLAUDE_NOTIFY_TTY=$(find_ancestor_tty) || exit 0
-fi
-
-if [ -n "$TMUX" ]; then
-  printf '\ePtmux;\e\e]777;notify;Claude Code;%s\a\e\\' "$MSG" > "$CLAUDE_NOTIFY_TTY"
-else
-  printf '\e]777;notify;Claude Code;%s\a' "$MSG" > "$CLAUDE_NOTIFY_TTY"
-fi
+```nix
+command = "${pkgs.danterm-claude-notify-osc777}/bin/danterm-claude-notify-osc777";
 ```
 
-Then add a `Stop` hook to your Claude Code settings (`~/.claude/settings.json`):
+For raw Claude Code JSON settings, use the resolved package binary path as the
+command:
 
 ```json
 {
@@ -174,7 +125,7 @@ Then add a `Stop` hook to your Claude Code settings (`~/.claude/settings.json`):
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/hooks/claude-notify.sh",
+            "command": "/absolute/path/to/danterm-claude-notify-osc777",
             "timeout": 10
           }
         ]
@@ -183,6 +134,11 @@ Then add a `Stop` hook to your Claude Code settings (`~/.claude/settings.json`):
   }
 }
 ```
+
+Without Nix, copy
+[`integrations/claude-code/claude-notify-osc777.sh`](integrations/claude-code/claude-notify-osc777.sh)
+somewhere on your machine and use that path as the command. Make the script
+executable and ensure `jq` is installed on PATH.
 
 DanTerm turns OSC 777 and OSC 9 messages into a macOS notification that, when
 clicked, will take you to the originating pane.
