@@ -2,7 +2,7 @@
 /// Shows a scrollable list of tasks with checkboxes, delete buttons,
 /// drag-to-reorder, a "Clear completed" button, and a multiline input
 /// that serves as both "add" and "edit" field. Selecting a row previews it;
-/// double-click, Tab, or Return enters edit mode and Cmd+Return saves.
+/// double-click, Tab, or Return enters edit mode and Return saves edits.
 
 import Cocoa
 
@@ -43,7 +43,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     private let clearButton = NSButton(title: "Clear completed", target: nil, action: nil)
     private let addInput = TodoInputView()
     private let editLabel: NSTextField = {
-        let tf = NSTextField(labelWithString: "Editing — Esc to cancel · ⌘⏎ to save")
+        let tf = NSTextField(labelWithString: "Editing - Esc to cancel - Enter to save")
         tf.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         tf.textColor = .secondaryLabelColor
         tf.isHidden = true
@@ -262,14 +262,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     }
 
     private func focusInitialMode() {
-        let items = todos
-        guard let row = firstSelectableRow(in: items, canSelect: { _ in true }) else {
-            focusComposeInput()
-            return
-        }
-        setSelectedRow(row)
-        populateInputFromSelection()
-        view.window?.makeFirstResponder(tableView)
+        focusComposeInput()
     }
 
     @discardableResult
@@ -325,18 +318,14 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         return true
     }
 
-    private func addTodoThenReturnToList() {
+    private func addTodoAndStayInCompose() {
         let text = addInput.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         runtime?.send(.addTodo(paneId: paneId, text: text))
         composeDraft = ""
         addInput.string = ""
         rebuildRows()
-        if let row = todos.indices.last {
-            setSelectedRow(row)
-            populateInputFromSelection()
-            view.window?.makeFirstResponder(tableView)
-        }
+        view.window?.makeFirstResponder(addInput.textView)
     }
 
     private func cancelEditAndReturnToList() {
@@ -550,7 +539,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
             if isEditing {
                 _ = saveEditThenReturnToList()
             } else if view.window?.firstResponder === addInput.textView {
-                addTodoThenReturnToList()
+                addTodoAndStayInCompose()
             }
             return true
         case .n:
@@ -614,7 +603,11 @@ extension TodoPopoverViewController: NSTextViewDelegate {
 
         switch action {
         case .submit:
-            _ = saveEditThenReturnToList()
+            if isEditing {
+                _ = saveEditThenReturnToList()
+            } else {
+                addTodoAndStayInCompose()
+            }
             return true
         case .insertNewline:
             textView.insertNewlineIgnoringFieldEditor(nil)

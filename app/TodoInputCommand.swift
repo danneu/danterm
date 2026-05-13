@@ -63,7 +63,7 @@ enum ListAction: Equatable {
 func classifyInputAction(key: InputKey, isEditing: Bool, fieldEmpty: Bool) -> InputAction {
     switch key {
     case .enter:
-        return .insertNewline
+        return .submit
     case .shiftEnter:
         return .insertNewline
     case .escape:

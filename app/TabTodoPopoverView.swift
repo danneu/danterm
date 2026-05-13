@@ -8,6 +8,7 @@ import Cocoa
 private let tabTodoRowDragType = NSPasteboard.PasteboardType("com.danneu.danterm.tab-todo-row")
 private let tabHeaderRowId = NSUserInterfaceItemIdentifier("TabTodoHeader")
 private let paneHeaderRowId = NSUserInterfaceItemIdentifier("PaneTodoHeader")
+private let tabTodoEmptyRowId = NSUserInterfaceItemIdentifier("TabTodoEmptyRow")
 
 private struct TabTodoDragPayload: Codable {
     enum Source: Equatable {
@@ -110,6 +111,33 @@ private final class TabTodoHeaderRowView: NSView {
     }
 }
 
+// MARK: - Empty row view
+
+/// Secondary placeholder row shown under each empty tab or pane section.
+private final class TabTodoEmptyRowView: NSView {
+    private let label: NSTextField = {
+        let tf = NSTextField(labelWithString: "No todo items")
+        tf.font = .systemFont(ofSize: NSFont.systemFontSize)
+        tf.textColor = .secondaryLabelColor
+        tf.lineBreakMode = .byTruncatingTail
+        return tf
+    }()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+
+        NSLayoutConstraint.activate([
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 28),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) not implemented") }
+}
+
 // MARK: - View Controller
 
 class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
@@ -121,14 +149,13 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
     private let clearButton = NSButton(title: "Clear completed", target: nil, action: nil)
     private let addInput = TodoInputView(placeholder: "Add a tab task…")
     private let editLabel: NSTextField = {
-        let tf = NSTextField(labelWithString: "Editing — Esc to cancel · ⌘⏎ to save")
+        let tf = NSTextField(labelWithString: "Editing - Esc to cancel - Enter to save")
         tf.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         tf.textColor = .secondaryLabelColor
         tf.isHidden = true
         tf.translatesAutoresizingMaskIntoConstraints = false
         return tf
     }()
-    private let emptyLabel = NSTextField(labelWithString: "No tasks yet")
 
     private var editTarget: TabTodoEditTarget?
     private var composeDraft = ""
@@ -206,12 +233,6 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(scrollView)
 
-        emptyLabel.textColor = .secondaryLabelColor
-        emptyLabel.font = .systemFont(ofSize: NSFont.systemFontSize)
-        emptyLabel.alignment = .center
-        emptyLabel.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(emptyLabel)
-
         let sep = NSBox()
         sep.boxType = .separator
 
@@ -243,9 +264,6 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: bottomStack.topAnchor),
 
-            emptyLabel.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
-            emptyLabel.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
-
             bottomStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
             bottomStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
             bottomStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
@@ -274,9 +292,6 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         rows = buildRows()
         let tabItems = tabTodos
         clearButton.isHidden = !tabItems.contains(where: \.isDone)
-        let itemCount = runtime.map { tabTodoItemCount(tabId, in: $0.model) } ?? 0
-        emptyLabel.isHidden = itemCount > 0
-        scrollView.isHidden = itemCount == 0
         let wasEditingTarget = editTarget
         isSyncingTableSelection = true
         tableView.reloadData()
@@ -367,13 +382,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
     }
 
     private func focusInitialMode() {
-        guard let row = firstSelectableRow(in: rows, canSelect: { $0.isSelectable }) else {
-            focusComposeInput()
-            return
-        }
-        setSelectedRow(row)
-        populateInputFromSelection()
-        view.window?.makeFirstResponder(tableView)
+        focusComposeInput()
     }
 
     @discardableResult
@@ -428,19 +437,14 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         return true
     }
 
-    private func addTodoThenReturnToList() {
+    private func addTodoAndStayInCompose() {
         let text = addInput.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         runtime?.send(.addTabTodo(tabId: tabId, text: text))
         composeDraft = ""
         addInput.string = ""
         rebuildRows()
-        if let todoId = tabTodos.last?.id {
-            let target = TabTodoEditTarget.tab(todoId: todoId)
-            _ = selectTarget(target)
-            populateInputFromSelection()
-            view.window?.makeFirstResponder(tableView)
-        }
+        view.window?.makeFirstResponder(addInput.textView)
     }
 
     private func cancelEditAndReturnToList() {
@@ -496,6 +500,11 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
             rowView.deleteButton.action = #selector(tabDeleteTask(_:))
             return rowView
 
+        case .tabEmptyPlaceholder:
+            let view = (tableView.makeView(withIdentifier: tabTodoEmptyRowId, owner: self) as? TabTodoEmptyRowView) ?? TabTodoEmptyRowView()
+            view.identifier = tabTodoEmptyRowId
+            return view
+
         case .paneSectionHeader(_, let title):
             let view = (tableView.makeView(withIdentifier: paneHeaderRowId, owner: self) as? TabTodoHeaderRowView) ?? TabTodoHeaderRowView()
             view.identifier = paneHeaderRowId
@@ -514,6 +523,11 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
             rowView.deleteButton.target = self
             rowView.deleteButton.action = #selector(paneDeleteTask(_:))
             return rowView
+
+        case .paneEmptyPlaceholder:
+            let view = (tableView.makeView(withIdentifier: tabTodoEmptyRowId, owner: self) as? TabTodoEmptyRowView) ?? TabTodoEmptyRowView()
+            view.identifier = tabTodoEmptyRowId
+            return view
         }
     }
 
@@ -530,6 +544,8 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         switch rows[row] {
         case .tabItem, .paneItem:
             return true
+        case .tabEmptyPlaceholder, .paneEmptyPlaceholder:
+            return false
         case .paneSectionHeader(let paneId, _):
             // Side-effect on click: focus the pane and dismiss the popover so
             // the user lands in the terminal. Return false so the row doesn't
@@ -582,7 +598,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
             payload = TabTodoDragPayload(source: .tab, todoId: item.id)
         case .paneItem(let paneId, let item):
             payload = TabTodoDragPayload(source: .pane(paneId.rawValue), todoId: item.id)
-        case .tabSectionHeader, .paneSectionHeader:
+        case .tabSectionHeader, .tabEmptyPlaceholder, .paneSectionHeader, .paneEmptyPlaceholder:
             return nil
         }
         guard let data = try? JSONEncoder().encode(payload),
@@ -827,7 +843,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
             if isEditing {
                 _ = saveEditThenReturnToList()
             } else if view.window?.firstResponder === addInput.textView {
-                addTodoThenReturnToList()
+                addTodoAndStayInCompose()
             }
             return true
         case .n:
@@ -889,7 +905,11 @@ extension TabTodoPopoverViewController: NSTextViewDelegate {
 
         switch action {
         case .submit:
-            _ = saveEditThenReturnToList()
+            if isEditing {
+                _ = saveEditThenReturnToList()
+            } else {
+                addTodoAndStayInCompose()
+            }
             return true
         case .insertNewline:
             textView.insertNewlineIgnoringFieldEditor(nil)

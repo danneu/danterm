@@ -288,12 +288,12 @@ func todoTests() {
 
     // MARK: - classifyInputAction
 
-    test("enter → insertNewline") {
-        try expectEqual(classifyInputAction(key: .enter, isEditing: false, fieldEmpty: true), .insertNewline)
-        try expectEqual(classifyInputAction(key: .enter, isEditing: true, fieldEmpty: false), .insertNewline)
+    test("enter submits") {
+        try expectEqual(classifyInputAction(key: .enter, isEditing: false, fieldEmpty: true), .submit)
+        try expectEqual(classifyInputAction(key: .enter, isEditing: true, fieldEmpty: false), .submit)
     }
 
-    test("shiftEnter → insertNewline") {
+    test("shiftEnter inserts newline") {
         try expectEqual(classifyInputAction(key: .shiftEnter, isEditing: false, fieldEmpty: true), .insertNewline)
         try expectEqual(classifyInputAction(key: .shiftEnter, isEditing: true, fieldEmpty: false), .insertNewline)
     }

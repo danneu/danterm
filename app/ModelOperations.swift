@@ -464,8 +464,10 @@ func tabTodoRollup(_ tabId: TabId, in model: AppModel) -> (total: Int, uncomplet
 enum TabTodoRow: Equatable {
   case tabSectionHeader
   case tabItem(TodoItem)
+  case tabEmptyPlaceholder
   case paneSectionHeader(paneId: PaneId, title: String)
   case paneItem(paneId: PaneId, item: TodoItem)
+  case paneEmptyPlaceholder(paneId: PaneId)
 }
 
 enum TabTodoEditTarget: Equatable {
@@ -483,12 +485,19 @@ extension TabTodoRow {
     switch self {
     case .tabSectionHeader, .paneSectionHeader:
       return true
-    case .tabItem, .paneItem:
+    case .tabItem, .tabEmptyPlaceholder, .paneItem, .paneEmptyPlaceholder:
       return false
     }
   }
 
-  var isSelectable: Bool { !isHeader }
+  var isSelectable: Bool {
+    switch self {
+    case .tabItem, .paneItem:
+      return true
+    case .tabSectionHeader, .tabEmptyPlaceholder, .paneSectionHeader, .paneEmptyPlaceholder:
+      return false
+    }
+  }
 
   var editTarget: TabTodoEditTarget? {
     switch self {
@@ -496,7 +505,7 @@ extension TabTodoRow {
       return .tab(todoId: item.id)
     case .paneItem(let paneId, let item):
       return .pane(paneId: paneId, todoId: item.id)
-    case .tabSectionHeader, .paneSectionHeader:
+    case .tabSectionHeader, .tabEmptyPlaceholder, .paneSectionHeader, .paneEmptyPlaceholder:
       return nil
     }
   }
@@ -505,16 +514,16 @@ extension TabTodoRow {
     switch self {
     case .tabItem(let item), .paneItem(_, let item):
       return item.text
-    case .tabSectionHeader, .paneSectionHeader:
+    case .tabSectionHeader, .tabEmptyPlaceholder, .paneSectionHeader, .paneEmptyPlaceholder:
       return nil
     }
   }
 
   var sectionIdentifier: AnyHashable? {
     switch self {
-    case .tabSectionHeader, .tabItem:
+    case .tabSectionHeader, .tabItem, .tabEmptyPlaceholder:
       return AnyHashable("tab")
-    case .paneSectionHeader(let paneId, _), .paneItem(let paneId, _):
+    case .paneSectionHeader(let paneId, _), .paneItem(let paneId, _), .paneEmptyPlaceholder(let paneId):
       return AnyHashable(paneId)
     }
   }
@@ -532,14 +541,22 @@ func tabTodoItemCount(_ tabId: TabId, in model: AppModel) -> Int {
 func buildTabTodoRows(model: AppModel, tabId: TabId) -> [TabTodoRow] {
   guard let tab = tabById(tabId, in: model) else { return [] }
   var rows: [TabTodoRow] = [.tabSectionHeader]
-  for item in tab.todos {
-    rows.append(.tabItem(item))
+  if tab.todos.isEmpty {
+    rows.append(.tabEmptyPlaceholder)
+  } else {
+    for item in tab.todos {
+      rows.append(.tabItem(item))
+    }
   }
   for paneId in allPaneIds(tab.rootNode) {
     guard let pane = model.panes[paneId] else { continue }
     rows.append(.paneSectionHeader(paneId: paneId, title: pane.title))
-    for item in pane.todos {
-      rows.append(.paneItem(paneId: paneId, item: item))
+    if pane.todos.isEmpty {
+      rows.append(.paneEmptyPlaceholder(paneId: paneId))
+    } else {
+      for item in pane.todos {
+        rows.append(.paneItem(paneId: paneId, item: item))
+      }
     }
   }
   return rows
@@ -562,6 +579,11 @@ func resolveTabTodoDropTarget(
     case .paneSectionHeader(let paneId, _):
       guard let pane = model.panes[paneId] else { return nil }
       return (.pane(paneId), pane.todos.count)
+    case .tabEmptyPlaceholder:
+      return (.tab(tabId), 0)
+    case .paneEmptyPlaceholder(let paneId):
+      guard model.panes[paneId] != nil else { return nil }
+      return (.pane(paneId), 0)
     case .tabItem, .paneItem:
       return nil
     }
@@ -589,6 +611,8 @@ func resolveTabTodoDropTarget(
         return false
       }
       return (.tab(tabId), atIndex)
+    case .tabEmptyPlaceholder:
+      return (.tab(tabId), 0)
     case .paneItem(let paneId, _):
       guard model.panes[paneId] != nil else { return nil }
       let atIndex = rows[..<proposedRow].count { row in
@@ -596,6 +620,9 @@ func resolveTabTodoDropTarget(
         return false
       }
       return (.pane(paneId), atIndex)
+    case .paneEmptyPlaceholder(let paneId):
+      guard model.panes[paneId] != nil else { return nil }
+      return (.pane(paneId), 0)
     }
   }
 }
@@ -624,9 +651,9 @@ func resolveTabTodoBucketStep(
 
 private func tabTodoDestination(for row: TabTodoRow, tabId: TabId) -> TodoDestination? {
   switch row {
-  case .tabSectionHeader, .tabItem:
+  case .tabSectionHeader, .tabItem, .tabEmptyPlaceholder:
     return .tab(tabId)
-  case .paneSectionHeader(let paneId, _), .paneItem(let paneId, _):
+  case .paneSectionHeader(let paneId, _), .paneItem(let paneId, _), .paneEmptyPlaceholder(let paneId):
     return .pane(paneId)
   }
 }

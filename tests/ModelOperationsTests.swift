@@ -1025,6 +1025,70 @@ func modelOperationsTests() {
         try expectEqual(paneHeaders, [paneA, paneB])
     }
 
+    test("buildTabTodoRows emits placeholders for an empty tab and empty panes") {
+        let (model, tabId, paneA, paneB) = makeTwoPaneTabTodoRowsModel()
+
+        let rows = buildTabTodoRows(model: model, tabId: tabId)
+
+        try expectEqual(rows, [
+            .tabSectionHeader,
+            .tabEmptyPlaceholder,
+            .paneSectionHeader(paneId: paneA, title: model.panes[paneA]!.title),
+            .paneEmptyPlaceholder(paneId: paneA),
+            .paneSectionHeader(paneId: paneB, title: model.panes[paneB]!.title),
+            .paneEmptyPlaceholder(paneId: paneB),
+        ])
+    }
+
+    test("buildTabTodoRows emits placeholders only for empty sections") {
+        var (model, tabId, paneA, paneB) = makeTwoPaneTabTodoRowsModel()
+        update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
+        update(&model, .addTodo(paneId: paneA, text: "pane A task"))
+
+        let rows = buildTabTodoRows(model: model, tabId: tabId)
+
+        try expect(rows.contains(.tabEmptyPlaceholder) == false, "populated tab should not have a placeholder")
+        try expect(rows.contains(.paneEmptyPlaceholder(paneId: paneA)) == false, "populated pane should not have a placeholder")
+        try expect(rows.contains(.paneEmptyPlaceholder(paneId: paneB)), "empty pane should have a placeholder")
+    }
+
+    test("buildTabTodoRows places each placeholder immediately after its header") {
+        let (model, tabId, paneA, paneB) = makeTwoPaneTabTodoRowsModel()
+
+        let rows = buildTabTodoRows(model: model, tabId: tabId)
+
+        try expectEqual(rows[0], .tabSectionHeader)
+        try expectEqual(rows[1], .tabEmptyPlaceholder)
+        let paneAHeader = rows.firstIndex { row in
+            if case .paneSectionHeader(let paneId, _) = row { return paneId == paneA }
+            return false
+        }!
+        try expectEqual(rows[paneAHeader + 1], .paneEmptyPlaceholder(paneId: paneA))
+        let paneBHeader = rows.firstIndex { row in
+            if case .paneSectionHeader(let paneId, _) = row { return paneId == paneB }
+            return false
+        }!
+        try expectEqual(rows[paneBHeader + 1], .paneEmptyPlaceholder(paneId: paneB))
+    }
+
+    test("tab todo placeholder rows are non-selectable section members") {
+        let paneId = PaneId()
+
+        let tabPlaceholder = TabTodoRow.tabEmptyPlaceholder
+        try expectEqual(tabPlaceholder.isHeader, false)
+        try expectEqual(tabPlaceholder.isSelectable, false)
+        try expect(tabPlaceholder.editTarget == nil)
+        try expect(tabPlaceholder.itemText == nil)
+        try expectEqual(tabPlaceholder.sectionIdentifier, Optional(AnyHashable("tab")))
+
+        let panePlaceholder = TabTodoRow.paneEmptyPlaceholder(paneId: paneId)
+        try expectEqual(panePlaceholder.isHeader, false)
+        try expectEqual(panePlaceholder.isSelectable, false)
+        try expect(panePlaceholder.editTarget == nil)
+        try expect(panePlaceholder.itemText == nil)
+        try expectEqual(panePlaceholder.sectionIdentifier, Optional(AnyHashable(paneId)))
+    }
+
     test("resolveTabTodoDropTarget .on tabSectionHeader appends to tab") {
         var (model, tabId, _, _) = makeTwoPaneTabTodoRowsModel()
         update(&model, .addTabTodo(tabId: tabId, text: "tab A"))
@@ -1050,6 +1114,28 @@ func modelOperationsTests() {
 
         try expectEqual(target?.destination, .pane(paneA))
         try expectEqual(target?.atIndex, 1)
+    }
+
+    test("resolveTabTodoDropTarget .on tabEmptyPlaceholder inserts at tab index 0") {
+        let (model, tabId, _, _) = makeTwoPaneTabTodoRowsModel()
+        let rows = buildTabTodoRows(model: model, tabId: tabId)
+        let placeholderRow = rows.firstIndex(of: .tabEmptyPlaceholder)!
+
+        let target = resolveTabTodoDropTarget(rows: rows, model: model, tabId: tabId, proposedRow: placeholderRow, dropOperation: .on)
+
+        try expectEqual(target?.destination, .tab(tabId))
+        try expectEqual(target?.atIndex, 0)
+    }
+
+    test("resolveTabTodoDropTarget .on paneEmptyPlaceholder inserts at pane index 0") {
+        let (model, tabId, paneA, _) = makeTwoPaneTabTodoRowsModel()
+        let rows = buildTabTodoRows(model: model, tabId: tabId)
+        let placeholderRow = rows.firstIndex(of: .paneEmptyPlaceholder(paneId: paneA))!
+
+        let target = resolveTabTodoDropTarget(rows: rows, model: model, tabId: tabId, proposedRow: placeholderRow, dropOperation: .on)
+
+        try expectEqual(target?.destination, .pane(paneA))
+        try expectEqual(target?.atIndex, 0)
     }
 
     test("resolveTabTodoDropTarget .above first tabItem inserts at tab index 0") {
@@ -1100,6 +1186,38 @@ func modelOperationsTests() {
 
         try expectEqual(target?.destination, .pane(paneB))
         try expectEqual(target?.atIndex, 1)
+    }
+
+    test("resolveTabTodoDropTarget .above tabEmptyPlaceholder inserts at tab index 0") {
+        let (model, tabId, _, _) = makeTwoPaneTabTodoRowsModel()
+        let rows = buildTabTodoRows(model: model, tabId: tabId)
+        let placeholderRow = rows.firstIndex(of: .tabEmptyPlaceholder)!
+
+        let target = resolveTabTodoDropTarget(rows: rows, model: model, tabId: tabId, proposedRow: placeholderRow, dropOperation: .above)
+
+        try expectEqual(target?.destination, .tab(tabId))
+        try expectEqual(target?.atIndex, 0)
+    }
+
+    test("resolveTabTodoDropTarget .above paneEmptyPlaceholder inserts at pane index 0") {
+        let (model, tabId, paneA, _) = makeTwoPaneTabTodoRowsModel()
+        let rows = buildTabTodoRows(model: model, tabId: tabId)
+        let placeholderRow = rows.firstIndex(of: .paneEmptyPlaceholder(paneId: paneA))!
+
+        let target = resolveTabTodoDropTarget(rows: rows, model: model, tabId: tabId, proposedRow: placeholderRow, dropOperation: .above)
+
+        try expectEqual(target?.destination, .pane(paneA))
+        try expectEqual(target?.atIndex, 0)
+    }
+
+    test("resolveTabTodoDropTarget .above one-past-end appends to final placeholder section") {
+        let (model, tabId, _, paneB) = makeTwoPaneTabTodoRowsModel()
+        let rows = buildTabTodoRows(model: model, tabId: tabId)
+
+        let target = resolveTabTodoDropTarget(rows: rows, model: model, tabId: tabId, proposedRow: rows.count, dropOperation: .above)
+
+        try expectEqual(target?.destination, .pane(paneB))
+        try expectEqual(target?.atIndex, 0)
     }
 
     test("resolveTabTodoDropTarget .above tabSectionHeader row 0 returns nil") {
