@@ -149,7 +149,9 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
     private let headerLabel = NSTextField(labelWithString: "Tab To-Do")
     private let clearButton = NSButton(title: "Clear completed", target: nil, action: nil)
     private let newButton = NSButton(title: "New (\u{2318}N)", target: nil, action: nil)
+    private let helpButton = NSButton()
     private let addInput = TodoInputView(placeholder: "Add a tab task…")
+    private let composeHintLabel = makeTodoShortcutHintLabel()
     private let editTitleLabel: NSTextField = {
         let tf = NSTextField(labelWithString: "Edit tab task")
         tf.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
@@ -158,6 +160,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         return tf
     }()
     private let editInput = TodoInputView(placeholder: "Edit task...", visibleLineCount: TodoInputView.editVisibleLineCount)
+    private let editHintLabel = makeTodoShortcutHintLabel()
     private let saveButton = NSButton(title: "Save", target: nil, action: nil)
     private let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
     private var bottomStack: NSStackView!
@@ -165,6 +168,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
 
     private var popoverState = TodoPopoverState<TabTodoEditTarget>()
     private var isSyncingTableSelection = false
+    private var shortcutHelpPopover: NSPopover?
     private var rows: [TabTodoRow] = []
 
     init(tabId: TabId, runtime: AppRuntime?) {
@@ -226,6 +230,9 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         headerActions.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(headerActions)
 
+        configureTodoShortcutHelpButton(helpButton, target: self, action: #selector(toggleShortcutHelp(_:)))
+        container.addSubview(helpButton)
+
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("tabtodo"))
         tableView.addTableColumn(column)
         tableView.headerView = nil
@@ -269,7 +276,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         editButtons.alignment = .centerY
         editButtons.spacing = 8
 
-        editContainer = NSStackView(views: [editTitleLabel, editInput, editButtons])
+        editContainer = NSStackView(views: [editTitleLabel, editInput, editHintLabel, editButtons])
         editContainer.orientation = .vertical
         editContainer.alignment = .leading
         editContainer.spacing = 8
@@ -279,7 +286,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
 
         addInput.textView.delegate = self
 
-        bottomStack = NSStackView(views: [sep, addInput])
+        bottomStack = NSStackView(views: [sep, addInput, composeHintLabel])
         bottomStack.orientation = .vertical
         bottomStack.alignment = .leading
         bottomStack.spacing = 4
@@ -299,7 +306,9 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
             headerLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
             headerLabel.trailingAnchor.constraint(lessThanOrEqualTo: headerActions.leadingAnchor, constant: -8),
             headerActions.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
-            headerActions.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            headerActions.trailingAnchor.constraint(equalTo: helpButton.leadingAnchor, constant: -6),
+            helpButton.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
+            helpButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
 
             scrollView.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -331,6 +340,11 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
     override func viewDidAppear() {
         super.viewDidAppear()
         focusInitialMode()
+    }
+
+    override func viewWillDisappear() {
+        super.viewWillDisappear()
+        closeShortcutHelpPopover()
     }
 
     func rebuildRows() {
@@ -784,6 +798,43 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         cancelEditAndReturnToList()
     }
 
+    @objc private func toggleShortcutHelp(_ sender: Any?) {
+        if shortcutHelpPopover != nil {
+            closeShortcutHelpPopover()
+        } else {
+            showShortcutHelpPopover()
+        }
+    }
+
+    /// Close shortcut help before the parent popover closes or reanchors.
+    func closeShortcutHelpPopover() {
+        guard let popover = shortcutHelpPopover else { return }
+        shortcutHelpPopover = nil
+        popover.performClose(nil)
+    }
+
+    /// Show tab-scope help while preserving the parent popover's dismissal behavior.
+    private func showShortcutHelpPopover() {
+        guard let parentPopover = runtime?.tabTodoPopover else { return }
+        let savedResponder = view.window?.firstResponder
+        let controller = TodoShortcutHelpViewController(
+            scope: .tab,
+            parentPopover: parentPopover,
+            parentView: view,
+            savedResponder: savedResponder
+        ) { [weak self] in
+            self?.shortcutHelpPopover = nil
+        }
+        let popover = NSPopover()
+        popover.contentViewController = controller
+        popover.behavior = .applicationDefined
+        popover.delegate = controller
+        controller.popover = popover
+        parentPopover.behavior = .applicationDefined
+        shortcutHelpPopover = popover
+        popover.show(relativeTo: helpButton.bounds, of: helpButton, preferredEdge: .minY)
+    }
+
     private func toggleSelectedTodoDone() {
         guard let target = selectedEditTarget() else { return }
         switch target {
@@ -941,6 +992,9 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         case .focusInput:
             focusComposeInput()
             return true
+        case .showShortcutHelp:
+            toggleShortcutHelp(nil)
+            return true
         case .unhandled:
             return false
         }
@@ -948,6 +1002,11 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
 
     private func performTodoKeyEquivalent(with event: NSEvent) -> Bool {
         let modifiers = tabKeyModifiers(from: event)
+        let key = tabListKey(from: event)
+        if classifyListAction(key: key, modifiers: modifiers) == .showShortcutHelp {
+            toggleShortcutHelp(nil)
+            return true
+        }
         if modifiers == [.command, .shift] {
             switch event.charactersIgnoringModifiers?.lowercased() {
             case "h", "l":
@@ -958,7 +1017,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         }
 
         guard modifiers == [.command] else { return false }
-        switch tabListKey(from: event) {
+        switch key {
         case .enter:
             if isEditing {
                 _ = saveEditThenReturnToList()
@@ -1132,6 +1191,8 @@ private func tabListKey(from event: NSEvent) -> ListKey {
         return .k
     case "l":
         return .l
+    case "/", "?":
+        return .slash
     case "n":
         return .n
     default:

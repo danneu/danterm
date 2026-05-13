@@ -34,6 +34,7 @@ echo "Compiling tests..."
         "$SCRIPT_DIR/app/DanTermConfig.swift" \
         "$SCRIPT_DIR/app/TodoPopoverState.swift" \
         "$SCRIPT_DIR/app/TodoInputCommand.swift" \
+        "$SCRIPT_DIR/app/TodoShortcutCatalog.swift" \
         "$SCRIPT_DIR"/tests/*.swift
 )
 echo "Running tests..."

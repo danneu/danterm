@@ -41,7 +41,9 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     private let scrollView = NSScrollView()
     private let headerLabel = NSTextField(labelWithString: "Pane To-Do")
     private let clearButton = NSButton(title: "Clear completed", target: nil, action: nil)
+    private let helpButton = NSButton()
     private let addInput = TodoInputView()
+    private let composeHintLabel = makeTodoShortcutHintLabel()
     private let editTitleLabel: NSTextField = {
         let tf = NSTextField(labelWithString: "Edit pane task")
         tf.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
@@ -50,6 +52,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         return tf
     }()
     private let editInput = TodoInputView(placeholder: "Edit task...", visibleLineCount: TodoInputView.editVisibleLineCount)
+    private let editHintLabel = makeTodoShortcutHintLabel()
     private let saveButton = NSButton(title: "Save", target: nil, action: nil)
     private let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
     private var bottomStack: NSStackView!
@@ -58,6 +61,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
 
     private var popoverState = TodoPopoverState<UUID>()
     private var isSyncingTableSelection = false
+    private var shortcutHelpPopover: NSPopover?
 
     private var todos: [TodoItem] { runtime?.model.panes[paneId]?.todos ?? [] }
 
@@ -93,7 +97,17 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         clearButton.bezelStyle = .accessoryBarAction
         clearButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         clearButton.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(clearButton)
+
+        let headerActions = NSStackView(views: [clearButton])
+        headerActions.orientation = .horizontal
+        headerActions.alignment = .centerY
+        headerActions.spacing = 6
+        headerActions.detachesHiddenViews = true
+        headerActions.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(headerActions)
+
+        configureTodoShortcutHelpButton(helpButton, target: self, action: #selector(toggleShortcutHelp(_:)))
+        container.addSubview(helpButton)
 
         // Table
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("todo"))
@@ -143,7 +157,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         editButtons.alignment = .centerY
         editButtons.spacing = 8
 
-        editContainer = NSStackView(views: [editTitleLabel, editInput, editButtons])
+        editContainer = NSStackView(views: [editTitleLabel, editInput, editHintLabel, editButtons])
         editContainer.orientation = .vertical
         editContainer.alignment = .leading
         editContainer.spacing = 8
@@ -157,7 +171,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
 
         addInput.textView.delegate = self
 
-        bottomStack = NSStackView(views: [sep, addInput])
+        bottomStack = NSStackView(views: [sep, addInput, composeHintLabel])
         bottomStack.orientation = .vertical
         bottomStack.alignment = .leading
         bottomStack.spacing = 4
@@ -176,8 +190,11 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
 
             headerLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
             headerLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            clearButton.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
-            clearButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            headerLabel.trailingAnchor.constraint(lessThanOrEqualTo: headerActions.leadingAnchor, constant: -8),
+            headerActions.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
+            headerActions.trailingAnchor.constraint(equalTo: helpButton.leadingAnchor, constant: -6),
+            helpButton.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
+            helpButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
 
             scrollView.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -212,6 +229,11 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     override func viewDidAppear() {
         super.viewDidAppear()
         focusInitialMode()
+    }
+
+    override func viewWillDisappear() {
+        super.viewWillDisappear()
+        closeShortcutHelpPopover()
     }
 
     func rebuildRows(preservingSelectedId selectedIdOverride: UUID? = nil) {
@@ -510,6 +532,43 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         cancelEditAndReturnToList()
     }
 
+    @objc private func toggleShortcutHelp(_ sender: Any?) {
+        if shortcutHelpPopover != nil {
+            closeShortcutHelpPopover()
+        } else {
+            showShortcutHelpPopover()
+        }
+    }
+
+    /// Close shortcut help before the parent popover closes or reanchors.
+    func closeShortcutHelpPopover() {
+        guard let popover = shortcutHelpPopover else { return }
+        shortcutHelpPopover = nil
+        popover.performClose(nil)
+    }
+
+    /// Show help as a child popover while preserving parent click-away state.
+    private func showShortcutHelpPopover() {
+        guard let parentPopover = runtime?.todoPopover else { return }
+        let savedResponder = view.window?.firstResponder
+        let controller = TodoShortcutHelpViewController(
+            scope: .pane,
+            parentPopover: parentPopover,
+            parentView: view,
+            savedResponder: savedResponder
+        ) { [weak self] in
+            self?.shortcutHelpPopover = nil
+        }
+        let popover = NSPopover()
+        popover.contentViewController = controller
+        popover.behavior = .applicationDefined
+        popover.delegate = controller
+        controller.popover = popover
+        parentPopover.behavior = .applicationDefined
+        shortcutHelpPopover = popover
+        popover.show(relativeTo: helpButton.bounds, of: helpButton, preferredEdge: .minY)
+    }
+
     private func toggleSelectedTodoDone() {
         guard let item = selectedTodo() else { return }
         runtime?.send(.toggleTodoDone(paneId: paneId, todoId: item.id))
@@ -566,6 +625,9 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         case .focusInput:
             focusComposeInput()
             return true
+        case .showShortcutHelp:
+            toggleShortcutHelp(nil)
+            return true
         case .unhandled:
             return false
         }
@@ -573,8 +635,13 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
 
     private func performTodoKeyEquivalent(with event: NSEvent) -> Bool {
         let modifiers = keyModifiers(from: event)
+        let key = listKey(from: event)
+        if classifyListAction(key: key, modifiers: modifiers) == .showShortcutHelp {
+            toggleShortcutHelp(nil)
+            return true
+        }
         guard modifiers == [.command] else { return false }
-        switch listKey(from: event) {
+        switch key {
         case .enter:
             if isEditing {
                 _ = saveEditThenReturnToList()
@@ -723,6 +790,8 @@ private func listKey(from event: NSEvent) -> ListKey {
         return .k
     case "l":
         return .l
+    case "/", "?":
+        return .slash
     case "n":
         return .n
     default:

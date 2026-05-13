@@ -382,6 +382,20 @@ func todoTests() {
         try expectEqual(classifyListAction(key: .h, modifiers: [.command, .shift]), .unhandled)
     }
 
+    test("list cmd shift l is unhandled") {
+        try expectEqual(classifyListAction(key: .l, modifiers: [.command, .shift]), .unhandled)
+    }
+
+    test("list cmd slash shows shortcut help") {
+        try expectEqual(classifyListAction(key: .slash, modifiers: [.command]), .showShortcutHelp)
+        try expectEqual(classifyListAction(key: .slash, modifiers: [.command, .shift]), .showShortcutHelp)
+    }
+
+    test("list slash without command is unhandled") {
+        try expectEqual(classifyListAction(key: .slash, modifiers: KeyModifiers()), .unhandled)
+        try expectEqual(classifyListAction(key: .slash, modifiers: [.shift]), .unhandled)
+    }
+
     test("list plain h is unhandled") {
         try expectEqual(classifyListAction(key: .h, modifiers: KeyModifiers()), .unhandled)
     }

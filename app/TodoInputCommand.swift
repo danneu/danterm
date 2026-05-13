@@ -31,6 +31,7 @@ enum ListKey: Equatable {
     case j
     case k
     case l
+    case slash
     case downArrow
     case upArrow
     case tab
@@ -59,6 +60,7 @@ enum ListAction: Equatable {
     case reorder(delta: Int)
     case moveBucket(delta: Int)
     case focusInput
+    case showShortcutHelp
     case unhandled
 }
 
@@ -86,6 +88,9 @@ func classifyInputAction(key: InputKey, isEditing: Bool, fieldEmpty: Bool) -> In
 /// Classify a row-mode key into a list action.
 func classifyListAction(key: ListKey, modifiers: KeyModifiers) -> ListAction {
     if modifiers.contains(.command) {
+        if key == .slash, modifiers == [.command] || modifiers == [.command, .shift] {
+            return .showShortcutHelp
+        }
         guard modifiers == [.command] else { return .unhandled }
         switch key {
         case .backspace:

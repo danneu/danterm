@@ -279,6 +279,32 @@ class AppRuntime {
         }
     }
 
+    /// Close pane-level shortcut help without dismissing the parent todo popover.
+    func closeTodoShortcutHelpPopover() {
+        (todoPopover?.contentViewController as? TodoPopoverViewController)?.closeShortcutHelpPopover()
+    }
+
+    /// Close tab-level shortcut help without dismissing the parent todo popover.
+    func closeTabTodoShortcutHelpPopover() {
+        (tabTodoPopover?.contentViewController as? TabTodoPopoverViewController)?.closeShortcutHelpPopover()
+    }
+
+    /// Dismiss child help before its pane parent so AppKit cannot refuse the parent close.
+    private func dismissTodoPopoverPair() {
+        closeTodoShortcutHelpPopover()
+        todoPopover?.performClose(nil)
+        todoPopover = nil
+        todoPopoverDelegate = nil
+    }
+
+    /// Dismiss child help before its tab parent so AppKit cannot refuse the parent close.
+    private func dismissTabTodoPopoverPair() {
+        closeTabTodoShortcutHelpPopover()
+        tabTodoPopover?.performClose(nil)
+        tabTodoPopover = nil
+        tabTodoPopoverDelegate = nil
+    }
+
     private func paneIsInActiveTab(_ paneId: PaneId) -> Bool {
         guard let selId = model.selectedTabId else { return false }
         return tabForPane(paneId, in: model)?.id == selId
@@ -672,9 +698,7 @@ class AppRuntime {
         // TODO popover
 
         case .showTodoPopover(let paneId):
-            todoPopover?.performClose(nil)
-            todoPopover = nil
-            todoPopoverDelegate = nil
+            dismissTodoPopoverPair()
             guard let contentArea = contentArea,
                   let wrapper = findPaneWrapper(for: paneId, in: contentArea) else { return }
             let anchor = wrapper.todoButtonView
@@ -689,14 +713,10 @@ class AppRuntime {
             todoPopoverDelegate = delegate
 
         case .dismissTodoPopover:
-            todoPopover?.performClose(nil)
-            todoPopover = nil
-            todoPopoverDelegate = nil
+            dismissTodoPopoverPair()
 
         case .showTodoPopoverForTab(let tabId):
-            tabTodoPopover?.performClose(nil)
-            tabTodoPopover = nil
-            tabTodoPopoverDelegate = nil
+            dismissTabTodoPopoverPair()
             guard let anchor = chromeView?.tabTodoButton else { return }
             let vc = TabTodoPopoverViewController(tabId: tabId, runtime: self)
             let delegate = TabTodoPopoverDelegateAdapter(tabId: tabId, runtime: self)
@@ -709,9 +729,7 @@ class AppRuntime {
             tabTodoPopoverDelegate = delegate
 
         case .dismissTodoPopoverForTab:
-            tabTodoPopover?.performClose(nil)
-            tabTodoPopover = nil
-            tabTodoPopoverDelegate = nil
+            dismissTabTodoPopoverPair()
 
         case .showClosePaneConfirmation(let paneId, let uncompletedCount):
             let alert = NSAlert()
@@ -1172,12 +1190,8 @@ class AppRuntime {
         cancelPaneDrag()
         alertsPopover?.performClose(nil)
         alertsPopover = nil
-        todoPopover?.performClose(nil)
-        todoPopover = nil
-        todoPopoverDelegate = nil
-        tabTodoPopover?.performClose(nil)
-        tabTodoPopover = nil
-        tabTodoPopoverDelegate = nil
+        dismissTodoPopoverPair()
+        dismissTabTodoPopoverPair()
         model.todoPopover = nil
         preferencesPanel?.close()
         preferencesPanel = nil
@@ -1336,12 +1350,8 @@ class AppRuntime {
 
     private func rebuildContentView() {
         cancelPaneDrag()
-        todoPopover?.performClose(nil)
-        todoPopover = nil
-        todoPopoverDelegate = nil
-        tabTodoPopover?.performClose(nil)
-        tabTodoPopover = nil
-        tabTodoPopoverDelegate = nil
+        dismissTodoPopoverPair()
+        dismissTabTodoPopoverPair()
         model.todoPopover = nil
         guard let contentArea = contentArea else { return }
 
@@ -1463,6 +1473,11 @@ private class TodoPopoverDelegateAdapter: NSObject, NSPopoverDelegate {
         self.paneId = paneId
         self.runtime = runtime
     }
+    /// NSPopoverDelegate: cascade-close shortcut help before the parent closes.
+    func popoverWillClose(_ notification: Notification) {
+        runtime?.closeTodoShortcutHelpPopover()
+    }
+    /// NSPopoverDelegate: keep model.todoPopover in sync after any close path.
     func popoverDidClose(_ notification: Notification) {
         runtime?.send(.todoPopoverClosed(paneId: paneId))
     }
@@ -1477,6 +1492,11 @@ class TabTodoPopoverDelegateAdapter: NSObject, NSPopoverDelegate {
         self.tabId = tabId
         self.runtime = runtime
     }
+    /// NSPopoverDelegate: cascade-close shortcut help before the parent closes.
+    func popoverWillClose(_ notification: Notification) {
+        runtime?.closeTabTodoShortcutHelpPopover()
+    }
+    /// NSPopoverDelegate: keep model.todoPopover in sync after any close path.
     func popoverDidClose(_ notification: Notification) {
         runtime?.send(.todoPopoverForTabClosed(tabId: tabId))
     }
