@@ -1103,6 +1103,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let bellDotId = NSUserInterfaceItemIdentifier("bellDot")
         let colorStripeId = NSUserInterfaceItemIdentifier("colorStripe")
         let accessoryStackId = NSUserInterfaceItemIdentifier("tabAccessoryStack")
+        let leadingStackId = NSUserInterfaceItemIdentifier("tabLeadingStack")
 
         let cell: NSTableCellView
         if let existing = outlineView.makeView(withIdentifier: cellId, owner: nil) as? NSTableCellView {
@@ -1125,8 +1126,16 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             textField.lineBreakMode = .byTruncatingTail
             textField.isEditable = false
             textField.delegate = self
-            cell.addSubview(textField)
             cell.textField = textField
+
+            let leadingStack = NSStackView(views: [textField])
+            leadingStack.translatesAutoresizingMaskIntoConstraints = false
+            leadingStack.orientation = .horizontal
+            leadingStack.alignment = .centerY
+            leadingStack.spacing = 4
+            leadingStack.identifier = leadingStackId
+            leadingStack.setHuggingPriority(.required, for: .horizontal)
+            cell.addSubview(leadingStack)
 
             let subtitleField = NSTextField(labelWithString: "")
             subtitleField.identifier = subtitleId
@@ -1153,9 +1162,9 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 colorStripe.widthAnchor.constraint(equalToConstant: 5),
                 accessoryStack.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
                 accessoryStack.topAnchor.constraint(equalTo: cell.topAnchor, constant: 4),
-                textField.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
-                textField.trailingAnchor.constraint(lessThanOrEqualTo: accessoryStack.leadingAnchor, constant: -4),
-                textField.topAnchor.constraint(equalTo: cell.topAnchor, constant: 4),
+                leadingStack.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
+                leadingStack.topAnchor.constraint(equalTo: cell.topAnchor, constant: 4),
+                leadingStack.trailingAnchor.constraint(lessThanOrEqualTo: accessoryStack.leadingAnchor, constant: -4),
                 subtitleField.leadingAnchor.constraint(equalTo: textField.leadingAnchor),
                 subtitleField.trailingAnchor.constraint(lessThanOrEqualTo: accessoryStack.leadingAnchor, constant: -4),
                 subtitleField.topAnchor.constraint(equalTo: textField.bottomAnchor, constant: 1),
@@ -1176,6 +1185,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let jumpBadgeId = NSUserInterfaceItemIdentifier("jumpModeBadge")
         let colorStripeId = NSUserInterfaceItemIdentifier("colorStripe")
         let accessoryStackId = NSUserInterfaceItemIdentifier("tabAccessoryStack")
+        let leadingStackId = NSUserInterfaceItemIdentifier("tabLeadingStack")
 
         if !skipTitle {
             cell.textField?.stringValue = tab.displayTitle
@@ -1189,21 +1199,20 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 let count = unreadAlertCount(for: tab, alerts: currentModel?.alerts ?? [])
                 bellBadge.updateBadge(count: count)
             }
-
-            let existingJumpBadge = stack.arrangedSubviews.first(where: { $0.identifier == jumpBadgeId }) as? NSTextField
+        }
+        if !skipTitle,
+           let leadingStack = cell.subviews.first(where: { $0.identifier == leadingStackId }) as? NSStackView
+        {
+            let existingJumpBadge = leadingStack.arrangedSubviews.first(where: { $0.identifier == jumpBadgeId }) as? NSTextField
             if let key = currentModel?.jumpMode?.keyMap[tab.id] {
                 let badge = existingJumpBadge ?? makeJumpModeBadge(identifier: jumpBadgeId)
                 badge.stringValue = String(key).uppercased()
                 badge.isHidden = false
                 if existingJumpBadge == nil {
-                    stack.addArrangedSubview(badge)
-                } else if stack.arrangedSubviews.last !== badge {
-                    stack.removeArrangedSubview(badge)
-                    badge.removeFromSuperview()
-                    stack.addArrangedSubview(badge)
+                    leadingStack.insertArrangedSubview(badge, at: 0)
                 }
             } else if let existingJumpBadge {
-                stack.removeArrangedSubview(existingJumpBadge)
+                leadingStack.removeArrangedSubview(existingJumpBadge)
                 existingJumpBadge.removeFromSuperview()
             }
         }
