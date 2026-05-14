@@ -1104,6 +1104,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let colorStripeId = NSUserInterfaceItemIdentifier("colorStripe")
         let accessoryStackId = NSUserInterfaceItemIdentifier("tabAccessoryStack")
         let leadingStackId = NSUserInterfaceItemIdentifier("tabLeadingStack")
+        let leadingConstraintId = "tabLeadingStackLeading"
 
         let cell: NSTableCellView
         if let existing = outlineView.makeView(withIdentifier: cellId, owner: nil) as? NSTableCellView {
@@ -1155,6 +1156,9 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             accessoryStack.identifier = accessoryStackId
             cell.addSubview(accessoryStack)
 
+            let leadingConstraint = leadingStack.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8)
+            leadingConstraint.identifier = leadingConstraintId
+
             NSLayoutConstraint.activate([
                 colorStripe.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
                 colorStripe.topAnchor.constraint(equalTo: cell.topAnchor),
@@ -1162,7 +1166,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 colorStripe.widthAnchor.constraint(equalToConstant: 5),
                 accessoryStack.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
                 accessoryStack.topAnchor.constraint(equalTo: cell.topAnchor, constant: 4),
-                leadingStack.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
+                leadingConstraint,
                 leadingStack.topAnchor.constraint(equalTo: cell.topAnchor, constant: 4),
                 leadingStack.trailingAnchor.constraint(lessThanOrEqualTo: accessoryStack.leadingAnchor, constant: -4),
                 subtitleField.leadingAnchor.constraint(equalTo: textField.leadingAnchor),
@@ -1186,6 +1190,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let colorStripeId = NSUserInterfaceItemIdentifier("colorStripe")
         let accessoryStackId = NSUserInterfaceItemIdentifier("tabAccessoryStack")
         let leadingStackId = NSUserInterfaceItemIdentifier("tabLeadingStack")
+        let leadingConstraintId = "tabLeadingStackLeading"
 
         if !skipTitle {
             cell.textField?.stringValue = tab.displayTitle
@@ -1220,8 +1225,10 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             if let color = tab.color {
                 stripe.layer?.backgroundColor = color.nsColor.cgColor
                 stripe.isHidden = false
+                cell.constraints.first { $0.identifier == leadingConstraintId }?.constant = 12
             } else {
                 stripe.isHidden = true
+                cell.constraints.first { $0.identifier == leadingConstraintId }?.constant = 8
             }
         }
     }
