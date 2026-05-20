@@ -102,10 +102,32 @@ Set `alert-clear-mode = manual` to make alerts persist until you explicitly dism
 
 ## Claude Code Integration
 
-For some reason, Claude Code seems to wait 1-2 minutes before sending an OSC 777 / OSC 9 notification when it's waiting for a response.
+Claude Code's default notification path waits on a roughly 60-second idle
+timer before emitting terminal notifications. DanTerm ships Claude Code hooks
+that bypass that delay and emit immediate per-pane OSC 777 notifications when
+Claude finishes a turn or needs user input.
 
-To work around this, DanTerm ships a Claude Code Stop hook package that emits
-an OSC 777 notification as soon as Claude finishes a turn.
+### Requirements
+
+Claude Code v2.1.141 or newer is required for hook
+[`terminalSequence`](https://code.claude.com/docs/en/hooks#emit-terminal-notifications)
+support.
+
+### Prerequisite
+
+Disable Claude Code's native notification channel so it does not duplicate the
+DanTerm hook path. Claude Code documents
+[`preferredNotifChannel`](https://code.claude.com/docs/en/settings) as the
+notification setting; use either path:
+
+- JSON: add `"preferredNotifChannel": "notifications_disabled"` to
+  `~/.claude/settings.json` or the project-local equivalent.
+- Interactive: open `/config` inside Claude Code and set Notifications to
+  disabled.
+
+Skipping this prerequisite leaves the delayed native notification path enabled,
+so Claude Code can still emit late notifications from panes you have already
+tabbed away from.
 
 With Nix, add `danterm.overlays.default` to your `nixpkgs.overlays`, then point
 Claude Code at the packaged hook:
@@ -119,8 +141,32 @@ command:
 
 ```json
 {
+  "preferredNotifChannel": "notifications_disabled",
   "hooks": {
     "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/absolute/path/to/danterm-claude-notify-osc777",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/absolute/path/to/danterm-claude-notify-osc777",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
       {
         "hooks": [
           {
@@ -145,7 +191,7 @@ clicked, will take you to the originating pane.
 
 ## OpenAI Codex Integration
 
-Codex already works out of the box. Dunno what's wrong with Claude Code.
+Codex already works out of the box.
 
 ## Shell Integration
 

@@ -35,7 +35,7 @@
 
     checks = forEachSystem hookSystems (system: pkgs: {
       claude-notify-osc777 = pkgs.runCommand "danterm-claude-notify-osc777-test" {
-        nativeBuildInputs = with pkgs; [ bash jq coreutils diffutils findutils ];
+        nativeBuildInputs = with pkgs; [ bash jq ];
       } ''
         mkdir -p integrations
         cp -R ${./integrations/claude-code} integrations/claude-code
