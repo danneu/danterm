@@ -56,14 +56,13 @@ final class EnvelopeTests: XCTestCase {
             params: .object([
                 IpcRequestContext.paramsKey: .object([
                     "paneId": .string("pane-1"),
-                    "tabId": .string("tab-1"),
                 ]),
             ])
         )
 
         let encoded = try sortedEncoder().encode(request)
         let decoded = try JSONDecoder().decode(JsonRpcRequest.self, from: encoded)
-        XCTAssertEqual(IpcRequestContext.from(params: decoded.params), IpcRequestContext(paneId: "pane-1", tabId: "tab-1"))
+        XCTAssertEqual(IpcRequestContext.from(params: decoded.params), IpcRequestContext(paneId: "pane-1"))
     }
 
     func testJSONValueDoesNotEncodeObjectAsBase64Data() throws {

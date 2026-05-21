@@ -27,34 +27,44 @@ struct DanTermCLI {
 
         Commands:
           ls                          Print the full app snapshot as JSON
-          tab new [--group <name>] [--cmd <s>] [--cwd <p>] [--title <s>]
+          tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>]
                                       Open a new tab, optionally launching a command
-          tab rename <name>|--clear   Rename the current tab or clear its custom title
+          tab rename [--tab <tab-id>] <name>|--clear
+                                      Rename a tab or clear its custom title
           pane focus <pane-id>        Focus a pane by id
-          pane split [--pane <id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>]
+          pane info [--pane <pane-id>]
+                                      Print pane, tab, and group metadata as JSON
+          pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>]
                                       Split a pane (horizontal/vertical)
-          pane input [--pane <id>] [--literal] -- <token>...
+          pane input [--pane <pane-id>] [--literal] -- <token>...
                                       Send keystrokes to a pane (tmux-style:
                                       "ls" Enter, C-c, Up, Escape). Use --pane
                                       to target a specific pane (default:
                                       caller's via $DANTERM_PANE).
-          pane read --pane <id> [--lines <n>]
+          pane read --pane <pane-id> [--lines <n>]
                                       Print a pane's visible text, or the last
                                       n lines of scrollback when --lines is set.
-          theme set <name>|--clear    Set or clear the current theme
-          todo list                   List todos as JSON
-          todo add <text>             Add a todo
-          todo edit <id> <text>       Edit a todo's text
-          todo done <id>              Mark a todo done
-          todo open <id>              Reopen a completed todo
-          todo delete <id>            Delete a todo
-          todo clear-completed        Remove all completed todos
+          theme set [--pane <pane-id>] <name>|--clear
+                                      Set or clear a pane theme
+          todo list [--pane <pane-id>]
+                                      List todos as JSON
+          todo add [--pane <pane-id>] <text>
+                                      Add a todo
+          todo edit [--pane <pane-id>] <id> <text>
+                                      Edit a todo's text
+          todo done [--pane <pane-id>] <id>
+                                      Mark a todo done
+          todo open [--pane <pane-id>] <id>
+                                      Reopen a completed todo
+          todo delete [--pane <pane-id>] <id>
+                                      Delete a todo
+          todo clear-completed [--pane <pane-id>]
+                                      Remove all completed todos
           help, --help, -h            Print this message
 
         Environment:
           DANTERM_SOCK   Path to the DanTerm control socket
           DANTERM_PANE   Pane id for context-aware commands (set by shell integration)
-          DANTERM_TAB    Tab id for context-aware commands (set by shell integration)
 
         """
 
@@ -108,8 +118,7 @@ struct DanTermCLI {
         let requestId = UUID().uuidString
         var params = command.params
         let context = IpcRequestContext(
-            paneId: nonEmpty(environment[EnvVars.pane]),
-            tabId: nonEmpty(environment[EnvVars.tab])
+            paneId: nonEmpty(environment[EnvVars.pane])
         )
         params[IpcRequestContext.paramsKey] = context.jsonValue
         let request = JsonRpcRequest(

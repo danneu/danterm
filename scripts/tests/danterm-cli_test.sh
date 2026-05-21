@@ -41,9 +41,12 @@ if grep -q '^danterm:' "$err"; then
 fi
 grep -qF 'Usage:' "$err"
 grep -qF 'ls' "$err"
-grep -qF 'pane split -h|-v' "$err"
-grep -qF 'todo clear-completed' "$err"
+grep -qF 'pane info [--pane <pane-id>]' "$err"
+grep -qF 'pane split [--pane <pane-id>] -h|-v' "$err"
+grep -qF 'todo clear-completed [--pane <pane-id>]' "$err"
 grep -qF 'DANTERM_SOCK' "$err"
+grep -qF 'DANTERM_PANE' "$err"
+! grep -qF 'DANTERM_TAB' "$err"
 
 # Explicit help requests: usage on stdout, exit 0, stderr silent. Same
 # stable tokens checked across each flag form.
@@ -54,9 +57,12 @@ for help_arg in help --help -h; do
     [[ -s "$out" ]]
     grep -qF 'Usage:' "$out"
     grep -qF 'ls' "$out"
-    grep -qF 'pane split -h|-v' "$out"
-    grep -qF 'todo clear-completed' "$out"
+    grep -qF 'pane info [--pane <pane-id>]' "$out"
+    grep -qF 'pane split [--pane <pane-id>] -h|-v' "$out"
+    grep -qF 'todo clear-completed [--pane <pane-id>]' "$out"
     grep -qF 'DANTERM_SOCK' "$out"
+    grep -qF 'DANTERM_PANE' "$out"
+    ! grep -qF 'DANTERM_TAB' "$out"
 done
 
 pkill -x "$APP_NAME" 2>/dev/null || true
@@ -82,31 +88,48 @@ export DANTERM_SOCK="$socket"
 model=""
 pane_id=""
 tab_id=""
+group_id=""
 for _ in $(seq 1 30); do
     if model="$("$CLI_PATH" ls 2>/dev/null)" \
         && pane_id="$(printf '%s\n' "$model" | jq -er '.panes[0].id // empty')" \
-        && tab_id="$(printf '%s\n' "$model" | jq -er '.selectedTabId // empty')"; then
+        && tab_id="$(printf '%s\n' "$model" | jq -er '.selectedTabId // empty')" \
+        && group_id="$(printf '%s\n' "$model" | jq -er --arg tab "$tab_id" '.groups[] | select([.tabs[].id] | index($tab)) | .id')"; then
         break
     fi
     sleep 1
 done
-if [[ -z "$pane_id" || -z "$tab_id" ]]; then
+if [[ -z "$pane_id" || -z "$tab_id" || -z "$group_id" ]]; then
     echo "DanTerm model did not expose an active pane" >&2
     exit 1
 fi
 
 printf '%s\n' "$model" | jq .groups >/dev/null
 export DANTERM_PANE="$pane_id"
-export DANTERM_TAB="$tab_id"
 
-"$CLI_PATH" tab title test123
-[[ "$("$CLI_PATH" tab title)" == "test123" ]]
+info="$("$CLI_PATH" pane info --pane "$pane_id")"
+printf '%s\n' "$info" | jq -e \
+    --arg pane "$pane_id" \
+    --arg tab "$tab_id" \
+    --arg group "$group_id" \
+    '.pane.id == $pane and .tab.id == $tab and .group.id == $group' >/dev/null
 
-todo_id="$("$CLI_PATH" todo add 'ship cli' | jq -r .id)"
-"$CLI_PATH" todo list | jq -e --arg id "$todo_id" '.[] | select(.id == $id)' >/dev/null
-"$CLI_PATH" todo edit "$todo_id" 'ship cli v2'
-"$CLI_PATH" todo "done" "$todo_id"
-"$CLI_PATH" todo delete "$todo_id"
+"$CLI_PATH" tab rename --tab "$tab_id" test123
+"$CLI_PATH" ls | jq -e \
+    --arg tab "$tab_id" \
+    '.groups[].tabs[] | select(.id == $tab and .customTitle == "test123")' >/dev/null
+
+"$CLI_PATH" tab new --group "$group_id" --title smoke-tab | jq -e '.tab.id and .panes[0].id' >/dev/null
+split_pane_id="$("$CLI_PATH" pane split --pane "$pane_id" -h --title smoke-split | jq -r '.pane.id')"
+[[ -n "$split_pane_id" && "$split_pane_id" != "null" ]]
+
+"$CLI_PATH" theme set --pane "$pane_id" SmokeTheme
+"$CLI_PATH" theme set --pane "$pane_id" --clear
+
+todo_id="$("$CLI_PATH" todo add 'ship cli' | jq -r '.todo.id')"
+"$CLI_PATH" todo list --pane "$pane_id" | jq -e --arg id "$todo_id" '.todos[] | select(.id == $id)' >/dev/null
+"$CLI_PATH" todo edit --pane "$pane_id" "$todo_id" 'ship cli v2'
+"$CLI_PATH" todo "done" --pane "$pane_id" "$todo_id"
+"$CLI_PATH" todo delete --pane "$pane_id" "$todo_id"
 
 /usr/bin/python3 - "$DANTERM_SOCK" <<'PY'
 import json
@@ -136,7 +159,7 @@ for _ in $(seq 1 10); do
     [[ ! -S "$socket" ]] && break
     sleep 0.5
 done
-if env -u DANTERM_PANE -u DANTERM_TAB "$CLI_PATH" ls >/tmp/danterm-cli-smoke.out 2>/tmp/danterm-cli-smoke.err; then
+if env -u DANTERM_PANE "$CLI_PATH" ls >/tmp/danterm-cli-smoke.out 2>/tmp/danterm-cli-smoke.err; then
     echo "danterm ls unexpectedly succeeded after app quit" >&2
     exit 1
 fi

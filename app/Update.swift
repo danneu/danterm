@@ -1488,10 +1488,6 @@ private func handleIpcRequest(
     params: JSONValue,
     context: IpcRequestContext
 ) -> [Effect] {
-    guard ipcContextIsWellFormed(context) else {
-        return ipcInvalidParams(reqId, "invalid context")
-    }
-
     switch method {
     case Methods.ls:
         do {
@@ -1503,12 +1499,30 @@ private func handleIpcRequest(
             return [.ipcError(reqId: reqId, code: -32603, message: "internal error")]
         }
 
-    case Methods.tabRename:
-        guard let tabId = resolveIpcTabId(context, in: model) else {
-            return ipcInvalidParams(reqId, "no tab in context")
+    case Methods.paneInfo:
+        do {
+            let paneId = try resolveTargetPane(params: params, context: context, in: model)
+            guard let result = paneInfoResult(paneId, in: model) else {
+                return ipcInvalidParams(reqId, "pane not found")
+            }
+            return [.ipcReply(reqId: reqId, result: result)]
+        } catch let error as IpcParamsError {
+            return ipcInvalidParams(reqId, error.message)
+        } catch {
+            return ipcInvalidParams(reqId, "invalid pane info params")
         }
+
+    case Methods.tabRename:
         guard case .object(let object) = params else {
             return ipcInvalidParams(reqId, "invalid params")
+        }
+        let tabId: TabId
+        do {
+            tabId = try resolveIpcTabId(params: params, context: context, in: model)
+        } catch let error as IpcParamsError {
+            return ipcInvalidParams(reqId, error.message)
+        } catch {
+            return ipcInvalidParams(reqId, "invalid tab")
         }
         guard let titleValue = object["title"] else {
             return ipcInvalidParams(reqId, "invalid title")
@@ -1559,29 +1573,18 @@ private func handleIpcRequest(
         } catch {
             return ipcInvalidParams(reqId, "invalid launch")
         }
-        let groupId: GroupId?
-        if let groupValue = object["group"] {
-            guard case .string(let groupName) = groupValue,
-                  !groupName.trimmingCharacters(in: .whitespaces).isEmpty
-            else {
-                return ipcInvalidParams(reqId, "invalid group")
-            }
-            groupId = model.groups.first(where: { $0.name == groupName })?.id
-            if groupId == nil {
-                let before = Set(model.groups.flatMap(\.tabs).map(\.id))
-                let beforeGroups = Set(model.groups.map(\.id))
-                let effects = update(&model, .createGroup(name: groupName, launch: launch))
-                let tabId = newestTabId(excluding: before, in: model)
-                let newGroupId = newestGroupId(excluding: beforeGroups, in: model)
-                return effects + [.ipcReply(reqId: reqId, result: tabNewResult(tabId: tabId, groupId: newGroupId, in: model))]
-            }
-        } else {
-            groupId = nil
+        let groupId: GroupId
+        do {
+            groupId = try resolveTabNewGroup(params: params, context: context, in: model)
+        } catch let error as IpcParamsError {
+            return ipcInvalidParams(reqId, error.message)
+        } catch {
+            return ipcInvalidParams(reqId, "invalid group")
         }
         let before = Set(model.groups.flatMap(\.tabs).map(\.id))
         let effects = update(&model, .createTab(inGroupId: groupId, launch: launch))
         let tabId = newestTabId(excluding: before, in: model)
-        return effects + [.ipcReply(reqId: reqId, result: tabNewResult(tabId: tabId, groupId: nil, in: model))]
+        return effects + [.ipcReply(reqId: reqId, result: tabNewResult(tabId: tabId, groupId: groupId, in: model))]
 
     case Methods.paneFocus:
         guard case .object(let object) = params,
@@ -1595,10 +1598,17 @@ private func handleIpcRequest(
         return effects + [.ipcReply(reqId: reqId, result: tabFocusResult(tabForPane(paneId, in: model)))]
 
     case Methods.themeSet:
-        guard let paneId = resolveIpcPaneId(context, in: model),
-              case .object(let object) = params,
+        guard case .object(let object) = params,
               let themeValue = object["themeName"]
         else {
+            return ipcInvalidParams(reqId, "invalid theme params")
+        }
+        let paneId: PaneId
+        do {
+            paneId = try resolveTargetPane(params: params, context: context, in: model)
+        } catch let error as IpcParamsError {
+            return ipcInvalidParams(reqId, error.message)
+        } catch {
             return ipcInvalidParams(reqId, "invalid theme params")
         }
         let themeName: String?
@@ -1691,19 +1701,33 @@ private func handleIpcRequest(
         }
 
     case Methods.todoList:
-        guard let paneId = resolveIpcPaneId(context, in: model),
-              let todos = model.panes[paneId]?.todos
-        else {
-            return ipcInvalidParams(reqId, "no pane in context")
+        do {
+            let paneId = try resolveTargetPane(params: params, context: context, in: model)
+            guard let todos = model.panes[paneId]?.todos else {
+                return ipcInvalidParams(reqId, "no pane in context")
+            }
+            return [.ipcReply(reqId: reqId, result: todoListResult(todos))]
+        } catch let error as IpcParamsError {
+            return ipcInvalidParams(reqId, error.message)
+        } catch {
+            return ipcInvalidParams(reqId, "invalid todo params")
         }
-        return [.ipcReply(reqId: reqId, result: todoListResult(todos))]
 
     case Methods.todoAdd:
-        guard let paneId = resolveIpcPaneId(context, in: model),
-              case .object(let object) = params,
-              case .string(let text)? = object["text"],
-              let item = appendTodo(&model, paneId: paneId, text: text, id: UUID())
+        guard case .object(let object) = params,
+              case .string(let text)? = object["text"]
         else {
+            return ipcInvalidParams(reqId, "invalid todo text")
+        }
+        let paneId: PaneId
+        do {
+            paneId = try resolveTargetPane(params: params, context: context, in: model)
+        } catch let error as IpcParamsError {
+            return ipcInvalidParams(reqId, error.message)
+        } catch {
+            return ipcInvalidParams(reqId, "invalid todo text")
+        }
+        guard let item = appendTodo(&model, paneId: paneId, text: text, id: UUID()) else {
             return ipcInvalidParams(reqId, "invalid todo text")
         }
         return [
@@ -1713,14 +1737,23 @@ private func handleIpcRequest(
         ]
 
     case Methods.todoEdit:
-        guard let paneId = resolveIpcPaneId(context, in: model),
-              case .object(let object) = params,
+        guard case .object(let object) = params,
               case .string(let rawTodoId)? = object["todoId"],
               case .string(let text)? = object["text"],
               let todoId = parseTodoId(rawTodoId),
-              todoExists(todoId, paneId: paneId, in: model),
               !text.trimmingCharacters(in: .whitespaces).isEmpty
         else {
+            return ipcInvalidParams(reqId, "invalid todo")
+        }
+        let paneId: PaneId
+        do {
+            paneId = try resolveTargetPane(params: params, context: context, in: model)
+        } catch let error as IpcParamsError {
+            return ipcInvalidParams(reqId, error.message)
+        } catch {
+            return ipcInvalidParams(reqId, "invalid todo")
+        }
+        guard todoExists(todoId, paneId: paneId, in: model) else {
             return ipcInvalidParams(reqId, "invalid todo")
         }
         let effects = update(&model, .editTodoText(paneId: paneId, todoId: todoId, text: text))
@@ -1731,12 +1764,21 @@ private func handleIpcRequest(
         ]
 
     case Methods.todoDone, Methods.todoOpen:
-        guard let paneId = resolveIpcPaneId(context, in: model),
-              case .object(let object) = params,
+        guard case .object(let object) = params,
               case .string(let rawTodoId)? = object["todoId"],
-              let todoId = parseTodoId(rawTodoId),
-              todoExists(todoId, paneId: paneId, in: model)
+              let todoId = parseTodoId(rawTodoId)
         else {
+            return ipcInvalidParams(reqId, "invalid todo")
+        }
+        let paneId: PaneId
+        do {
+            paneId = try resolveTargetPane(params: params, context: context, in: model)
+        } catch let error as IpcParamsError {
+            return ipcInvalidParams(reqId, error.message)
+        } catch {
+            return ipcInvalidParams(reqId, "invalid todo")
+        }
+        guard todoExists(todoId, paneId: paneId, in: model) else {
             return ipcInvalidParams(reqId, "invalid todo")
         }
         let shouldBeDone = method == Methods.todoDone
@@ -1748,12 +1790,21 @@ private func handleIpcRequest(
         ]
 
     case Methods.todoDelete:
-        guard let paneId = resolveIpcPaneId(context, in: model),
-              case .object(let object) = params,
+        guard case .object(let object) = params,
               case .string(let rawTodoId)? = object["todoId"],
-              let todoId = parseTodoId(rawTodoId),
-              todoExists(todoId, paneId: paneId, in: model)
+              let todoId = parseTodoId(rawTodoId)
         else {
+            return ipcInvalidParams(reqId, "invalid todo")
+        }
+        let paneId: PaneId
+        do {
+            paneId = try resolveTargetPane(params: params, context: context, in: model)
+        } catch let error as IpcParamsError {
+            return ipcInvalidParams(reqId, error.message)
+        } catch {
+            return ipcInvalidParams(reqId, "invalid todo")
+        }
+        guard todoExists(todoId, paneId: paneId, in: model) else {
             return ipcInvalidParams(reqId, "invalid todo")
         }
         let effects = update(&model, .deleteTodo(paneId: paneId, todoId: todoId))
@@ -1763,7 +1814,12 @@ private func handleIpcRequest(
         ]
 
     case Methods.todoClearCompleted:
-        guard let paneId = resolveIpcPaneId(context, in: model) else {
+        let paneId: PaneId
+        do {
+            paneId = try resolveTargetPane(params: params, context: context, in: model)
+        } catch let error as IpcParamsError {
+            return ipcInvalidParams(reqId, error.message)
+        } catch {
             return ipcInvalidParams(reqId, "no pane in context")
         }
         let effects = update(&model, .clearCompletedTodos(paneId: paneId))
@@ -1781,12 +1837,6 @@ private func ipcInvalidParams(_ reqId: UUID, _ message: String) -> [Effect] {
     [.ipcError(reqId: reqId, code: -32602, message: message)]
 }
 
-private func ipcContextIsWellFormed(_ context: IpcRequestContext) -> Bool {
-    if let paneId = context.paneId, parsePaneId(paneId) == nil { return false }
-    if let tabId = context.tabId, parseTabId(tabId) == nil { return false }
-    return true
-}
-
 private func parsePaneId(_ raw: String?) -> PaneId? {
     guard let raw, let uuid = UUID(uuidString: raw) else { return nil }
     return PaneId(rawValue: uuid)
@@ -1795,6 +1845,11 @@ private func parsePaneId(_ raw: String?) -> PaneId? {
 private func parseTabId(_ raw: String?) -> TabId? {
     guard let raw, let uuid = UUID(uuidString: raw) else { return nil }
     return TabId(rawValue: uuid)
+}
+
+private func parseGroupId(_ raw: String?) -> GroupId? {
+    guard let raw, let uuid = UUID(uuidString: raw) else { return nil }
+    return GroupId(rawValue: uuid)
 }
 
 private func parseTodoId(_ raw: String?) -> UUID? {
@@ -1814,6 +1869,32 @@ private struct IpcParamsError: Error {
     init(_ message: String) { self.message = message }
 }
 
+// Resolve a pane-targeting IPC command. A supplied params.pane is authoritative:
+// malformed or stale explicit ids fail instead of falling back to pane context.
+private func resolveTargetPane(
+    params: JSONValue,
+    context: IpcRequestContext,
+    in model: AppModel
+) throws -> PaneId {
+    if case .object(let object) = params, let raw = object["pane"] {
+        return try resolveExplicitPane(raw, in: model)
+    }
+    if let id = resolveIpcPaneId(context, in: model) {
+        return id
+    }
+    throw IpcParamsError("no pane in context")
+}
+
+private func resolveExplicitPane(_ raw: JSONValue, in model: AppModel) throws -> PaneId {
+    guard case .string(let str) = raw else {
+        throw IpcParamsError("pane must be a string")
+    }
+    guard let id = parsePaneId(str), model.panes[id] != nil else {
+        throw IpcParamsError("pane not found")
+    }
+    return id
+}
+
 // `pane split`-specific pane resolver. An explicit pane targets a sibling and
 // must be valid; only an absent pane falls back to the request context.
 private func resolvePaneSplitTarget(
@@ -1821,19 +1902,7 @@ private func resolvePaneSplitTarget(
     context: IpcRequestContext,
     in model: AppModel
 ) throws -> PaneId {
-    if case .object(let object) = params, let raw = object["pane"] {
-        guard case .string(let str) = raw else {
-            throw IpcParamsError("pane must be a string")
-        }
-        guard let id = parsePaneId(str), model.panes[id] != nil else {
-            throw IpcParamsError("pane not found")
-        }
-        return id
-    }
-    if let id = resolveIpcPaneId(context, in: model) {
-        return id
-    }
-    throw IpcParamsError("no pane in context")
+    try resolveTargetPane(params: params, context: context, in: model)
 }
 
 // `pane.input`-specific pane resolver. Honours an explicit `pane` field in
@@ -1845,19 +1914,7 @@ private func resolveSendKeysPane(
     context: IpcRequestContext,
     in model: AppModel
 ) throws -> PaneId {
-    if case .object(let object) = params, let raw = object["pane"] {
-        guard case .string(let str) = raw else {
-            throw IpcParamsError("pane must be a string")
-        }
-        guard let id = parsePaneId(str), model.panes[id] != nil else {
-            throw IpcParamsError("pane not found")
-        }
-        return id
-    }
-    if let id = resolveIpcPaneId(context, in: model) {
-        return id
-    }
-    throw IpcParamsError("no pane in context")
+    try resolveTargetPane(params: params, context: context, in: model)
 }
 
 // Parses a single `input[i]` JSON object into an InputEvent. All structural
@@ -1907,14 +1964,49 @@ private func parseInputEvent(_ value: JSONValue) throws -> InputEvent {
     return .key(key, mods)
 }
 
-private func resolveIpcTabId(_ context: IpcRequestContext, in model: AppModel) -> TabId? {
-    if let paneId = parsePaneId(context.paneId) {
-        return tabForPane(paneId, in: model)?.id
+private func resolveIpcTabId(
+    params: JSONValue,
+    context: IpcRequestContext,
+    in model: AppModel
+) throws -> TabId {
+    if case .object(let object) = params, let raw = object["tab"] {
+        guard case .string(let str) = raw else {
+            throw IpcParamsError("tab must be a string")
+        }
+        guard let id = parseTabId(str), tabById(id, in: model) != nil else {
+            throw IpcParamsError("tab not found")
+        }
+        return id
     }
-    if let tabId = parseTabId(context.tabId), tabById(tabId, in: model) != nil {
+    if let paneId = parsePaneId(context.paneId),
+       let tabId = tabForPane(paneId, in: model)?.id {
         return tabId
     }
-    return nil
+    throw IpcParamsError("no tab in context")
+}
+
+private func resolveTabNewGroup(
+    params: JSONValue,
+    context: IpcRequestContext,
+    in model: AppModel
+) throws -> GroupId {
+    if case .object(let object) = params, let raw = object["group"] {
+        guard case .string(let str) = raw else {
+            throw IpcParamsError("group must be a string")
+        }
+        guard let id = parseGroupId(str),
+              model.groups.contains(where: { $0.id == id })
+        else {
+            throw IpcParamsError("group not found")
+        }
+        return id
+    }
+    if let paneId = parsePaneId(context.paneId),
+       let tab = tabForPane(paneId, in: model),
+       let group = groupForTab(tab.id, in: model) {
+        return group.id
+    }
+    throw IpcParamsError("no group in context")
 }
 
 private func ipcSplitDirection(_ raw: String) -> SplitNodeModel.Direction? {
@@ -1927,10 +2019,6 @@ private func ipcSplitDirection(_ raw: String) -> SplitNodeModel.Direction? {
 
 private func newestTabId(excluding before: Set<TabId>, in model: AppModel) -> TabId? {
     model.groups.flatMap(\.tabs).first(where: { !before.contains($0.id) })?.id
-}
-
-private func newestGroupId(excluding before: Set<GroupId>, in model: AppModel) -> GroupId? {
-    model.groups.first(where: { !before.contains($0.id) })?.id
 }
 
 private func tabNewResult(tabId: TabId?, groupId: GroupId?, in model: AppModel) -> JSONValue {
@@ -1983,6 +2071,31 @@ private func paneResult(_ paneId: PaneId?) -> JSONValue {
         return .object(["pane": .null])
     }
     return .object(["pane": .object(["id": .string(paneId.rawValue.uuidString)])])
+}
+
+private func paneInfoResult(_ paneId: PaneId, in model: AppModel) -> JSONValue? {
+    guard let pane = model.panes[paneId],
+          let tab = tabForPane(paneId, in: model),
+          let group = groupForTab(tab.id, in: model)
+    else {
+        return nil
+    }
+    return .object([
+        "pane": .object([
+            "id": .string(pane.id.rawValue.uuidString),
+            "title": .string(pane.title),
+            "cwd": pane.cwd.map(JSONValue.string) ?? .null,
+        ]),
+        "tab": .object([
+            "id": .string(tab.id.rawValue.uuidString),
+            "title": .string(tab.displayTitle),
+            "groupId": .string(group.id.rawValue.uuidString),
+        ]),
+        "group": .object([
+            "id": .string(group.id.rawValue.uuidString),
+            "name": .string(group.name),
+        ]),
+    ])
 }
 
 private func paneThemeResult(_ paneId: PaneId, in model: AppModel) -> JSONValue {

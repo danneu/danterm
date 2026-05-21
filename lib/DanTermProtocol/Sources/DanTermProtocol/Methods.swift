@@ -7,6 +7,7 @@ public enum Methods {
     public static let tabNew = "tab.new"
     public static let tabRename = "tab.rename"
     public static let paneFocus = "pane.focus"
+    public static let paneInfo = "pane.info"
     public static let paneSplit = "pane.split"
     public static let paneInput = "pane.input"
     public static let paneRead = "pane.read"

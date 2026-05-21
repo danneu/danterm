@@ -355,15 +355,11 @@ class AppRuntime {
         switch effect {
         case .createSurface(let paneId, let cwd, let command, let launchCommand, let waitAfterCommand):
             let token = tokenStore.generate(for: paneId)
-            var envVars: [(String, String)] = [
-                (EnvVars.flag, "1"),
-                (EnvVars.sock, ipcSocketPath.path),
-                (EnvVars.pane, paneId.rawValue.uuidString),
-                ("DANTERM_TOKEN", token),
-            ]
-            if let tabId = tabForPane(paneId, in: model)?.id {
-                envVars.append((EnvVars.tab, tabId.rawValue.uuidString))
-            }
+            let envVars = terminalLaunchEnvironment(
+                ipcSocketPath: ipcSocketPath.path,
+                paneId: paneId,
+                token: token
+            )
             let view = makeTerminalView(
                 paneId: paneId,
                 workingDirectory: cwd,

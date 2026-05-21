@@ -10,8 +10,8 @@ final class TabNewArgsTests: XCTestCase {
 
     func testGroupParses() throws {
         XCTAssertEqual(
-            try parseTabNewArgs(["--group", "Builds"]),
-            ParsedTabNew(group: "Builds", launch: nil)
+            try parseTabNewArgs(["--group", "G1"]),
+            ParsedTabNew(group: "G1", launch: nil)
         )
     }
 
@@ -32,8 +32,8 @@ final class TabNewArgsTests: XCTestCase {
 
     func testCombinationParses() throws {
         XCTAssertEqual(
-            try parseTabNewArgs(["--group", "Builds", "--cmd", "make test", "--cwd", "/repo", "--title", "tests"]),
-            ParsedTabNew(group: "Builds", launch: LaunchSpec(cmd: "make test", cwd: "/repo", title: "tests"))
+            try parseTabNewArgs(["--group", "G1", "--cmd", "make test", "--cwd", "/repo", "--title", "tests"]),
+            ParsedTabNew(group: "G1", launch: LaunchSpec(cmd: "make test", cwd: "/repo", title: "tests"))
         )
     }
 

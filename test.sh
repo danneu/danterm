@@ -24,6 +24,7 @@ echo "Compiling tests..."
         "$SCRIPT_DIR/app/ModelOperations.swift" \
         "$SCRIPT_DIR/app/Msg.swift" \
         "$SCRIPT_DIR/app/Effect.swift" \
+        "$SCRIPT_DIR/app/TerminalLaunchEnvironment.swift" \
         "$SCRIPT_DIR/app/Update.swift" \
         "$SCRIPT_DIR/app/IpcConnection.swift" \
         "$SCRIPT_DIR/app/CLIPathInstaller.swift" \

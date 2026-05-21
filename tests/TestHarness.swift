@@ -27,6 +27,7 @@ struct TestRunner {
         todoTests()
         updateTabTodoTests()
         todoShortcutCatalogTests()
+        terminalLaunchEnvironmentTests()
         ipcUpdateTests()
         ipcConnectionTests()
         cliPathInstallerTests()

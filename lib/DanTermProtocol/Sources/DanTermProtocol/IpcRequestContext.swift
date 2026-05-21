@@ -1,21 +1,18 @@
-// Raw pane/tab context supplied by the CLI and resolved inside pure update code.
+// Raw pane context supplied by the CLI and resolved inside pure update code.
 import Foundation
 
 public struct IpcRequestContext: Codable, Equatable {
     public let paneId: String?
-    public let tabId: String?
 
     public static let paramsKey = "_ctx"
 
-    public init(paneId: String? = nil, tabId: String? = nil) {
+    public init(paneId: String? = nil) {
         self.paneId = paneId
-        self.tabId = tabId
     }
 
     public var jsonValue: JSONValue {
         var object: [String: JSONValue] = [:]
         if let paneId { object["paneId"] = .string(paneId) }
-        if let tabId { object["tabId"] = .string(tabId) }
         return .object(object)
     }
 
@@ -26,8 +23,7 @@ public struct IpcRequestContext: Codable, Equatable {
             return IpcRequestContext()
         }
         return IpcRequestContext(
-            paneId: context["paneId"]?.asString,
-            tabId: context["tabId"]?.asString
+            paneId: context["paneId"]?.asString
         )
     }
 
