@@ -3,7 +3,7 @@ import DanTermProtocol
 
 enum Effect {
     // Surface
-    case createSurface(paneId: PaneId, cwd: String?, command: String?)
+    case createSurface(paneId: PaneId, cwd: String?, command: String?, launchCommand: String? = nil, waitAfterCommand: Bool = true)
     case destroySurface(paneId: PaneId)
     // Paste path (ghostty_surface_text). Strips control bytes and applies
     // bracketed-paste mode if active. Used by direct IPC callers that send

@@ -46,6 +46,8 @@ class TerminalView: NSView, NSTextInputClient {
         ghosttyApp: GhosttyApp,
         workingDirectory: String? = nil,
         command: String? = nil,
+        launchCommand: String? = nil,
+        waitAfterCommand: Bool = true,
         restoreCommandBehavior: RestoreCommandBehavior = .execute,
         envVars: [(String, String)] = []
     ) {
@@ -78,10 +80,12 @@ class TerminalView: NSView, NSTextInputClient {
             self.surface = newSurface
         }
 
-        // Launch commands should behave like typed shell input so the pane
-        // stays alive after command exit. Restored snapshots may choose to
-        // prefill the command instead of executing it immediately.
-        let initialInput = restoreInitialInput(for: command, behavior: restoreCommandBehavior)
+        // Restored snapshots may choose to prefill the command instead of
+        // executing it immediately. IPC launches use Ghostty's command field
+        // and must not also seed shell input.
+        let initialInput = launchCommand == nil
+            ? restoreInitialInput(for: command, behavior: restoreCommandBehavior)
+            : nil
 
         // Build env var structs (strdup'd so pointers stay alive through createSurface)
         var envVarStructs = envVars.map { (key, value) in
@@ -100,27 +104,27 @@ class TerminalView: NSView, NSTextInputClient {
             config.env_var_count = buf.count
         }
 
-        // Apply working directory and initial input, then create surface.
-        // withCString closures must nest so both pointers stay alive.
-        if let dir = workingDirectory {
-            dir.withCString { dirPtr in
-                config.working_directory = dirPtr
-                if let input = initialInput {
-                    input.withCString { inputPtr in
-                        config.initial_input = inputPtr
-                        createSurface()
+        // Apply optional strings, then create the surface while the C string
+        // pointers are still alive.
+        func withOptionalCString<T>(_ string: String?, _ body: (UnsafePointer<CChar>?) -> T) -> T {
+            if let string {
+                return string.withCString { body($0) }
+            }
+            return body(nil)
+        }
+
+        withOptionalCString(workingDirectory) { dirPtr in
+            withOptionalCString(initialInput) { inputPtr in
+                withOptionalCString(launchCommand) { commandPtr in
+                    config.working_directory = dirPtr
+                    config.initial_input = inputPtr
+                    if let commandPtr {
+                        config.command = commandPtr
+                        config.wait_after_command = waitAfterCommand
                     }
-                } else {
                     createSurface()
                 }
             }
-        } else if let input = initialInput {
-            input.withCString { inputPtr in
-                config.initial_input = inputPtr
-                createSurface()
-            }
-        } else {
-            createSurface()
         }
 
         // Surface creation failed — release the bridge retain immediately

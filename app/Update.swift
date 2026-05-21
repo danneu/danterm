@@ -41,15 +41,21 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
     // MARK: - Tab Management
 
-    case .createTab(let inGroupId, let position):
+    case .createTab(let inGroupId, let position, let launch):
         let paneId = PaneId()
         let tabId = TabId()
-        let cwd = currentCwd(in: model)
+        let cwd = launch?.cwd ?? currentCwd(in: model)
 
-        let pane = PaneModel(id: paneId)
+        var pane = PaneModel(id: paneId)
+        if let title = launch?.title {
+            pane.title = title
+        }
         model.panes[paneId] = pane
 
-        let tab = TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(paneId))
+        var tab = TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(paneId))
+        if let title = launch?.title {
+            tab.customTitle = title
+        }
 
         // Find target group
         let targetGroupIndex: Int
@@ -85,7 +91,13 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
         model.selectedTabId = tabId
 
-        effects.append(.createSurface(paneId: paneId, cwd: cwd, command: nil))
+        effects.append(.createSurface(
+            paneId: paneId,
+            cwd: cwd,
+            command: nil,
+            launchCommand: launch?.cmd,
+            waitAfterCommand: true
+        ))
         effects.append(.rebuildContentView)
         effects.append(.reloadSidebar)
         effects.append(contentsOf: selectionSyncEffects(for: model))
@@ -179,7 +191,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
     // MARK: - Pane Management
 
-    case .splitPane(let paneId, let direction):
+    case .splitPane(let paneId, let direction, let launch):
         let tab: TabModel
         if let paneId {
             guard let found = tabForPane(paneId, in: model) else { return [] }
@@ -190,12 +202,15 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         let targetPaneId = paneId ?? tab.focusedPaneId
         let newPaneId = PaneId()
-        let cwd = model.panes[targetPaneId]?.cwd
+        let cwd = launch?.cwd ?? model.panes[targetPaneId]?.cwd
         let theme = model.panes[targetPaneId]?.theme
 
         guard let newRoot = splitLeaf(tab.rootNode, paneId: targetPaneId, direction: direction, newPaneId: newPaneId) else { return [] }
 
         var newPane = PaneModel(id: newPaneId)
+        if let title = launch?.title {
+            newPane.title = title
+        }
         newPane.theme = theme
         model.panes[newPaneId] = newPane
 
@@ -207,7 +222,13 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
 
         var effects: [Effect] = [
-            .createSurface(paneId: newPaneId, cwd: cwd, command: nil),
+            .createSurface(
+                paneId: newPaneId,
+                cwd: cwd,
+                command: nil,
+                launchCommand: launch?.cmd,
+                waitAfterCommand: true
+            ),
             .rebuildContentView,
             // Persist new split tree so the pane layout survives a crash.
             .scheduleCheckpoint,
@@ -973,11 +994,11 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
     // MARK: - Group Management
 
-    case .createGroup(let name):
+    case .createGroup(let name, let launch):
         let groupId = GroupId()
         let group = GroupModel(id: groupId, name: name)
         model.groups.append(group)
-        return update(&model, .createTab(inGroupId: groupId))
+        return update(&model, .createTab(inGroupId: groupId, launch: launch))
 
     case .deleteGroup(let id, let moveTabs):
         guard let idx = model.groups.firstIndex(where: { $0.id == id }),
@@ -1482,22 +1503,27 @@ private func handleIpcRequest(
             return [.ipcError(reqId: reqId, code: -32603, message: "internal error")]
         }
 
-    case Methods.tabTitle:
+    case Methods.tabRename:
         guard let tabId = resolveIpcTabId(context, in: model) else {
             return ipcInvalidParams(reqId, "no tab in context")
         }
         guard case .object(let object) = params else {
             return ipcInvalidParams(reqId, "invalid params")
         }
-        if let titleValue = object["title"] {
-            guard case .string(let title) = titleValue else {
-                return ipcInvalidParams(reqId, "invalid title")
-            }
-            let effects = update(&model, .renameTab(id: tabId, name: title))
-            return effects + [.ipcReply(reqId: reqId, result: .object(["ok": .bool(true)]))]
+        guard let titleValue = object["title"] else {
+            return ipcInvalidParams(reqId, "invalid title")
         }
-        let current = tabById(tabId, in: model)?.displayTitle ?? ""
-        return [.ipcReply(reqId: reqId, result: .object(["title": .string(current)]))]
+        let title: String?
+        switch titleValue {
+        case .string(let value):
+            title = value
+        case .null:
+            title = nil
+        default:
+            return ipcInvalidParams(reqId, "invalid title")
+        }
+        let effects = update(&model, .renameTab(id: tabId, name: title))
+        return effects + [.ipcReply(reqId: reqId, result: tabRenameResult(tabById(tabId, in: model)))]
 
     case Methods.paneSplit:
         do {
@@ -1507,20 +1533,31 @@ private func handleIpcRequest(
             else {
                 throw IpcParamsError("invalid pane split params")
             }
+            let launch = try parseLaunchSpec(object["launch"])
             let paneId = try resolvePaneSplitTarget(params: params, context: context, in: model)
             let before = Set(model.panes.keys)
-            let effects = update(&model, .splitPane(paneId: paneId, direction: direction))
+            let effects = update(&model, .splitPane(paneId: paneId, direction: direction, launch: launch))
             let newPaneId = model.panes.keys.first(where: { !before.contains($0) })
-            return effects + [.ipcReply(reqId: reqId, result: paneIdResult(newPaneId))]
+            return effects + [.ipcReply(reqId: reqId, result: paneResult(newPaneId))]
+        } catch let error as LaunchSpecParseError {
+            return ipcInvalidParams(reqId, launchSpecErrorMessage(error))
         } catch let error as IpcParamsError {
             return ipcInvalidParams(reqId, error.message)
         } catch {
             return ipcInvalidParams(reqId, "invalid pane split params")
         }
 
-    case Methods.newTab:
+    case Methods.tabNew:
         guard case .object(let object) = params else {
             return ipcInvalidParams(reqId, "invalid params")
+        }
+        let launch: LaunchSpec?
+        do {
+            launch = try parseLaunchSpec(object["launch"])
+        } catch let error as LaunchSpecParseError {
+            return ipcInvalidParams(reqId, launchSpecErrorMessage(error))
+        } catch {
+            return ipcInvalidParams(reqId, "invalid launch")
         }
         let groupId: GroupId?
         if let groupValue = object["group"] {
@@ -1532,17 +1569,19 @@ private func handleIpcRequest(
             groupId = model.groups.first(where: { $0.name == groupName })?.id
             if groupId == nil {
                 let before = Set(model.groups.flatMap(\.tabs).map(\.id))
-                let effects = update(&model, .createGroup(name: groupName))
+                let beforeGroups = Set(model.groups.map(\.id))
+                let effects = update(&model, .createGroup(name: groupName, launch: launch))
                 let tabId = newestTabId(excluding: before, in: model)
-                return effects + [.ipcReply(reqId: reqId, result: tabIdResult(tabId))]
+                let newGroupId = newestGroupId(excluding: beforeGroups, in: model)
+                return effects + [.ipcReply(reqId: reqId, result: tabNewResult(tabId: tabId, groupId: newGroupId, in: model))]
             }
         } else {
             groupId = nil
         }
         let before = Set(model.groups.flatMap(\.tabs).map(\.id))
-        let effects = update(&model, .createTab(inGroupId: groupId))
+        let effects = update(&model, .createTab(inGroupId: groupId, launch: launch))
         let tabId = newestTabId(excluding: before, in: model)
-        return effects + [.ipcReply(reqId: reqId, result: tabIdResult(tabId))]
+        return effects + [.ipcReply(reqId: reqId, result: tabNewResult(tabId: tabId, groupId: nil, in: model))]
 
     case Methods.paneFocus:
         guard case .object(let object) = params,
@@ -1553,7 +1592,7 @@ private func handleIpcRequest(
             return ipcInvalidParams(reqId, "invalid pane id")
         }
         let effects = navigateToPane(paneId, in: &model)
-        return effects + [.ipcReply(reqId: reqId, result: .object(["ok": .bool(true)]))]
+        return effects + [.ipcReply(reqId: reqId, result: tabFocusResult(tabForPane(paneId, in: model)))]
 
     case Methods.themeSet:
         guard let paneId = resolveIpcPaneId(context, in: model),
@@ -1572,9 +1611,9 @@ private func handleIpcRequest(
             return ipcInvalidParams(reqId, "invalid theme name")
         }
         let effects = update(&model, .setPaneTheme(paneId: paneId, themeName: themeName))
-        return effects + [.ipcReply(reqId: reqId, result: .object(["ok": .bool(true)]))]
+        return effects + [.ipcReply(reqId: reqId, result: paneThemeResult(paneId, in: model))]
 
-    case Methods.sendKeys:
+    case Methods.paneInput:
         do {
             let paneId = try resolveSendKeysPane(params: params, context: context, in: model)
             guard case .object(let object) = params else {
@@ -1594,7 +1633,7 @@ private func handleIpcRequest(
                 }
                 return [
                     .sendText(paneId: paneId, text: text),
-                    .ipcReply(reqId: reqId, result: .object(["ok": .bool(true)])),
+                    .ipcReply(reqId: reqId, result: okResult()),
                 ]
             case (.none, .some(let i)):
                 guard case .array(let arr) = i else {
@@ -1611,7 +1650,7 @@ private func handleIpcRequest(
                         effects.append(.sendInputKey(paneId: paneId, key: key, mods: mods))
                     }
                 }
-                effects.append(.ipcReply(reqId: reqId, result: .object(["ok": .bool(true)])))
+                effects.append(.ipcReply(reqId: reqId, result: okResult()))
                 return effects
             }
         } catch let error as IpcParamsError {
@@ -1620,7 +1659,7 @@ private func handleIpcRequest(
             return ipcInvalidParams(reqId, "invalid params")
         }
 
-    case Methods.readPane:
+    case Methods.paneRead:
         do {
             guard case .object(let object) = params else {
                 throw IpcParamsError("invalid params")
@@ -1657,7 +1696,7 @@ private func handleIpcRequest(
         else {
             return ipcInvalidParams(reqId, "no pane in context")
         }
-        return [.ipcReply(reqId: reqId, result: .array(todos.map(todoJSON)))]
+        return [.ipcReply(reqId: reqId, result: todoListResult(todos))]
 
     case Methods.todoAdd:
         guard let paneId = resolveIpcPaneId(context, in: model),
@@ -1670,7 +1709,7 @@ private func handleIpcRequest(
         return [
             .scheduleCheckpoint,
             .refreshPaneToolbar(paneId: paneId),
-            .ipcReply(reqId: reqId, result: todoJSON(item)),
+            .ipcReply(reqId: reqId, result: todoResult(item)),
         ]
 
     case Methods.todoEdit:
@@ -1685,9 +1724,10 @@ private func handleIpcRequest(
             return ipcInvalidParams(reqId, "invalid todo")
         }
         let effects = update(&model, .editTodoText(paneId: paneId, todoId: todoId, text: text))
+        let updated = model.panes[paneId]?.todos.first(where: { $0.id == todoId })
         return effects + [
             .refreshPaneToolbar(paneId: paneId),
-            .ipcReply(reqId: reqId, result: .object(["ok": .bool(true)])),
+            .ipcReply(reqId: reqId, result: todoResult(updated)),
         ]
 
     case Methods.todoDone, Methods.todoOpen:
@@ -1701,9 +1741,10 @@ private func handleIpcRequest(
         }
         let shouldBeDone = method == Methods.todoDone
         let effects = update(&model, .setTodoDone(paneId: paneId, todoId: todoId, isDone: shouldBeDone))
+        let updated = model.panes[paneId]?.todos.first(where: { $0.id == todoId })
         return effects + [
             .refreshPaneToolbar(paneId: paneId),
-            .ipcReply(reqId: reqId, result: .object(["ok": .bool(true)])),
+            .ipcReply(reqId: reqId, result: todoResult(updated)),
         ]
 
     case Methods.todoDelete:
@@ -1718,7 +1759,7 @@ private func handleIpcRequest(
         let effects = update(&model, .deleteTodo(paneId: paneId, todoId: todoId))
         return effects + [
             .refreshPaneToolbar(paneId: paneId),
-            .ipcReply(reqId: reqId, result: .object(["ok": .bool(true)])),
+            .ipcReply(reqId: reqId, result: okResult()),
         ]
 
     case Methods.todoClearCompleted:
@@ -1728,7 +1769,7 @@ private func handleIpcRequest(
         let effects = update(&model, .clearCompletedTodos(paneId: paneId))
         return effects + [
             .refreshPaneToolbar(paneId: paneId),
-            .ipcReply(reqId: reqId, result: .object(["ok": .bool(true)])),
+            .ipcReply(reqId: reqId, result: okResult()),
         ]
 
     default:
@@ -1795,7 +1836,7 @@ private func resolvePaneSplitTarget(
     throw IpcParamsError("no pane in context")
 }
 
-// `send-keys`-specific pane resolver. Honours an explicit `pane` field in
+// `pane.input`-specific pane resolver. Honours an explicit `pane` field in
 // params (cross-pane targeting) and never silently falls back to the request
 // context when the explicit pane is malformed or unknown — the caller asked
 // for a specific pane and got something wrong, so they should hear about it.
@@ -1888,14 +1929,103 @@ private func newestTabId(excluding before: Set<TabId>, in model: AppModel) -> Ta
     model.groups.flatMap(\.tabs).first(where: { !before.contains($0.id) })?.id
 }
 
-private func tabIdResult(_ tabId: TabId?) -> JSONValue {
-    guard let tabId else { return .object([:]) }
-    return .object(["tabId": .string(tabId.rawValue.uuidString)])
+private func newestGroupId(excluding before: Set<GroupId>, in model: AppModel) -> GroupId? {
+    model.groups.first(where: { !before.contains($0.id) })?.id
 }
 
-private func paneIdResult(_ paneId: PaneId?) -> JSONValue {
-    guard let paneId else { return .object(["paneId": .null]) }
-    return .object(["paneId": .string(paneId.rawValue.uuidString)])
+private func tabNewResult(tabId: TabId?, groupId: GroupId?, in model: AppModel) -> JSONValue {
+    var object: [String: JSONValue] = [
+        "tab": .null,
+        "panes": .array([]),
+    ]
+    if let tabId {
+        object["tab"] = tabSnapshotJSON(tabId, in: model) ?? .object(["id": .string(tabId.rawValue.uuidString)])
+        object["panes"] = .array(paneIdsForTab(tabId, in: model).map { paneId in
+            .object(["id": .string(paneId.rawValue.uuidString)])
+        })
+    }
+    if let groupId,
+       let group = model.groups.first(where: { $0.id == groupId }) {
+        object["group"] = .object([
+            "id": .string(group.id.rawValue.uuidString),
+            "name": .string(group.name),
+        ])
+    }
+    return .object(object)
+}
+
+private func tabRenameResult(_ tab: TabModel?) -> JSONValue {
+    guard let tab else {
+        return .object(["tab": .null])
+    }
+    return .object([
+        "tab": .object([
+            "id": .string(tab.id.rawValue.uuidString),
+            "customTitle": tab.customTitle.map(JSONValue.string) ?? .null,
+        ])
+    ])
+}
+
+private func tabFocusResult(_ tab: TabModel?) -> JSONValue {
+    guard let tab else {
+        return .object(["tab": .null])
+    }
+    return .object([
+        "tab": .object([
+            "id": .string(tab.id.rawValue.uuidString),
+            "focusedPaneId": .string(tab.focusedPaneId.rawValue.uuidString),
+        ])
+    ])
+}
+
+private func paneResult(_ paneId: PaneId?) -> JSONValue {
+    guard let paneId else {
+        return .object(["pane": .null])
+    }
+    return .object(["pane": .object(["id": .string(paneId.rawValue.uuidString)])])
+}
+
+private func paneThemeResult(_ paneId: PaneId, in model: AppModel) -> JSONValue {
+    .object([
+        "pane": .object([
+            "id": .string(paneId.rawValue.uuidString),
+            "theme": model.panes[paneId]?.theme.map(JSONValue.string) ?? .null,
+        ])
+    ])
+}
+
+private func todoResult(_ item: TodoItem?) -> JSONValue {
+    .object(["todo": item.map(todoJSON) ?? .null])
+}
+
+private func todoListResult(_ todos: [TodoItem]) -> JSONValue {
+    .object(["todos": .array(todos.map(todoJSON))])
+}
+
+private func okResult() -> JSONValue {
+    .object(["ok": .bool(true)])
+}
+
+private func tabSnapshotJSON(_ tabId: TabId, in model: AppModel) -> JSONValue? {
+    let snapshot = toSnapshot(model)
+    guard let tab = snapshot.groups.flatMap(\.tabs).first(where: { $0.id == tabId.rawValue.uuidString }) else {
+        return nil
+    }
+    return encodeJSONValue(tab)
+}
+
+private func encodeJSONValue<T: Encodable>(_ value: T) -> JSONValue? {
+    guard let data = try? JSONEncoder().encode(value) else { return nil }
+    return try? JSONDecoder().decode(JSONValue.self, from: data)
+}
+
+private func launchSpecErrorMessage(_ error: LaunchSpecParseError) -> String {
+    switch error {
+    case .notObject:
+        return "launch must be an object"
+    case .fieldNotString(let field):
+        return "launch.\(field) must be a string"
+    }
 }
 
 private func appendTodo(_ model: inout AppModel, paneId: PaneId, text: String, id: UUID) -> TodoItem? {
@@ -2035,15 +2165,28 @@ private func jumpModeCancel(_ model: inout AppModel) -> [Effect] {
 /// Navigate to a pane: select its current tab, clear zoom if needed, focus the pane.
 private func navigateToPane(_ paneId: PaneId, in model: inout AppModel) -> [Effect] {
     guard let currentTab = tabForPane(paneId, in: model) else { return [] }
+    let wasZoomed = currentTab.isZoomed
+    let oldFocusedPaneId = currentTab.focusedPaneId
+    let focusChanged = paneId != oldFocusedPaneId
     var effects = update(&model, .selectTab(id: currentTab.id))
-    if let tab = selectedTab(in: model), tab.isZoomed, paneId != tab.focusedPaneId {
+    updateTab(currentTab.id, in: &model) { tab in
+        tab.focusedPaneId = paneId
+    }
+    if focusChanged && model.config.alertClearMode == .focus {
+        markAlertsReadForPane(paneId, in: &model)
+    }
+    if wasZoomed, paneId != oldFocusedPaneId {
         updateSelectedTab(&model) { t in t.isZoomed = false }
     }
+    effects.append(contentsOf: syncFocusedPaneChrome(paneId, in: &model))
     // Always emit refresh effects — selectTab is a no-op when already on
     // the pane's tab, but we still need to update borders/badges.
     effects.append(.rebuildContentView)
     effects.append(.reloadSidebar)
     effects.append(.makeFirstResponder(paneId: paneId))
+    if focusChanged {
+        effects.append(.scheduleCheckpoint)
+    }
     return effects
 }
 

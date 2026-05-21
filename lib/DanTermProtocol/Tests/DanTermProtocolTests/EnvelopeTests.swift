@@ -7,7 +7,7 @@ final class EnvelopeTests: XCTestCase {
     func testObjectParamsRoundTrip() throws {
         let request = JsonRpcRequest(
             id: .number(1),
-            method: Methods.tabTitle,
+            method: Methods.tabRename,
             params: .object([
                 "b": .array([.number(2), .number(3)]),
                 "a": .number(1),
@@ -17,7 +17,7 @@ final class EnvelopeTests: XCTestCase {
         let encoded = try sortedEncoder().encode(request)
         XCTAssertEqual(
             String(data: encoded, encoding: .utf8),
-            #"{"id":1,"jsonrpc":"2.0","method":"tab.title","params":{"a":1,"b":[2,3]}}"#
+            #"{"id":1,"jsonrpc":"2.0","method":"tab.rename","params":{"a":1,"b":[2,3]}}"#
         )
         let decoded = try JSONDecoder().decode(JsonRpcRequest.self, from: encoded)
         XCTAssertEqual(decoded, request)

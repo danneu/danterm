@@ -32,7 +32,7 @@ func tabTests() {
             return false
         })
         try expect(createEffect != nil, "should have createSurface effect")
-        if case .createSurface(_, let cwd, _) = createEffect! {
+        if case .createSurface(_, let cwd, _, _, _) = createEffect! {
             try expectEqual(cwd, "/tmp/test", "cwd should inherit")
         }
     }

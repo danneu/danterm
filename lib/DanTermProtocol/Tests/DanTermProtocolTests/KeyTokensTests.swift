@@ -1,4 +1,4 @@
-// Tests for the argv-token classifier used by `danterm send-keys --`.
+// Tests for the argv-token classifier used by `danterm pane input --`.
 import Foundation
 import XCTest
 @testable import DanTermProtocol

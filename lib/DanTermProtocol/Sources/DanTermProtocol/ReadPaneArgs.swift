@@ -1,4 +1,4 @@
-// CLI argument parser and rendering helpers for `danterm read-pane`.
+// CLI argument parser and rendering helpers for `danterm pane read`.
 import Foundation
 
 public struct ParsedReadPane: Equatable {

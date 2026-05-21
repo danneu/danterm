@@ -1,4 +1,4 @@
-// Tests for the CLI argument parser shared with `danterm send-keys`.
+// Tests for the CLI argument parser shared with `danterm pane input`.
 import Foundation
 import XCTest
 @testable import DanTermProtocol

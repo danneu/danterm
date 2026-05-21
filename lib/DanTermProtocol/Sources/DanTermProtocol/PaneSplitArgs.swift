@@ -9,16 +9,19 @@ public enum PaneSplitDirection: Equatable {
 public struct ParsedPaneSplit: Equatable {
     public let pane: String?
     public let direction: PaneSplitDirection
+    public let launch: LaunchSpec?
 
-    public init(pane: String?, direction: PaneSplitDirection) {
+    public init(pane: String?, direction: PaneSplitDirection, launch: LaunchSpec? = nil) {
         self.pane = pane
         self.direction = direction
+        self.launch = launch
     }
 }
 
 public enum PaneSplitParseError: Error, Equatable {
     case missingDirection
     case missingPaneArg
+    case missingValue(String)
     case unknownFlag(String)
     case unexpectedArgument(String)
 }
@@ -26,6 +29,9 @@ public enum PaneSplitParseError: Error, Equatable {
 public func parsePaneSplitArgs(_ args: [String]) throws -> ParsedPaneSplit {
     var pane: String?
     var direction: PaneSplitDirection?
+    var cmd: String?
+    var cwd: String?
+    var title: String?
     var i = 0
 
     while i < args.count {
@@ -36,6 +42,24 @@ public func parsePaneSplitArgs(_ args: [String]) throws -> ParsedPaneSplit {
                 throw PaneSplitParseError.missingPaneArg
             }
             pane = args[i + 1]
+            i += 2
+        case "--cmd":
+            guard i + 1 < args.count else {
+                throw PaneSplitParseError.missingValue(arg)
+            }
+            cmd = args[i + 1]
+            i += 2
+        case "--cwd":
+            guard i + 1 < args.count else {
+                throw PaneSplitParseError.missingValue(arg)
+            }
+            cwd = args[i + 1]
+            i += 2
+        case "--title":
+            guard i + 1 < args.count else {
+                throw PaneSplitParseError.missingValue(arg)
+            }
+            title = args[i + 1]
             i += 2
         case "-h":
             guard direction == nil else {
@@ -60,5 +84,6 @@ public func parsePaneSplitArgs(_ args: [String]) throws -> ParsedPaneSplit {
     guard let direction else {
         throw PaneSplitParseError.missingDirection
     }
-    return ParsedPaneSplit(pane: pane, direction: direction)
+    let spec = LaunchSpec(cmd: cmd, cwd: cwd, title: title)
+    return ParsedPaneSplit(pane: pane, direction: direction, launch: spec.isEmpty ? nil : spec)
 }

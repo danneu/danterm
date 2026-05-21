@@ -13,23 +13,10 @@ private struct CLIError: Error {
     }
 }
 
-private enum OutputMode {
-    case none
-    case json
-    case tabTitle
-    case text
-}
-
-private struct CLICommand {
-    let method: String
-    let params: [String: JSONValue]
-    let outputMode: OutputMode
-}
-
 struct DanTermCLI {
     private static let socketTimeoutSeconds = 5
 
-    // Top-level help text. Kept in sync by hand with `parseCommand` and
+    // Top-level help text. Kept in sync by hand with `parseCLI` and
     // the `EnvVars` constants used in `request(...)` -- there is no
     // automated check, so any change to either touches this string too.
     private static let usageText: String = """
@@ -40,18 +27,18 @@ struct DanTermCLI {
 
         Commands:
           ls                          Print the full app snapshot as JSON
-          tab title [text]            Get or set the current tab title
-          tab rename <name>           Rename the current tab
+          tab new [--group <name>] [--cmd <s>] [--cwd <p>] [--title <s>]
+                                      Open a new tab, optionally launching a command
+          tab rename <name>|--clear   Rename the current tab or clear its custom title
           pane focus <pane-id>        Focus a pane by id
-          pane split [--pane <id>] -h|-v
+          pane split [--pane <id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>]
                                       Split a pane (horizontal/vertical)
-          new-tab [--group <name>]    Open a new tab, optionally in a named group
-          send-keys [--pane <id>] [--literal] -- <token>...
+          pane input [--pane <id>] [--literal] -- <token>...
                                       Send keystrokes to a pane (tmux-style:
                                       "ls" Enter, C-c, Up, Escape). Use --pane
                                       to target a specific pane (default:
                                       caller's via $DANTERM_PANE).
-          read-pane --pane <id> [--lines <n>]
+          pane read --pane <id> [--lines <n>]
                                       Print a pane's visible text, or the last
                                       n lines of scrollback when --lines is set.
           theme set <name>|--clear    Set or clear the current theme
@@ -73,7 +60,7 @@ struct DanTermCLI {
 
     static func main() {
         do {
-            // Intercept help before parseCommand so we never touch the IPC
+            // Intercept help before parseCLI so we never touch the IPC
             // socket for pure local arg handling.
             let rawArgs = Array(CommandLine.arguments.dropFirst())
             if rawArgs.isEmpty {
@@ -84,7 +71,7 @@ struct DanTermCLI {
                 print(usageText, terminator: "")
                 exit(0)
             }
-            let command = try parseCommand(rawArgs)
+            let command = try parseCLI(rawArgs)
             let environment = ProcessInfo.processInfo.environment
             let socketPath = nonEmpty(environment[EnvVars.sock]) ?? controlSocketPath().path
             let response = try request(command, socketPath: socketPath, environment: environment)
@@ -96,240 +83,12 @@ struct DanTermCLI {
         } catch let error as CLIError {
             fputs("danterm: \(error.message)\n", stderr)
             exit(error.exitCode)
+        } catch let error as CLIParseError {
+            fputs("danterm: \(error.message)\n", stderr)
+            exit(1)
         } catch {
             fputs("danterm: \(error.localizedDescription)\n", stderr)
             exit(1)
-        }
-    }
-
-    private static func parseCommand(_ args: [String]) throws -> CLICommand {
-        guard let head = args.first else { throw CLIError("missing command") }
-        switch head {
-        case "ls":
-            guard args.count == 1 else {
-                throw CLIError("usage: danterm ls")
-            }
-            return CLICommand(method: Methods.ls, params: [:], outputMode: .json)
-
-        case "tab":
-            guard args.count >= 2 else { throw CLIError("usage: danterm tab title [text]") }
-            switch args[1] {
-            case "title":
-                let text = args.dropFirst(2).joined(separator: " ")
-                let params: [String: JSONValue] = text.isEmpty ? [:] : ["title": .string(text)]
-                return CLICommand(method: Methods.tabTitle, params: params, outputMode: text.isEmpty ? .tabTitle : .none)
-            case "rename":
-                let name = args.dropFirst(2).joined(separator: " ")
-                guard !name.isEmpty else { throw CLIError("usage: danterm tab rename <name>") }
-                return CLICommand(method: Methods.tabTitle, params: ["title": .string(name)], outputMode: .none)
-            default:
-                throw CLIError("unknown tab command")
-            }
-
-        case "pane":
-            guard args.count >= 2 else { throw CLIError("usage: danterm pane <focus|split>") }
-            switch args[1] {
-            case "focus":
-                guard args.count == 3 else { throw CLIError("usage: danterm pane focus <pane-id>") }
-                return CLICommand(method: Methods.paneFocus, params: ["paneId": .string(args[2])], outputMode: .none)
-            case "split":
-                return try parsePaneSplitCommand(Array(args.dropFirst(2)))
-            default:
-                throw CLIError("unknown pane command")
-            }
-
-        case "new-tab":
-            if args.count == 1 {
-                return CLICommand(method: Methods.newTab, params: [:], outputMode: .none)
-            }
-            guard args.count >= 3, args[1] == "--group" else {
-                throw CLIError("usage: danterm new-tab [--group <name>]")
-            }
-            let name = args.dropFirst(2).joined(separator: " ")
-            guard !name.isEmpty else { throw CLIError("usage: danterm new-tab [--group <name>]") }
-            return CLICommand(method: Methods.newTab, params: ["group": .string(name)], outputMode: .none)
-
-        case "send-keys":
-            return try parseSendKeysCommand(Array(args.dropFirst()))
-
-        case "read-pane":
-            return try parseReadPaneCommand(Array(args.dropFirst()))
-
-        case "theme":
-            guard args.count >= 3, args[1] == "set" else {
-                throw CLIError("usage: danterm theme set <name>|--clear")
-            }
-            if args[2] == "--clear" {
-                guard args.count == 3 else { throw CLIError("usage: danterm theme set --clear") }
-                return CLICommand(method: Methods.themeSet, params: ["themeName": .null], outputMode: .none)
-            }
-            let name = args.dropFirst(2).joined(separator: " ")
-            guard !name.isEmpty else { throw CLIError("usage: danterm theme set <name>|--clear") }
-            return CLICommand(method: Methods.themeSet, params: ["themeName": .string(name)], outputMode: .none)
-
-        case "todo":
-            return try parseTodo(Array(args.dropFirst()))
-
-        default:
-            throw CLIError("unknown command: \(head)")
-        }
-    }
-
-    private static func parseTodo(_ args: [String]) throws -> CLICommand {
-        guard let head = args.first else { throw CLIError("usage: danterm todo <command>") }
-        switch head {
-        case "list":
-            guard args.count == 1 else { throw CLIError("usage: danterm todo list") }
-            return CLICommand(method: Methods.todoList, params: [:], outputMode: .json)
-        case "add":
-            let text = args.dropFirst().joined(separator: " ")
-            guard !text.isEmpty else { throw CLIError("usage: danterm todo add <text>") }
-            return CLICommand(method: Methods.todoAdd, params: ["text": .string(text)], outputMode: .json)
-        case "edit":
-            guard args.count >= 3 else { throw CLIError("usage: danterm todo edit <todo-id> <text>") }
-            let text = args.dropFirst(2).joined(separator: " ")
-            return CLICommand(method: Methods.todoEdit, params: ["todoId": .string(args[1]), "text": .string(text)], outputMode: .none)
-        case "done":
-            guard args.count == 2 else { throw CLIError("usage: danterm todo done <todo-id>") }
-            return CLICommand(method: Methods.todoDone, params: ["todoId": .string(args[1])], outputMode: .none)
-        case "open":
-            guard args.count == 2 else { throw CLIError("usage: danterm todo open <todo-id>") }
-            return CLICommand(method: Methods.todoOpen, params: ["todoId": .string(args[1])], outputMode: .none)
-        case "delete":
-            guard args.count == 2 else { throw CLIError("usage: danterm todo delete <todo-id>") }
-            return CLICommand(method: Methods.todoDelete, params: ["todoId": .string(args[1])], outputMode: .none)
-        case "clear-completed":
-            guard args.count == 1 else { throw CLIError("usage: danterm todo clear-completed") }
-            return CLICommand(method: Methods.todoClearCompleted, params: [:], outputMode: .none)
-        default:
-            throw CLIError("unknown todo command")
-        }
-    }
-
-    private static func parsePaneSplitCommand(_ args: [String]) throws -> CLICommand {
-        let parsed: ParsedPaneSplit
-        do {
-            parsed = try parsePaneSplitArgs(args)
-        } catch let error as PaneSplitParseError {
-            switch error {
-            case .missingDirection, .missingPaneArg:
-                throw CLIError("usage: danterm pane split [--pane <id>] -h|-v")
-            case .unknownFlag(let flag):
-                throw CLIError("unknown flag: \(flag)")
-            case .unexpectedArgument(let argument):
-                throw CLIError("unexpected argument: \(argument)")
-            }
-        }
-
-        var params: [String: JSONValue] = [
-            "direction": .string(parsed.direction == .horizontal ? "horizontal" : "vertical")
-        ]
-        if let pane = parsed.pane {
-            params["pane"] = .string(pane)
-        }
-        return CLICommand(method: Methods.paneSplit, params: params, outputMode: .json)
-    }
-
-    private static func parseSendKeysCommand(_ args: [String]) throws -> CLICommand {
-        let parsed: ParsedSendKeys
-        do {
-            parsed = try parseSendKeysArgs(args)
-        } catch SendKeysParseError.unknownFlag(let flag) {
-            throw CLIError("unknown flag: \(flag)")
-        } catch SendKeysParseError.missingPaneArg {
-            throw CLIError("usage: danterm send-keys --pane <id> ...")
-        } catch SendKeysParseError.literalRequiresSeparator {
-            throw CLIError("--literal requires -- before the tokens")
-        } catch SendKeysParseError.missingArguments {
-            throw CLIError("usage: danterm send-keys [--pane <id>] [--literal] -- <token>...")
-        } catch SendKeysParseError.keyToken(.unknownKey(let token)) {
-            throw CLIError("unknown key: \(token)")
-        }
-
-        var params: [String: JSONValue] = [:]
-        if let pane = parsed.pane {
-            params["pane"] = .string(pane)
-        }
-        params["input"] = .array(parsed.events.map(inputEventToJSON))
-        return CLICommand(method: Methods.sendKeys, params: params, outputMode: .none)
-    }
-
-    private static func parseReadPaneCommand(_ args: [String]) throws -> CLICommand {
-        let parsed: ParsedReadPane
-        do {
-            parsed = try parseReadPaneArgs(args)
-        } catch let error as ReadPaneParseError {
-            switch error {
-            case .missingPane, .missingPaneArg:
-                throw CLIError("usage: danterm read-pane --pane <uuid> [--lines <n>]")
-            case .missingLinesArg, .invalidLines(_):
-                throw CLIError("--lines must be a positive integer")
-            case .unknownFlag(let flag):
-                throw CLIError("unknown flag: \(flag)")
-            case .unexpectedArgument(let argument):
-                throw CLIError("unexpected argument: \(argument)")
-            }
-        }
-
-        var params: [String: JSONValue] = ["pane": .string(parsed.pane)]
-        if let lineLimit = parsed.lineLimit {
-            params["lines"] = .number(Double(lineLimit))
-        }
-        return CLICommand(method: Methods.readPane, params: params, outputMode: .text)
-    }
-
-    // Map a single InputEvent to its JSON-RPC wire form. Inverse of
-    // Update.swift's parseInputEvent — keep them in sync.
-    private static func inputEventToJSON(_ event: InputEvent) -> JSONValue {
-        switch event {
-        case .text(let text):
-            return .object(["text": .string(text)])
-        case .key(let key, let mods):
-            var object: [String: JSONValue] = ["key": .string(wireName(for: key))]
-            if !mods.isEmpty {
-                var modNames: [JSONValue] = []
-                if mods.contains(.ctrl) { modNames.append(.string("ctrl")) }
-                if mods.contains(.alt)  { modNames.append(.string("alt")) }
-                object["mods"] = .array(modNames)
-            }
-            return .object(object)
-        }
-    }
-
-    // Canonical wire name for a KeyName. Aliases (Backspace -> BSpace, Esc ->
-    // Escape) collapse to one canonical form on the way out.
-    private static func wireName(for key: KeyName) -> String {
-        switch key {
-        case .letter(let c):
-            return String(c)
-        case .named(let n):
-            switch n {
-            case .enter:  return "Enter"
-            case .tab:    return "Tab"
-            case .bspace: return "BSpace"
-            case .escape: return "Escape"
-            case .up:     return "Up"
-            case .down:   return "Down"
-            case .left:   return "Left"
-            case .right:  return "Right"
-            case .home:   return "Home"
-            case .end:    return "End"
-            case .pgUp:   return "PgUp"
-            case .pgDn:   return "PgDn"
-            case .delete: return "Delete"
-            case .f1:  return "F1"
-            case .f2:  return "F2"
-            case .f3:  return "F3"
-            case .f4:  return "F4"
-            case .f5:  return "F5"
-            case .f6:  return "F6"
-            case .f7:  return "F7"
-            case .f8:  return "F8"
-            case .f9:  return "F9"
-            case .f10: return "F10"
-            case .f11: return "F11"
-            case .f12: return "F12"
-            }
         }
     }
 
@@ -494,14 +253,12 @@ struct DanTermCLI {
         }
     }
 
-    private static func printResult(_ result: JSONValue, mode: OutputMode) throws {
+    private static func printResult(_ result: JSONValue, mode: CLIOutputMode) throws {
         switch mode {
         case .none:
             return
         case .json:
             print(try compactJson(result))
-        case .tabTitle:
-            print(result["title"]?.asString ?? "")
         case .text:
             guard let text = renderReadPaneResult(result) else {
                 throw CLIError("malformed response")

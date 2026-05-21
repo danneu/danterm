@@ -16,7 +16,7 @@ func ipcUpdateTests() {
     test("malformed context returns invalid params") {
         var model = makeModel()
         createTab(&model)
-        let effects = sendIpc(&model, method: Methods.tabTitle, context: IpcRequestContext(paneId: "not-a-uuid"))
+        let effects = sendIpc(&model, method: Methods.tabRename, context: IpcRequestContext(paneId: "not-a-uuid"))
         let error = try requireIpcError(effects)
         try expectEqual(error.code, -32602)
     }
@@ -33,18 +33,25 @@ func ipcUpdateTests() {
         try expect(object["panes"] != nil, "snapshot should include panes")
     }
 
-    test("tab.title set and get use pane current tab") {
+    test("tab.rename sets and clears custom title") {
         var model = makeModel()
         createTab(&model)
         let ctx = contextForSelectedPane(in: model)
+        let tabId = selectedTab(in: model)!.id
 
-        _ = sendIpc(&model, method: Methods.tabTitle, params: .object(["title": .string("hello")]), context: ctx)
-        let effects = sendIpc(&model, method: Methods.tabTitle, context: ctx)
-        let reply = try requireIpcReply(effects)
-        try expectEqual(reply["title"]?.asString, "hello")
+        let setEffects = sendIpc(&model, method: Methods.tabRename, params: .object(["title": .string("hello")]), context: ctx)
+        let setReply = try requireIpcReply(setEffects)
+        try expectEqual(setReply["tab"]?["id"]?.asString, tabId.rawValue.uuidString)
+        try expectEqual(setReply["tab"]?["customTitle"]?.asString, "hello")
+        try expectEqual(tabById(tabId, in: model)?.customTitle, "hello")
+
+        let clearEffects = sendIpc(&model, method: Methods.tabRename, params: .object(["title": .null]), context: ctx)
+        let clearReply = try requireIpcReply(clearEffects)
+        try expectEqual(clearReply["tab"]?["customTitle"], .null)
+        try expectEqual(tabById(tabId, in: model)?.customTitle, nil)
     }
 
-    test("tab.title ignores stale tab id when pane moved") {
+    test("tab.rename ignores stale tab id when pane moved") {
         var model = makeModel()
         createTab(&model)
         let sourceTabId = selectedTab(in: model)!.id
@@ -58,7 +65,7 @@ func ipcUpdateTests() {
             paneId: paneId.rawValue.uuidString,
             tabId: sourceTabId.rawValue.uuidString
         )
-        _ = sendIpc(&model, method: Methods.tabTitle, params: .object(["title": .string("current")]), context: stale)
+        _ = sendIpc(&model, method: Methods.tabRename, params: .object(["title": .string("current")]), context: stale)
 
         let currentTab = tabForPane(paneId, in: model)
         try expectEqual(currentTab?.id, targetTabId)
@@ -84,7 +91,7 @@ func ipcUpdateTests() {
         try expectEqual(model.selectedTabId, foregroundTabId)
         try expectEqual(allPaneIds(tabById(backgroundTabId, in: model)!.rootNode).count, 2)
         let reply = try requireIpcReply(effects)
-        let returnedPaneId = try requirePaneId(reply["paneId"], "pane.split should return the new pane id")
+        let returnedPaneId = try requirePaneId(reply["pane"]?["id"], "pane.split should return the new pane id")
         try expect(!beforePaneIds.contains(returnedPaneId), "returned pane id should be new")
         try expectEqual(Set(model.panes.keys).subtracting(beforePaneIds), Set([returnedPaneId]))
     }
@@ -109,7 +116,7 @@ func ipcUpdateTests() {
         )
 
         let reply = try requireIpcReply(effects)
-        let returnedPaneId = try requirePaneId(reply["paneId"], "pane.split should return the sibling split pane id")
+        let returnedPaneId = try requirePaneId(reply["pane"]?["id"], "pane.split should return the sibling split pane id")
         try expect(!beforePaneIds.contains(returnedPaneId), "returned pane id should be new")
         try expectEqual(Set(model.panes.keys).subtracting(beforePaneIds), Set([returnedPaneId]))
         guard case .split(_, .horizontal, .leaf(let first), .split(_, .vertical, .leaf(let second), .leaf(let third), _), _) =
@@ -202,7 +209,7 @@ func ipcUpdateTests() {
         )
 
         let reply = try requireIpcReply(effects)
-        try expectEqual(reply["paneId"], .null)
+        try expectEqual(reply["pane"], .null)
         try expectEqual(Set(model.panes.keys), beforePaneIds)
     }
 
@@ -220,22 +227,76 @@ func ipcUpdateTests() {
         )
 
         try expectEqual(model.selectedTabId, targetTabId)
+        let reply = try requireIpcReply(effects)
+        try expectEqual(reply["tab"]?["id"]?.asString, targetTabId.rawValue.uuidString)
+        try expectEqual(reply["tab"]?["focusedPaneId"]?.asString, targetPaneId.rawValue.uuidString)
         try expect(hasEffect(effects) {
             if case .makeFirstResponder(let paneId) = $0 { return paneId == targetPaneId }
             return false
         }, "expected focus effect")
     }
 
-    test("new-tab with group creates tab in named group") {
+    test("pane.focus replies with same-tab focusedPaneId synchronously") {
         var model = makeModel()
         createTab(&model)
-        let effects = sendIpc(&model, method: Methods.newTab, params: .object(["group": .string("Builds")]))
-        let group = model.groups.first(where: { $0.name == "Builds" })
-        try expectEqual(group?.tabs.count, 1)
-        try expect(try requireIpcReply(effects)["tabId"]?.asString != nil, "reply should include tab id")
+        let tabId = selectedTab(in: model)!.id
+        let firstPaneId = selectedTab(in: model)!.focusedPaneId
+        _ = update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
+        let secondPaneId = selectedTab(in: model)!.focusedPaneId
+        updateTabForTest(tabId, in: &model) { $0.focusedPaneId = firstPaneId }
+
+        let effects = sendIpc(
+            &model,
+            method: Methods.paneFocus,
+            params: .object(["paneId": .string(secondPaneId.rawValue.uuidString)])
+        )
+
+        let reply = try requireIpcReply(effects)
+        try expectEqual(reply["tab"]?["focusedPaneId"]?.asString, secondPaneId.rawValue.uuidString)
+        try expectEqual(tabById(tabId, in: model)?.focusedPaneId, secondPaneId)
     }
 
-    test("new-tab with duplicate group names targets first matching group") {
+    test("pane.focus clears target pane alerts in focus mode") {
+        var model = makeModel()
+        model.config.alertClearMode = .focus
+        createTab(&model)
+        let tabId = selectedTab(in: model)!.id
+        let firstPaneId = selectedTab(in: model)!.focusedPaneId
+        _ = update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
+        let secondPaneId = selectedTab(in: model)!.focusedPaneId
+        updateTabForTest(tabId, in: &model) { $0.focusedPaneId = firstPaneId }
+        model.alerts.insert(AlertModel(
+            id: AlertId(),
+            kind: .bell,
+            paneId: secondPaneId,
+            title: "DanTerm",
+            body: "test",
+            createdAt: Date(),
+            isUnread: true
+        ), at: 0)
+
+        _ = sendIpc(
+            &model,
+            method: Methods.paneFocus,
+            params: .object(["paneId": .string(secondPaneId.rawValue.uuidString)])
+        )
+
+        try expectEqual(model.alerts[0].isUnread, false, "focusing pane should mark its alerts read")
+    }
+
+    test("tab.new with group creates tab in named group") {
+        var model = makeModel()
+        createTab(&model)
+        let effects = sendIpc(&model, method: Methods.tabNew, params: .object(["group": .string("Builds")]))
+        let group = model.groups.first(where: { $0.name == "Builds" })
+        try expectEqual(group?.tabs.count, 1)
+        let reply = try requireIpcReply(effects)
+        try expect(reply["tab"]?["id"]?.asString != nil, "reply should include tab id")
+        try expectEqual(reply["group"]?["name"]?.asString, "Builds")
+        try expectEqual(reply["panes"]?.asArray?.count, 1)
+    }
+
+    test("tab.new with duplicate group names targets first matching group") {
         var model = makeModel()
         createTab(&model)
         _ = update(&model, .createGroup(name: "Builds"))
@@ -248,13 +309,147 @@ func ipcUpdateTests() {
         let firstCountBefore = buildGroups[0].tabs.count
         let secondCountBefore = buildGroups[1].tabs.count
 
-        let effects = sendIpc(&model, method: Methods.newTab, params: .object(["group": .string("Builds")]))
+        let effects = sendIpc(&model, method: Methods.tabNew, params: .object(["group": .string("Builds")]))
 
         let firstGroup = model.groups.first(where: { $0.id == firstGroupId })
         let secondGroup = model.groups.first(where: { $0.id == secondGroupId })
         try expectEqual(firstGroup?.tabs.count, firstCountBefore + 1)
         try expectEqual(secondGroup?.tabs.count, secondCountBefore)
-        try expect(try requireIpcReply(effects)["tabId"]?.asString != nil, "reply should include tab id")
+        try expect(try requireIpcReply(effects)["tab"]?["id"]?.asString != nil, "reply should include tab id")
+    }
+
+    test("tab.new with launch creates direct-launch surface and custom tab title") {
+        var model = makeModel()
+        createTab(&model)
+        let effects = sendIpc(
+            &model,
+            method: Methods.tabNew,
+            params: .object([
+                "launch": .object([
+                    "cmd": .string("date"),
+                    "cwd": .string("/tmp"),
+                    "title": .string("clock"),
+                ])
+            ])
+        )
+
+        let reply = try requireIpcReply(effects)
+        let tabId = try requireTabId(reply["tab"]?["id"], "tab.new should return tab id")
+        let paneId = try requirePaneId(reply["panes"]?.asArray?.first?["id"], "tab.new should return pane id")
+        try expectEqual(reply["tab"]?["focusedPaneId"]?.asString, paneId.rawValue.uuidString)
+        try expectEqual(reply["tab"]?["rootNode"]?["paneId"]?.asString, paneId.rawValue.uuidString)
+        try expectEqual(reply["panes"]?.asArray?.first?.asObject?.keys.count, 1)
+        try expectEqual(tabById(tabId, in: model)?.customTitle, "clock")
+        try expectEqual(tabById(tabId, in: model)?.displayTitle, "clock")
+        try expectEqual(model.panes[paneId]?.title, "clock")
+        try expect(hasEffect(effects) {
+            if case .createSurface(let effectPaneId, let cwd, let command, let launchCommand, let waitAfterCommand) = $0 {
+                return effectPaneId == paneId
+                    && cwd == "/tmp"
+                    && command == nil
+                    && launchCommand == "date"
+                    && waitAfterCommand
+            }
+            return false
+        }, "expected createSurface with direct launch command")
+    }
+
+    test("tab.new with new group forwards launch to created tab") {
+        var model = makeModel()
+        createTab(&model)
+
+        let effects = sendIpc(
+            &model,
+            method: Methods.tabNew,
+            params: .object([
+                "group": .string("Builds"),
+                "launch": .object(["cmd": .string("make test")]),
+            ])
+        )
+
+        let group = model.groups.first(where: { $0.name == "Builds" })
+        let paneId = group?.tabs.first?.focusedPaneId
+        try expect(paneId != nil, "new group should have an auto-created tab")
+        try expect(hasEffect(effects) {
+            if case .createSurface(let effectPaneId, _, let command, let launchCommand, _) = $0 {
+                return effectPaneId == paneId && command == nil && launchCommand == "make test"
+            }
+            return false
+        }, "expected launch command to reach group-created tab")
+    }
+
+    test("pane.split with launch title sets pane title without tab custom title") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = selectedTab(in: model)!.id
+        let paneId = selectedTab(in: model)!.focusedPaneId
+
+        let effects = sendIpc(
+            &model,
+            method: Methods.paneSplit,
+            params: .object([
+                "direction": .string("horizontal"),
+                "launch": .object([
+                    "cmd": .string("cargo --version"),
+                    "cwd": .string("/tmp"),
+                    "title": .string("cargo"),
+                ]),
+            ]),
+            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        )
+
+        let newPaneId = try requirePaneId(try requireIpcReply(effects)["pane"]?["id"], "pane.split should return pane id")
+        try expectEqual(model.panes[newPaneId]?.title, "cargo")
+        try expectEqual(tabById(tabId, in: model)?.customTitle, nil)
+        try expect(hasEffect(effects) {
+            if case .createSurface(let effectPaneId, let cwd, let command, let launchCommand, _) = $0 {
+                return effectPaneId == newPaneId
+                    && cwd == "/tmp"
+                    && command == nil
+                    && launchCommand == "cargo --version"
+            }
+            return false
+        }, "expected split createSurface to use direct launch")
+    }
+
+    test("malformed launch returns invalid params without mutation effects") {
+        let launchValues: [JSONValue] = [
+            .string("bad"),
+            .object(["cmd": .number(42)]),
+        ]
+        for launchValue in launchValues {
+            var model = makeModel()
+            createTab(&model)
+            let contextPaneId = selectedTab(in: model)!.focusedPaneId
+            let paneIdsBefore = Set(model.panes.keys)
+            let tabEffects = sendIpc(
+                &model,
+                method: Methods.tabNew,
+                params: .object(["launch": launchValue])
+            )
+            try expectEqual(try requireIpcError(tabEffects).code, -32602)
+            try expectEqual(Set(model.panes.keys), paneIdsBefore)
+            try expect(!hasEffect(tabEffects) {
+                if case .createSurface = $0 { return true }
+                return false
+            }, "malformed tab.new launch should not create a surface")
+
+            let splitEffects = sendIpc(
+                &model,
+                method: Methods.paneSplit,
+                params: .object([
+                    "direction": .string("horizontal"),
+                    "launch": launchValue,
+                ]),
+                context: IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
+            )
+            try expectEqual(try requireIpcError(splitEffects).code, -32602)
+            try expectEqual(Set(model.panes.keys), paneIdsBefore)
+            try expect(!hasEffect(splitEffects) {
+                if case .createSurface = $0 { return true }
+                return false
+            }, "malformed pane.split launch should not create a surface")
+        }
     }
 
     test("theme.set updates pane override and clears with null") {
@@ -263,11 +458,13 @@ func ipcUpdateTests() {
         let paneId = selectedTab(in: model)!.focusedPaneId
         let ctx = IpcRequestContext(paneId: paneId.rawValue.uuidString)
 
-        _ = sendIpc(&model, method: Methods.themeSet, params: .object(["themeName": .string("Tokyo Night")]), context: ctx)
+        let setEffects = sendIpc(&model, method: Methods.themeSet, params: .object(["themeName": .string("Tokyo Night")]), context: ctx)
         try expectEqual(model.panes[paneId]?.theme, "Tokyo Night")
+        try expectEqual(try requireIpcReply(setEffects)["pane"]?["theme"]?.asString, "Tokyo Night")
 
-        _ = sendIpc(&model, method: Methods.themeSet, params: .object(["themeName": .null]), context: ctx)
+        let clearEffects = sendIpc(&model, method: Methods.themeSet, params: .object(["themeName": .null]), context: ctx)
         try expectEqual(model.panes[paneId]?.theme, nil)
+        try expectEqual(try requireIpcReply(clearEffects)["pane"]?["theme"], .null)
     }
 
     test("todo list add edit done open delete clear-completed use context pane") {
@@ -283,21 +480,24 @@ func ipcUpdateTests() {
             context: ctx
         )
         let added = try requireIpcReply(addEffects)
-        let todoId = try requireString(added["id"], "todo add should return id")
+        let todoId = try requireString(added["todo"]?["id"], "todo add should return id")
         try expectEqual(model.panes[paneId]?.todos.first?.text, "ship cli")
         try expect(hasEffect(addEffects) { if case .refreshPaneToolbar(let pid) = $0 { return pid == paneId }; return false })
 
-        _ = sendIpc(&model, method: Methods.todoEdit, params: .object(["todoId": .string(todoId), "text": .string("ship cli v2")]), context: ctx)
+        let editReply = try requireIpcReply(sendIpc(&model, method: Methods.todoEdit, params: .object(["todoId": .string(todoId), "text": .string("ship cli v2")]), context: ctx))
         try expectEqual(model.panes[paneId]?.todos.first?.text, "ship cli v2")
+        try expectEqual(editReply["todo"]?["text"]?.asString, "ship cli v2")
 
-        _ = sendIpc(&model, method: Methods.todoDone, params: .object(["todoId": .string(todoId)]), context: ctx)
+        let doneReply = try requireIpcReply(sendIpc(&model, method: Methods.todoDone, params: .object(["todoId": .string(todoId)]), context: ctx))
         try expectEqual(model.panes[paneId]?.todos.first?.isDone, true)
+        try expectEqual(doneReply["todo"]?["isDone"]?.asBool, true)
 
-        _ = sendIpc(&model, method: Methods.todoOpen, params: .object(["todoId": .string(todoId)]), context: ctx)
+        let openReply = try requireIpcReply(sendIpc(&model, method: Methods.todoOpen, params: .object(["todoId": .string(todoId)]), context: ctx))
         try expectEqual(model.panes[paneId]?.todos.first?.isDone, false)
+        try expectEqual(openReply["todo"]?["isDone"]?.asBool, false)
 
         let list = try requireIpcReply(sendIpc(&model, method: Methods.todoList, context: ctx))
-        try expectEqual(list.asArray?.count, 1)
+        try expectEqual(list["todos"]?.asArray?.count, 1)
 
         _ = sendIpc(&model, method: Methods.todoDelete, params: .object(["todoId": .string(todoId)]), context: ctx)
         try expectEqual(model.panes[paneId]?.todos.count, 0)
@@ -308,7 +508,7 @@ func ipcUpdateTests() {
             params: .object(["text": .string("done later")]),
             context: ctx
         ))
-        let secondTodoId = try requireString(secondAdd["id"], "todo add should return second id")
+        let secondTodoId = try requireString(secondAdd["todo"]?["id"], "todo add should return second id")
         _ = sendIpc(&model, method: Methods.todoDone, params: .object(["todoId": .string(secondTodoId)]), context: ctx)
         _ = sendIpc(&model, method: Methods.todoDone, params: .object(["todoId": .string(todoId)]), context: ctx)
         _ = sendIpc(&model, method: Methods.todoClearCompleted, context: ctx)
@@ -329,13 +529,13 @@ func ipcUpdateTests() {
         try expectEqual(error.code, -32602)
     }
 
-    test("send-keys emits text effect for context pane") {
+    test("pane.input emits text effect for context pane") {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let effects = sendIpc(
             &model,
-            method: Methods.sendKeys,
+            method: Methods.paneInput,
             params: .object(["text": .string("echo hi")]),
             context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
         )
@@ -345,13 +545,13 @@ func ipcUpdateTests() {
         }, "expected sendText effect")
     }
 
-    test("send-keys input array emits ordered Effects via the key path") {
+    test("pane.input input array emits ordered Effects via the key path") {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let effects = sendIpc(
             &model,
-            method: Methods.sendKeys,
+            method: Methods.paneInput,
             params: .object([
                 "input": .array([
                     .object(["text": .string("ls")]),
@@ -382,13 +582,13 @@ func ipcUpdateTests() {
         }, "input path must not emit .sendText")
     }
 
-    test("send-keys explicit empty mods equals omitted mods") {
+    test("pane.input explicit empty mods equals omitted mods") {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let effects = sendIpc(
             &model,
-            method: Methods.sendKeys,
+            method: Methods.paneInput,
             params: .object([
                 "input": .array([
                     .object([
@@ -407,13 +607,13 @@ func ipcUpdateTests() {
         }, "expected sendInputKey with empty mods")
     }
 
-    test("send-keys non-array mods is invalid params") {
+    test("pane.input non-array mods is invalid params") {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let effects = sendIpc(
             &model,
-            method: Methods.sendKeys,
+            method: Methods.paneInput,
             params: .object([
                 "input": .array([
                     .object([
@@ -430,13 +630,13 @@ func ipcUpdateTests() {
                    "message should describe non-array mods, got: \(error.message)")
     }
 
-    test("send-keys key with ctrl mod emits sendInputKey") {
+    test("pane.input key with ctrl mod emits sendInputKey") {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let effects = sendIpc(
             &model,
-            method: Methods.sendKeys,
+            method: Methods.paneInput,
             params: .object([
                 "input": .array([
                     .object([
@@ -455,13 +655,13 @@ func ipcUpdateTests() {
         }, "expected sendInputKey for C-c")
     }
 
-    test("send-keys with both text and input is invalid params") {
+    test("pane.input with both text and input is invalid params") {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let effects = sendIpc(
             &model,
-            method: Methods.sendKeys,
+            method: Methods.paneInput,
             params: .object([
                 "text": .string("hi"),
                 "input": .array([.object(["text": .string("hi")])]),
@@ -472,13 +672,13 @@ func ipcUpdateTests() {
         try expectEqual(error.code, -32602)
     }
 
-    test("send-keys with neither text nor input is invalid params") {
+    test("pane.input with neither text nor input is invalid params") {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let effects = sendIpc(
             &model,
-            method: Methods.sendKeys,
+            method: Methods.paneInput,
             params: .object([:]),
             context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
         )
@@ -486,13 +686,13 @@ func ipcUpdateTests() {
         try expectEqual(error.code, -32602)
     }
 
-    test("send-keys input event missing both text and key is invalid params") {
+    test("pane.input input event missing both text and key is invalid params") {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let effects = sendIpc(
             &model,
-            method: Methods.sendKeys,
+            method: Methods.paneInput,
             params: .object([
                 "input": .array([.object([:])])
             ]),
@@ -502,13 +702,13 @@ func ipcUpdateTests() {
         try expectEqual(error.code, -32602)
     }
 
-    test("send-keys input event with both text and key is invalid params") {
+    test("pane.input input event with both text and key is invalid params") {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let effects = sendIpc(
             &model,
-            method: Methods.sendKeys,
+            method: Methods.paneInput,
             params: .object([
                 "input": .array([
                     .object([
@@ -525,13 +725,13 @@ func ipcUpdateTests() {
 
     // Load-bearing assertion: a wire-level "Bogus" key never makes it past the
     // IPC handler. No .sendInputKey is emitted; the response is an error.
-    test("send-keys unknown key name is rejected before any Effect") {
+    test("pane.input unknown key name is rejected before any Effect") {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let effects = sendIpc(
             &model,
-            method: Methods.sendKeys,
+            method: Methods.paneInput,
             params: .object([
                 "input": .array([
                     .object(["key": .string("Bogus")])
@@ -549,13 +749,13 @@ func ipcUpdateTests() {
         }, "no .sendInputKey should be emitted")
     }
 
-    test("send-keys non-string key value is invalid params") {
+    test("pane.input non-string key value is invalid params") {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let effects = sendIpc(
             &model,
-            method: Methods.sendKeys,
+            method: Methods.paneInput,
             params: .object([
                 "input": .array([
                     .object(["key": .number(5)])
@@ -567,13 +767,13 @@ func ipcUpdateTests() {
         try expectEqual(error.code, -32602)
     }
 
-    test("send-keys unknown mod name is invalid params") {
+    test("pane.input unknown mod name is invalid params") {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let effects = sendIpc(
             &model,
-            method: Methods.sendKeys,
+            method: Methods.paneInput,
             params: .object([
                 "input": .array([
                     .object([
@@ -590,13 +790,13 @@ func ipcUpdateTests() {
                    "message should mention unknown mod bogus, got: \(error.message)")
     }
 
-    test("send-keys shift mod is rejected") {
+    test("pane.input shift mod is rejected") {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let effects = sendIpc(
             &model,
-            method: Methods.sendKeys,
+            method: Methods.paneInput,
             params: .object([
                 "input": .array([
                     .object([
@@ -613,7 +813,7 @@ func ipcUpdateTests() {
                    "message should mention shift, got: \(error.message)")
     }
 
-    test("send-keys explicit pane targets that pane regardless of context") {
+    test("pane.input explicit pane targets that pane regardless of context") {
         var model = makeModel()
         createTab(&model)
         let backgroundPaneId = selectedTab(in: model)!.focusedPaneId
@@ -622,7 +822,7 @@ func ipcUpdateTests() {
         // Context says foreground; explicit pane param overrides to background.
         let effects = sendIpc(
             &model,
-            method: Methods.sendKeys,
+            method: Methods.paneInput,
             params: .object([
                 "pane": .string(backgroundPaneId.rawValue.uuidString),
                 "input": .array([.object(["text": .string("hi")])]),
@@ -637,13 +837,13 @@ func ipcUpdateTests() {
         }, "expected effect targeting explicit pane")
     }
 
-    test("send-keys explicit pane that doesn't exist returns pane not found") {
+    test("pane.input explicit pane that doesn't exist returns pane not found") {
         var model = makeModel()
         createTab(&model)
         let realPaneId = selectedTab(in: model)!.focusedPaneId
         let effects = sendIpc(
             &model,
-            method: Methods.sendKeys,
+            method: Methods.paneInput,
             params: .object([
                 "pane": .string(UUID().uuidString),
                 "input": .array([.object(["text": .string("hi")])]),
@@ -661,13 +861,13 @@ func ipcUpdateTests() {
         }, "no input effect should be emitted")
     }
 
-    test("send-keys non-string pane is invalid params and does not fall back") {
+    test("pane.input non-string pane is invalid params and does not fall back") {
         var model = makeModel()
         createTab(&model)
         let realPaneId = selectedTab(in: model)!.focusedPaneId
         let effects = sendIpc(
             &model,
-            method: Methods.sendKeys,
+            method: Methods.paneInput,
             params: .object([
                 "pane": .number(5),
                 "input": .array([.object(["text": .string("hi")])]),
@@ -680,12 +880,12 @@ func ipcUpdateTests() {
                    "expected 'pane must be a string', got: \(error.message)")
     }
 
-    test("send-keys with no pane in context and no explicit pane errors") {
+    test("pane.input with no pane in context and no explicit pane errors") {
         var model = makeModel()
         createTab(&model)
         let effects = sendIpc(
             &model,
-            method: Methods.sendKeys,
+            method: Methods.paneInput,
             params: .object(["input": .array([.object(["text": .string("hi")])])]),
             context: IpcRequestContext()
         )
@@ -695,13 +895,13 @@ func ipcUpdateTests() {
                    "expected 'no pane in context', got: \(error.message)")
     }
 
-    test("read-pane emits viewport read effect without immediate reply") {
+    test("pane.read emits viewport read effect without immediate reply") {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let effects = sendIpc(
             &model,
-            method: Methods.readPane,
+            method: Methods.paneRead,
             params: .object(["pane": .string(paneId.rawValue.uuidString)])
         )
 
@@ -714,16 +914,16 @@ func ipcUpdateTests() {
         try expect(!hasEffect(effects) {
             if case .ipcReply = $0 { return true }
             return false
-        }, "read-pane success should not emit an immediate ipcReply")
+        }, "pane.read success should not emit an immediate ipcReply")
     }
 
-    test("read-pane emits scrollback tail read effect with line limit") {
+    test("pane.read emits scrollback tail read effect with line limit") {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let effects = sendIpc(
             &model,
-            method: Methods.readPane,
+            method: Methods.paneRead,
             params: .object([
                 "pane": .string(paneId.rawValue.uuidString),
                 "lines": .number(200),
@@ -738,22 +938,22 @@ func ipcUpdateTests() {
         try expectEqual(lineLimit, 200)
     }
 
-    test("read-pane missing pane param errors") {
+    test("pane.read missing pane param errors") {
         var model = makeModel()
         createTab(&model)
-        let effects = sendIpc(&model, method: Methods.readPane, params: .object([:]))
+        let effects = sendIpc(&model, method: Methods.paneRead, params: .object([:]))
         let error = try requireIpcError(effects)
         try expectEqual(error.code, -32602)
         try expectEqual(error.message, "pane required")
     }
 
-    test("read-pane non-string pane param errors") {
+    test("pane.read non-string pane param errors") {
         for paneValue in [JSONValue.number(5), .array([]), .object([:])] {
             var model = makeModel()
             createTab(&model)
             let effects = sendIpc(
                 &model,
-                method: Methods.readPane,
+                method: Methods.paneRead,
                 params: .object(["pane": paneValue])
             )
             let error = try requireIpcError(effects)
@@ -762,13 +962,13 @@ func ipcUpdateTests() {
         }
     }
 
-    test("read-pane unknown pane errors") {
+    test("pane.read unknown pane errors") {
         for rawPane in ["bogus", UUID().uuidString] {
             var model = makeModel()
             createTab(&model)
             let effects = sendIpc(
                 &model,
-                method: Methods.readPane,
+                method: Methods.paneRead,
                 params: .object(["pane": .string(rawPane)])
             )
             let error = try requireIpcError(effects)
@@ -777,7 +977,7 @@ func ipcUpdateTests() {
         }
     }
 
-    test("read-pane invalid line limits error") {
+    test("pane.read invalid line limits error") {
         let invalidValues: [JSONValue] = [.number(0), .number(-5), .string("5"), .number(1.5)]
         for linesValue in invalidValues {
             var model = makeModel()
@@ -785,7 +985,7 @@ func ipcUpdateTests() {
             let paneId = selectedTab(in: model)!.focusedPaneId
             let effects = sendIpc(
                 &model,
-                method: Methods.readPane,
+                method: Methods.paneRead,
                 params: .object([
                     "pane": .string(paneId.rawValue.uuidString),
                     "lines": linesValue,
@@ -851,4 +1051,21 @@ private func requirePaneId(_ value: JSONValue?, _ message: String) throws -> Pan
         throw TestFailure(message: message)
     }
     return PaneId(rawValue: uuid)
+}
+
+private func requireTabId(_ value: JSONValue?, _ message: String) throws -> TabId {
+    let raw = try requireString(value, message)
+    guard let uuid = UUID(uuidString: raw) else {
+        throw TestFailure(message: message)
+    }
+    return TabId(rawValue: uuid)
+}
+
+private func updateTabForTest(_ tabId: TabId, in model: inout AppModel, _ body: (inout TabModel) -> Void) {
+    for groupIndex in model.groups.indices {
+        if let tabIndex = model.groups[groupIndex].tabs.firstIndex(where: { $0.id == tabId }) {
+            body(&model.groups[groupIndex].tabs[tabIndex])
+            return
+        }
+    }
 }

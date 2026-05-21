@@ -1,4 +1,4 @@
-// Argv-token classifier for `danterm send-keys -- <token>...`.
+// Argv-token classifier for `danterm pane input -- <token>...`.
 // Each token is classified as either a literal text run or a structured key
 // event. The rule is deterministic — no fall-through that contradicts itself
 // — and rejects shifted special keys (any S- prefix) outright in v1.

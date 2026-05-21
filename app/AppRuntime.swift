@@ -353,7 +353,7 @@ class AppRuntime {
 
     private func perform(_ effect: Effect) {
         switch effect {
-        case .createSurface(let paneId, let cwd, let command):
+        case .createSurface(let paneId, let cwd, let command, let launchCommand, let waitAfterCommand):
             let token = tokenStore.generate(for: paneId)
             var envVars: [(String, String)] = [
                 (EnvVars.flag, "1"),
@@ -368,6 +368,8 @@ class AppRuntime {
                 paneId: paneId,
                 workingDirectory: cwd,
                 command: command,
+                launchCommand: launchCommand,
+                waitAfterCommand: waitAfterCommand,
                 restoreCommandBehavior: .execute,
                 envVars: envVars
             )
@@ -1157,6 +1159,8 @@ class AppRuntime {
                             paneId: paneId,
                             workingDirectory: resolved?.cwd,
                             command: resolved?.command,
+                            launchCommand: nil,
+                            waitAfterCommand: true,
                             restoreCommandBehavior: restoreCommandBehavior,
                             envVars: envVars
                         )
@@ -1249,6 +1253,8 @@ class AppRuntime {
         paneId: PaneId,
         workingDirectory: String?,
         command: String?,
+        launchCommand: String?,
+        waitAfterCommand: Bool,
         restoreCommandBehavior: RestoreCommandBehavior,
         envVars: [(String, String)]
     ) -> TerminalView {
@@ -1256,6 +1262,8 @@ class AppRuntime {
             ghosttyApp: ghosttyApp,
             workingDirectory: workingDirectory,
             command: command,
+            launchCommand: launchCommand,
+            waitAfterCommand: waitAfterCommand,
             restoreCommandBehavior: restoreCommandBehavior,
             envVars: envVars
         )

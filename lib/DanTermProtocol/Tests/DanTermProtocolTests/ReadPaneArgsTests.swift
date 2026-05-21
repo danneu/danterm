@@ -1,4 +1,4 @@
-// Tests for the CLI argument parser and rendering helpers for `danterm read-pane`.
+// Tests for the CLI argument parser and rendering helpers for `danterm pane read`.
 import Foundation
 import XCTest
 @testable import DanTermProtocol

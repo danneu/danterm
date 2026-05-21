@@ -1,4 +1,4 @@
-// CLI argument parser for `danterm send-keys`. Extracted into the protocol
+// CLI argument parser for `danterm pane input`. Extracted into the protocol
 // library so tests can exercise flag handling and the tmux-style
 // `-- <token>...` form without going through a real subprocess.
 import Foundation

@@ -1,4 +1,4 @@
-// Structured input events used by the `send-keys` IPC method to drive a pane
+// Structured input events used by the `pane.input` IPC method to drive a pane
 // as if the user typed at the keyboard. The CLI parses argv tokens into these
 // values; the wire form decodes one-to-one via `KeyName(wireName:)`.
 import Foundation

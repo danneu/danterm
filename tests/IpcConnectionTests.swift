@@ -19,7 +19,7 @@ func ipcConnectionTests() {
     test("two full lines in one read emit two frames") {
         var framer = IpcLineFramer()
         var chunk = ipcLine(#"{"jsonrpc":"2.0","id":1,"method":"ls"}"#)
-        chunk.append(ipcLine(#"{"jsonrpc":"2.0","id":2,"method":"tab.title"}"#))
+        chunk.append(ipcLine(#"{"jsonrpc":"2.0","id":2,"method":"tab.rename"}"#))
         let events = framer.append(chunk)
         try expectEqual(events.count, 2)
     }
