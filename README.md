@@ -189,6 +189,55 @@ executable and ensure `jq` is installed on PATH.
 DanTerm turns OSC 777 and OSC 9 messages into a macOS notification that, when
 clicked, will take you to the originating pane.
 
+## Agent Skill
+
+DanTerm ships an [Agent Skill](https://code.claude.com/docs/en/skills) under
+[`integrations/danterm/`](integrations/danterm). It teaches coding agents
+(Claude Code, Codex, etc.) how to drive DanTerm from the shell: renaming the
+current tab, opening a new tab and launching a command in it, reading another
+pane's output, sending keys to another pane, theme switching, and todos.
+
+Install the skill directory, not the loose file, into your agent runtime's
+skill discovery path:
+
+| Runtime | User-wide path | Per-project path |
+|---|---|---|
+| Claude Code | `~/.claude/skills/danterm` | `<repo>/.claude/skills/danterm` |
+| Codex | `~/.codex/skills/danterm` | `<repo>/.codex/skills/danterm` |
+
+### With Nix
+
+Add `danterm.overlays.default` to your `nixpkgs.overlays`, then symlink the
+packaged skill directory:
+
+```nix
+home.file.".claude/skills/danterm".source =
+  "${pkgs.danterm-agent-skill}/share/danterm-agent-skill";
+home.file.".codex/skills/danterm".source =
+  "${pkgs.danterm-agent-skill}/share/danterm-agent-skill";
+```
+
+### Without Nix
+
+Clone this repo or download the directory, then symlink:
+
+```sh
+mkdir -p ~/.claude/skills ~/.codex/skills
+ln -s /absolute/path/to/danterm/integrations/danterm \
+  ~/.claude/skills/danterm
+ln -s /absolute/path/to/danterm/integrations/danterm \
+  ~/.codex/skills/danterm
+```
+
+### Verify
+
+- Claude Code: type `/skills` and confirm `danterm` is listed.
+- Codex: type `/skills` in an interactive Codex session and confirm `danterm`
+  is listed.
+
+Restart Codex after installing so it reloads the skill list. For Claude Code,
+open `/skills`; if `danterm` is not listed, restart the session.
+
 ## OpenAI Codex Integration
 
 Codex already works out of the box.

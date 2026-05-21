@@ -19,6 +19,19 @@
           bashOptions = [];
           text = builtins.readFile ./integrations/claude-code/claude-notify-osc777.sh;
         };
+        danterm-agent-skill = final.stdenvNoCC.mkDerivation {
+          pname = "danterm-agent-skill";
+          version = "0.0.0";
+          src = ./integrations/danterm;
+          dontConfigure = true;
+          dontBuild = true;
+          installPhase = ''
+            runHook preInstall
+            mkdir -p $out/share/danterm-agent-skill
+            cp -R . $out/share/danterm-agent-skill/
+            runHook postInstall
+          '';
+        };
       } // nixpkgs.lib.optionalAttrs
         (builtins.elem prev.stdenv.hostPlatform.system appSystems)
         {
@@ -27,6 +40,7 @@
 
     packages = forEachSystem hookSystems (system: pkgs:
       {
+        danterm-agent-skill = pkgs.danterm-agent-skill;
         claude-notify-osc777 = pkgs.danterm-claude-notify-osc777;
       } // nixpkgs.lib.optionalAttrs (builtins.elem system appSystems) {
         default = pkgs.danterm;
