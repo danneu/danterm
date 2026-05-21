@@ -526,6 +526,79 @@ func ipcUpdateTests() {
         try expectEqual(model.groups.flatMap(\.tabs).count, tabsBefore)
     }
 
+    test("tab.new background does not steal selection") {
+        var model = makeModel()
+        createTab(&model)
+        let selectedTabId = selectedTab(in: model)!.id
+        let groupId = model.groups[0].id
+
+        let effects = sendIpc(
+            &model,
+            method: Methods.tabNew,
+            params: .object([
+                "group": .string(groupId.rawValue.uuidString),
+                "background": .bool(true),
+            ])
+        )
+
+        try expectEqual(model.selectedTabId, selectedTabId, "background tab.new should not change selected tab")
+        let reply = try requireIpcReply(effects)
+        try expect(reply["tab"]?["id"]?.asString != nil, "reply should include new tab id")
+        try expectEqual(reply["group"]?["id"]?.asString, groupId.rawValue.uuidString)
+    }
+
+    test("tab.new with malformed background fails before mutation") {
+        var model = makeModel()
+        createTab(&model)
+        let groupId = model.groups[0].id
+        let paneIdsBefore = Set(model.panes.keys)
+        let tabsBefore = model.groups.flatMap(\.tabs).map(\.id)
+
+        let effects = sendIpc(
+            &model,
+            method: Methods.tabNew,
+            params: .object([
+                "group": .string(groupId.rawValue.uuidString),
+                "background": .string("true"),
+            ])
+        )
+
+        let error = try requireIpcError(effects)
+        try expectEqual(error.code, -32602)
+        try expectEqual(Set(model.panes.keys), paneIdsBefore)
+        try expectEqual(model.groups.flatMap(\.tabs).map(\.id), tabsBefore)
+    }
+
+    test("tab.new inherits cwd from caller pane, not selected tab") {
+        for background in [true, false] {
+            var model = makeModel()
+            createTab(&model)
+            let selectedTabId = selectedTab(in: model)!.id
+            let selectedPaneId = selectedTab(in: model)!.focusedPaneId
+            model.panes[selectedPaneId]?.cwd = "/selected"
+            createTab(&model)
+            let callerPaneId = selectedTab(in: model)!.focusedPaneId
+            model.panes[callerPaneId]?.cwd = "/caller"
+            _ = update(&model, .selectTab(id: selectedTabId))
+
+            let effects = sendIpc(
+                &model,
+                method: Methods.tabNew,
+                params: .object(["background": .bool(background)]),
+                context: IpcRequestContext(paneId: callerPaneId.rawValue.uuidString)
+            )
+
+            let reply = try requireIpcReply(effects)
+            let paneId = try requirePaneId(reply["panes"]?.asArray?.first?["id"], "tab.new should return pane id")
+            try expect(hasEffect(effects) {
+                if case .createSurface(let effectPaneId, let cwd, _, _, _) = $0 {
+                    return effectPaneId == paneId && cwd == "/caller"
+                }
+                return false
+            }, "tab.new should inherit cwd from caller pane")
+        }
+    }
+
     test("tab.new with launch creates direct-launch surface and custom tab title") {
         var model = makeModel()
         createTab(&model)
@@ -622,6 +695,86 @@ func ipcUpdateTests() {
             }
             return false
         }, "expected split createSurface to use direct launch")
+    }
+
+    test("pane.split background on selected tab preserves focused pane") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = selectedTab(in: model)!.id
+        let focusedPaneId = selectedTab(in: model)!.focusedPaneId
+
+        let effects = sendIpc(
+            &model,
+            method: Methods.paneSplit,
+            params: .object([
+                "direction": .string("horizontal"),
+                "background": .bool(true),
+            ]),
+            context: IpcRequestContext(paneId: focusedPaneId.rawValue.uuidString)
+        )
+
+        let reply = try requireIpcReply(effects)
+        let newPaneId = try requirePaneId(reply["pane"]?["id"], "pane.split should return pane id")
+        let tab = tabById(tabId, in: model)!
+        try expect(allPaneIds(tab.rootNode).contains(newPaneId), "target tab should contain new pane")
+        try expectEqual(tab.focusedPaneId, focusedPaneId, "background split should preserve focused pane")
+        try expectEqual(model.selectedTabId, tabId, "background split should not change selected tab")
+        try expect(hasEffect(effects) {
+            if case .rebuildContentView = $0 { return true }
+            return false
+        }, "selected-tab background split should rebuild content view")
+    }
+
+    test("pane.split background on unselected tab does not rebuild") {
+        var model = makeModel()
+        createTab(&model)
+        let selectedTabId = selectedTab(in: model)!.id
+        createTab(&model)
+        let backgroundTabId = selectedTab(in: model)!.id
+        let backgroundPaneId = selectedTab(in: model)!.focusedPaneId
+        _ = update(&model, .selectTab(id: selectedTabId))
+
+        let effects = sendIpc(
+            &model,
+            method: Methods.paneSplit,
+            params: .object([
+                "direction": .string("horizontal"),
+                "background": .bool(true),
+            ]),
+            context: IpcRequestContext(paneId: backgroundPaneId.rawValue.uuidString)
+        )
+
+        let reply = try requireIpcReply(effects)
+        let newPaneId = try requirePaneId(reply["pane"]?["id"], "pane.split should return pane id")
+        let backgroundTab = tabById(backgroundTabId, in: model)!
+        try expect(allPaneIds(backgroundTab.rootNode).contains(newPaneId), "background tab should contain new pane")
+        try expectEqual(backgroundTab.focusedPaneId, backgroundPaneId, "background split should preserve target focus")
+        try expectEqual(model.selectedTabId, selectedTabId, "background split should not change selected tab")
+        try expect(!hasEffect(effects) {
+            if case .rebuildContentView = $0 { return true }
+            return false
+        }, "unselected-tab background split should not rebuild content view")
+    }
+
+    test("pane.split with malformed background fails before mutation") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let paneIdsBefore = Set(model.panes.keys)
+
+        let effects = sendIpc(
+            &model,
+            method: Methods.paneSplit,
+            params: .object([
+                "direction": .string("horizontal"),
+                "background": .string("true"),
+            ]),
+            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        )
+
+        let error = try requireIpcError(effects)
+        try expectEqual(error.code, -32602)
+        try expectEqual(Set(model.panes.keys), paneIdsBefore)
     }
 
     test("malformed launch returns invalid params without mutation effects") {

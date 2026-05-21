@@ -20,6 +20,39 @@ func tabTests() {
         }, "should emit rebuildContentView")
     }
 
+    test("testCreateTabBackgroundDoesNotChangeSelection") {
+        var model = makeModel()
+        createTab(&model)
+        let selectedTabId = model.groups[0].tabs[0].id
+        let selectedPaneId = model.groups[0].tabs[0].focusedPaneId
+        let beforePaneIds = Set(model.panes.keys)
+
+        let effects = createTab(&model, background: true)
+        let newPaneIds = Set(model.panes.keys).subtracting(beforePaneIds)
+
+        try expectEqual(model.groups[0].tabs.count, 2)
+        try expectEqual(model.selectedTabId, selectedTabId, "background tab should not steal selection")
+        try expectEqual(newPaneIds.count, 1, "background tab should create one pane")
+        try expect(hasEffect(effects) {
+            if case .createSurface(let paneId, _, _, _, _) = $0 {
+                return newPaneIds.contains(paneId)
+            }
+            return false
+        }, "should emit createSurface for new pane")
+        try expect(hasEffect(effects) {
+            if case .reloadSidebar = $0 { return true }
+            return false
+        }, "should reload sidebar")
+        try expect(!hasEffect(effects) {
+            if case .focusSurface(let paneId, false) = $0, paneId == selectedPaneId { return true }
+            return false
+        }, "should not defocus selected pane")
+        try expect(!hasEffect(effects) {
+            if case .rebuildContentView = $0 { return true }
+            return false
+        }, "should not rebuild content view")
+    }
+
     test("testCreateTabInheritsWorkingDirectory") {
         var model = makeModel()
         createTab(&model)
@@ -114,6 +147,25 @@ func tabTests() {
 
         try expectEqual(model.groups[0].tabs.count, 0, "General should have no tabs")
         try expectEqual(model.groups[1].tabs.count, 2, "Work should have auto-created tab + explicit tab")
+    }
+
+    test("testCreateTabBackgroundIntoSpecificGroup") {
+        var model = makeModel()
+        createTab(&model)
+        let selectedTabId = model.selectedTabId!
+        let _ = update(&model, .createGroup(name: "Work"))
+        let workGroupId = model.groups[1].id
+        let workCountBefore = model.groups[1].tabs.count
+        _ = update(&model, .selectTab(id: selectedTabId))
+
+        let effects = createTab(&model, inGroupId: workGroupId, background: true)
+
+        try expectEqual(model.groups[1].tabs.count, workCountBefore + 1, "background tab should land in requested group")
+        try expectEqual(model.selectedTabId, selectedTabId, "background tab should not change selection")
+        try expect(!hasEffect(effects) {
+            if case .rebuildContentView = $0 { return true }
+            return false
+        }, "background tab should not rebuild content view")
     }
 
     test("testCreateTabInsertsAfterCurrentTab") {

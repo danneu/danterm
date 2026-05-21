@@ -15,6 +15,13 @@ final class TabNewArgsTests: XCTestCase {
         )
     }
 
+    func testBackgroundFlagParses() throws {
+        XCTAssertEqual(
+            try parseTabNewArgs(["--background"]),
+            ParsedTabNew(group: nil, launch: nil, background: true)
+        )
+    }
+
     func testLaunchFlagsParseIndividually() throws {
         XCTAssertEqual(
             try parseTabNewArgs(["--cmd", "date"]),
@@ -34,6 +41,17 @@ final class TabNewArgsTests: XCTestCase {
         XCTAssertEqual(
             try parseTabNewArgs(["--group", "G1", "--cmd", "make test", "--cwd", "/repo", "--title", "tests"]),
             ParsedTabNew(group: "G1", launch: LaunchSpec(cmd: "make test", cwd: "/repo", title: "tests"))
+        )
+    }
+
+    func testBackgroundCombinesWithOtherFlags() throws {
+        XCTAssertEqual(
+            try parseTabNewArgs(["--group", "G1", "--background", "--cmd", "date"]),
+            ParsedTabNew(
+                group: "G1",
+                launch: LaunchSpec(cmd: "date", cwd: nil, title: nil),
+                background: true
+            )
         )
     }
 

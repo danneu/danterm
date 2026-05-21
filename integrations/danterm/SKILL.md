@@ -30,10 +30,12 @@ the app's currently focused group, tab, or pane.
 
 For agent commands:
 
-- `tab new`: always pass `--group <group-id>`.
+- `tab new`: always pass `--group <group-id>`; prefer `--background`
+  unless the user asked to switch to the new tab.
 - `tab rename`: always pass `--tab <tab-id>`.
-- `pane split`, `pane input`, `theme set`, and todos: always pass
-  `--pane <pane-id>`.
+- `pane split`: always pass `--pane <pane-id>`; prefer `--background`
+  unless the user asked to focus the new pane.
+- `pane input`, `theme set`, and todos: always pass `--pane <pane-id>`.
 - `pane focus` and `pane read` already require explicit pane ids; keep them
   explicit.
 
@@ -92,10 +94,13 @@ exactly one matching pane, tab, or group before running any mutation command.
     danterm tab new --group "$GROUP_ID"
     danterm tab new --group "$GROUP_ID" --cmd 'vim notes.md' --title notes
     danterm tab new --group "$GROUP_ID" --cmd 'cargo test --workspace' --cwd ~/proj --title tests
+    danterm tab new --group "$GROUP_ID" --background --cmd 'just test' --title tests
 
 `--cmd` launches the program directly via libghostty, not by typing into a
 shell prompt, so it does not race shell startup. The pane stays open after the
 command exits.
+
+Use `--background` to keep the user's current tab focused.
 
 ### Split a pane and run a command in the new one
 
@@ -108,6 +113,9 @@ Prefer `--cmd` over splitting and then sending keys; it avoids the
 shell-prompt race.
 
     danterm pane split --pane "$PANE_ID" -h --cmd 'just test' --title tests
+    danterm pane split --pane "$PANE_ID" -h --background --cmd 'just test' --title tests
+
+Use `--background` to leave the caller's pane focused inside its tab.
 
 To capture the new pane id for later:
 
@@ -206,6 +214,10 @@ else prints nothing on success and exits 0.
   `pane split --pane <pane-id> --cmd` over the
   split-then-`pane input` pattern. `--cmd` launches the program directly and
   avoids racing the shell prompt.
+- Prefer `--background` on `tab new` and `pane split` for autonomous work the
+  user did not just ask for. The user may be focused on another tab or pane;
+  stealing focus is disruptive. Omit `--background` only when the user
+  explicitly asked you to switch to the new tab or pane.
 - When a recipe needs an id, derive it from `pane info` or `ls` using the
   targeting rule above; do not guess UUIDs.
 - Errors print to stderr as `danterm: <message>` and exit non-zero. Surface

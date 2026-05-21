@@ -10,11 +10,13 @@ public struct ParsedPaneSplit: Equatable {
     public let pane: String?
     public let direction: PaneSplitDirection
     public let launch: LaunchSpec?
+    public let background: Bool
 
-    public init(pane: String?, direction: PaneSplitDirection, launch: LaunchSpec? = nil) {
+    public init(pane: String?, direction: PaneSplitDirection, launch: LaunchSpec? = nil, background: Bool = false) {
         self.pane = pane
         self.direction = direction
         self.launch = launch
+        self.background = background
     }
 }
 
@@ -32,6 +34,7 @@ public func parsePaneSplitArgs(_ args: [String]) throws -> ParsedPaneSplit {
     var cmd: String?
     var cwd: String?
     var title: String?
+    var background = false
     var i = 0
 
     while i < args.count {
@@ -61,6 +64,9 @@ public func parsePaneSplitArgs(_ args: [String]) throws -> ParsedPaneSplit {
             }
             title = args[i + 1]
             i += 2
+        case "--background":
+            background = true
+            i += 1
         case "-h":
             guard direction == nil else {
                 throw PaneSplitParseError.unexpectedArgument(arg)
@@ -85,5 +91,5 @@ public func parsePaneSplitArgs(_ args: [String]) throws -> ParsedPaneSplit {
         throw PaneSplitParseError.missingDirection
     }
     let spec = LaunchSpec(cmd: cmd, cwd: cwd, title: title)
-    return ParsedPaneSplit(pane: pane, direction: direction, launch: spec.isEmpty ? nil : spec)
+    return ParsedPaneSplit(pane: pane, direction: direction, launch: spec.isEmpty ? nil : spec, background: background)
 }

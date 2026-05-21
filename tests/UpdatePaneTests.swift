@@ -458,6 +458,120 @@ func paneTests() {
         try expectEqual(model.panes.count, 3)
     }
 
+    test("testSplitPaneBackgroundOnSelectedTabRebuildsButPreservesFocus") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        let existingFocusedPaneId = model.groups[0].tabs[0].focusedPaneId
+        let beforePaneIds = Set(model.panes.keys)
+
+        let effects = update(
+            &model,
+            .splitPane(paneId: existingFocusedPaneId, direction: .horizontal, background: true)
+        )
+        let newPaneIds = Set(model.panes.keys).subtracting(beforePaneIds)
+        let tab = tabById(tabId, in: model)!
+
+        try expectEqual(newPaneIds.count, 1, "background split should create one pane")
+        try expect(allPaneIds(tab.rootNode).contains(newPaneIds.first!), "tab tree should contain new pane")
+        try expectEqual(tab.focusedPaneId, existingFocusedPaneId, "background split should preserve focused pane")
+        try expectEqual(model.selectedTabId, tabId, "background split should not change selected tab")
+        try expect(hasEffect(effects) {
+            if case .createSurface(let paneId, _, _, _, _) = $0 {
+                return newPaneIds.contains(paneId)
+            }
+            return false
+        }, "should create a surface for the new pane")
+        try expect(hasEffect(effects) {
+            if case .scheduleCheckpoint = $0 { return true }
+            return false
+        }, "should schedule checkpoint")
+        try expect(hasEffect(effects) {
+            if case .rebuildContentView = $0 { return true }
+            return false
+        }, "selected-tab background split should rebuild so the new pane renders")
+        try expect(!hasEffect(effects) {
+            if case .makeFirstResponder = $0 { return true }
+            return false
+        }, "background split should not request first responder")
+    }
+
+    test("testSplitPaneBackgroundOnUnselectedTabSkipsRebuild") {
+        var model = makeModel()
+        createTab(&model)
+        let tabAId = model.groups[0].tabs[0].id
+        createTab(&model)
+        let tabBId = model.groups[0].tabs[1].id
+        let tabBFocusedPaneId = model.groups[0].tabs[1].focusedPaneId
+        _ = update(&model, .selectTab(id: tabAId))
+        let beforePaneIds = Set(model.panes.keys)
+
+        let effects = update(
+            &model,
+            .splitPane(paneId: tabBFocusedPaneId, direction: .horizontal, background: true)
+        )
+        let newPaneIds = Set(model.panes.keys).subtracting(beforePaneIds)
+        let tabB = tabById(tabBId, in: model)!
+
+        try expectEqual(newPaneIds.count, 1, "background split should create one pane")
+        try expect(allPaneIds(tabB.rootNode).contains(newPaneIds.first!), "background tab tree should contain new pane")
+        try expectEqual(tabB.focusedPaneId, tabBFocusedPaneId, "background split should preserve target tab focus")
+        try expectEqual(model.selectedTabId, tabAId, "background split should not change selected tab")
+        try expect(hasEffect(effects) {
+            if case .createSurface(let paneId, _, _, _, _) = $0 {
+                return newPaneIds.contains(paneId)
+            }
+            return false
+        }, "should create a surface for the new pane")
+        try expect(hasEffect(effects) {
+            if case .scheduleCheckpoint = $0 { return true }
+            return false
+        }, "should schedule checkpoint")
+        try expect(!hasEffect(effects) {
+            if case .rebuildContentView = $0 { return true }
+            return false
+        }, "unselected-tab background split should not rebuild content view")
+        try expect(!hasEffect(effects) {
+            if case .makeFirstResponder = $0 { return true }
+            return false
+        }, "background split should not request first responder")
+    }
+
+    test("testSplitPaneBackgroundInheritsTheme") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        model.panes[paneId]?.theme = "Tokyo Night"
+        let beforePaneIds = Set(model.panes.keys)
+
+        let effects = update(&model, .splitPane(paneId: paneId, direction: .horizontal, background: true))
+        let newPaneId = Set(model.panes.keys).subtracting(beforePaneIds).first!
+
+        try expectEqual(model.panes[newPaneId]?.theme, "Tokyo Night", "background split should inherit target theme")
+        try expect(hasEffect(effects) {
+            if case .applyPaneTheme(let paneId) = $0, paneId == newPaneId { return true }
+            return false
+        }, "background split should apply inherited theme")
+    }
+
+    test("testSplitPaneForegroundStillMovesFocus") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        let focusedPaneId = model.groups[0].tabs[0].focusedPaneId
+        let beforePaneIds = Set(model.panes.keys)
+
+        let effects = update(&model, .splitPane(paneId: focusedPaneId, direction: .horizontal))
+        let newPaneId = Set(model.panes.keys).subtracting(beforePaneIds).first!
+        let tab = tabById(tabId, in: model)!
+
+        try expectEqual(tab.focusedPaneId, newPaneId, "foreground split should focus new pane")
+        try expect(hasEffect(effects) {
+            if case .rebuildContentView = $0 { return true }
+            return false
+        }, "foreground split should rebuild content view")
+    }
+
     test("testFocusDirectionThenFirstResponderUpdatesFocusAndRebuilds") {
         var model = makeModel()
         createTab(&model)

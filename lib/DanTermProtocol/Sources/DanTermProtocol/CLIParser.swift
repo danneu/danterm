@@ -88,7 +88,7 @@ private func parseTabNewCommand(_ args: [String]) throws -> CLICommand {
     } catch let error as TabNewParseError {
         switch error {
         case .missingValue(_):
-            throw CLIParseError("usage: danterm tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>]")
+            throw CLIParseError("usage: danterm tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background]")
         case .unknownFlag(let flag):
             throw CLIParseError("unknown flag: \(flag)")
         case .unexpectedArgument(let argument):
@@ -102,6 +102,9 @@ private func parseTabNewCommand(_ args: [String]) throws -> CLICommand {
     }
     if let launch = parsed.launch {
         params["launch"] = launch.jsonValue
+    }
+    if parsed.background {
+        params["background"] = .bool(true)
     }
     return CLICommand(method: Methods.tabNew, params: params, outputMode: .json)
 }
@@ -155,7 +158,7 @@ private func parsePaneSplitCommand(_ args: [String]) throws -> CLICommand {
     } catch let error as PaneSplitParseError {
         switch error {
         case .missingDirection, .missingPaneArg, .missingValue(_):
-            throw CLIParseError("usage: danterm pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>]")
+            throw CLIParseError("usage: danterm pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background]")
         case .unknownFlag(let flag):
             throw CLIParseError("unknown flag: \(flag)")
         case .unexpectedArgument(let argument):
@@ -171,6 +174,9 @@ private func parsePaneSplitCommand(_ args: [String]) throws -> CLICommand {
     }
     if let launch = parsed.launch {
         params["launch"] = launch.jsonValue
+    }
+    if parsed.background {
+        params["background"] = .bool(true)
     }
     return CLICommand(method: Methods.paneSplit, params: params, outputMode: .json)
 }

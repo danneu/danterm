@@ -19,6 +19,11 @@ final class PaneSplitArgsTests: XCTestCase {
         XCTAssertEqual(parsed, ParsedPaneSplit(pane: "P1", direction: .horizontal))
     }
 
+    func testBackgroundFlagParses() throws {
+        let parsed = try parsePaneSplitArgs(["-h", "--background"])
+        XCTAssertEqual(parsed, ParsedPaneSplit(pane: nil, direction: .horizontal, background: true))
+    }
+
     func testLaunchFlagsParse() throws {
         let parsed = try parsePaneSplitArgs(["-h", "--cmd", "vim foo", "--cwd", "/tmp", "--title", "edit"])
         XCTAssertEqual(
@@ -27,6 +32,22 @@ final class PaneSplitArgsTests: XCTestCase {
                 pane: nil,
                 direction: .horizontal,
                 launch: LaunchSpec(cmd: "vim foo", cwd: "/tmp", title: "edit")
+            )
+        )
+    }
+
+    func testBackgroundCombinesWithOtherFlags() throws {
+        let parsed = try parsePaneSplitArgs([
+            "--pane", "P1", "-h", "--background",
+            "--cmd", "just test", "--cwd", "/tmp", "--title", "tests",
+        ])
+        XCTAssertEqual(
+            parsed,
+            ParsedPaneSplit(
+                pane: "P1",
+                direction: .horizontal,
+                launch: LaunchSpec(cmd: "just test", cwd: "/tmp", title: "tests"),
+                background: true
             )
         )
     }

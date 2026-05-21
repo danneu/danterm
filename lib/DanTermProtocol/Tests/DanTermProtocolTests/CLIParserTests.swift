@@ -15,6 +15,13 @@ final class CLIParserTests: XCTestCase {
         ]))
     }
 
+    func testTabNewParsesBackgroundFlag() throws {
+        let command = try parseCLI(["tab", "new", "--background"])
+        XCTAssertEqual(command.method, Methods.tabNew)
+        XCTAssertEqual(command.outputMode, .json)
+        XCTAssertEqual(command.params["background"], .bool(true))
+    }
+
     func testPaneInfoParsesExplicitAndImplicitForms() throws {
         let explicit = try parseCLI(["pane", "info", "--pane", "P1"])
         XCTAssertEqual(explicit.method, Methods.paneInfo)
@@ -66,9 +73,11 @@ final class CLIParserTests: XCTestCase {
 
     func testImplicitHumanMutationFormsStillParseWithoutExplicitTargets() throws {
         XCTAssertEqual(try parseCLI(["tab", "new"]).params["group"], nil)
+        XCTAssertEqual(try parseCLI(["tab", "new"]).params["background"], nil)
         XCTAssertEqual(try parseCLI(["tab", "rename", "work"]).params["tab"], nil)
         XCTAssertEqual(try parseCLI(["tab", "rename", "--clear"]).params["tab"], nil)
         XCTAssertEqual(try parseCLI(["pane", "split", "-h"]).params["pane"], nil)
+        XCTAssertEqual(try parseCLI(["pane", "split", "-h"]).params["background"], nil)
         XCTAssertEqual(try parseCLI(["pane", "input", "--", "ls"]).params["pane"], nil)
         XCTAssertEqual(try parseCLI(["theme", "set", "TokyoNight"]).params["pane"], nil)
         XCTAssertEqual(try parseCLI(["theme", "set", "--clear"]).params["pane"], nil)
@@ -131,6 +140,14 @@ final class CLIParserTests: XCTestCase {
         ]))
     }
 
+    func testPaneSplitParsesBackgroundFlag() throws {
+        let command = try parseCLI(["pane", "split", "-h", "--background"])
+        XCTAssertEqual(command.method, Methods.paneSplit)
+        XCTAssertEqual(command.outputMode, .json)
+        XCTAssertEqual(command.params["direction"], .string("horizontal"))
+        XCTAssertEqual(command.params["background"], .bool(true))
+    }
+
     func testRemovedLegacyCommandsAreUnknown() {
         for command in ["new-tab", "send-keys", "read-pane"] {
             XCTAssertThrowsError(try parseCLI([command])) { err in
@@ -142,10 +159,10 @@ final class CLIParserTests: XCTestCase {
     func testMalformedExplicitTargetSyntaxThrowsUsageErrors() {
         let cases: [([String], String)] = [
             (["pane", "info", "--pane"], "usage: danterm pane info [--pane <pane-id>]"),
-            (["tab", "new", "--group"], "usage: danterm tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>]"),
+            (["tab", "new", "--group"], "usage: danterm tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background]"),
             (["tab", "rename", "--tab"], "usage: danterm tab rename [--tab <tab-id>] <name>|--clear"),
             (["tab", "rename", "--tab", "T1", "--clear", "extra"], "usage: danterm tab rename [--tab <tab-id>] --clear"),
-            (["pane", "split", "--pane"], "usage: danterm pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>]"),
+            (["pane", "split", "--pane"], "usage: danterm pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background]"),
             (["pane", "input", "--pane"], "usage: danterm pane input --pane <pane-id> ..."),
             (["theme", "set", "--pane"], "usage: danterm theme set [--pane <pane-id>] <name>|--clear"),
             (["theme", "set", "--pane", "P1", "--clear", "extra"], "usage: danterm theme set [--pane <pane-id>] --clear"),

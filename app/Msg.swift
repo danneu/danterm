@@ -41,10 +41,10 @@ enum TodoDestination: Equatable {
 
 enum Msg {
     // User actions
-    case createTab(inGroupId: GroupId?, position: TabInsertPosition = .afterSelected, launch: LaunchSpec? = nil)
+    case createTab(inGroupId: GroupId?, position: TabInsertPosition = .afterSelected, launch: LaunchSpec? = nil, background: Bool = false)
     case selectTab(id: TabId)
     case requestCloseTab(id: TabId)
-    case splitPane(paneId: PaneId? = nil, direction: SplitNodeModel.Direction, launch: LaunchSpec? = nil)
+    case splitPane(paneId: PaneId? = nil, direction: SplitNodeModel.Direction, launch: LaunchSpec? = nil, background: Bool = false)
     case closePane(paneId: PaneId)
     case focusDirection(direction: SplitNodeModel.Direction, side: SplitNodeModel.Side)
     case createGroup(name: String, launch: LaunchSpec? = nil)

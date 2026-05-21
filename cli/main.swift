@@ -27,14 +27,14 @@ struct DanTermCLI {
 
         Commands:
           ls                          Print the full app snapshot as JSON
-          tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>]
+          tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background]
                                       Open a new tab, optionally launching a command
           tab rename [--tab <tab-id>] <name>|--clear
                                       Rename a tab or clear its custom title
           pane focus <pane-id>        Focus a pane by id
           pane info [--pane <pane-id>]
                                       Print pane, tab, and group metadata as JSON
-          pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>]
+          pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background]
                                       Split a pane (horizontal/vertical)
           pane input [--pane <pane-id>] [--literal] -- <token>...
                                       Send keystrokes to a pane (tmux-style:

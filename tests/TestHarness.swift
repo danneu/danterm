@@ -84,8 +84,8 @@ func makeModel() -> AppModel {
 
 /// Create a tab and return the effects (for inspection or ignoring).
 @discardableResult
-func createTab(_ model: inout AppModel, inGroupId: GroupId? = nil) -> [Effect] {
-    return update(&model, .createTab(inGroupId: inGroupId))
+func createTab(_ model: inout AppModel, inGroupId: GroupId? = nil, background: Bool = false) -> [Effect] {
+    return update(&model, .createTab(inGroupId: inGroupId, background: background))
 }
 
 func hasEffect(_ effects: [Effect], _ check: (Effect) -> Bool) -> Bool {
