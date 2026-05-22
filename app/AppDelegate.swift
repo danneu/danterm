@@ -144,7 +144,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
             let summary = sessionSummary(lastSession)
             let alert = NSAlert()
             alert.addButton(withTitle: "Restore")
-            alert.addButton(withTitle: "Start Fresh")
+            let startFreshButton = alert.addButton(withTitle: "Start Fresh")
+            // Enter activates "Restore" (first button = default). Bind Escape to
+            // "Start Fresh" so dismissing the modal matches clicking it.
+            startFreshButton.keyEquivalent = "\u{1b}"
             if previousSessionCrashed {
                 alert.messageText = "Restore Previous Session?"
                 alert.informativeText = "DanTerm did not exit cleanly last time.\n\(summary)"
