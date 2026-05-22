@@ -44,6 +44,7 @@ enum Effect {
     // `uncompletedTodoCount` rolls up the tab's own todos plus every pane's
     // todos in that tab (the same number the chrome's tab-todo badge shows).
     case showCloseTabConfirmation(tabId: TabId, tabTitle: String, paneCount: Int, isLastTab: Bool, uncompletedTodoCount: Int)
+    case showCloseTabsConfirmation(tabIds: [TabId], tabCount: Int, totalPaneCount: Int, totalUncompletedTodos: Int, isQuit: Bool)
     case terminate
     case activateApp
     case setAppFocus(Bool)

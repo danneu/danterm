@@ -445,6 +445,29 @@ func emitCloseTabConfirmation(
   )]
 }
 
+// Single chokepoint for asking before closing a tab batch. It uses the same
+// pending-confirmation slot as single-tab close and quit confirmations.
+func emitCloseTabsConfirmation(_ model: inout AppModel, ids: [TabId]) -> [Effect] {
+  guard model.pendingConfirmation == nil else { return [] }
+  model.pendingConfirmation = .closeTab
+
+  var totalPaneCount = 0
+  var totalUncompletedTodos = 0
+  for id in ids {
+    guard let tab = tabById(id, in: model) else { continue }
+    totalPaneCount += allPaneIds(tab.rootNode).count
+    totalUncompletedTodos += tabTodoRollup(id, in: model).uncompleted
+  }
+
+  return [.showCloseTabsConfirmation(
+    tabIds: ids,
+    tabCount: ids.count,
+    totalPaneCount: totalPaneCount,
+    totalUncompletedTodos: totalUncompletedTodos,
+    isQuit: ids.count == totalTabCount(model)
+  )]
+}
+
 /// Total + uncompleted count for a tab's own to-dos plus every pane's
 /// to-dos inside that tab. Pure: same input -> same output.
 func tabTodoRollup(_ tabId: TabId, in model: AppModel) -> (total: Int, uncompleted: Int) {
@@ -716,6 +739,44 @@ private func tabTodoCount(for destination: TodoDestination, in model: AppModel) 
 // confirm and cancel paths can clear pending confirmation state.
 func closeTabConfirmationResponse(isConfirm: Bool, tabId: TabId) -> Msg {
   isConfirm ? .confirmCloseTab(id: tabId) : .cancelCloseTab
+}
+
+// Converts the AppKit close-tabs alert response into an explicit Msg so both
+// confirm and cancel paths can clear pending confirmation state.
+func closeTabsConfirmationResponse(isConfirm: Bool, ids: [TabId]) -> Msg {
+  isConfirm ? .confirmCloseTabs(ids: ids) : .cancelCloseTabs
+}
+
+/// Build the close-tabs confirmation copy. Mentions extra panes beyond one per
+/// tab and unfinished tasks, matching the details the tab badges advertise.
+func closeTabsConfirmationCopy(
+  tabCount: Int,
+  totalPaneCount: Int,
+  totalUncompletedTodos: Int,
+  isQuit: Bool
+) -> String {
+  var parts: [String] = []
+  if totalPaneCount > tabCount {
+    parts.append("\(totalPaneCount) terminal panes")
+  }
+  if totalUncompletedTodos > 0 {
+    let label = totalUncompletedTodos == 1 ? "1 unfinished task" : "\(totalUncompletedTodos) unfinished tasks"
+    parts.append(label)
+  }
+
+  let prefix: String
+  if parts.isEmpty {
+    prefix = "These tabs will be closed."
+  } else if parts.count == 1 {
+    prefix = "These tabs have \(parts[0])."
+  } else {
+    prefix = "These tabs have \(parts[0]) and \(parts[1])."
+  }
+
+  if isQuit {
+    return prefix + " Closing them will quit DanTerm."
+  }
+  return prefix
 }
 
 // MARK: - Restore

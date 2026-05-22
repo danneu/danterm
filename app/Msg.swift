@@ -44,6 +44,7 @@ enum Msg {
     case createTab(inGroupId: GroupId?, position: TabInsertPosition = .afterSelected, launch: LaunchSpec? = nil, background: Bool = false)
     case selectTab(id: TabId)
     case requestCloseTab(id: TabId)
+    case requestCloseTabs(ids: [TabId])
     case splitPane(paneId: PaneId? = nil, direction: SplitNodeModel.Direction, launch: LaunchSpec? = nil, background: Bool = false)
     case closePane(paneId: PaneId)
     case focusDirection(direction: SplitNodeModel.Direction, side: SplitNodeModel.Side)
@@ -74,6 +75,8 @@ enum Msg {
     case closeTab(id: TabId)
     case confirmCloseTab(id: TabId)
     case cancelCloseTab
+    case confirmCloseTabs(ids: [TabId])
+    case cancelCloseTabs
 
     // Command tracking
     case commandStarted(paneId: PaneId, command: String)

@@ -546,6 +546,28 @@ class AppRuntime {
                 self.send(closeTabConfirmationResponse(isConfirm: isConfirm, tabId: tabId))
             }
 
+        case .showCloseTabsConfirmation(let tabIds, let tabCount, let totalPaneCount, let totalUncompletedTodos, let isQuit):
+            let alert = NSAlert()
+            alert.messageText = isQuit ? "Close \(tabCount) tabs and quit DanTerm?" : "Close \(tabCount) tabs?"
+            alert.informativeText = closeTabsConfirmationCopy(
+                tabCount: tabCount,
+                totalPaneCount: totalPaneCount,
+                totalUncompletedTodos: totalUncompletedTodos,
+                isQuit: isQuit
+            )
+            alert.addButton(withTitle: "Close \(tabCount) Tabs")
+            alert.addButton(withTitle: "Cancel")
+            if let window = window {
+                alert.beginSheetModal(for: window) { [weak self] response in
+                    let isConfirm = response == .alertFirstButtonReturn
+                    self?.send(closeTabsConfirmationResponse(isConfirm: isConfirm, ids: tabIds))
+                }
+            } else {
+                let response = alert.runModal()
+                let isConfirm = response == .alertFirstButtonReturn
+                self.send(closeTabsConfirmationResponse(isConfirm: isConfirm, ids: tabIds))
+            }
+
         case .showTerminateConfirmation(let paneCount):
             if quitConfirmationPanel == nil {
                 quitConfirmationPanel = QuitConfirmationPanel(runtime: self)

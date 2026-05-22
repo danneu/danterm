@@ -970,13 +970,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         runtime?.send(.clearAlertsForTabs(tabIds: box.ids))
     }
 
-    /// Closing N tabs dispatches N .requestCloseTab calls so each tab's
-    /// per-pane "running command" confirmation flow runs independently.
+    /// Close the selected tab batch through one confirmation flow so mixed
+    /// simple and confirmation-needed tabs are handled uniformly.
     @objc private func contextCloseTabs(_ sender: NSMenuItem) {
         guard let box = sender.representedObject as? TabIdsBox else { return }
-        for id in box.ids {
-            runtime?.send(.requestCloseTab(id: id))
-        }
+        runtime?.send(.requestCloseTabs(ids: box.ids))
     }
 
     /// Mirrors AppDelegate.newGroup: send the action, then begin inline

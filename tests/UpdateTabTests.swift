@@ -564,6 +564,222 @@ func tabTests() {
         try expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
     }
 
+    test("testRequestCloseTabsMixedBatchShowsSingleConfirmationAndKeepsTabsUntilConfirm") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let secondTabId = model.groups[0].tabs[1].id
+        let thirdTabId = model.groups[0].tabs[2].id
+        update(&model, .selectTab(id: firstTabId))
+        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .addTabTodo(tabId: secondTabId, text: "finish this"))
+        let tabIdsBefore = model.groups.flatMap(\.tabs).map(\.id)
+
+        let effects = update(&model, .requestCloseTabs(ids: [firstTabId, secondTabId, thirdTabId]))
+
+        guard let confirmation = closeTabsConfirmationArgs(in: effects) else {
+            throw TestFailure(message: "expected showCloseTabsConfirmation")
+        }
+        try expectEqual(closeTabsConfirmationEffectCount(effects), 1, "should emit one batch confirmation")
+        try expectEqual(confirmation.tabIds, [firstTabId, secondTabId, thirdTabId])
+        try expectEqual(confirmation.tabCount, 3)
+        try expectEqual(model.groups.flatMap(\.tabs).map(\.id), tabIdsBefore, "tabs should remain until confirm")
+        try expect(model.pendingConfirmation == .closeTab, "close-tab confirmation should be pending")
+        try expect(destroyedPaneIds(in: effects).isEmpty, "request should not destroy panes")
+    }
+
+    test("testRequestCloseTabsRollsUpPaneAndTodoCounts") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let secondTabId = model.groups[0].tabs[1].id
+        let thirdTab = model.groups[0].tabs[2]
+        update(&model, .selectTab(id: firstTabId))
+        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .addTabTodo(tabId: secondTabId, text: "tab task"))
+        update(&model, .addTodo(paneId: thirdTab.focusedPaneId, text: "pane task"))
+
+        let effects = update(&model, .requestCloseTabs(ids: [firstTabId, secondTabId, thirdTab.id]))
+
+        guard let confirmation = closeTabsConfirmationArgs(in: effects) else {
+            throw TestFailure(message: "expected showCloseTabsConfirmation")
+        }
+        try expectEqual(confirmation.totalPaneCount, 4, "should roll up every pane in the batch")
+        try expectEqual(confirmation.totalUncompletedTodos, 2, "should roll up tab and pane todos")
+    }
+
+    test("testRequestCloseTabsSetsIsQuitWhenBatchCoversEveryLiveTab") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let ids = model.groups[0].tabs.map(\.id)
+
+        let effects = update(&model, .requestCloseTabs(ids: ids))
+
+        guard let confirmation = closeTabsConfirmationArgs(in: effects) else {
+            throw TestFailure(message: "expected showCloseTabsConfirmation")
+        }
+        try expect(confirmation.isQuit, "closing every live tab should set isQuit")
+    }
+
+    test("testRequestCloseTabsSingleIdDelegatesToRequestCloseTab") {
+        var base = makeModel()
+        createTab(&base)
+        createTab(&base)
+        let firstTabId = base.groups[0].tabs[0].id
+        var direct = base
+        var batch = base
+
+        let directEffects = update(&direct, .requestCloseTab(id: firstTabId))
+        let batchEffects = update(&batch, .requestCloseTabs(ids: [firstTabId]))
+
+        try expectEqual(batch, direct, "single-id batch should match direct request model mutation")
+        try expectEqual(destroyedPaneIds(in: batchEffects), destroyedPaneIds(in: directEffects))
+        try expectEqual(effectCount(batchEffects) { if case .reloadSidebar = $0 { return true }; return false },
+                        effectCount(directEffects) { if case .reloadSidebar = $0 { return true }; return false })
+        try expectEqual(effectCount(batchEffects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+                        effectCount(directEffects) { if case .scheduleCheckpoint = $0 { return true }; return false })
+    }
+
+    test("testRequestCloseTabsEmptyIdsIsNoOp") {
+        var model = makeModel()
+        let snapshot = model
+
+        let effects = update(&model, .requestCloseTabs(ids: []))
+
+        try expectEqual(effects.count, 0)
+        try expectEqual(model, snapshot, "empty batch should not mutate model")
+    }
+
+    test("testRequestCloseTabsFiltersStaleIdsBeforeSingletonDelegation") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let liveTabId = model.groups[0].tabs[0].id
+        let staleTabId = TabId()
+
+        let effects = update(&model, .requestCloseTabs(ids: [staleTabId, liveTabId]))
+
+        try expect(!model.groups[0].tabs.contains { $0.id == liveTabId }, "live tab should be closed")
+        try expectEqual(model.groups[0].tabs.count, 1, "stale id should be ignored")
+        try expect(!destroyedPaneIds(in: effects).isEmpty, "delegated close should destroy the live tab pane")
+    }
+
+    test("testRequestCloseTabsDeduplicatesIdsForConfirmation") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let secondTabId = model.groups[0].tabs[1].id
+        update(&model, .selectTab(id: firstTabId))
+        update(&model, .splitPane(direction: .horizontal))
+
+        let effects = update(&model, .requestCloseTabs(ids: [firstTabId, secondTabId, firstTabId, secondTabId]))
+
+        guard let confirmation = closeTabsConfirmationArgs(in: effects) else {
+            throw TestFailure(message: "expected showCloseTabsConfirmation")
+        }
+        try expectEqual(confirmation.tabIds, [firstTabId, secondTabId])
+        try expectEqual(confirmation.tabCount, 2)
+        try expectEqual(confirmation.totalPaneCount, 3)
+        try expect(confirmation.isQuit, "unique-id coverage should drive isQuit")
+    }
+
+    test("testRequestCloseTabsBatchNoOpsWhenConfirmationPending") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let ids = model.groups[0].tabs.map(\.id)
+        model.pendingConfirmation = .closeTab
+
+        let effects = update(&model, .requestCloseTabs(ids: ids))
+
+        try expectEqual(effects.count, 0, "pending confirmation should block batch sheet")
+        try expectEqual(model.groups[0].tabs.map(\.id), ids, "blocked batch should not close simple tabs")
+    }
+
+    test("testConfirmCloseTabsRemovesEveryRequestedTabAndClearsPending") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let secondTabId = model.groups[0].tabs[1].id
+        let thirdTabId = model.groups[0].tabs[2].id
+        update(&model, .selectTab(id: firstTabId))
+        update(&model, .splitPane(direction: .horizontal))
+        let expectedDestroyed = Set(paneIdsForTab(firstTabId, in: model) + paneIdsForTab(secondTabId, in: model))
+        model.pendingConfirmation = .closeTab
+
+        let effects = update(&model, .confirmCloseTabs(ids: [firstTabId, secondTabId]))
+
+        try expect(model.pendingConfirmation == nil, "confirm should clear pending confirmation")
+        try expectEqual(Set(model.groups.flatMap(\.tabs).map(\.id)), Set([thirdTabId]))
+        try expectEqual(destroyedPaneIds(in: effects), expectedDestroyed)
+        for paneId in expectedDestroyed {
+            try expect(model.panes[paneId] == nil, "closed tab pane should be removed")
+        }
+    }
+
+    test("testConfirmCloseTabsEmptyingBatchTerminatesWithoutReloadOrCheckpoint") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let ids = model.groups[0].tabs.map(\.id)
+        model.pendingConfirmation = .closeTab
+
+        let effects = update(&model, .confirmCloseTabs(ids: ids))
+
+        try expectEqual(effectCount(effects) { if case .terminate = $0 { return true }; return false },
+                        1, "emptying batch should emit exactly one terminate")
+        try expect(isTerminateEffect(effects.last), "terminate should be the final effect")
+        try expectEqual(effectCount(effects) { if case .reloadSidebar = $0 { return true }; return false },
+                        0, "emptying batch should not reload sidebar")
+        try expectEqual(effectCount(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+                        0, "emptying batch should not schedule a checkpoint after terminate")
+    }
+
+    test("testConfirmCloseTabsNonEmptyingBatchReloadsAndCheckpointsOnce") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let secondTabId = model.groups[0].tabs[1].id
+        let thirdTabId = model.groups[0].tabs[2].id
+        update(&model, .selectTab(id: secondTabId))
+        model.pendingConfirmation = .closeTab
+
+        let effects = update(&model, .confirmCloseTabs(ids: [secondTabId, thirdTabId]))
+
+        try expectEqual(Set(model.groups.flatMap(\.tabs).map(\.id)), Set([firstTabId]))
+        try expectEqual(model.selectedTabId, firstTabId, "selection should move to a remaining tab")
+        try expectEqual(effectCount(effects) { if case .reloadSidebar = $0 { return true }; return false },
+                        1, "non-emptying batch should reload sidebar once")
+        try expectEqual(effectCount(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+                        1, "non-emptying batch should checkpoint once")
+        try expectEqual(effectCount(effects) { if case .terminate = $0 { return true }; return false },
+                        0, "non-emptying batch should not terminate")
+    }
+
+    test("testCancelCloseTabsClearsPendingAndRemovesNothing") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let ids = model.groups[0].tabs.map(\.id)
+        model.pendingConfirmation = .closeTab
+
+        let effects = update(&model, .cancelCloseTabs)
+
+        try expectEqual(effects.count, 0, "cancel should produce no effects")
+        try expect(model.pendingConfirmation == nil, "cancel should clear pending confirmation")
+        try expectEqual(model.groups[0].tabs.map(\.id), ids)
+    }
+
     // MARK: - Tab Color
 
     test("testSetTabColor") {
@@ -752,4 +968,45 @@ func tabTests() {
         try expectEqual(model.groups, snapshot)
         try expectEqual(effects.count, 0)
     }
+}
+
+private func closeTabsConfirmationArgs(
+    in effects: [Effect]
+) -> (tabIds: [TabId], tabCount: Int, totalPaneCount: Int, totalUncompletedTodos: Int, isQuit: Bool)? {
+    for effect in effects {
+        if case .showCloseTabsConfirmation(
+            let tabIds,
+            let tabCount,
+            let totalPaneCount,
+            let totalUncompletedTodos,
+            let isQuit
+        ) = effect {
+            return (tabIds, tabCount, totalPaneCount, totalUncompletedTodos, isQuit)
+        }
+    }
+    return nil
+}
+
+private func closeTabsConfirmationEffectCount(_ effects: [Effect]) -> Int {
+    effectCount(effects) {
+        if case .showCloseTabsConfirmation = $0 { return true }
+        return false
+    }
+}
+
+private func destroyedPaneIds(in effects: [Effect]) -> Set<PaneId> {
+    Set(effects.compactMap { effect in
+        if case .destroySurface(let paneId) = effect { return paneId }
+        return nil
+    })
+}
+
+private func effectCount(_ effects: [Effect], matching predicate: (Effect) -> Bool) -> Int {
+    effects.filter(predicate).count
+}
+
+private func isTerminateEffect(_ effect: Effect?) -> Bool {
+    guard let effect else { return false }
+    if case .terminate = effect { return true }
+    return false
 }

@@ -134,61 +134,27 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
         return update(&model, .closeTab(id: id))
 
+    case .requestCloseTabs(let ids):
+        let normalized = normalizedLiveTabIds(ids, in: model)
+        guard !normalized.isEmpty else { return [] }
+        guard normalized.count > 1 else {
+            return update(&model, .requestCloseTab(id: normalized[0]))
+        }
+        return emitCloseTabsConfirmation(&model, ids: normalized)
+
     case .closeTab(let id):
-        guard let (groupIdx, tabIdx) = tabLocation(id, in: model) else { return [] }
+        guard tabLocation(id, in: model) != nil else { return [] }
 
         if wouldQuitFromClose(model) {
             return emitTerminateConfirmation(&model)
         }
 
-        let tab = model.groups[groupIdx].tabs[tabIdx]
-        let groupId = model.groups[groupIdx].id
-        let paneIds = allPaneIds(tab.rootNode)
-
-        // Compute fallback selection: prefer predecessor, then successor in flattened order.
-        let fallbackTabId: TabId? = {
-            guard id == model.selectedTabId else { return nil }
-            let allTabs = model.groups.flatMap(\.tabs)
-            guard let idx = allTabs.firstIndex(where: { $0.id == id }) else { return nil }
-            if idx > 0 { return allTabs[idx - 1].id }
-            if idx + 1 < allTabs.count { return allTabs[idx + 1].id }
-            return nil
-        }()
-
-        var effects: [Effect] = []
-        for pid in paneIds {
-            effects.append(.destroySurface(paneId: pid))
-            removeAlertsForPane(pid, in: &model)
-            removePaneSearchState(pid, from: &model)
-            model.lastNotificationTime.removeValue(forKey: pid)
-            model.panes.removeValue(forKey: pid)
-            if model.todoPopover == .pane(pid) {
-                model.todoPopover = nil
-                effects.append(.dismissTodoPopover)
-            }
-        }
-        // Tab popover open against this tab dies with the tab. Emit the dismiss
-        // effect even though no `todoPopoverForTabClosed` will fire, so AppRuntime
-        // closes the floating NSPopover.
-        if model.todoPopover == .tab(id) {
-            model.todoPopover = nil
-            effects.append(.dismissTodoPopoverForTab)
-        }
-
-        model.groups[groupIdx].tabs.remove(at: tabIdx)
-        removeGroupIfEmpty(groupId, from: &model)
+        var effects = closeTabBody(&model, id: id)
 
         // Check if all tabs gone
         let allTabs = model.groups.flatMap(\.tabs)
         if allTabs.isEmpty {
             return effects + [.terminate]
-        }
-
-        // Select fallback tab if we closed the selected one
-        if id == model.selectedTabId, let newId = fallbackTabId {
-            model.selectedTabId = newId
-            effects.append(.rebuildContentView)
-            effects.append(contentsOf: selectionSyncEffects(for: model))
         }
         effects.append(.reloadSidebar)
         // Persist tab removal + new selection so closed tabs don't reappear on restore.
@@ -996,6 +962,28 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return update(&model, .closeTab(id: id))
 
     case .cancelCloseTab:
+        model.pendingConfirmation = nil
+        return []
+
+    case .confirmCloseTabs(let ids):
+        model.pendingConfirmation = nil
+        let normalized = normalizedLiveTabIds(ids, in: model)
+        guard !normalized.isEmpty else { return [] }
+
+        var effects: [Effect] = []
+        for id in normalized {
+            effects.append(contentsOf: closeTabBody(&model, id: id))
+        }
+
+        let allTabs = model.groups.flatMap(\.tabs)
+        if allTabs.isEmpty {
+            return effects + [.terminate]
+        }
+        effects.append(.reloadSidebar)
+        effects.append(.scheduleCheckpoint)
+        return effects
+
+    case .cancelCloseTabs:
         model.pendingConfirmation = nil
         return []
 
@@ -2404,7 +2392,67 @@ private func removeAlertsForPane(_ paneId: PaneId, in model: inout AppModel) {
     model.alerts.removeAll { $0.paneId == paneId }
 }
 
-/// Throttle macOS notification delivery: one per pane per kind every 5 seconds.
+private func normalizedLiveTabIds(_ ids: [TabId], in model: AppModel) -> [TabId] {
+    var seen = Set<TabId>()
+    return ids.filter { id in
+        guard !seen.contains(id), tabLocation(id, in: model) != nil
+        else { return false }
+        seen.insert(id)
+        return true
+    }
+}
+
+// Core tab removal shared by single and batch close. The caller owns the final
+// tail: terminate-if-empty vs. reload-sidebar-and-checkpoint.
+private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Effect] {
+    guard let (groupIdx, tabIdx) = tabLocation(id, in: model) else { return [] }
+    let tab = model.groups[groupIdx].tabs[tabIdx]
+    let groupId = model.groups[groupIdx].id
+    let paneIds = allPaneIds(tab.rootNode)
+
+    // Compute fallback selection: prefer predecessor, then successor in flattened order.
+    let fallbackTabId: TabId? = {
+        guard id == model.selectedTabId else { return nil }
+        let allTabs = model.groups.flatMap(\.tabs)
+        guard let idx = allTabs.firstIndex(where: { $0.id == id }) else { return nil }
+        if idx > 0 { return allTabs[idx - 1].id }
+        if idx + 1 < allTabs.count { return allTabs[idx + 1].id }
+        return nil
+    }()
+
+    var effects: [Effect] = []
+    for pid in paneIds {
+        effects.append(.destroySurface(paneId: pid))
+        removeAlertsForPane(pid, in: &model)
+        removePaneSearchState(pid, from: &model)
+        model.lastNotificationTime.removeValue(forKey: pid)
+        model.panes.removeValue(forKey: pid)
+        if model.todoPopover == .pane(pid) {
+            model.todoPopover = nil
+            effects.append(.dismissTodoPopover)
+        }
+    }
+    // Tab popover open against this tab dies with the tab. Emit the dismiss
+    // effect even though no `todoPopoverForTabClosed` will fire, so AppRuntime
+    // closes the floating NSPopover.
+    if model.todoPopover == .tab(id) {
+        model.todoPopover = nil
+        effects.append(.dismissTodoPopoverForTab)
+    }
+
+    model.groups[groupIdx].tabs.remove(at: tabIdx)
+    removeGroupIfEmpty(groupId, from: &model)
+
+    // Select fallback tab if we closed the selected one.
+    if id == model.selectedTabId, let newId = fallbackTabId {
+        model.selectedTabId = newId
+        effects.append(.rebuildContentView)
+        effects.append(contentsOf: selectionSyncEffects(for: model))
+    }
+    return effects
+}
+
+/// Throttle macOS notification delivery: one per pane per kind every 1 second.
 private let notificationThrottleInterval: TimeInterval = 1
 
 /// Throttle macOS notification delivery: one per pane per kind every throttle interval.
