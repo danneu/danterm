@@ -936,19 +936,21 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return effects
 
     case .goToMostRecentAlertPane:
-        // Ack all alerts on the current tab so repeated presses walk through tabs
+        // Ack only the focused pane before searching so repeated presses walk every
+        // unread pane, including sibling panes in the current split.
         var ackedPaneIds: [PaneId] = []
-        if let tabId = model.selectedTabId {
-            let paneIds = paneIdsForTab(tabId, in: model)
-            ackedPaneIds = unreadAlertPaneIds(for: paneIds, in: model)
-            for paneId in ackedPaneIds { markAlertsReadForPane(paneId, in: &model) }
+        if let tab = selectedTab(in: model),
+           paneHasUnreadAlert(tab.focusedPaneId, alerts: model.alerts) {
+            markAlertsReadForPane(tab.focusedPaneId, in: &model)
+            ackedPaneIds = [tab.focusedPaneId]
         }
+        let ackedTabIds = tabIdsForPanes(ackedPaneIds, in: model)
+        let ackEffects = refreshPaneAlertChromeEffects(for: ackedPaneIds)
+            + sidebarAlertUpdateEffects(for: ackedTabIds, in: model)
         guard let alert = model.alerts.first(where: { $0.isUnread && model.panes[$0.paneId] != nil }) else {
-            let ackedTabIds = tabIdsForPanes(ackedPaneIds, in: model)
-            return ackedPaneIds.isEmpty ? [] : refreshPaneAlertChromeEffects(for: ackedPaneIds)
-                + sidebarAlertUpdateEffects(for: ackedTabIds, in: model)
+            return ackEffects
         }
-        return refreshPaneAlertChromeEffects(for: ackedPaneIds) + navigateToPane(alert.paneId, in: &model)
+        return ackEffects + navigateToPane(alert.paneId, in: &model)
 
     case .setShowAllAlerts(let showAll):
         model.showAllAlerts = showAll

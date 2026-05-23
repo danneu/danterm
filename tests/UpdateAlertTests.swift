@@ -440,6 +440,109 @@ func alertTests() {
         try expectEqual(effects.count, 0, "no alerts should produce no effects")
     }
 
+    test("testGoToMostRecentAlertPaneIntraTabNavigatesToAlertPane") {
+        var model = makeModel()
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .paneBecameFirstResponder(paneId: paneA))
+        try expectEqual(model.groups[0].tabs[0].focusedPaneId, paneA)
+
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneB,
+            title: "DanTerm", body: "intra-tab", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        let effects = update(&model, .goToMostRecentAlertPane)
+
+        try expect(hasEffect(effects) {
+            if case .makeFirstResponder(let pid) = $0, pid == paneB { return true }
+            return false
+        }, "should focus paneB")
+
+        try expectEqual(model.groups[0].tabs[0].focusedPaneId, paneB,
+            "tab's focusedPaneId should be paneB after navigation")
+        try expectEqual(model.alerts[0].isUnread, false,
+            "paneB's alert should be marked read after focus moves to it")
+    }
+
+    test("testGoToMostRecentAlertPaneIntraTabDoesNotAckSiblingInManualMode") {
+        var model = makeModel()
+        model.config.alertClearMode = .manual
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .paneBecameFirstResponder(paneId: paneA))
+
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneB,
+            title: "DanTerm", body: "intra-tab", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        let effects = update(&model, .goToMostRecentAlertPane)
+
+        try expect(hasEffect(effects) {
+            if case .makeFirstResponder(let pid) = $0, pid == paneB { return true }
+            return false
+        }, "should focus paneB")
+
+        try expectEqual(model.alerts[0].isUnread, true,
+            "paneB's alert should remain unread")
+    }
+
+    test("testGoToMostRecentAlertPaneRepeatedPressWalksPanesInTab") {
+        var model = makeModel()
+        model.config.alertClearMode = .manual
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .splitPane(direction: .vertical))
+        let paneC = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .paneBecameFirstResponder(paneId: paneA))
+        try expectEqual(model.groups[0].tabs[0].focusedPaneId, paneA)
+
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneC,
+            title: "DanTerm", body: "older", createdAt: Date(), isUnread: true
+        ), at: 0)
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneB,
+            title: "DanTerm", body: "newer", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        update(&model, .goToMostRecentAlertPane)
+        try expectEqual(model.groups[0].tabs[0].focusedPaneId, paneB,
+            "press 1 should land on paneB")
+        try expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == true,
+            "paneB unread after press 1")
+        try expect(model.alerts.first(where: { $0.paneId == paneC })?.isUnread == true,
+            "paneC unread after press 1")
+
+        update(&model, .goToMostRecentAlertPane)
+        try expectEqual(model.groups[0].tabs[0].focusedPaneId, paneC,
+            "press 2 should land on paneC")
+        try expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false,
+            "paneB acked on press 2")
+        try expect(model.alerts.first(where: { $0.paneId == paneC })?.isUnread == true,
+            "paneC unread until press 3")
+
+        update(&model, .goToMostRecentAlertPane)
+        try expect(model.alerts.first(where: { $0.paneId == paneC })?.isUnread == false,
+            "paneC acked on press 3")
+        try expect(!model.alerts.contains(where: { $0.isUnread }),
+            "all alerts read after walking through siblings")
+    }
+
     test("testGoToMostRecentAlertPaneUsesCurrentTabAfterMove") {
         var model = makeModel()
         createTab(&model)  // tab1 with paneA
@@ -614,7 +717,7 @@ func alertTests() {
         }, "third press should not navigate")
     }
 
-    test("testGoToMostRecentAlertPaneAcksAllPanesInSplit") {
+    test("testGoToMostRecentAlertPaneAcksOnlyFocusedPaneInSplit") {
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)  // tab1 with paneA
@@ -642,9 +745,10 @@ func alertTests() {
         ), at: 2)
 
         let effects = update(&model, .goToMostRecentAlertPane)
-        // Both split pane alerts should be acked
-        try expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false, "paneB alert should be acked")
-        try expect(model.alerts.first(where: { $0.paneId == paneC })?.isUnread == false, "paneC alert should be acked")
+        try expect(model.alerts.first(where: { $0.paneId == paneC })?.isUnread == false,
+            "focused pane's alert should be acked")
+        try expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == true,
+            "non-focused sibling alert should remain unread")
         // paneA alert should still be unread
         try expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == true, "paneA alert should still be unread")
         // Should navigate to tab1/paneA
@@ -652,10 +756,8 @@ func alertTests() {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
             return false
         }, "should navigate to paneA")
-        try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneB),
-            "should refresh acked split paneB border")
         try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneC),
-            "should refresh acked split paneC border")
+            "should refresh acked focused pane border")
     }
 
     // MARK: - filteredAlerts / alertsEmptyText Tests
