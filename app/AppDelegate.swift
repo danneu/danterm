@@ -686,6 +686,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         return false
     }
 
+    // NSWindowDelegate: forward occlusion changes to libghostty so renderer
+    // threads can reduce work while the window is fully hidden or covered.
+    func windowDidChangeOcclusionState(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        let visible = window.occlusionState.contains(.visible)
+        runtime?.applyOcclusionToAllSurfaces(visible)
+    }
+
     // MARK: - App Lifecycle
 
     // NSApplicationDelegate: catch-all safety net for any NSApp.terminate call.

@@ -326,6 +326,15 @@ class AppRuntime {
         return surfaces[paneId]
     }
 
+    /// Forward the current window occlusion visibility to every live libghostty surface.
+    func applyOcclusionToAllSurfaces(_ visible: Bool) {
+        for view in surfaces.values {
+            if let surface = view.surface {
+                ghostty_surface_set_occlusion(surface, visible)
+            }
+        }
+    }
+
     /// Make the given pane's surface the first responder. The view dispatches
     /// `.paneBecameFirstResponder` from its becomeFirstResponder override, so
     /// the model update + chrome refresh follow naturally. No-op when the
@@ -1292,6 +1301,12 @@ class AppRuntime {
         view.bridge.paneId = paneId
         view.runtime = self
         view.scrollbarEnabled = ghosttyApp.scrollbarEnabled
+        // Surfaces created for background tabs or restore may not attach to a
+        // window immediately, so sync renderer occlusion before returning.
+        if let surface = view.surface {
+            let visible = window?.occlusionState.contains(.visible) ?? true
+            ghostty_surface_set_occlusion(surface, visible)
+        }
         return view
     }
 
