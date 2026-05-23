@@ -30,9 +30,13 @@ func ghosttyTests() {
             return false
         }, "should emit sendNotification for background bell")
         try expect(hasEffect(effects) {
-            if case .updatePaneAlertBorder(let pid) = $0, pid == firstTabPaneId { return true }
+            if case .refreshPaneBorder(let pid) = $0, pid == firstTabPaneId { return true }
             return false
-        }, "should emit updatePaneAlertBorder for background bell")
+        }, "should emit refreshPaneBorder for background bell")
+        try expect(hasEffect(effects) {
+            if case .refreshPaneToolbar(let pid) = $0, pid == firstTabPaneId { return true }
+            return false
+        }, "should refresh pane toolbar for background bell")
     }
 
     test("testSurfaceCreationFailedCleansUp") {
@@ -204,9 +208,13 @@ func ghosttyTests() {
             return false
         }, "should send notification with OSC 777 title/body")
         try expect(hasEffect(effects) {
-            if case .updatePaneAlertBorder(let pid) = $0, pid == firstTabPaneId { return true }
+            if case .refreshPaneBorder(let pid) = $0, pid == firstTabPaneId { return true }
             return false
-        }, "should update pane alert border for background pane")
+        }, "should refresh pane border for background pane")
+        try expect(hasEffect(effects) {
+            if case .refreshPaneToolbar(let pid) = $0, pid == firstTabPaneId { return true }
+            return false
+        }, "should refresh pane toolbar for background notification")
     }
 
     test("testDesktopNotificationThrottlesIndependentlyFromBell") {

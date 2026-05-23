@@ -479,20 +479,17 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             seen.insert(id); return true
         }
         guard !validIds.isEmpty else { return [] }
-        var anyHadUnread = false
+        var affectedPaneIds: [PaneId] = []
         for id in validIds {
             let paneIds = paneIdsForTab(id, in: model)
-            let hadUnread = model.alerts.contains {
-                $0.isUnread && paneIds.contains($0.paneId) }
-            if hadUnread {
-                anyHadUnread = true
-                for pid in paneIds {
-                    markAlertsReadForPane(pid, in: &model)
-                }
+            let unreadPaneIds = unreadAlertPaneIds(for: paneIds, in: model)
+            if !unreadPaneIds.isEmpty {
+                affectedPaneIds.append(contentsOf: unreadPaneIds)
+                for pid in unreadPaneIds { markAlertsReadForPane(pid, in: &model) }
             }
         }
-        guard anyHadUnread else { return [] }
-        return [.rebuildContentView, .reloadSidebar]
+        guard !affectedPaneIds.isEmpty else { return [] }
+        return refreshPaneAlertChromeEffects(for: affectedPaneIds) + [.reloadSidebar]
 
     case .setPaneTheme(let paneId, let themeName):
         model.panes[paneId]?.theme = themeName
@@ -531,12 +528,20 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let oldFocusedId = tab.focusedPaneId
         guard paneId != oldFocusedId else { return [] }
 
+        let clearedAlerts = model.config.alertClearMode == .focus
+            && paneHasUnreadAlert(paneId, alerts: model.alerts)
         if model.config.alertClearMode == .focus {
             markAlertsReadForPane(paneId, in: &model)
         }
         updateSelectedTab(&model) { t in t.focusedPaneId = paneId }
 
-        var effects: [Effect] = [.rebuildContentView]
+        var effects: [Effect] = [
+            .refreshPaneBorder(paneId: oldFocusedId),
+            .refreshPaneBorder(paneId: paneId),
+        ]
+        if clearedAlerts {
+            effects.append(.refreshPaneToolbar(paneId: paneId))
+        }
         effects.append(contentsOf: syncFocusedPaneChrome(paneId, in: &model))
         // Persist focused pane so restore opens the right pane within each tab.
         effects.append(.scheduleCheckpoint)
@@ -800,7 +805,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         model.alerts.insert(alert, at: 0)
         if model.alerts.count > 100 { model.alerts.removeLast() }
 
-        var effects: [Effect] = [.updatePaneAlertBorder(paneId: paneId), .updateSidebarTabRow(tabId: tab.id)]
+        var effects: [Effect] = refreshPaneAlertChromeEffects(for: [paneId]) + [.updateSidebarTabRow(tabId: tab.id)]
         if let group = groupForTab(tab.id, in: model), group.isCollapsed {
             effects.append(.updateSidebarGroupRow(groupId: group.id))
         }
@@ -831,7 +836,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         model.alerts.insert(alert, at: 0)
         if model.alerts.count > 100 { model.alerts.removeLast() }
 
-        var effects: [Effect] = [.updatePaneAlertBorder(paneId: paneId), .updateSidebarTabRow(tabId: tab.id)]
+        var effects: [Effect] = refreshPaneAlertChromeEffects(for: [paneId]) + [.updateSidebarTabRow(tabId: tab.id)]
         if let group = groupForTab(tab.id, in: model), group.isCollapsed {
             effects.append(.updateSidebarGroupRow(groupId: group.id))
         }
@@ -891,14 +896,19 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
     // MARK: - Alerts
 
     case .markAlertRead(let alertId):
+        var effects: [Effect] = []
         if let idx = model.alerts.firstIndex(where: { $0.id == alertId }) {
+            let paneId = model.alerts[idx].paneId
             model.alerts[idx].isUnread = false
+            effects.append(contentsOf: refreshPaneAlertChromeEffects(for: [paneId]))
         }
-        return [.rebuildContentView, .reloadSidebar]
+        effects.append(.reloadSidebar)
+        return effects
 
     case .markAllAlertsRead:
+        let affectedPaneIds = unreadAlertPaneIds(in: model)
         for i in model.alerts.indices { model.alerts[i].isUnread = false }
-        return [.rebuildContentView, .reloadSidebar]
+        return refreshPaneAlertChromeEffects(for: affectedPaneIds) + [.reloadSidebar]
 
     case .activateAlert(let alertId):
         guard let alert = model.alerts.first(where: { $0.id == alertId }) else { return [] }
@@ -907,7 +917,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             if let idx = model.alerts.firstIndex(where: { $0.id == alertId }) {
                 model.alerts[idx].isUnread = false
             }
-            return [.rebuildContentView, .reloadSidebar, .dismissAlertsPopover]
+            return refreshPaneAlertChromeEffects(for: [alert.paneId]) + [.reloadSidebar, .dismissAlertsPopover]
         }
         // Mark read (unless manual mode — user must ack explicitly)
         if model.config.alertClearMode != .manual,
@@ -921,20 +931,16 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
     case .goToMostRecentAlertPane:
         // Ack all alerts on the current tab so repeated presses walk through tabs
-        var ackedCurrentTab = false
+        var ackedPaneIds: [PaneId] = []
         if let tabId = model.selectedTabId {
             let paneIds = paneIdsForTab(tabId, in: model)
-            if model.alerts.contains(where: { $0.isUnread && paneIds.contains($0.paneId) }) {
-                for paneId in paneIds {
-                    markAlertsReadForPane(paneId, in: &model)
-                }
-                ackedCurrentTab = true
-            }
+            ackedPaneIds = unreadAlertPaneIds(for: paneIds, in: model)
+            for paneId in ackedPaneIds { markAlertsReadForPane(paneId, in: &model) }
         }
         guard let alert = model.alerts.first(where: { $0.isUnread && model.panes[$0.paneId] != nil }) else {
-            return ackedCurrentTab ? [.rebuildContentView, .reloadSidebar] : []
+            return ackedPaneIds.isEmpty ? [] : refreshPaneAlertChromeEffects(for: ackedPaneIds) + [.reloadSidebar]
         }
-        return navigateToPane(alert.paneId, in: &model)
+        return refreshPaneAlertChromeEffects(for: ackedPaneIds) + navigateToPane(alert.paneId, in: &model)
 
     case .setShowAllAlerts(let showAll):
         model.showAllAlerts = showAll
@@ -944,17 +950,15 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let hadUnread = model.alerts.contains { $0.paneId == paneId && $0.isUnread }
         guard hadUnread else { return [] }
         markAlertsReadForPane(paneId, in: &model)
-        return [.rebuildContentView, .reloadSidebar]
+        return refreshPaneAlertChromeEffects(for: [paneId]) + [.reloadSidebar]
 
     case .ackTabAlerts:
         guard let tabId = model.selectedTabId else { return [] }
         let paneIds = paneIdsForTab(tabId, in: model)
-        let hadUnread = model.alerts.contains { $0.isUnread && paneIds.contains($0.paneId) }
-        guard hadUnread else { return [] }
-        for paneId in paneIds {
-            markAlertsReadForPane(paneId, in: &model)
-        }
-        return [.rebuildContentView, .reloadSidebar]
+        let affectedPaneIds = unreadAlertPaneIds(for: paneIds, in: model)
+        guard !affectedPaneIds.isEmpty else { return [] }
+        for paneId in affectedPaneIds { markAlertsReadForPane(paneId, in: &model) }
+        return refreshPaneAlertChromeEffects(for: affectedPaneIds) + [.reloadSidebar]
 
     case .confirmTerminate:
         model.pendingConfirmation = nil
@@ -2472,6 +2476,31 @@ private func selectionSyncEffects(for model: AppModel) -> [Effect] {
 private func markAlertsReadForPane(_ paneId: PaneId, in model: inout AppModel) {
     for i in model.alerts.indices where model.alerts[i].paneId == paneId && model.alerts[i].isUnread {
         model.alerts[i].isUnread = false
+    }
+}
+
+private func unreadAlertPaneIds(in model: AppModel) -> [PaneId] {
+    unreadAlertPaneIds(for: Array(model.panes.keys), in: model)
+}
+
+private func unreadAlertPaneIds(for paneIds: [PaneId], in model: AppModel) -> [PaneId] {
+    let paneIdSet = Set(paneIds)
+    var seen = Set<PaneId>()
+    var result: [PaneId] = []
+    for alert in model.alerts where alert.isUnread && paneIdSet.contains(alert.paneId) {
+        if seen.insert(alert.paneId).inserted {
+            result.append(alert.paneId)
+        }
+    }
+    return result
+}
+
+private func refreshPaneAlertChromeEffects(for paneIds: [PaneId]) -> [Effect] {
+    paneIds.flatMap {
+        [
+            .refreshPaneBorder(paneId: $0),
+            .refreshPaneToolbar(paneId: $0),
+        ]
     }
 }
 

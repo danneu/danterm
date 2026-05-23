@@ -16,10 +16,11 @@ func alertTests() {
 
         let effects = update(&model, .markAlertRead(alertId: alertId))
         try expectEqual(model.alerts[0].isUnread, false)
-        try expect(hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
-            return false
-        }, "should rebuild content view")
+        try expect(!alertTestHasRebuildContentView(effects), "should not rebuild content view")
+        try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneId),
+            "should refresh pane border")
+        try expect(alertTestHasRefreshPaneToolbar(effects, paneId: paneId),
+            "should refresh pane toolbar")
         try expect(hasEffect(effects) {
             if case .reloadSidebar = $0 { return true }
             return false
@@ -29,9 +30,11 @@ func alertTests() {
     test("testMarkAllAlertsRead") {
         var model = makeModel()
         createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+        createTab(&model)
+        let paneB = model.groups[0].tabs[1].focusedPaneId
 
-        for _ in 0..<3 {
+        for paneId in [paneA, paneB, paneA] {
             model.alerts.insert(AlertModel(
                 id: AlertId(), kind: .bell, paneId: paneId,
                 title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
@@ -40,10 +43,15 @@ func alertTests() {
 
         let effects = update(&model, .markAllAlertsRead)
         try expect(model.alerts.allSatisfy { !$0.isUnread }, "all alerts should be read")
-        try expect(hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
-            return false
-        }, "should rebuild content view")
+        try expect(!alertTestHasRebuildContentView(effects), "should not rebuild content view")
+        try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneA),
+            "should refresh paneA border")
+        try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneB),
+            "should refresh paneB border")
+        try expect(alertTestHasRefreshPaneToolbar(effects, paneId: paneA),
+            "should refresh paneA toolbar")
+        try expect(alertTestHasRefreshPaneToolbar(effects, paneId: paneB),
+            "should refresh paneB toolbar")
     }
 
     test("testActivateAlertNavigatesAndMarksRead") {
@@ -120,6 +128,9 @@ func alertTests() {
             if case .makeFirstResponder = $0 { return true }
             return false
         }, "should not navigate")
+        try expect(!alertTestHasRebuildContentView(effects), "should not rebuild content view")
+        try expect(alertTestHasRefreshPaneBorder(effects, paneId: stalePaneId),
+            "should refresh stale alert pane border")
         try expect(hasEffect(effects) {
             if case .dismissAlertsPopover = $0 { return true }
             return false
@@ -487,6 +498,8 @@ func alertTests() {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
             return false
         }, "should focus paneA")
+        try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneB),
+            "should refresh acked current-tab pane border")
     }
 
     test("testGoToMostRecentAlertPaneAcksCurrentTabThenNoMoreAlerts") {
@@ -506,10 +519,11 @@ func alertTests() {
             if case .makeFirstResponder = $0 { return true }
             return false
         }, "no unread alerts remained after acking current tab")
-        try expect(hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
-            return false
-        }, "should rebuild content view")
+        try expect(!alertTestHasRebuildContentView(effects), "should not rebuild content view")
+        try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneA),
+            "should refresh acked pane border")
+        try expect(alertTestHasRefreshPaneToolbar(effects, paneId: paneA),
+            "should refresh acked pane toolbar")
         try expect(hasEffect(effects) {
             if case .reloadSidebar = $0 { return true }
             return false
@@ -553,10 +567,11 @@ func alertTests() {
         // Third press: acks tab2, no more unread alerts
         let effects = update(&model, .goToMostRecentAlertPane)
         try expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false, "paneB alert should be acked after third press")
-        try expect(hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
-            return false
-        }, "third press should return refresh effects")
+        try expect(!alertTestHasRebuildContentView(effects), "third press should not rebuild content view")
+        try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneB),
+            "third press should refresh acked pane border")
+        try expect(alertTestHasRefreshPaneToolbar(effects, paneId: paneB),
+            "third press should refresh acked pane toolbar")
         try expect(!hasEffect(effects) {
             if case .makeFirstResponder = $0 { return true }
             return false
@@ -601,6 +616,10 @@ func alertTests() {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
             return false
         }, "should navigate to paneA")
+        try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneB),
+            "should refresh acked split paneB border")
+        try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneC),
+            "should refresh acked split paneC border")
     }
 
     // MARK: - filteredAlerts / alertsEmptyText Tests
@@ -762,10 +781,11 @@ func alertTests() {
 
         let effects = update(&model, .clearAlertsForPane(paneId: paneA))
         try expectEqual(model.alerts[0].isUnread, false, "clearAlertsForPane should mark pane's alerts read")
-        try expect(hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
-            return false
-        }, "should rebuild content view")
+        try expect(!alertTestHasRebuildContentView(effects), "should not rebuild content view")
+        try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneA),
+            "should refresh cleared pane border")
+        try expect(alertTestHasRefreshPaneToolbar(effects, paneId: paneA),
+            "should refresh cleared pane toolbar")
         try expect(hasEffect(effects) {
             if case .reloadSidebar = $0 { return true }
             return false
@@ -801,7 +821,11 @@ func alertTests() {
         // Clear alerts for paneA (not focused) while paneB is focused
         let effects = update(&model, .clearAlertsForPane(paneId: paneA))
         try expectEqual(model.alerts[0].isUnread, false, "clearAlertsForPane should clear non-focused pane's alerts")
-        try expect(effects.count > 0, "should produce effects")
+        try expect(!alertTestHasRebuildContentView(effects), "should not rebuild content view")
+        try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneA),
+            "should refresh non-focused pane border")
+        try expect(alertTestHasRefreshPaneToolbar(effects, paneId: paneA),
+            "should refresh non-focused pane toolbar")
     }
 
     // MARK: - ackTabAlerts
@@ -829,10 +853,15 @@ func alertTests() {
 
         let effects = update(&model, .ackTabAlerts)
         try expectEqual(model.alerts.filter { $0.isUnread }.count, 0, "all tab alerts should be marked read")
-        try expect(hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
-            return false
-        }, "should rebuild content view")
+        try expect(!alertTestHasRebuildContentView(effects), "should not rebuild content view")
+        try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneA),
+            "should refresh paneA border")
+        try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneB),
+            "should refresh paneB border")
+        try expect(alertTestHasRefreshPaneToolbar(effects, paneId: paneA),
+            "should refresh paneA toolbar")
+        try expect(alertTestHasRefreshPaneToolbar(effects, paneId: paneB),
+            "should refresh paneB toolbar")
         try expect(hasEffect(effects) {
             if case .reloadSidebar = $0 { return true }
             return false
@@ -902,10 +931,11 @@ func alertTests() {
         let tab2Alert = model.alerts.first { $0.paneId == tab2Pane }!
         try expectEqual(tab1Alert.isUnread, false, "target tab's alerts should be cleared")
         try expectEqual(tab2Alert.isUnread, true, "other tab's alerts should remain unread")
-        try expect(hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
-            return false
-        }, "should rebuild content view")
+        try expect(!alertTestHasRebuildContentView(effects), "should not rebuild content view")
+        try expect(alertTestHasRefreshPaneBorder(effects, paneId: tab1Pane),
+            "should refresh cleared tab pane border")
+        try expect(alertTestHasRefreshPaneToolbar(effects, paneId: tab1Pane),
+            "should refresh cleared tab pane toolbar")
         try expect(hasEffect(effects) {
             if case .reloadSidebar = $0 { return true }
             return false
@@ -978,9 +1008,15 @@ func alertTests() {
         try expect(hasEffect(effects) {
             if case .reloadSidebar = $0 { return true }; return false
         })
-        try expect(hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }; return false
-        })
+        try expect(!alertTestHasRebuildContentView(effects), "should not rebuild content view")
+        try expect(alertTestHasRefreshPaneBorder(effects, paneId: pane1),
+            "should refresh first cleared pane border")
+        try expect(alertTestHasRefreshPaneBorder(effects, paneId: pane2),
+            "should refresh second cleared pane border")
+        try expect(alertTestHasRefreshPaneToolbar(effects, paneId: pane1),
+            "should refresh first cleared pane toolbar")
+        try expect(alertTestHasRefreshPaneToolbar(effects, paneId: pane2),
+            "should refresh second cleared pane toolbar")
         _ = id3
     }
 
@@ -1012,5 +1048,26 @@ func alertTests() {
         try expectEqual(effects.count, 0, "all stale ids → no-op")
         try expect(model.alerts.contains { $0.isUnread },
             "real alerts unaffected by stale-id batch")
+    }
+}
+
+private func alertTestHasRebuildContentView(_ effects: [Effect]) -> Bool {
+    hasEffect(effects) {
+        if case .rebuildContentView = $0 { return true }
+        return false
+    }
+}
+
+private func alertTestHasRefreshPaneBorder(_ effects: [Effect], paneId: PaneId) -> Bool {
+    hasEffect(effects) {
+        if case .refreshPaneBorder(let pid) = $0, pid == paneId { return true }
+        return false
+    }
+}
+
+private func alertTestHasRefreshPaneToolbar(_ effects: [Effect], paneId: PaneId) -> Bool {
+    hasEffect(effects) {
+        if case .refreshPaneToolbar(let pid) = $0, pid == paneId { return true }
+        return false
     }
 }

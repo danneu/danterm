@@ -146,6 +146,7 @@ func paneTests() {
 
         // Split to create paneB
         update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
 
         // Set some state on paneA
         model.panes[paneA]?.title = "my-title"
@@ -163,10 +164,26 @@ func paneTests() {
         let tab = model.groups[0].tabs[0]
         try expectEqual(tab.focusedPaneId, paneA, "focused pane should change")
         try expectEqual(model.alerts[0].isUnread, false, "alert should be marked read")
-        try expect(hasEffect(effects) {
+        try expect(!hasEffect(effects) {
             if case .rebuildContentView = $0 { return true }
             return false
-        }, "should emit rebuildContentView")
+        }, "should not rebuild content view")
+        try expect(hasEffect(effects) {
+            if case .refreshPaneBorder(let pid) = $0, pid == paneB { return true }
+            return false
+        }, "should refresh old focused pane border")
+        try expect(hasEffect(effects) {
+            if case .refreshPaneBorder(let pid) = $0, pid == paneA { return true }
+            return false
+        }, "should refresh new focused pane border")
+        try expect(hasEffect(effects) {
+            if case .refreshPaneToolbar(let pid) = $0, pid == paneA { return true }
+            return false
+        }, "should refresh toolbar for pane whose alerts were cleared")
+        try expect(!hasEffect(effects) {
+            if case .makeFirstResponder = $0 { return true }
+            return false
+        }, "should not request first responder from first responder callback")
         try expect(hasEffect(effects) {
             if case .updateSidebarTabRow = $0 { return true }
             return false
@@ -184,6 +201,28 @@ func paneTests() {
 
         let effects = update(&model, .paneBecameFirstResponder(paneId: paneId))
         try expectEqual(effects.count, 0, "same pane should return no effects")
+    }
+
+    test("testPaneBecameFirstResponderDoesNotRefreshToolbarWhenAlertsRemainUnread") {
+        var model = makeModel()
+        model.config.alertClearMode = .manual
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .splitPane(direction: .horizontal))
+
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        let effects = update(&model, .paneBecameFirstResponder(paneId: paneA))
+
+        try expectEqual(model.alerts[0].isUnread, true, "manual mode should leave alert unread")
+        try expect(!hasEffect(effects) {
+            if case .refreshPaneToolbar = $0 { return true }
+            return false
+        }, "should not refresh pane toolbar when focus does not clear alerts")
     }
 
     test("testClosePaneUpdatesSidebarAndWindowTitle") {
@@ -572,7 +611,7 @@ func paneTests() {
         }, "foreground split should rebuild content view")
     }
 
-    test("testFocusDirectionThenFirstResponderUpdatesFocusAndRebuilds") {
+    test("testFocusDirectionThenFirstResponderUpdatesFocusAndRefreshesBorders") {
         var model = makeModel()
         createTab(&model)
         let leftPaneId = model.groups[0].tabs[0].focusedPaneId
@@ -590,10 +629,22 @@ func paneTests() {
 
         let callbackEffects = update(&model, .paneBecameFirstResponder(paneId: leftPaneId))
         try expectEqual(model.groups[0].tabs[0].focusedPaneId, leftPaneId, "focus should update after first responder callback")
-        try expect(hasEffect(callbackEffects) {
+        try expect(!hasEffect(callbackEffects) {
             if case .rebuildContentView = $0 { return true }
             return false
-        }, "should rebuild content view after focus change callback")
+        }, "should not rebuild content view after focus change callback")
+        try expect(hasEffect(callbackEffects) {
+            if case .refreshPaneBorder(let paneId) = $0, paneId == rightPaneId { return true }
+            return false
+        }, "should refresh old focused pane border")
+        try expect(hasEffect(callbackEffects) {
+            if case .refreshPaneBorder(let paneId) = $0, paneId == leftPaneId { return true }
+            return false
+        }, "should refresh new focused pane border")
+        try expect(!hasEffect(callbackEffects) {
+            if case .makeFirstResponder = $0 { return true }
+            return false
+        }, "should not request first responder from first responder callback")
     }
 
     // MARK: - movePaneToTab Tests

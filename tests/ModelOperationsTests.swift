@@ -296,6 +296,26 @@ func modelOperationsTests() {
         try expectEqual(totalTabCount(model), 3)
     }
 
+    // MARK: - isFocusedAndVisible
+
+    test("testIsFocusedAndVisible") {
+        var model = makeModel()
+        createTab(&model)
+        let firstPaneId = selectedTab(in: model)!.focusedPaneId
+
+        update(&model, .splitPane(direction: .horizontal))
+        let focusedSplitPaneId = selectedTab(in: model)!.focusedPaneId
+
+        try expect(isFocusedAndVisible(focusedSplitPaneId, in: model), "focused pane in selected split tab should be visible")
+        try expect(!isFocusedAndVisible(firstPaneId, in: model), "non-focused pane should not be focused and visible")
+
+        createTab(&model)
+        let singlePaneId = selectedTab(in: model)!.focusedPaneId
+
+        try expect(!isFocusedAndVisible(singlePaneId, in: model), "focused pane in single-pane tab should not show a focus border")
+        try expect(!isFocusedAndVisible(focusedSplitPaneId, in: model), "pane in non-selected tab should not be focused and visible")
+    }
+
     // MARK: - swapLeaves
 
     test("testSwapLeavesSimple") {

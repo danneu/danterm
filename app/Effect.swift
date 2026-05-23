@@ -24,7 +24,7 @@ enum Effect {
 
     // View
     case rebuildContentView
-    case updatePaneAlertBorder(paneId: PaneId)
+    case refreshPaneBorder(paneId: PaneId)
     case reloadSidebar
     case updateSidebarTabRow(tabId: TabId)
     case updateSidebarGroupRow(groupId: GroupId)

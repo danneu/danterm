@@ -870,6 +870,17 @@ func paneHasUnreadAlert(_ paneId: PaneId, alerts: [AlertModel]) -> Bool {
   alerts.contains { $0.isUnread && $0.paneId == paneId }
 }
 
+/// Return whether a pane should show the green focus border in the current content view.
+func isFocusedAndVisible(_ paneId: PaneId, in model: AppModel) -> Bool {
+  guard let tab = selectedTab(in: model),
+    tab.focusedPaneId == paneId
+  else {
+    return false
+  }
+  if case .leaf = tab.rootNode { return false }
+  return true
+}
+
 func unreadAlertCount(for tab: TabModel, alerts: [AlertModel]) -> Int {
   let paneIds = Set(allPaneIds(tab.rootNode))
   return alerts.filter { $0.isUnread && paneIds.contains($0.paneId) }.count

@@ -439,9 +439,10 @@ class AppRuntime {
         case .rebuildContentView:
             rebuildContentView()
 
-        case .updatePaneAlertBorder(let paneId):
+        case .refreshPaneBorder(let paneId):
+            let isFocused = isFocusedAndVisible(paneId, in: model)
             let hasBell = paneHasUnreadAlert(paneId, alerts: model.alerts)
-            surfaces[paneId]?.setFocusBorder(false, hasBell: hasBell)
+            surfaces[paneId]?.setFocusBorder(isFocused, hasBell: hasBell)
 
         case .reloadSidebar:
             sidebarView?.reload(model: model)
@@ -1419,9 +1420,8 @@ class AppRuntime {
 
         // Set focus borders based on model state (skip green border for single-pane tabs)
         let focusedId = tab.focusedPaneId
-        let isSinglePane: Bool = { if case .leaf = tab.rootNode { return true } else { return false } }()
         for paneId in allPaneIds(displayNode) {
-            let isFocused = !isSinglePane && paneId == focusedId
+            let isFocused = isFocusedAndVisible(paneId, in: model)
             let hasBell = paneHasUnreadAlert(paneId, alerts: model.alerts)
             surfaces[paneId]?.setFocusBorder(isFocused, hasBell: hasBell)
         }
