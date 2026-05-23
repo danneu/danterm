@@ -82,17 +82,20 @@ public func parseCLI(_ args: [String]) throws -> CLICommand {
 }
 
 private func parseTabNewCommand(_ args: [String]) throws -> CLICommand {
+    let usage = "usage: danterm tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--after-selected | --at-group-end | --after-tab <tab-id>]"
     let parsed: ParsedTabNew
     do {
         parsed = try parseTabNewArgs(args)
     } catch let error as TabNewParseError {
         switch error {
         case .missingValue(_):
-            throw CLIParseError("usage: danterm tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background]")
+            throw CLIParseError(usage)
         case .unknownFlag(let flag):
             throw CLIParseError("unknown flag: \(flag)")
         case .unexpectedArgument(let argument):
             throw CLIParseError("unexpected argument: \(argument)")
+        case .conflictingPositionFlags:
+            throw CLIParseError("--after-selected, --at-group-end, and --after-tab are mutually exclusive\n\(usage)")
         }
     }
 
@@ -105,6 +108,17 @@ private func parseTabNewCommand(_ args: [String]) throws -> CLICommand {
     }
     if parsed.background {
         params["background"] = .bool(true)
+    }
+    switch parsed.position {
+    case .none:
+        break
+    case .afterSelected:
+        params["position"] = .string("afterSelected")
+    case .atGroupEnd:
+        params["position"] = .string("atGroupEnd")
+    case .afterTab(let id):
+        params["position"] = .string("afterTab")
+        params["afterTabId"] = .string(id)
     }
     return CLICommand(method: Methods.tabNew, params: params, outputMode: .json)
 }

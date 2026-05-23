@@ -235,6 +235,51 @@ func tabTests() {
         try expectEqual(model.groups[1].tabs.last?.id, model.selectedTabId, "new tab is last and selected")
     }
 
+    test("testCreateTabAfterTabInTargetGroupInsertsAfterReference") {
+        var model = makeModel()
+        createTab(&model) // tab A
+        createTab(&model) // tab B
+        createTab(&model) // tab C
+        let tabAId = model.groups[0].tabs[0].id
+        let tabBId = model.groups[0].tabs[1].id
+        let tabCId = model.groups[0].tabs[2].id
+
+        update(&model, .createTab(inGroupId: nil, position: .afterTab(tabAId)))
+        let tabDId = model.groups[0].tabs[1].id
+
+        try expectEqual(model.groups[0].tabs.map(\.id), [tabAId, tabDId, tabBId, tabCId])
+        try expectEqual(model.selectedTabId, tabDId, "newly created tab is selected")
+    }
+
+    test("testCreateTabAfterTabFromDifferentGroupAppendsToTargetGroup") {
+        var model = makeModel()
+        createTab(&model)
+        let otherGroupRef = model.groups[0].tabs[0].id
+        _ = update(&model, .createGroup(name: "Work"))
+        let workGroupId = model.groups[1].id
+        update(&model, .createTab(inGroupId: workGroupId))
+        let workBefore = model.groups[1].tabs.map(\.id)
+
+        update(&model, .createTab(inGroupId: workGroupId, position: .afterTab(otherGroupRef)))
+        let newTabId = model.groups[1].tabs.last!.id
+
+        try expectEqual(model.groups[1].tabs.map(\.id), workBefore + [newTabId])
+        try expectEqual(model.selectedTabId, newTabId, "newly created tab is selected")
+    }
+
+    test("testCreateTabAfterUnknownTabAppendsToTargetGroup") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let before = model.groups[0].tabs.map(\.id)
+
+        update(&model, .createTab(inGroupId: nil, position: .afterTab(TabId())))
+        let newTabId = model.groups[0].tabs.last!.id
+
+        try expectEqual(model.groups[0].tabs.map(\.id), before + [newTabId])
+        try expectEqual(model.selectedTabId, newTabId, "newly created tab is selected")
+    }
+
     test("testSelectTabAlreadySelected") {
         var model = makeModel()
         createTab(&model)

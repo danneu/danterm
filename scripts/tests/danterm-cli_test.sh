@@ -119,6 +119,7 @@ printf '%s\n' "$info" | jq -e \
     '.groups[].tabs[] | select(.id == $tab and .customTitle == "test123")' >/dev/null
 
 "$CLI_PATH" tab new --group "$group_id" --title smoke-tab | jq -e '.tab.id and .panes[0].id' >/dev/null
+"$CLI_PATH" tab new --group "$group_id" --at-group-end --title smoke-tab-end | jq -e '.tab.id and .panes[0].id' >/dev/null
 split_pane_id="$("$CLI_PATH" pane split --pane "$pane_id" -h --title smoke-split | jq -r '.pane.id')"
 [[ -n "$split_pane_id" && "$split_pane_id" != "null" ]]
 

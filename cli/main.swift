@@ -28,6 +28,7 @@ struct DanTermCLI {
         Commands:
           ls                          Print the full app snapshot as JSON
           tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background]
+                  [--after-selected | --at-group-end | --after-tab <tab-id>]
                                       Open a new tab, optionally launching a command
           tab rename [--tab <tab-id>] <name>|--clear
                                       Rename a tab or clear its custom title

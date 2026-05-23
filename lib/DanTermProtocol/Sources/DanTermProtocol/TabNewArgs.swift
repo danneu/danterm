@@ -1,15 +1,23 @@
 // CLI argument parser for `danterm tab new`.
 import Foundation
 
+public enum ParsedTabPosition: Equatable {
+    case afterSelected
+    case atGroupEnd
+    case afterTab(String)
+}
+
 public struct ParsedTabNew: Equatable {
     public let group: String?
     public let launch: LaunchSpec?
     public let background: Bool
+    public let position: ParsedTabPosition?
 
-    public init(group: String?, launch: LaunchSpec?, background: Bool = false) {
+    public init(group: String?, launch: LaunchSpec?, background: Bool = false, position: ParsedTabPosition? = nil) {
         self.group = group
         self.launch = launch
         self.background = background
+        self.position = position
     }
 }
 
@@ -17,6 +25,7 @@ public enum TabNewParseError: Error, Equatable {
     case missingValue(String)
     case unknownFlag(String)
     case unexpectedArgument(String)
+    case conflictingPositionFlags
 }
 
 public func parseTabNewArgs(_ args: [String]) throws -> ParsedTabNew {
@@ -25,6 +34,7 @@ public func parseTabNewArgs(_ args: [String]) throws -> ParsedTabNew {
     var cwd: String?
     var title: String?
     var background = false
+    var position: ParsedTabPosition?
     var i = 0
 
     while i < args.count {
@@ -45,6 +55,16 @@ public func parseTabNewArgs(_ args: [String]) throws -> ParsedTabNew {
         case "--background":
             background = true
             i += 1
+        case "--after-selected":
+            try setPosition(.afterSelected, into: &position)
+            i += 1
+        case "--at-group-end":
+            try setPosition(.atGroupEnd, into: &position)
+            i += 1
+        case "--after-tab":
+            let id = try value(after: arg, in: args, at: i)
+            try setPosition(.afterTab(id), into: &position)
+            i += 2
         default:
             if arg.hasPrefix("-") {
                 throw TabNewParseError.unknownFlag(arg)
@@ -54,7 +74,7 @@ public func parseTabNewArgs(_ args: [String]) throws -> ParsedTabNew {
     }
 
     let spec = LaunchSpec(cmd: cmd, cwd: cwd, title: title)
-    return ParsedTabNew(group: group, launch: spec.isEmpty ? nil : spec, background: background)
+    return ParsedTabNew(group: group, launch: spec.isEmpty ? nil : spec, background: background, position: position)
 }
 
 private func value(after flag: String, in args: [String], at index: Int) throws -> String {
@@ -62,4 +82,11 @@ private func value(after flag: String, in args: [String], at index: Int) throws 
         throw TabNewParseError.missingValue(flag)
     }
     return args[index + 1]
+}
+
+private func setPosition(_ newPosition: ParsedTabPosition, into position: inout ParsedTabPosition?) throws {
+    guard position == nil else {
+        throw TabNewParseError.conflictingPositionFlags
+    }
+    position = newPosition
 }

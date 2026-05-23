@@ -22,6 +22,43 @@ final class CLIParserTests: XCTestCase {
         XCTAssertEqual(command.params["background"], .bool(true))
     }
 
+    func testTabNewParsesPositionFlags() throws {
+        let afterSelected = try parseCLI(["tab", "new", "--after-selected"])
+        XCTAssertEqual(afterSelected.params["position"], .string("afterSelected"))
+        XCTAssertEqual(afterSelected.params["afterTabId"], nil)
+
+        let atGroupEnd = try parseCLI(["tab", "new", "--at-group-end"])
+        XCTAssertEqual(atGroupEnd.params["position"], .string("atGroupEnd"))
+        XCTAssertEqual(atGroupEnd.params["afterTabId"], nil)
+
+        let tabId = "85AA4B6B-41B2-4D67-A9C8-F0C25B2E2BEA"
+        let afterTab = try parseCLI(["tab", "new", "--after-tab", tabId])
+        XCTAssertEqual(afterTab.params["position"], .string("afterTab"))
+        XCTAssertEqual(afterTab.params["afterTabId"], .string(tabId))
+    }
+
+    func testTabNewWithoutPositionFlagOmitsPositionParams() throws {
+        let command = try parseCLI(["tab", "new"])
+        XCTAssertEqual(command.params["position"], nil)
+        XCTAssertEqual(command.params["afterTabId"], nil)
+    }
+
+    func testTabNewConflictingPositionFlagsThrowUsageError() {
+        XCTAssertThrowsError(try parseCLI(["tab", "new", "--after-selected", "--at-group-end"])) { err in
+            let message = (err as? CLIParseError)?.message
+            XCTAssertTrue(message?.contains("mutually exclusive") == true)
+            XCTAssertTrue(message?.contains(tabNewUsageWithPositionFlags) == true)
+        }
+    }
+
+    func testTabNewMissingAfterTabValueThrowsUpdatedUsageError() {
+        XCTAssertThrowsError(try parseCLI(["tab", "new", "--after-tab"])) { err in
+            let message = (err as? CLIParseError)?.message
+            XCTAssertTrue(message?.hasPrefix("usage: danterm tab new") == true)
+            XCTAssertTrue(message?.contains("--after-tab") == true)
+        }
+    }
+
     func testPaneInfoParsesExplicitAndImplicitForms() throws {
         let explicit = try parseCLI(["pane", "info", "--pane", "P1"])
         XCTAssertEqual(explicit.method, Methods.paneInfo)
@@ -159,7 +196,7 @@ final class CLIParserTests: XCTestCase {
     func testMalformedExplicitTargetSyntaxThrowsUsageErrors() {
         let cases: [([String], String)] = [
             (["pane", "info", "--pane"], "usage: danterm pane info [--pane <pane-id>]"),
-            (["tab", "new", "--group"], "usage: danterm tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background]"),
+            (["tab", "new", "--group"], tabNewUsageWithPositionFlags),
             (["tab", "rename", "--tab"], "usage: danterm tab rename [--tab <tab-id>] <name>|--clear"),
             (["tab", "rename", "--tab", "T1", "--clear", "extra"], "usage: danterm tab rename [--tab <tab-id>] --clear"),
             (["pane", "split", "--pane"], "usage: danterm pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background]"),
@@ -177,3 +214,5 @@ final class CLIParserTests: XCTestCase {
         }
     }
 }
+
+private let tabNewUsageWithPositionFlags = "usage: danterm tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--after-selected | --at-group-end | --after-tab <tab-id>]"

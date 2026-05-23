@@ -24,9 +24,11 @@ enum MruDirection {
 // Where a newly-created tab lands within its target group.
 // `afterSelected` keeps the new tab next to the current one (Cmd-T).
 // `atGroupEnd` always appends, regardless of selection (Cmd-Shift-T).
+// `afterTab` inserts immediately after a specific tab in the target group.
 enum TabInsertPosition {
     case afterSelected
     case atGroupEnd
+    case afterTab(TabId)
 }
 
 enum TodoSource: Equatable {

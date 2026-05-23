@@ -663,6 +663,134 @@ func ipcUpdateTests() {
         }, "expected launch command to reach group-created tab")
     }
 
+    test("tab.new afterTab without group uses referenced tab group without pane context") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let refTabId = model.groups[0].tabs[0].id
+        let targetGroupId = model.groups[0].id
+        _ = update(&model, .createGroup(name: "Other"))
+        let beforeGroupTabs = groupTabIds(in: model)
+        let panesBefore = Set(model.panes.keys)
+
+        let effects = sendIpc(
+            &model,
+            method: Methods.tabNew,
+            params: .object([
+                "position": .string("afterTab"),
+                "afterTabId": .string(refTabId.rawValue.uuidString),
+            ])
+        )
+
+        let reply = try requireIpcReply(effects)
+        try expectAfterTabInserted(
+            reply: reply,
+            in: model,
+            targetGroupId: targetGroupId,
+            refTabId: refTabId,
+            beforeGroupTabs: beforeGroupTabs,
+            panesBefore: panesBefore
+        )
+    }
+
+    test("tab.new afterTab with matching group succeeds") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let refTabId = model.groups[0].tabs[0].id
+        let targetGroupId = model.groups[0].id
+        let beforeGroupTabs = groupTabIds(in: model)
+        let panesBefore = Set(model.panes.keys)
+
+        let effects = sendIpc(
+            &model,
+            method: Methods.tabNew,
+            params: .object([
+                "group": .string(targetGroupId.rawValue.uuidString),
+                "position": .string("afterTab"),
+                "afterTabId": .string(refTabId.rawValue.uuidString),
+            ])
+        )
+
+        let reply = try requireIpcReply(effects)
+        try expectAfterTabInserted(
+            reply: reply,
+            in: model,
+            targetGroupId: targetGroupId,
+            refTabId: refTabId,
+            beforeGroupTabs: beforeGroupTabs,
+            panesBefore: panesBefore
+        )
+    }
+
+    test("tab.new afterTab with different explicit group fails before mutation") {
+        var model = makeModel()
+        createTab(&model)
+        let refTabId = model.groups[0].tabs[0].id
+        _ = update(&model, .createGroup(name: "Other"))
+        let otherGroupId = model.groups[1].id
+        let before = model
+
+        let effects = sendIpc(
+            &model,
+            method: Methods.tabNew,
+            params: .object([
+                "group": .string(otherGroupId.rawValue.uuidString),
+                "position": .string("afterTab"),
+                "afterTabId": .string(refTabId.rawValue.uuidString),
+            ])
+        )
+
+        let error = try requireIpcError(effects)
+        try expectEqual(error.code, -32602)
+        try expectEqual(model, before)
+    }
+
+    test("tab.new afterTab invalid params fail before mutation") {
+        let invalidCases: [[String: JSONValue]] = [
+            [
+                "position": .string("afterTab"),
+                "afterTabId": .string(UUID().uuidString),
+            ],
+            [
+                "position": .string("afterTab"),
+            ],
+            [
+                "position": .string("afterTab"),
+                "afterTabId": .number(7),
+            ],
+            [
+                "position": .string("afterTab"),
+                "afterTabId": .string("not-a-uuid"),
+            ],
+            [
+                "afterTabId": .string(UUID().uuidString),
+            ],
+            [
+                "position": .number(7),
+            ],
+            [
+                "position": .string("middle"),
+            ],
+            [
+                "position": .string("afterSelected"),
+                "afterTabId": .string(UUID().uuidString),
+            ],
+        ]
+
+        for params in invalidCases {
+            var model = makeModel()
+            createTab(&model)
+            let before = model
+
+            let effects = sendIpc(&model, method: Methods.tabNew, params: .object(params))
+
+            let error = try requireIpcError(effects)
+            try expectEqual(error.code, -32602)
+            try expectEqual(model, before)
+        }
+    }
+
     test("pane.split with launch title sets pane title without tab custom title") {
         var model = makeModel()
         createTab(&model)
@@ -1614,6 +1742,51 @@ private func sendIpc(
 private func contextForSelectedPane(in model: AppModel) -> IpcRequestContext {
     let tab = selectedTab(in: model)!
     return IpcRequestContext(paneId: tab.focusedPaneId.rawValue.uuidString)
+}
+
+private func groupTabIds(in model: AppModel) -> [[TabId]] {
+    model.groups.map { $0.tabs.map(\.id) }
+}
+
+private func expectAfterTabInserted(
+    reply: JSONValue,
+    in model: AppModel,
+    targetGroupId: GroupId,
+    refTabId: TabId,
+    beforeGroupTabs: [[TabId]],
+    panesBefore: Set<PaneId>
+) throws {
+    guard let targetGroupIndex = model.groups.firstIndex(where: { $0.id == targetGroupId }) else {
+        throw TestFailure(message: "target group should exist")
+    }
+    guard let refIndex = beforeGroupTabs[targetGroupIndex].firstIndex(of: refTabId) else {
+        throw TestFailure(message: "reference tab should be in target group snapshot")
+    }
+    let tabId = try requireTabId(reply["tab"]?["id"], "tab.new should return tab id")
+    let paneId = try requirePaneId(reply["panes"]?.asArray?.first?["id"], "tab.new should return pane id")
+    var expectedTarget = beforeGroupTabs[targetGroupIndex]
+    expectedTarget.insert(tabId, at: refIndex + 1)
+
+    for groupIndex in model.groups.indices {
+        if groupIndex == targetGroupIndex {
+            try expectEqual(model.groups[groupIndex].tabs.map(\.id), expectedTarget)
+        } else {
+            try expectEqual(model.groups[groupIndex].tabs.map(\.id), beforeGroupTabs[groupIndex])
+        }
+    }
+
+    let newPaneIds = Set(model.panes.keys).subtracting(panesBefore)
+    try expectEqual(newPaneIds, [paneId])
+    guard let tab = tabById(tabId, in: model) else {
+        throw TestFailure(message: "new tab should exist")
+    }
+    try expectEqual(tab.focusedPaneId, paneId)
+    if case .leaf(let rootPaneId) = tab.rootNode {
+        try expectEqual(rootPaneId, paneId)
+    } else {
+        throw TestFailure(message: "new tab should have a root leaf")
+    }
+    try expectEqual(model.selectedTabId, tabId)
 }
 
 private func requireIpcReply(_ effects: [Effect]) throws -> JSONValue {

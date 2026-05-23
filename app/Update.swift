@@ -67,8 +67,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         } else {
             targetGroupIndex = 0
         }
-        // .atGroupEnd always appends. .afterSelected inserts after the
-        // selected tab when it lives in the target group, otherwise appends.
+        // .atGroupEnd always appends. .afterSelected and .afterTab insert
+        // after their reference tab when it lives in the target group,
+        // otherwise they append.
         switch position {
         case .atGroupEnd:
             model.groups[targetGroupIndex].tabs.append(tab)
@@ -76,6 +77,12 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             if let selId = model.selectedTabId,
                let selIdx = model.groups[targetGroupIndex].tabs.firstIndex(where: { $0.id == selId }) {
                 model.groups[targetGroupIndex].tabs.insert(tab, at: selIdx + 1)
+            } else {
+                model.groups[targetGroupIndex].tabs.append(tab)
+            }
+        case .afterTab(let refTabId):
+            if let refIdx = model.groups[targetGroupIndex].tabs.firstIndex(where: { $0.id == refTabId }) {
+                model.groups[targetGroupIndex].tabs.insert(tab, at: refIdx + 1)
             } else {
                 model.groups[targetGroupIndex].tabs.append(tab)
             }
@@ -1574,9 +1581,11 @@ private func handleIpcRequest(
         }
         let background: Bool
         let groupId: GroupId
+        let position: TabInsertPosition?
         do {
             background = try parseOptionalBool(object["background"], name: "background")
-            groupId = try resolveTabNewGroup(params: params, context: context, in: model)
+            position = try parseTabInsertPosition(object)
+            groupId = try resolveTabNewTargetGroup(position: position, params: params, context: context, in: model)
         } catch let error as IpcParamsError {
             return ipcInvalidParams(reqId, error.message)
         } catch {
@@ -1593,7 +1602,13 @@ private func handleIpcRequest(
             )
         }
         let before = Set(model.groups.flatMap(\.tabs).map(\.id))
-        let effects = update(&model, .createTab(inGroupId: groupId, launch: effectiveLaunch, background: background))
+        let createTabMsg: Msg
+        if let position {
+            createTabMsg = .createTab(inGroupId: groupId, position: position, launch: effectiveLaunch, background: background)
+        } else {
+            createTabMsg = .createTab(inGroupId: groupId, launch: effectiveLaunch, background: background)
+        }
+        let effects = update(&model, createTabMsg)
         let tabId = newestTabId(excluding: before, in: model)
         return effects + [.ipcReply(reqId: reqId, result: tabNewResult(tabId: tabId, groupId: groupId, in: model))]
 
@@ -1891,6 +1906,50 @@ private func parseOptionalBool(_ value: JSONValue?, name: String) throws -> Bool
     }
 }
 
+private func parseTabInsertPosition(_ object: [String: JSONValue]) throws -> TabInsertPosition? {
+    let positionValue = object["position"]
+    let afterTabIdValue = object["afterTabId"]
+
+    if positionValue == nil && afterTabIdValue == nil {
+        return nil
+    }
+    if afterTabIdValue != nil {
+        switch positionValue {
+        case .none:
+            throw IpcParamsError("afterTabId is only valid when position == \"afterTab\"")
+        case .some(.string(let rawPosition)) where rawPosition != "afterTab":
+            throw IpcParamsError("afterTabId is only valid when position == \"afterTab\"")
+        default:
+            break
+        }
+    }
+
+    guard let positionValue else { return nil }
+    guard case .string(let rawPosition) = positionValue else {
+        throw IpcParamsError("position must be a string")
+    }
+
+    switch rawPosition {
+    case "afterSelected":
+        return .afterSelected
+    case "atGroupEnd":
+        return .atGroupEnd
+    case "afterTab":
+        guard let afterTabIdValue else {
+            throw IpcParamsError("position=afterTab requires afterTabId")
+        }
+        guard case .string(let rawTabId) = afterTabIdValue else {
+            throw IpcParamsError("afterTabId must be a string")
+        }
+        guard let tabId = parseTabId(rawTabId) else {
+            throw IpcParamsError("afterTabId is not a valid tab id")
+        }
+        return .afterTab(tabId)
+    default:
+        throw IpcParamsError("position must be one of: afterSelected, atGroupEnd, afterTab")
+    }
+}
+
 // Resolve a pane-targeting IPC command. A supplied params.pane is authoritative:
 // malformed or stale explicit ids fail instead of falling back to pane context.
 private func resolveTargetPane(
@@ -2013,15 +2072,7 @@ private func resolveTabNewGroup(
     in model: AppModel
 ) throws -> GroupId {
     if case .object(let object) = params, let raw = object["group"] {
-        guard case .string(let str) = raw else {
-            throw IpcParamsError("group must be a string")
-        }
-        guard let id = parseGroupId(str),
-              model.groups.contains(where: { $0.id == id })
-        else {
-            throw IpcParamsError("group not found")
-        }
-        return id
+        return try resolveExplicitGroup(raw, in: model)
     }
     if let paneId = parsePaneId(context.paneId),
        let tab = tabForPane(paneId, in: model),
@@ -2029,6 +2080,43 @@ private func resolveTabNewGroup(
         return group.id
     }
     throw IpcParamsError("no group in context")
+}
+
+private func resolveTabNewTargetGroup(
+    position: TabInsertPosition?,
+    params: JSONValue,
+    context: IpcRequestContext,
+    in model: AppModel
+) throws -> GroupId {
+    guard case .afterTab(let refTabId) = position else {
+        return try resolveTabNewGroup(params: params, context: context, in: model)
+    }
+    guard tabById(refTabId, in: model) != nil else {
+        throw IpcParamsError("position.afterTabId not found")
+    }
+    guard let refGroup = groupForTab(refTabId, in: model) else {
+        throw IpcParamsError("position.afterTabId not found")
+    }
+    if case .object(let object) = params, let rawGroup = object["group"] {
+        let requestedGroupId = try resolveExplicitGroup(rawGroup, in: model)
+        guard requestedGroupId == refGroup.id else {
+            throw IpcParamsError("position.afterTabId is not in the requested group")
+        }
+        return requestedGroupId
+    }
+    return refGroup.id
+}
+
+private func resolveExplicitGroup(_ raw: JSONValue, in model: AppModel) throws -> GroupId {
+    guard case .string(let str) = raw else {
+        throw IpcParamsError("group must be a string")
+    }
+    guard let id = parseGroupId(str),
+          model.groups.contains(where: { $0.id == id })
+    else {
+        throw IpcParamsError("group not found")
+    }
+    return id
 }
 
 private func ipcSplitDirection(_ raw: String) -> SplitNodeModel.Direction? {
