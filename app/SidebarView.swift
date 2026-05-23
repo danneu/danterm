@@ -314,16 +314,53 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             liveTabIds: liveTabIds,
             selectedTabId: model.selectedTabId)
 
-        // Restore in two phases so AppKit's `selectedRow` (the last
-        // selected row, per docs) ends up on `model.selectedTabId` —
-        // important for shift-click range start and arrow-key behavior.
+        applyRestoreSelection(restoreSet, selectedTabId: model.selectedTabId)
+
+        // Scroll the model's currently-selected tab into view.
+        if let selectedTabId = model.selectedTabId,
+           let item = tabItemCache[selectedTabId] {
+            let row = outlineView.row(forItem: item)
+            if row >= 0 { outlineView.scrollRowToVisible(row) }
+        }
+    }
+
+    func applySelection(tabId: TabId, model: AppModel) {
+        isReloading = true
+        defer { isReloading = false }
+
+        currentModel = model
+        let priorSelectedTabIds: Set<TabId> = Set(
+            outlineView.selectedRowIndexes.compactMap { row in
+                guard let item = outlineView.item(atRow: row) as? SidebarItem,
+                      case .tab(let tab) = item.kind else { return nil }
+                return tab.id
+            })
+        let liveTabIds: Set<TabId> = Set(
+            model.groups.flatMap(\.tabs).map(\.id))
+        let restoreSet = resolveReloadSelection(
+            priorSelectedTabIds: priorSelectedTabIds,
+            liveTabIds: liveTabIds,
+            selectedTabId: tabId)
+
+        applyRestoreSelection(restoreSet, selectedTabId: tabId)
+        refreshRowEmphasis(focusedTabId: tabId)
+
+        if let item = tabItemCache[tabId] {
+            let row = outlineView.row(forItem: item)
+            if row >= 0 { outlineView.scrollRowToVisible(row) }
+        }
+    }
+
+    /// Restore AppKit selection so multi-selection stays live while the focused
+    /// row remains the last selected row for shift-click and keyboard range use.
+    private func applyRestoreSelection(_ restoreSet: Set<TabId>, selectedTabId: TabId?) {
         var nonFocusRows = IndexSet()
         var focusRow: Int? = nil
         for id in restoreSet {
             guard let item = tabItemCache[id] else { continue }
             let row = outlineView.row(forItem: item)
             guard row >= 0 else { continue }
-            if id == model.selectedTabId {
+            if id == selectedTabId {
                 focusRow = row
             } else {
                 nonFocusRows.insert(row)
@@ -342,13 +379,27 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         } else if !nonFocusRows.isEmpty {
             outlineView.selectRowIndexes(
                 nonFocusRows, byExtendingSelection: false)
+        } else if !restoreSet.isEmpty {
+            // The target can be hidden inside a collapsed group. applySelection
+            // does not reloadData, so clear any stale visible row selection here.
+            outlineView.selectRowIndexes(
+                IndexSet(), byExtendingSelection: false)
         }
+    }
 
-        // Scroll the model's currently-selected tab into view.
-        if let selectedTabId = model.selectedTabId,
-           let item = tabItemCache[selectedTabId] {
-            let row = outlineView.row(forItem: item)
-            if row >= 0 { outlineView.scrollRowToVisible(row) }
+    /// Recompute row emphasis in place after a selection-only update.
+    private func refreshRowEmphasis(focusedTabId: TabId?) {
+        for row in 0..<outlineView.numberOfRows {
+            guard let rowView = outlineView.rowView(
+                atRow: row, makeIfNecessary: false) as? SidebarRowView else { continue }
+            let rowTabId: TabId? = {
+                guard let item = outlineView.item(atRow: row) as? SidebarItem,
+                      case .tab(let tab) = item.kind else { return nil }
+                return tab.id
+            }()
+            rowView.forceEmphasizedSelection = shouldForceSidebarRowEmphasis(
+                rowTabId: rowTabId,
+                focusedTabId: focusedTabId)
         }
     }
 

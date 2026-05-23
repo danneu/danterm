@@ -87,6 +87,22 @@ func tabTests() {
         try expectEqual(model.selectedTabId, firstTabId)
     }
 
+    test("testSelectTabSetsSidebarSelection") {
+        var model = makeModel()
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        createTab(&model)
+
+        let effects = update(&model, .selectTab(id: firstTabId))
+
+        try expect(hasEffect(effects) {
+            if case .setSidebarSelection(let tid) = $0, tid == firstTabId { return true }
+            return false
+        }, "should set sidebar selection")
+        try expectEqual(effectCount(effects) { if case .reloadSidebar = $0 { return true }; return false },
+                        0, "selection-only tab change should not reload sidebar")
+    }
+
     test("testSelectTabClearsBell") {
         var model = makeModel()
         createTab(&model)
@@ -105,6 +121,65 @@ func tabTests() {
         // Select tab B — alert should be marked read
         update(&model, .selectTab(id: tabBId))
         try expect(!model.alerts.contains { $0.paneId == tabBPaneId && $0.isUnread }, "selecting tab should mark alerts read")
+    }
+
+    test("testSelectTabRefreshesSidebarRowOnlyWhenFocusClearsAlert") {
+        var model = makeModel()
+        model.config.alertClearMode = .focus
+        createTab(&model)
+        let tabAId = model.groups[0].tabs[0].id
+        createTab(&model)
+        let tabBId = model.groups[0].tabs[1].id
+        let tabBPaneId = model.groups[0].tabs[1].focusedPaneId
+
+        let noAlertEffects = update(&model, .selectTab(id: tabAId))
+        try expectEqual(effectCount(noAlertEffects) {
+            if case .updateSidebarTabRow = $0 { return true }
+            return false
+        }, 0, "selecting without clearing alerts should not refresh a sidebar row")
+
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: tabBPaneId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        let effects = update(&model, .selectTab(id: tabBId))
+
+        try expectEqual(model.alerts[0].isUnread, false,
+            "focus-mode selection should mark focused pane alerts read")
+        try expect(hasEffect(effects) {
+            if case .updateSidebarTabRow(let tid) = $0, tid == tabBId { return true }
+            return false
+        }, "clearing focus alerts should refresh selected tab row")
+    }
+
+    test("testSelectTabRefreshesCollapsedGroupRowWhenFocusClearsAlert") {
+        var model = makeModel()
+        model.config.alertClearMode = .focus
+        createTab(&model)
+        let generalTabId = model.groups[0].tabs[0].id
+        update(&model, .createGroup(name: "Work"))
+        let workGroupId = model.groups[1].id
+        let workTabId = model.groups[1].tabs[0].id
+        let workPaneId = model.groups[1].tabs[0].focusedPaneId
+        update(&model, .selectTab(id: generalTabId))
+        update(&model, .toggleGroupCollapse(groupId: workGroupId))
+
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: workPaneId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        let effects = update(&model, .selectTab(id: workTabId))
+
+        try expect(hasEffect(effects) {
+            if case .updateSidebarTabRow(let tid) = $0, tid == workTabId { return true }
+            return false
+        }, "clearing focus alerts should refresh selected tab row")
+        try expect(hasEffect(effects) {
+            if case .updateSidebarGroupRow(let gid) = $0, gid == workGroupId { return true }
+            return false
+        }, "clearing focus alerts in a collapsed group should refresh group row")
     }
 
     test("testCloseLastPaneShowsConfirmation") {

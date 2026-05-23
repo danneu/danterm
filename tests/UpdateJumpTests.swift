@@ -21,6 +21,13 @@ func updateJumpTests() {
         }
     }
 
+    func hasSetSidebarSelection(_ effects: [Effect], tabId: TabId) -> Bool {
+        hasEffect(effects) {
+            if case .setSidebarSelection(let tid) = $0, tid == tabId { return true }
+            return false
+        }
+    }
+
     func hasHideSwitcherOverlay(_ effects: [Effect]) -> Bool {
         hasEffect(effects) {
             if case .hideSwitcherOverlay = $0 { return true }
@@ -62,6 +69,8 @@ func updateJumpTests() {
         try expectEqual(model.selectedTabId, ids[0], "first visible tab should be selected")
         try expect(model.selectedTabId != initiallySelected)
         try expect(model.jumpMode == nil, "jump mode should be cleared")
+        try expect(hasSetSidebarSelection(effects, tabId: ids[0]),
+            "commit should update sidebar selection")
         try expect(hasReloadSidebar(effects), "commit should reload sidebar")
     }
 

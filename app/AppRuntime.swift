@@ -447,6 +447,9 @@ class AppRuntime {
         case .reloadSidebar:
             sidebarView?.reload(model: model)
 
+        case .setSidebarSelection(let tabId):
+            sidebarView?.applySelection(tabId: tabId, model: model)
+
         case .updateSidebarTabRow(let tabId):
             sidebarView?.updateTabRow(tabId: tabId, model: model)
 

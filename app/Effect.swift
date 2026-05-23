@@ -26,6 +26,7 @@ enum Effect {
     case rebuildContentView
     case refreshPaneBorder(paneId: PaneId)
     case reloadSidebar
+    case setSidebarSelection(tabId: TabId)
     case updateSidebarTabRow(tabId: TabId)
     case updateSidebarGroupRow(groupId: GroupId)
     case setWindowTitle(String)

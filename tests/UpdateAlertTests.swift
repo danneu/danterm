@@ -22,9 +22,35 @@ func alertTests() {
         try expect(alertTestHasRefreshPaneToolbar(effects, paneId: paneId),
             "should refresh pane toolbar")
         try expect(hasEffect(effects) {
-            if case .reloadSidebar = $0 { return true }
+            if case .updateSidebarTabRow(let tid) = $0,
+               tid == model.groups[0].tabs[0].id { return true }
             return false
-        }, "should reload sidebar")
+        }, "should refresh alert tab row")
+        try expect(!alertTestHasReloadSidebar(effects), "should not reload sidebar")
+    }
+
+    test("testMarkAlertReadForStalePaneSkipsSidebarUpdate") {
+        var model = makeModel()
+        createTab(&model)
+        let stalePaneId = PaneId()
+
+        let alertId = AlertId()
+        model.alerts.insert(AlertModel(
+            id: alertId, kind: .bell, paneId: stalePaneId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        let effects = update(&model, .markAlertRead(alertId: alertId))
+        try expectEqual(model.alerts[0].isUnread, false)
+        try expect(alertTestHasRefreshPaneBorder(effects, paneId: stalePaneId),
+            "should refresh stale pane border")
+        try expect(alertTestHasRefreshPaneToolbar(effects, paneId: stalePaneId),
+            "should refresh stale pane toolbar")
+        try expectEqual(alertTestEffectCount(effects) {
+            if case .updateSidebarTabRow = $0 { return true }
+            return false
+        }, 0, "stale alert should not refresh any tab row")
+        try expect(!alertTestHasReloadSidebar(effects), "stale alert should not reload sidebar")
     }
 
     test("testMarkAllAlertsRead") {
@@ -52,6 +78,11 @@ func alertTests() {
             "should refresh paneA toolbar")
         try expect(alertTestHasRefreshPaneToolbar(effects, paneId: paneB),
             "should refresh paneB toolbar")
+        try expectEqual(alertTestEffectCount(effects) {
+            if case .updateSidebarTabRow = $0 { return true }
+            return false
+        }, 2, "should refresh one row per affected tab")
+        try expect(!alertTestHasReloadSidebar(effects), "should not reload sidebar")
     }
 
     test("testActivateAlertNavigatesAndMarksRead") {
@@ -131,6 +162,9 @@ func alertTests() {
         try expect(!alertTestHasRebuildContentView(effects), "should not rebuild content view")
         try expect(alertTestHasRefreshPaneBorder(effects, paneId: stalePaneId),
             "should refresh stale alert pane border")
+        try expect(alertTestHasRefreshPaneToolbar(effects, paneId: stalePaneId),
+            "should refresh stale alert pane toolbar")
+        try expect(!alertTestHasReloadSidebar(effects), "stale alert should not reload sidebar")
         try expect(hasEffect(effects) {
             if case .dismissAlertsPopover = $0 { return true }
             return false
@@ -525,9 +559,11 @@ func alertTests() {
         try expect(alertTestHasRefreshPaneToolbar(effects, paneId: paneA),
             "should refresh acked pane toolbar")
         try expect(hasEffect(effects) {
-            if case .reloadSidebar = $0 { return true }
+            if case .updateSidebarTabRow(let tid) = $0,
+               tid == model.selectedTabId { return true }
             return false
-        }, "should reload sidebar")
+        }, "should refresh selected tab row")
+        try expect(!alertTestHasReloadSidebar(effects), "should not reload sidebar")
     }
 
     test("testGoToMostRecentAlertPaneRepeatedPressWalksTabs") {
@@ -787,9 +823,11 @@ func alertTests() {
         try expect(alertTestHasRefreshPaneToolbar(effects, paneId: paneA),
             "should refresh cleared pane toolbar")
         try expect(hasEffect(effects) {
-            if case .reloadSidebar = $0 { return true }
+            if case .updateSidebarTabRow(let tid) = $0,
+               tid == model.groups[0].tabs[0].id { return true }
             return false
-        }, "should reload sidebar")
+        }, "should refresh pane's tab row")
+        try expect(!alertTestHasReloadSidebar(effects), "should not reload sidebar")
     }
 
     test("testClearAlertsForPaneNoopsWhenNoUnreadAlerts") {
@@ -863,9 +901,11 @@ func alertTests() {
         try expect(alertTestHasRefreshPaneToolbar(effects, paneId: paneB),
             "should refresh paneB toolbar")
         try expect(hasEffect(effects) {
-            if case .reloadSidebar = $0 { return true }
+            if case .updateSidebarTabRow(let tid) = $0,
+               tid == model.selectedTabId { return true }
             return false
-        }, "should reload sidebar")
+        }, "should refresh selected tab row")
+        try expect(!alertTestHasReloadSidebar(effects), "should not reload sidebar")
     }
 
     test("testAckTabAlertsDoesNotAffectOtherTabs") {
@@ -937,9 +977,10 @@ func alertTests() {
         try expect(alertTestHasRefreshPaneToolbar(effects, paneId: tab1Pane),
             "should refresh cleared tab pane toolbar")
         try expect(hasEffect(effects) {
-            if case .reloadSidebar = $0 { return true }
+            if case .updateSidebarTabRow(let tid) = $0, tid == tab1Id { return true }
             return false
-        }, "should reload sidebar")
+        }, "should refresh cleared tab row")
+        try expect(!alertTestHasReloadSidebar(effects), "should not reload sidebar")
     }
 
     test("testClearAlertsForTabNoopsWhenNoUnreadAlerts") {
@@ -1005,9 +1046,11 @@ func alertTests() {
         try expect(!unreadByPane(pane1), "tab1 alerts cleared")
         try expect(!unreadByPane(pane2), "tab2 alerts cleared")
         try expect(unreadByPane(pane3), "tab3 alert preserved")
-        try expect(hasEffect(effects) {
-            if case .reloadSidebar = $0 { return true }; return false
-        })
+        try expectEqual(alertTestEffectCount(effects) {
+            if case .updateSidebarTabRow = $0 { return true }
+            return false
+        }, 2, "should refresh one row per cleared tab")
+        try expect(!alertTestHasReloadSidebar(effects), "should not reload sidebar")
         try expect(!alertTestHasRebuildContentView(effects), "should not rebuild content view")
         try expect(alertTestHasRefreshPaneBorder(effects, paneId: pane1),
             "should refresh first cleared pane border")
@@ -1018,6 +1061,32 @@ func alertTests() {
         try expect(alertTestHasRefreshPaneToolbar(effects, paneId: pane2),
             "should refresh second cleared pane toolbar")
         _ = id3
+    }
+
+    test("testClearAlertsForTabsRefreshesOnlyTabsWithUnreadAlerts") {
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let id1 = model.groups[0].tabs[0].id
+        let id2 = model.groups[0].tabs[1].id
+        let pane1 = model.groups[0].tabs[0].focusedPaneId
+
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: pane1,
+            title: "x", body: "y", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        let effects = update(&model, .clearAlertsForTabs(tabIds: [id1, id2]))
+
+        try expect(hasEffect(effects) {
+            if case .updateSidebarTabRow(let tid) = $0, tid == id1 { return true }
+            return false
+        }, "tab with unread alerts should refresh")
+        try expect(!hasEffect(effects) {
+            if case .updateSidebarTabRow(let tid) = $0, tid == id2 { return true }
+            return false
+        }, "tab without unread alerts should not refresh")
+        try expect(!alertTestHasReloadSidebar(effects), "should not reload sidebar")
     }
 
     test("testClearAlertsForTabsNoUnreadIsNoop") {
@@ -1070,4 +1139,15 @@ private func alertTestHasRefreshPaneToolbar(_ effects: [Effect], paneId: PaneId)
         if case .refreshPaneToolbar(let pid) = $0, pid == paneId { return true }
         return false
     }
+}
+
+private func alertTestHasReloadSidebar(_ effects: [Effect]) -> Bool {
+    hasEffect(effects) {
+        if case .reloadSidebar = $0 { return true }
+        return false
+    }
+}
+
+private func alertTestEffectCount(_ effects: [Effect], matching predicate: (Effect) -> Bool) -> Int {
+    effects.filter(predicate).count
 }
