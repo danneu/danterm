@@ -11,6 +11,39 @@ allowed-tools: Bash(danterm *)
 `danterm help` for the authoritative command list. The recipes below cover the
 cases agents hit in practice.
 
+## CLI API
+
+Keep this section synced with `danterm help` and the parser in
+`lib/DanTermProtocol/Sources/DanTermProtocol/CLIParser.swift`.
+
+    danterm ls
+    danterm tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--after-selected | --at-group-end | --after-tab <tab-id>]
+    danterm tab rename [--tab <tab-id>] <name>|--clear
+    danterm pane focus <pane-id>
+    danterm pane info [--pane <pane-id>]
+    danterm pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background]
+    danterm pane input [--pane <pane-id>] [--literal] -- <token>...
+    danterm pane read --pane <pane-id> [--lines <n>]
+    danterm theme set [--pane <pane-id>] <name>|--clear
+    danterm todo list [--pane <pane-id>]
+    danterm todo add [--pane <pane-id>] <text>
+    danterm todo edit [--pane <pane-id>] <todo-id> <text>
+    danterm todo done [--pane <pane-id>] <todo-id>
+    danterm todo open [--pane <pane-id>] <todo-id>
+    danterm todo delete [--pane <pane-id>] <todo-id>
+    danterm todo clear-completed [--pane <pane-id>]
+
+`tab new` position flags are mutually exclusive:
+
+- No position flag: insert after the currently selected tab in the target
+  group, falling back to the end of that group.
+- `--after-selected`: explicit form of the default behavior.
+- `--at-group-end`: append at the end of the target group.
+- `--after-tab <tab-id>`: insert immediately after the referenced tab. If
+  `--group` is also supplied, it must name the referenced tab's group. If
+  `--group` is omitted, the referenced tab's group is the target and
+  `$DANTERM_PANE` is not required.
+
 ## Targeting rule
 
 Assume the user may keep using DanTerm while you run commands. Do not rely on
@@ -30,8 +63,9 @@ the app's currently focused group, tab, or pane.
 
 For agent commands:
 
-- `tab new`: always pass `--group <group-id>`; prefer `--background`
-  unless the user asked to switch to the new tab.
+- `tab new`: always pass `--group <group-id>` or an explicit
+  `--after-tab <tab-id>` anchor. Prefer `--background` unless the user asked
+  to switch to the new tab.
 - `tab rename`: always pass `--tab <tab-id>`.
 - `pane split`: always pass `--pane <pane-id>`; prefer `--background`
   unless the user asked to focus the new pane.
@@ -73,7 +107,7 @@ exactly one matching pane, tab, or group before running any mutation command.
 | User says | Command |
 |---|---|
 | "rename this tab to X" / "label this tab" | `tab rename --tab <tab-id>` |
-| "open a new tab" / "...and run X in it" | `tab new --group <group-id>` with optional `--cmd` |
+| "open a new tab" / "...and run X in it" | `tab new --group <group-id>` with optional `--cmd` / position flags |
 | "split the pane" / "...and run X in it" | `pane split --pane <pane-id>` with optional `--cmd` |
 | "what's the build doing in the other pane?" | `pane read --pane <pane-id>` |
 | "type X into pane <id>" / "send Ctrl-C to..." | `pane input --pane <pane-id>` |
@@ -95,12 +129,19 @@ exactly one matching pane, tab, or group before running any mutation command.
     danterm tab new --group "$GROUP_ID" --cmd 'vim notes.md' --title notes
     danterm tab new --group "$GROUP_ID" --cmd 'cargo test --workspace' --cwd ~/proj --title tests
     danterm tab new --group "$GROUP_ID" --background --cmd 'just test' --title tests
+    danterm tab new --group "$GROUP_ID" --at-group-end --background --cmd 'just test' --title tests
+    danterm tab new --after-tab "$TAB_ID" --background --cmd 'just test' --title tests
 
 `--cmd` launches the program directly via libghostty, not by typing into a
 shell prompt, so it does not race shell startup. The pane stays open after the
 command exits.
 
 Use `--background` to keep the user's current tab focused.
+
+Use `--at-group-end` when the new tab should not be inserted next to the
+selected tab. Use `--after-tab <tab-id>` when the user names an exact tab to
+place the new tab after; this is an explicit target and can work without
+`$DANTERM_PANE`.
 
 ### Split a pane and run a command in the new one
 
@@ -200,7 +241,7 @@ else prints nothing on success and exits 0.
 |---|---|
 | `ls` | JSON: `{groups, panes, selectedTabId}` |
 | `pane info --pane <pane-id>` | JSON: `{pane: {id, title, cwd}, tab: {id, title, groupId}, group: {id, name}}` |
-| `tab new --group <group-id>` | JSON: `{tab: {...}, panes: [{id}], group?: {id, name}}` |
+| `tab new ...` | JSON: `{tab: {...}, panes: [{id}], group?: {id, name}}` |
 | `pane split --pane <pane-id>` | JSON: `{pane: {id}}` |
 | `todo list --pane <pane-id>` | JSON: `{todos: [{id, text, isDone}, ...]}` |
 | `todo add --pane <pane-id>` | JSON: `{todo: {id, text, isDone}}` |
@@ -214,6 +255,8 @@ else prints nothing on success and exits 0.
   `pane split --pane <pane-id> --cmd` over the
   split-then-`pane input` pattern. `--cmd` launches the program directly and
   avoids racing the shell prompt.
+- For `tab new`, choose exactly one position mode. Use `--at-group-end` for
+  append behavior and `--after-tab <tab-id>` when an exact tab anchor is known.
 - Prefer `--background` on `tab new` and `pane split` for autonomous work the
   user did not just ask for. The user may be focused on another tab or pane;
   stealing focus is disruptive. Omit `--background` only when the user

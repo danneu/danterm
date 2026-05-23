@@ -205,6 +205,14 @@ See [docs/ci.md](docs/ci.md) for details on secrets, signing, and troubleshootin
 
 Use `gh` CLI for all GitHub API requests.
 
+## CLI API Documentation
+
+When changing the `danterm` CLI command surface, flags, stdout shape, targeting
+semantics, or parser error usage, update `integrations/danterm/SKILL.md` in the
+same change. Keep the skill's CLI API section and recipes synced with
+`cli/main.swift` and `lib/DanTermProtocol/Sources/DanTermProtocol/CLIParser.swift`
+so agent users see the current command contract.
+
 ## Plan Review Protocol
 
 When reviewing a plan:
