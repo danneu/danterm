@@ -57,6 +57,26 @@ func allPaneIds(_ node: SplitNodeModel) -> [PaneId] {
   }
 }
 
+/// Compute the model-derived renderer visibility for every pane in every tab.
+func effectiveSurfaceVisibility(in model: AppModel, windowVisible: Bool) -> [PaneId: Bool] {
+  var result: [PaneId: Bool] = [:]
+  let selectedTabId = model.selectedTabId
+
+  for group in model.groups {
+    for tab in group.tabs {
+      let tabIsSelected = tab.id == selectedTabId
+      for paneId in allPaneIds(tab.rootNode) {
+        let visible = windowVisible
+          && tabIsSelected
+          && !(tab.isZoomed && paneId != tab.focusedPaneId)
+        result[paneId] = visible
+      }
+    }
+  }
+
+  return result
+}
+
 func firstLeafId(_ node: SplitNodeModel) -> PaneId {
   switch node {
   case .leaf(let id):

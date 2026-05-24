@@ -19,6 +19,9 @@ class AppRuntime {
     var model: AppModel
     let ghosttyApp: GhosttyApp
     var surfaces: [PaneId: TerminalView] = [:]
+    // Last libghostty occlusion value pushed for each live surface.
+    // Cleared on teardown because restore/import can reuse pane IDs for fresh surfaces.
+    private var surfaceVisibility: [PaneId: Bool] = [:]
     var tokenStore = PaneTokenStore()
     weak var window: NSWindow?
     weak var sidebarView: SidebarView?
@@ -213,6 +216,7 @@ class AppRuntime {
         for effect in effects {
             perform(effect)
         }
+        syncSurfaceVisibility()
         if model.pendingConfirmation == .terminate {
             quitConfirmationPanel?.configure(paneCount: model.panes.count)
         }
@@ -326,12 +330,22 @@ class AppRuntime {
         return surfaces[paneId]
     }
 
-    /// Forward the current window occlusion visibility to every live libghostty surface.
-    func applyOcclusionToAllSurfaces(_ visible: Bool) {
-        for view in surfaces.values {
-            if let surface = view.surface {
+    /// Push effective model visibility to live libghostty surfaces, skipping unchanged panes.
+    func syncSurfaceVisibility() {
+        let windowVisible = window?.occlusionState.contains(.visible) ?? true
+        let desired = effectiveSurfaceVisibility(in: model, windowVisible: windowVisible)
+
+        for (paneId, view) in surfaces {
+            guard let surface = view.surface else { continue }
+            let visible = desired[paneId] ?? true
+            if surfaceVisibility[paneId] != visible {
                 ghostty_surface_set_occlusion(surface, visible)
+                surfaceVisibility[paneId] = visible
             }
+        }
+
+        surfaceVisibility = surfaceVisibility.filter { paneId, _ in
+            surfaces[paneId] != nil
         }
     }
 
@@ -1239,6 +1253,7 @@ class AppRuntime {
                 view.closeSurface()
             }
         }
+        surfaceVisibility.removeAll()
         for paneId in Array(replayFiles.keys) {
             cleanupReplayFile(for: paneId)
         }
@@ -1259,6 +1274,7 @@ class AppRuntime {
 
         refreshContentTitlebar()
         rebuildContentView()
+        syncSurfaceVisibility()
         sidebarView?.reload(model: model)
         let unreadCount = totalUnreadAlertCount(model: model)
         chromeView?.updateBellBadge(count: unreadCount)
@@ -1301,12 +1317,6 @@ class AppRuntime {
         view.bridge.paneId = paneId
         view.runtime = self
         view.scrollbarEnabled = ghosttyApp.scrollbarEnabled
-        // Surfaces created for background tabs or restore may not attach to a
-        // window immediately, so sync renderer occlusion before returning.
-        if let surface = view.surface {
-            let visible = window?.occlusionState.contains(.visible) ?? true
-            ghostty_surface_set_occlusion(surface, visible)
-        }
         return view
     }
 

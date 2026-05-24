@@ -43,6 +43,160 @@ func modelOperationsTests() {
         try expect(ids.contains(c))
     }
 
+    // MARK: - effectiveSurfaceVisibility
+
+    func makeVisibilityModel(tabs: [TabModel], selectedTabId: TabId?) -> AppModel {
+        let paneEntries = tabs.flatMap { tab in
+            allPaneIds(tab.rootNode).map { paneId in
+                (paneId, PaneModel(id: paneId))
+            }
+        }
+        return AppModel(
+            groups: [GroupModel(id: GroupId(), name: "General", tabs: tabs)],
+            panes: Dictionary(uniqueKeysWithValues: paneEntries),
+            selectedTabId: selectedTabId
+        )
+    }
+
+    test("effectiveSurfaceVisibility marks every reachable pane hidden when window is hidden") {
+        let a = PaneId(), b = PaneId(), c = PaneId()
+        let tabAId = TabId(), tabBId = TabId()
+        let tabA = TabModel(
+            id: tabAId,
+            focusedPaneId: a,
+            rootNode: .split(
+                id: SplitId(), direction: .horizontal,
+                first: .leaf(a),
+                second: .leaf(b),
+                ratio: 0.5
+            )
+        )
+        let tabB = TabModel(id: tabBId, focusedPaneId: c, rootNode: .leaf(c))
+        let model = makeVisibilityModel(tabs: [tabA, tabB], selectedTabId: tabAId)
+
+        let visibility = effectiveSurfaceVisibility(in: model, windowVisible: false)
+
+        try expectEqual(visibility, [a: false, b: false, c: false])
+    }
+
+    test("effectiveSurfaceVisibility marks a selected single-pane tab visible") {
+        let paneId = PaneId()
+        let tabId = TabId()
+        let tab = TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(paneId))
+        let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
+
+        let visibility = effectiveSurfaceVisibility(in: model, windowVisible: true)
+
+        try expectEqual(visibility, [paneId: true])
+    }
+
+    test("effectiveSurfaceVisibility hides panes in non-selected tabs") {
+        let selectedA = PaneId(), selectedB = PaneId(), background = PaneId()
+        let selectedTabId = TabId(), backgroundTabId = TabId()
+        let selectedTab = TabModel(
+            id: selectedTabId,
+            focusedPaneId: selectedA,
+            rootNode: .split(
+                id: SplitId(), direction: .horizontal,
+                first: .leaf(selectedA),
+                second: .leaf(selectedB),
+                ratio: 0.5
+            )
+        )
+        let backgroundTab = TabModel(
+            id: backgroundTabId,
+            focusedPaneId: background,
+            rootNode: .leaf(background)
+        )
+        let model = makeVisibilityModel(tabs: [selectedTab, backgroundTab], selectedTabId: selectedTabId)
+
+        let visibility = effectiveSurfaceVisibility(in: model, windowVisible: true)
+
+        try expectEqual(visibility, [selectedA: true, selectedB: true, background: false])
+    }
+
+    test("effectiveSurfaceVisibility hides zoomed sibling panes") {
+        let focused = PaneId(), sibling = PaneId()
+        let tabId = TabId()
+        let tab = TabModel(
+            id: tabId,
+            focusedPaneId: focused,
+            rootNode: .split(
+                id: SplitId(), direction: .horizontal,
+                first: .leaf(focused),
+                second: .leaf(sibling),
+                ratio: 0.5
+            ),
+            isZoomed: true
+        )
+        let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
+
+        let visibility = effectiveSurfaceVisibility(in: model, windowVisible: true)
+
+        try expectEqual(visibility, [focused: true, sibling: false])
+    }
+
+    test("effectiveSurfaceVisibility keeps a zoomed single-pane tab visible") {
+        let paneId = PaneId()
+        let tabId = TabId()
+        let tab = TabModel(
+            id: tabId,
+            focusedPaneId: paneId,
+            rootNode: .leaf(paneId),
+            isZoomed: true
+        )
+        let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
+
+        let visibility = effectiveSurfaceVisibility(in: model, windowVisible: true)
+
+        try expectEqual(visibility, [paneId: true])
+    }
+
+    test("effectiveSurfaceVisibility hides every pane when there is no selected tab") {
+        let a = PaneId(), b = PaneId()
+        let tabId = TabId()
+        let tab = TabModel(
+            id: tabId,
+            focusedPaneId: a,
+            rootNode: .split(
+                id: SplitId(), direction: .horizontal,
+                first: .leaf(a),
+                second: .leaf(b),
+                ratio: 0.5
+            )
+        )
+        let model = makeVisibilityModel(tabs: [tab], selectedTabId: nil)
+
+        let visibility = effectiveSurfaceVisibility(in: model, windowVisible: true)
+
+        try expectEqual(visibility, [a: false, b: false])
+    }
+
+    test("effectiveSurfaceVisibility marks every selected nested split leaf visible") {
+        let a = PaneId(), b = PaneId(), c = PaneId()
+        let tabId = TabId()
+        let tab = TabModel(
+            id: tabId,
+            focusedPaneId: a,
+            rootNode: .split(
+                id: SplitId(), direction: .horizontal,
+                first: .leaf(a),
+                second: .split(
+                    id: SplitId(), direction: .vertical,
+                    first: .leaf(b),
+                    second: .leaf(c),
+                    ratio: 0.5
+                ),
+                ratio: 0.5
+            )
+        )
+        let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
+
+        let visibility = effectiveSurfaceVisibility(in: model, windowVisible: true)
+
+        try expectEqual(visibility, [a: true, b: true, c: true])
+    }
+
     // MARK: - firstLeafId / lastLeafId
 
     test("testFirstLeafId") {
