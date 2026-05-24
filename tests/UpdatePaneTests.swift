@@ -165,9 +165,9 @@ func paneTests() {
         try expectEqual(tab.focusedPaneId, paneA, "focused pane should change")
         try expectEqual(model.alerts[0].isUnread, false, "alert should be marked read")
         try expect(!hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
+            if case .rebuildTabContainer = $0 { return true }
             return false
-        }, "should not rebuild content view")
+        }, "should not rebuild tab container")
         try expect(hasEffect(effects) {
             if case .refreshPaneBorder(let pid) = $0, pid == paneB { return true }
             return false
@@ -275,6 +275,46 @@ func paneTests() {
         }, "should emit updateSidebarGroupRow for collapsed group")
     }
 
+    test("closePane with remaining panes rebuilds only that tab container") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        update(&model, .splitPane(direction: .horizontal))
+        let paneToClose = model.groups[0].tabs[0].focusedPaneId
+
+        let effects = update(&model, .closePane(paneId: paneToClose))
+
+        try expect(hasEffect(effects) {
+            if case .rebuildTabContainer(let effectTabId) = $0, effectTabId == tabId { return true }
+            return false
+        }, "closePane should rebuild the surviving tab container")
+        try expect(!hasEffect(effects) {
+            if case .showSelectedTab = $0 { return true }
+            return false
+        }, "closePane with panes remaining should not switch tabs")
+    }
+
+    test("closePane closing selected tab removes container and shows fallback") {
+        var model = makeModel()
+        createTab(&model)
+        let fallbackTabId = model.groups[0].tabs[0].id
+        createTab(&model)
+        let closingTabId = model.groups[0].tabs[1].id
+        let closingPaneId = model.groups[0].tabs[1].focusedPaneId
+
+        let effects = update(&model, .closePane(paneId: closingPaneId))
+
+        try expectEqual(model.selectedTabId, fallbackTabId, "closing selected tab should select fallback")
+        try expect(hasEffect(effects) {
+            if case .removeTabContainer(let tabId) = $0, tabId == closingTabId { return true }
+            return false
+        }, "closePane should remove the closed tab container")
+        try expect(hasEffect(effects) {
+            if case .showSelectedTab = $0 { return true }
+            return false
+        }, "closePane should show fallback tab")
+    }
+
     // MARK: - Zoom Tests
 
     test("testToggleZoomOnSplit") {
@@ -285,9 +325,9 @@ func paneTests() {
         let effects = update(&model, .toggleZoomPane)
         try expectEqual(model.groups[0].tabs[0].isZoomed, true)
         try expect(hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
+            if case .rebuildTabContainer(let tabId) = $0, tabId == model.groups[0].tabs[0].id { return true }
             return false
-        }, "should rebuild content view")
+        }, "should rebuild tab container")
     }
 
     test("testToggleZoomOff") {
@@ -299,9 +339,9 @@ func paneTests() {
         let effects = update(&model, .toggleZoomPane)
         try expectEqual(model.groups[0].tabs[0].isZoomed, false)
         try expect(hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
+            if case .rebuildTabContainer(let tabId) = $0, tabId == model.groups[0].tabs[0].id { return true }
             return false
-        }, "should rebuild content view")
+        }, "should rebuild tab container")
     }
 
     test("testToggleZoomNoOpOnSinglePane") {
@@ -370,9 +410,9 @@ func paneTests() {
         let effects = update(&model, .focusDirection(direction: .horizontal, side: .first))
         try expectEqual(model.groups[0].tabs[0].isZoomed, false, "focus direction should clear zoom")
         try expect(hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
+            if case .rebuildTabContainer(let tabId) = $0, tabId == model.groups[0].tabs[0].id { return true }
             return false
-        }, "should rebuild content view")
+        }, "should rebuild tab container")
     }
 
     // MARK: - movePane Tests
@@ -391,9 +431,9 @@ func paneTests() {
         try expectEqual(tab.focusedPaneId, paneA, "source should be focused after move")
         try expectEqual(tab.isZoomed, false, "zoom should be cleared")
         try expect(hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
+            if case .rebuildTabContainer(let tabId) = $0, tabId == tab.id { return true }
             return false
-        }, "should emit rebuildContentView")
+        }, "should emit rebuildTabContainer")
         // Both panes should still exist
         let ids = allPaneIds(tab.rootNode)
         try expectEqual(ids.count, 2)
@@ -413,9 +453,9 @@ func paneTests() {
         let tab = model.groups[0].tabs[0]
         try expectEqual(tab.focusedPaneId, paneA, "source should be focused after swap")
         try expect(hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
+            if case .rebuildTabContainer(let tabId) = $0, tabId == tab.id { return true }
             return false
-        }, "should emit rebuildContentView")
+        }, "should emit rebuildTabContainer")
         // A should now be second (was first before swap)
         try expectEqual(lastLeafId(tab.rootNode), paneA, "A should now be last (swapped to right)")
     }
@@ -526,16 +566,16 @@ func paneTests() {
             return false
         }, "should schedule checkpoint")
         try expect(hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
+            if case .rebuildTabContainer(let effectTabId) = $0, effectTabId == tabId { return true }
             return false
-        }, "selected-tab background split should rebuild so the new pane renders")
+        }, "selected-tab background split should rebuild the tab container so the new pane renders")
         try expect(!hasEffect(effects) {
             if case .makeFirstResponder = $0 { return true }
             return false
         }, "background split should not request first responder")
     }
 
-    test("testSplitPaneBackgroundOnUnselectedTabSkipsRebuild") {
+    test("testSplitPaneBackgroundOnUnselectedTabEmitsScopedRebuild") {
         var model = makeModel()
         createTab(&model)
         let tabAId = model.groups[0].tabs[0].id
@@ -566,10 +606,10 @@ func paneTests() {
             if case .scheduleCheckpoint = $0 { return true }
             return false
         }, "should schedule checkpoint")
-        try expect(!hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
+        try expect(hasEffect(effects) {
+            if case .rebuildTabContainer(let tabId) = $0, tabId == tabBId { return true }
             return false
-        }, "unselected-tab background split should not rebuild content view")
+        }, "unselected-tab background split should emit a scoped rebuild for that tab")
         try expect(!hasEffect(effects) {
             if case .makeFirstResponder = $0 { return true }
             return false
@@ -606,9 +646,9 @@ func paneTests() {
 
         try expectEqual(tab.focusedPaneId, newPaneId, "foreground split should focus new pane")
         try expect(hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
+            if case .rebuildTabContainer(let effectTabId) = $0, effectTabId == tabId { return true }
             return false
-        }, "foreground split should rebuild content view")
+        }, "foreground split should rebuild tab container")
     }
 
     test("testFocusDirectionThenFirstResponderUpdatesFocusAndRefreshesBorders") {
@@ -630,9 +670,9 @@ func paneTests() {
         let callbackEffects = update(&model, .paneBecameFirstResponder(paneId: leftPaneId))
         try expectEqual(model.groups[0].tabs[0].focusedPaneId, leftPaneId, "focus should update after first responder callback")
         try expect(!hasEffect(callbackEffects) {
-            if case .rebuildContentView = $0 { return true }
+            if case .rebuildTabContainer = $0 { return true }
             return false
-        }, "should not rebuild content view after focus change callback")
+        }, "should not rebuild tab container after focus change callback")
         try expect(hasEffect(callbackEffects) {
             if case .refreshPaneBorder(let paneId) = $0, paneId == rightPaneId { return true }
             return false
@@ -652,6 +692,7 @@ func paneTests() {
     test("testMovePaneToTabBasicCrossTab") {
         var model = makeModel()
         createTab(&model) // tab1 with paneA
+        let tab1Id = model.groups[0].tabs[0].id
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
         createTab(&model) // tab2 with paneB
@@ -681,6 +722,22 @@ func paneTests() {
             if case .destroySurface = $0 { return true }
             return false
         }, "should not destroy any surfaces")
+        try expect(hasEffect(effects) {
+            if case .removeTabContainer(let tabId) = $0, tabId == tab1Id { return true }
+            return false
+        }, "should remove emptied source tab container")
+        try expect(!hasEffect(effects) {
+            if case .rebuildTabContainer(let tabId) = $0, tabId == tab1Id { return true }
+            return false
+        }, "should not rebuild removed source tab container")
+        try expect(hasEffect(effects) {
+            if case .rebuildTabContainer(let tabId) = $0, tabId == tab2Id { return true }
+            return false
+        }, "should rebuild target tab container")
+        try expect(hasEffect(effects) {
+            if case .showSelectedTab = $0 { return true }
+            return false
+        }, "should show target tab")
 
         try expect(hasEffect(effects) {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
@@ -701,7 +758,7 @@ func paneTests() {
         let paneC = model.groups[0].tabs[1].focusedPaneId
 
         // Move paneA from tab1 to tab2
-        update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
+        let effects = update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
 
         // Tab1 should remain with just paneB
         try expectEqual(model.groups[0].tabs.count, 2, "source tab should remain")
@@ -720,6 +777,22 @@ func paneTests() {
         try expect(dstPaneIds.contains(paneA))
         try expect(dstPaneIds.contains(paneC))
         try expectEqual(dstTab.focusedPaneId, paneA, "target tab should focus moved pane")
+        try expect(hasEffect(effects) {
+            if case .rebuildTabContainer(let tabId) = $0, tabId == tab1Id { return true }
+            return false
+        }, "should rebuild surviving source tab container")
+        try expect(hasEffect(effects) {
+            if case .rebuildTabContainer(let tabId) = $0, tabId == tab2Id { return true }
+            return false
+        }, "should rebuild target tab container")
+        try expect(hasEffect(effects) {
+            if case .showSelectedTab = $0 { return true }
+            return false
+        }, "should show target tab")
+        try expect(!hasEffect(effects) {
+            if case .removeTabContainer(let tabId) = $0, tabId == tab1Id { return true }
+            return false
+        }, "should not remove surviving source tab container")
     }
 
     test("testMovePaneToTabSameTabIsNoOp") {
@@ -901,6 +974,14 @@ func paneTests() {
             if case .destroySurface = $0 { return true }
             return false
         }, "should not destroy any surfaces")
+        try expect(hasEffect(effects) {
+            if case .showSelectedTab = $0 { return true }
+            return false
+        }, "should show moved tab")
+        try expect(!hasEffect(effects) {
+            if case .removeTabContainer(let tabId) = $0, tabId == tab1Id { return true }
+            return false
+        }, "should not remove moved tab container")
     }
 
     test("testMovePaneToNewTabPathA_SameGroupIndexAdjust") {
@@ -972,11 +1053,19 @@ func paneTests() {
 
         // Move B (the focused pane) to a new tab
         let groupId = model.groups[0].id
-        update(&model, .movePaneToNewTab(paneId: paneB, inGroupId: groupId, atIndex: 1))
+        let effects = update(&model, .movePaneToNewTab(paneId: paneB, inGroupId: groupId, atIndex: 1))
 
         // Source tab should now focus paneA
         let srcTab = model.groups[0].tabs[0]
         try expectEqual(srcTab.focusedPaneId, paneA, "source tab should focus remaining pane")
+        try expect(hasEffect(effects) {
+            if case .rebuildTabContainer(let tabId) = $0, tabId == srcTab.id { return true }
+            return false
+        }, "should rebuild source tab container")
+        try expect(hasEffect(effects) {
+            if case .showSelectedTab = $0 { return true }
+            return false
+        }, "should show extracted tab")
     }
 
     test("testMovePaneToNewTabPathB_ChromeDerived") {

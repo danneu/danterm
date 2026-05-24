@@ -51,6 +51,57 @@ func ghosttyTests() {
             if case .terminate = $0 { return true }
             return false
         }, "should terminate when no tabs left")
+        try expect(hasEffect(effects) {
+            if case .destroySurface(let pid) = $0, pid == paneId { return true }
+            return false
+        }, "should destroy failed pane surface")
+        try expect(hasEffect(effects) {
+            if case .removeTabContainer = $0 { return true }
+            return false
+        }, "should remove failed tab container")
+        try expect(!hasEffect(effects) {
+            if case .showSelectedTab = $0 { return true }
+            return false
+        }, "last-tab failure should not show a fallback tab")
+    }
+
+    test("surfaceCreationFailed removes split tab siblings") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+        createTab(&model)
+        let fallbackTabId = model.groups[0].tabs[1].id
+        update(&model, .selectTab(id: tabId))
+
+        let effects = update(&model, .surfaceCreationFailed(paneId: paneA))
+
+        try expectEqual(model.selectedTabId, fallbackTabId, "selection should move to fallback tab")
+        try expect(model.panes[paneA] == nil, "failed pane should be removed")
+        try expect(model.panes[paneB] == nil, "sibling pane should be removed")
+        try expect(!model.groups[0].tabs.contains { $0.id == tabId }, "failed tab should be removed")
+        try expect(hasEffect(effects) {
+            if case .destroySurface(let pid) = $0, pid == paneA { return true }
+            return false
+        }, "should destroy failed pane surface")
+        try expect(hasEffect(effects) {
+            if case .destroySurface(let pid) = $0, pid == paneB { return true }
+            return false
+        }, "should destroy sibling pane surface")
+        try expect(hasEffect(effects) {
+            if case .removeTabContainer(let effectTabId) = $0, effectTabId == tabId { return true }
+            return false
+        }, "should remove failed tab container")
+        try expect(hasEffect(effects) {
+            if case .showSelectedTab = $0 { return true }
+            return false
+        }, "should show fallback tab")
+        try expect(!hasEffect(effects) {
+            if case .terminate = $0 { return true }
+            return false
+        }, "should not terminate when fallback tab remains")
     }
 
     test("testBellThrottling") {

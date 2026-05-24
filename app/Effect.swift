@@ -23,7 +23,9 @@ enum Effect {
     case makeFirstResponder(paneId: PaneId)
 
     // View
-    case rebuildContentView
+    case showSelectedTab
+    case rebuildTabContainer(tabId: TabId)
+    case removeTabContainer(tabId: TabId)
     case refreshPaneBorder(paneId: PaneId)
     case reloadSidebar
     case setSidebarSelection(tabId: TabId)

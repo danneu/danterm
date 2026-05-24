@@ -22,6 +22,7 @@ class AppRuntime {
     // Last libghostty occlusion value pushed for each live surface.
     // Cleared on teardown because restore/import can reuse pane IDs for fresh surfaces.
     private var surfaceVisibility: [PaneId: Bool] = [:]
+    private var tabContainers: [TabId: SplitContainerView] = [:]
     var tokenStore = PaneTokenStore()
     weak var window: NSWindow?
     weak var sidebarView: SidebarView?
@@ -459,8 +460,14 @@ class AppRuntime {
                 window?.makeFirstResponder(view)
             }
 
-        case .rebuildContentView:
-            rebuildContentView()
+        case .showSelectedTab:
+            showSelectedTab()
+
+        case .rebuildTabContainer(let tabId):
+            rebuildTabContainer(tabId)
+
+        case .removeTabContainer(let tabId):
+            removeTabContainer(tabId)
 
         case .refreshPaneBorder(let paneId):
             let isFocused = isFocusedAndVisible(paneId, in: model)
@@ -1247,6 +1254,10 @@ class AppRuntime {
         quitConfirmationPanel?.orderOut(nil)
         quitConfirmationPanel = nil
 
+        for tabId in Array(tabContainers.keys) {
+            removeTabContainer(tabId)
+        }
+
         for paneId in Array(surfaces.keys) {
             cleanupReplayFile(for: paneId)
             if let view = surfaces.removeValue(forKey: paneId) {
@@ -1273,7 +1284,7 @@ class AppRuntime {
         reconcileMru(&model)
 
         refreshContentTitlebar()
-        rebuildContentView()
+        showSelectedTab()
         syncSurfaceVisibility()
         sidebarView?.reload(model: model)
         let unreadCount = totalUnreadAlertCount(model: model)
@@ -1352,9 +1363,8 @@ class AppRuntime {
 
     // MARK: - Pane Toolbars
 
-    func refreshPaneToolbars() {
-        guard let contentArea = contentArea else { return }
-        forEachPaneWrapper(in: contentArea) { wrapper in
+    func refreshPaneToolbars(in root: NSView) {
+        forEachPaneWrapper(in: root) { wrapper in
             let (title, cwd) = paneToolbarText(for: wrapper.paneId, in: model)
             let progress = model.panes[wrapper.paneId]?.progress
             let isRemote = model.panes[wrapper.paneId]?.isRemote ?? false
@@ -1403,23 +1413,42 @@ class AppRuntime {
 
     // MARK: - View Building
 
-    private func rebuildContentView() {
+    /// Clear transient UI anchored to pane/tab view objects before replacing or hiding them.
+    private func prepareForViewSwap() {
         cancelPaneDrag()
         dismissTodoPopoverPair()
         dismissTabTodoPopoverPair()
         model.todoPopover = nil
-        guard let contentArea = contentArea else { return }
+    }
 
-        // Capture browser focus before subview removal so we can restore it after reattachment
+    /// Ensure the selected tab has a mounted container and make it the visible tab.
+    private func showSelectedTab() {
+        guard contentArea != nil else { return }
+
+        prepareForViewSwap()
         let browserFocus = themeBrowserView?.captureFocusTarget()
 
-        // Remove old content
-        for subview in contentArea.subviews {
-            subview.removeFromSuperview()
+        for (tabId, container) in tabContainers {
+            container.isHidden = tabId != model.selectedTabId
         }
 
         guard let tab = selectedTab(in: model) else { return }
+        let container = ensureTabContainer(for: tab)
+        container.isHidden = false
+        finalizeTabSelection(tab: tab, container: container, browserFocus: browserFocus)
+    }
 
+    /// Return an existing tab container or lazily build one from the current model.
+    private func ensureTabContainer(for tab: TabModel) -> SplitContainerView {
+        if let existing = tabContainers[tab.id] {
+            return existing
+        }
+        return buildAndInsertContainer(for: tab)
+    }
+
+    /// Build a split container for one tab and insert it below the theme browser overlay.
+    private func buildAndInsertContainer(for tab: TabModel) -> SplitContainerView {
+        guard let contentArea = contentArea else { fatalError("contentArea unavailable") }
         let displayNode: SplitNodeModel
         if tab.isZoomed {
             displayNode = .leaf(tab.focusedPaneId)
@@ -1443,9 +1472,48 @@ class AppRuntime {
             frame: contentArea.bounds
         )
         container.autoresizingMask = [.width, .height]
-        contentArea.addSubview(container)
+        if let browser = themeBrowserView {
+            contentArea.addSubview(container, positioned: .below, relativeTo: browser)
+        } else {
+            contentArea.addSubview(container)
+        }
         container.rebuild()
+        tabContainers[tab.id] = container
+        return container
+    }
 
+    /// Rebuild a mounted tab's container after its split tree or zoom state changes.
+    private func rebuildTabContainer(_ tabId: TabId) {
+        guard let tab = tabById(tabId, in: model),
+              let existing = tabContainers[tabId] else { return }
+        let wasHidden = existing.isHidden
+        let browserFocus = !wasHidden ? themeBrowserView?.captureFocusTarget() : nil
+        if !wasHidden {
+            prepareForViewSwap()
+        }
+        existing.removeFromSuperview()
+        tabContainers.removeValue(forKey: tabId)
+
+        let container = buildAndInsertContainer(for: tab)
+        container.isHidden = wasHidden
+        if !wasHidden {
+            finalizeTabSelection(tab: tab, container: container, browserFocus: browserFocus)
+        }
+    }
+
+    /// Detach and forget the cached container for a removed tab.
+    private func removeTabContainer(_ tabId: TabId) {
+        guard let container = tabContainers.removeValue(forKey: tabId) else { return }
+        container.removeFromSuperview()
+    }
+
+    /// Refresh chrome, focus, and overlays for the visible tab container.
+    private func finalizeTabSelection(
+        tab: TabModel,
+        container: SplitContainerView,
+        browserFocus: ThemeBrowserFocusTarget?
+    ) {
+        let displayNode: SplitNodeModel = tab.isZoomed ? .leaf(tab.focusedPaneId) : tab.rootNode
         // Set focus borders based on model state (skip green border for single-pane tabs)
         let focusedId = tab.focusedPaneId
         for paneId in allPaneIds(displayNode) {
@@ -1464,7 +1532,7 @@ class AppRuntime {
             }
         }
 
-        refreshPaneToolbars()
+        refreshPaneToolbars(in: container)
         refreshContentTitlebar()
         // Refresh the chrome's tab-todo badge: restore-from-snapshot bypasses
         // update() and lands here, so without this the badge would render
@@ -1473,25 +1541,17 @@ class AppRuntime {
 
         // Rehydrate search overlays for panes with active search
         for (paneId, search) in model.searchState {
-            findPaneWrapper(for: paneId, in: contentArea)?.showSearchOverlay(search: search, runtime: self)
+            findPaneWrapper(for: paneId, in: container)?.showSearchOverlay(search: search, runtime: self)
         }
         // If search is active on the focused pane, focus its text field (unless browser has focus)
         if browserFocus == nil,
            model.searchState[focusedId] != nil,
-           let field = findPaneWrapper(for: focusedId, in: contentArea)?.searchOverlay?.searchField {
+           let field = findPaneWrapper(for: focusedId, in: container)?.searchOverlay?.searchField {
             window?.makeFirstResponder(field)
         }
 
-        // Rehydrate theme browser panel if open
         if let browser = themeBrowserView {
-            contentArea.addSubview(browser)
-            NSLayoutConstraint.activate([
-                browser.topAnchor.constraint(equalTo: contentArea.topAnchor),
-                browser.bottomAnchor.constraint(equalTo: contentArea.bottomAnchor),
-                browser.trailingAnchor.constraint(equalTo: contentArea.trailingAnchor),
-            ])
             browser.reloadFromRuntime()
-            // Restore focus to browser if it owned focus before rebuild
             if let target = browserFocus {
                 browser.restoreFocus(target)
             }

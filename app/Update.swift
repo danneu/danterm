@@ -108,7 +108,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             waitAfterCommand: true
         ))
         if !background {
-            effects.append(.rebuildContentView)
+            effects.append(.showSelectedTab)
         }
         effects.append(.reloadSidebar)
         if !background {
@@ -211,9 +211,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 waitAfterCommand: true
             ),
         ]
-        if !background || model.selectedTabId == tab.id {
-            effects.append(.rebuildContentView)
-        }
+        effects.append(.rebuildTabContainer(tabId: tab.id))
         // Persist new split tree so the pane layout survives a crash.
         effects.append(.scheduleCheckpoint)
         if theme != nil {
@@ -261,7 +259,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             effects.append(contentsOf: syncFocusedPaneChrome(next, in: &model))
         }
 
-        effects.append(.rebuildContentView)
+        effects.append(.rebuildTabContainer(tabId: tab.id))
         // Persist pane removal + updated tree so closed panes stay closed on restore.
         effects.append(.scheduleCheckpoint)
         return effects
@@ -294,7 +292,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             tab.isZoomed = false
         }
         // Persist rearranged split tree so pane positions survive a crash.
-        return [.rebuildContentView, .scheduleCheckpoint]
+        return [.rebuildTabContainer(tabId: tab.id), .scheduleCheckpoint]
 
     case .movePaneToTab(let paneId, let targetTabId):
         // Find source tab containing this pane
@@ -321,6 +319,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 tab.subtitle = chrome.subtitle
             }
         }
+
+        let sourceEmptied = newSourceTree == nil
 
         // Handle source tab
         if let newRoot = newSourceTree {
@@ -351,7 +351,13 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             }
         }
         model.selectedTabId = targetTabId
-        effects.append(.rebuildContentView)
+        if sourceEmptied {
+            effects.append(.removeTabContainer(tabId: sourceTab.id))
+        } else {
+            effects.append(.rebuildTabContainer(tabId: sourceTab.id))
+        }
+        effects.append(.rebuildTabContainer(tabId: targetTabId))
+        effects.append(.showSelectedTab)
         effects.append(.reloadSidebar)
         effects.append(contentsOf: selectionSyncEffects(for: model))
         effects.append(.makeFirstResponder(paneId: paneId))
@@ -423,7 +429,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             markAlertsReadForPane(paneId, in: &model)
         }
 
-        effects.append(.rebuildContentView)
+        effects.append(.showSelectedTab)
+        if !sourceHasOnlyThisPane {
+            effects.append(.rebuildTabContainer(tabId: sourceTab.id))
+        }
         effects.append(.reloadSidebar)
         effects.append(contentsOf: selectionSyncEffects(for: model))
         effects.append(.makeFirstResponder(paneId: paneId))
@@ -517,7 +526,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         guard let tab = selectedTab(in: model) else { return [] }
         if tab.isZoomed {
             updateSelectedTab(&model) { t in t.isZoomed = false }
-            return [.rebuildContentView]
+            return [.rebuildTabContainer(tabId: tab.id)]
         }
         guard let target = nearestLeaf(tab.rootNode, from: tab.focusedPaneId, direction: direction, side: side) else { return [] }
 
@@ -853,30 +862,48 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return update(&model, .closePane(paneId: paneId))
 
     case .surfaceCreationFailed(let paneId):
-        model.panes.removeValue(forKey: paneId)
-        removeAlertsForPane(paneId, in: &model)
-        removePaneSearchState(paneId, from: &model)
-        model.lastNotificationTime.removeValue(forKey: paneId)
-        // Find and remove the tab containing this pane
+        // Surface creation failure removes the whole containing tab, so every
+        // sibling pane must be cleaned up as if the tab had been closed.
         for gi in model.groups.indices {
             if let ti = model.groups[gi].tabs.firstIndex(where: { allPaneIds($0.rootNode).contains(paneId) }) {
-                let tabId = model.groups[gi].tabs[ti].id
+                let tab = model.groups[gi].tabs[ti]
+                let tabId = tab.id
                 let groupId = model.groups[gi].id
+                var effects: [Effect] = []
+                for pid in allPaneIds(tab.rootNode) {
+                    effects.append(.destroySurface(paneId: pid))
+                    removeAlertsForPane(pid, in: &model)
+                    removePaneSearchState(pid, from: &model)
+                    model.lastNotificationTime.removeValue(forKey: pid)
+                    model.panes.removeValue(forKey: pid)
+                }
+
                 model.groups[gi].tabs.remove(at: ti)
                 removeGroupIfEmpty(groupId, from: &model)
+                effects.append(.removeTabContainer(tabId: tabId))
+
+                var selectionMoved = false
                 if model.selectedTabId == tabId {
                     model.selectedTabId = model.groups.flatMap(\.tabs).first?.id
+                    selectionMoved = model.selectedTabId != nil
                 }
                 if model.groups.flatMap(\.tabs).isEmpty {
-                    return [.terminate]
+                    return effects + [.terminate]
                 }
-                var effects: [Effect] = [.rebuildContentView, .reloadSidebar]
-                effects.append(contentsOf: selectionSyncEffects(for: model))
+                if selectionMoved {
+                    effects.append(.showSelectedTab)
+                    effects.append(contentsOf: selectionSyncEffects(for: model))
+                }
+                effects.append(.reloadSidebar)
                 // Persist tab removal after a failed surface so it doesn't reappear.
                 effects.append(.scheduleCheckpoint)
                 return effects
             }
         }
+        model.panes.removeValue(forKey: paneId)
+        removeAlertsForPane(paneId, in: &model)
+        removePaneSearchState(paneId, from: &model)
+        model.lastNotificationTime.removeValue(forKey: paneId)
         return []
 
     // MARK: - Lifecycle
@@ -1044,6 +1071,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                     model.lastNotificationTime.removeValue(forKey: pid)
                     model.panes.removeValue(forKey: pid)
                 }
+                effects.append(.removeTabContainer(tabId: tab.id))
             }
             model.groups.remove(at: idx)
             if model.groups.flatMap(\.tabs).isEmpty {
@@ -1053,7 +1081,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             if let selId = model.selectedTabId,
                !model.groups.flatMap(\.tabs).contains(where: { $0.id == selId }) {
                 model.selectedTabId = model.groups.flatMap(\.tabs).first?.id
-                effects.append(.rebuildContentView)
+                effects.append(.showSelectedTab)
                 effects.append(contentsOf: selectionSyncEffects(for: model))
             }
             effects.append(.reloadSidebar)
@@ -1176,11 +1204,11 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         guard let tab = selectedTab(in: model) else { return [] }
         if tab.isZoomed {
             updateSelectedTab(&model) { t in t.isZoomed = false }
-            return [.rebuildContentView]
+            return [.rebuildTabContainer(tabId: tab.id)]
         }
         if case .split = tab.rootNode {
             updateSelectedTab(&model) { t in t.isZoomed = true }
-            return [.rebuildContentView]
+            return [.rebuildTabContainer(tabId: tab.id)]
         }
         return []
 
@@ -2306,7 +2334,7 @@ private func applySelectTab(_ model: inout AppModel, id: TabId) -> [Effect] {
     if model.config.alertClearMode == .focus, let tab = selectedTab(in: model) {
         alertsCleared = markAlertsReadForPane(tab.focusedPaneId, in: &model)
     }
-    effects.append(.rebuildContentView)
+    effects.append(.showSelectedTab)
     effects.append(.setSidebarSelection(tabId: id))
     if alertsCleared {
         effects.append(.updateSidebarTabRow(tabId: id))
@@ -2416,6 +2444,7 @@ private func navigateToPane(_ paneId: PaneId, in model: inout AppModel) -> [Effe
     let oldFocusedPaneId = currentTab.focusedPaneId
     let focusChanged = paneId != oldFocusedPaneId
     var effects = update(&model, .selectTab(id: currentTab.id))
+    let tabSwitched = !effects.isEmpty
     updateTab(currentTab.id, in: &model) { tab in
         tab.focusedPaneId = paneId
     }
@@ -2426,9 +2455,14 @@ private func navigateToPane(_ paneId: PaneId, in model: inout AppModel) -> [Effe
         updateSelectedTab(&model) { t in t.isZoomed = false }
     }
     effects.append(contentsOf: syncFocusedPaneChrome(paneId, in: &model))
-    // Always emit refresh effects — selectTab is a no-op when already on
-    // the pane's tab, but we still need to update borders/badges.
-    effects.append(.rebuildContentView)
+    // Same-tab navigation still needs selection finalization because selectTab
+    // intentionally no-ops when the target tab is already selected.
+    if !tabSwitched {
+        effects.append(.showSelectedTab)
+    }
+    if wasZoomed, paneId != oldFocusedPaneId {
+        effects.append(.rebuildTabContainer(tabId: currentTab.id))
+    }
     effects.append(.reloadSidebar)
     effects.append(.makeFirstResponder(paneId: paneId))
     if focusChanged {
@@ -2619,11 +2653,12 @@ private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Effect] {
 
     model.groups[groupIdx].tabs.remove(at: tabIdx)
     removeGroupIfEmpty(groupId, from: &model)
+    effects.append(.removeTabContainer(tabId: id))
 
     // Select fallback tab if we closed the selected one.
     if id == model.selectedTabId, let newId = fallbackTabId {
         model.selectedTabId = newId
-        effects.append(.rebuildContentView)
+        effects.append(.showSelectedTab)
         effects.append(contentsOf: selectionSyncEffects(for: model))
     }
     return effects

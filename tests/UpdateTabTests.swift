@@ -15,9 +15,9 @@ func tabTests() {
             return false
         }, "should emit createSurface")
         try expect(hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
+            if case .showSelectedTab = $0 { return true }
             return false
-        }, "should emit rebuildContentView")
+        }, "should emit showSelectedTab")
     }
 
     test("testCreateTabBackgroundDoesNotChangeSelection") {
@@ -48,9 +48,9 @@ func tabTests() {
             return false
         }, "should not defocus selected pane")
         try expect(!hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
+            if case .showSelectedTab = $0 { return true }
             return false
-        }, "should not rebuild content view")
+        }, "should not show selected tab")
     }
 
     test("testCreateTabInheritsWorkingDirectory") {
@@ -99,6 +99,10 @@ func tabTests() {
             if case .setSidebarSelection(let tid) = $0, tid == firstTabId { return true }
             return false
         }, "should set sidebar selection")
+        try expect(hasEffect(effects) {
+            if case .showSelectedTab = $0 { return true }
+            return false
+        }, "selection change should show selected tab")
         try expectEqual(effectCount(effects) { if case .reloadSidebar = $0 { return true }; return false },
                         0, "selection-only tab change should not reload sidebar")
     }
@@ -238,9 +242,9 @@ func tabTests() {
         try expectEqual(model.groups[1].tabs.count, workCountBefore + 1, "background tab should land in requested group")
         try expectEqual(model.selectedTabId, selectedTabId, "background tab should not change selection")
         try expect(!hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
+            if case .showSelectedTab = $0 { return true }
             return false
-        }, "background tab should not rebuild content view")
+        }, "background tab should not show selected tab")
     }
 
     test("testCreateTabInsertsAfterCurrentTab") {
@@ -953,11 +957,15 @@ func tabTests() {
         let effects = update(&model, .closeTab(id: firstTabId))
         try expectEqual(model.selectedTabId, secondTabId, "selection should remain on second tab")
         try expectEqual(model.groups[0].tabs.count, 1)
-        // Should not have rebuildContentView since we didn't close the selected tab
+        // Should not show the selected tab since we didn't close the selected tab.
         try expect(!hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
+            if case .showSelectedTab = $0 { return true }
             return false
-        }, "should not rebuild content view when closing non-selected tab")
+        }, "should not show selected tab when closing non-selected tab")
+        try expect(hasEffect(effects) {
+            if case .removeTabContainer(let tabId) = $0, tabId == firstTabId { return true }
+            return false
+        }, "should remove closed tab container")
     }
 
     // MARK: - Close Tab Selects Previous

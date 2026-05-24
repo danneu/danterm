@@ -16,7 +16,7 @@ func alertTests() {
 
         let effects = update(&model, .markAlertRead(alertId: alertId))
         try expectEqual(model.alerts[0].isUnread, false)
-        try expect(!alertTestHasRebuildContentView(effects), "should not rebuild content view")
+        try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
         try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneId),
             "should refresh pane border")
         try expect(alertTestHasRefreshPaneToolbar(effects, paneId: paneId),
@@ -69,7 +69,7 @@ func alertTests() {
 
         let effects = update(&model, .markAllAlertsRead)
         try expect(model.alerts.allSatisfy { !$0.isUnread }, "all alerts should be read")
-        try expect(!alertTestHasRebuildContentView(effects), "should not rebuild content view")
+        try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
         try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneA),
             "should refresh paneA border")
         try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneB),
@@ -115,6 +115,59 @@ func alertTests() {
             if case .dismissAlertsPopover = $0 { return true }
             return false
         }, "should dismiss popover")
+        try expectEqual(alertTestShowSelectedTabCount(effects), 1, "cross-tab alert activation should show selected tab once")
+    }
+
+    test("testActivateAlertSameTabShowsSelectedTab") {
+        var model = makeModel()
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .splitPane(direction: .horizontal))
+        let tabId = model.groups[0].tabs[0].id
+
+        let alertId = AlertId()
+        model.alerts.insert(AlertModel(
+            id: alertId, kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        let effects = update(&model, .activateAlert(alertId: alertId))
+
+        try expectEqual(model.selectedTabId, tabId, "should stay on current tab")
+        try expectEqual(model.groups[0].tabs[0].focusedPaneId, paneA, "should focus alert pane")
+        try expectEqual(alertTestShowSelectedTabCount(effects), 1, "same-tab alert activation should explicitly show selected tab")
+        try expect(!hasEffect(effects) {
+            if case .rebuildTabContainer = $0 { return true }
+            return false
+        }, "same-tab non-zoom navigation should not rebuild tab container")
+    }
+
+    test("testActivateAlertSameTabZoomClearRebuildsContainer") {
+        var model = makeModel()
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .toggleZoomPane)
+        try expectEqual(model.groups[0].tabs[0].focusedPaneId, paneB, "paneB should be focused before navigation")
+        try expectEqual(model.groups[0].tabs[0].isZoomed, true, "tab should be zoomed before navigation")
+
+        let alertId = AlertId()
+        model.alerts.insert(AlertModel(
+            id: alertId, kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        let effects = update(&model, .activateAlert(alertId: alertId))
+
+        let tab = model.groups[0].tabs[0]
+        try expectEqual(tab.focusedPaneId, paneA, "should focus alert pane")
+        try expectEqual(tab.isZoomed, false, "zoom should clear when navigating to hidden pane")
+        try expectEqual(alertTestShowSelectedTabCount(effects), 1, "same-tab zoom navigation should show selected tab")
+        try expect(hasEffect(effects) {
+            if case .rebuildTabContainer(let tabId) = $0, tabId == tab.id { return true }
+            return false
+        }, "zoom clear should rebuild tab container")
     }
 
     test("testActivateAlertDoesNotMarkReadInManualMode") {
@@ -159,7 +212,7 @@ func alertTests() {
             if case .makeFirstResponder = $0 { return true }
             return false
         }, "should not navigate")
-        try expect(!alertTestHasRebuildContentView(effects), "should not rebuild content view")
+        try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
         try expect(alertTestHasRefreshPaneBorder(effects, paneId: stalePaneId),
             "should refresh stale alert pane border")
         try expect(alertTestHasRefreshPaneToolbar(effects, paneId: stalePaneId),
@@ -656,7 +709,7 @@ func alertTests() {
             if case .makeFirstResponder = $0 { return true }
             return false
         }, "no unread alerts remained after acking current tab")
-        try expect(!alertTestHasRebuildContentView(effects), "should not rebuild content view")
+        try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
         try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneA),
             "should refresh acked pane border")
         try expect(alertTestHasRefreshPaneToolbar(effects, paneId: paneA),
@@ -706,7 +759,7 @@ func alertTests() {
         // Third press: acks tab2, no more unread alerts
         let effects = update(&model, .goToMostRecentAlertPane)
         try expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false, "paneB alert should be acked after third press")
-        try expect(!alertTestHasRebuildContentView(effects), "third press should not rebuild content view")
+        try expect(!alertTestHasTabContainerEffect(effects), "third press should not refresh tab container")
         try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneB),
             "third press should refresh acked pane border")
         try expect(alertTestHasRefreshPaneToolbar(effects, paneId: paneB),
@@ -919,7 +972,7 @@ func alertTests() {
 
         let effects = update(&model, .clearAlertsForPane(paneId: paneA))
         try expectEqual(model.alerts[0].isUnread, false, "clearAlertsForPane should mark pane's alerts read")
-        try expect(!alertTestHasRebuildContentView(effects), "should not rebuild content view")
+        try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
         try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneA),
             "should refresh cleared pane border")
         try expect(alertTestHasRefreshPaneToolbar(effects, paneId: paneA),
@@ -961,7 +1014,7 @@ func alertTests() {
         // Clear alerts for paneA (not focused) while paneB is focused
         let effects = update(&model, .clearAlertsForPane(paneId: paneA))
         try expectEqual(model.alerts[0].isUnread, false, "clearAlertsForPane should clear non-focused pane's alerts")
-        try expect(!alertTestHasRebuildContentView(effects), "should not rebuild content view")
+        try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
         try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneA),
             "should refresh non-focused pane border")
         try expect(alertTestHasRefreshPaneToolbar(effects, paneId: paneA),
@@ -993,7 +1046,7 @@ func alertTests() {
 
         let effects = update(&model, .ackTabAlerts)
         try expectEqual(model.alerts.filter { $0.isUnread }.count, 0, "all tab alerts should be marked read")
-        try expect(!alertTestHasRebuildContentView(effects), "should not rebuild content view")
+        try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
         try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneA),
             "should refresh paneA border")
         try expect(alertTestHasRefreshPaneBorder(effects, paneId: paneB),
@@ -1073,7 +1126,7 @@ func alertTests() {
         let tab2Alert = model.alerts.first { $0.paneId == tab2Pane }!
         try expectEqual(tab1Alert.isUnread, false, "target tab's alerts should be cleared")
         try expectEqual(tab2Alert.isUnread, true, "other tab's alerts should remain unread")
-        try expect(!alertTestHasRebuildContentView(effects), "should not rebuild content view")
+        try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
         try expect(alertTestHasRefreshPaneBorder(effects, paneId: tab1Pane),
             "should refresh cleared tab pane border")
         try expect(alertTestHasRefreshPaneToolbar(effects, paneId: tab1Pane),
@@ -1153,7 +1206,7 @@ func alertTests() {
             return false
         }, 2, "should refresh one row per cleared tab")
         try expect(!alertTestHasReloadSidebar(effects), "should not reload sidebar")
-        try expect(!alertTestHasRebuildContentView(effects), "should not rebuild content view")
+        try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
         try expect(alertTestHasRefreshPaneBorder(effects, paneId: pane1),
             "should refresh first cleared pane border")
         try expect(alertTestHasRefreshPaneBorder(effects, paneId: pane2),
@@ -1222,11 +1275,19 @@ func alertTests() {
     }
 }
 
-private func alertTestHasRebuildContentView(_ effects: [Effect]) -> Bool {
+private func alertTestHasTabContainerEffect(_ effects: [Effect]) -> Bool {
     hasEffect(effects) {
-        if case .rebuildContentView = $0 { return true }
+        if case .showSelectedTab = $0 { return true }
+        if case .rebuildTabContainer = $0 { return true }
         return false
     }
+}
+
+private func alertTestShowSelectedTabCount(_ effects: [Effect]) -> Int {
+    effects.filter {
+        if case .showSelectedTab = $0 { return true }
+        return false
+    }.count
 }
 
 private func alertTestHasRefreshPaneBorder(_ effects: [Effect], paneId: PaneId) -> Bool {

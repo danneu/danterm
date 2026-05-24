@@ -229,9 +229,9 @@ func updateMruTests() {
             return false
         }, "should emit hideSwitcherOverlay")
         try expect(hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
+            if case .showSelectedTab = $0 { return true }
             return false
-        }, "should emit rebuildContentView (selectTab effect)")
+        }, "should emit showSelectedTab (selectTab effect)")
     }
 
     test("mruCycleCommitted at cursorIndex 0 is a focus no-op but hides overlay") {

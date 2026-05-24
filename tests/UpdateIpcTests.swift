@@ -848,12 +848,12 @@ func ipcUpdateTests() {
         try expectEqual(tab.focusedPaneId, focusedPaneId, "background split should preserve focused pane")
         try expectEqual(model.selectedTabId, tabId, "background split should not change selected tab")
         try expect(hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
+            if case .rebuildTabContainer(let effectTabId) = $0, effectTabId == tabId { return true }
             return false
-        }, "selected-tab background split should rebuild content view")
+        }, "selected-tab background split should rebuild tab container")
     }
 
-    test("pane.split background on unselected tab does not rebuild") {
+    test("pane.split background on unselected tab emits scoped rebuild") {
         var model = makeModel()
         createTab(&model)
         let selectedTabId = selectedTab(in: model)!.id
@@ -878,10 +878,10 @@ func ipcUpdateTests() {
         try expect(allPaneIds(backgroundTab.rootNode).contains(newPaneId), "background tab should contain new pane")
         try expectEqual(backgroundTab.focusedPaneId, backgroundPaneId, "background split should preserve target focus")
         try expectEqual(model.selectedTabId, selectedTabId, "background split should not change selected tab")
-        try expect(!hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
+        try expect(hasEffect(effects) {
+            if case .rebuildTabContainer(let effectTabId) = $0, effectTabId == backgroundTabId { return true }
             return false
-        }, "unselected-tab background split should not rebuild content view")
+        }, "unselected-tab background split should emit scoped rebuild")
     }
 
     test("pane.split with malformed background fails before mutation") {

@@ -71,6 +71,7 @@ func groupTests() {
 
         update(&model, .createGroup(name: "Temp"))
         let tempGroupId = model.groups[1].id
+        let autoTabId = model.groups[1].tabs[0].id
         // Temp has 1 auto-created tab
 
         // Move first tab to Temp (now Temp has 2 tabs)
@@ -83,6 +84,14 @@ func groupTests() {
             if case .destroySurface = $0 { return true }
             return false
         }, "should emit destroySurface for closed panes")
+        try expect(hasEffect(effects) {
+            if case .removeTabContainer(let tabId) = $0, tabId == tabId1 { return true }
+            return false
+        }, "should remove moved tab container")
+        try expect(hasEffect(effects) {
+            if case .removeTabContainer(let tabId) = $0, tabId == autoTabId { return true }
+            return false
+        }, "should remove auto-created tab container")
         // tabId2 should still be around
         try expectEqual(model.groups[0].tabs.count, 1)
         try expectEqual(model.groups[0].tabs[0].id, tabId2)
@@ -225,9 +234,9 @@ func groupTests() {
             return false
         }, "should emit createSurface for the new tab's pane")
         try expect(hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
+            if case .showSelectedTab = $0 { return true }
             return false
-        }, "should emit rebuildContentView")
+        }, "should emit showSelectedTab")
         try expect(hasEffect(effects) {
             if case .reloadSidebar = $0 { return true }
             return false
@@ -300,9 +309,13 @@ func groupTests() {
         try expectEqual(model.groups[0].id, workGroupId, "Work should remain")
         try expect(model.selectedTabId != nil, "some tab should be selected")
         try expect(hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
+            if case .showSelectedTab = $0 { return true }
             return false
-        }, "should emit rebuildContentView")
+        }, "should emit showSelectedTab")
+        try expect(hasEffect(effects) {
+            if case .removeTabContainer(let tabId) = $0, tabId == generalTabId { return true }
+            return false
+        }, "should remove closed tab container")
         try expect(hasEffect(effects) {
             if case .reloadSidebar = $0 { return true }
             return false
@@ -360,7 +373,9 @@ func groupTests() {
         update(&model, .createGroup(name: "Work"))
         let workGroupId = model.groups[1].id
 
+        let generalTabId = model.groups[0].tabs[0].id
         let generalPaneId = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .selectTab(id: generalTabId))
 
         let effects = update(&model, .surfaceCreationFailed(paneId: generalPaneId))
 
@@ -371,9 +386,13 @@ func groupTests() {
             return false
         }, "should not terminate — Work group has tabs")
         try expect(hasEffect(effects) {
-            if case .rebuildContentView = $0 { return true }
+            if case .showSelectedTab = $0 { return true }
             return false
-        }, "should emit rebuildContentView")
+        }, "should emit showSelectedTab")
+        try expect(hasEffect(effects) {
+            if case .removeTabContainer = $0 { return true }
+            return false
+        }, "should remove failed tab container")
     }
 
     test("testExtractSingleTabToNewGroup") {
