@@ -17,12 +17,7 @@ func alertTests() {
         let effects = update(&model, .markAlertRead(alertId: alertId))
         try expectEqual(model.alerts[0].isUnread, false)
         try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
-        try expect(hasEffect(effects) {
-            if case .updateSidebarTabRow(let tid) = $0,
-               tid == model.groups[0].tabs[0].id { return true }
-            return false
-        }, "should refresh alert tab row")
-        try expect(!alertTestHasReloadSidebar(effects), "should not reload sidebar")
+        // The tab's alert badge reconciles via reconcileSidebar.
     }
 
     test("testMarkAlertReadForStalePaneSkipsSidebarUpdate") {
@@ -38,11 +33,7 @@ func alertTests() {
 
         let effects = update(&model, .markAlertRead(alertId: alertId))
         try expectEqual(model.alerts[0].isUnread, false)
-        try expectEqual(alertTestEffectCount(effects) {
-            if case .updateSidebarTabRow = $0 { return true }
-            return false
-        }, 0, "stale alert should not refresh any tab row")
-        try expect(!alertTestHasReloadSidebar(effects), "stale alert should not reload sidebar")
+        try expect(effects.isEmpty, "stale alert marks read but emits no commands (badges reconcile)")
     }
 
     test("testMarkAllAlertsRead") {
@@ -62,11 +53,7 @@ func alertTests() {
         let effects = update(&model, .markAllAlertsRead)
         try expect(model.alerts.allSatisfy { !$0.isUnread }, "all alerts should be read")
         try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
-        try expectEqual(alertTestEffectCount(effects) {
-            if case .updateSidebarTabRow = $0 { return true }
-            return false
-        }, 2, "should refresh one row per affected tab")
-        try expect(!alertTestHasReloadSidebar(effects), "should not reload sidebar")
+        try expect(effects.isEmpty, "marking all read emits no commands (badges reconcile)")
     }
 
     test("testActivateAlertNavigatesAndMarksRead") {
@@ -197,7 +184,6 @@ func alertTests() {
             return false
         }, "should not navigate")
         try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
-        try expect(!alertTestHasReloadSidebar(effects), "stale alert should not reload sidebar")
         try expect(hasEffect(effects) {
             if case .dismissAlertsPopover = $0 { return true }
             return false
@@ -688,12 +674,7 @@ func alertTests() {
             return false
         }, "no unread alerts remained after acking current tab")
         try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
-        try expect(hasEffect(effects) {
-            if case .updateSidebarTabRow(let tid) = $0,
-               tid == model.selectedTabId { return true }
-            return false
-        }, "should refresh selected tab row")
-        try expect(!alertTestHasReloadSidebar(effects), "should not reload sidebar")
+        // The selected tab's alert badge reconciles via reconcileSidebar.
     }
 
     test("testGoToMostRecentAlertPaneRepeatedPressWalksTabs") {
@@ -941,12 +922,7 @@ func alertTests() {
         let effects = update(&model, .clearAlertsForPane(paneId: paneA))
         try expectEqual(model.alerts[0].isUnread, false, "clearAlertsForPane should mark pane's alerts read")
         try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
-        try expect(hasEffect(effects) {
-            if case .updateSidebarTabRow(let tid) = $0,
-               tid == model.groups[0].tabs[0].id { return true }
-            return false
-        }, "should refresh pane's tab row")
-        try expect(!alertTestHasReloadSidebar(effects), "should not reload sidebar")
+        // The pane's tab alert badge reconciles via reconcileSidebar.
     }
 
     test("testClearAlertsForPaneNoopsWhenNoUnreadAlerts") {
@@ -1007,12 +983,7 @@ func alertTests() {
         let effects = update(&model, .ackTabAlerts)
         try expectEqual(model.alerts.filter { $0.isUnread }.count, 0, "all tab alerts should be marked read")
         try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
-        try expect(hasEffect(effects) {
-            if case .updateSidebarTabRow(let tid) = $0,
-               tid == model.selectedTabId { return true }
-            return false
-        }, "should refresh selected tab row")
-        try expect(!alertTestHasReloadSidebar(effects), "should not reload sidebar")
+        // The selected tab's alert badge reconciles via reconcileSidebar.
     }
 
     test("testAckTabAlertsDoesNotAffectOtherTabs") {
@@ -1079,11 +1050,7 @@ func alertTests() {
         try expectEqual(tab1Alert.isUnread, false, "target tab's alerts should be cleared")
         try expectEqual(tab2Alert.isUnread, true, "other tab's alerts should remain unread")
         try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
-        try expect(hasEffect(effects) {
-            if case .updateSidebarTabRow(let tid) = $0, tid == tab1Id { return true }
-            return false
-        }, "should refresh cleared tab row")
-        try expect(!alertTestHasReloadSidebar(effects), "should not reload sidebar")
+        // The cleared tab's alert badge reconciles via reconcileSidebar.
     }
 
     test("testClearAlertsForTabNoopsWhenNoUnreadAlerts") {
@@ -1149,11 +1116,7 @@ func alertTests() {
         try expect(!unreadByPane(pane1), "tab1 alerts cleared")
         try expect(!unreadByPane(pane2), "tab2 alerts cleared")
         try expect(unreadByPane(pane3), "tab3 alert preserved")
-        try expectEqual(alertTestEffectCount(effects) {
-            if case .updateSidebarTabRow = $0 { return true }
-            return false
-        }, 2, "should refresh one row per cleared tab")
-        try expect(!alertTestHasReloadSidebar(effects), "should not reload sidebar")
+        try expect(effects.isEmpty, "clearing emits no commands (badges reconcile)")
         try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
         _ = id3
     }
@@ -1173,15 +1136,12 @@ func alertTests() {
 
         let effects = update(&model, .clearAlertsForTabs(tabIds: [id1, id2]))
 
-        try expect(hasEffect(effects) {
-            if case .updateSidebarTabRow(let tid) = $0, tid == id1 { return true }
-            return false
-        }, "tab with unread alerts should refresh")
-        try expect(!hasEffect(effects) {
-            if case .updateSidebarTabRow(let tid) = $0, tid == id2 { return true }
-            return false
-        }, "tab without unread alerts should not refresh")
-        try expect(!alertTestHasReloadSidebar(effects), "should not reload sidebar")
+        // Only id1 had an unread alert; clearing marks it read while id2 (no alerts) is
+        // untouched. The per-row badge refresh now reconciles via reconcileSidebar, so the
+        // model state is the net.
+        try expect(!model.alerts.contains { $0.paneId == pane1 && $0.isUnread },
+            "id1's unread alert should be cleared")
+        try expect(effects.isEmpty, "clearing emits no commands (badges reconcile)")
     }
 
     test("testClearAlertsForTabsNoUnreadIsNoop") {
@@ -1230,14 +1190,3 @@ private func alertTestShowSelectedTabCount(_ effects: [Effect]) -> Int {
     }.count
 }
 
-
-private func alertTestHasReloadSidebar(_ effects: [Effect]) -> Bool {
-    hasEffect(effects) {
-        if case .reloadSidebar = $0 { return true }
-        return false
-    }
-}
-
-private func alertTestEffectCount(_ effects: [Effect], matching predicate: (Effect) -> Bool) -> Int {
-    effects.filter(predicate).count
-}

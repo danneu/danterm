@@ -120,15 +120,11 @@ func ghosttyTests() {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        let tabId = model.groups[0].tabs[0].id
 
         let effects = update(&model, .surfaceTitle(paneId: paneId, title: "vim"))
         try expectEqual(model.pane(paneId)?.title, "vim")
         try expectEqual(model.groups[0].tabs[0].title, "vim")
-        try expect(hasEffect(effects) {
-            if case .updateSidebarTabRow(let tid) = $0, tid == tabId { return true }
-            return false
-        }, "should reload sidebar row")
+        // The tab row (title/subtitle) reconciles from the model via reconcileSidebar.
         try expect(hasEffect(effects) {
             if case .setWindowTitle = $0 { return true }
             return false
@@ -154,14 +150,10 @@ func ghosttyTests() {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        let tabId = model.groups[0].tabs[0].id
 
         let effects = update(&model, .surfaceCwd(paneId: paneId, cwd: "/home/dan/projects"))
         try expectEqual(model.pane(paneId)?.cwd, "/home/dan/projects")
-        try expect(hasEffect(effects) {
-            if case .updateSidebarTabRow(let tid) = $0, tid == tabId { return true }
-            return false
-        }, "should reload sidebar row")
+        // The tab row (title/subtitle) reconciles from the model via reconcileSidebar.
         try expect(hasEffect(effects) {
             if case .setWindowTitle = $0 { return true }
             return false
@@ -194,10 +186,7 @@ func ghosttyTests() {
         let effects = update(&model, .surfaceTitle(paneId: paneA, title: "vim"))
         try expectEqual(model.pane(paneA)?.title, "vim", "pane title should update")
         try expectEqual(model.groups[0].tabs[0].title, "vim", "background tab title should update")
-        try expect(hasEffect(effects) {
-            if case .updateSidebarTabRow(let tid) = $0, tid == tabAId { return true }
-            return false
-        }, "should reload sidebar row for background tab")
+        // The background tab's row reconciles from its updated model title/subtitle.
         try expect(!hasEffect(effects) {
             if case .setWindowTitle = $0 { return true }
             return false
@@ -216,10 +205,7 @@ func ghosttyTests() {
         let effects = update(&model, .surfaceCwd(paneId: paneA, cwd: "/tmp"))
         try expectEqual(model.pane(paneA)?.cwd, "/tmp", "pane cwd should update")
         try expectEqual(model.groups[0].tabs[0].subtitle, "~" == abbreviateHome("/tmp") ? "~" : "/tmp", "background tab subtitle should update")
-        try expect(hasEffect(effects) {
-            if case .updateSidebarTabRow(let tid) = $0, tid == tabAId { return true }
-            return false
-        }, "should reload sidebar row for background tab")
+        // The background tab's row reconciles from its updated model title/subtitle.
         try expect(!hasEffect(effects) {
             if case .setWindowTitle = $0 { return true }
             return false

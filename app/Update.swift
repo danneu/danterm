@@ -110,7 +110,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         if !background {
             effects.append(.showSelectedTab)
         }
-        effects.append(.reloadSidebar)
         if !background {
             effects.append(contentsOf: selectionSyncEffects(for: model))
         }
@@ -163,7 +162,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         if allTabs.isEmpty {
             return effects + [.terminate]
         }
-        effects.append(.reloadSidebar)
         // Persist tab removal + new selection so closed tabs don't reappear on restore.
         effects.append(.scheduleCheckpoint)
         return effects
@@ -359,7 +357,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         effects.append(.rebuildTabContainer(tabId: targetTabId))
         effects.append(.showSelectedTab)
-        effects.append(.reloadSidebar)
         effects.append(contentsOf: selectionSyncEffects(for: model))
         effects.append(.makeFirstResponder(paneId: paneId))
         // Persist cross-tab pane move so the new tree layout survives a crash.
@@ -432,7 +429,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         if !sourceHasOnlyThisPane {
             effects.append(.rebuildTabContainer(tabId: sourceTab.id))
         }
-        effects.append(.reloadSidebar)
         effects.append(contentsOf: selectionSyncEffects(for: model))
         effects.append(.makeFirstResponder(paneId: paneId))
         // Persist pane-to-new-tab extraction so the tab structure survives a crash.
@@ -453,8 +449,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         var effects: [Effect] = []
         for id in validIds {
             updateTab(id, in: &model) { t in t.color = color }
-            effects.append(.updateSidebarTabRow(tabId: id))
         }
+        // The color stripe updates via reconcileSidebar (color is in the projection).
         effects.append(.scheduleCheckpoint)
         return effects
 
@@ -470,7 +466,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         var selectedTabAffected = false
         for id in validIds {
             updateTab(id, in: &model) { t in t.customTitle = nil }
-            effects.append(.updateSidebarTabRow(tabId: id))
             if id == model.selectedTabId { selectedTabAffected = true }
         }
         if selectedTabAffected {
@@ -497,8 +492,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             }
         }
         guard !affectedPaneIds.isEmpty else { return [] }
-        let affectedTabIds = tabIdsForPanes(affectedPaneIds, in: model)
-        return sidebarAlertUpdateEffects(for: affectedTabIds, in: model)
+        // Tab/group bell badges reconcile via reconcileSidebar after the alerts read above.
+        return []
 
     case .setPaneTheme(let paneId, let themeName):
         model.updatePane(paneId) { $0.theme = themeName }
@@ -508,7 +503,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let trimmed = name?.trimmingCharacters(in: .whitespaces)
         let customTitle: String? = (trimmed?.isEmpty ?? true) ? nil : trimmed
         updateTab(id, in: &model) { t in t.customTitle = customTitle }
-        var effects: [Effect] = [.updateSidebarTabRow(tabId: id)]
+        // The renamed row updates via reconcileSidebar (displayTitle is in the projection).
+        var effects: [Effect] = []
         if id == model.selectedTabId {
             effects.append(contentsOf: selectionSyncEffects(for: model))
         }
@@ -766,7 +762,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         let abbrev = abbreviateHome(title)
         updateTab(tab.id, in: &model) { t in t.title = abbrev }
-        var effects: [Effect] = [.updateSidebarTabRow(tabId: tab.id)]
+        var effects: [Effect] = []
         if tab.id == model.selectedTabId {
             let updatedTab = selectedTab(in: model)!
             effects.append(.setWindowTitle(windowTitle(for: updatedTab)))
@@ -784,7 +780,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         let abbrev = abbreviateHome(cwd)
         updateTab(tab.id, in: &model) { t in t.subtitle = abbrev }
-        var effects: [Effect] = [.updateSidebarTabRow(tabId: tab.id)]
+        var effects: [Effect] = []
         if tab.id == model.selectedTabId {
             let updatedTab = selectedTab(in: model)!
             effects.append(.setWindowTitle(windowTitle(for: updatedTab)))
@@ -803,7 +799,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             return []
         }
 
-        guard let tab = tabForPane(paneId, in: model) else { return [] }
+        guard tabForPane(paneId, in: model) != nil else { return [] }
         let paneTitle = model.pane(paneId)?.title ?? "Terminal"
 
         // Hack: ack previous alerts so each pane has at most 1 unread alert.
@@ -818,10 +814,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         model.alerts.insert(alert, at: 0)
         if model.alerts.count > 100 { model.alerts.removeLast() }
 
-        var effects: [Effect] = [.updateSidebarTabRow(tabId: tab.id)]
-        if let group = groupForTab(tab.id, in: model), group.isCollapsed {
-            effects.append(.updateSidebarGroupRow(groupId: group.id))
-        }
+        // The tab/group bell badges now ride reconcileSidebar (the projection counts
+        // unread alerts per tab and per collapsed group); only the notification remains.
+        var effects: [Effect] = []
 
         effects.append(contentsOf: throttledNotification(
             alertId: alert.id, kind: .bell, paneId: paneId,
@@ -835,7 +830,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             return []
         }
 
-        guard let tab = tabForPane(paneId, in: model) else { return [] }
+        guard tabForPane(paneId, in: model) != nil else { return [] }
 
         // Hack: ack previous alerts so each pane has at most 1 unread alert.
         // This keeps pane badges boolean and tab badges count panes-with-alerts
@@ -849,10 +844,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         model.alerts.insert(alert, at: 0)
         if model.alerts.count > 100 { model.alerts.removeLast() }
 
-        var effects: [Effect] = [.updateSidebarTabRow(tabId: tab.id)]
-        if let group = groupForTab(tab.id, in: model), group.isCollapsed {
-            effects.append(.updateSidebarGroupRow(groupId: group.id))
-        }
+        // Tab/group bell badges ride reconcileSidebar (see surfaceBell).
+        var effects: [Effect] = []
 
         effects.append(contentsOf: throttledNotification(
             alertId: alert.id, kind: .desktopNotification, paneId: paneId,
@@ -895,7 +888,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                     effects.append(.showSelectedTab)
                     effects.append(contentsOf: selectionSyncEffects(for: model))
                 }
-                effects.append(.reloadSidebar)
                 // Persist tab removal after a failed surface so it doesn't reappear.
                 effects.append(.scheduleCheckpoint)
                 return effects
@@ -914,12 +906,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return [.setAppFocus(true)]
 
     case .appResignedActive:
-        var effects: [Effect] = [.setAppFocus(false)]
         if model.jumpMode != nil {
-            model.jumpMode = nil
-            effects.append(.reloadSidebar)
+            model.jumpMode = nil   // jump badges clear via reconcileSidebar
         }
-        return effects
+        return [.setAppFocus(false)]
 
     case .requestQuit:
         return emitTerminateConfirmation(&model)
@@ -927,21 +917,15 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
     // MARK: - Alerts
 
     case .markAlertRead(let alertId):
-        var effects: [Effect] = []
+        // Marking the alert read updates the tab/group bell badges via reconcileSidebar.
         if let idx = model.alerts.firstIndex(where: { $0.id == alertId }) {
-            let paneId = model.alerts[idx].paneId
             model.alerts[idx].isUnread = false
-            if let tab = tabForPane(paneId, in: model) {
-                effects.append(contentsOf: sidebarAlertUpdateEffects(for: [tab.id], in: model))
-            }
         }
-        return effects
+        return []
 
     case .markAllAlertsRead:
-        let affectedPaneIds = unreadAlertPaneIds(in: model)
-        let affectedTabIds = tabIdsForPanes(affectedPaneIds, in: model)
         for i in model.alerts.indices { model.alerts[i].isUnread = false }
-        return sidebarAlertUpdateEffects(for: affectedTabIds, in: model)
+        return []   // bell badges reconcile via reconcileSidebar
 
     case .activateAlert(let alertId):
         guard let alert = model.alerts.first(where: { $0.id == alertId }) else { return [] }
@@ -965,18 +949,15 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
     case .goToMostRecentAlertPane:
         // Ack only the focused pane before searching so repeated presses walk every
         // unread pane, including sibling panes in the current split.
-        var ackedPaneIds: [PaneId] = []
         if let tab = selectedTab(in: model),
            paneHasUnreadAlert(tab.focusedPaneId, alerts: model.alerts) {
             markAlertsReadForPane(tab.focusedPaneId, in: &model)
-            ackedPaneIds = [tab.focusedPaneId]
         }
-        let ackedTabIds = tabIdsForPanes(ackedPaneIds, in: model)
-        let ackEffects = sidebarAlertUpdateEffects(for: ackedTabIds, in: model)
+        // Acked-pane bell badges reconcile via reconcileSidebar.
         guard let alert = model.alerts.first(where: { $0.isUnread && model.pane($0.paneId) != nil }) else {
-            return ackEffects
+            return []
         }
-        return ackEffects + navigateToPane(alert.paneId, in: &model)
+        return navigateToPane(alert.paneId, in: &model)
 
     case .setShowAllAlerts(let showAll):
         model.showAllAlerts = showAll
@@ -986,8 +967,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let hadUnread = model.alerts.contains { $0.paneId == paneId && $0.isUnread }
         guard hadUnread else { return [] }
         markAlertsReadForPane(paneId, in: &model)
-        let affectedTabIds = tabIdsForPanes([paneId], in: model)
-        return sidebarAlertUpdateEffects(for: affectedTabIds, in: model)
+        return []   // bell badge reconciles via reconcileSidebar
 
     case .ackTabAlerts:
         guard let tabId = model.selectedTabId else { return [] }
@@ -995,7 +975,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let affectedPaneIds = unreadAlertPaneIds(for: paneIds, in: model)
         guard !affectedPaneIds.isEmpty else { return [] }
         for paneId in affectedPaneIds { markAlertsReadForPane(paneId, in: &model) }
-        return sidebarAlertUpdateEffects(for: [tabId], in: model)
+        return []   // bell badges reconcile via reconcileSidebar
 
     case .confirmTerminate:
         model.pendingConfirmation = nil
@@ -1027,7 +1007,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         if allTabs.isEmpty {
             return effects + [.terminate]
         }
-        effects.append(.reloadSidebar)
         effects.append(.scheduleCheckpoint)
         return effects
 
@@ -1080,7 +1059,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 effects.append(.showSelectedTab)
                 effects.append(contentsOf: selectionSyncEffects(for: model))
             }
-            effects.append(.reloadSidebar)
             // Persist group deletion + tab removal so they don't reappear.
             effects.append(.scheduleCheckpoint)
             return effects
@@ -1088,15 +1066,16 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
         model.groups.remove(at: idx)
         // Persist group deletion (tabs moved to default group).
-        return [.reloadSidebar, .scheduleCheckpoint]
+        return [.scheduleCheckpoint]
 
     case .renameGroup(let id, let name):
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty,
               let idx = model.groups.firstIndex(where: { $0.id == id }) else { return [] }
         model.groups[idx].name = trimmed
-        // Persist group name so it appears correctly on restore.
-        return [.reloadSidebar, .scheduleCheckpoint]
+        // Persist group name so it appears correctly on restore (the row updates via
+        // reconcileSidebar).
+        return [.scheduleCheckpoint]
 
     case .moveTabs(let tabIds, let toGroupId, let atIndex):
         var seen = Set<TabId>()
@@ -1150,7 +1129,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             removeGroupIfEmpty(sgid, from: &model)
         }
 
-        return [.reloadSidebar, .scheduleCheckpoint]
+        return [.scheduleCheckpoint]
 
     case .extractTabsToNewGroup(let tabIds, let groupName):
         // Dedupe and drop ids that no longer exist.
@@ -1177,18 +1156,19 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         // removeGroupIfEmpty pruning of vacated source groups. The new
         // group is empty, so atIndex: 0 is unambiguous; ids are inserted
         // in the order given. Discard nested effects -- we emit one
-        // reloadSidebar + scheduleCheckpoint at the end.
+        // scheduleCheckpoint at the end (the sidebar updates via reconcileSidebar).
         _ = update(&model, .moveTabs(
             tabIds: validIds, toGroupId: newGroupId, atIndex: 0))
-        return [.reloadSidebar, .scheduleCheckpoint]
+        return [.scheduleCheckpoint]
 
     case .reorderGroup(let groupId, let toIndex):
         guard let currentIdx = model.groups.firstIndex(where: { $0.id == groupId }) else { return [] }
         let clamped = max(0, min(toIndex, model.groups.count - 1))
         let group = model.groups.remove(at: currentIdx)
         model.groups.insert(group, at: clamped)
-        // Persist group ordering so sidebar layout survives a restart.
-        return [.reloadSidebar, .scheduleCheckpoint]
+        // Persist group ordering so sidebar layout survives a restart (the rows reorder
+        // via reconcileSidebar).
+        return [.scheduleCheckpoint]
 
     case .toggleGroupCollapse(let groupId):
         guard let idx = model.groups.firstIndex(where: { $0.id == groupId }) else { return [] }
@@ -2329,18 +2309,12 @@ private func applySelectTab(_ model: inout AppModel, id: TabId) -> [Effect] {
         }
     }
     model.selectedTabId = id
-    var alertsCleared = false
     if model.config.alertClearMode == .focus, let tab = selectedTab(in: model) {
-        alertsCleared = markAlertsReadForPane(tab.focusedPaneId, in: &model)
+        markAlertsReadForPane(tab.focusedPaneId, in: &model)
     }
     effects.append(.showSelectedTab)
-    effects.append(.setSidebarSelection(tabId: id))
-    if alertsCleared {
-        effects.append(.updateSidebarTabRow(tabId: id))
-        if let group = groupForTab(id, in: model), group.isCollapsed {
-            effects.append(.updateSidebarGroupRow(groupId: group.id))
-        }
-    }
+    // Selection is view-owned: reconcileSidebar reapplies it (replacing the deleted
+    // .setSidebarSelection), and any cleared-alert bell badges update from the projection.
     effects.append(contentsOf: selectionSyncEffects(for: model))
     effects.append(.scheduleCheckpoint)
     return effects
@@ -2410,28 +2384,25 @@ private func jumpModeActivate(_ model: inout AppModel, visibleTabs: [TabId]) -> 
         effects.append(.hideSwitcherOverlay)
     }
     model.jumpMode = JumpModeState(keyMap: assignJumpKeys(visibleTabs: visibleTabs))
-    effects.append(.reloadSidebar)
-    return effects
+    return effects   // per-tab jump badges appear via reconcileSidebar
 }
 
 private func jumpModeCommit(_ model: inout AppModel, char: Character) -> [Effect] {
     guard let jumpMode = model.jumpMode else { return [] }
-    model.jumpMode = nil
+    model.jumpMode = nil   // jump badges clear via reconcileSidebar
 
     guard let targetId = jumpMode.keyMap.first(where: { $0.value == char })?.key,
           tabLocation(targetId, in: model) != nil else {
-        return [.reloadSidebar]
+        return []
     }
 
-    var effects = applySelectTab(&model, id: targetId)
-    effects.append(.reloadSidebar)
-    return effects
+    return applySelectTab(&model, id: targetId)
 }
 
 private func jumpModeCancel(_ model: inout AppModel) -> [Effect] {
     guard model.jumpMode != nil else { return [] }
-    model.jumpMode = nil
-    return [.reloadSidebar]
+    model.jumpMode = nil   // jump badges clear via reconcileSidebar
+    return []
 }
 
 // MARK: - Helpers
@@ -2462,7 +2433,6 @@ private func navigateToPane(_ paneId: PaneId, in model: inout AppModel) -> [Effe
     if wasZoomed, paneId != oldFocusedPaneId {
         effects.append(.rebuildTabContainer(tabId: currentTab.id))
     }
-    effects.append(.reloadSidebar)
     effects.append(.makeFirstResponder(paneId: paneId))
     if focusChanged {
         effects.append(.scheduleCheckpoint)
@@ -2513,10 +2483,8 @@ private func syncFocusedPaneChrome(_ paneId: PaneId, in model: inout AppModel) -
     var effects: [Effect] = []
     if let tab = selectedTab(in: model) {
         effects.append(.setWindowTitle(windowTitle(for: tab)))
-        effects.append(.updateSidebarTabRow(tabId: tab.id))
-        if let group = groupForTab(tab.id, in: model), group.isCollapsed {
-            effects.append(.updateSidebarGroupRow(groupId: group.id))
-        }
+        // The tab row (title/subtitle, and any collapsed-group roll-up) updates via
+        // reconcileSidebar; only the window title remains a command here.
     }
     return effects
 }
@@ -2536,10 +2504,6 @@ private func markAlertsReadForPane(_ paneId: PaneId, in model: inout AppModel) -
     return changed
 }
 
-private func unreadAlertPaneIds(in model: AppModel) -> [PaneId] {
-    unreadAlertPaneIds(for: model.allPaneIds, in: model)
-}
-
 private func unreadAlertPaneIds(for paneIds: [PaneId], in model: AppModel) -> [PaneId] {
     let paneIdSet = Set(paneIds)
     var seen = Set<PaneId>()
@@ -2552,41 +2516,10 @@ private func unreadAlertPaneIds(for paneIds: [PaneId], in model: AppModel) -> [P
     return result
 }
 
-private func tabIdsForPanes(_ paneIds: [PaneId], in model: AppModel) -> [TabId] {
-    let paneToTab = paneToTabIdMap(in: model)
-    var seen = Set<TabId>()
-    var result: [TabId] = []
-    for paneId in paneIds {
-        guard let tabId = paneToTab[paneId],
-              seen.insert(tabId).inserted else { continue }
-        result.append(tabId)
-    }
-    return result
-}
+// tabIdsForPanes / paneToTabIdMap / unreadAlertPaneIds(in:) were deleted in Stage 5:
+// they existed only to compute which sidebar rows to refresh for an alert change, which
+// reconcileSidebar now derives from the projection (the bell-badge counts).
 
-private func paneToTabIdMap(in model: AppModel) -> [PaneId: TabId] {
-    var result: [PaneId: TabId] = [:]
-    for group in model.groups {
-        for tab in group.tabs {
-            for paneId in allPaneIds(tab.rootNode) {
-                result[paneId] = tab.id
-            }
-        }
-    }
-    return result
-}
-
-private func sidebarAlertUpdateEffects(for tabIds: [TabId], in model: AppModel) -> [Effect] {
-    var effects = tabIds.map { Effect.updateSidebarTabRow(tabId: $0) }
-    var seenGroupIds = Set<GroupId>()
-    for tabId in tabIds {
-        guard let group = groupForTab(tabId, in: model),
-              group.isCollapsed,
-              seenGroupIds.insert(group.id).inserted else { continue }
-        effects.append(.updateSidebarGroupRow(groupId: group.id))
-    }
-    return effects
-}
 
 /// Remove all alerts for a pane that is being destroyed.
 private func removeAlertsForPane(_ paneId: PaneId, in model: inout AppModel) {

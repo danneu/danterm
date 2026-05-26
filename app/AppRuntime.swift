@@ -17,6 +17,10 @@ class AppRuntime {
     }
 
     var model: AppModel
+    // Ephemeral view state the reconciler reads as a second input (see ViewLocalState).
+    // Today just the inline-rename target, set/cleared by SidebarView's rename paths and
+    // read only by reconcileSidebar's rename guard.
+    var viewLocalState = ViewLocalState()
     let ghosttyApp: GhosttyApp
     var surfaces: [PaneId: TerminalView] = [:]
     // Last libghostty occlusion value pushed for each live surface.
@@ -472,18 +476,6 @@ class AppRuntime {
 
         case .removeTabContainer(let tabId):
             removeTabContainer(tabId)
-
-        case .reloadSidebar:
-            sidebarView?.reload(model: model)
-
-        case .setSidebarSelection(let tabId):
-            sidebarView?.applySelection(tabId: tabId, model: model)
-
-        case .updateSidebarTabRow(let tabId):
-            sidebarView?.updateTabRow(tabId: tabId, model: model)
-
-        case .updateSidebarGroupRow(let groupId):
-            sidebarView?.updateGroupRow(groupId: groupId, model: model)
 
         case .setWindowTitle(let title):
             window?.title = title
@@ -1278,11 +1270,11 @@ class AppRuntime {
 
         refreshContentTitlebar()
         showSelectedTab()
-        // Route the post-restore sync through reconcile() so focus borders land via
-        // the reconciler (clean build -- tearDownCurrentSession reset the caches).
-        // showSelectedTab() still builds the container here; Stage 8 folds that in.
+        // Route the post-restore sync through reconcile() so focus borders + the sidebar
+        // land via the reconciler (clean build -- tearDownCurrentSession reset the caches,
+        // so reconcileSidebar's nil cache rebuilds every row). showSelectedTab() still
+        // builds the container here; Stage 8 folds that in.
         reconcile()
-        sidebarView?.reload(model: model)
         let unreadCount = totalUnreadAlertCount(model: model)
         chromeView?.updateBellBadge(count: unreadCount)
         NSApp.dockTile.badgeLabel = unreadCount > 0 ? "\(unreadCount)" : nil

@@ -30,6 +30,12 @@ struct ReconcilerCaches {
     // explicit per-pane cache invalidation when it folds containers into the reconciler.
     var paneToolbar: [PaneId: PaneToolbarRender] = [:]
     var searchOverlay: [PaneId: SearchOverlayRender] = [:]   // key present iff search active
+    // Single-optional ordered-pass cache (like the eventual windowChrome/switcher caches):
+    // the last sidebar projection reconcileSidebar applied. computeSidebarRowOps diffs the
+    // new projection against this into ordered NSOutlineView row ops. nil == not yet built
+    // (first reconcile inserts all rows via reloadAll). NSOutlineView owns selection, so it
+    // is excluded from the projection and reapplied separately (resolveReloadSelection).
+    var sidebar: SidebarProjection? = nil
 }
 
 extension AppRuntime {
@@ -40,6 +46,7 @@ extension AppRuntime {
     func reconcile() {
         reconcileFocusBorders()
         reconcilePaneChrome()
+        reconcileSidebar()
         syncSurfaceVisibility()  // existing occlusion pass; stays last
     }
 
@@ -89,5 +96,40 @@ extension AppRuntime {
             guard let contentArea = contentArea else { return }
             findPaneWrapper(for: paneId, in: contentArea)?.hideSearchOverlay()
         })
+    }
+
+    /// Granular NSOutlineView sidebar diff -- the one ordered op-list pass. The pure
+    /// `computeSidebarRowOps` diffs the projection against `caches.sidebar` into an
+    /// ordered insert/remove/reload/collapse script (inconsistent batch ops crash
+    /// NSOutlineView hard, so all the diff logic stays pure + tested); the thin executor
+    /// `SidebarView.applySidebarOps` issues the matching outline mutations. Selection is
+    /// view-owned: the executor captures the live multi-selection, applies the ops, then
+    /// reapplies through `resolveReloadSelection` (replacing the deleted
+    /// `.setSidebarSelection` effect). The narrow rename guard suppresses only a `reload`
+    /// of the live-editing row (its title/attrs belong to the field editor) while
+    /// structural ops still apply; a structural op on that row ends the edit and clears
+    /// the sidecar. Replaces the deleted `reloadSidebar` / `setSidebarSelection` /
+    /// `updateSidebarTabRow` / `updateSidebarGroupRow` effects + the imperative
+    /// `reload(model:)`.
+    func reconcileSidebar() {
+        guard let sidebarView = sidebarView else { return }
+        let new = desiredSidebar(in: model)
+        let rawOps = computeSidebarRowOps(old: caches.sidebar, new: new)
+        let guarded = guardSidebarRenameOps(
+            ops: rawOps,
+            renameTarget: viewLocalState.sidebarRenameTarget,
+            new: new)
+        if guarded.clearRename {
+            // A structural op removed/moved the edited row (or a wholesale rebuild ran):
+            // end the now-orphaned edit so the field editor never strands.
+            viewLocalState.sidebarRenameTarget = nil
+        }
+        sidebarView.applySidebarOps(
+            guarded.ops, model: model, clearActiveRename: guarded.clearRename)
+        // Advance the cache. If a reload was suppressed for the still-editing row,
+        // retain its prior projection so the deferred attr update re-fires on edit-end.
+        caches.sidebar = advanceSidebarCache(
+            old: caches.sidebar, new: new,
+            suppressedRenameTarget: viewLocalState.sidebarRenameTarget)
     }
 }

@@ -26,10 +26,9 @@ enum Effect {
     case showSelectedTab
     case rebuildTabContainer(tabId: TabId)
     case removeTabContainer(tabId: TabId)
-    case reloadSidebar
-    case setSidebarSelection(tabId: TabId)
-    case updateSidebarTabRow(tabId: TabId)
-    case updateSidebarGroupRow(groupId: GroupId)
+    // Sidebar (reloadSidebar / setSidebarSelection / updateSidebarTabRow /
+    // updateSidebarGroupRow) is now derived by reconcileSidebar from the model after
+    // every send(); the granular NSOutlineView diff replaced these effects in Stage 5.
     case setWindowTitle(String)
 
     // Export
@@ -101,8 +100,7 @@ extension Effect {
             return true
         case .createSurface, .destroySurface, .sendText, .sendInputText, .sendInputKey,
              .focusSurface, .makeFirstResponder, .showSelectedTab, .rebuildTabContainer,
-             .removeTabContainer, .reloadSidebar, .setSidebarSelection, .updateSidebarTabRow,
-             .updateSidebarGroupRow, .setWindowTitle, .exportState, .ipcReply, .ipcError,
+             .removeTabContainer, .setWindowTitle, .exportState, .ipcReply, .ipcError,
              .readPaneText, .sendNotification, .showTerminateConfirmation,
              .showCloseTabConfirmation, .showCloseTabsConfirmation, .terminate, .activateApp,
              .setAppFocus, .dismissAlertsPopover, .updateToolbarBellBadge, .updateDockBadge,

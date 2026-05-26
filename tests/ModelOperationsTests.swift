@@ -1781,6 +1781,61 @@ func modelOperationsTests() {
         try expect(desiredSearchOverlays(in: model)[paneId] == nil,
             "ended search drops the pane's key (disappear-but-host-survives)")
     }
+
+    // MARK: - desiredSidebar (sidebar projection, Stage 5)
+
+    test("desiredSidebar: ordered groups -> tabs with rendered attrs, collapse, jump badge") {
+        let g1 = GroupId(); let g2 = GroupId()
+        let tA = TabId(); let tB = TabId(); let tC = TabId()
+        let pA = PaneId(); let pB = PaneId(); let pC = PaneId()
+        var tabA = TabModel(id: tA, focusedPaneId: pA, rootNode: .leaf(PaneModel(id: pA)))
+        tabA.title = "shell"; tabA.customTitle = "Edited"; tabA.subtitle = "~/src"; tabA.color = .blue
+        let tabB = TabModel(id: tB, focusedPaneId: pB, rootNode: .leaf(PaneModel(id: pB)))
+        let tabC = TabModel(id: tC, focusedPaneId: pC, rootNode: .leaf(PaneModel(id: pC)))
+        var model = AppModel(groups: [
+            GroupModel(id: g1, name: "Work", isCollapsed: true, tabs: [tabA, tabB]),
+            GroupModel(id: g2, name: "Home", tabs: [tabC]),
+        ], selectedTabId: tA)
+        model.alerts = [AlertModel(id: AlertId(), kind: .bell, paneId: pA,
+            title: "t", body: "b", createdAt: Date(), isUnread: true)]
+        model.jumpMode = JumpModeState(keyMap: [tB: "j"])
+
+        let proj = desiredSidebar(in: model)
+        try expect(!proj.isSingleGroupMode, "two groups -> not single-group mode")
+        try expectEqual(proj.groups.map(\.id), [g1, g2], "groups in model order")
+
+        let work = proj.groups[0]
+        try expectEqual(work.name, "Work")
+        try expect(work.isCollapsed, "collapse projected from the model")
+        try expect(work.isFirst, "first group flagged")
+        try expectEqual(work.tabCount, 2)
+        try expectEqual(work.unreadAlertCount, 1, "group bell rolls up its tabs' unread alerts")
+        try expectEqual(work.tabs.map(\.id), [tA, tB], "tabs in group order")
+        // Tab A: displayTitle resolves customTitle; subtitle, color, bell carried.
+        try expectEqual(work.tabs[0].displayTitle, "Edited")
+        try expectEqual(work.tabs[0].subtitle, "~/src")
+        try expectEqual(work.tabs[0].color, .blue)
+        try expectEqual(work.tabs[0].unreadAlertCount, 1)
+        try expect(work.tabs[0].jumpKey == nil, "tab A has no jump key")
+        // Tab B: jump badge from model.jumpMode.keyMap.
+        try expectEqual(work.tabs[1].jumpKey, "j", "jump badge from model.jumpMode.keyMap")
+        try expect(!proj.groups[1].isFirst, "second group not first")
+    }
+
+    test("desiredSidebar: projection excludes selection (independent of selectedTabId)") {
+        let (model, ids) = makeMruModel(tabCount: 3)
+        var other = model
+        other.selectedTabId = ids[2]
+        try expect(model.selectedTabId != other.selectedTabId, "precondition: selection differs")
+        try expectEqual(desiredSidebar(in: model), desiredSidebar(in: other),
+            "selection is view-owned -> not in the projection")
+    }
+
+    test("desiredSidebar: one group is single-group mode") {
+        let (model, _) = makeMruModel(tabCount: 2)
+        try expect(desiredSidebar(in: model).isSingleGroupMode,
+            "a single group promotes tabs to roots (no group row)")
+    }
 }
 
 /// Build a model with N tabs in one group; returns the tab ids in display order.
