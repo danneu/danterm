@@ -26,7 +26,6 @@ enum Effect {
     case showSelectedTab
     case rebuildTabContainer(tabId: TabId)
     case removeTabContainer(tabId: TabId)
-    case refreshPaneBorder(paneId: PaneId)
     case reloadSidebar
     case setSidebarSelection(tabId: TabId)
     case updateSidebarTabRow(tabId: TabId)

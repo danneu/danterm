@@ -7,7 +7,7 @@
 | Yes          | 1              | Part 1 | 1a -- Tree-owns-panes (live model, wire format unchanged)                                    |
 | Yes          | 2              | Part 1 | 1a -- One leaf-embedded snapshot format (v2)                                                 |
 |              | _(checkpoint)_ | --     | Part 1 -> Part 2 go/no-go                                                                    |
-|              | 3              | Part 2 | `reconcileFocusBorders`                                                                      |
+| Yes          | 3              | Part 2 | `reconcileFocusBorders`                                                                      |
 |              | 4              | Part 2 | `reconcilePaneChrome` (toolbars + search overlay)                                            |
 |              | 5              | Part 2 | `reconcileSidebar` + Part 1b (`ViewLocalState`/`RenameTarget`)                               |
 |              | 6              | Part 2 | `reconcileWindowChrome`                                                                      |
@@ -1120,7 +1120,7 @@ the prior count by reshaping in place), `just build` clean.
   pre-impl) failed for the right reason (version 1; top-level `panes` present);
   the chrome-from-focused-leaf test was confirmed red ("Sibling != Editor")
   against a decoder that read `firstLeafId` instead of `focusedPaneId` -- it puts
-  the focused pane in the *second* leaf so a first-leaf regression fails it.
+  the focused pane in the _second_ leaf so a first-leaf regression fails it.
 
 **Manual QA still owed (cannot be driven headless):**
 
@@ -1142,3 +1142,130 @@ the prior count by reshaping in place), `just build` clean.
   and the test helpers `allPaneSnapshots`/`paneSnapshot(_:in:)` (TestHarness).
 - No new index or stored pane state was introduced (the format swap is read/write
   only); the tree remains the single source of truth.
+
+### Stage 3 -- `reconcileFocusBorders` (first reconcile pass + scaffolding)
+
+Landed. `just test` 970/970 (964 prior + 6 new: 3 focus-border projection, 3
+`applyDiff`), `just build` clean. This is the first reconcile pass; it stands up
+the scaffolding stages 4-8 copy.
+
+**What shipped:**
+
+- **Reconciler scaffolding.** New `app/Reconcile.swift` (app-only, SPM-globbed)
+  holds `struct ReconcilerCaches` (one field so far, `focusBorders: [PaneId:
+BorderState]`) and `extension AppRuntime { func reconcile(); func
+reconcileFocusBorders() }`. `reconcile()` runs `reconcileFocusBorders()` then
+  `syncSurfaceVisibility()` (occlusion stays last). `send()` calls `reconcile()`
+  where it used to call `syncSurfaceVisibility()` directly; **no command-phase
+  split** (single-phase flow preserved -- `isPostReconcile` is Stage 4's).
+- **Pure layer in `ModelOperations.swift`** (so the test build, whose `test.sh`
+  source list includes `ModelOperations.swift` but not `AppRuntime.swift`/AppKit,
+  can cover it): `struct BorderState: Equatable { focused; bell }`,
+  `desiredFocusBorders(in:) -> [PaneId: BorderState]` (keyed over `allPanes`;
+  `focused = isFocusedAndVisible`, which already encodes the single-pane-tab
+  no-green-border rule; `bell = paneHasUnreadAlert`, independent so a single-pane
+  tab still shows the red bell), and the generic `applyDiff` exactly as the plan
+  specifies, **including the `remove`-on-disappear semantics** (a key absent from
+  `desired` invokes `remove` once, then is pruned). `BorderState` reproduces the
+  two values the old `.refreshPaneBorder` arm computed before
+  `TerminalView.setFocusBorder`; the executor is unchanged, only the computation
+  moved into the pure layer.
+- **Focus borders migrated off effects.** Deleted the `Effect.refreshPaneBorder`
+  case, its `perform` arm, and all 3 emission sites (`paneBecameFirstResponder`'s
+  two emissions; `refreshPaneAlertChromeEffects`, now toolbar-only). Deleting the
+  case is what forced the compiler to surface every site (app + test). The
+  alert-cleared toolbar refresh and downstream chrome stay as commands.
+- **Restore + teardown wired.** `tearDownCurrentSession` resets the caches by
+  re-init (`caches = ReconcilerCaches()`) alongside the existing
+  `surfaceVisibility.removeAll()`, so the first post-restore reconcile is a clean
+  build. `commitRestoreSession` routes its post-restore sync through
+  `reconcile()` instead of a bare `syncSurfaceVisibility()`.
+- **Tests.** Focus-border projection tests in `ModelOperationsTests.swift` (incl.
+  single-pane-no-border, bell-on-single-pane, focused-in-split, keyed-over-all-
+  live-panes/non-selected-tab-no-border). New `tests/ReconcileTests.swift`
+  (`reconcileTests()`, registered in `TestHarness`) holds the `applyDiff` tests:
+  only-changed-keys-apply / unchanged-skip / disappeared-key-invokes-remove-once-
+  then-prunes / default-no-op-remove-still-prunes. Deleted the `.refreshPaneBorder`
+  emission assertions across `UpdateAlertTests` (16 calls + the
+  `alertTestHasRefreshPaneBorder` helper), `UpdateGhosttyTests` (2), and
+  `UpdatePaneTests` (4); the paired toolbar/model-state assertions (focus handlers
+  set/leave `focusedPaneId`, alerts marked read) are preserved.
+
+**Verified finding (the interim-stage cache-coherence subtlety):**
+`focusBorders` is exempt from cross-pass invalidation because the border rides
+the persisted `TerminalView`. **Confirmed for Stage 3** (where containers are
+still effect-built): `TerminalView` is constructed _only_ in `makeTerminalView`;
+`SplitContainerView` obtains views via `surfaceLookup: { surfaces[paneId] }`
+(`AppRuntime.swift` ~1473) and re-parents the _same_ instance from the `surfaces`
+dict on `rebuildTabContainer`. `setFocusBorder` writes `layer.borderWidth/Color`,
+which travel with the view instance across re-parenting, so a rebuild does not
+drop the border and the value-unchanged diff correctly skips re-applying. The
+assumption holds; no invalidation needed.
+
+**Deviations / judgment calls:**
+
+- **`finalizeTabSelection`'s container-build border loop (`AppRuntime.swift`
+  ~1524) was deliberately left in place.** It is not an `Effect` emission -- it is
+  part of the still-effect-built container path Stage 8 folds into
+  `reconcileContainers`. It coexists coherently with `reconcileFocusBorders`
+  (identical `isFocusedAndVisible`/`paneHasUnreadAlert` computation, same persisted
+  `TerminalView`), so it never diverges from the cache; removing it now would be
+  Stage 8 overreach. Stage 8 deletes it when containers move to the reconciler.
+- **`surfaceVisibility` stays a standalone cache**, not folded into
+  `ReconcilerCaches` ("add only the field you use now"). Teardown resets both
+  (`surfaceVisibility.removeAll()` + `caches = ReconcilerCaches()`). A later stage
+  may fold it in; `syncSurfaceVisibility()` is otherwise untouched.
+- **`AppDelegate.windowDidChangeOcclusionState` keeps calling
+  `syncSurfaceVisibility()` directly** -- it is the occlusion callback, not the
+  restore path, and borders do not depend on occlusion. Only `send()` and the
+  restore commit route through `reconcile()`.
+- **Pure-vs-AppKit file split** dictated by `test.sh`'s explicit source list:
+  pure projection + `applyDiff` + `BorderState` in `ModelOperations.swift`
+  (test-visible); impure passes + `ReconcilerCaches` in app-only
+  `app/Reconcile.swift`. `reconcile()`/`reconcileFocusBorders()` are `internal`
+  (not `private`) because they live in a cross-file extension that `send()` and
+  `commitRestoreSession` call; `caches` is likewise `internal` so the extension
+  can reach it.
+- **`applyDiff` records `cache[k]=v` even when the `apply` closure no-ops** (e.g.
+  `surfaces[k]` nil). Harmless in Stage 3: `createSurface` populates `surfaces`
+  synchronously in the command phase before `reconcile()`, so every pane in
+  `desired` has a live `TerminalView` at reconcile time, and `setFocusBorder`
+  needs only the view (not the ghostty `.surface`). Matches how the existing
+  visibility cache behaves.
+
+**Manual QA still owed (cannot be driven headless):**
+
+There is no headless test for actual border _drawing_ -- the executor
+(`setFocusBorder`) is unchanged and the projection/diff are the pure nets. A human
+should `just build-run` and confirm end-to-end: green focus border follows focus
+moves across panes; **single-pane tab draws no green border**; red bell border
+appears on background-bell panes and clears on ack; borders correct after tab
+switch and zoom toggle; borders correct after snapshot restore (clean-build path).
+
+**Handoffs for later stages:**
+
+- **Where the scaffolding lives:** `reconcile()` + `reconcileFocusBorders()` +
+  `ReconcilerCaches` in `app/Reconcile.swift`; `applyDiff` + projections +
+  `BorderState` in `app/ModelOperations.swift` (pure, test-covered in
+  `tests/ReconcileTests.swift` + `tests/ModelOperationsTests.swift`).
+- **Template for adding a pass** (this stage is the exemplar): (1) pure projection
+  in `ModelOperations.swift` returning an `Equatable` value; (2) add a cache field
+  to `ReconcilerCaches` (resets for free via the `tearDownCurrentSession` re-init);
+  (3) a `reconcileX()` in `Reconcile.swift` running the projection through
+  `applyDiff` (pass a non-default `remove` for disappear-but-host-survives passes
+  like the search overlay), inserted into `reconcile()` _before_
+  `syncSurfaceVisibility()`; (4) delete the matching `Effect` case + its `perform`
+  arm + every emission site **in the same stage** -- deleting the case makes a
+  missed emission a compile error.
+- **Stage 4 owns introducing the command-phase split** (`isPostReconcile`, the
+  pre/post `perform` partition) that this stage deliberately left out. Stage 3
+  kept the single-phase flow per the plan's "No command-phase change."
+- **Cache invalidation:** `focusBorders` needs none (host persists, verified
+  above). The first host-recreated cache (`paneToolbar`/`searchOverlay`, Stage 4)
+  is where the container executor must clear affected keys before its pass --
+  `applyDiff`'s "absent-from-cache re-applies" is the mechanism that re-pushes
+  value-unchanged chrome onto a fresh wrapper.
+- Stage 5 (`RenameTarget`/`ViewLocalState`), Stage 8 (`.destroySurface` still
+  emitted in 4 handlers; the `surfaceCreationFailed` split-tab test still asserts
+  one per sibling), and Stage 9 (`Effect` -> `Command` rename) handoffs above
+  remain valid and untouched.

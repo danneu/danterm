@@ -168,14 +168,6 @@ func paneTests() {
             return false
         }, "should not rebuild tab container")
         try expect(hasEffect(effects) {
-            if case .refreshPaneBorder(let pid) = $0, pid == paneB { return true }
-            return false
-        }, "should refresh old focused pane border")
-        try expect(hasEffect(effects) {
-            if case .refreshPaneBorder(let pid) = $0, pid == paneA { return true }
-            return false
-        }, "should refresh new focused pane border")
-        try expect(hasEffect(effects) {
             if case .refreshPaneToolbar(let pid) = $0, pid == paneA { return true }
             return false
         }, "should refresh toolbar for pane whose alerts were cleared")
@@ -671,14 +663,6 @@ func paneTests() {
             if case .rebuildTabContainer = $0 { return true }
             return false
         }, "should not rebuild tab container after focus change callback")
-        try expect(hasEffect(callbackEffects) {
-            if case .refreshPaneBorder(let paneId) = $0, paneId == rightPaneId { return true }
-            return false
-        }, "should refresh old focused pane border")
-        try expect(hasEffect(callbackEffects) {
-            if case .refreshPaneBorder(let paneId) = $0, paneId == leftPaneId { return true }
-            return false
-        }, "should refresh new focused pane border")
         try expect(!hasEffect(callbackEffects) {
             if case .makeFirstResponder = $0 { return true }
             return false
