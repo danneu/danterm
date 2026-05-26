@@ -40,6 +40,11 @@ struct ReconcilerCaches {
     // Its three hosts (window, chromeView, dock tile) persist across container rebuilds,
     // so this cache needs no cross-pass invalidation. nil == not yet applied.
     var windowChrome: WindowChromeProjection? = nil
+    // Single-optional MRU switcher cache (the windowChrome template, plus a hide
+    // transition): the last switcher projection reconcileSwitcher applied. nil == no MRU
+    // cycle == panel ordered out. The panel persists across container rebuilds, so this
+    // cache needs no cross-pass invalidation.
+    var switcher: SwitcherProjection? = nil
 }
 
 extension AppRuntime {
@@ -52,6 +57,7 @@ extension AppRuntime {
         reconcilePaneChrome()
         reconcileSidebar()
         reconcileWindowChrome()
+        reconcileSwitcher()      // single-optional MRU projection; nil (no mruCycle) -> orderOut
         syncSurfaceVisibility()  // existing occlusion pass; stays last
     }
 
@@ -160,5 +166,29 @@ extension AppRuntime {
         chromeView?.tabTodoButton.update(
             totalCount: new.tabTodoTotal, uncompletedCount: new.tabTodoUncompleted)
         caches.windowChrome = new
+    }
+
+    /// Show/redraw or hide the MRU switcher panel from one diffed `SwitcherProjection?`.
+    /// The windowChrome single-struct-compare template, plus a hide transition: a `nil`
+    /// projection (no `model.mruCycle`, or every frozen tab gone) orders the panel out;
+    /// a non-nil one renders the rows + centers + orders front. Replaces the deleted
+    /// `.showSwitcherOverlay` / `.hideSwitcherOverlay` effects -- the `mruCycle` mutation
+    /// in the cycle handlers now drives this. Render + center + orderFront on each non-nil
+    /// change is idempotent (matching the old per-step `.showSwitcherOverlay`); the `nil`
+    /// transition is what hides the panel on cycle end/cancel. The panel persists across
+    /// container rebuilds, so no cross-pass invalidation.
+    func reconcileSwitcher() {
+        let new = desiredSwitcher(in: model)
+        guard caches.switcher != new else { return }
+        if let proj = new {
+            // Non-activating: orderFront, never makeKeyAndOrderFront -- key would steal
+            // first responder from the focused terminal pane.
+            switcherPanel?.apply(rows: proj.rows, cursorIndex: proj.cursorIndex)
+            switcherPanel?.centerOnScreen(of: window)
+            switcherPanel?.orderFront(nil)
+        } else {
+            switcherPanel?.orderOut(nil)  // nil == no cycle == hide
+        }
+        caches.switcher = new
     }
 }

@@ -2315,7 +2315,8 @@ private func mruCycleStep(_ model: inout AppModel, direction: MruDirection) -> [
     case .newer: cycle.cursorIndex = (cycle.cursorIndex - 1 + count) % count
     }
     model.mruCycle = cycle
-    return [.showSwitcherOverlay]
+    // The switcher panel reconciles from model.mruCycle (reconcileSwitcher).
+    return []
 }
 
 private func mruCycleCommit(_ model: inout AppModel) -> [Effect] {
@@ -2325,38 +2326,39 @@ private func mruCycleCommit(_ model: inout AppModel) -> [Effect] {
     // last-pane closePane, automation). Filter frozenOrder against live tabs
     // and remap the cursor before reading the chosen id.
     guard let resolved = resolveLiveCycle(cycle, in: model) else {
-        // Every frozen tab is gone; treat as cancel.
+        // Every frozen tab is gone; treat as cancel. mruCycle == nil ->
+        // reconcileSwitcher orders the panel out.
         model.mruCycle = nil
-        return [.hideSwitcherOverlay]
+        return []
     }
 
     let chosenId = resolved.liveOrder[resolved.cursorIndex]
     model.mruCycle = nil
 
+    // mruCycle == nil now -> reconcileSwitcher hides the panel; the only surviving
+    // effects are the selectTab commands when the chosen tab differs.
     var effects: [Effect] = []
     if chosenId != model.selectedTabId {
         effects.append(contentsOf: applySelectTab(&model, id: chosenId))
     }
-    effects.append(.hideSwitcherOverlay)
     return effects
 }
 
 private func mruCycleCancel(_ model: inout AppModel) -> [Effect] {
     guard model.mruCycle != nil else { return [] }
     model.mruCycle = nil
-    return [.hideSwitcherOverlay]
+    // mruCycle == nil -> reconcileSwitcher orders the panel out.
+    return []
 }
 
 // MARK: - Tab Jump Mode Handlers
 
 private func jumpModeActivate(_ model: inout AppModel, visibleTabs: [TabId]) -> [Effect] {
-    var effects: [Effect] = []
-    if model.mruCycle != nil {
-        model.mruCycle = nil
-        effects.append(.hideSwitcherOverlay)
-    }
+    // End any in-flight MRU cycle; reconcileSwitcher hides the panel once mruCycle is nil
+    // (a no-op assignment when no cycle is active).
+    model.mruCycle = nil
     model.jumpMode = JumpModeState(keyMap: assignJumpKeys(visibleTabs: visibleTabs))
-    return effects   // per-tab jump badges appear via reconcileSidebar
+    return []   // jump badges (reconcileSidebar) + switcher hide (reconcileSwitcher) both reconcile
 }
 
 private func jumpModeCommit(_ model: inout AppModel, char: Character) -> [Effect] {
