@@ -212,7 +212,7 @@ func treeOwnsPanesTests() {
     // drops every sibling pane from pane()/allPaneIds, and prunes id-keyed side
     // tables. Stage 8 moved surface teardown into reconcileSurfaceExistence, so this
     // asserts the structural model change plus the pure teardown-selection diff
-    // (surfacesToTearDown) instead of the old .destroySurface-per-sibling effect.
+    // (surfacesToTearDown) instead of the old .destroySurface-per-sibling command.
     test("surfaceCreationFailed in a split tab removes the tab and cleans up siblings") {
         var model = makeModel()
         createTab(&model)
@@ -255,15 +255,15 @@ func treeOwnsPanesTests() {
     }
 
     // An unknown pane (owned by no tree -- impossible to orphan now) is a safe
-    // no-op: no effects and the model is unchanged.
+    // no-op: no commands and the model is unchanged.
     test("surfaceCreationFailed for an unknown pane is a no-op") {
         var model = makeModel()
         createTab(&model)
         let before = model
 
-        let effects = update(&model, .surfaceCreationFailed(paneId: PaneId()))
+        let commands = update(&model, .surfaceCreationFailed(paneId: PaneId()))
 
-        try expect(effects.isEmpty, "unknown pane should emit no effects")
+        try expect(commands.isEmpty, "unknown pane should emit no commands")
         try expectEqual(model, before, "model should be unchanged")
     }
 

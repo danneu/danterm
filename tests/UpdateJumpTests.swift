@@ -1,7 +1,7 @@
 // Tests for tab jump mode update handlers. The per-tab jump badges and the selection
 // now reconcile via reconcileSidebar (the projection carries jumpMode.keyMap and
 // selection is view-owned), so these assert the model-state outcomes and the surviving
-// commands rather than the deleted reloadSidebar / setSidebarSelection effects.
+// commands rather than the deleted reloadSidebar / setSidebarSelection commands.
 import Foundation
 
 func updateJumpTests() {
@@ -21,11 +21,11 @@ func updateJumpTests() {
         var model = makeModel()
         let visibleTabs = [TabId(), TabId(), TabId()]
 
-        let effects = update(&model, .jumpModeActivated(visibleTabs: visibleTabs))
+        let commands = update(&model, .jumpModeActivated(visibleTabs: visibleTabs))
 
         try expectEqual(model.jumpMode?.keyMap, assignJumpKeys(visibleTabs: visibleTabs))
         // Per-tab jump badges appear via reconcileSidebar; plain activation emits no command.
-        try expect(effects.isEmpty, "plain activation emits no commands")
+        try expect(commands.isEmpty, "plain activation emits no commands")
     }
 
     test("jumpModeActivated clears an active MRU cycle") {
@@ -33,11 +33,11 @@ func updateJumpTests() {
         var model = m0
         model.mruCycle = MruCycleState(frozenOrder: model.mruOrder, cursorIndex: 1)
 
-        let effects = update(&model, .jumpModeActivated(visibleTabs: ids))
+        let commands = update(&model, .jumpModeActivated(visibleTabs: ids))
 
         try expect(model.mruCycle == nil, "MRU cycle cleared -> reconcileSwitcher hides the panel")
         try expect(model.jumpMode != nil, "jump mode should be active")
-        try expect(effects.isEmpty, "no commands; jump badges + switcher hide both reconcile")
+        try expect(commands.isEmpty, "no commands; jump badges + switcher hide both reconcile")
     }
 
     test("jumpModeKeyPressed selects mapped tab and clears mode") {
@@ -60,12 +60,12 @@ func updateJumpTests() {
         var model = m0
         _ = update(&model, .jumpModeActivated(visibleTabs: ids))
 
-        let effects = update(&model, .jumpModeKeyPressed(char: "a"))
+        let commands = update(&model, .jumpModeKeyPressed(char: "a"))
 
         try expectEqual(model.selectedTabId, ids[0])
         try expect(model.jumpMode == nil)
         // Re-selecting the current tab is a command no-op; badges clear via reconcile.
-        try expect(effects.isEmpty, "self-select commit emits no commands")
+        try expect(commands.isEmpty, "self-select commit emits no commands")
     }
 
     test("jumpModeKeyPressed for unmapped key clears mode without changing selection") {
@@ -74,11 +74,11 @@ func updateJumpTests() {
         let initiallySelected = model.selectedTabId
         _ = update(&model, .jumpModeActivated(visibleTabs: ids))
 
-        let effects = update(&model, .jumpModeKeyPressed(char: "z"))
+        let commands = update(&model, .jumpModeKeyPressed(char: "z"))
 
         try expectEqual(model.selectedTabId, initiallySelected)
         try expect(model.jumpMode == nil)
-        try expect(effects.isEmpty, "unmapped key emits no commands (badges clear via reconcile)")
+        try expect(commands.isEmpty, "unmapped key emits no commands (badges clear via reconcile)")
     }
 
     test("jumpModeKeyPressed for stale mapped tab clears mode") {
@@ -88,11 +88,11 @@ func updateJumpTests() {
         _ = update(&model, .jumpModeActivated(visibleTabs: ids))
         _ = update(&model, .closeTab(id: ids[0]))
 
-        let effects = update(&model, .jumpModeKeyPressed(char: "a"))
+        let commands = update(&model, .jumpModeKeyPressed(char: "a"))
 
         try expectEqual(model.selectedTabId, initiallySelected)
         try expect(model.jumpMode == nil)
-        try expect(effects.isEmpty, "stale target emits no commands (badges clear via reconcile)")
+        try expect(commands.isEmpty, "stale target emits no commands (badges clear via reconcile)")
     }
 
     test("jumpModeCanceled clears mode") {
@@ -101,11 +101,11 @@ func updateJumpTests() {
         let initiallySelected = model.selectedTabId
         _ = update(&model, .jumpModeActivated(visibleTabs: ids))
 
-        let effects = update(&model, .jumpModeCanceled)
+        let commands = update(&model, .jumpModeCanceled)
 
         try expectEqual(model.selectedTabId, initiallySelected)
         try expect(model.jumpMode == nil)
-        try expect(effects.isEmpty, "cancel emits no commands (badges clear via reconcile)")
+        try expect(commands.isEmpty, "cancel emits no commands (badges clear via reconcile)")
     }
 
     test("appResignedActive clears jump mode") {
@@ -113,17 +113,17 @@ func updateJumpTests() {
         var model = m0
         _ = update(&model, .jumpModeActivated(visibleTabs: ids))
 
-        let effects = update(&model, .appResignedActive)
+        let commands = update(&model, .appResignedActive)
 
         try expect(model.jumpMode == nil)
-        try expect(hasEffect(effects) { if case .setAppFocus(false) = $0 { return true }; return false })
+        try expect(hasEffect(commands) { if case .setAppFocus(false) = $0 { return true }; return false })
     }
 
     test("appResignedActive without jump mode still defocuses") {
         var model = makeModel()
 
-        let effects = update(&model, .appResignedActive)
+        let commands = update(&model, .appResignedActive)
 
-        try expect(hasEffect(effects) { if case .setAppFocus(false) = $0 { return true }; return false })
+        try expect(hasEffect(commands) { if case .setAppFocus(false) = $0 { return true }; return false })
     }
 }

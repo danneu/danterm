@@ -83,14 +83,14 @@ func makeModel() -> AppModel {
     )
 }
 
-/// Create a tab and return the effects (for inspection or ignoring).
+/// Create a tab and return the commands (for inspection or ignoring).
 @discardableResult
-func createTab(_ model: inout AppModel, inGroupId: GroupId? = nil, background: Bool = false) -> [Effect] {
+func createTab(_ model: inout AppModel, inGroupId: GroupId? = nil, background: Bool = false) -> [Command] {
     return update(&model, .createTab(inGroupId: inGroupId, background: background))
 }
 
-func hasEffect(_ effects: [Effect], _ check: (Effect) -> Bool) -> Bool {
-    effects.contains(where: check)
+func hasEffect(_ commands: [Command], _ check: (Command) -> Bool) -> Bool {
+    commands.contains(where: check)
 }
 
 // MARK: - Snapshot (v2 leaf-embedded) test helpers

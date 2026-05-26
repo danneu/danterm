@@ -12,8 +12,8 @@ Custom terminal emulator built on libghostty (the Zig library from Ghostty).
 ## Architecture
 
 Elm architecture (unidirectional data flow): views dispatch `Msg` values,
-`update` produces a new `AppModel` + `[Effect]`, and `AppRuntime` performs
-effects (creating surfaces, rebuilding views, sending notifications, etc.).
+`update` produces a new `AppModel` + `[Command]`, and `AppRuntime` performs
+commands (creating surfaces, rebuilding views, sending notifications, etc.).
 Model and update logic are pure and fully unit-testable without Cocoa or
 GhosttyKit.
 
@@ -21,11 +21,11 @@ GhosttyKit.
 app/
 ├── main.swift              # Entry point: ghostty_init, NSApp setup
 ├── AppDelegate.swift       # Window creation, menu bar, notification delegate
-├── AppRuntime.swift        # Holds model + surfaces, dispatches Msg, performs Effects
+├── AppRuntime.swift        # Holds model + surfaces, dispatches Msg, performs Commands
 ├── Model.swift             # AppModel, TypedId<Tag>, model structs, snapshot validation
 ├── Msg.swift               # All messages (user actions, ghostty callbacks, lifecycle)
-├── Effect.swift            # Side effects (createSurface, rebuildContentView, etc.)
-├── Update.swift            # Pure update function: (inout AppModel, Msg) -> [Effect]
+├── Command.swift           # Commands (side effects) update() returns; AppRuntime.perform runs them
+├── Update.swift            # Pure update function: (inout AppModel, Msg) -> [Command]
 ├── ModelOperations.swift   # Pure helpers: split tree ops, query helpers, bell counts
 ├── DanTermConfig.swift     # User-facing config (init file, preferences)
 ├── GhosttyApp.swift        # Wraps ghostty_app_t, runtime callbacks → Msg
@@ -53,8 +53,8 @@ docs/
 ```
 User/Ghostty action
     → Msg
-    → update(&model, msg) -> [Effect]   (pure)
-    → AppRuntime.perform(effect)         (side effects)
+    → update(&model, msg) -> [Command]   (pure)
+    → AppRuntime.perform(command)         (side effects)
     → view rebuild / surface creation / etc.
 ```
 

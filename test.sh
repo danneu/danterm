@@ -23,7 +23,7 @@ echo "Compiling tests..."
         "$SCRIPT_DIR/app/Model.swift" \
         "$SCRIPT_DIR/app/ModelOperations.swift" \
         "$SCRIPT_DIR/app/Msg.swift" \
-        "$SCRIPT_DIR/app/Effect.swift" \
+        "$SCRIPT_DIR/app/Command.swift" \
         "$SCRIPT_DIR/app/TerminalLaunchEnvironment.swift" \
         "$SCRIPT_DIR/app/Update.swift" \
         "$SCRIPT_DIR/app/IpcConnection.swift" \

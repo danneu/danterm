@@ -83,9 +83,9 @@ func paneTests() {
             throw TestFailure(message: "should be a split")
         }
 
-        let effects = update(&model, .splitRatioChanged(splitId: splitId, ratio: 0.3))
-        try expectEqual(effects.count, 1, "splitRatioChanged should only produce scheduleCheckpoint")
-        try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false })
+        let commands = update(&model, .splitRatioChanged(splitId: splitId, ratio: 0.3))
+        try expectEqual(commands.count, 1, "splitRatioChanged should only produce scheduleCheckpoint")
+        try expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false })
 
         guard case .split(_, _, _, _, let ratio) = model.groups[0].tabs[0].rootNode else {
             throw TestFailure(message: "should still be a split")
@@ -135,8 +135,8 @@ func paneTests() {
         createTab(&model)
 
         // Single pane, try to navigate
-        let effects = update(&model, .focusDirection(direction: .horizontal, side: .first))
-        try expectEqual(effects.count, 0, "no effects when no neighbor exists")
+        let commands = update(&model, .focusDirection(direction: .horizontal, side: .first))
+        try expectEqual(commands.count, 0, "no commands when no neighbor exists")
     }
 
     test("testPaneBecameFirstResponder") {
@@ -158,7 +158,7 @@ func paneTests() {
         ), at: 0)
 
         // paneB is focused. Simulate paneA becoming first responder.
-        let effects = update(&model, .paneBecameFirstResponder(paneId: paneA))
+        let commands = update(&model, .paneBecameFirstResponder(paneId: paneA))
 
         let tab = model.groups[0].tabs[0]
         try expectEqual(tab.focusedPaneId, paneA, "focused pane should change")
@@ -166,7 +166,7 @@ func paneTests() {
         // A focus change does not drift the tab's ContainerShape (focusedPaneId is excluded
         // when unzoomed), so reconcileContainers does not rebuild -- focusedPaneId is the net.
         // The toolbar's unread-alert badge reconciles; the alert-cleared state is asserted above.
-        try expect(!hasEffect(effects) {
+        try expect(!hasEffect(commands) {
             if case .makeFirstResponder = $0 { return true }
             return false
         }, "should not request first responder from first responder callback")
@@ -179,8 +179,8 @@ func paneTests() {
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let effects = update(&model, .paneBecameFirstResponder(paneId: paneId))
-        try expectEqual(effects.count, 0, "same pane should return no effects")
+        let commands = update(&model, .paneBecameFirstResponder(paneId: paneId))
+        try expectEqual(commands.count, 0, "same pane should return no commands")
     }
 
     test("testPaneBecameFirstResponderLeavesAlertUnreadInManualMode") {
@@ -237,14 +237,14 @@ func paneTests() {
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
-        let effects = update(&model, .closePane(paneId: paneB))
+        let commands = update(&model, .closePane(paneId: paneB))
 
         // The collapsed group's bell-badge roll-up now reconciles via reconcileSidebar
         // (desiredSidebar.groupUnreadAlertCount); here we assert the close itself and that
         // it persists.
         try expect(model.pane(paneB) == nil, "paneB should be closed")
         try expectEqual(model.groups[0].tabs[0].focusedPaneId, paneA, "paneA should refocus")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
         }, "should persist via scheduleCheckpoint")
@@ -314,9 +314,9 @@ func paneTests() {
         var model = makeModel()
         createTab(&model)
 
-        let effects = update(&model, .toggleZoomPane)
+        let commands = update(&model, .toggleZoomPane)
         try expectEqual(model.groups[0].tabs[0].isZoomed, false)
-        try expectEqual(effects.count, 0, "no effects on single pane")
+        try expectEqual(commands.count, 0, "no commands on single pane")
     }
 
     test("testCloseZoomedPaneNormalizesZoom") {
@@ -425,16 +425,16 @@ func paneTests() {
         update(&model, .splitPane(direction: .horizontal))
         let pane = model.groups[0].tabs[0].focusedPaneId
 
-        let effects = update(&model, .movePane(source: pane, target: pane, intent: .swap))
-        try expectEqual(effects.count, 0, "same source/target is no-op")
+        let commands = update(&model, .movePane(source: pane, target: pane, intent: .swap))
+        try expectEqual(commands.count, 0, "same source/target is no-op")
     }
 
     test("testMovePaneNoSelectedTab") {
         var model = makeModel()
         model.selectedTabId = nil
 
-        let effects = update(&model, .movePane(source: PaneId(), target: PaneId(), intent: .swap))
-        try expectEqual(effects.count, 0, "no selected tab is no-op")
+        let commands = update(&model, .movePane(source: PaneId(), target: PaneId(), intent: .swap))
+        try expectEqual(commands.count, 0, "no selected tab is no-op")
     }
 
     test("testMovePaneZoomedTab") {
@@ -446,8 +446,8 @@ func paneTests() {
         try expectEqual(model.groups[0].tabs[0].isZoomed, true)
 
         let paneB = allPaneIds(model.groups[0].tabs[0].rootNode).first(where: { $0 != paneA })!
-        let effects = update(&model, .movePane(source: paneA, target: paneB, intent: .swap))
-        try expectEqual(effects.count, 0, "zoomed tab is no-op")
+        let commands = update(&model, .movePane(source: paneA, target: paneB, intent: .swap))
+        try expectEqual(commands.count, 0, "zoomed tab is no-op")
     }
 
     test("testSplitPaneTargetsByPaneId") {
@@ -503,7 +503,7 @@ func paneTests() {
         let existingFocusedPaneId = model.groups[0].tabs[0].focusedPaneId
         let beforePaneIds = Set(model.allPaneIds)
 
-        let effects = update(
+        let commands = update(
             &model,
             .splitPane(paneId: existingFocusedPaneId, direction: .horizontal, background: true)
         )
@@ -514,13 +514,13 @@ func paneTests() {
         try expect(allPaneIds(tab.rootNode).contains(newPaneIds.first!), "tab tree should contain new pane")
         try expectEqual(tab.focusedPaneId, existingFocusedPaneId, "background split should preserve focused pane")
         try expectEqual(model.selectedTabId, tabId, "background split should not change selected tab")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .createSurface(let paneId, _, _, _, _) = $0 {
                 return newPaneIds.contains(paneId)
             }
             return false
         }, "should create a surface for the new pane")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
         }, "should schedule checkpoint")
@@ -528,7 +528,7 @@ func paneTests() {
         // reconcileContainers rebuilds it -- the new pane in this tab's tree is the net.
         try expect(allPaneIds(model.groups[0].tabs[0].rootNode).contains { newPaneIds.contains($0) },
             "new pane lands in the selected tab's tree (rendered on the rebuild)")
-        try expect(!hasEffect(effects) {
+        try expect(!hasEffect(commands) {
             if case .makeFirstResponder = $0 { return true }
             return false
         }, "background split should not request first responder")
@@ -544,7 +544,7 @@ func paneTests() {
         _ = update(&model, .selectTab(id: tabAId))
         let beforePaneIds = Set(model.allPaneIds)
 
-        let effects = update(
+        let commands = update(
             &model,
             .splitPane(paneId: tabBFocusedPaneId, direction: .horizontal, background: true)
         )
@@ -555,19 +555,19 @@ func paneTests() {
         try expect(allPaneIds(tabB.rootNode).contains(newPaneIds.first!), "background tab tree should contain new pane")
         try expectEqual(tabB.focusedPaneId, tabBFocusedPaneId, "background split should preserve target tab focus")
         try expectEqual(model.selectedTabId, tabAId, "background split should not change selected tab")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .createSurface(let paneId, _, _, _, _) = $0 {
                 return newPaneIds.contains(paneId)
             }
             return false
         }, "should create a surface for the new pane")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
         }, "should schedule checkpoint")
         // Only tabB's ContainerShape drifted, so reconcileContainers rebuilds exactly tabB
         // (scoped structurally) -- the new pane in tabB's tree (asserted above) is the net.
-        try expect(!hasEffect(effects) {
+        try expect(!hasEffect(commands) {
             if case .makeFirstResponder = $0 { return true }
             return false
         }, "background split should not request first responder")
@@ -580,11 +580,11 @@ func paneTests() {
         model.updatePane(paneId) { $0.theme = "Tokyo Night" }
         let beforePaneIds = Set(model.allPaneIds)
 
-        let effects = update(&model, .splitPane(paneId: paneId, direction: .horizontal, background: true))
+        let commands = update(&model, .splitPane(paneId: paneId, direction: .horizontal, background: true))
         let newPaneId = Set(model.allPaneIds).subtracting(beforePaneIds).first!
 
         try expectEqual(model.pane(newPaneId)?.theme, "Tokyo Night", "background split should inherit target theme")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .applyPaneTheme(let paneId) = $0, paneId == newPaneId { return true }
             return false
         }, "background split should apply inherited theme")
@@ -647,7 +647,7 @@ func paneTests() {
         // A TODO popover open before a cross-tab move (a view swap) must clear.
         model.todoPopover = .tab(model.selectedTabId!)
 
-        let effects = update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
+        let commands = update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
 
         // Source tab (single pane) should be removed
         try expectEqual(model.groups[0].tabs.count, 1, "source tab should be removed when empty")
@@ -676,7 +676,7 @@ func paneTests() {
         // A cross-tab move is a view swap, so the stranded TODO popover record clears.
         try expect(model.todoPopover == nil, "cross-tab move clears the stranded TODO popover")
 
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
             return false
         }, "should emit makeFirstResponder for moved pane")
@@ -726,8 +726,8 @@ func paneTests() {
         let tabId = model.groups[0].tabs[0].id
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let effects = update(&model, .movePaneToTab(paneId: paneId, targetTabId: tabId))
-        try expectEqual(effects.count, 0, "same tab should be no-op")
+        let commands = update(&model, .movePaneToTab(paneId: paneId, targetTabId: tabId))
+        try expectEqual(commands.count, 0, "same tab should be no-op")
     }
 
     test("testMovePaneToTabSourceTabClosedWhenEmpty") {
@@ -782,10 +782,10 @@ func paneTests() {
         let paneB = model.groups[0].tabs[1].focusedPaneId
 
         // Move paneA to tab2 (tab2 is currently selected)
-        let effects = update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
+        let commands = update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
 
         // Should defocus tab2's panes before switching (paneB was in the selected tab)
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .focusSurface(let pid, let focused) = $0, pid == paneB, !focused { return true }
             return false
         }, "should defocus old tab's panes")
@@ -799,9 +799,9 @@ func paneTests() {
         createTab(&model)
         let tab2Id = model.groups[0].tabs[1].id
 
-        let effects = update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
+        let commands = update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
 
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
             return false
         }, "should emit makeFirstResponder for moved pane")
@@ -837,7 +837,7 @@ func paneTests() {
         let groupId = model.groups[0].id
 
         // Drag paneA to new tab at index 1 (after tab1)
-        let effects = update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 1))
+        let commands = update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 1))
 
         try expectEqual(model.groups[0].tabs.count, 2, "should have 2 tabs")
         // Source tab should still exist with paneB only
@@ -862,7 +862,7 @@ func paneTests() {
 
         // The pane moves (preserved in the new tab, asserted above) -- no pane left the
         // model, so reconcileSurfaceExistence tears nothing down (the surface is reused).
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
             return false
         }, "should emit makeFirstResponder for moved pane")
@@ -951,8 +951,8 @@ func paneTests() {
         let groupId = model.groups[0].id
 
         // Should be no-op: can't create a new tab from the only pane in the only tab
-        let effects = update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 0))
-        try expectEqual(effects.count, 0, "should be no-op for single-pane single-tab")
+        let commands = update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 0))
+        try expectEqual(commands.count, 0, "should be no-op for single-pane single-tab")
         try expectEqual(model.groups[0].tabs.count, 1)
     }
 

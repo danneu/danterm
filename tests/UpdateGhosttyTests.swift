@@ -8,9 +8,9 @@ func ghosttyTests() {
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let effects = update(&model, .surfaceBell(paneId: paneId))
+        let commands = update(&model, .surfaceBell(paneId: paneId))
         try expectEqual(model.alerts.count, 0, "no alert for bell on focused pane")
-        try expectEqual(effects.count, 0, "no effects for bell on focused pane")
+        try expectEqual(commands.count, 0, "no commands for bell on focused pane")
     }
 
     test("testBellOnBackgroundPaneCreatesUnreadAlert") {
@@ -20,12 +20,12 @@ func ghosttyTests() {
 
         createTab(&model)
 
-        let effects = update(&model, .surfaceBell(paneId: firstTabPaneId))
+        let commands = update(&model, .surfaceBell(paneId: firstTabPaneId))
         try expectEqual(model.alerts.count, 1, "should create one alert")
         try expectEqual(model.alerts[0].kind, .bell)
         try expectEqual(model.alerts[0].isUnread, true, "alert should be unread")
         try expectEqual(model.alerts[0].paneId, firstTabPaneId)
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .sendNotification = $0 { return true }
             return false
         }, "should emit sendNotification for background bell")
@@ -38,10 +38,10 @@ func ghosttyTests() {
         let paneId = model.groups[0].tabs[0].focusedPaneId
         let liveSurfaceIds = Set(model.allPaneIds)
 
-        let effects = update(&model, .surfaceCreationFailed(paneId: paneId))
+        let commands = update(&model, .surfaceCreationFailed(paneId: paneId))
         try expect(model.pane(paneId) == nil, "pane should be removed")
         try expectEqual(model.groups[0].tabs.count, 0, "tab should be removed")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .terminate = $0 { return true }
             return false
         }, "should terminate when no tabs left")
@@ -63,7 +63,7 @@ func ghosttyTests() {
         update(&model, .selectTab(id: tabId))
         let liveSurfaceIds = Set(model.allPaneIds)
 
-        let effects = update(&model, .surfaceCreationFailed(paneId: paneA))
+        let commands = update(&model, .surfaceCreationFailed(paneId: paneA))
 
         try expectEqual(model.selectedTabId, fallbackTabId, "selection should move to fallback tab")
         try expect(model.pane(paneA) == nil, "failed pane should be removed")
@@ -73,7 +73,7 @@ func ghosttyTests() {
         // absent from the model. Container removal + fallback selection are structural.
         try expectEqual(surfacesToTearDown(liveSurfaceIds: liveSurfaceIds, model: model), Set([paneA, paneB]),
             "both sibling pane surfaces are torn down")
-        try expect(!hasEffect(effects) {
+        try expect(!hasEffect(commands) {
             if case .terminate = $0 { return true }
             return false
         }, "should not terminate when fallback tab remains")
@@ -118,11 +118,11 @@ func ghosttyTests() {
         update(&model, .splitPane(direction: .horizontal))
         // paneB is focused
 
-        let effects = update(&model, .surfaceTitle(paneId: paneA, title: "htop"))
+        let commands = update(&model, .surfaceTitle(paneId: paneA, title: "htop"))
         try expectEqual(model.pane(paneA)?.title, "htop", "pane title should update")
         try expectEqual(model.groups[0].tabs[0].title, "Terminal", "tab title should not change")
-        try expectEqual(effects.count, 1, "only scheduleCheckpoint for unfocused pane title")
-        try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false })
+        try expectEqual(commands.count, 1, "only scheduleCheckpoint for unfocused pane title")
+        try expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false })
     }
 
     test("testSurfacePwdFocusedPane") {
@@ -146,10 +146,10 @@ func ghosttyTests() {
         update(&model, .splitPane(direction: .horizontal))
         // paneB is now focused
 
-        let effects = update(&model, .surfaceCwd(paneId: paneA, cwd: "/tmp"))
+        let commands = update(&model, .surfaceCwd(paneId: paneA, cwd: "/tmp"))
         try expectEqual(model.pane(paneA)?.cwd, "/tmp", "pane cwd should update")
-        try expectEqual(effects.count, 1, "only scheduleCheckpoint for unfocused pane cwd")
-        try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false })
+        try expectEqual(commands.count, 1, "only scheduleCheckpoint for unfocused pane cwd")
+        try expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false })
     }
 
     test("testSurfaceTitleBackgroundTab") {
@@ -189,9 +189,9 @@ func ghosttyTests() {
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let effects = update(&model, .desktopNotification(paneId: paneId, title: "Build complete", body: "make finished"))
+        let commands = update(&model, .desktopNotification(paneId: paneId, title: "Build complete", body: "make finished"))
         try expectEqual(model.alerts.count, 0, "should not create alert for focused pane")
-        try expectEqual(effects.count, 0, "should produce no effects for focused pane")
+        try expectEqual(commands.count, 0, "should produce no commands for focused pane")
     }
 
     test("testDesktopNotificationOnBackgroundPaneCreatesUnreadAlert") {
@@ -201,10 +201,10 @@ func ghosttyTests() {
 
         createTab(&model)
 
-        let effects = update(&model, .desktopNotification(paneId: firstTabPaneId, title: "Hello", body: "World"))
+        let commands = update(&model, .desktopNotification(paneId: firstTabPaneId, title: "Hello", body: "World"))
         try expectEqual(model.alerts.count, 1, "should create alert")
         try expectEqual(model.alerts[0].isUnread, true, "background pane alert should be unread")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .sendNotification(_, let t, let b) = $0,
                t == "Hello", b == "World" { return true }
             return false
@@ -224,8 +224,8 @@ func ghosttyTests() {
         try expect(model.lastNotificationTime[firstTabPaneId]?[.bell] != nil, "bell should set lastNotificationTime")
 
         // Desktop notification should still fire (independent throttle)
-        let effects = update(&model, .desktopNotification(paneId: firstTabPaneId, title: "Done", body: "Task finished"))
-        try expect(hasEffect(effects) {
+        let commands = update(&model, .desktopNotification(paneId: firstTabPaneId, title: "Done", body: "Task finished"))
+        try expect(hasEffect(commands) {
             if case .sendNotification(_, let t, _) = $0, t == "Done" { return true }
             return false
         }, "desktop notification should not be throttled by bell")
@@ -246,9 +246,9 @@ func ghosttyTests() {
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let effects = update(&model, .surfaceProgress(paneId: paneId, state: .set(percent: 50)))
+        let commands = update(&model, .surfaceProgress(paneId: paneId, state: .set(percent: 50)))
         try expectEqual(model.pane(paneId)?.progress, .set(percent: 50))
-        try expectEqual(effects.count, 0, "no effects from progress update")
+        try expectEqual(commands.count, 0, "no commands from progress update")
     }
 
     test("testSurfaceProgressNilClearsState") {
@@ -268,8 +268,8 @@ func ghosttyTests() {
         createTab(&model)
         let unknownPaneId = PaneId()
 
-        let effects = update(&model, .surfaceProgress(paneId: unknownPaneId, state: .set(percent: 50)))
-        try expectEqual(effects.count, 0, "no effects for unknown pane")
+        let commands = update(&model, .surfaceProgress(paneId: unknownPaneId, state: .set(percent: 50)))
+        try expectEqual(commands.count, 0, "no commands for unknown pane")
     }
 
     test("testProgressStateSurvivesTitleUpdate") {
@@ -301,9 +301,9 @@ func ghosttyTests() {
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let effects = update(&model, .surfaceClosed(paneId: paneId))
+        let commands = update(&model, .surfaceClosed(paneId: paneId))
         try expect(model.pane(paneId) != nil, "pane should still exist (confirmation pending)")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .showTerminateConfirmation(let count) = $0, count == 1 { return true }
             return false
         }, "should show confirmation when last pane closed via surfaceClosed")

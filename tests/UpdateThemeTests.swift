@@ -13,17 +13,17 @@ func themeTests() {
         try expectEqual(model.pane(paneId)?.theme, "Dracula")
     }
 
-    test("setPaneTheme produces applyPaneTheme and scheduleCheckpoint effects") {
+    test("setPaneTheme produces applyPaneTheme and scheduleCheckpoint commands") {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        let effects = update(&model, .setPaneTheme(paneId: paneId, themeName: "Nord"))
-        try expect(hasEffect(effects) {
+        let commands = update(&model, .setPaneTheme(paneId: paneId, themeName: "Nord"))
+        try expect(hasEffect(commands) {
             if case .applyPaneTheme(let id) = $0 {
                 return id == paneId
             }; return false
         }, "should emit applyPaneTheme")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }; return false
         }, "should emit scheduleCheckpoint")
     }
@@ -55,10 +55,10 @@ func themeTests() {
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         update(&model, .setPaneTheme(paneId: paneId, themeName: "Rose Pine"))
-        let effects = update(&model, .splitPane(paneId: paneId, direction: .vertical))
+        let commands = update(&model, .splitPane(paneId: paneId, direction: .vertical))
         let tab = selectedTab(in: model)!
         let newPaneId = tab.focusedPaneId
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .applyPaneTheme(let id) = $0 {
                 return id == newPaneId
             }; return false
@@ -68,8 +68,8 @@ func themeTests() {
     test("splitPane without theme does not emit applyPaneTheme") {
         var model = makeModel()
         createTab(&model)
-        let effects = update(&model, .splitPane(direction: .horizontal))
-        try expect(!hasEffect(effects) {
+        let commands = update(&model, .splitPane(direction: .horizontal))
+        try expect(!hasEffect(commands) {
             if case .applyPaneTheme = $0 { return true }; return false
         }, "should not emit applyPaneTheme when no theme")
     }
@@ -133,9 +133,9 @@ func themeTests() {
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         update(&model, .setPaneTheme(paneId: paneId, themeName: "Catppuccin Latte"))
-        let effects = update(&model, .exportState)
-        guard case .exportState(let snapshot) = effects.first else {
-            throw TestFailure(message: "expected exportState effect")
+        let commands = update(&model, .exportState)
+        guard case .exportState(let snapshot) = commands.first else {
+            throw TestFailure(message: "expected exportState command")
         }
         let ps = paneSnapshot(paneId.rawValue.uuidString, in: snapshot)
         try expectEqual(ps?.theme, "Catppuccin Latte")

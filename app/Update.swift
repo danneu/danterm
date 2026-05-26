@@ -17,7 +17,7 @@ func isDraftDirty(_ draft: PreferencesDraft, vs config: DanTermConfig, ghostty: 
 }
 
 @discardableResult
-func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
+func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
     // Single chokepoint: every code path that mutates tab membership or
     // selectedTabId reaches this point. `defer` fires after the matched case
     // returns, and `inout model` makes the reconciled state visible to
@@ -89,10 +89,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
 
         // Defocus old tab's panes
-        var effects: [Effect] = []
+        var commands: [Command] = []
         if !background, let oldTabId = model.selectedTabId {
             for oldPaneId in paneIdsForTab(oldTabId, in: model) {
-                effects.append(.focusSurface(paneId: oldPaneId, focused: false))
+                commands.append(.focusSurface(paneId: oldPaneId, focused: false))
             }
         }
 
@@ -100,7 +100,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             model.selectedTabId = tabId
         }
 
-        effects.append(.createSurface(
+        commands.append(.createSurface(
             paneId: paneId,
             cwd: cwd,
             command: nil,
@@ -113,8 +113,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             clearTodoPopoverForViewSwap(&model)
         }
         // Persist new tab + pane + selection so a crash doesn't lose the tab.
-        effects.append(.scheduleCheckpoint)
-        return effects
+        commands.append(.scheduleCheckpoint)
+        return commands
 
     case .selectAdjacentTab(let direction):
         guard let targetId = adjacentTabId(direction: direction, in: model) else { return [] }
@@ -154,16 +154,16 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             return emitTerminateConfirmation(&model)
         }
 
-        var effects = closeTabBody(&model, id: id)
+        var commands = closeTabBody(&model, id: id)
 
         // Check if all tabs gone
         let allTabs = model.groups.flatMap(\.tabs)
         if allTabs.isEmpty {
-            return effects + [.terminate]
+            return commands + [.terminate]
         }
         // Persist tab removal + new selection so closed tabs don't reappear on restore.
-        effects.append(.scheduleCheckpoint)
-        return effects
+        commands.append(.scheduleCheckpoint)
+        return commands
 
     // MARK: - Pane Management
 
@@ -199,7 +199,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             tab.isZoomed = false
         }
 
-        var effects: [Effect] = [
+        var commands: [Command] = [
             .createSurface(
                 paneId: newPaneId,
                 cwd: cwd,
@@ -215,11 +215,11 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             clearTodoPopoverForViewSwap(&model)
         }
         // Persist new split tree so the pane layout survives a crash.
-        effects.append(.scheduleCheckpoint)
+        commands.append(.scheduleCheckpoint)
         if theme != nil {
-            effects.append(.applyPaneTheme(paneId: newPaneId))
+            commands.append(.applyPaneTheme(paneId: newPaneId))
         }
-        return effects
+        return commands
 
     case .closePane(let paneId):
         guard let tabId = model.selectedTabId,
@@ -235,13 +235,13 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
         // Surface teardown is reconcileSurfaceExistence's now (paneId leaves the tree
         // below, so the next reconcile tears its surface down); keep side-table cleanup.
-        var effects: [Effect] = []
+        var commands: [Command] = []
         removeAlertsForPane(paneId, in: &model)
         removePaneSearchState(paneId, from: &model)
         model.lastNotificationTime.removeValue(forKey: paneId)
         if model.todoPopover == .pane(paneId) {
             model.todoPopover = nil
-            effects.append(.dismissTodoPopover)
+            commands.append(.dismissTodoPopover)
         }
 
         guard let newRoot = newTree else {
@@ -268,8 +268,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         // anchored TODO popover, so clear the model record. reconcileContainers rebuilds.
         clearTodoPopoverForViewSwap(&model)
         // Persist pane removal + updated tree so closed panes stay closed on restore.
-        effects.append(.scheduleCheckpoint)
-        return effects
+        commands.append(.scheduleCheckpoint)
+        return commands
 
     case .movePane(let source, let target, let intent):
         guard source != target else { return [] }
@@ -351,11 +351,11 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             markAlertsReadForPane(paneId, in: &model)
         }
 
-        // Build effects: defocus old tab's panes, then select + focus the target tab.
-        var effects: [Effect] = []
+        // Build commands: defocus old tab's panes, then select + focus the target tab.
+        var commands: [Command] = []
         if let oldTabId = model.selectedTabId {
             for oldPaneId in paneIdsForTab(oldTabId, in: model) {
-                effects.append(.focusSurface(paneId: oldPaneId, focused: false))
+                commands.append(.focusSurface(paneId: oldPaneId, focused: false))
             }
         }
         model.selectedTabId = targetTabId
@@ -363,10 +363,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         // is rebuilt + shown -- all by reconcileContainers from the model. Selection moved
         // to the target (a view swap), so clear the stranded TODO popover record.
         clearTodoPopoverForViewSwap(&model)
-        effects.append(.makeFirstResponder(paneId: paneId))
+        commands.append(.makeFirstResponder(paneId: paneId))
         // Persist cross-tab pane move so the new tree layout survives a crash.
-        effects.append(.scheduleCheckpoint)
-        return effects
+        commands.append(.scheduleCheckpoint)
+        return commands
 
     case .movePaneToNewTab(let paneId, let inGroupId, let atIndex):
         // Find source tab containing this pane
@@ -380,12 +380,12 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         // Guard: don't allow if this would leave zero tabs
         if sourceHasOnlyThisPane && totalTabCount(model) == 1 { return [] }
 
-        var effects: [Effect] = []
+        var commands: [Command] = []
 
         // Defocus old tab's panes
         if let oldTabId = model.selectedTabId {
             for oldPaneId in paneIdsForTab(oldTabId, in: model) {
-                effects.append(.focusSurface(paneId: oldPaneId, focused: false))
+                commands.append(.focusSurface(paneId: oldPaneId, focused: false))
             }
         }
 
@@ -433,10 +433,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         // Selection moved to the new tab (a view swap); the source + new containers
         // reconcile from the model via reconcileContainers. Clear the stranded popover record.
         clearTodoPopoverForViewSwap(&model)
-        effects.append(.makeFirstResponder(paneId: paneId))
+        commands.append(.makeFirstResponder(paneId: paneId))
         // Persist pane-to-new-tab extraction so the tab structure survives a crash.
-        effects.append(.scheduleCheckpoint)
-        return effects
+        commands.append(.scheduleCheckpoint)
+        return commands
 
     case .setTabColors(let tabIds, let color):
         // Apply the chosen color to every requested tab. No toggle-off
@@ -449,13 +449,13 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             seen.insert(id); return true
         }
         guard !validIds.isEmpty else { return [] }
-        var effects: [Effect] = []
+        var commands: [Command] = []
         for id in validIds {
             updateTab(id, in: &model) { t in t.color = color }
         }
         // The color stripe updates via reconcileSidebar (color is in the projection).
-        effects.append(.scheduleCheckpoint)
-        return effects
+        commands.append(.scheduleCheckpoint)
+        return commands
 
     case .clearCustomTitles(let tabIds):
         var seen = Set<TabId>()
@@ -600,16 +600,16 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             model.preferencesDraft!.alertClearMode = newConfig.alertClearMode
             model.preferencesDraft!.remoteTheme = newConfig.remoteTheme
         }
-        var effects: [Effect] = [.syncPreferencesPanel]
+        var commands: [Command] = [.syncPreferencesPanel]
         if newConfig.remoteTheme != oldConfig.remoteTheme {
             // Two passes: collect remote pane ids, then updatePane + emit per pane
             // (can't mutate via updatePane while iterating model.allPanes).
             for paneId in model.allPanes.filter(\.isRemote).map(\.id) {
                 model.updatePane(paneId) { $0.remoteThemeOverride = newConfig.remoteTheme }
-                effects.append(.applyPaneTheme(paneId: paneId))
+                commands.append(.applyPaneTheme(paneId: paneId))
             }
         }
-        return effects
+        return commands
 
     // MARK: - Preferences Panel
 
@@ -683,13 +683,13 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         guard let draft = model.preferencesDraft else { return [] }
         let resolvedTheme = resolveRemoteTheme(draft.remoteTheme)
         let oldConfig = model.config
-        var effects: [Effect] = []
+        var commands: [Command] = []
         // Save changed keys to disk.
         if draft.alertClearMode != oldConfig.alertClearMode {
-            effects.append(.saveDanTermConfigKey(key: "alert-clear-mode", value: draft.alertClearMode.rawValue))
+            commands.append(.saveDanTermConfigKey(key: "alert-clear-mode", value: draft.alertClearMode.rawValue))
         }
         if resolvedTheme != oldConfig.remoteTheme {
-            effects.append(.saveDanTermConfigKey(key: "remote-theme", value: resolvedTheme))
+            commands.append(.saveDanTermConfigKey(key: "remote-theme", value: resolvedTheme))
         }
         // Apply to model.
         model.config.alertClearMode = draft.alertClearMode
@@ -700,7 +700,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         if resolvedTheme != oldConfig.remoteTheme {
             for paneId in model.allPanes.filter(\.isRemote).map(\.id) {
                 model.updatePane(paneId) { $0.remoteThemeOverride = resolvedTheme }
-                effects.append(.applyPaneTheme(paneId: paneId))
+                commands.append(.applyPaneTheme(paneId: paneId))
             }
         }
         // Save changed Ghostty keys and trigger reload if any changed.
@@ -708,24 +708,24 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         var ghosttyChanged = false
         if draft.theme != committedGhostty.theme {
             if let theme = draft.theme {
-                effects.append(.saveDanTermConfigKey(key: "theme", value: theme))
+                commands.append(.saveDanTermConfigKey(key: "theme", value: theme))
             } else {
-                effects.append(.removeDanTermConfigKey(key: "theme"))
+                commands.append(.removeDanTermConfigKey(key: "theme"))
             }
             ghosttyChanged = true
         }
         if draft.fontSize != committedGhostty.fontSize {
             if let fs = draft.fontSize, let val = Double(fs), val > 0 {
-                effects.append(.saveDanTermConfigKey(key: "font-size", value: fs))
+                commands.append(.saveDanTermConfigKey(key: "font-size", value: fs))
                 ghosttyChanged = true
             } else if draft.fontSize == nil {
-                effects.append(.removeDanTermConfigKey(key: "font-size"))
+                commands.append(.removeDanTermConfigKey(key: "font-size"))
                 ghosttyChanged = true
             }
             // else: invalid font-size — skip, leave dirty
         }
         if ghosttyChanged {
-            effects.append(.reloadGhosttyConfig)
+            commands.append(.reloadGhosttyConfig)
             // Optimistically update committed baselines for saved fields.
             // The CONFIG_CHANGE callback will confirm with ghosttyPrefsRefreshed.
             if draft.theme != committedGhostty.theme {
@@ -738,8 +738,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 model.committedGhosttyPrefs?.fontSize = draft.fontSize
             }
         }
-        effects.append(.syncPreferencesPanel)
-        return effects
+        commands.append(.syncPreferencesPanel)
+        return commands
 
     // MARK: - Export
 
@@ -800,13 +800,13 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
         // The tab/group bell badges now ride reconcileSidebar (the projection counts
         // unread alerts per tab and per collapsed group); only the notification remains.
-        var effects: [Effect] = []
+        var commands: [Command] = []
 
-        effects.append(contentsOf: throttledNotification(
+        commands.append(contentsOf: throttledNotification(
             alertId: alert.id, kind: .bell, paneId: paneId,
             title: "DanTerm", body: paneTitle, model: &model
         ))
-        return effects
+        return commands
 
     case .desktopNotification(let paneId, let title, let body):
         // Same as bell: no alert for the focused pane of the selected tab
@@ -829,13 +829,13 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         if model.alerts.count > 100 { model.alerts.removeLast() }
 
         // Tab/group bell badges ride reconcileSidebar (see surfaceBell).
-        var effects: [Effect] = []
+        var commands: [Command] = []
 
-        effects.append(contentsOf: throttledNotification(
+        commands.append(contentsOf: throttledNotification(
             alertId: alert.id, kind: .desktopNotification, paneId: paneId,
             title: title, body: body, model: &model
         ))
-        return effects
+        return commands
 
     case .surfaceClosed(let paneId):
         return update(&model, .closePane(paneId: paneId))
@@ -848,7 +848,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 let tab = model.groups[gi].tabs[ti]
                 let tabId = tab.id
                 let groupId = model.groups[gi].id
-                var effects: [Effect] = []
+                var commands: [Command] = []
                 for pid in allPaneIds(tab.rootNode) {
                     // Surface teardown is reconcileSurfaceExistence's (these panes leave the
                     // tree below); keep the id-keyed side-table cleanup here.
@@ -866,15 +866,15 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                     selectionMoved = model.selectedTabId != nil
                 }
                 if model.groups.flatMap(\.tabs).isEmpty {
-                    return effects + [.terminate]
+                    return commands + [.terminate]
                 }
                 if selectionMoved {
                     // Selection moved to a surviving tab (a view swap); clear the popover record.
                     clearTodoPopoverForViewSwap(&model)
                 }
                 // Persist tab removal after a failed surface so it doesn't reappear.
-                effects.append(.scheduleCheckpoint)
-                return effects
+                commands.append(.scheduleCheckpoint)
+                return commands
             }
         }
         // A pane in no tree cannot exist now, so this fallback is just defensive
@@ -925,10 +925,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
            let idx = model.alerts.firstIndex(where: { $0.id == alertId }) {
             model.alerts[idx].isUnread = false
         }
-        var effects = navigateToPane(alert.paneId, in: &model)
-        effects.append(.activateApp)
-        effects.append(.dismissAlertsPopover)
-        return effects
+        var commands = navigateToPane(alert.paneId, in: &model)
+        commands.append(.activateApp)
+        commands.append(.dismissAlertsPopover)
+        return commands
 
     case .goToMostRecentAlertPane:
         // Ack only the focused pane before searching so repeated presses walk every
@@ -982,17 +982,17 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let normalized = normalizedLiveTabIds(ids, in: model)
         guard !normalized.isEmpty else { return [] }
 
-        var effects: [Effect] = []
+        var commands: [Command] = []
         for id in normalized {
-            effects.append(contentsOf: closeTabBody(&model, id: id))
+            commands.append(contentsOf: closeTabBody(&model, id: id))
         }
 
         let allTabs = model.groups.flatMap(\.tabs)
         if allTabs.isEmpty {
-            return effects + [.terminate]
+            return commands + [.terminate]
         }
-        effects.append(.scheduleCheckpoint)
-        return effects
+        commands.append(.scheduleCheckpoint)
+        return commands
 
     case .cancelCloseTabs:
         model.pendingConfirmation = nil
@@ -1022,7 +1022,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             model.groups[adjIdx].tabs.append(contentsOf: group.tabs)
         } else {
             // Close all tabs' surfaces
-            var effects: [Effect] = []
+            var commands: [Command] = []
             for tab in group.tabs {
                 for pid in allPaneIds(tab.rootNode) {
                     // Surface teardown is reconcileSurfaceExistence's (these panes leave the
@@ -1034,7 +1034,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             }
             model.groups.remove(at: idx)
             if model.groups.flatMap(\.tabs).isEmpty {
-                return effects + [.terminate]
+                return commands + [.terminate]
             }
             // Fix selection if needed
             if let selId = model.selectedTabId,
@@ -1044,8 +1044,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 clearTodoPopoverForViewSwap(&model)
             }
             // Persist group deletion + tab removal so they don't reappear.
-            effects.append(.scheduleCheckpoint)
-            return effects
+            commands.append(.scheduleCheckpoint)
+            return commands
         }
 
         model.groups.remove(at: idx)
@@ -1139,7 +1139,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         // Reuse .moveTabs for tabLocation lookup, clamping, and
         // removeGroupIfEmpty pruning of vacated source groups. The new
         // group is empty, so atIndex: 0 is unambiguous; ids are inserted
-        // in the order given. Discard nested effects -- we emit one
+        // in the order given. Discard nested commands -- we emit one
         // scheduleCheckpoint at the end (the sidebar updates via reconcileSidebar).
         _ = update(&model, .moveTabs(
             tabIds: validIds, toGroupId: newGroupId, atIndex: 0))
@@ -1242,13 +1242,13 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             return [.dismissTodoPopover]
         }
         // Close any other open popover (pane or tab) before showing the new one.
-        var effects: [Effect] = []
+        var commands: [Command] = []
         if case .tab = model.todoPopover {
-            effects.append(.dismissTodoPopoverForTab)
+            commands.append(.dismissTodoPopoverForTab)
         }
         model.todoPopover = .pane(paneId)
-        effects.append(.showTodoPopover(paneId: paneId))
-        return effects
+        commands.append(.showTodoPopover(paneId: paneId))
+        return commands
 
     case .todoPopoverClosed(let paneId):
         if model.todoPopover == .pane(paneId) {
@@ -1262,13 +1262,13 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             model.todoPopover = nil
             return [.dismissTodoPopoverForTab]
         }
-        var effects: [Effect] = []
+        var commands: [Command] = []
         if case .pane = model.todoPopover {
-            effects.append(.dismissTodoPopover)
+            commands.append(.dismissTodoPopover)
         }
         model.todoPopover = .tab(tabId)
-        effects.append(.showTodoPopoverForTab(tabId: tabId))
-        return effects
+        commands.append(.showTodoPopoverForTab(tabId: tabId))
+        return commands
 
     case .todoPopoverForTabClosed(let tabId):
         if model.todoPopover == .tab(tabId) {
@@ -1484,9 +1484,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return mruCycleCancel(&model)
 
     case .mruCycleOneShot(let direction):
-        var effects = mruCycleStep(&model, direction: direction)
-        effects.append(contentsOf: mruCycleCommit(&model))
-        return effects
+        var commands = mruCycleStep(&model, direction: direction)
+        commands.append(contentsOf: mruCycleCommit(&model))
+        return commands
 
     // Tab jump mode
     case .jumpModeActivated(let visibleTabs):
@@ -1508,7 +1508,7 @@ private func handleIpcRequest(
     method: String,
     params: JSONValue,
     context: IpcRequestContext
-) -> [Effect] {
+) -> [Command] {
     switch method {
     case Methods.ls:
         do {
@@ -1557,8 +1557,8 @@ private func handleIpcRequest(
         default:
             return ipcInvalidParams(reqId, "invalid title")
         }
-        let effects = update(&model, .renameTab(id: tabId, name: title))
-        return effects + [.ipcReply(reqId: reqId, result: tabRenameResult(tabById(tabId, in: model)))]
+        let commands = update(&model, .renameTab(id: tabId, name: title))
+        return commands + [.ipcReply(reqId: reqId, result: tabRenameResult(tabById(tabId, in: model)))]
 
     case Methods.paneSplit:
         do {
@@ -1572,9 +1572,9 @@ private func handleIpcRequest(
             let background = try parseOptionalBool(object["background"], name: "background")
             let paneId = try resolvePaneSplitTarget(params: params, context: context, in: model)
             let before = Set(model.allPaneIds)
-            let effects = update(&model, .splitPane(paneId: paneId, direction: direction, launch: launch, background: background))
+            let commands = update(&model, .splitPane(paneId: paneId, direction: direction, launch: launch, background: background))
             let newPaneId = model.allPaneIds.first(where: { !before.contains($0) })
-            return effects + [.ipcReply(reqId: reqId, result: paneResult(newPaneId))]
+            return commands + [.ipcReply(reqId: reqId, result: paneResult(newPaneId))]
         } catch let error as LaunchSpecParseError {
             return ipcInvalidParams(reqId, launchSpecErrorMessage(error))
         } catch let error as IpcParamsError {
@@ -1624,9 +1624,9 @@ private func handleIpcRequest(
         } else {
             createTabMsg = .createTab(inGroupId: groupId, launch: effectiveLaunch, background: background)
         }
-        let effects = update(&model, createTabMsg)
+        let commands = update(&model, createTabMsg)
         let tabId = newestTabId(excluding: before, in: model)
-        return effects + [.ipcReply(reqId: reqId, result: tabNewResult(tabId: tabId, groupId: groupId, in: model))]
+        return commands + [.ipcReply(reqId: reqId, result: tabNewResult(tabId: tabId, groupId: groupId, in: model))]
 
     case Methods.paneFocus:
         guard case .object(let object) = params,
@@ -1636,8 +1636,8 @@ private func handleIpcRequest(
         else {
             return ipcInvalidParams(reqId, "invalid pane id")
         }
-        let effects = navigateToPane(paneId, in: &model)
-        return effects + [.ipcReply(reqId: reqId, result: tabFocusResult(tabForPane(paneId, in: model)))]
+        let commands = navigateToPane(paneId, in: &model)
+        return commands + [.ipcReply(reqId: reqId, result: tabFocusResult(tabForPane(paneId, in: model)))]
 
     case Methods.themeSet:
         guard case .object(let object) = params,
@@ -1662,8 +1662,8 @@ private func handleIpcRequest(
         default:
             return ipcInvalidParams(reqId, "invalid theme name")
         }
-        let effects = update(&model, .setPaneTheme(paneId: paneId, themeName: themeName))
-        return effects + [.ipcReply(reqId: reqId, result: paneThemeResult(paneId, in: model))]
+        let commands = update(&model, .setPaneTheme(paneId: paneId, themeName: themeName))
+        return commands + [.ipcReply(reqId: reqId, result: paneThemeResult(paneId, in: model))]
 
     case Methods.paneInput:
         do {
@@ -1691,19 +1691,19 @@ private func handleIpcRequest(
                 guard case .array(let arr) = i else {
                     throw IpcParamsError("input must be an array")
                 }
-                var effects: [Effect] = []
-                effects.reserveCapacity(arr.count + 1)
+                var commands: [Command] = []
+                commands.reserveCapacity(arr.count + 1)
                 for value in arr {
                     let event = try parseInputEvent(value)
                     switch event {
                     case .text(let text):
-                        effects.append(.sendInputText(paneId: paneId, text: text))
+                        commands.append(.sendInputText(paneId: paneId, text: text))
                     case .key(let key, let mods):
-                        effects.append(.sendInputKey(paneId: paneId, key: key, mods: mods))
+                        commands.append(.sendInputKey(paneId: paneId, key: key, mods: mods))
                     }
                 }
-                effects.append(.ipcReply(reqId: reqId, result: okResult()))
-                return effects
+                commands.append(.ipcReply(reqId: reqId, result: okResult()))
+                return commands
             }
         } catch let error as IpcParamsError {
             return ipcInvalidParams(reqId, error.message)
@@ -1798,9 +1798,9 @@ private func handleIpcRequest(
         guard todoExists(todoId, paneId: paneId, in: model) else {
             return ipcInvalidParams(reqId, "invalid todo")
         }
-        let effects = update(&model, .editTodoText(paneId: paneId, todoId: todoId, text: text))
+        let commands = update(&model, .editTodoText(paneId: paneId, todoId: todoId, text: text))
         let updated = model.pane(paneId)?.todos.first(where: { $0.id == todoId })
-        return effects + [
+        return commands + [
             .ipcReply(reqId: reqId, result: todoResult(updated)),
         ]
 
@@ -1823,9 +1823,9 @@ private func handleIpcRequest(
             return ipcInvalidParams(reqId, "invalid todo")
         }
         let shouldBeDone = method == Methods.todoDone
-        let effects = update(&model, .setTodoDone(paneId: paneId, todoId: todoId, isDone: shouldBeDone))
+        let commands = update(&model, .setTodoDone(paneId: paneId, todoId: todoId, isDone: shouldBeDone))
         let updated = model.pane(paneId)?.todos.first(where: { $0.id == todoId })
-        return effects + [
+        return commands + [
             .ipcReply(reqId: reqId, result: todoResult(updated)),
         ]
 
@@ -1847,8 +1847,8 @@ private func handleIpcRequest(
         guard todoExists(todoId, paneId: paneId, in: model) else {
             return ipcInvalidParams(reqId, "invalid todo")
         }
-        let effects = update(&model, .deleteTodo(paneId: paneId, todoId: todoId))
-        return effects + [
+        let commands = update(&model, .deleteTodo(paneId: paneId, todoId: todoId))
+        return commands + [
             .ipcReply(reqId: reqId, result: okResult()),
         ]
 
@@ -1861,8 +1861,8 @@ private func handleIpcRequest(
         } catch {
             return ipcInvalidParams(reqId, "no pane in context")
         }
-        let effects = update(&model, .clearCompletedTodos(paneId: paneId))
-        return effects + [
+        let commands = update(&model, .clearCompletedTodos(paneId: paneId))
+        return commands + [
             .ipcReply(reqId: reqId, result: okResult()),
         ]
 
@@ -1871,7 +1871,7 @@ private func handleIpcRequest(
     }
 }
 
-private func ipcInvalidParams(_ reqId: UUID, _ message: String) -> [Effect] {
+private func ipcInvalidParams(_ reqId: UUID, _ message: String) -> [Command] {
     [.ipcError(reqId: reqId, code: -32602, message: message)]
 }
 
@@ -2286,14 +2286,14 @@ private func todoJSON(_ item: TodoItem) -> JSONValue {
 // MARK: - Tab Selection Helper
 
 /// Body of `.selectTab` extracted into a helper so `mruCycleCommitted` can
-/// reuse the focus / rebuild / checkpoint effects without duplicating logic.
-private func applySelectTab(_ model: inout AppModel, id: TabId) -> [Effect] {
+/// reuse the focus / rebuild / checkpoint commands without duplicating logic.
+private func applySelectTab(_ model: inout AppModel, id: TabId) -> [Command] {
     guard id != model.selectedTabId else { return [] }
 
-    var effects: [Effect] = []
+    var commands: [Command] = []
     if let oldTabId = model.selectedTabId {
         for oldPaneId in paneIdsForTab(oldTabId, in: model) {
-            effects.append(.focusSurface(paneId: oldPaneId, focused: false))
+            commands.append(.focusSurface(paneId: oldPaneId, focused: false))
         }
     }
     model.selectedTabId = id
@@ -2307,13 +2307,13 @@ private func applySelectTab(_ model: inout AppModel, id: TabId) -> [Effect] {
     // Selection is view-owned: reconcileSidebar reapplies it (replacing the deleted
     // .setSidebarSelection), and any cleared-alert bell badges update from the projection.
     // The selected tab's window chrome reconciles via reconcileWindowChrome.
-    effects.append(.scheduleCheckpoint)
-    return effects
+    commands.append(.scheduleCheckpoint)
+    return commands
 }
 
 // MARK: - MRU Cycle Handlers
 
-private func mruCycleStep(_ model: inout AppModel, direction: MruDirection) -> [Effect] {
+private func mruCycleStep(_ model: inout AppModel, direction: MruDirection) -> [Command] {
     // Empty MRU: nothing to cycle through. Avoids modulo-by-zero below.
     guard !model.mruOrder.isEmpty else { return [] }
 
@@ -2338,7 +2338,7 @@ private func mruCycleStep(_ model: inout AppModel, direction: MruDirection) -> [
     return []
 }
 
-private func mruCycleCommit(_ model: inout AppModel) -> [Effect] {
+private func mruCycleCommit(_ model: inout AppModel) -> [Command] {
     guard let cycle = model.mruCycle else { return [] }
 
     // Tabs may have been removed mid-cycle (closeTab, surfaceCreationFailed,
@@ -2355,15 +2355,15 @@ private func mruCycleCommit(_ model: inout AppModel) -> [Effect] {
     model.mruCycle = nil
 
     // mruCycle == nil now -> reconcileSwitcher hides the panel; the only surviving
-    // effects are the selectTab commands when the chosen tab differs.
-    var effects: [Effect] = []
+    // commands are the selectTab commands when the chosen tab differs.
+    var commands: [Command] = []
     if chosenId != model.selectedTabId {
-        effects.append(contentsOf: applySelectTab(&model, id: chosenId))
+        commands.append(contentsOf: applySelectTab(&model, id: chosenId))
     }
-    return effects
+    return commands
 }
 
-private func mruCycleCancel(_ model: inout AppModel) -> [Effect] {
+private func mruCycleCancel(_ model: inout AppModel) -> [Command] {
     guard model.mruCycle != nil else { return [] }
     model.mruCycle = nil
     // mruCycle == nil -> reconcileSwitcher orders the panel out.
@@ -2372,7 +2372,7 @@ private func mruCycleCancel(_ model: inout AppModel) -> [Effect] {
 
 // MARK: - Tab Jump Mode Handlers
 
-private func jumpModeActivate(_ model: inout AppModel, visibleTabs: [TabId]) -> [Effect] {
+private func jumpModeActivate(_ model: inout AppModel, visibleTabs: [TabId]) -> [Command] {
     // End any in-flight MRU cycle; reconcileSwitcher hides the panel once mruCycle is nil
     // (a no-op assignment when no cycle is active).
     model.mruCycle = nil
@@ -2380,7 +2380,7 @@ private func jumpModeActivate(_ model: inout AppModel, visibleTabs: [TabId]) -> 
     return []   // jump badges (reconcileSidebar) + switcher hide (reconcileSwitcher) both reconcile
 }
 
-private func jumpModeCommit(_ model: inout AppModel, char: Character) -> [Effect] {
+private func jumpModeCommit(_ model: inout AppModel, char: Character) -> [Command] {
     guard let jumpMode = model.jumpMode else { return [] }
     model.jumpMode = nil   // jump badges clear via reconcileSidebar
 
@@ -2392,7 +2392,7 @@ private func jumpModeCommit(_ model: inout AppModel, char: Character) -> [Effect
     return applySelectTab(&model, id: targetId)
 }
 
-private func jumpModeCancel(_ model: inout AppModel) -> [Effect] {
+private func jumpModeCancel(_ model: inout AppModel) -> [Command] {
     guard model.jumpMode != nil else { return [] }
     model.jumpMode = nil   // jump badges clear via reconcileSidebar
     return []
@@ -2401,13 +2401,13 @@ private func jumpModeCancel(_ model: inout AppModel) -> [Effect] {
 // MARK: - Helpers
 
 /// Navigate to a pane: select its current tab, clear zoom if needed, focus the pane.
-private func navigateToPane(_ paneId: PaneId, in model: inout AppModel) -> [Effect] {
+private func navigateToPane(_ paneId: PaneId, in model: inout AppModel) -> [Command] {
     guard let currentTab = tabForPane(paneId, in: model) else { return [] }
     let wasZoomed = currentTab.isZoomed
     let oldFocusedPaneId = currentTab.focusedPaneId
     let focusChanged = paneId != oldFocusedPaneId
-    var effects = update(&model, .selectTab(id: currentTab.id))
-    let tabSwitched = !effects.isEmpty
+    var commands = update(&model, .selectTab(id: currentTab.id))
+    let tabSwitched = !commands.isEmpty
     updateTab(currentTab.id, in: &model) { tab in
         tab.focusedPaneId = paneId
     }
@@ -2426,11 +2426,11 @@ private func navigateToPane(_ paneId: PaneId, in model: inout AppModel) -> [Effe
     }
     // A zoom change here rebuilds the selected (visible) container via reconcileContainers;
     // its stranded-popover clear is already covered above (same-tab) or by applySelectTab.
-    effects.append(.makeFirstResponder(paneId: paneId))
+    commands.append(.makeFirstResponder(paneId: paneId))
     if focusChanged {
-        effects.append(.scheduleCheckpoint)
+        commands.append(.scheduleCheckpoint)
     }
-    return effects
+    return commands
 }
 
 private func updateSelectedTab(_ model: inout AppModel, _ body: (inout TabModel) -> Void) {
@@ -2513,7 +2513,7 @@ private func normalizedLiveTabIds(_ ids: [TabId], in model: AppModel) -> [TabId]
 
 // Core tab removal shared by single and batch close. The caller owns the final
 // tail: terminate-if-empty vs. reload-sidebar-and-checkpoint.
-private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Effect] {
+private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Command] {
     guard let (groupIdx, tabIdx) = tabLocation(id, in: model) else { return [] }
     let tab = model.groups[groupIdx].tabs[tabIdx]
     let groupId = model.groups[groupIdx].id
@@ -2529,7 +2529,7 @@ private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Effect] {
         return nil
     }()
 
-    var effects: [Effect] = []
+    var commands: [Command] = []
     for pid in paneIds {
         // Surface teardown is reconcileSurfaceExistence's (these panes leave the tree
         // below); keep the id-keyed side-table cleanup + per-pane popover dismiss here.
@@ -2538,15 +2538,15 @@ private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Effect] {
         model.lastNotificationTime.removeValue(forKey: pid)
         if model.todoPopover == .pane(pid) {
             model.todoPopover = nil
-            effects.append(.dismissTodoPopover)
+            commands.append(.dismissTodoPopover)
         }
     }
     // Tab popover open against this tab dies with the tab. Emit the dismiss
-    // effect even though no `todoPopoverForTabClosed` will fire, so AppRuntime
+    // command even though no `todoPopoverForTabClosed` will fire, so AppRuntime
     // closes the floating NSPopover.
     if model.todoPopover == .tab(id) {
         model.todoPopover = nil
-        effects.append(.dismissTodoPopoverForTab)
+        commands.append(.dismissTodoPopoverForTab)
     }
 
     model.groups[groupIdx].tabs.remove(at: tabIdx)
@@ -2559,7 +2559,7 @@ private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Effect] {
         // Selection moved to the fallback (a view swap); clear the stranded popover record.
         clearTodoPopoverForViewSwap(&model)
     }
-    return effects
+    return commands
 }
 
 /// Throttle macOS notification delivery: one per pane per kind every 1 second.
@@ -2569,7 +2569,7 @@ private let notificationThrottleInterval: TimeInterval = 1
 private func throttledNotification(
     alertId: AlertId, kind: AlertKind, paneId: PaneId,
     title: String, body: String, model: inout AppModel
-) -> [Effect] {
+) -> [Command] {
     let now = Date()
     let shouldNotify: Bool
     if let last = model.lastNotificationTime[paneId]?[kind] {

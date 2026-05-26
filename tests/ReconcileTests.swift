@@ -46,31 +46,31 @@ func reconcileTests() {
             "the disappeared key is pruned even when remove is the default no-op")
     }
 
-    // MARK: - Effect.isPostReconcile (command-phase split, Stage 4)
+    // MARK: - Command.isPostReconcile (command-phase split, Stage 4)
 
-    test("Effect.isPostReconcile: exactly makeFirstResponder + focusSearchField defer past reconcile") {
+    test("Command.isPostReconcile: exactly makeFirstResponder + focusSearchField defer past reconcile") {
         let pane = PaneId()
         // focusSearchField targets the search field reconcilePaneChrome creates, so
         // it must run after reconcile().
-        try expect(Effect.focusSearchField(paneId: pane).isPostReconcile,
+        try expect(Command.focusSearchField(paneId: pane).isPostReconcile,
             "focusSearchField is post-reconcile")
         // makeFirstResponder is post-reconcile as of Stage 8: reconcileContainers now mounts
         // the pane's TerminalView during reconcile, so first responder must be set after.
-        try expect(Effect.makeFirstResponder(paneId: pane).isPostReconcile,
+        try expect(Command.makeFirstResponder(paneId: pane).isPostReconcile,
             "makeFirstResponder is post-reconcile (Stage 8)")
         // focusSurface acts on an already-existing surface; deferring it is wrong.
-        try expect(!Effect.focusSurface(paneId: pane, focused: true).isPostReconcile,
+        try expect(!Command.focusSurface(paneId: pane, focused: true).isPostReconcile,
             "focusSurface is pre-reconcile")
         // A representative sample of other commands are pre-reconcile.
-        try expect(!Effect.createSurface(paneId: pane, cwd: nil, command: nil).isPostReconcile,
+        try expect(!Command.createSurface(paneId: pane, cwd: nil, command: nil).isPostReconcile,
             "createSurface is pre-reconcile")
-        try expect(!Effect.applyPaneTheme(paneId: pane).isPostReconcile,
+        try expect(!Command.applyPaneTheme(paneId: pane).isPostReconcile,
             "applyPaneTheme is pre-reconcile")
-        try expect(!Effect.sendEndSearch(paneId: pane).isPostReconcile,
+        try expect(!Command.sendEndSearch(paneId: pane).isPostReconcile,
             "sendEndSearch is pre-reconcile")
-        try expect(!Effect.scheduleCheckpoint.isPostReconcile,
+        try expect(!Command.scheduleCheckpoint.isPostReconcile,
             "scheduleCheckpoint is pre-reconcile")
-        try expect(!Effect.terminate.isPostReconcile,
+        try expect(!Command.terminate.isPostReconcile,
             "terminate is pre-reconcile")
     }
 

@@ -13,7 +13,7 @@
 | Yes          | 6              | Part 2 | `reconcileWindowChrome`                                                                      |
 | Yes          | 7              | Part 2 | `reconcileSwitcher`                                                                          |
 | Yes          | 8              | Part 2 | `reconcileSurfaceExistence` + `reconcileContainers` + Part 1c (keyed surface reconciliation) |
-|              | 9              | Part 2 | Rename `Effect` -> `Command`                                                                 |
+| Yes          | 9              | Part 2 | Rename `Effect` -> `Command`                                                                 |
 
 This plan does two things, in order. First it restructures the model so a pane
 exists iff a tree leaf owns it (Part 1) -- pane content moves into the leaf and
@@ -1880,3 +1880,105 @@ checklist PLUS:**
   `tearDownCurrentSession`'s `caches = ReconcilerCaches()`. `tabContainers` /
   `buildAndInsertContainer` / `removeTabContainer` / `tearDownSurface` / `dismissStrandedPopovers` /
   `applyMountTimeFocus` are now `internal` so the cross-file `reconcile` extension can reach them.
+
+### Stage 9 -- Rename `Effect` -> `Command` (last; the surviving enum is a command set)
+
+Landed. `just test` 995/995 (**unchanged** -- pure, behavior-preserving rename, no new
+tests; the green suite at Stage 8's count is the proof), `just build` clean.
+
+**What shipped (the rename + coherence finish):**
+
+- **Type `Effect` -> `Command`** everywhere via a whole-word (`\bEffect\b`) pass: the `enum`
+  declaration, the `extension` (the `isPostReconcile` switch rides along unchanged), all ~23
+  `[Effect]` return signatures + `var effects: [Effect]` accumulators across `Update.swift`
+  (+ the three `emit*Confirmation` helpers in `ModelOperations.swift`), `perform`'s parameter
+  type, and every qualified `Effect.x` reference in app + tests. After the pass, zero
+  whole-word `Effect` type references remain in any Swift source.
+- **`git mv app/Effect.swift app/Command.swift`** -- SPM globs `app/` (like `Reconcile.swift`),
+  so no `Package.swift` change; `just build` picks it up. **Added a top-of-file purpose comment**
+  (the file had none, starting at `import`) that declares the invariant: `update()` returns only
+  commands; the view is a projection of `reconcile()`, so no projection case lives here, and the
+  type name makes reintroducing one a compile error. The `isPostReconcile` doc already spoke in
+  "command" terms; only `extension Effect` -> `extension Command` changed there.
+- **Locals/params `effect`/`effects` -> `command`/`commands`** (the optional coherence finish --
+  done, not skipped) in `AppRuntime.swift` (the `send()` command-phase loop + `perform`'s param),
+  `Update.swift`, `ModelOperations.swift`, and all `tests/*.swift`. Whole-word, so it never
+  reached camelCase-embedded names.
+- **`AGENTS.md` doc update:** the Architecture prose (`+ [Command]`, "performs commands"), the
+  file-map entry (`Command.swift # Commands (side effects) update() returns; AppRuntime.perform
+  runs them`, alignment preserved), the `Update.swift -> [Command]` line, and the data-flow
+  diagram (`-> [Command]`, `AppRuntime.perform(command)`).
+- **`test.sh` + `test-ui.sh` source-list fix** (the non-obvious one): the pure test build uses an
+  **explicit** `swiftc` source list (not SPM globbing -- that is how it excludes AppKit), and both
+  listed `app/Effect.swift`. Repointed to `app/Command.swift`; without this `just test` cannot find
+  the file. `Reconcile.swift` is (correctly) still absent from that list -- the pure projection
+  layer it relies on lives in `ModelOperations.swift`.
+
+**Deviations / judgment calls:**
+
+- **`perform` kept its name** (you perform a command), and **`isPostReconcile` kept its name** --
+  the plan named no replacements.
+- **`createSurface`'s `command:` field binding now shadows `perform`'s `command` parameter** in
+  `case .createSurface(let paneId, let cwd, let command, ...)`. This is legal Swift (a case-let
+  shadowing an outer param); the body uses the destructured `command` string exactly as before, and
+  `just build` confirms it compiles. The `command:`/`launchCommand:`/`waitAfterCommand:` labels and
+  the unrelated `Command`-named symbols (`RestoreCommandBehavior`, `CommandLine`, `doCommandBy`,
+  etc.) were untouched -- the whole-word `effect`->`command` rename does not reach any of them.
+- **Concept-prose and historical "effect" references left as-is** (deliberate -- these are not
+  identifiers and renaming them would be wrong or revisionist): the general "side effect" / "visible
+  effect" CS-concept comments in `AppRuntime.swift` (file header reworded "side commands" -> the
+  commands, the one spot the mechanical pass mangled), `TabTodoPopoverView.swift`,
+  `TodoInputCommand.swift`, `AppDelegate.swift`; and `Reconcile.swift`'s doc comments that reference
+  the *deleted* projection effects each pass replaced (`.refreshPaneBorder` effect,
+  `.showSearchOverlay`/`.hideSearchOverlay` effects, etc.) -- those described eliminated
+  effect-projections and read accurately as "effect."
+- **camelCase-embedded `Effect` identifiers left as-is** (whole-word patterns never touch them, and
+  the plan flagged them as safe): the test helpers `isTerminateEffect`/`createEffect`. Harmless mild
+  vocabulary drift in a test file; renaming them was out of the mechanical scope.
+
+**Manual QA -- THE CONSOLIDATED END-TO-END GATE FOR THE WHOLE RECONCILER (owed to a human):**
+
+Stage 9 adds no behavior, so it introduces no new QA. But every Part 2 stage deferred its
+AppKit/GUI verification (the executors are manual-QA-only; the projections/diffs/ops are the pure
+nets, all under test). This is the moment to close that backlog. **I could not drive the macOS
+AppKit/Metal GUI headlessly, so the entire visual checklist below is left for the human.** The
+final dev build is installed at `~/Applications/DanTerm Dev.app` (`just build-run` to relaunch).
+Run the full tab/pane list PLUS:
+
+- **Restore + scrollback (Stage 2):** open several panes with scrollback, quit (writes enriched
+  checkpoint), relaunch -> scrollback restores into every pane. First post-upgrade launch off a v1
+  checkpoint is rejected once -> fresh session (accepted reject-v1 break).
+- **Focus borders (Stage 3, QA 1-3):** green border follows focus across panes; **single-pane tab
+  draws no green border**; red bell border on background-bell panes, clears on ack; borders correct
+  after tab switch, zoom toggle, and snapshot restore.
+- **Search overlay + command-phase split (Stage 4, QA 7/12):** Cmd-F opens search and the cursor
+  lands in the field on the **first** press; typing updates the match count live; Esc removes the
+  overlay and the pane stays. With an active search overlay, force a container rebuild of its tab
+  (split/unsplit a sibling, toggle zoom) -> toolbar + active overlay re-appear on the fresh wrapper
+  (chrome-cache invalidation), not blank.
+- **Sidebar granular diff (Stage 5):** tab/group insert/remove/move/reload apply without
+  `NSOutlineView` batch-inconsistency crashes; inline rename is NOT clobbered mid-edit by a
+  concurrent `send()`, but the edited row can still be moved/closed; a vanished rename target ends
+  the edit cleanly; multi-selection survives a reconcile; jump-mode badges render.
+- **Window chrome (Stage 6):** window/content title, dock + toolbar bell unread badges, and the
+  tab-todo button all update after their `Msg`s.
+- **MRU switcher (Stage 7):** Cmd-Tab cycle shows the switcher overlay and it hides on release
+  (`mruCycle == nil` -> `orderOut`).
+- **Containers / surfaces / eager mounting (Stage 8, QA 6/10/14):** rapid pane clicks -- focus
+  follows, never fights, no rebuild; drag a split divider continuously -- smooth, no rebuild
+  (ratios excluded from `ContainerShape`); restore a many-tab session -- every container mounted,
+  only the selected visible, hidden tabs occluded (no background CPU after first reconcile), first
+  responder only in the selected tab.
+- **General:** tab switch with active search; scrollback survives switch; zoom across switch;
+  `navigateToPane` clears zoom; cross-tab pane drag; extract-to-new-tab; delete group; 20-tab rapid
+  switch; close selected/non-selected tab; theme browser z-order; Retina scale change; **todo
+  popover during rebuild** (open a pane/tab TODO popover, then split/close/switch -> dismisses
+  cleanly, no stranded floating popover); snapshot import over an active session.
+
+**Plan complete.** The 9-stage delivery sequence is done. Part 1 (tree-owns-panes: a pane exists
+iff a leaf owns it; the `panes` dict and its drift-invariant are gone) and Part 2 (full view
+reconciler) are both delivered: `update()` now returns **only commands**, and `reconcile()` derives
+the entire AppKit/surface view from the model after every `send()`. The automated gates pass
+(`just test` 995/995, `just build` clean). The one remaining gate is the consolidated manual-QA
+pass above -- **none of those GUI items were run here (cannot drive the GUI headless); all are left
+for the human** on the installed final build.

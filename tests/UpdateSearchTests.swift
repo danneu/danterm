@@ -7,8 +7,8 @@ func searchTests() {
         var model = makeModel()
         createTab(&model)
         let tab = selectedTab(in: model)!
-        let effects = update(&model, .startSearch)
-        try expect(hasEffect(effects) {
+        let commands = update(&model, .startSearch)
+        try expect(hasEffect(commands) {
             if case .sendStartSearch(let pid) = $0 { return pid == tab.focusedPaneId }
             return false
         }, "expected sendStartSearch")
@@ -21,11 +21,11 @@ func searchTests() {
         createTab(&model)
         let tab = selectedTab(in: model)!
         let paneId = tab.focusedPaneId
-        let effects = update(&model, .ghosttyStartSearch(paneId: paneId, needle: ""))
+        let commands = update(&model, .ghosttyStartSearch(paneId: paneId, needle: ""))
         // searchState set -> reconcilePaneChrome renders the overlay (no .showSearchOverlay).
         try expect(model.searchState[paneId] != nil, "search state should exist")
         try expectEqual(model.searchState[paneId]?.needle, "")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .focusSearchField(let pid) = $0 { return pid == paneId }
             return false
         }, "expected focusSearchField")
@@ -44,9 +44,9 @@ func searchTests() {
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .ghosttyStartSearch(paneId: paneId, needle: "first"))
-        let effects = update(&model, .ghosttyStartSearch(paneId: paneId, needle: "second"))
+        let commands = update(&model, .ghosttyStartSearch(paneId: paneId, needle: "second"))
         try expectEqual(model.searchState[paneId]?.needle, "second")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .focusSearchField(let pid) = $0 { return pid == paneId }
             return false
         }, "expected focusSearchField on re-entry")
@@ -59,11 +59,11 @@ func searchTests() {
         update(&model, .ghosttyStartSearch(paneId: paneId, needle: ""))
         model.searchState[paneId]?.total = 5
         model.searchState[paneId]?.selected = 2
-        let effects = update(&model, .searchNeedleChanged(paneId: paneId, needle: "new"))
+        let commands = update(&model, .searchNeedleChanged(paneId: paneId, needle: "new"))
         try expectEqual(model.searchState[paneId]?.needle, "new")
         try expect(model.searchState[paneId]?.total == nil, "total should be cleared")
         try expect(model.searchState[paneId]?.selected == nil, "selected should be cleared")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .sendSearchNeedle(let pid, let n) = $0 { return pid == paneId && n == "new" }
             return false
         }, "expected sendSearchNeedle")
@@ -74,8 +74,8 @@ func searchTests() {
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .ghosttyStartSearch(paneId: paneId, needle: ""))
-        let effects = update(&model, .searchNavigate(paneId: paneId, direction: .next))
-        try expect(hasEffect(effects) {
+        let commands = update(&model, .searchNavigate(paneId: paneId, direction: .next))
+        try expect(hasEffect(commands) {
             if case .sendSearchNavigate(let pid, let dir) = $0 {
                 return pid == paneId && dir == .next
             }
@@ -88,15 +88,15 @@ func searchTests() {
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .ghosttyStartSearch(paneId: paneId, needle: "test"))
-        let effects = update(&model, .endSearch(paneId: paneId))
+        let commands = update(&model, .endSearch(paneId: paneId))
         // searchState cleared -> the overlay projection drops this pane's key, so
         // reconcilePaneChrome's `remove` tears the overlay down (no .hideSearchOverlay).
         try expect(model.searchState[paneId] == nil, "search state should be removed")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .sendEndSearch(let pid) = $0 { return pid == paneId }
             return false
         }, "expected sendEndSearch")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0 { return pid == paneId }
             return false
         }, "expected makeFirstResponder")
@@ -106,8 +106,8 @@ func searchTests() {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        let effects = update(&model, .endSearch(paneId: paneId))
-        try expect(effects.isEmpty, "should be no-op")
+        let commands = update(&model, .endSearch(paneId: paneId))
+        try expect(commands.isEmpty, "should be no-op")
     }
 
     test("ghosttySearchTotal updates total") {
@@ -115,11 +115,11 @@ func searchTests() {
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .ghosttyStartSearch(paneId: paneId, needle: "x"))
-        let effects = update(&model, .ghosttySearchTotal(paneId: paneId, total: 42))
+        let commands = update(&model, .ghosttySearchTotal(paneId: paneId, total: 42))
         try expectEqual(model.searchState[paneId]?.total, 42)
         // The match count re-renders via reconcilePaneChrome from the searchState
         // change above; the handler emits no command.
-        try expect(effects.isEmpty, "ghosttySearchTotal emits no command")
+        try expect(commands.isEmpty, "ghosttySearchTotal emits no command")
     }
 
     test("ghosttySearchSelected updates selected") {
@@ -127,11 +127,11 @@ func searchTests() {
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .ghosttyStartSearch(paneId: paneId, needle: "x"))
-        let effects = update(&model, .ghosttySearchSelected(paneId: paneId, selected: 3))
+        let commands = update(&model, .ghosttySearchSelected(paneId: paneId, selected: 3))
         try expectEqual(model.searchState[paneId]?.selected, 3)
         // The match count re-renders via reconcilePaneChrome from the searchState
         // change above; the handler emits no command.
-        try expect(effects.isEmpty, "ghosttySearchSelected emits no command")
+        try expect(commands.isEmpty, "ghosttySearchSelected emits no command")
     }
 
     test("closePane cleans up search state") {

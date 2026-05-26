@@ -452,19 +452,19 @@ func exportTests() {
         try expectEqual(result, "╭ repo:danterm                                                                         k8s:orbstack\n╰ $\n")
     }
 
-    // MARK: - exportState Msg/Effect
+    // MARK: - exportState Msg/Command
 
-    test("exportState effect contains AppModelSnapshot") {
+    test("exportState command contains AppModelSnapshot") {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         model.updatePane(paneId) { $0.lastCommand = "vim" }
         model.updatePane(paneId) { $0.cwd = NSHomeDirectory() + "/projects" }
         let expected = toSnapshot(model)
-        let effects = update(&model, .exportState)
-        try expectEqual(effects.count, 1)
-        guard case .exportState(let snapshot) = effects[0] else {
-            throw TestFailure(message: "expected .exportState effect")
+        let commands = update(&model, .exportState)
+        try expectEqual(commands.count, 1)
+        guard case .exportState(let snapshot) = commands[0] else {
+            throw TestFailure(message: "expected .exportState command")
         }
         try expectEqual(snapshot.groups.count, expected.groups.count)
         try expectEqual(allPaneSnapshots(snapshot).count, allPaneSnapshots(expected).count)

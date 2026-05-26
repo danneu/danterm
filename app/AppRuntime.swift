@@ -1,11 +1,11 @@
-// Runtime bridge that performs update effects and synchronizes AppKit/Ghostty views.
+// Runtime bridge that performs update commands and synchronizes AppKit/Ghostty views.
 import Cocoa
 import DanTermProtocol
 import GhosttyKit
 import UniformTypeIdentifiers
 @preconcurrency import UserNotifications
 
-// App runtime owns the mutable app model, performs side effects emitted by the
+// App runtime owns the mutable app model, performs the commands emitted by the
 // pure update function, and bridges model changes into AppKit/Ghostty objects.
 @MainActor
 class AppRuntime {
@@ -221,17 +221,17 @@ class AppRuntime {
     func send(_ msg: Msg) {
         guard let translatedMsg = translateMsg(msg, tokenForPane: { self.tokenStore.token(for: $0) }) else { return }
 
-        let effects = update(&model, translatedMsg)
+        let commands = update(&model, translatedMsg)
         // Command-phase split: most commands run before reconcile(); the few that
         // target a view the reconciler creates (Stage 4: only .focusSearchField,
         // whose search field reconcilePaneChrome builds) run after. See
-        // Effect.isPostReconcile.
-        for effect in effects where !effect.isPostReconcile {
-            perform(effect)
+        // Command.isPostReconcile.
+        for command in commands where !command.isPostReconcile {
+            perform(command)
         }
         reconcile()
-        for effect in effects where effect.isPostReconcile {
-            perform(effect)
+        for command in commands where command.isPostReconcile {
+            perform(command)
         }
         if model.pendingConfirmation == .terminate {
             quitConfirmationPanel?.configure(paneCount: model.allPaneIds.count)
@@ -321,10 +321,10 @@ class AppRuntime {
         try? FileManager.default.removeItem(at: socketPath)
     }
 
-    // MARK: - Effect Performer
+    // MARK: - Command Performer
 
-    private func perform(_ effect: Effect) {
-        switch effect {
+    private func perform(_ command: Command) {
+        switch command {
         case .createSurface(let paneId, let cwd, let command, let launchCommand, let waitAfterCommand):
             let token = tokenStore.generate(for: paneId)
             let envVars = terminalLaunchEnvironment(
@@ -582,7 +582,7 @@ class AppRuntime {
             alertsPopover?.performClose(nil)
             alertsPopover = nil
 
-        // Search effects
+        // Search commands
 
         case .sendStartSearch(let paneId):
             if let view = surfaces[paneId], let surface = view.surface {

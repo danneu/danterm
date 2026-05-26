@@ -105,8 +105,8 @@ func groupTests() {
         try expectEqual(model.groups.count, 1, "empty General should be pruned")
         try expectEqual(model.groups[0].id, onlyGroupId)
 
-        let effects = update(&model, .deleteGroup(id: onlyGroupId, moveTabs: false))
-        try expectEqual(effects.count, 0, "deleting sole group should be no-op")
+        let commands = update(&model, .deleteGroup(id: onlyGroupId, moveTabs: false))
+        try expectEqual(commands.count, 0, "deleting sole group should be no-op")
         try expectEqual(model.groups.count, 1, "model should be unchanged")
     }
 
@@ -115,8 +115,8 @@ func groupTests() {
         createTab(&model)
         let onlyGroupId = model.groups[0].id
 
-        let effects = update(&model, .deleteGroup(id: onlyGroupId, moveTabs: true))
-        try expectEqual(effects.count, 0, "deleting last remaining group should be no-op")
+        let commands = update(&model, .deleteGroup(id: onlyGroupId, moveTabs: true))
+        try expectEqual(commands.count, 0, "deleting last remaining group should be no-op")
         try expectEqual(model.groups.count, 1)
     }
 
@@ -125,9 +125,9 @@ func groupTests() {
         update(&model, .createGroup(name: "Work"))
         let workId = model.groups[1].id
 
-        let effects = update(&model, .renameGroup(id: workId, name: "Projects"))
+        let commands = update(&model, .renameGroup(id: workId, name: "Projects"))
         try expectEqual(model.groups[1].name, "Projects")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
         }, "should persist via scheduleCheckpoint (sidebar updates via reconcileSidebar)")
@@ -138,9 +138,9 @@ func groupTests() {
         update(&model, .createGroup(name: "Work"))
         let workId = model.groups[1].id
 
-        let effects = update(&model, .renameGroup(id: workId, name: ""))
+        let commands = update(&model, .renameGroup(id: workId, name: ""))
         try expectEqual(model.groups[1].name, "Work", "name should be unchanged")
-        try expectEqual(effects.count, 0, "should emit no effects")
+        try expectEqual(commands.count, 0, "should emit no commands")
     }
 
     test("renameGroup rejects whitespace-only name") {
@@ -148,9 +148,9 @@ func groupTests() {
         update(&model, .createGroup(name: "Work"))
         let workId = model.groups[1].id
 
-        let effects = update(&model, .renameGroup(id: workId, name: "   "))
+        let commands = update(&model, .renameGroup(id: workId, name: "   "))
         try expectEqual(model.groups[1].name, "Work", "name should be unchanged")
-        try expectEqual(effects.count, 0, "should emit no effects")
+        try expectEqual(commands.count, 0, "should emit no commands")
     }
 
     test("renameGroup trims whitespace") {
@@ -169,11 +169,11 @@ func groupTests() {
         let bGroupId = model.groups[2].id
 
         // Move B to index 1 (right after General)
-        let effects = update(&model, .reorderGroup(groupId: bGroupId, toIndex: 1))
+        let commands = update(&model, .reorderGroup(groupId: bGroupId, toIndex: 1))
         try expectEqual(model.groups[0].name, "General")
         try expectEqual(model.groups[1].name, "B")
         try expectEqual(model.groups[2].name, "A")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
         }, "should persist via scheduleCheckpoint (sidebar updates via reconcileSidebar)")
@@ -184,10 +184,10 @@ func groupTests() {
         update(&model, .createGroup(name: "A"))
         let aGroupId = model.groups[1].id
 
-        let effects = update(&model, .reorderGroup(groupId: aGroupId, toIndex: 0))
+        let commands = update(&model, .reorderGroup(groupId: aGroupId, toIndex: 0))
         try expectEqual(model.groups[0].name, "A", "A should be at index 0")
         try expectEqual(model.groups[1].name, "General")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
         }, "should persist via scheduleCheckpoint (sidebar updates via reconcileSidebar)")
@@ -214,7 +214,7 @@ func groupTests() {
         createTab(&model) // existing tab in General
         let oldSelectedTabId = model.selectedTabId
 
-        let effects = update(&model, .createGroup(name: "Work"))
+        let commands = update(&model, .createGroup(name: "Work"))
         let workGroup = model.groups[1]
 
         try expectEqual(workGroup.tabs.count, 1, "new group should have one tab")
@@ -223,13 +223,13 @@ func groupTests() {
         try expect(model.selectedTabId != oldSelectedTabId, "selection should have changed")
         try expect(model.pane(newTab.focusedPaneId) != nil, "pane should exist in model")
 
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .createSurface = $0 { return true }
             return false
         }, "should emit createSurface for the new tab's pane")
         // The tab switch is structural (reconcileContainers shows the new selected tab);
         // selectedTabId (asserted above) is the net.
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
         }, "should persist via scheduleCheckpoint (sidebar updates via reconcileSidebar)")
@@ -295,14 +295,14 @@ func groupTests() {
         // Select General's tab so closing it triggers selection change
         let generalTabId = model.groups[0].tabs[0].id
         update(&model, .selectTab(id: generalTabId))
-        let effects = update(&model, .closeTab(id: generalTabId))
+        let commands = update(&model, .closeTab(id: generalTabId))
 
         try expectEqual(model.groups.count, 1, "empty General should be pruned")
         try expectEqual(model.groups[0].id, workGroupId, "Work should remain")
         try expect(model.selectedTabId != nil, "some tab should be selected")
         // The fallback selection + closed-tab container removal are structural now
         // (reconcileContainers); selectedTabId + the pruned group above are the nets.
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
         }, "should persist via scheduleCheckpoint (sidebar updates via reconcileSidebar)")
@@ -363,11 +363,11 @@ func groupTests() {
         let generalPaneId = model.groups[0].tabs[0].focusedPaneId
         update(&model, .selectTab(id: generalTabId))
 
-        let effects = update(&model, .surfaceCreationFailed(paneId: generalPaneId))
+        let commands = update(&model, .surfaceCreationFailed(paneId: generalPaneId))
 
         try expectEqual(model.groups.count, 1, "empty General should be pruned")
         try expectEqual(model.groups[0].id, workGroupId, "Work should remain")
-        try expect(!hasEffect(effects) {
+        try expect(!hasEffect(commands) {
             if case .terminate = $0 { return true }
             return false
         }, "should not terminate — Work group has tabs")
@@ -381,7 +381,7 @@ func groupTests() {
         createTab(&model) // tab2 — keeps source group non-empty after extract
         let tab1Id = model.groups[0].tabs[0].id
 
-        let effects = update(&model, .extractTabsToNewGroup(
+        let commands = update(&model, .extractTabsToNewGroup(
             tabIds: [tab1Id], groupName: "Extracted"))
 
         try expectEqual(model.groups.count, 2, "source group should survive (still has tab2)")
@@ -390,8 +390,8 @@ func groupTests() {
         try expectEqual(model.groups[1].tabs[0].id, tab1Id)
         try expectEqual(model.groups[0].tabs.count, 1, "source has tab2 left")
 
-        try expectEqual(effects.count, 1, "should emit exactly scheduleCheckpoint (sidebar reconciles)")
-        try expect(hasEffect(effects) {
+        try expectEqual(commands.count, 1, "should emit exactly scheduleCheckpoint (sidebar reconciles)")
+        try expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }; return false
         })
     }
@@ -404,7 +404,7 @@ func groupTests() {
         let tab1Id = model.groups[0].tabs[0].id
         let tab2Id = model.groups[0].tabs[1].id
 
-        let effects = update(&model, .extractTabsToNewGroup(
+        let commands = update(&model, .extractTabsToNewGroup(
             tabIds: [tab1Id, tab2Id], groupName: "Extracted"))
 
         try expectEqual(model.groups.count, 2)
@@ -412,7 +412,7 @@ func groupTests() {
         try expectEqual(model.groups[1].tabs[0].id, tab1Id, "order preserved")
         try expectEqual(model.groups[1].tabs[1].id, tab2Id, "order preserved")
         try expectEqual(model.groups[0].tabs.count, 1, "tab3 left in source")
-        try expectEqual(effects.count, 1, "only scheduleCheckpoint (sidebar reconciles)")
+        try expectEqual(commands.count, 1, "only scheduleCheckpoint (sidebar reconciles)")
     }
 
     test("testExtractMultipleTabsAcrossGroups") {
@@ -425,7 +425,7 @@ func groupTests() {
         // Work has its auto-created tab
         let workAuto = model.groups[1].tabs[0].id
 
-        let effects = update(&model, .extractTabsToNewGroup(
+        let commands = update(&model, .extractTabsToNewGroup(
             tabIds: [general1, workAuto], groupName: "Extracted"))
 
         // General had 2 tabs (one extracted) → still has 1, survives
@@ -436,7 +436,7 @@ func groupTests() {
         try expectEqual(model.groups[1].tabs.count, 2)
         try expectEqual(model.groups[1].tabs[0].id, general1, "input order preserved")
         try expectEqual(model.groups[1].tabs[1].id, workAuto, "input order preserved")
-        try expectEqual(effects.count, 1, "only scheduleCheckpoint (sidebar reconciles)")
+        try expectEqual(commands.count, 1, "only scheduleCheckpoint (sidebar reconciles)")
     }
 
     test("testExtractAllTabsFromOnlyGroupIsNoop") {
@@ -447,12 +447,12 @@ func groupTests() {
         let tab2Id = model.groups[0].tabs[1].id
         let snapshot = model.groups
 
-        let effects = update(&model, .extractTabsToNewGroup(
+        let commands = update(&model, .extractTabsToNewGroup(
             tabIds: [tab1Id, tab2Id], groupName: "Extracted"))
 
         try expectEqual(model.groups.count, 1, "no new group created")
         try expectEqual(model.groups, snapshot, "model.groups unchanged")
-        try expectEqual(effects.count, 0, "no-op should emit no effects")
+        try expectEqual(commands.count, 0, "no-op should emit no commands")
     }
 
     test("testExtractAllTabsAcrossMultipleGroupsIsNoop") {
@@ -465,12 +465,12 @@ func groupTests() {
 
         // 2 groups, 1 tab each: extracting both = every live tab.
         let snapshotCount = model.groups.count
-        let effects = update(&model, .extractTabsToNewGroup(
+        let commands = update(&model, .extractTabsToNewGroup(
             tabIds: [generalTabId, workTabId], groupName: "Extracted"))
 
         try expectEqual(model.groups.count, snapshotCount,
             "no group destruction; structure preserved")
-        try expectEqual(effects.count, 0, "no-op should emit no effects")
+        try expectEqual(commands.count, 0, "no-op should emit no commands")
     }
 
     test("testExtractDedupesAndIgnoresStaleIds") {
@@ -482,14 +482,14 @@ func groupTests() {
         let tab2Id = model.groups[0].tabs[1].id
         let stale = TabId() // never existed
 
-        let effects = update(&model, .extractTabsToNewGroup(
+        let commands = update(&model, .extractTabsToNewGroup(
             tabIds: [tab1Id, tab1Id, stale, tab2Id], groupName: "Extracted"))
 
         try expectEqual(model.groups.count, 2)
         try expectEqual(model.groups[1].tabs.count, 2, "duplicate dropped, stale dropped")
         try expectEqual(model.groups[1].tabs[0].id, tab1Id)
         try expectEqual(model.groups[1].tabs[1].id, tab2Id)
-        try expectEqual(effects.count, 1, "only scheduleCheckpoint (sidebar reconciles)")
+        try expectEqual(commands.count, 1, "only scheduleCheckpoint (sidebar reconciles)")
     }
 
     test("testExtractAllStaleIdsIsNoop") {
@@ -499,11 +499,11 @@ func groupTests() {
         let stale1 = TabId()
         let stale2 = TabId()
 
-        let effects = update(&model, .extractTabsToNewGroup(
+        let commands = update(&model, .extractTabsToNewGroup(
             tabIds: [stale1, stale2], groupName: "Extracted"))
 
         try expectEqual(model.groups, snapshot, "no group created when all ids stale")
-        try expectEqual(effects.count, 0)
+        try expectEqual(commands.count, 0)
     }
 
     test("testExtractPreservesSelectedTabIdWhenFocusedTabIsExtracted") {
@@ -553,7 +553,7 @@ func groupTests() {
         let b0 = model.groups[1].tabs[0].id // auto-created tab
 
         // Drop {a0, a1} into Work at index 1 (between b0 and end).
-        let effects = update(&model, .moveTabs(
+        let commands = update(&model, .moveTabs(
             tabIds: [a0, a1], toGroupId: workId, atIndex: 1))
 
         try expectEqual(model.groups.count, 2)
@@ -564,8 +564,8 @@ func groupTests() {
         try expectEqual(model.groups[1].tabs[1].id, a0, "input order preserved")
         try expectEqual(model.groups[1].tabs[2].id, a1, "input order preserved")
 
-        try expectEqual(effects.count, 1, "exactly scheduleCheckpoint (sidebar reconciles)")
-        try expect(hasEffect(effects) {
+        try expectEqual(commands.count, 1, "exactly scheduleCheckpoint (sidebar reconciles)")
+        try expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }; return false
         })
     }
@@ -660,11 +660,11 @@ func groupTests() {
         let stale1 = TabId()
         let stale2 = TabId()
 
-        let effects = update(&model, .moveTabs(
+        let commands = update(&model, .moveTabs(
             tabIds: [stale1, stale2], toGroupId: workId, atIndex: 0))
 
         try expectEqual(model.groups, snapshot, "groups unchanged")
-        try expectEqual(effects.count, 0)
+        try expectEqual(commands.count, 0)
     }
 
     test("testMoveTabsClampedAtIndex") {

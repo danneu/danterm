@@ -30,9 +30,9 @@ func alertTests() {
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .markAlertRead(alertId: alertId))
+        let commands = update(&model, .markAlertRead(alertId: alertId))
         try expectEqual(model.alerts[0].isUnread, false)
-        try expect(effects.isEmpty, "stale alert marks read but emits no commands (badges reconcile)")
+        try expect(commands.isEmpty, "stale alert marks read but emits no commands (badges reconcile)")
     }
 
     test("testMarkAllAlertsRead") {
@@ -49,9 +49,9 @@ func alertTests() {
             ), at: 0)
         }
 
-        let effects = update(&model, .markAllAlertsRead)
+        let commands = update(&model, .markAllAlertsRead)
         try expect(model.alerts.allSatisfy { !$0.isUnread }, "all alerts should be read")
-        try expect(effects.isEmpty, "marking all read emits no commands (badges reconcile)")
+        try expect(commands.isEmpty, "marking all read emits no commands (badges reconcile)")
     }
 
     test("testActivateAlertNavigatesAndMarksRead") {
@@ -69,18 +69,18 @@ func alertTests() {
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .activateAlert(alertId: alertId))
+        let commands = update(&model, .activateAlert(alertId: alertId))
         try expectEqual(model.selectedTabId, tabId, "should navigate to alert's tab")
         try expectEqual(model.alerts[0].isUnread, false, "alert should be marked read")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneId { return true }
             return false
         }, "should focus alert's pane")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .activateApp = $0 { return true }
             return false
         }, "should activate app")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .dismissAlertsPopover = $0 { return true }
             return false
         }, "should dismiss popover")
@@ -151,10 +151,10 @@ func alertTests() {
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .activateAlert(alertId: alertId))
+        let commands = update(&model, .activateAlert(alertId: alertId))
         try expectEqual(model.selectedTabId, tabId, "should still navigate to alert's tab")
         try expectEqual(model.alerts[0].isUnread, true, "manual mode: activateAlert should NOT mark alert read")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneId { return true }
             return false
         }, "should still focus alert's pane")
@@ -171,13 +171,13 @@ func alertTests() {
             title: "DanTerm", body: "stale", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .activateAlert(alertId: alertId))
+        let commands = update(&model, .activateAlert(alertId: alertId))
         try expectEqual(model.alerts[0].isUnread, false, "should mark read")
-        try expect(!hasEffect(effects) {
+        try expect(!hasEffect(commands) {
             if case .makeFirstResponder = $0 { return true }
             return false
         }, "should not navigate")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .dismissAlertsPopover = $0 { return true }
             return false
         }, "should dismiss popover")
@@ -381,10 +381,10 @@ func alertTests() {
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .activateAlert(alertId: alertId))
+        let commands = update(&model, .activateAlert(alertId: alertId))
         try expectEqual(model.selectedTabId, tabId)
         try expectEqual(model.alerts[0].isUnread, false)
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .activateApp = $0 { return true }
             return false
         }, "should activate app")
@@ -407,9 +407,9 @@ func alertTests() {
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .goToMostRecentAlertPane)
+        let commands = update(&model, .goToMostRecentAlertPane)
         try expectEqual(model.selectedTabId, tab1Id, "should switch to tab containing alert pane")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
             return false
         }, "should focus the alert's pane")
@@ -436,8 +436,8 @@ func alertTests() {
             title: "DanTerm", body: "valid", createdAt: Date(), isUnread: true
         ), at: 1)
 
-        let effects = update(&model, .goToMostRecentAlertPane)
-        try expect(hasEffect(effects) {
+        let commands = update(&model, .goToMostRecentAlertPane)
+        try expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
             return false
         }, "should navigate to the first valid alert's pane")
@@ -448,8 +448,8 @@ func alertTests() {
         var model = makeModel()
         createTab(&model)
 
-        let effects = update(&model, .goToMostRecentAlertPane)
-        try expectEqual(effects.count, 0, "no alerts should produce no effects")
+        let commands = update(&model, .goToMostRecentAlertPane)
+        try expectEqual(commands.count, 0, "no alerts should produce no commands")
     }
 
     test("testGoToMostRecentAlertPaneIntraTabNavigatesToAlertPane") {
@@ -468,9 +468,9 @@ func alertTests() {
             title: "DanTerm", body: "intra-tab", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .goToMostRecentAlertPane)
+        let commands = update(&model, .goToMostRecentAlertPane)
 
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneB { return true }
             return false
         }, "should focus paneB")
@@ -497,9 +497,9 @@ func alertTests() {
             title: "DanTerm", body: "intra-tab", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .goToMostRecentAlertPane)
+        let commands = update(&model, .goToMostRecentAlertPane)
 
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneB { return true }
             return false
         }, "should focus paneB")
@@ -577,9 +577,9 @@ func alertTests() {
         createTab(&model)
 
         // goToMostRecentAlertPane should use paneA's CURRENT tab (tab2), not the stale tab1
-        let effects = update(&model, .goToMostRecentAlertPane)
+        let commands = update(&model, .goToMostRecentAlertPane)
         try expectEqual(model.selectedTabId, tab2Id, "should navigate to pane's current tab, not original tab")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
             return false
         }, "should focus the alert's pane")
@@ -608,9 +608,9 @@ func alertTests() {
             title: "DanTerm", body: "unread", createdAt: Date(), isUnread: true
         ), at: 1)
 
-        let effects = update(&model, .goToMostRecentAlertPane)
+        let commands = update(&model, .goToMostRecentAlertPane)
         try expectEqual(model.selectedTabId, tab1Id, "should navigate to the unread alert's tab, skipping read alert")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
             return false
         }, "should focus the unread alert's pane")
@@ -636,14 +636,14 @@ func alertTests() {
             title: "DanTerm", body: "tab2 alert", createdAt: Date(), isUnread: true
         ), at: 1)
 
-        let effects = update(&model, .goToMostRecentAlertPane)
+        let commands = update(&model, .goToMostRecentAlertPane)
         // tab2's alert should be acked
         try expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false, "current tab's alert should be acked")
         // paneA's alert should still be unread (manual mode, selectTab won't auto-clear)
         try expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == true, "destination alert should still be unread")
         // Should navigate to tab1/paneA
         try expectEqual(model.selectedTabId, tab1Id, "should navigate to tab1")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
             return false
         }, "should focus paneA")
@@ -660,9 +660,9 @@ func alertTests() {
             title: "DanTerm", body: "only alert", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .goToMostRecentAlertPane)
+        let commands = update(&model, .goToMostRecentAlertPane)
         try expectEqual(model.alerts[0].isUnread, false, "alert should be acked")
-        try expect(!hasEffect(effects) {
+        try expect(!hasEffect(commands) {
             if case .makeFirstResponder = $0 { return true }
             return false
         }, "no unread alerts remained after acking current tab")
@@ -704,9 +704,9 @@ func alertTests() {
         try expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == true, "paneB alert still unread after second press")
 
         // Third press: acks tab2, no more unread alerts
-        let effects = update(&model, .goToMostRecentAlertPane)
+        let commands = update(&model, .goToMostRecentAlertPane)
         try expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false, "paneB alert should be acked after third press")
-        try expect(!hasEffect(effects) {
+        try expect(!hasEffect(commands) {
             if case .makeFirstResponder = $0 { return true }
             return false
         }, "third press should not navigate")
@@ -739,7 +739,7 @@ func alertTests() {
             title: "DanTerm", body: "split pane C", createdAt: Date(), isUnread: true
         ), at: 2)
 
-        let effects = update(&model, .goToMostRecentAlertPane)
+        let commands = update(&model, .goToMostRecentAlertPane)
         try expect(model.alerts.first(where: { $0.paneId == paneC })?.isUnread == false,
             "focused pane's alert should be acked")
         try expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == true,
@@ -747,7 +747,7 @@ func alertTests() {
         // paneA alert should still be unread
         try expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == true, "paneA alert should still be unread")
         // Should navigate to tab1/paneA
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
             return false
         }, "should navigate to paneA")
@@ -920,8 +920,8 @@ func alertTests() {
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        let effects = update(&model, .clearAlertsForPane(paneId: paneA))
-        try expectEqual(effects.count, 0, "clearAlertsForPane with no unread alerts should be a no-op")
+        let commands = update(&model, .clearAlertsForPane(paneId: paneA))
+        try expectEqual(commands.count, 0, "clearAlertsForPane with no unread alerts should be a no-op")
     }
 
     test("testClearAlertsForNonFocusedPane") {
@@ -1007,8 +1007,8 @@ func alertTests() {
         var model = makeModel()
         createTab(&model)
 
-        let effects = update(&model, .ackTabAlerts)
-        try expectEqual(effects.count, 0, "ackTabAlerts with no unread alerts should be a no-op")
+        let commands = update(&model, .ackTabAlerts)
+        try expectEqual(commands.count, 0, "ackTabAlerts with no unread alerts should be a no-op")
     }
 
     // MARK: - clearAlertsForTab
@@ -1045,8 +1045,8 @@ func alertTests() {
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
 
-        let effects = update(&model, .clearAlertsForTabs(tabIds: [tabId]))
-        try expectEqual(effects.count, 0, "clearAlertsForTabs with no unread alerts should be a no-op")
+        let commands = update(&model, .clearAlertsForTabs(tabIds: [tabId]))
+        try expectEqual(commands.count, 0, "clearAlertsForTabs with no unread alerts should be a no-op")
     }
 
     test("testGoToMostRecentAlertPaneUnzoomsIfNeeded") {
@@ -1095,7 +1095,7 @@ func alertTests() {
             ), at: 0)
         }
 
-        let effects = update(&model, .clearAlertsForTabs(tabIds: [id1, id2]))
+        let commands = update(&model, .clearAlertsForTabs(tabIds: [id1, id2]))
 
         let unreadByPane: (PaneId) -> Bool = { pid in
             model.alerts.contains { $0.paneId == pid && $0.isUnread }
@@ -1103,7 +1103,7 @@ func alertTests() {
         try expect(!unreadByPane(pane1), "tab1 alerts cleared")
         try expect(!unreadByPane(pane2), "tab2 alerts cleared")
         try expect(unreadByPane(pane3), "tab3 alert preserved")
-        try expect(effects.isEmpty, "clearing emits no commands (badges reconcile)")
+        try expect(commands.isEmpty, "clearing emits no commands (badges reconcile)")
         _ = id3
     }
 
@@ -1120,14 +1120,14 @@ func alertTests() {
             title: "x", body: "y", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .clearAlertsForTabs(tabIds: [id1, id2]))
+        let commands = update(&model, .clearAlertsForTabs(tabIds: [id1, id2]))
 
         // Only id1 had an unread alert; clearing marks it read while id2 (no alerts) is
         // untouched. The per-row badge refresh now reconciles via reconcileSidebar, so the
         // model state is the net.
         try expect(!model.alerts.contains { $0.paneId == pane1 && $0.isUnread },
             "id1's unread alert should be cleared")
-        try expect(effects.isEmpty, "clearing emits no commands (badges reconcile)")
+        try expect(commands.isEmpty, "clearing emits no commands (badges reconcile)")
     }
 
     test("testClearAlertsForTabsNoUnreadIsNoop") {
@@ -1138,8 +1138,8 @@ func alertTests() {
         let id2 = model.groups[0].tabs[1].id
         // No alerts inserted.
 
-        let effects = update(&model, .clearAlertsForTabs(tabIds: [id1, id2]))
-        try expectEqual(effects.count, 0,
+        let commands = update(&model, .clearAlertsForTabs(tabIds: [id1, id2]))
+        try expectEqual(commands.count, 0,
             "no unread alerts on any selected tab → no-op")
     }
 
@@ -1152,10 +1152,10 @@ func alertTests() {
             title: "x", body: "y", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .clearAlertsForTabs(
+        let commands = update(&model, .clearAlertsForTabs(
             tabIds: [TabId(), TabId()]))
 
-        try expectEqual(effects.count, 0, "all stale ids → no-op")
+        try expectEqual(commands.count, 0, "all stale ids → no-op")
         try expect(model.alerts.contains { $0.isUnread },
             "real alerts unaffected by stale-id batch")
     }
