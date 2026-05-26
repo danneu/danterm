@@ -277,44 +277,37 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         childItems = newChildItems
     }
 
-    func reload(model: AppModel) {
+    /// Entry point for the reconcileSidebar pass: apply an ordered row-op script to the
+    /// NSOutlineView, then reapply the view-owned selection. `isReloading` suppresses the
+    /// selectionDidChange / collapse feedback loop while we mutate. Mirrors what the old
+    /// imperative `reload(model:)` / `applySelection(...)` did (snapshot selection ->
+    /// mutate -> resolveReloadSelection -> restore), but the mutation is now the granular
+    /// op list rather than a full reloadData -- so the field editor and unchanged rows
+    /// survive (an empty op list is a pure selection refresh).
+    func applySidebarOps(_ ops: [SidebarRowOp], model: AppModel, clearActiveRename: Bool) {
         isReloading = true
         defer { isReloading = false }
+        currentModel = model
 
-        // Snapshot the user's multi-selection by tab id BEFORE reconcile.
-        let priorSelectedTabIds: Set<TabId> = Set(
-            outlineView.selectedRowIndexes.compactMap { row in
-                guard let item = outlineView.item(atRow: row) as? SidebarItem,
-                      case .tab(let tab) = item.kind else { return nil }
-                return tab.id
-            })
+        // End an orphaned inline edit before its row is removed/moved (the guard already
+        // cleared the sidecar). Clearing the per-field associated object first makes the
+        // resign-triggered textShouldEndEditing a no-op (no stray rename Msg).
+        if clearActiveRename { endActiveInlineRename() }
 
-        reconcile(model: model)
-        outlineView.reloadData()
+        // Snapshot the user's multi-selection by tab id BEFORE the rows move.
+        let priorSelectedTabIds = Set(selectedTabIds())
 
-        // Restore collapse state
-        if !isSingleGroupMode {
-            for group in model.groups {
-                if let item = groupItemCache[group.id] {
-                    if group.isCollapsed {
-                        outlineView.collapseItem(item)
-                    } else {
-                        outlineView.expandItem(item)
-                    }
-                }
-            }
-        }
+        for op in ops { applyRowOp(op, model: model) }
 
-        // Liveness derived from the model — NOT tabItemCache, which isn't
-        // pruned in reconcile and would carry stale ids of closed tabs.
-        let liveTabIds: Set<TabId> = Set(
-            model.groups.flatMap(\.tabs).map(\.id))
+        // Reapply selection (NSOutlineView-owned) through the existing pure rule, then
+        // refresh the forced-accent emphasis on the surviving rows.
+        let liveTabIds = Set(model.groups.flatMap(\.tabs).map(\.id))
         let restoreSet = resolveReloadSelection(
             priorSelectedTabIds: priorSelectedTabIds,
             liveTabIds: liveTabIds,
             selectedTabId: model.selectedTabId)
-
         applyRestoreSelection(restoreSet, selectedTabId: model.selectedTabId)
+        refreshRowEmphasis(focusedTabId: model.selectedTabId)
 
         // Scroll the model's currently-selected tab into view.
         if let selectedTabId = model.selectedTabId,
@@ -324,30 +317,117 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
     }
 
-    func applySelection(tabId: TabId, model: AppModel) {
-        isReloading = true
-        defer { isReloading = false }
+    /// Apply one ordered op, keeping the dataSource backing store (rootItems / childItems
+    /// / item caches) in lockstep with the NSOutlineView mutation -- update the array,
+    /// then issue the matching insert/remove with the same index (the contract for the
+    /// animated row methods). Indices are relative to the running state (the op list is a
+    /// sequential script). In single-group mode tabs are root rows (parent nil); in
+    /// multi-group mode they are children of their group item.
+    private func applyRowOp(_ op: SidebarRowOp, model: AppModel) {
+        switch op {
+        case .reloadAll:
+            rebuildAllRows(model: model)
 
-        currentModel = model
-        let priorSelectedTabIds: Set<TabId> = Set(
-            outlineView.selectedRowIndexes.compactMap { row in
-                guard let item = outlineView.item(atRow: row) as? SidebarItem,
-                      case .tab(let tab) = item.kind else { return nil }
-                return tab.id
-            })
-        let liveTabIds: Set<TabId> = Set(
-            model.groups.flatMap(\.tabs).map(\.id))
-        let restoreSet = resolveReloadSelection(
-            priorSelectedTabIds: priorSelectedTabIds,
-            liveTabIds: liveTabIds,
-            selectedTabId: tabId)
+        case .insertGroup(let id, let index):
+            guard let group = model.groups.first(where: { $0.id == id }) else { return }
+            let item = groupItemCache[id] ?? SidebarItem(id: id.rawValue, kind: .group(group))
+            item.kind = .group(group)
+            groupItemCache[id] = item
+            // Build the group's child tab items so the dataSource can serve them.
+            childItems[id] = group.tabs.map { tab in
+                let ti = tabItemCache[tab.id] ?? SidebarItem(id: tab.id.rawValue, kind: .tab(tab))
+                ti.kind = .tab(tab)
+                tabItemCache[tab.id] = ti
+                return ti
+            }
+            rootItems.insert(item, at: index)
+            outlineView.insertItems(at: IndexSet(integer: index), inParent: nil, withAnimation: [])
+            // Inserts default expanded; match the model (a setGroupCollapsed op may also
+            // follow for a collapsed insert -- idempotent).
+            if group.isCollapsed { outlineView.collapseItem(item) } else { outlineView.expandItem(item) }
 
-        applyRestoreSelection(restoreSet, selectedTabId: tabId)
-        refreshRowEmphasis(focusedTabId: tabId)
+        case .removeGroup(let index):
+            let item = rootItems[index]
+            if case .group(let g) = item.kind {
+                for child in childItems[g.id] ?? [] {
+                    if case .tab(let t) = child.kind { tabItemCache.removeValue(forKey: t.id) }
+                }
+                childItems.removeValue(forKey: g.id)
+                groupItemCache.removeValue(forKey: g.id)
+            }
+            rootItems.remove(at: index)
+            outlineView.removeItems(at: IndexSet(integer: index), inParent: nil, withAnimation: [])
 
-        if let item = tabItemCache[tabId] {
-            let row = outlineView.row(forItem: item)
-            if row >= 0 { outlineView.scrollRowToVisible(row) }
+        case .reloadGroup(let id):
+            updateGroupRow(groupId: id, model: model)
+
+        case .setGroupCollapsed(let id, let collapsed):
+            guard let item = groupItemCache[id] else { return }
+            if collapsed { outlineView.collapseItem(item) } else { outlineView.expandItem(item) }
+            applyGroupCollapseState(for: item, collapsed: collapsed)
+
+        case .insertTab(let id, let groupId, let index):
+            guard let tab = tabById(id, in: model) else { return }
+            let item = tabItemCache[id] ?? SidebarItem(id: id.rawValue, kind: .tab(tab))
+            item.kind = .tab(tab)
+            tabItemCache[id] = item
+            if isSingleGroupMode {
+                rootItems.insert(item, at: index)
+                outlineView.insertItems(at: IndexSet(integer: index), inParent: nil, withAnimation: [])
+            } else {
+                childItems[groupId, default: []].insert(item, at: index)
+                outlineView.insertItems(at: IndexSet(integer: index), inParent: groupItemCache[groupId], withAnimation: [])
+            }
+
+        case .removeTab(let groupId, let index):
+            if isSingleGroupMode {
+                if case .tab(let t) = rootItems[index].kind { tabItemCache.removeValue(forKey: t.id) }
+                rootItems.remove(at: index)
+                outlineView.removeItems(at: IndexSet(integer: index), inParent: nil, withAnimation: [])
+            } else {
+                guard var children = childItems[groupId] else { return }
+                if case .tab(let t) = children[index].kind { tabItemCache.removeValue(forKey: t.id) }
+                children.remove(at: index)
+                childItems[groupId] = children
+                outlineView.removeItems(at: IndexSet(integer: index), inParent: groupItemCache[groupId], withAnimation: [])
+            }
+
+        case .reloadTab(let id):
+            updateTabRow(tabId: id, model: model)
+        }
+    }
+
+    /// reloadAll executor: rebuild the backing item lists and reloadData (first reconcile
+    /// and single<->multi group-mode flips). Selection is restored by the caller after.
+    private func rebuildAllRows(model: AppModel) {
+        reconcile(model: model)
+        outlineView.reloadData()
+        restoreCollapseState(model: model)
+    }
+
+    /// Re-apply each group's expanded/collapsed state after a full reloadData (which
+    /// resets expansion). No-op in single-group mode (tabs are roots, no group rows).
+    private func restoreCollapseState(model: AppModel) {
+        guard !isSingleGroupMode else { return }
+        for group in model.groups {
+            guard let item = groupItemCache[group.id] else { continue }
+            if group.isCollapsed { outlineView.collapseItem(item) } else { outlineView.expandItem(item) }
+        }
+    }
+
+    /// Forcibly end any in-progress inline rename without dispatching a rename Msg, so a
+    /// removed/moved edited row never strands its field editor. The guard already cleared
+    /// the sidecar; clearing the per-field associated object here makes the
+    /// resign-triggered textShouldEndEditing a no-op.
+    func endActiveInlineRename() {
+        for row in 0..<outlineView.numberOfRows {
+            guard let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView,
+                  let textField = cell.textField,
+                  textField.currentEditor() != nil else { continue }
+            objc_setAssociatedObject(textField, &AssociatedKeys.renameTarget, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+            textField.isEditable = false
+            window?.makeFirstResponder(nil)
+            break
         }
     }
 
@@ -380,8 +460,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             outlineView.selectRowIndexes(
                 nonFocusRows, byExtendingSelection: false)
         } else if !restoreSet.isEmpty {
-            // The target can be hidden inside a collapsed group. applySelection
-            // does not reloadData, so clear any stale visible row selection here.
+            // The target can be hidden inside a collapsed group. The granular op path
+            // may not reloadData, so clear any stale visible row selection here.
             outlineView.selectRowIndexes(
                 IndexSet(), byExtendingSelection: false)
         }
@@ -464,6 +544,12 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         textField.isEditable = true
         textField.selectText(nil)
         window?.makeFirstResponder(textField)
+        // Mirror the rename target into the sidecar -- the reconciler's authoritative
+        // "which row is editing" signal. Set AFTER makeFirstResponder: if that ended a
+        // prior inline edit, the prior field's finish path cleared the (shared) sidecar
+        // synchronously, so setting it here ensures this target wins. Synchronous and
+        // before any send(), so a row never reconciles mid-edit.
+        runtime?.viewLocalState.sidebarRenameTarget = target
     }
 
     // MARK: - NSOutlineViewDataSource
@@ -1030,8 +1116,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     /// Mirrors AppDelegate.newGroup: send the action, then begin inline
     /// rename on the freshly-created group (diffed via group-id snapshot
-    /// against currentModel, which the .reloadSidebar effect refreshed
-    /// during send).
+    /// against currentModel, which reconcileSidebar refreshed during send).
     @objc private func contextExtractTabs(_ sender: NSMenuItem) {
         guard let box = sender.representedObject as? TabIdsBox,
               !box.ids.isEmpty else { return }
@@ -1310,6 +1395,12 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// target parameter lets doCommandBy pass the saved target (since it clears
     /// the associated object before calling).
     private func finishInlineRename(textField: NSTextField, target: RenameTarget? = nil) {
+        // Clear the sidecar first -- this is the common sink for every finish path
+        // (doCommandBy Enter/Esc and textShouldEndEditing click-away). It runs
+        // synchronously before doCommandBy's synchronous sends and before
+        // textShouldEndEditing's deferred send, so the next reconcile sees no rename
+        // target and applies the row's reload normally.
+        runtime?.viewLocalState.sidebarRenameTarget = nil
         let resolvedTarget = target
             ?? objc_getAssociatedObject(textField, &AssociatedKeys.renameTarget) as? RenameTarget
         textField.isEditable = false
@@ -1421,12 +1512,10 @@ extension SidebarView: NSTextFieldDelegate {
 
 // MARK: - Helpers
 
-/// Tracks whether an inline-editing text field is renaming a tab or a group.
-private enum RenameTarget {
-    case tab(TabId)
-    case group(GroupId)
-}
-
+// `RenameTarget` now lives in Model.swift (hoisted so the reconciler can read the
+// inline-rename target via the ViewLocalState sidecar). The associated-object dance
+// below stays as the field editor's own bookkeeping; the sidecar is the copy the
+// reconciler reads.
 private enum AssociatedKeys {
     static var groupId: UInt8 = 0
     static var renameTarget: UInt8 = 0

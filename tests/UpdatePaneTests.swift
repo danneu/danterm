@@ -173,10 +173,8 @@ func paneTests() {
             if case .makeFirstResponder = $0 { return true }
             return false
         }, "should not request first responder from first responder callback")
-        try expect(hasEffect(effects) {
-            if case .updateSidebarTabRow = $0 { return true }
-            return false
-        }, "should emit updateSidebarTabRow")
+        // The sidebar tab row now updates via reconcileSidebar; only the window title
+        // remains a command.
         try expect(hasEffect(effects) {
             if case .setWindowTitle = $0 { return true }
             return false
@@ -230,17 +228,15 @@ func paneTests() {
         try expectEqual(tab.focusedPaneId, paneA)
         try expectEqual(tab.title, "pane-a-title")
         try expectEqual(tab.subtitle, "/tmp/pane-a")
-        try expect(hasEffect(effects) {
-            if case .updateSidebarTabRow = $0 { return true }
-            return false
-        }, "should emit updateSidebarTabRow")
+        // The tab row's title/subtitle now reconcile from this model state via
+        // reconcileSidebar; only the window title remains a command.
         try expect(hasEffect(effects) {
             if case .setWindowTitle = $0 { return true }
             return false
         }, "should emit setWindowTitle")
     }
 
-    test("testClosePaneUpdatesCollapsedGroupRow") {
+    test("testClosePaneInCollapsedGroupClosesAndPersists") {
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
@@ -252,13 +248,17 @@ func paneTests() {
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
-        let groupId = model.groups[0].id
         let effects = update(&model, .closePane(paneId: paneB))
 
+        // The collapsed group's bell-badge roll-up now reconciles via reconcileSidebar
+        // (desiredSidebar.groupUnreadAlertCount); here we assert the close itself and that
+        // it persists.
+        try expect(model.pane(paneB) == nil, "paneB should be closed")
+        try expectEqual(model.groups[0].tabs[0].focusedPaneId, paneA, "paneA should refocus")
         try expect(hasEffect(effects) {
-            if case .updateSidebarGroupRow(let gid) = $0, gid == groupId { return true }
+            if case .scheduleCheckpoint = $0 { return true }
             return false
-        }, "should emit updateSidebarGroupRow for collapsed group")
+        }, "should persist via scheduleCheckpoint")
     }
 
     test("closePane with remaining panes rebuilds only that tab container") {

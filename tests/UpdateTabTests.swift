@@ -39,10 +39,7 @@ func tabTests() {
             }
             return false
         }, "should emit createSurface for new pane")
-        try expect(hasEffect(effects) {
-            if case .reloadSidebar = $0 { return true }
-            return false
-        }, "should reload sidebar")
+        // The new tab's row appears via reconcileSidebar.
         try expect(!hasEffect(effects) {
             if case .focusSurface(let paneId, false) = $0, paneId == selectedPaneId { return true }
             return false
@@ -86,7 +83,7 @@ func tabTests() {
         try expectEqual(model.selectedTabId, firstTabId)
     }
 
-    test("testSelectTabSetsSidebarSelection") {
+    test("testSelectTabShowsSelectedTab") {
         var model = makeModel()
         createTab(&model)
         let firstTabId = model.groups[0].tabs[0].id
@@ -94,16 +91,14 @@ func tabTests() {
 
         let effects = update(&model, .selectTab(id: firstTabId))
 
-        try expect(hasEffect(effects) {
-            if case .setSidebarSelection(let tid) = $0, tid == firstTabId { return true }
-            return false
-        }, "should set sidebar selection")
+        // Sidebar selection is view-owned: reconcileSidebar reapplies it from
+        // model.selectedTabId (replacing the deleted .setSidebarSelection effect), so the
+        // model selection + the showSelectedTab command are the net.
+        try expectEqual(model.selectedTabId, firstTabId, "model selection should change")
         try expect(hasEffect(effects) {
             if case .showSelectedTab = $0 { return true }
             return false
         }, "selection change should show selected tab")
-        try expectEqual(effectCount(effects) { if case .reloadSidebar = $0 { return true }; return false },
-                        0, "selection-only tab change should not reload sidebar")
     }
 
     test("testSelectTabClearsBell") {
@@ -126,7 +121,7 @@ func tabTests() {
         try expect(!model.alerts.contains { $0.paneId == tabBPaneId && $0.isUnread }, "selecting tab should mark alerts read")
     }
 
-    test("testSelectTabRefreshesSidebarRowOnlyWhenFocusClearsAlert") {
+    test("testSelectTabFocusModeMarksFocusedPaneAlertsRead") {
         var model = makeModel()
         model.config.alertClearMode = .focus
         createTab(&model)
@@ -135,28 +130,24 @@ func tabTests() {
         let tabBId = model.groups[0].tabs[1].id
         let tabBPaneId = model.groups[0].tabs[1].focusedPaneId
 
-        let noAlertEffects = update(&model, .selectTab(id: tabAId))
-        try expectEqual(effectCount(noAlertEffects) {
-            if case .updateSidebarTabRow = $0 { return true }
-            return false
-        }, 0, "selecting without clearing alerts should not refresh a sidebar row")
+        // Selecting tabA (no alert on its focused pane) leaves alerts untouched.
+        update(&model, .selectTab(id: tabAId))
 
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: tabBPaneId,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .selectTab(id: tabBId))
+        update(&model, .selectTab(id: tabBId))
 
+        // Focus-mode selection marks the focused pane's alerts read; that tab's bell
+        // badge then reconciles via reconcileSidebar (the row refresh is no longer emitted).
         try expectEqual(model.alerts[0].isUnread, false,
             "focus-mode selection should mark focused pane alerts read")
-        try expect(hasEffect(effects) {
-            if case .updateSidebarTabRow(let tid) = $0, tid == tabBId { return true }
-            return false
-        }, "clearing focus alerts should refresh selected tab row")
+        try expectEqual(model.selectedTabId, tabBId)
     }
 
-    test("testSelectTabRefreshesCollapsedGroupRowWhenFocusClearsAlert") {
+    test("testSelectTabFocusModeMarksAlertReadInCollapsedGroup") {
         var model = makeModel()
         model.config.alertClearMode = .focus
         createTab(&model)
@@ -173,16 +164,13 @@ func tabTests() {
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .selectTab(id: workTabId))
+        update(&model, .selectTab(id: workTabId))
 
-        try expect(hasEffect(effects) {
-            if case .updateSidebarTabRow(let tid) = $0, tid == workTabId { return true }
-            return false
-        }, "clearing focus alerts should refresh selected tab row")
-        try expect(hasEffect(effects) {
-            if case .updateSidebarGroupRow(let gid) = $0, gid == workGroupId { return true }
-            return false
-        }, "clearing focus alerts in a collapsed group should refresh group row")
+        // The focused pane's alert is marked read; the collapsed group's rolled-up bell
+        // badge then reconciles via reconcileSidebar (desiredSidebar.groupUnreadAlertCount).
+        try expect(!model.alerts.contains { $0.paneId == workPaneId && $0.isUnread },
+            "focus-mode selection should mark the focused pane's alert read")
+        try expectEqual(model.selectedTabId, workTabId)
     }
 
     test("testCloseLastPaneShowsConfirmation") {
@@ -762,8 +750,6 @@ func tabTests() {
 
         try expectEqual(batch, direct, "single-id batch should match direct request model mutation")
         try expectEqual(destroyedPaneIds(in: batchEffects), destroyedPaneIds(in: directEffects))
-        try expectEqual(effectCount(batchEffects) { if case .reloadSidebar = $0 { return true }; return false },
-                        effectCount(directEffects) { if case .reloadSidebar = $0 { return true }; return false })
         try expectEqual(effectCount(batchEffects) { if case .scheduleCheckpoint = $0 { return true }; return false },
                         effectCount(directEffects) { if case .scheduleCheckpoint = $0 { return true }; return false })
     }
@@ -860,8 +846,6 @@ func tabTests() {
         try expectEqual(effectCount(effects) { if case .terminate = $0 { return true }; return false },
                         1, "emptying batch should emit exactly one terminate")
         try expect(isTerminateEffect(effects.last), "terminate should be the final effect")
-        try expectEqual(effectCount(effects) { if case .reloadSidebar = $0 { return true }; return false },
-                        0, "emptying batch should not reload sidebar")
         try expectEqual(effectCount(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
                         0, "emptying batch should not schedule a checkpoint after terminate")
     }
@@ -881,8 +865,6 @@ func tabTests() {
 
         try expectEqual(Set(model.groups.flatMap(\.tabs).map(\.id)), Set([firstTabId]))
         try expectEqual(model.selectedTabId, firstTabId, "selection should move to a remaining tab")
-        try expectEqual(effectCount(effects) { if case .reloadSidebar = $0 { return true }; return false },
-                        1, "non-emptying batch should reload sidebar once")
         try expectEqual(effectCount(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
                         1, "non-emptying batch should checkpoint once")
         try expectEqual(effectCount(effects) { if case .terminate = $0 { return true }; return false },
@@ -913,9 +895,9 @@ func tabTests() {
         let effects = update(&model, .setTabColors(tabIds: [tabId], color: .red))
         try expectEqual(model.groups[0].tabs[0].color, .red)
         try expect(hasEffect(effects) {
-            if case .updateSidebarTabRow(let tid) = $0, tid == tabId { return true }
+            if case .scheduleCheckpoint = $0 { return true }
             return false
-        }, "should emit updateSidebarTabRow")
+        }, "should persist via scheduleCheckpoint (color reconciles via reconcileSidebar)")
     }
 
     test("testSetTabColorClear") {
@@ -927,9 +909,9 @@ func tabTests() {
         let effects = update(&model, .setTabColors(tabIds: [tabId], color: nil))
         try expect(model.groups[0].tabs[0].color == nil, "color should be nil")
         try expect(hasEffect(effects) {
-            if case .updateSidebarTabRow(let tid) = $0, tid == tabId { return true }
+            if case .scheduleCheckpoint = $0 { return true }
             return false
-        }, "should emit updateSidebarTabRow")
+        }, "should persist via scheduleCheckpoint (color reconciles via reconcileSidebar)")
     }
 
     test("testSetTabColorReplaceDifferent") {
@@ -1077,8 +1059,8 @@ func tabTests() {
 
         try expectEqual(model.groups[0].tabs[0].color, .purple)
         try expectEqual(model.groups[0].tabs[1].color, .purple)
-        // updateSidebarTabRow per valid id (2) + scheduleCheckpoint (1)
-        try expectEqual(effects.count, 3,
+        // Per-tab row updates now reconcile; only scheduleCheckpoint remains.
+        try expectEqual(effects.count, 1,
             "no double-dispatch for duplicates; stale dropped")
     }
 

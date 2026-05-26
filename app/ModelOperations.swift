@@ -1070,6 +1070,274 @@ func totalUnreadAlertCount(model: AppModel) -> Int {
   model.alerts.filter(\.isUnread).count
 }
 
+// MARK: - Sidebar Projection + Row-Op Diff (reconcileSidebar)
+
+/// One sidebar tab row's rendered attributes -- everything `configureTabCell` draws.
+/// `id` keys the row; the remaining fields are compared to decide a `reloadTab` op.
+/// Selection is *not* here: NSOutlineView owns selectedRowIndexes and the reconciler
+/// reapplies it via `resolveReloadSelection`, so a selection change is never a row op.
+struct SidebarTabProjection: Equatable {
+  let id: TabId
+  // Non-id fields are `var` so the row-op model-apply test can transform a working
+  // copy of the old projection in place (and the executor can mirror it). They never
+  // change identity, only rendered content.
+  var displayTitle: String
+  var subtitle: String?
+  var unreadAlertCount: Int
+  var jumpKey: Character?   // model.jumpMode?.keyMap[tab.id]
+  var color: TabColor?
+}
+
+/// One sidebar group row. `isCollapsed` drives the structural `setGroupCollapsed`
+/// op (expand/collapse + caret); the reload-attrs (name/bell/tabCount/isFirst -- the
+/// rest of what `configureGroupCell` draws) drive a `reloadGroup` op. `tabs` is the
+/// ordered child list this group owns.
+struct SidebarGroupProjection: Equatable {
+  let id: GroupId
+  var isCollapsed: Bool
+  var name: String
+  var unreadAlertCount: Int
+  var tabCount: Int
+  var isFirst: Bool        // first group draws no top separator
+  var tabs: [SidebarTabProjection]
+}
+
+/// The full sidebar outline as a pure value: ordered groups -> ordered tabs, every
+/// rendered attribute, collapse state, and the per-tab jump badge -- but NOT selection.
+/// `isSingleGroupMode` (one group) hides group rows and promotes tabs to roots; a flip
+/// of this flag restructures the whole outline, so `computeSidebarRowOps` rebuilds.
+struct SidebarProjection: Equatable {
+  var isSingleGroupMode: Bool
+  var groups: [SidebarGroupProjection]
+}
+
+/// Project the sidebar outline from the model. Selection is excluded by design
+/// (view-owned). The jump badge comes from `model.jumpMode?.keyMap[tab.id]`.
+func desiredSidebar(in model: AppModel) -> SidebarProjection {
+  let firstGroupId = model.groups.first?.id
+  let groups = model.groups.map { group in
+    SidebarGroupProjection(
+      id: group.id,
+      isCollapsed: group.isCollapsed,
+      name: group.name,
+      unreadAlertCount: groupUnreadAlertCount(for: group, alerts: model.alerts),
+      tabCount: group.tabs.count,
+      isFirst: group.id == firstGroupId,
+      tabs: group.tabs.map { tab in
+        SidebarTabProjection(
+          id: tab.id,
+          displayTitle: tab.displayTitle,
+          subtitle: tab.subtitle,
+          unreadAlertCount: unreadAlertCount(for: tab, alerts: model.alerts),
+          jumpKey: model.jumpMode?.keyMap[tab.id],
+          color: tab.color
+        )
+      }
+    )
+  }
+  return SidebarProjection(isSingleGroupMode: model.groups.count == 1, groups: groups)
+}
+
+/// A single ordered NSOutlineView mutation. The list `computeSidebarRowOps` returns is
+/// a *sequential* script: each index is relative to the running (intermediate) state,
+/// so applying the ops one at a time -- as both the executor and the model-apply test
+/// do -- transforms old into new. Reorders are decomposed into remove+insert (no move
+/// op), which keeps the executor off NSOutlineView's crash-prone `moveItem` index
+/// semantics and lets a moved edited row's cell be destroyed and rebuilt cleanly.
+/// `insert`/`reload` ops carry the entity id; the executor and test source that row's
+/// content from the *new* projection / live model. `remove` ops carry only an index.
+enum SidebarRowOp: Equatable {
+  case reloadAll                                                   // wholesale rebuild
+  case insertGroup(id: GroupId, index: Int)
+  case removeGroup(index: Int)
+  case reloadGroup(id: GroupId)                                    // name/bell/tabCount/isFirst
+  case setGroupCollapsed(id: GroupId, collapsed: Bool)
+  case insertTab(id: TabId, groupId: GroupId, index: Int)
+  case removeTab(groupId: GroupId, index: Int)
+  case reloadTab(id: TabId)
+}
+
+/// Transform `old` id-list into `new` via a sequential remove/insert script (indices
+/// relative to the running state). A reorder surfaces as a remove+insert pair, not a
+/// move. Shared by the group-level and tab-level diffs.
+private func sidebarSequenceOps<Id: Hashable>(
+  old: [Id], new: [Id],
+  insert: (Id, Int) -> SidebarRowOp,
+  remove: (Int) -> SidebarRowOp
+) -> [SidebarRowOp] {
+  var ops: [SidebarRowOp] = []
+  var work = old
+  let newSet = Set(new)
+  // 1. Remove ids absent from new, descending so the not-yet-processed indices stay valid.
+  var i = work.count - 1
+  while i >= 0 {
+    if !newSet.contains(work[i]) {
+      ops.append(remove(i))
+      work.remove(at: i)
+    }
+    i -= 1
+  }
+  // 2. work now holds old's surviving ids (a subset of new). Walk new; wherever the
+  //    running list disagrees with new[j], either pull new[j] down from its current
+  //    spot (a reorder, k > j) or insert it (a new id) -- so the running prefix matches.
+  var j = 0
+  while j < new.count {
+    if j < work.count, work[j] == new[j] { j += 1; continue }
+    if let k = work.firstIndex(of: new[j]) {
+      ops.append(remove(k)); work.remove(at: k)
+    }
+    ops.append(insert(new[j], j)); work.insert(new[j], at: j)
+    j += 1
+  }
+  return ops
+}
+
+/// Diff two sidebar projections into a minimal ordered op list. A nil `old` (first
+/// run) or a single<->multi group-mode flip rebuilds wholesale (`reloadAll`); otherwise
+/// it diffs groups, then each surviving group's tabs, then reload + collapse ops. Pure
+/// and unit-tested via model-apply (apply the ops to a copy of `old` -> equals `new`),
+/// which catches NSOutlineView-invalid index ordering an exact-sequence assert would bless.
+func computeSidebarRowOps(old: SidebarProjection?, new: SidebarProjection) -> [SidebarRowOp] {
+  guard let old = old, old.isSingleGroupMode == new.isSingleGroupMode else {
+    return [.reloadAll]
+  }
+
+  var ops: [SidebarRowOp] = []
+
+  // Level 1: group rows (roots in multi-group mode). A removed group takes its tabs
+  // with it; an inserted group brings its tabs (built from `new`/model), so neither
+  // needs per-tab ops.
+  ops += sidebarSequenceOps(
+    old: old.groups.map(\.id), new: new.groups.map(\.id),
+    insert: { id, idx in .insertGroup(id: id, index: idx) },
+    remove: { idx in .removeGroup(index: idx) })
+
+  let oldGroupById = Dictionary(uniqueKeysWithValues: old.groups.map { ($0.id, $0) })
+
+  // Level 2: tabs within each surviving group.
+  for newGroup in new.groups {
+    guard let oldGroup = oldGroupById[newGroup.id] else { continue }  // inserted group: handled above
+    ops += sidebarSequenceOps(
+      old: oldGroup.tabs.map(\.id), new: newGroup.tabs.map(\.id),
+      insert: { id, idx in .insertTab(id: id, groupId: newGroup.id, index: idx) },
+      remove: { idx in .removeTab(groupId: newGroup.id, index: idx) })
+  }
+
+  // Group reload-attrs (everything configureGroupCell draws except collapse, which the
+  // setGroupCollapsed op drives, and the tab list).
+  for newGroup in new.groups {
+    guard let oldGroup = oldGroupById[newGroup.id] else { continue }
+    if (oldGroup.name, oldGroup.unreadAlertCount, oldGroup.tabCount, oldGroup.isFirst)
+       != (newGroup.name, newGroup.unreadAlertCount, newGroup.tabCount, newGroup.isFirst) {
+      ops.append(.reloadGroup(id: newGroup.id))
+    }
+  }
+
+  // Tab reload-attrs: same id, different rendered content.
+  let oldTabById = Dictionary(
+    uniqueKeysWithValues: old.groups.flatMap(\.tabs).map { ($0.id, $0) })
+  for newTab in new.groups.flatMap(\.tabs) {
+    if let oldTab = oldTabById[newTab.id], oldTab != newTab {
+      ops.append(.reloadTab(id: newTab.id))
+    }
+  }
+
+  // Collapse (structural expand/collapse). Skipped in single-group mode -- the lone
+  // group has no caret. A newly inserted group defaults to expanded, so emit a collapse
+  // op if it should start collapsed.
+  if !new.isSingleGroupMode {
+    for newGroup in new.groups {
+      if let oldGroup = oldGroupById[newGroup.id] {
+        if oldGroup.isCollapsed != newGroup.isCollapsed {
+          ops.append(.setGroupCollapsed(id: newGroup.id, collapsed: newGroup.isCollapsed))
+        }
+      } else if newGroup.isCollapsed {
+        ops.append(.setGroupCollapsed(id: newGroup.id, collapsed: true))
+      }
+    }
+  }
+
+  return ops
+}
+
+/// The narrow rename guard (Risk: "Rename guard must stay narrow"). While a sidebar row
+/// is inline-edited, a `reload` of *that* row is suppressed -- its title/attrs are owned
+/// by the live field editor -- but every structural op still applies: a tab being
+/// renamed can be closed or moved by another `send()`. `clearRename` tells the executor
+/// to end the now-orphaned edit (and clear the sidecar) when the edited row is removed
+/// (absent from `new`), moved (a re-insert op carries its id), or caught in a reloadAll
+/// rebuild. Factored pure so the rename-guard-scope test is structure-insensitive.
+func guardSidebarRenameOps(
+  ops: [SidebarRowOp],
+  renameTarget: RenameTarget?,
+  new: SidebarProjection
+) -> (ops: [SidebarRowOp], clearRename: Bool) {
+  guard let renameTarget = renameTarget else { return (ops, false) }
+
+  let targetPresent: Bool = {
+    switch renameTarget {
+    case .tab(let id): return new.groups.contains { $0.tabs.contains { $0.id == id } }
+    case .group(let id): return new.groups.contains { $0.id == id }
+    }
+  }()
+
+  var out: [SidebarRowOp] = []
+  var clearRename = !targetPresent   // the edited row was removed/closed -> end the edit
+  for op in ops {
+    switch op {
+    case .reloadTab(let id) where renameTarget == .tab(id):
+      continue   // suppress: field editor owns this row
+    case .reloadGroup(let id) where renameTarget == .group(id):
+      continue   // suppress
+    case .insertTab(let id, _, _) where renameTarget == .tab(id):
+      out.append(op); clearRename = true   // edited row moved (remove+insert) -> end edit
+    case .insertGroup(let id, _) where renameTarget == .group(id):
+      out.append(op); clearRename = true
+    case .reloadAll:
+      out.append(op); clearRename = true   // wholesale rebuild recreates every cell
+    default:
+      out.append(op)
+    }
+  }
+  return (out, clearRename)
+}
+
+/// Advance the reconcileSidebar cache to `new` after applying ops -- but if a row's
+/// reload was suppressed because it is the live-editing row (`suppressedRenameTarget`
+/// non-nil after the guard ran), retain that row's *prior* projection so the deferred
+/// attribute update re-fires the next time the row diffs (once the edit ends and the
+/// guard stops suppressing). Without this the cache would claim the suppressed attrs
+/// were applied and silently drift (a cancelled rename would strand a stale badge).
+/// The suppressed row never has a structural op (those clear the rename target), so
+/// retaining its old attrs in `new`'s structure is safe.
+func advanceSidebarCache(
+  old: SidebarProjection?,
+  new: SidebarProjection,
+  suppressedRenameTarget: RenameTarget?
+) -> SidebarProjection {
+  guard let target = suppressedRenameTarget, let old = old else { return new }
+  var merged = new
+  switch target {
+  case .tab(let id):
+    guard let oldTab = old.groups.flatMap(\.tabs).first(where: { $0.id == id }) else { return new }
+    for gi in merged.groups.indices {
+      if let ti = merged.groups[gi].tabs.firstIndex(where: { $0.id == id }) {
+        merged.groups[gi].tabs[ti] = oldTab
+        return merged
+      }
+    }
+  case .group(let id):
+    guard let oldGroup = old.groups.first(where: { $0.id == id }),
+          let gi = merged.groups.firstIndex(where: { $0.id == id }) else { return new }
+    // Retain only the reload-attrs (collapse + tab list are structural, already applied).
+    merged.groups[gi].name = oldGroup.name
+    merged.groups[gi].unreadAlertCount = oldGroup.unreadAlertCount
+    merged.groups[gi].tabCount = oldGroup.tabCount
+    merged.groups[gi].isFirst = oldGroup.isFirst
+  }
+  return merged
+}
+
 // MARK: - Delete Group
 
 // Determines whether deleting a group requires user confirmation.

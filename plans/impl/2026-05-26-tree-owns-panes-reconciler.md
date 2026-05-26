@@ -9,7 +9,7 @@
 |              | _(checkpoint)_ | --     | Part 1 -> Part 2 go/no-go                                                                    |
 | Yes          | 3              | Part 2 | `reconcileFocusBorders`                                                                      |
 | Yes          | 4              | Part 2 | `reconcilePaneChrome` (toolbars + search overlay)                                            |
-|              | 5              | Part 2 | `reconcileSidebar` + Part 1b (`ViewLocalState`/`RenameTarget`)                               |
+| Yes          | 5              | Part 2 | `reconcileSidebar` + Part 1b (`ViewLocalState`/`RenameTarget`)                               |
 |              | 6              | Part 2 | `reconcileWindowChrome`                                                                      |
 |              | 7              | Part 2 | `reconcileSwitcher`                                                                          |
 |              | 8              | Part 2 | `reconcileSurfaceExistence` + `reconcileContainers` + Part 1c (keyed surface reconciliation) |
@@ -1402,3 +1402,125 @@ the projections/diff are the pure nets):**
 - Stage 5 (`RenameTarget`/`ViewLocalState`) and Stage 9 (`Effect` -> `Command` rename)
   handoffs above remain valid and untouched. `Effect` is **not** renamed (Stage 9);
   side-tables stay `[PaneId: ...]`; `allPaneIds` is `allPanes.map(\.id)`.
+
+### Stage 5 -- `reconcileSidebar` (NSOutlineView granular diff) + Part 1b (`ViewLocalState`/`RenameTarget`)
+
+Landed. `just test` 986/986 (974 prior + 12 new: 3 sidebar projection, 6 `computeSidebarRowOps`
+model-apply, 3 rename-guard scope), `just build` clean. The trickiest pass, landed isolated.
+
+**What shipped (Part 1b first, then the pass):**
+
+- **Part 1b -- `RenameTarget` hoist + `ViewLocalState` sidecar.** `RenameTarget`
+  (`.tab`/`.group`, now `Equatable`) moved from a `private enum` in `SidebarView` into
+  `Model.swift` so the reconciler can read it. `struct ViewLocalState { var
+  sidebarRenameTarget: RenameTarget? }` is stored on `AppRuntime` next to `model`.
+  `SidebarView.beginRenaming(item:target:)` (the single choke point reached by clicks,
+  `beginRenamingTab/Group`, and the menu/IPC entries) **sets**
+  `runtime.viewLocalState.sidebarRenameTarget`; `finishInlineRename` (the common sink that
+  every finish path -- Enter/Esc `doCommandBy`, click-away `textShouldEndEditing` -- calls)
+  **clears** it. Both are synchronous, before any `send()` the rename paths dispatch, so a
+  row never reconciles mid-edit. The per-text-field associated-object dance stays as the
+  field editor's own bookkeeping; the sidecar is the authoritative copy the executor reads.
+- **Pure layer in `ModelOperations.swift`** (test-visible): `SidebarProjection` (Equatable;
+  `isSingleGroupMode` + ordered `SidebarGroupProjection`s -> `SidebarTabProjection`s with
+  every rendered attr, collapse, and the jump badge from `model.jumpMode?.keyMap[tab.id]`;
+  **selection excluded**) + `desiredSidebar(in:)`; the `SidebarRowOp` enum +
+  `computeSidebarRowOps(old:new:)` (a two-level group-then-tab diff producing an **ordered
+  sequential** op script); `guardSidebarRenameOps(ops:renameTarget:new:)` (the narrow guard);
+  and `advanceSidebarCache(old:new:suppressedRenameTarget:)` (the suppressed-reload cache
+  coherence helper -- see deviations).
+- **Thin executor** `reconcileSidebar()` in `Reconcile.swift`, inserted into `reconcile()`
+  after `reconcilePaneChrome()`, before `syncSurfaceVisibility()`. It computes the projection,
+  diffs against `caches.sidebar` (new single-optional field), runs the guard, clears the
+  sidecar + advances the cache, and hands the guarded ops to `SidebarView.applySidebarOps`.
+  The AppKit executor (`applySidebarOps` + `applyRowOp` + `rebuildAllRows` +
+  `endActiveInlineRename`) issues the matching `insertItems`/`removeItems`/`reloadItem`-via-
+  in-place-configure + expand/collapse, keeping `rootItems`/`childItems`/the item caches in
+  lockstep. **Selection is view-owned**: it snapshots the live multi-selection, applies the
+  ops, then reapplies through the existing `resolveReloadSelection` + `applyRestoreSelection`
+  + `refreshRowEmphasis` (replacing `.setSidebarSelection`). `commitRestoreSession` dropped
+  its explicit `sidebarView?.reload(model:)` -- the `reconcile()` it already calls now builds
+  the sidebar from the nil (reset) cache.
+- **Per-stage deletions:** the 4 `Effect` cases (`reloadSidebar`/`setSidebarSelection`/
+  `updateSidebarTabRow`/`updateSidebarGroupRow`) + their `perform` arms + their entries in
+  the `isPostReconcile` exhaustive switch + all 34 emission sites across `Update.swift`. The
+  now-dead `reload(model:)`/`applySelection(...)` in `SidebarView` and the
+  `sidebarAlertUpdateEffects`/`tabIdsForPanes`/`paneToTabIdMap`/`unreadAlertPaneIds(in:)`
+  helpers in `Update.swift` were removed (they only computed sidebar-effect targets the
+  reconciler now derives from the projection).
+
+**Deviations / judgment calls:**
+
+- **Reorders/moves are decomposed into remove+insert; there is no `move` op.** This keeps
+  the executor off `NSOutlineView.moveItem`'s crash-prone cross-/same-parent index
+  semantics (untested headless) and naturally destroys+rebuilds a moved row's cell -- which
+  is exactly what ends a rename-target row's edit cleanly (QA 13). The plan's "insert/remove/
+  move/reload" became insert/remove/reload + a `reloadAll` op (first build + single<->multi
+  group-mode flip, which restructures the whole outline). The model-apply test validates the
+  op order regardless of which element the diff chooses to move.
+- **The rename guard fully suppresses a `reload` of the edited row** (not skipTitle): the
+  Risk section and the rename-guard-scope test both say "attrs not clobbered," so the row is
+  left entirely untouched while editing. To avoid drift (a cancelled rename stranding a stale
+  badge), `advanceSidebarCache` retains the suppressed row's **prior** projection in
+  `caches.sidebar`, so the deferred attr update re-fires the moment the edit ends and the
+  guard stops suppressing. Net effect vs today's live skipTitle update: the edited row's
+  badge/subtitle/color update on **edit-end** rather than mid-edit -- a deliberate, drift-free
+  trade.
+- **`clearRename` fires for a remove OR a move of the edited row** (per the guard test), not
+  only "absent from new." A pure removal is caught by absence-from-`new`; a move is caught by
+  the re-insert op carrying the target id. A within-group reorder that the diff happens to
+  satisfy by moving a *sibling* leaves the edited row's cell untouched, so `clearRename` stays
+  false there (correct -- the editor survives a passive shift).
+- **Collapse is projected** (`GroupModel.isCollapsed` is model-owned), so it rides
+  `setGroupCollapsed` ops; selection and multi-selection are the only view-owned sidebar state
+  and are reapplied via `resolveReloadSelection` (kept out of the projection).
+- **`(AppModel, ViewLocalState)` threading:** I kept the sidecar **sidebar-local** rather than
+  threading it into every projection. Only the executor's guard reads it; the content
+  projection (`desiredSidebar`) and `computeSidebarRowOps` don't need it, and the Stage 3/4
+  projections (`desiredFocusBorders`/`desiredPaneToolbar`/`desiredSearchOverlays`) were left
+  taking only `(in: AppModel)`. The plan's "every projection takes `(AppModel,
+  ViewLocalState)`" is a convention I deliberately did **not** churn -- later stages should
+  thread the sidecar only where a pass actually reads it.
+- Several alert/select handlers now `return []` (model mutation only -- bell badges reconcile);
+  their tests assert the model state + `effects.isEmpty`/`scheduleCheckpoint` instead of the
+  deleted row emissions.
+
+**Manual QA still owed (the NSOutlineView executor is manual-QA-only; the op-list +
+projection + guard are the pure nets, all under test):** run `just build-run` and verify:
+
+1. **QA 1** -- inline-rename a tab, trigger an unrelated `send()` (bell elsewhere): the field
+   editor survives (the row's reload is suppressed by the sidecar guard).
+2. **QA 2** -- multi-select tabs, unrelated `send()`: selection survives (not collapsed to the
+   focused tab); reorder/drag tabs between groups -> minimal row ops, no flicker.
+3. **QA 3** -- collapse a group, switch tabs, add a tab: collapse preserved (projected from
+   `isCollapsed`; `setGroupCollapsed` only fires on an actual change).
+4. **QA 4** -- bell + todo badges update on the right rows without a full reload.
+5. **QA 13** -- inline-rename a tab, then move/close *that* tab from another path (menu, IPC,
+   drag): the row moves/closes, the edit ends cleanly (no stranded field editor, no stale row),
+   `sidebarRenameTarget` cleared. Also confirm the launch + snapshot-restore paths render the
+   sidebar (the first reconcile's `reloadAll` builds every row from the nil cache).
+
+**Handoffs for later stages:**
+
+- **`ViewLocalState` now exists on `AppRuntime`** with `sidebarRenameTarget`, set in
+  `SidebarView.beginRenaming` and cleared in `finishInlineRename` (synchronously, pre-`send`).
+  Its **only reader** is `reconcileSidebar`'s rename guard. It was kept **sidebar-local** (not
+  threaded into the other projections) -- see the convention note under deviations; a later
+  pass that needs view-local state should add a field and thread it only where read.
+- **`caches.sidebar: SidebarProjection?`** is the first single-optional **ordered-pass** cache
+  (the template the eventual `windowChrome`/`switcher` caches follow). It is reset for free by
+  `tearDownCurrentSession`'s `caches = ReconcilerCaches()`. Note for **Stage 8** (containers):
+  reconcileSidebar captures/restores selection *itself* (snapshot live selection -> apply ops
+  -> `resolveReloadSelection`), independent of the container pass; the container pass need not
+  touch sidebar selection. `reconcileSidebar` runs **after** `reconcilePaneChrome` and
+  **before** `syncSurfaceVisibility`; Stage 8 inserts `reconcileSurfaceExistence` +
+  `reconcileContainers` ahead of the chrome/sidebar passes (existence first).
+- **To Stage 6:** the `refreshTabTodoButton()` calls (still in the `send()` switch and in
+  `finalizeTabSelection`) and the unread dock/toolbar-badge block in `send()` remain
+  untouched, waiting for `reconcileWindowChrome`. `setWindowTitle` is still an emitted command
+  (Stage 6 deletes it).
+- **No command-phase change:** the sidebar emits no focus commands, so `isPostReconcile` is
+  unchanged (only the 4 deleted cases were removed from its `false` list).
+- Stage 8 (`.destroySurface` still emitted in 4 handlers; the `surfaceCreationFailed`
+  split-tab test still asserts one per sibling) and Stage 9 (`Effect` -> `Command` rename)
+  handoffs above remain valid and untouched.

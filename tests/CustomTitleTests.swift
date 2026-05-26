@@ -30,11 +30,8 @@ func customTitleTests() {
 
         let effects = update(&model, .renameTab(id: tabId, name: "My App"))
         try expectEqual(model.groups[0].tabs[0].customTitle, "My App")
-        try expect(hasEffect(effects) {
-            if case .updateSidebarTabRow(let tid) = $0, tid == tabId { return true }
-            return false
-        }, "should emit updateSidebarTabRow")
-        // Tab is selected, so should also emit setWindowTitle
+        // The renamed row updates via reconcileSidebar (displayTitle is in the projection).
+        // Tab is selected, so it should also emit setWindowTitle.
         try expect(hasEffect(effects) {
             if case .setWindowTitle = $0 { return true }
             return false
@@ -50,10 +47,7 @@ func customTitleTests() {
 
         let effects = update(&model, .renameTab(id: tabId, name: nil))
         try expect(model.groups[0].tabs[0].customTitle == nil, "customTitle should be nil")
-        try expect(hasEffect(effects) {
-            if case .updateSidebarTabRow(let tid) = $0, tid == tabId { return true }
-            return false
-        }, "should emit updateSidebarTabRow")
+        // The renamed row updates via reconcileSidebar (displayTitle is in the projection).
         try expect(hasEffect(effects) {
             if case .setWindowTitle = $0 { return true }
             return false
@@ -580,8 +574,11 @@ func customTitleTests() {
 
         try expect(model.groups[0].tabs[0].customTitle == nil)
         try expect(model.groups[0].tabs[1].customTitle == nil)
-        try expect(effects.count >= 3,
-            "at least 2 updateSidebarTabRow + 1 scheduleCheckpoint")
+        // Per-row sidebar updates now reconcile; the batch clear still persists.
+        try expect(hasEffect(effects) {
+            if case .scheduleCheckpoint = $0 { return true }
+            return false
+        }, "should persist the batch clear via scheduleCheckpoint")
     }
 
     test("testClearCustomTitlesAllStaleIsNoop") {
@@ -609,7 +606,11 @@ func customTitleTests() {
         let effects = update(&model, .clearCustomTitles(tabIds: [id]))
 
         try expect(model.groups[0].tabs[0].customTitle == nil)
-        try expect(effects.count >= 2,
-            "updateSidebarTabRow + scheduleCheckpoint plus selectionSyncEffects")
+        // Clearing the focused tab's title resyncs the window title via selectionSyncEffects
+        // (the row itself reconciles via reconcileSidebar).
+        try expect(hasEffect(effects) {
+            if case .setWindowTitle = $0 { return true }
+            return false
+        }, "should emit setWindowTitle (selectionSync) for the selected tab")
     }
 }
