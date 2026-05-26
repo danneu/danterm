@@ -209,8 +209,10 @@ func treeOwnsPanesTests() {
     }
 
     // surfaceCreationFailed for a pane in a SPLIT tab removes the whole tab,
-    // drops every sibling pane from pane()/allPaneIds, prunes id-keyed side
-    // tables, and (stage-1 form) still emits a .destroySurface per sibling.
+    // drops every sibling pane from pane()/allPaneIds, and prunes id-keyed side
+    // tables. Stage 8 moved surface teardown into reconcileSurfaceExistence, so this
+    // asserts the structural model change plus the pure teardown-selection diff
+    // (surfacesToTearDown) instead of the old .destroySurface-per-sibling effect.
     test("surfaceCreationFailed in a split tab removes the tab and cleans up siblings") {
         var model = makeModel()
         createTab(&model)
@@ -226,7 +228,11 @@ func treeOwnsPanesTests() {
         model.lastNotificationTime[paneA] = [.bell: Date()]
         model.lastNotificationTime[paneB] = [.bell: Date()]
 
-        let effects = update(&model, .surfaceCreationFailed(paneId: paneA))
+        // Surfaces live before the failure = every pane currently in the model.
+        let liveSurfaceIds = Set(model.allPaneIds)
+        try expect(liveSurfaceIds.isSuperset(of: [paneA, paneB]), "both split panes were live")
+
+        update(&model, .surfaceCreationFailed(paneId: paneA))
 
         // Whole tab removed: both panes gone.
         try expect(model.pane(paneA) == nil, "failed pane should be gone")
@@ -241,12 +247,11 @@ func treeOwnsPanesTests() {
         try expect(model.lastNotificationTime[paneA] == nil, "lastNotificationTime should be pruned for paneA")
         try expect(model.lastNotificationTime[paneB] == nil, "lastNotificationTime should be pruned for paneB")
 
-        // Stage-1 form: still emits a .destroySurface per sibling pane.
-        let destroyed: Set<PaneId> = Set(effects.compactMap {
-            if case .destroySurface(let pid) = $0 { return pid }
-            return nil
-        })
-        try expectEqual(destroyed, Set([paneA, paneB]), "should destroy every sibling surface")
+        // reconcileSurfaceExistence tears down exactly the two siblings (now absent from
+        // allPaneIds); the surviving second-tab pane is never selected.
+        let teardown = surfacesToTearDown(liveSurfaceIds: liveSurfaceIds, model: model)
+        try expectEqual(teardown, Set([paneA, paneB]), "every sibling pane is selected for teardown")
+        try expect(teardown.isDisjoint(with: Set(model.allPaneIds)), "surviving panes are never torn down")
     }
 
     // An unknown pane (owned by no tree -- impossible to orphan now) is a safe

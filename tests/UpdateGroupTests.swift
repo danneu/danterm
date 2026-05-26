@@ -71,27 +71,21 @@ func groupTests() {
 
         update(&model, .createGroup(name: "Temp"))
         let tempGroupId = model.groups[1].id
-        let autoTabId = model.groups[1].tabs[0].id
         // Temp has 1 auto-created tab
 
         // Move first tab to Temp (now Temp has 2 tabs)
         update(&model, .moveTabs(tabIds: [tabId1], toGroupId: tempGroupId, atIndex: 0))
 
+        // Capture Temp's pane surfaces before deleting (both its tabs are destroyed).
+        let deletedPanes = Set(model.groups[1].tabs.flatMap { allPaneIds($0.rootNode) })
+        let liveBefore = Set(model.allPaneIds)
+
         // Delete Temp without moving tabs — destroys both tabs in Temp
-        let effects = update(&model, .deleteGroup(id: tempGroupId, moveTabs: false))
+        update(&model, .deleteGroup(id: tempGroupId, moveTabs: false))
         try expectEqual(model.groups.count, 1, "only General should remain")
-        try expect(hasEffect(effects) {
-            if case .destroySurface = $0 { return true }
-            return false
-        }, "should emit destroySurface for closed panes")
-        try expect(hasEffect(effects) {
-            if case .removeTabContainer(let tabId) = $0, tabId == tabId1 { return true }
-            return false
-        }, "should remove moved tab container")
-        try expect(hasEffect(effects) {
-            if case .removeTabContainer(let tabId) = $0, tabId == autoTabId { return true }
-            return false
-        }, "should remove auto-created tab container")
+        // Surface teardown is reconcileSurfaceExistence's; container removal is structural.
+        try expectEqual(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model), deletedPanes,
+            "both deleted tabs' pane surfaces are torn down")
         // tabId2 should still be around
         try expectEqual(model.groups[0].tabs.count, 1)
         try expectEqual(model.groups[0].tabs[0].id, tabId2)
@@ -233,10 +227,8 @@ func groupTests() {
             if case .createSurface = $0 { return true }
             return false
         }, "should emit createSurface for the new tab's pane")
-        try expect(hasEffect(effects) {
-            if case .showSelectedTab = $0 { return true }
-            return false
-        }, "should emit showSelectedTab")
+        // The tab switch is structural (reconcileContainers shows the new selected tab);
+        // selectedTabId (asserted above) is the net.
         try expect(hasEffect(effects) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
@@ -308,14 +300,8 @@ func groupTests() {
         try expectEqual(model.groups.count, 1, "empty General should be pruned")
         try expectEqual(model.groups[0].id, workGroupId, "Work should remain")
         try expect(model.selectedTabId != nil, "some tab should be selected")
-        try expect(hasEffect(effects) {
-            if case .showSelectedTab = $0 { return true }
-            return false
-        }, "should emit showSelectedTab")
-        try expect(hasEffect(effects) {
-            if case .removeTabContainer(let tabId) = $0, tabId == generalTabId { return true }
-            return false
-        }, "should remove closed tab container")
+        // The fallback selection + closed-tab container removal are structural now
+        // (reconcileContainers); selectedTabId + the pruned group above are the nets.
         try expect(hasEffect(effects) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
@@ -385,14 +371,8 @@ func groupTests() {
             if case .terminate = $0 { return true }
             return false
         }, "should not terminate — Work group has tabs")
-        try expect(hasEffect(effects) {
-            if case .showSelectedTab = $0 { return true }
-            return false
-        }, "should emit showSelectedTab")
-        try expect(hasEffect(effects) {
-            if case .removeTabContainer = $0 { return true }
-            return false
-        }, "should remove failed tab container")
+        // Fallback selection + failed-tab container removal are structural now
+        // (reconcileContainers); the pruned group + surviving Work group above are the nets.
     }
 
     test("testExtractSingleTabToNewGroup") {

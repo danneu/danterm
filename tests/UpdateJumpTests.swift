@@ -46,14 +46,13 @@ func updateJumpTests() {
         let initiallySelected = model.selectedTabId
         _ = update(&model, .jumpModeActivated(visibleTabs: ids))
 
-        let effects = update(&model, .jumpModeKeyPressed(char: "a"))
+        update(&model, .jumpModeKeyPressed(char: "a"))
 
         try expectEqual(model.selectedTabId, ids[0], "first visible tab should be selected")
         try expect(model.selectedTabId != initiallySelected)
         try expect(model.jumpMode == nil, "jump mode should be cleared")
-        // Selection reconciles in reconcileSidebar; applySelectTab still drives the view swap.
-        try expect(hasEffect(effects) { if case .showSelectedTab = $0 { return true }; return false },
-            "commit should show the selected tab")
+        // The view swap is structural now: reconcileContainers shows the newly selected
+        // tab. selectedTabId (asserted above) is the net.
     }
 
     test("jumpModeKeyPressed on already-selected tab clears mode") {

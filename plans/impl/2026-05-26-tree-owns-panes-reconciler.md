@@ -12,7 +12,7 @@
 | Yes          | 5              | Part 2 | `reconcileSidebar` + Part 1b (`ViewLocalState`/`RenameTarget`)                               |
 | Yes          | 6              | Part 2 | `reconcileWindowChrome`                                                                      |
 | Yes          | 7              | Part 2 | `reconcileSwitcher`                                                                          |
-|              | 8              | Part 2 | `reconcileSurfaceExistence` + `reconcileContainers` + Part 1c (keyed surface reconciliation) |
+| Yes          | 8              | Part 2 | `reconcileSurfaceExistence` + `reconcileContainers` + Part 1c (keyed surface reconciliation) |
 |              | 9              | Part 2 | Rename `Effect` -> `Command`                                                                 |
 
 This plan does two things, in order. First it restructures the model so a pane
@@ -1732,3 +1732,151 @@ single-optional diff are the pure nets, under test). Run `just build-run` and ve
   selection) and Stage 9 (`Effect` -> `Command` rename) handoffs remain valid and untouched.
   `Effect` is **not** renamed; side-tables stay `[PaneId: ...]`; `allPaneIds` is
   `allPanes.map(\.id)`.
+
+### Stage 8 -- `reconcileSurfaceExistence` + `reconcileContainers` + Part 1c (keyed surface reconciliation)
+
+Landed. `just test` 995/995 (986 prior + 9 new: 4 `computeContainerOps` model-apply, 3
+`ContainerShape`, 1 `chromeInvalidation`, 1 `surfacesToTearDown`), `just build` clean.
+This is the largest, most coupled Part 2 pass: surface teardown + eager container
+mounting + chrome-cache invalidation + the `.destroySurface` deletions + the
+command-phase flip, all in one build. **After this stage no projection `Effect` case
+remains.**
+
+**What shipped:**
+
+- **`reconcileSurfaceExistence` (FIRST pass, `Reconcile.swift`)** -- inserted at the very
+  front of `reconcile()`. Pure `surfacesToTearDown(liveSurfaceIds:model:)` =
+  `liveSurfaceIds - Set(model.allPaneIds)` (`ModelOperations.swift`); the executor runs the
+  old `.destroySurface` teardown body (now `AppRuntime.tearDownSurface(_:)`: `tokenStore.remove`
+  + `cleanupReplayFile` + cancel/remove `searchDebounceTimers` + `surfaces.removeValue` +
+  `closeSurface`) for each torn-down pane. Runs first so a removed pane's surface is gone
+  before its container is rebuilt/removed (matching the old destroySurface-before-rebuild
+  order). Surface *creation* stays a command.
+- **`reconcileContainers` (SECOND pass) -- eager.** `desiredContainerShapes(in:)` is a total
+  projection of every group's every tab. `computeContainerOps(old:new:selectedTabId:)` emits
+  `.remove` (tab gone), `.rebuild` (tab new or shape-drifted), `.setVisible(tab, == selected)`
+  for **every** tab in `new`, ordered remove -> rebuild -> setVisible. The executor reuses
+  `buildAndInsertContainer`/`removeTabContainer`; the selected container is visible, the rest
+  mounted + `isHidden`. Returns the tab to mount-focus (built/rebuilt or shown-from-hidden;
+  only the selected one) so `reconcile()` can apply focus **after** `reconcilePaneChrome`.
+- **`ContainerShape` (pure, `Equatable`)** = a `ContainerShapeNode` structural fingerprint
+  (split ids + directions + leaf `PaneId`s, **ratios dropped**) + `isZoomed` + the zoomed leaf
+  id. **Excludes split ratios** (so `splitRatioChanged` is a content-diff no-op) **and the
+  leaf `PaneModel` payload** (so a title/cwd/progress/theme/todo edit never rebuilds). A focus
+  change in an unzoomed tab does not drift the shape (focusedPaneId is in the shape only while
+  zoomed), which is why a pane click never rebuilds (QA 6).
+- **Chrome-cache invalidation.** Pure `chromeInvalidation(ops:newShapes:)` returns every leaf
+  pane of a `.rebuild` op's container; the executor clears `caches.paneToolbar[pid]` /
+  `caches.searchOverlay[pid]` for those panes **before** `reconcilePaneChrome` runs (the next
+  pass), so its `applyDiff` sees key-absent-from-cache and re-pushes the value-unchanged chrome
+  onto the fresh wrapper. This **replaced** `finalizeTabSelection`'s `refreshPaneToolbars(in:)`
+  + active-search rehydrate (both deleted). `focusBorders` is not invalidated (its `TerminalView`
+  persists in `surfaces`).
+- **Command-phase flip.** `Effect.isPostReconcile` now classifies **exactly**
+  `makeFirstResponder` + `focusSearchField` as post-reconcile (`makeFirstResponder` flipped from
+  pre); `focusSurface` stays pre-reconcile (acts on an existing surface; a foreground createTab
+  create-failure re-enters `send` and re-focuses the fallback, which a deferred
+  `focusSurface(old,false)` would defocus). Still an exhaustive switch with no `default`.
+- **`clearTodoPopoverForViewSwap(&model)` (pure)** = `model.todoPopover = nil`, placed by the
+  1:1 rule at all 8 `.showSelectedTab` sites (createTab-foreground, movePaneToTab,
+  movePaneToNewTab, surfaceCreationFailed, deleteGroup, applySelectTab, navigateToPane-same-tab,
+  closeTabBody) and at the standalone visible-tab `.rebuildTabContainer` sites (closePane,
+  movePane, focusDirection-unzoom, toggleZoom x2; splitPane **guarded** by
+  `tab.id == model.selectedTabId` since it can target a background tab). The AppKit dismiss
+  (`dismissStrandedPopovers` = cancelPaneDrag + dismiss todo/tab-todo pairs) lives in the
+  `reconcileContainers` executor and fires when the **previously-visible** container is hidden,
+  rebuilt, or removed.
+- **Restore.** `commitRestoreSession` dropped `showSelectedTab()`; the `reconcile()` it already
+  calls builds every container eagerly from the reset (empty) `containerShape` cache
+  (`reconcileSurfaceExistence` is a no-op there -- staged surfaces match `allPaneIds`).
+  `tearDownCurrentSession` now reuses `dismissStrandedPopovers()` + `clearTodoPopoverForViewSwap`.
+- **Per-stage deletions (compiler-enforced):** `Effect` cases `destroySurface` /
+  `showSelectedTab` / `rebuildTabContainer` / `removeTabContainer` + their `perform` arms + their
+  `isPostReconcile` entries + all 26 emission sites (4 `.destroySurface`, 8 `.showSelectedTab`,
+  10 `.rebuildTabContainer`, 4 `.removeTabContainer`). Dead methods deleted:
+  `showSelectedTab()`, `ensureTabContainer()`, `rebuildTabContainer()`, `finalizeTabSelection()`,
+  `prepareForViewSwap()`, and (now callerless) `refreshPaneToolbars(in:)` + `forEachPaneWrapper`.
+
+**Deviations / judgment calls:**
+
+- **Mount-time focus is applied by `reconcile()` *after* `reconcilePaneChrome`, not inside
+  `reconcileContainers`.** The folded `finalizeTabSelection` focus logic lives in
+  `AppRuntime.applyMountTimeFocus(_:)`, but its active-search branch needs the search field that
+  `reconcilePaneChrome` (a later pass) rebuilds on a fresh wrapper. So `reconcileContainers`
+  returns *which* container to focus and `reconcile()` invokes `applyMountTimeFocus` after the
+  chrome pass. The terminal/browser-focus branches don't need this ordering (their hosts persist),
+  but keeping the whole decision in one method, applied once at the right time, is cleaner than
+  splitting it. This is the plan's "fold into reconcileContainers" intent with the overlay-build
+  ordering respected.
+- **Mount-time focus runs only when the selected container is *activated*** (built/rebuilt or
+  transitions hidden->visible), tracked in the executor -- never on a background-only reconcile.
+  This is what keeps a pane click from refighting first responder (QA 6) and what scopes focus to
+  the visible tab under eager mounting (QA 14). The move/navigate handlers additionally emit an
+  explicit (now post-reconcile) `.makeFirstResponder`; `selectTab` relies solely on mount-time
+  focus (it has no makeFirstResponder), and its container *does* transition visible, so it is
+  covered.
+- **`chromeInvalidation` only contributes `.rebuild` leaves** (from `newShapes`), not `.remove`.
+  A removed tab is absent from `newShapes` (can't resolve its leaves), and its panes are gone from
+  the model anyway, so `reconcilePaneChrome`'s keyed-over-all-panes `applyDiff` prunes their cache
+  entries itself. The signature `(ops:, newShapes:)` is exactly sufficient.
+- **Stranded-popover dismiss fires on *any* previously-visible-container hide/rebuild/remove**
+  (including a plain tab switch), matching the old `prepareForViewSwap` which dismissed on every
+  view swap, not just rebuilds. The pane TODO popover anchors inside the container (geometrically
+  stranded on hide); the tab TODO popover anchors in persistent chrome but goes stale on a switch,
+  so dismissing both keeps them in sync with the (already-cleared) model record.
+- **`splitPane`'s `clearTodoPopoverForViewSwap` is guarded** by `tab.id == model.selectedTabId`:
+  splitPane can split a pane in a non-selected tab (IPC), which is a *background* rebuild that must
+  not clear a popover open in the visible tab. The other standalone rebuild sites operate on the
+  selected tab unconditionally, so they clear unconditionally. The `reconcileContainers` AppKit
+  dismiss and this model clear stay consistent (a background rebuild triggers neither).
+- **`movePaneToTab`/`movePaneToNewTab`/`navigateToPane` rebuild sites do NOT get an extra clear** --
+  each is paired with a `.showSelectedTab` (now the clear) on the same handler, and at executor
+  time those rebuilds are of background/about-to-be-shown containers, so the clear came from the
+  selection change, exactly as before.
+- **TDD red confirmed** on the marquee net: with `computeContainerOps` emitting `.setVisible` only
+  for the selected tab (the dropped-hide regression), the visibility-only-switch model-apply test
+  goes red with `[A:true, B:true] != [A:false, B:true]` (two visible containers); restored to green.
+
+**Manual QA still owed (the AppKit executors are manual-QA-only; the ops/projection/selection
+helpers are the pure nets, all under test). Run `just build-run` and verify the full tab/pane
+checklist PLUS:**
+
+- **QA 6** -- rapid clicks between panes: first responder follows the click, never fights it
+  (a focus change doesn't drift the ContainerShape, so reconcileContainers doesn't rebuild and
+  mount-time focus doesn't run).
+- **QA 10** -- drag a split divider continuously: smooth, no rebuild (`splitRatioChanged` is a
+  content-diff no-op since ratios are excluded from `ContainerShape`).
+- **QA 12** -- with an active search overlay in a pane, force a container rebuild of its tab
+  (split/unsplit a sibling, toggle zoom): the toolbar and the active search overlay re-appear on
+  the rebuilt wrapper via the **chrome-cache invalidation** (not the deleted rehydrate), not blank.
+- **QA 14** -- restore a many-tab session: every tab's container is mounted, only the selected one
+  visible, hidden tabs occluded (no background CPU after the first reconcile -- `syncSurfaceVisibility`
+  sets occlusion=false for non-visible), and first responder lands only in the selected tab.
+- General: tab switch with active search, scrollback survives switch, focus borders across switch,
+  zoom across switch, navigateToPane clears zoom, cross-tab pane drag, extract-to-new-tab, delete
+  group, snapshot restore, 20-tab rapid switch, Cmd-Tab, close selected/non-selected tab, theme
+  browser z-order, Retina scale change, **todo popover during rebuild** (open a pane/tab TODO
+  popover, then split/close/switch -- the popover dismisses cleanly, no stranded floating popover),
+  snapshot import over an active session.
+
+**Handoffs for later stages:**
+
+- **To Stage 9 (the pure rename):** **no projection `Effect` case remains** -- every surviving
+  `Effect` is a real command (PTY create/text/key, focus moves, per-pane theme apply, notifications,
+  IPC reply/error/read, checkpoint, config persistence, modal confirmations, app/dock, TODO
+  popovers, export). Stage 9 is now a mechanical rename `Effect` -> `Command` (+ `AppRuntime.perform`
+  -> whatever executor name the plan picks). The enum + its `isPostReconcile` switch live in
+  **`app/Effect.swift`**; the `perform(_:)` switch lives in **`app/AppRuntime.swift`**; emission
+  sites are throughout `app/Update.swift` (+ a few in `app/AppRuntime.swift`/`app/GhosttyApp.swift`).
+  `isPostReconcile` now classifies **exactly** `makeFirstResponder` + `focusSearchField` as post.
+- **Final `reconcile()` pass order:** `reconcileSurfaceExistence` -> `reconcileContainers`
+  (returns the mount-focus tab) -> `reconcileFocusBorders` -> `reconcilePaneChrome` ->
+  `applyMountTimeFocus(mountFocusTab)` -> `reconcileSidebar` -> `reconcileWindowChrome` ->
+  `reconcileSwitcher` -> `syncSurfaceVisibility` (occlusion last). Eager container mounting and the
+  `paneToolbar`/`searchOverlay` chrome-cache invalidation are live; Stage 4's imperative rehydrate is
+  gone -- the cache-coherence mechanism is now: containers run before chrome and clear the affected
+  keys for rebuilt/removed containers so the chrome pass re-applies onto fresh wrappers.
+- `ReconcilerCaches` gained `containerShape: [TabId: ContainerShape]`; it resets for free via
+  `tearDownCurrentSession`'s `caches = ReconcilerCaches()`. `tabContainers` /
+  `buildAndInsertContainer` / `removeTabContainer` / `tearDownSurface` / `dismissStrandedPopovers` /
+  `applyMountTimeFocus` are now `internal` so the cross-file `reconcile` extension can reach them.

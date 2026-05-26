@@ -108,7 +108,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             waitAfterCommand: true
         ))
         if !background {
-            effects.append(.showSelectedTab)
+            // Foreground createTab selects the new tab (a view swap); clear the stranded
+            // TODO popover record. reconcileContainers builds + shows the new container.
+            clearTodoPopoverForViewSwap(&model)
         }
         // Persist new tab + pane + selection so a crash doesn't lose the tab.
         effects.append(.scheduleCheckpoint)
@@ -206,7 +208,12 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 waitAfterCommand: true
             ),
         ]
-        effects.append(.rebuildTabContainer(tabId: tab.id))
+        // reconcileContainers rebuilds the container (its shape drifted). If the split is
+        // on the *visible* (selected) tab, the rebuild strands an anchored TODO popover --
+        // clear the model record (a background-tab split leaves the visible popover alone).
+        if tab.id == model.selectedTabId {
+            clearTodoPopoverForViewSwap(&model)
+        }
         // Persist new split tree so the pane layout survives a crash.
         effects.append(.scheduleCheckpoint)
         if theme != nil {
@@ -226,7 +233,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             return emitTerminateConfirmation(&model)
         }
 
-        var effects: [Effect] = [.destroySurface(paneId: paneId)]
+        // Surface teardown is reconcileSurfaceExistence's now (paneId leaves the tree
+        // below, so the next reconcile tears its surface down); keep side-table cleanup.
+        var effects: [Effect] = []
         removeAlertsForPane(paneId, in: &model)
         removePaneSearchState(paneId, from: &model)
         model.lastNotificationTime.removeValue(forKey: paneId)
@@ -255,7 +264,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             syncFocusedPaneChrome(next, in: &model)
         }
 
-        effects.append(.rebuildTabContainer(tabId: tab.id))
+        // closePane operates on the selected (visible) tab; its rebuild strands an
+        // anchored TODO popover, so clear the model record. reconcileContainers rebuilds.
+        clearTodoPopoverForViewSwap(&model)
         // Persist pane removal + updated tree so closed panes stay closed on restore.
         effects.append(.scheduleCheckpoint)
         return effects
@@ -287,8 +298,11 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             tab.focusedPaneId = source
             tab.isZoomed = false
         }
+        // movePane operates on the selected (visible) tab; its rebuild strands an
+        // anchored TODO popover, so clear the model record. reconcileContainers rebuilds.
+        clearTodoPopoverForViewSwap(&model)
         // Persist rearranged split tree so pane positions survive a crash.
-        return [.rebuildTabContainer(tabId: tab.id), .scheduleCheckpoint]
+        return [.scheduleCheckpoint]
 
     case .movePaneToTab(let paneId, let targetTabId):
         // Find source tab containing this pane
@@ -316,8 +330,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             tab.subtitle = chrome.subtitle
         }
 
-        let sourceEmptied = newSourceTree == nil
-
         // Handle source tab
         if let newRoot = newSourceTree {
             // Source tab still has panes — update it
@@ -339,7 +351,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             markAlertsReadForPane(paneId, in: &model)
         }
 
-        // Build effects: defocus old tab's panes, select target tab, rebuild
+        // Build effects: defocus old tab's panes, then select + focus the target tab.
         var effects: [Effect] = []
         if let oldTabId = model.selectedTabId {
             for oldPaneId in paneIdsForTab(oldTabId, in: model) {
@@ -347,13 +359,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             }
         }
         model.selectedTabId = targetTabId
-        if sourceEmptied {
-            effects.append(.removeTabContainer(tabId: sourceTab.id))
-        } else {
-            effects.append(.rebuildTabContainer(tabId: sourceTab.id))
-        }
-        effects.append(.rebuildTabContainer(tabId: targetTabId))
-        effects.append(.showSelectedTab)
+        // The source container reconciles (removed if emptied, else rebuilt) and the target
+        // is rebuilt + shown -- all by reconcileContainers from the model. Selection moved
+        // to the target (a view swap), so clear the stranded TODO popover record.
+        clearTodoPopoverForViewSwap(&model)
         effects.append(.makeFirstResponder(paneId: paneId))
         // Persist cross-tab pane move so the new tree layout survives a crash.
         effects.append(.scheduleCheckpoint)
@@ -421,10 +430,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             markAlertsReadForPane(paneId, in: &model)
         }
 
-        effects.append(.showSelectedTab)
-        if !sourceHasOnlyThisPane {
-            effects.append(.rebuildTabContainer(tabId: sourceTab.id))
-        }
+        // Selection moved to the new tab (a view swap); the source + new containers
+        // reconcile from the model via reconcileContainers. Clear the stranded popover record.
+        clearTodoPopoverForViewSwap(&model)
         effects.append(.makeFirstResponder(paneId: paneId))
         // Persist pane-to-new-tab extraction so the tab structure survives a crash.
         effects.append(.scheduleCheckpoint)
@@ -506,7 +514,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         guard let tab = selectedTab(in: model) else { return [] }
         if tab.isZoomed {
             updateSelectedTab(&model) { t in t.isZoomed = false }
-            return [.rebuildTabContainer(tabId: tab.id)]
+            // Unzoom rebuilds the selected (visible) container; clear the stranded popover.
+            clearTodoPopoverForViewSwap(&model)
+            return []
         }
         guard let target = nearestLeaf(tab.rootNode, from: tab.focusedPaneId, direction: direction, side: side) else { return [] }
 
@@ -840,7 +850,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 let groupId = model.groups[gi].id
                 var effects: [Effect] = []
                 for pid in allPaneIds(tab.rootNode) {
-                    effects.append(.destroySurface(paneId: pid))
+                    // Surface teardown is reconcileSurfaceExistence's (these panes leave the
+                    // tree below); keep the id-keyed side-table cleanup here.
                     removeAlertsForPane(pid, in: &model)
                     removePaneSearchState(pid, from: &model)
                     model.lastNotificationTime.removeValue(forKey: pid)
@@ -848,7 +859,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
                 model.groups[gi].tabs.remove(at: ti)
                 removeGroupIfEmpty(groupId, from: &model)
-                effects.append(.removeTabContainer(tabId: tabId))
 
                 var selectionMoved = false
                 if model.selectedTabId == tabId {
@@ -859,7 +869,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                     return effects + [.terminate]
                 }
                 if selectionMoved {
-                    effects.append(.showSelectedTab)
+                    // Selection moved to a surviving tab (a view swap); clear the popover record.
+                    clearTodoPopoverForViewSwap(&model)
                 }
                 // Persist tab removal after a failed surface so it doesn't reappear.
                 effects.append(.scheduleCheckpoint)
@@ -1014,12 +1025,12 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             var effects: [Effect] = []
             for tab in group.tabs {
                 for pid in allPaneIds(tab.rootNode) {
-                    effects.append(.destroySurface(paneId: pid))
+                    // Surface teardown is reconcileSurfaceExistence's (these panes leave the
+                    // tree below); keep the id-keyed side-table cleanup here.
                     removeAlertsForPane(pid, in: &model)
                     removePaneSearchState(pid, from: &model)
                     model.lastNotificationTime.removeValue(forKey: pid)
                 }
-                effects.append(.removeTabContainer(tabId: tab.id))
             }
             model.groups.remove(at: idx)
             if model.groups.flatMap(\.tabs).isEmpty {
@@ -1029,7 +1040,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             if let selId = model.selectedTabId,
                !model.groups.flatMap(\.tabs).contains(where: { $0.id == selId }) {
                 model.selectedTabId = model.groups.flatMap(\.tabs).first?.id
-                effects.append(.showSelectedTab)
+                // Selection moved to a surviving tab (a view swap); clear the popover record.
+                clearTodoPopoverForViewSwap(&model)
             }
             // Persist group deletion + tab removal so they don't reappear.
             effects.append(.scheduleCheckpoint)
@@ -1150,13 +1162,17 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
     case .toggleZoomPane:
         guard let tab = selectedTab(in: model) else { return [] }
+        // Zoom toggle changes the selected (visible) tab's container shape, so
+        // reconcileContainers rebuilds it; clear the stranded TODO popover record.
         if tab.isZoomed {
             updateSelectedTab(&model) { t in t.isZoomed = false }
-            return [.rebuildTabContainer(tabId: tab.id)]
+            clearTodoPopoverForViewSwap(&model)
+            return []
         }
         if case .split = tab.rootNode {
             updateSelectedTab(&model) { t in t.isZoomed = true }
-            return [.rebuildTabContainer(tabId: tab.id)]
+            clearTodoPopoverForViewSwap(&model)
+            return []
         }
         return []
 
@@ -2284,7 +2300,10 @@ private func applySelectTab(_ model: inout AppModel, id: TabId) -> [Effect] {
     if model.config.alertClearMode == .focus, let tab = selectedTab(in: model) {
         markAlertsReadForPane(tab.focusedPaneId, in: &model)
     }
-    effects.append(.showSelectedTab)
+    // Tab switch (a view swap): reconcileContainers hides the old container and shows the
+    // new one + applies mount-time focus. Clear the stranded TODO popover record (the old
+    // showSelectedTab's prepareForViewSwap clear).
+    clearTodoPopoverForViewSwap(&model)
     // Selection is view-owned: reconcileSidebar reapplies it (replacing the deleted
     // .setSidebarSelection), and any cleared-alert bell badges update from the projection.
     // The selected tab's window chrome reconciles via reconcileWindowChrome.
@@ -2399,14 +2418,14 @@ private func navigateToPane(_ paneId: PaneId, in model: inout AppModel) -> [Effe
         updateSelectedTab(&model) { t in t.isZoomed = false }
     }
     syncFocusedPaneChrome(paneId, in: &model)
-    // Same-tab navigation still needs selection finalization because selectTab
-    // intentionally no-ops when the target tab is already selected.
+    // Same-tab navigation still needs popover finalization because selectTab
+    // intentionally no-ops when the target tab is already selected (so applySelectTab's
+    // clear didn't run). A tab-switch path already cleared it via applySelectTab.
     if !tabSwitched {
-        effects.append(.showSelectedTab)
+        clearTodoPopoverForViewSwap(&model)
     }
-    if wasZoomed, paneId != oldFocusedPaneId {
-        effects.append(.rebuildTabContainer(tabId: currentTab.id))
-    }
+    // A zoom change here rebuilds the selected (visible) container via reconcileContainers;
+    // its stranded-popover clear is already covered above (same-tab) or by applySelectTab.
     effects.append(.makeFirstResponder(paneId: paneId))
     if focusChanged {
         effects.append(.scheduleCheckpoint)
@@ -2512,7 +2531,8 @@ private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Effect] {
 
     var effects: [Effect] = []
     for pid in paneIds {
-        effects.append(.destroySurface(paneId: pid))
+        // Surface teardown is reconcileSurfaceExistence's (these panes leave the tree
+        // below); keep the id-keyed side-table cleanup + per-pane popover dismiss here.
         removeAlertsForPane(pid, in: &model)
         removePaneSearchState(pid, from: &model)
         model.lastNotificationTime.removeValue(forKey: pid)
@@ -2531,12 +2551,13 @@ private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Effect] {
 
     model.groups[groupIdx].tabs.remove(at: tabIdx)
     removeGroupIfEmpty(groupId, from: &model)
-    effects.append(.removeTabContainer(tabId: id))
+    // The closed tab's container is removed by reconcileContainers (it left the model).
 
     // Select fallback tab if we closed the selected one.
     if id == model.selectedTabId, let newId = fallbackTabId {
         model.selectedTabId = newId
-        effects.append(.showSelectedTab)
+        // Selection moved to the fallback (a view swap); clear the stranded popover record.
+        clearTodoPopoverForViewSwap(&model)
     }
     return effects
 }

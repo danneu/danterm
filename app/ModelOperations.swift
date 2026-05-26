@@ -1380,6 +1380,151 @@ func advanceSidebarCache(
   return merged
 }
 
+// MARK: - View Reconciler: Containers (Stage 8)
+//
+// The content area renders one SplitContainerView per tab (eager: every tab's
+// container is mounted; the selected tab's is visible, the rest hidden). A
+// container is rebuilt only when its *shape* drifts -- structure + leaf ids +
+// zoom -- NOT on a split-ratio change or any leaf PaneModel payload edit
+// (title/cwd/progress/theme/todo), which now live in the tree. Excluding the
+// payload is what keeps a metadata edit from rebuilding a container (and clearing
+// anchored UI); excluding ratios keeps a divider drag a content-diff no-op.
+
+/// Structural fingerprint of a split tree: split ids + directions + leaf pane ids,
+/// with ratios and the leaf PaneModel payload dropped. Equatable so two trees that
+/// differ only in ratio or payload compare equal.
+indirect enum ContainerShapeNode: Equatable {
+  case leaf(PaneId)
+  case split(id: SplitId, direction: SplitNodeModel.Direction, first: ContainerShapeNode, second: ContainerShapeNode)
+}
+
+/// What a tab's container is built from, reduced to the inputs that require a
+/// rebuild: the tree's structural fingerprint plus the zoom state (a zoomed tab
+/// renders only its focused leaf, so the zoom flag and the zoomed leaf id are part
+/// of the shape). Ratios and pane payloads are excluded via `ContainerShapeNode`.
+struct ContainerShape: Equatable {
+  let tree: ContainerShapeNode
+  let isZoomed: Bool
+  // focusedPaneId while zoomed; nil otherwise -- so a focus change in an unzoomed
+  // tab does NOT drift the shape (which is why a pane click never rebuilds).
+  let zoomedLeaf: PaneId?
+}
+
+/// Reduce a split tree to its structural fingerprint (drops ratios + payload).
+func containerShapeNode(_ node: SplitNodeModel) -> ContainerShapeNode {
+  switch node {
+  case .leaf(let pane):
+    return .leaf(pane.id)
+  case .split(let id, let dir, let first, let second, _):
+    return .split(id: id, direction: dir, first: containerShapeNode(first), second: containerShapeNode(second))
+  }
+}
+
+/// The container shape for one tab.
+func containerShape(of tab: TabModel) -> ContainerShape {
+  ContainerShape(
+    tree: containerShapeNode(tab.rootNode),
+    isZoomed: tab.isZoomed,
+    zoomedLeaf: tab.isZoomed ? tab.focusedPaneId : nil
+  )
+}
+
+/// Container-shape projection: one shape per tab in the model -- a *total* projection
+/// of every group's every tab (eager mounting has no "mounted set" side-input).
+func desiredContainerShapes(in model: AppModel) -> [TabId: ContainerShape] {
+  var result: [TabId: ContainerShape] = [:]
+  for group in model.groups {
+    for tab in group.tabs {
+      result[tab.id] = containerShape(of: tab)
+    }
+  }
+  return result
+}
+
+/// A single container mutation the thin `reconcileContainers` executor applies.
+/// `remove` detaches a gone tab's container; `rebuild` recreates a new/drifted tab's
+/// container; `setVisible` toggles isHidden. Emitted remove -> rebuild -> setVisible
+/// so a rebuilt container exists before its visibility op runs. Equatable for the
+/// model-apply test.
+enum ContainerOp: Equatable {
+  case remove(tabId: TabId)
+  case rebuild(tabId: TabId)
+  case setVisible(tabId: TabId, visible: Bool)
+}
+
+/// Diff old vs new container shapes into ops: `.remove` for tabs gone from `new`,
+/// `.rebuild` for a tab absent in `old` (new tab) or whose shape drifted, and
+/// `.setVisible` for *every* tab in `new` (selected visible, rest hidden -- eager).
+/// Ordered remove -> rebuild -> setVisible. Pure; unit-tested via model-apply
+/// (apply the ops to a presence/visibility map -> equals new's keys + visibility),
+/// which catches a dropped-hide regression an exact-sequence assert would bless.
+func computeContainerOps(
+  old: [TabId: ContainerShape],
+  new: [TabId: ContainerShape],
+  selectedTabId: TabId?
+) -> [ContainerOp] {
+  var ops: [ContainerOp] = []
+  for tabId in old.keys where new[tabId] == nil {
+    ops.append(.remove(tabId: tabId))
+  }
+  for (tabId, shape) in new where old[tabId] != shape {
+    ops.append(.rebuild(tabId: tabId))
+  }
+  for tabId in new.keys {
+    ops.append(.setVisible(tabId: tabId, visible: tabId == selectedTabId))
+  }
+  return ops
+}
+
+/// Leaf pane ids of a container shape (backs `chromeInvalidation`).
+func leafPaneIds(of shape: ContainerShape) -> [PaneId] {
+  func walk(_ node: ContainerShapeNode) -> [PaneId] {
+    switch node {
+    case .leaf(let id): return [id]
+    case .split(_, _, let first, let second): return walk(first) + walk(second)
+    }
+  }
+  return walk(shape.tree)
+}
+
+/// Panes whose host PaneWrapperView a container op destroys, so `reconcileContainers`
+/// must clear their paneToolbar/searchOverlay cache entries *before*
+/// `reconcilePaneChrome` runs -- otherwise the value-unchanged chrome diff would skip
+/// the fresh wrapper and leave it blank. Only `.rebuild` contributes (its panes
+/// survive on a fresh wrapper): a `.remove`'s panes are gone from the model, so
+/// reconcilePaneChrome's keyed-over-all-panes diff prunes their cache entries itself;
+/// `.setVisible` keeps the same wrapper. (The signature takes only `newShapes`, which
+/// cannot resolve a removed tab's leaves anyway -- by design, since they need no
+/// invalidation.)
+func chromeInvalidation(ops: [ContainerOp], newShapes: [TabId: ContainerShape]) -> Set<PaneId> {
+  var result: Set<PaneId> = []
+  for op in ops {
+    if case .rebuild(let tabId) = op, let shape = newShapes[tabId] {
+      result.formUnion(leafPaneIds(of: shape))
+    }
+  }
+  return result
+}
+
+/// Surfaces to tear down: live surfaces whose pane no longer exists in the model.
+/// With tree-owns-panes, "desired surfaces" is exactly `model.allPaneIds`, so a pure
+/// set difference selects the dead ones. `reconcileSurfaceExistence` runs this over
+/// `Set(surfaces.keys)` and tears down each selected pane. Surface *creation* stays a
+/// command (it forks a PTY), so the reconciler only ever destroys.
+func surfacesToTearDown(liveSurfaceIds: Set<PaneId>, model: AppModel) -> Set<PaneId> {
+  liveSurfaceIds.subtracting(Set(model.allPaneIds))
+}
+
+/// Clear the open-TODO-popover model record on a view swap (tab switch or visible
+/// container rebuild). The record drives guards + close callbacks but is never read
+/// by the reconciler to *present* a popover; the matching AppKit dismiss lives in
+/// `reconcileContainers`. Placed by a 1:1 rule wherever the migration removed a
+/// `.showSelectedTab` emission or a visible-tab `.rebuildTabContainer`, preserving
+/// today's `prepareForViewSwap` clearing.
+func clearTodoPopoverForViewSwap(_ model: inout AppModel) {
+  model.todoPopover = nil
+}
+
 // MARK: - Delete Group
 
 // Determines whether deleting a group requires user confirmation.

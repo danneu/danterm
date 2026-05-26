@@ -4,7 +4,8 @@ import DanTermProtocol
 enum Effect {
     // Surface
     case createSurface(paneId: PaneId, cwd: String?, command: String?, launchCommand: String? = nil, waitAfterCommand: Bool = true)
-    case destroySurface(paneId: PaneId)
+    // Surface *destruction* is a projection (reconcileSurfaceExistence tears down surfaces
+    // for panes gone from model.allPaneIds), so there is no destroySurface command.
     // Paste path (ghostty_surface_text). Strips control bytes and applies
     // bracketed-paste mode if active. Used by direct IPC callers that send
     // the top-level `text` field.
@@ -23,14 +24,11 @@ enum Effect {
     case makeFirstResponder(paneId: PaneId)
 
     // View
-    case showSelectedTab
-    case rebuildTabContainer(tabId: TabId)
-    case removeTabContainer(tabId: TabId)
-    // Sidebar (reloadSidebar / setSidebarSelection / updateSidebarTabRow /
-    // updateSidebarGroupRow) is now derived by reconcileSidebar from the model after
-    // every send(); the granular NSOutlineView diff replaced these effects in Stage 5.
-    // The window/content title is likewise derived by reconcileWindowChrome (Stage 6),
-    // so setWindowTitle is gone.
+    // The per-tab SplitContainerViews are derived by reconcileContainers from the model
+    // after every send() (Stage 8, eager): showSelectedTab / rebuildTabContainer /
+    // removeTabContainer are gone. Sidebar (reloadSidebar / setSidebarSelection /
+    // updateSidebarTabRow / updateSidebarGroupRow) is derived by reconcileSidebar (Stage 5),
+    // and the window/content title by reconcileWindowChrome (Stage 6).
 
     // Export
     case exportState(AppModelSnapshot)
@@ -85,20 +83,21 @@ enum Effect {
 
 extension Effect {
     /// Whether this command must run *after* `reconcile()` because it targets a view
-    /// the reconciler creates. In Stage 4 only `focusSearchField` qualifies: it focuses
-    /// the search field that `reconcilePaneChrome` builds, which does not exist until
-    /// after reconcile. `makeFirstResponder` stays pre-reconcile because its
-    /// `TerminalView` is still created by the effect-built container path (Stage 8 flips
-    /// it once `reconcileContainers` mounts the view); `focusSurface` is pre-reconcile
-    /// because it acts on an already-existing surface and deferring it is actively wrong.
-    /// Exhaustive with no `default` so a new case cannot be added without classifying it.
+    /// the reconciler creates. Exactly `makeFirstResponder` and `focusSearchField`:
+    /// `reconcileContainers` mounts a pane's `TerminalView` during reconcile (Stage 8),
+    /// and `reconcilePaneChrome` builds the search field, so neither exists until after
+    /// reconcile. `focusSurface` stays pre-reconcile: it acts on an already-existing
+    /// surface, and deferring it is actively wrong -- a foreground createTab create-failure
+    /// re-enters send() and re-focuses the fallback, which a deferred focusSurface(old,false)
+    /// would then defocus. (makeFirstResponder/focusSearchField safely no-op in that failure
+    /// path: their pane was removed, so surfaces[id] is nil.) Exhaustive with no `default`
+    /// so a new case cannot be added without classifying it.
     var isPostReconcile: Bool {
         switch self {
-        case .focusSearchField:
+        case .makeFirstResponder, .focusSearchField:
             return true
-        case .createSurface, .destroySurface, .sendText, .sendInputText, .sendInputKey,
-             .focusSurface, .makeFirstResponder, .showSelectedTab, .rebuildTabContainer,
-             .removeTabContainer, .exportState, .ipcReply, .ipcError,
+        case .createSurface, .sendText, .sendInputText, .sendInputKey,
+             .focusSurface, .exportState, .ipcReply, .ipcError,
              .readPaneText, .sendNotification, .showTerminateConfirmation,
              .showCloseTabConfirmation, .showCloseTabsConfirmation, .terminate, .activateApp,
              .setAppFocus, .dismissAlertsPopover,

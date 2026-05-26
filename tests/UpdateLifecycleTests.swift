@@ -215,10 +215,8 @@ func lifecycleTests() {
         let effects = update(&model, .closePane(paneId: paneId))
 
         try expectEqual(effects.count, 0, "closePane should be blocked by pending quit confirmation")
-        try expect(!hasEffect(effects) {
-            if case .destroySurface = $0 { return true }
-            return false
-        }, "should not destroy a surface while confirmation is pending")
+        // No effects at all (asserted above) + the model unchanged means no surface is torn
+        // down: reconcileSurfaceExistence only tears down panes absent from allPaneIds.
         try expectEqual(model.allPanes, originalPanes, "panes should be unchanged")
     }
 

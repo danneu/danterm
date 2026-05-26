@@ -14,9 +14,8 @@ func alertTests() {
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .markAlertRead(alertId: alertId))
+        update(&model, .markAlertRead(alertId: alertId))
         try expectEqual(model.alerts[0].isUnread, false)
-        try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
         // The tab's alert badge reconciles via reconcileSidebar.
     }
 
@@ -52,7 +51,6 @@ func alertTests() {
 
         let effects = update(&model, .markAllAlertsRead)
         try expect(model.alerts.allSatisfy { !$0.isUnread }, "all alerts should be read")
-        try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
         try expect(effects.isEmpty, "marking all read emits no commands (badges reconcile)")
     }
 
@@ -86,7 +84,8 @@ func alertTests() {
             if case .dismissAlertsPopover = $0 { return true }
             return false
         }, "should dismiss popover")
-        try expectEqual(alertTestShowSelectedTabCount(effects), 1, "cross-tab alert activation should show selected tab once")
+        // The tab switch itself is structural now (reconcileContainers shows the selected
+        // tab); model.selectedTabId (asserted above) is the net.
     }
 
     test("testActivateAlertSameTabShowsSelectedTab") {
@@ -102,15 +101,13 @@ func alertTests() {
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .activateAlert(alertId: alertId))
+        update(&model, .activateAlert(alertId: alertId))
 
         try expectEqual(model.selectedTabId, tabId, "should stay on current tab")
         try expectEqual(model.groups[0].tabs[0].focusedPaneId, paneA, "should focus alert pane")
-        try expectEqual(alertTestShowSelectedTabCount(effects), 1, "same-tab alert activation should explicitly show selected tab")
-        try expect(!hasEffect(effects) {
-            if case .rebuildTabContainer = $0 { return true }
-            return false
-        }, "same-tab non-zoom navigation should not rebuild tab container")
+        // Same-tab non-zoom navigation does not change the tab's ContainerShape, so
+        // reconcileContainers does not rebuild it; focusedPaneId (asserted above) is the net.
+        try expectEqual(model.groups[0].tabs[0].isZoomed, false, "non-zoom navigation leaves zoom off")
     }
 
     test("testActivateAlertSameTabZoomClearRebuildsContainer") {
@@ -129,16 +126,13 @@ func alertTests() {
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .activateAlert(alertId: alertId))
+        update(&model, .activateAlert(alertId: alertId))
 
         let tab = model.groups[0].tabs[0]
         try expectEqual(tab.focusedPaneId, paneA, "should focus alert pane")
+        // Clearing zoom changes the tab's ContainerShape (isZoomed), so reconcileContainers
+        // rebuilds it -- isZoomed == false is the structural net for that rebuild.
         try expectEqual(tab.isZoomed, false, "zoom should clear when navigating to hidden pane")
-        try expectEqual(alertTestShowSelectedTabCount(effects), 1, "same-tab zoom navigation should show selected tab")
-        try expect(hasEffect(effects) {
-            if case .rebuildTabContainer(let tabId) = $0, tabId == tab.id { return true }
-            return false
-        }, "zoom clear should rebuild tab container")
     }
 
     test("testActivateAlertDoesNotMarkReadInManualMode") {
@@ -183,7 +177,6 @@ func alertTests() {
             if case .makeFirstResponder = $0 { return true }
             return false
         }, "should not navigate")
-        try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
         try expect(hasEffect(effects) {
             if case .dismissAlertsPopover = $0 { return true }
             return false
@@ -673,7 +666,6 @@ func alertTests() {
             if case .makeFirstResponder = $0 { return true }
             return false
         }, "no unread alerts remained after acking current tab")
-        try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
         // The selected tab's alert badge reconciles via reconcileSidebar.
     }
 
@@ -714,7 +706,6 @@ func alertTests() {
         // Third press: acks tab2, no more unread alerts
         let effects = update(&model, .goToMostRecentAlertPane)
         try expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false, "paneB alert should be acked after third press")
-        try expect(!alertTestHasTabContainerEffect(effects), "third press should not refresh tab container")
         try expect(!hasEffect(effects) {
             if case .makeFirstResponder = $0 { return true }
             return false
@@ -919,9 +910,8 @@ func alertTests() {
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .clearAlertsForPane(paneId: paneA))
+        update(&model, .clearAlertsForPane(paneId: paneA))
         try expectEqual(model.alerts[0].isUnread, false, "clearAlertsForPane should mark pane's alerts read")
-        try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
         // The pane's tab alert badge reconciles via reconcileSidebar.
     }
 
@@ -952,9 +942,8 @@ func alertTests() {
         ), at: 0)
 
         // Clear alerts for paneA (not focused) while paneB is focused
-        let effects = update(&model, .clearAlertsForPane(paneId: paneA))
+        update(&model, .clearAlertsForPane(paneId: paneA))
         try expectEqual(model.alerts[0].isUnread, false, "clearAlertsForPane should clear non-focused pane's alerts")
-        try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
     }
 
     // MARK: - ackTabAlerts
@@ -980,9 +969,8 @@ func alertTests() {
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .ackTabAlerts)
+        update(&model, .ackTabAlerts)
         try expectEqual(model.alerts.filter { $0.isUnread }.count, 0, "all tab alerts should be marked read")
-        try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
         // The selected tab's alert badge reconciles via reconcileSidebar.
     }
 
@@ -1044,12 +1032,11 @@ func alertTests() {
             title: "DanTerm", body: "tab2", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .clearAlertsForTabs(tabIds: [tab1Id]))
+        update(&model, .clearAlertsForTabs(tabIds: [tab1Id]))
         let tab1Alert = model.alerts.first { $0.paneId == tab1Pane }!
         let tab2Alert = model.alerts.first { $0.paneId == tab2Pane }!
         try expectEqual(tab1Alert.isUnread, false, "target tab's alerts should be cleared")
         try expectEqual(tab2Alert.isUnread, true, "other tab's alerts should remain unread")
-        try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
         // The cleared tab's alert badge reconciles via reconcileSidebar.
     }
 
@@ -1117,7 +1104,6 @@ func alertTests() {
         try expect(!unreadByPane(pane2), "tab2 alerts cleared")
         try expect(unreadByPane(pane3), "tab3 alert preserved")
         try expect(effects.isEmpty, "clearing emits no commands (badges reconcile)")
-        try expect(!alertTestHasTabContainerEffect(effects), "should not refresh tab container")
         _ = id3
     }
 
@@ -1173,20 +1159,5 @@ func alertTests() {
         try expect(model.alerts.contains { $0.isUnread },
             "real alerts unaffected by stale-id batch")
     }
-}
-
-private func alertTestHasTabContainerEffect(_ effects: [Effect]) -> Bool {
-    hasEffect(effects) {
-        if case .showSelectedTab = $0 { return true }
-        if case .rebuildTabContainer = $0 { return true }
-        return false
-    }
-}
-
-private func alertTestShowSelectedTabCount(_ effects: [Effect]) -> Int {
-    effects.filter {
-        if case .showSelectedTab = $0 { return true }
-        return false
-    }.count
 }
 

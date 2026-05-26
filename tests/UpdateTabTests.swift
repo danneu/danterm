@@ -14,10 +14,8 @@ func tabTests() {
             if case .createSurface = $0 { return true }
             return false
         }, "should emit createSurface")
-        try expect(hasEffect(effects) {
-            if case .showSelectedTab = $0 { return true }
-            return false
-        }, "should emit showSelectedTab")
+        // The foreground tab is shown structurally (reconcileContainers builds + shows the
+        // new selected tab); selectedTabId (asserted above) is the net.
     }
 
     test("testCreateTabBackgroundDoesNotChangeSelection") {
@@ -44,10 +42,8 @@ func tabTests() {
             if case .focusSurface(let paneId, false) = $0, paneId == selectedPaneId { return true }
             return false
         }, "should not defocus selected pane")
-        try expect(!hasEffect(effects) {
-            if case .showSelectedTab = $0 { return true }
-            return false
-        }, "should not show selected tab")
+        // A background tab does not become visible -- selectedTabId is unchanged (asserted
+        // above), so reconcileContainers mounts its container hidden, never shown.
     }
 
     test("testCreateTabInheritsWorkingDirectory") {
@@ -83,22 +79,21 @@ func tabTests() {
         try expectEqual(model.selectedTabId, firstTabId)
     }
 
-    test("testSelectTabShowsSelectedTab") {
+    test("testSelectTabSwitchesSelectionAndClearsStrandedTodoPopover") {
         var model = makeModel()
         createTab(&model)
         let firstTabId = model.groups[0].tabs[0].id
         createTab(&model)
+        // Open a tab TODO popover, then switch tabs: the popover is stranded, so the model
+        // record clears (clearTodoPopoverForViewSwap); the AppKit dismiss is reconcileContainers'.
+        model.todoPopover = .tab(model.selectedTabId!)
 
-        let effects = update(&model, .selectTab(id: firstTabId))
+        update(&model, .selectTab(id: firstTabId))
 
-        // Sidebar selection is view-owned: reconcileSidebar reapplies it from
-        // model.selectedTabId (replacing the deleted .setSidebarSelection effect), so the
-        // model selection + the showSelectedTab command are the net.
+        // Selection is view-owned (reconcileSidebar reapplies it) and the container swap is
+        // structural (reconcileContainers); the model selection + cleared popover are the net.
         try expectEqual(model.selectedTabId, firstTabId, "model selection should change")
-        try expect(hasEffect(effects) {
-            if case .showSelectedTab = $0 { return true }
-            return false
-        }, "selection change should show selected tab")
+        try expect(model.todoPopover == nil, "tab switch clears the stranded TODO popover record")
     }
 
     test("testSelectTabClearsBell") {
@@ -224,14 +219,12 @@ func tabTests() {
         let workCountBefore = model.groups[1].tabs.count
         _ = update(&model, .selectTab(id: selectedTabId))
 
-        let effects = createTab(&model, inGroupId: workGroupId, background: true)
+        createTab(&model, inGroupId: workGroupId, background: true)
 
         try expectEqual(model.groups[1].tabs.count, workCountBefore + 1, "background tab should land in requested group")
         try expectEqual(model.selectedTabId, selectedTabId, "background tab should not change selection")
-        try expect(!hasEffect(effects) {
-            if case .showSelectedTab = $0 { return true }
-            return false
-        }, "background tab should not show selected tab")
+        // A background tab never becomes visible -- selectedTabId is unchanged (asserted
+        // above), so reconcileContainers mounts its container hidden.
     }
 
     test("testCreateTabInsertsAfterCurrentTab") {
@@ -516,13 +509,14 @@ func tabTests() {
         createTab(&model)
         createTab(&model)
         let firstTabId = model.groups[0].tabs[0].id
+        let firstPaneId = model.groups[0].tabs[0].focusedPaneId
+        let liveBefore = Set(model.allPaneIds)
 
         let effects = update(&model, .requestCloseTab(id: firstTabId))
         try expectEqual(model.groups[0].tabs.count, 1, "tab should be removed")
-        try expect(hasEffect(effects) {
-            if case .destroySurface = $0 { return true }
-            return false
-        }, "should emit destroySurface")
+        // Surface teardown is reconcileSurfaceExistence's: the closed tab's pane is selected.
+        try expectEqual(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model), Set([firstPaneId]),
+            "closed tab's pane surface is torn down")
         try expect(!hasEffect(effects) {
             if case .showCloseTabConfirmation = $0 { return true }
             return false
@@ -610,17 +604,15 @@ func tabTests() {
         update(&model, .splitPane(direction: .horizontal))
         let paneIds = paneIdsForTab(firstTabId, in: model)
         model.pendingConfirmation = .closeTab
+        let liveBefore = Set(model.allPaneIds)
 
-        let effects = update(&model, .confirmCloseTab(id: firstTabId))
+        update(&model, .confirmCloseTab(id: firstTabId))
 
         try expect(model.pendingConfirmation == nil, "confirm should clear pending confirmation")
         try expect(!model.groups[0].tabs.contains { $0.id == firstTabId }, "tab should be removed")
-        for paneId in paneIds {
-            try expect(hasEffect(effects) {
-                if case .destroySurface(let pid) = $0, pid == paneId { return true }
-                return false
-            }, "should destroy each pane in the tab")
-        }
+        // Surface teardown is reconcileSurfaceExistence's: every pane in the closed tab is selected.
+        try expectEqual(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model), Set(paneIds),
+            "each pane in the closed tab is torn down")
     }
 
     test("testConfirmCloseTabLastMultiPaneRoutesToTerminate") {
@@ -630,6 +622,7 @@ func tabTests() {
         update(&model, .splitPane(direction: .horizontal))
         let paneIds = paneIdsForTab(tabId, in: model)
         model.pendingConfirmation = .closeTab
+        let liveBefore = Set(model.allPaneIds)
 
         let effects = update(&model, .confirmCloseTab(id: tabId))
 
@@ -640,12 +633,12 @@ func tabTests() {
             throw TestFailure(message: "expected showTerminateConfirmation")
         }
         for paneId in paneIds {
-            try expect(!hasEffect(effects) {
-                if case .destroySurface(let pid) = $0, pid == paneId { return true }
-                return false
-            }, "should not destroy panes before quit confirmation")
             try expect(model.pane(paneId) != nil, "pane should still exist")
         }
+        // Nothing left the model (routes to quit confirmation), so reconcileSurfaceExistence
+        // tears down no surface -- checked against the pre-update live set so this is a real net.
+        try expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model).isEmpty,
+            "no surface is torn down before the quit confirmation")
         try expect(model.groups[0].tabs.contains { $0.id == tabId }, "tab should still exist")
         try expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
     }
@@ -687,6 +680,7 @@ func tabTests() {
         update(&model, .splitPane(direction: .horizontal))
         update(&model, .addTabTodo(tabId: secondTabId, text: "finish this"))
         let tabIdsBefore = model.groups.flatMap(\.tabs).map(\.id)
+        let liveBefore = Set(model.allPaneIds)
 
         let effects = update(&model, .requestCloseTabs(ids: [firstTabId, secondTabId, thirdTabId]))
 
@@ -698,7 +692,10 @@ func tabTests() {
         try expectEqual(confirmation.tabCount, 3)
         try expectEqual(model.groups.flatMap(\.tabs).map(\.id), tabIdsBefore, "tabs should remain until confirm")
         try expect(model.pendingConfirmation == .closeTab, "close-tab confirmation should be pending")
-        try expect(destroyedPaneIds(in: effects).isEmpty, "request should not destroy panes")
+        // The request only shows the confirmation; no pane left the model, so
+        // reconcileSurfaceExistence tears down nothing.
+        try expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model).isEmpty,
+            "request should not tear down panes")
     }
 
     test("testRequestCloseTabsRollsUpPaneAndTodoCounts") {
@@ -745,11 +742,15 @@ func tabTests() {
         var direct = base
         var batch = base
 
+        let liveBefore = Set(base.allPaneIds)
         let directEffects = update(&direct, .requestCloseTab(id: firstTabId))
         let batchEffects = update(&batch, .requestCloseTabs(ids: [firstTabId]))
 
         try expectEqual(batch, direct, "single-id batch should match direct request model mutation")
-        try expectEqual(destroyedPaneIds(in: batchEffects), destroyedPaneIds(in: directEffects))
+        // Equal models -> equal teardown selection (reconcileSurfaceExistence is a pure
+        // function of the model + live surfaces).
+        try expectEqual(surfacesToTearDown(liveSurfaceIds: liveBefore, model: batch),
+                        surfacesToTearDown(liveSurfaceIds: liveBefore, model: direct))
         try expectEqual(effectCount(batchEffects) { if case .scheduleCheckpoint = $0 { return true }; return false },
                         effectCount(directEffects) { if case .scheduleCheckpoint = $0 { return true }; return false })
     }
@@ -769,13 +770,18 @@ func tabTests() {
         createTab(&model)
         createTab(&model)
         let liveTabId = model.groups[0].tabs[0].id
+        let liveTabPaneId = model.groups[0].tabs[0].focusedPaneId
         let staleTabId = TabId()
+        let liveBefore = Set(model.allPaneIds)
 
-        let effects = update(&model, .requestCloseTabs(ids: [staleTabId, liveTabId]))
+        update(&model, .requestCloseTabs(ids: [staleTabId, liveTabId]))
 
         try expect(!model.groups[0].tabs.contains { $0.id == liveTabId }, "live tab should be closed")
         try expectEqual(model.groups[0].tabs.count, 1, "stale id should be ignored")
-        try expect(!destroyedPaneIds(in: effects).isEmpty, "delegated close should destroy the live tab pane")
+        // The delegated close removed the live tab's pane, so reconcileSurfaceExistence
+        // tears its surface down.
+        try expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model).contains(liveTabPaneId),
+            "delegated close tears down the live tab pane")
     }
 
     test("testRequestCloseTabsDeduplicatesIdsForConfirmation") {
@@ -823,12 +829,15 @@ func tabTests() {
         update(&model, .splitPane(direction: .horizontal))
         let expectedDestroyed = Set(paneIdsForTab(firstTabId, in: model) + paneIdsForTab(secondTabId, in: model))
         model.pendingConfirmation = .closeTab
+        let liveBefore = Set(model.allPaneIds)
 
-        let effects = update(&model, .confirmCloseTabs(ids: [firstTabId, secondTabId]))
+        update(&model, .confirmCloseTabs(ids: [firstTabId, secondTabId]))
 
         try expect(model.pendingConfirmation == nil, "confirm should clear pending confirmation")
         try expectEqual(Set(model.groups.flatMap(\.tabs).map(\.id)), Set([thirdTabId]))
-        try expectEqual(destroyedPaneIds(in: effects), expectedDestroyed)
+        // Surface teardown is reconcileSurfaceExistence's: every pane in both closed tabs
+        // is selected once absent from the model.
+        try expectEqual(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model), expectedDestroyed)
         for paneId in expectedDestroyed {
             try expect(model.pane(paneId) == nil, "closed tab pane should be removed")
         }
@@ -930,23 +939,21 @@ func tabTests() {
         var model = makeModel()
         createTab(&model)
         let firstTabId = model.groups[0].tabs[0].id
+        let firstPaneId = model.groups[0].tabs[0].focusedPaneId
 
         createTab(&model)
         let secondTabId = model.groups[0].tabs[1].id
         // secondTabId is now selected
+        let liveBefore = Set(model.allPaneIds)
 
-        let effects = update(&model, .closeTab(id: firstTabId))
+        update(&model, .closeTab(id: firstTabId))
         try expectEqual(model.selectedTabId, secondTabId, "selection should remain on second tab")
         try expectEqual(model.groups[0].tabs.count, 1)
-        // Should not show the selected tab since we didn't close the selected tab.
-        try expect(!hasEffect(effects) {
-            if case .showSelectedTab = $0 { return true }
-            return false
-        }, "should not show selected tab when closing non-selected tab")
-        try expect(hasEffect(effects) {
-            if case .removeTabContainer(let tabId) = $0, tabId == firstTabId { return true }
-            return false
-        }, "should remove closed tab container")
+        // Closing a non-selected tab does not change selection (asserted above), so
+        // reconcileContainers leaves the visible tab alone and just removes the closed tab's
+        // (hidden) container; reconcileSurfaceExistence tears down its pane.
+        try expectEqual(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model), Set([firstPaneId]),
+            "closed non-selected tab's pane surface is torn down")
     }
 
     // MARK: - Close Tab Selects Previous
@@ -1101,13 +1108,6 @@ private func closeTabsConfirmationEffectCount(_ effects: [Effect]) -> Int {
         if case .showCloseTabsConfirmation = $0 { return true }
         return false
     }
-}
-
-private func destroyedPaneIds(in effects: [Effect]) -> Set<PaneId> {
-    Set(effects.compactMap { effect in
-        if case .destroySurface(let paneId) = effect { return paneId }
-        return nil
-    })
 }
 
 private func effectCount(_ effects: [Effect], matching predicate: (Effect) -> Bool) -> Int {
