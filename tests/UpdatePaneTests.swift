@@ -167,10 +167,8 @@ func paneTests() {
             if case .rebuildTabContainer = $0 { return true }
             return false
         }, "should not rebuild tab container")
-        try expect(hasEffect(effects) {
-            if case .refreshPaneToolbar(let pid) = $0, pid == paneA { return true }
-            return false
-        }, "should refresh toolbar for pane whose alerts were cleared")
+        // The toolbar's unread-alert badge now reconciles (no .refreshPaneToolbar);
+        // the alert-cleared model state is asserted above.
         try expect(!hasEffect(effects) {
             if case .makeFirstResponder = $0 { return true }
             return false
@@ -194,7 +192,7 @@ func paneTests() {
         try expectEqual(effects.count, 0, "same pane should return no effects")
     }
 
-    test("testPaneBecameFirstResponderDoesNotRefreshToolbarWhenAlertsRemainUnread") {
+    test("testPaneBecameFirstResponderLeavesAlertUnreadInManualMode") {
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
@@ -207,13 +205,11 @@ func paneTests() {
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .paneBecameFirstResponder(paneId: paneA))
+        update(&model, .paneBecameFirstResponder(paneId: paneA))
 
+        // Manual mode does not clear alerts on focus, so the toolbar's unread-alert
+        // badge (now reconciled from this model state, not emitted) stays lit.
         try expectEqual(model.alerts[0].isUnread, true, "manual mode should leave alert unread")
-        try expect(!hasEffect(effects) {
-            if case .refreshPaneToolbar = $0 { return true }
-            return false
-        }, "should not refresh pane toolbar when focus does not clear alerts")
     }
 
     test("testClosePaneUpdatesSidebarAndWindowTitle") {

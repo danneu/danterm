@@ -498,8 +498,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         guard !affectedPaneIds.isEmpty else { return [] }
         let affectedTabIds = tabIdsForPanes(affectedPaneIds, in: model)
-        return refreshPaneAlertChromeEffects(for: affectedPaneIds)
-            + sidebarAlertUpdateEffects(for: affectedTabIds, in: model)
+        return sidebarAlertUpdateEffects(for: affectedTabIds, in: model)
 
     case .setPaneTheme(let paneId, let themeName):
         model.updatePane(paneId) { $0.theme = themeName }
@@ -538,19 +537,14 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let oldFocusedId = tab.focusedPaneId
         guard paneId != oldFocusedId else { return [] }
 
-        let clearedAlerts = model.config.alertClearMode == .focus
-            && paneHasUnreadAlert(paneId, alerts: model.alerts)
         if model.config.alertClearMode == .focus {
             markAlertsReadForPane(paneId, in: &model)
         }
         updateSelectedTab(&model) { t in t.focusedPaneId = paneId }
 
-        // Focus borders reconcile after send(); only the alert-cleared toolbar
-        // refresh and downstream chrome remain as commands here.
+        // Focus borders and the pane toolbar (incl. its unread-alert badge) reconcile
+        // after send(); only downstream chrome remains as commands here.
         var effects: [Effect] = []
-        if clearedAlerts {
-            effects.append(.refreshPaneToolbar(paneId: paneId))
-        }
         effects.append(contentsOf: syncFocusedPaneChrome(paneId, in: &model))
         // Persist focused pane so restore opens the right pane within each tab.
         effects.append(.scheduleCheckpoint)
@@ -824,7 +818,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         model.alerts.insert(alert, at: 0)
         if model.alerts.count > 100 { model.alerts.removeLast() }
 
-        var effects: [Effect] = refreshPaneAlertChromeEffects(for: [paneId]) + [.updateSidebarTabRow(tabId: tab.id)]
+        var effects: [Effect] = [.updateSidebarTabRow(tabId: tab.id)]
         if let group = groupForTab(tab.id, in: model), group.isCollapsed {
             effects.append(.updateSidebarGroupRow(groupId: group.id))
         }
@@ -855,7 +849,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         model.alerts.insert(alert, at: 0)
         if model.alerts.count > 100 { model.alerts.removeLast() }
 
-        var effects: [Effect] = refreshPaneAlertChromeEffects(for: [paneId]) + [.updateSidebarTabRow(tabId: tab.id)]
+        var effects: [Effect] = [.updateSidebarTabRow(tabId: tab.id)]
         if let group = groupForTab(tab.id, in: model), group.isCollapsed {
             effects.append(.updateSidebarGroupRow(groupId: group.id))
         }
@@ -937,7 +931,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         if let idx = model.alerts.firstIndex(where: { $0.id == alertId }) {
             let paneId = model.alerts[idx].paneId
             model.alerts[idx].isUnread = false
-            effects.append(contentsOf: refreshPaneAlertChromeEffects(for: [paneId]))
             if let tab = tabForPane(paneId, in: model) {
                 effects.append(contentsOf: sidebarAlertUpdateEffects(for: [tab.id], in: model))
             }
@@ -948,8 +941,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let affectedPaneIds = unreadAlertPaneIds(in: model)
         let affectedTabIds = tabIdsForPanes(affectedPaneIds, in: model)
         for i in model.alerts.indices { model.alerts[i].isUnread = false }
-        return refreshPaneAlertChromeEffects(for: affectedPaneIds)
-            + sidebarAlertUpdateEffects(for: affectedTabIds, in: model)
+        return sidebarAlertUpdateEffects(for: affectedTabIds, in: model)
 
     case .activateAlert(let alertId):
         guard let alert = model.alerts.first(where: { $0.id == alertId }) else { return [] }
@@ -958,7 +950,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             if let idx = model.alerts.firstIndex(where: { $0.id == alertId }) {
                 model.alerts[idx].isUnread = false
             }
-            return refreshPaneAlertChromeEffects(for: [alert.paneId]) + [.dismissAlertsPopover]
+            return [.dismissAlertsPopover]
         }
         // Mark read (unless manual mode — user must ack explicitly)
         if model.config.alertClearMode != .manual,
@@ -980,8 +972,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             ackedPaneIds = [tab.focusedPaneId]
         }
         let ackedTabIds = tabIdsForPanes(ackedPaneIds, in: model)
-        let ackEffects = refreshPaneAlertChromeEffects(for: ackedPaneIds)
-            + sidebarAlertUpdateEffects(for: ackedTabIds, in: model)
+        let ackEffects = sidebarAlertUpdateEffects(for: ackedTabIds, in: model)
         guard let alert = model.alerts.first(where: { $0.isUnread && model.pane($0.paneId) != nil }) else {
             return ackEffects
         }
@@ -996,8 +987,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         guard hadUnread else { return [] }
         markAlertsReadForPane(paneId, in: &model)
         let affectedTabIds = tabIdsForPanes([paneId], in: model)
-        return refreshPaneAlertChromeEffects(for: [paneId])
-            + sidebarAlertUpdateEffects(for: affectedTabIds, in: model)
+        return sidebarAlertUpdateEffects(for: affectedTabIds, in: model)
 
     case .ackTabAlerts:
         guard let tabId = model.selectedTabId else { return [] }
@@ -1005,8 +995,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let affectedPaneIds = unreadAlertPaneIds(for: paneIds, in: model)
         guard !affectedPaneIds.isEmpty else { return [] }
         for paneId in affectedPaneIds { markAlertsReadForPane(paneId, in: &model) }
-        return refreshPaneAlertChromeEffects(for: affectedPaneIds)
-            + sidebarAlertUpdateEffects(for: [tabId], in: model)
+        return sidebarAlertUpdateEffects(for: [tabId], in: model)
 
     case .confirmTerminate:
         model.pendingConfirmation = nil
@@ -1241,14 +1230,17 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         if !needle.isEmpty {
             model.searchState[paneId]?.needle = needle
         }
-        return [.showSearchOverlay(paneId: paneId), .focusSearchField(paneId: paneId)]
+        // reconcilePaneChrome renders the overlay from the searchState change above;
+        // only the post-reconcile focus into the (now-built) field stays a command.
+        return [.focusSearchField(paneId: paneId)]
 
     case .searchNeedleChanged(let paneId, let needle):
         guard model.searchState[paneId] != nil else { return [] }
         model.searchState[paneId]?.needle = needle
         model.searchState[paneId]?.total = nil
         model.searchState[paneId]?.selected = nil
-        return [.sendSearchNeedle(paneId: paneId, needle: needle), .showSearchOverlay(paneId: paneId)]
+        // The overlay re-renders from the searchState change via reconcilePaneChrome.
+        return [.sendSearchNeedle(paneId: paneId, needle: needle)]
 
     case .searchNavigate(let paneId, let direction):
         guard model.searchState[paneId] != nil else { return [] }
@@ -1257,17 +1249,21 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
     case .endSearch(let paneId):
         guard model.searchState[paneId] != nil else { return [] }
         model.searchState.removeValue(forKey: paneId)
-        return [.hideSearchOverlay(paneId: paneId), .sendEndSearch(paneId: paneId), .makeFirstResponder(paneId: paneId)]
+        // Clearing searchState drops the pane's key from the overlay projection, so
+        // reconcilePaneChrome's `remove` tears the overlay down (no .hideSearchOverlay).
+        return [.sendEndSearch(paneId: paneId), .makeFirstResponder(paneId: paneId)]
 
     case .ghosttySearchTotal(let paneId, let total):
         guard model.searchState[paneId] != nil else { return [] }
         model.searchState[paneId]?.total = total
-        return [.showSearchOverlay(paneId: paneId)]
+        // reconcilePaneChrome re-renders the overlay's match count from this change.
+        return []
 
     case .ghosttySearchSelected(let paneId, let selected):
         guard model.searchState[paneId] != nil else { return [] }
         model.searchState[paneId]?.selected = selected
-        return [.showSearchOverlay(paneId: paneId)]
+        // reconcilePaneChrome re-renders the overlay's match count from this change.
+        return []
 
     // MARK: - TODO
 
@@ -1808,9 +1804,9 @@ private func handleIpcRequest(
         guard let item = appendTodo(&model, paneId: paneId, text: text, id: UUID()) else {
             return ipcInvalidParams(reqId, "invalid todo text")
         }
+        // Pane toolbar (incl. todo counts) reconciles from the model change above.
         return [
             .scheduleCheckpoint,
-            .refreshPaneToolbar(paneId: paneId),
             .ipcReply(reqId: reqId, result: todoResult(item)),
         ]
 
@@ -1837,7 +1833,6 @@ private func handleIpcRequest(
         let effects = update(&model, .editTodoText(paneId: paneId, todoId: todoId, text: text))
         let updated = model.pane(paneId)?.todos.first(where: { $0.id == todoId })
         return effects + [
-            .refreshPaneToolbar(paneId: paneId),
             .ipcReply(reqId: reqId, result: todoResult(updated)),
         ]
 
@@ -1863,7 +1858,6 @@ private func handleIpcRequest(
         let effects = update(&model, .setTodoDone(paneId: paneId, todoId: todoId, isDone: shouldBeDone))
         let updated = model.pane(paneId)?.todos.first(where: { $0.id == todoId })
         return effects + [
-            .refreshPaneToolbar(paneId: paneId),
             .ipcReply(reqId: reqId, result: todoResult(updated)),
         ]
 
@@ -1887,7 +1881,6 @@ private func handleIpcRequest(
         }
         let effects = update(&model, .deleteTodo(paneId: paneId, todoId: todoId))
         return effects + [
-            .refreshPaneToolbar(paneId: paneId),
             .ipcReply(reqId: reqId, result: okResult()),
         ]
 
@@ -1902,7 +1895,6 @@ private func handleIpcRequest(
         }
         let effects = update(&model, .clearCompletedTodos(paneId: paneId))
         return effects + [
-            .refreshPaneToolbar(paneId: paneId),
             .ipcReply(reqId: reqId, result: okResult()),
         ]
 
@@ -2558,11 +2550,6 @@ private func unreadAlertPaneIds(for paneIds: [PaneId], in model: AppModel) -> [P
         }
     }
     return result
-}
-
-private func refreshPaneAlertChromeEffects(for paneIds: [PaneId]) -> [Effect] {
-    // Focus borders reconcile after send(); only the toolbar refresh remains a command.
-    paneIds.map { .refreshPaneToolbar(paneId: $0) }
 }
 
 private func tabIdsForPanes(_ paneIds: [PaneId], in model: AppModel) -> [TabId] {

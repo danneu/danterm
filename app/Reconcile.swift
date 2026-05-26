@@ -20,9 +20,16 @@ import Cocoa
 /// build, not a stale diff.
 struct ReconcilerCaches {
     // focusBorders rides the persisted TerminalView in `surfaces`, which survives
-    // container rebuilds, so this cache needs no cross-pass invalidation (later
-    // host-recreated caches like paneToolbar will). Later stages add their fields.
+    // container rebuilds, so this cache needs no cross-pass invalidation.
     var focusBorders: [PaneId: BorderState] = [:]
+    // paneToolbar / searchOverlay are the first *host-recreated* caches: their host is
+    // the PaneWrapperView, which a container rebuild destroys (toolbar + overlay are
+    // subviews of the wrapper). Stage 4 keeps them coherent via finalizeTabSelection's
+    // post-build chrome rehydrate -- which re-applies the current model values onto a
+    // fresh wrapper, equal to the cache so no divergence. Stage 8 replaces that with
+    // explicit per-pane cache invalidation when it folds containers into the reconciler.
+    var paneToolbar: [PaneId: PaneToolbarRender] = [:]
+    var searchOverlay: [PaneId: SearchOverlayRender] = [:]   // key present iff search active
 }
 
 extension AppRuntime {
@@ -32,6 +39,7 @@ extension AppRuntime {
     /// passes ahead of syncSurfaceVisibility().
     func reconcile() {
         reconcileFocusBorders()
+        reconcilePaneChrome()
         syncSurfaceVisibility()  // existing occlusion pass; stays last
     }
 
@@ -44,6 +52,42 @@ extension AppRuntime {
     func reconcileFocusBorders() {
         applyDiff(desiredFocusBorders(in: model), &caches.focusBorders, apply: { paneId, state in
             surfaces[paneId]?.setFocusBorder(state.focused, hasBell: state.bell)
+        })
+    }
+
+    /// Push each pane's toolbar render and search overlay to its PaneWrapperView,
+    /// each diffed against its cache. Replaces the deleted `.refreshPaneToolbar`,
+    /// `.showSearchOverlay`, and `.hideSearchOverlay` effects (and the imperative
+    /// toolbar refreshes in `send()`); the executors (`updateToolbar`,
+    /// `showSearchOverlay`, `hideSearchOverlay`) are unchanged -- only the computation
+    /// and triggering moved into the pure projections + this pass.
+    ///
+    /// Toolbar: keyed over all live panes, so a key leaves only when its pane is gone
+    /// (the container pass already destroyed the wrapper) -- the default no-op `remove`
+    /// just prunes the cache. Search overlay: keyed iff search is active, so the key
+    /// disappears on `.endSearch` while the wrapper survives -- a non-default `remove`
+    /// tears the overlay down (the disappear-but-host-survives discipline).
+    func reconcilePaneChrome() {
+        applyDiff(desiredPaneToolbar(in: model), &caches.paneToolbar, apply: { paneId, render in
+            guard let contentArea = contentArea else { return }
+            findPaneWrapper(for: paneId, in: contentArea)?.updateToolbar(
+                title: render.title,
+                cwd: render.cwd,
+                progress: render.progress,
+                isRemote: render.isRemote,
+                remoteSession: render.remoteSession,
+                unreadAlertCount: render.unreadAlertCount,
+                totalTodoCount: render.totalTodoCount,
+                uncompletedTodoCount: render.uncompletedTodoCount
+            )
+        })
+        applyDiff(desiredSearchOverlays(in: model), &caches.searchOverlay, apply: { paneId, render in
+            guard let contentArea = contentArea else { return }
+            let search = SearchModel(needle: render.needle, total: render.total, selected: render.selected)
+            findPaneWrapper(for: paneId, in: contentArea)?.showSearchOverlay(search: search, runtime: self)
+        }, remove: { paneId in
+            guard let contentArea = contentArea else { return }
+            findPaneWrapper(for: paneId, in: contentArea)?.hideSearchOverlay()
         })
     }
 }

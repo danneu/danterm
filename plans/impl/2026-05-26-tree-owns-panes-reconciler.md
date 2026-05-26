@@ -8,7 +8,7 @@
 | Yes          | 2              | Part 1 | 1a -- One leaf-embedded snapshot format (v2)                                                 |
 |              | _(checkpoint)_ | --     | Part 1 -> Part 2 go/no-go                                                                    |
 | Yes          | 3              | Part 2 | `reconcileFocusBorders`                                                                      |
-|              | 4              | Part 2 | `reconcilePaneChrome` (toolbars + search overlay)                                            |
+| Yes          | 4              | Part 2 | `reconcilePaneChrome` (toolbars + search overlay)                                            |
 |              | 5              | Part 2 | `reconcileSidebar` + Part 1b (`ViewLocalState`/`RenameTarget`)                               |
 |              | 6              | Part 2 | `reconcileWindowChrome`                                                                      |
 |              | 7              | Part 2 | `reconcileSwitcher`                                                                          |
@@ -1269,3 +1269,136 @@ switch and zoom toggle; borders correct after snapshot restore (clean-build path
   emitted in 4 handlers; the `surfaceCreationFailed` split-tab test still asserts
   one per sibling), and Stage 9 (`Effect` -> `Command` rename) handoffs above
   remain valid and untouched.
+
+### Stage 4 -- `reconcilePaneChrome` (pane toolbars + search overlay) + command-phase split
+
+Landed. `just test` 974/974 (970 prior + 4 new: 2 pane-toolbar projection, 1
+search-overlay disappearance, 1 `isPostReconcile` classification), `just build`
+clean. This is the first pass with two diffs, the first **host-recreated** caches,
+and the architectural addition Stage 3 deferred: the command-phase split.
+
+**What shipped:**
+
+- **`reconcilePaneChrome` pass** (`Reconcile.swift`), inserted into `reconcile()`
+  after `reconcileFocusBorders()`, before `syncSurfaceVisibility()`. Two diffs in
+  one pass: the **toolbar** diff (`desiredPaneToolbar` -> `caches.paneToolbar`, the
+  **default no-op `remove`** -- keyed over all live panes, so a key leaves only when
+  the pane is gone and the container pass already destroyed the wrapper; the apply
+  pushes the projected render via `findPaneWrapper(...)?.updateToolbar(...)`, **not**
+  the old model-re-deriving `refreshPaneToolbar(for:)`); and the **search-overlay**
+  diff (`desiredSearchOverlays` -> `caches.searchOverlay`, a **non-default `remove`**
+  calling `hideSearchOverlay()` -- keyed iff `searchState[paneId] != nil`, so the key
+  disappears on `.endSearch` and the overlay tears down while the wrapper survives).
+- **Pure projections** in `ModelOperations.swift` (test-visible): `PaneToolbarRender`
+  (the 8 fields `refreshPaneToolbar(for:)` read -- title/cwd via `paneToolbarText`,
+  progress, isRemote, remoteSession, unread-alert count from `model.alerts`,
+  total/uncompleted todo counts) + `desiredPaneToolbar(in:)`; `SearchOverlayRender`
+  (needle + total/selected from `searchState`) + `desiredSearchOverlays(in:)`. The
+  search apply reconstructs a `SearchModel` from the render so the executor is driven
+  by the projected value, never re-read from the model.
+- **Command-phase split (`Effect.isPostReconcile`)** -- an **exhaustive switch with no
+  `default`**. Only `.focusSearchField` is `true`; everything else (incl.
+  `.makeFirstResponder` and `.focusSurface`) is `false`. `send()`'s loop is now
+  pre-reconcile (`!isPostReconcile`) -> `reconcile()` -> post-reconcile
+  (`isPostReconcile`). This is what lets `.focusSearchField` (from `.ghosttyStartSearch`)
+  land in the search field that `reconcilePaneChrome` _just created_ during reconcile;
+  the field does not exist until then.
+- **Carved `send()`'s imperative switch**: removed every `refreshPaneToolbar(for:)`
+  call (the `surfaceTitle/cwd/progress/remote/commandEnded` case folded away; the
+  per-pane todo + moveTodo toolbar refreshes dropped). **Kept every
+  `refreshTabTodoButton()` call** and the unread dock/toolbar-badge block -- both are
+  Stage 6's (`reconcileWindowChrome`).
+- **Kept `finalizeTabSelection`'s post-build chrome rehydrate** untouched
+  (`refreshPaneToolbars(in:)` + active-search rehydrate + search-field focus + the
+  Stage-6 `refreshTabTodoButton()`). This is the still-effect-built container path
+  Stage 8 folds in; it is what re-chromes a freshly-rebuilt wrapper while the
+  container executor's cache invalidation (Stage 8) does not exist yet (QA 12 passes
+  in Stage 4 because of it).
+- **Per-stage deletions:** `Effect.refreshPaneToolbar` / `.showSearchOverlay` /
+  `.hideSearchOverlay` cases + their `perform` arms + all emission sites. Search
+  effect lists edited per spec: `.ghosttyStartSearch` drops `.showSearchOverlay`,
+  keeps `.focusSearchField`; `.searchNeedleChanged` / `.ghosttySearchTotal` /
+  `.ghosttySearchSelected` drop `.showSearchOverlay` (the projection re-renders from
+  the `searchState` change -- the last two now return `[]`); `.endSearch` drops
+  `.hideSearchOverlay`, keeps `.sendEndSearch` + `.makeFirstResponder`.
+
+**Verified finding (cache coherence across the first host-recreated caches):** the
+diffed `paneToolbar`/`searchOverlay` caches stay coherent with rebuilt wrappers
+_without_ invalidation in Stage 4 because `finalizeTabSelection`'s imperative rehydrate
+runs right after an (effect-built) container rebuild and applies the **current model
+value, which equals the cache value** -- so the value-unchanged diff correctly skips
+re-applying and the fresh wrapper is already chromed. Confirmed by tracing
+close-pane-in-a-split (rebuild) and tab-switch (hidden-but-mounted wrapper persists,
+so background toolbar/badge updates still apply). Stage 8 replaces this with explicit
+per-pane invalidation.
+
+**Deviations / judgment calls:**
+
+- **Projection labels use `in:`** (`desiredPaneToolbar(in:)`,
+  `desiredSearchOverlays(in:)`) to match the sibling `desiredFocusBorders(in:)` in the
+  same section, not the plan's casual `desiredPaneToolbar(model:)`. Type/return shape
+  match the spec (`[PaneId: PaneToolbarRender]`); only the argument label differs.
+- **Deleted the singular `refreshPaneToolbar(for:)` method**, not just its callers --
+  it became fully dead once the `send()` switch calls and the `perform` arm were
+  removed. The **plural `refreshPaneToolbars(in:)` is kept** (still used by
+  `finalizeTabSelection`'s rehydrate).
+- **Deleted the `refreshPaneAlertChromeEffects` helper entirely** (its only output was
+  `.refreshPaneToolbar`) and inlined its 9 alert-handler call sites down to their
+  surviving `sidebarAlertUpdateEffects(...)` / `[.updateSidebarTabRow]` /
+  `[.dismissAlertsPopover]` parts. The alert toolbar badge now reconciles from the
+  `model.alerts` change. `paneBecameFirstResponder` lost its now-unused `clearedAlerts`
+  local along with its conditional toolbar emission (the `markAlertsReadForPane` model
+  mutation stays, so the badge still clears via reconcile).
+- **`findPaneWrapper(for:in:)` made `internal`** (was `private`) so the cross-file
+  `reconcilePaneChrome` extension can reach a wrapper.
+- **`reconcilePaneChrome` guards `contentArea` inside each apply/remove closure**
+  (mirroring the deleted perform arms) rather than once at the top, so `applyDiff`
+  always runs and keeps the cache coherent even if `contentArea` is briefly nil.
+- **Test migrations:** deleted the `.refreshPaneToolbar` / `.showSearchOverlay` /
+  `.hideSearchOverlay` emission assertions across `UpdateSearchTests` (4 tests),
+  `UpdatePaneTests` (2), `UpdateGhosttyTests` (2), `UpdateIpcTests` (1), and
+  `UpdateAlertTests` (14 call sites + the `alertTestHasRefreshPaneToolbar` helper);
+  replaced with commands-only assertions (startSearch still emits `.focusSearchField`;
+  endSearch still emits `.sendEndSearch` + `.makeFirstResponder`; the two
+  ghosttySearch\* now assert `effects.isEmpty`) and preserved the model-state
+  assertions (searchState set/cleared, alerts marked read/left-unread). One
+  `UpdatePaneTests` test was renamed (`...DoesNotRefreshToolbar...` ->
+  `...LeavesAlertUnreadInManualMode`) since its kernel is now a model-state property.
+  (Two pre-existing `#no-usage` test warnings -- `secondGroupId` in `UpdateGroupTests`,
+  `paneB` in `UpdatePaneTests` -- are unrelated to Stage 4 and untouched.)
+
+**Manual QA still owed (cannot be driven headless -- the executors are unchanged and
+the projections/diff are the pure nets):**
+
+- **QA 7 (the command-phase-split net):** Cmd-F opens search AND the cursor lands in
+  the field on the **first** press (post-reconcile focus into the just-created field);
+  type a needle -> match count updates live (the `update(search:)` guard avoids
+  clobbering the field mid-type); press Escape (`.endSearch`) -> the overlay disappears
+  (the `applyDiff` `remove` -> `hideSearchOverlay()`), the pane stays.
+- **QA 12 (the kept-rehydrate net):** with an active search overlay in a pane, force a
+  container rebuild of its tab (split/unsplit a sibling, toggle zoom) -> the toolbar and
+  the active search overlay re-appear on the rebuilt wrapper (via the kept
+  `finalizeTabSelection` rehydrate, not invalidation), not blank.
+- **General toolbar coverage:** title/cwd/progress, remote-session label, todo counts
+  (via UI and via the `danterm` CLI todo IPC), and the unread-alert badge all still
+  render on the pane toolbar after their respective `Msg`s -- these lost their
+  imperative refreshes and now ride `reconcilePaneChrome`.
+
+**Handoffs for later stages:**
+
+- **To Stage 8:** the command-phase split now exists with `.makeFirstResponder`
+  **pre**-reconcile; Stage 8 flips it to post-reconcile once `reconcileContainers`
+  mounts the `TerminalView`. Stage 8 also folds the kept `finalizeTabSelection` chrome
+  rehydrate (toolbars + active-search overlays + search-field focus) into the container
+  executor AND **adds the `paneToolbar`/`searchOverlay` cache invalidation** for
+  rebuilt/removed containers. **These are the first host-recreated caches; in Stage 4
+  they rely on the imperative rehydrate, not invalidation** (see the verified finding
+  above). `findPaneWrapper` is now `internal` for the pass to use.
+- **To Stage 6:** the `refreshTabTodoButton()` calls (still in the `send()` switch and
+  in `finalizeTabSelection`) and the unread dock/toolbar-badge block in `send()` are
+  untouched and waiting for `reconcileWindowChrome`.
+- **`isPostReconcile`** is the exhaustive `Effect` switch new commands must classify
+  (no `default`); it is the seam later stages extend.
+- Stage 5 (`RenameTarget`/`ViewLocalState`) and Stage 9 (`Effect` -> `Command` rename)
+  handoffs above remain valid and untouched. `Effect` is **not** renamed (Stage 9);
+  side-tables stay `[PaneId: ...]`; `allPaneIds` is `allPanes.map(\.id)`.

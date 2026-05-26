@@ -45,4 +45,32 @@ func reconcileTests() {
         try expectEqual(cache, ["a": 1],
             "the disappeared key is pruned even when remove is the default no-op")
     }
+
+    // MARK: - Effect.isPostReconcile (command-phase split, Stage 4)
+
+    test("Effect.isPostReconcile: only focusSearchField defers past reconcile") {
+        let pane = PaneId()
+        // focusSearchField targets the search field reconcilePaneChrome creates, so
+        // it must run after reconcile().
+        try expect(Effect.focusSearchField(paneId: pane).isPostReconcile,
+            "focusSearchField is post-reconcile")
+        // makeFirstResponder stays pre-reconcile in Stage 4: its TerminalView is
+        // still built by the effect-built container path (flips in Stage 8).
+        try expect(!Effect.makeFirstResponder(paneId: pane).isPostReconcile,
+            "makeFirstResponder stays pre-reconcile")
+        // focusSurface acts on an already-existing surface; deferring it is wrong.
+        try expect(!Effect.focusSurface(paneId: pane, focused: true).isPostReconcile,
+            "focusSurface is pre-reconcile")
+        // A representative sample of other commands are pre-reconcile.
+        try expect(!Effect.createSurface(paneId: pane, cwd: nil, command: nil).isPostReconcile,
+            "createSurface is pre-reconcile")
+        try expect(!Effect.applyPaneTheme(paneId: pane).isPostReconcile,
+            "applyPaneTheme is pre-reconcile")
+        try expect(!Effect.sendEndSearch(paneId: pane).isPostReconcile,
+            "sendEndSearch is pre-reconcile")
+        try expect(!Effect.scheduleCheckpoint.isPostReconcile,
+            "scheduleCheckpoint is pre-reconcile")
+        try expect(!Effect.terminate.isPostReconcile,
+            "terminate is pre-reconcile")
+    }
 }

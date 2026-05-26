@@ -16,18 +16,15 @@ func searchTests() {
         try expect(model.searchState.isEmpty, "should not create search state")
     }
 
-    test("ghosttyStartSearch creates SearchModel and emits show + focus") {
+    test("ghosttyStartSearch creates SearchModel and emits focus") {
         var model = makeModel()
         createTab(&model)
         let tab = selectedTab(in: model)!
         let paneId = tab.focusedPaneId
         let effects = update(&model, .ghosttyStartSearch(paneId: paneId, needle: ""))
+        // searchState set -> reconcilePaneChrome renders the overlay (no .showSearchOverlay).
         try expect(model.searchState[paneId] != nil, "search state should exist")
         try expectEqual(model.searchState[paneId]?.needle, "")
-        try expect(hasEffect(effects) {
-            if case .showSearchOverlay(let pid) = $0 { return pid == paneId }
-            return false
-        }, "expected showSearchOverlay")
         try expect(hasEffect(effects) {
             if case .focusSearchField(let pid) = $0 { return pid == paneId }
             return false
@@ -86,17 +83,15 @@ func searchTests() {
         }, "expected sendSearchNavigate")
     }
 
-    test("endSearch removes state and emits hide + sendEnd + makeFirstResponder") {
+    test("endSearch removes state and emits sendEnd + makeFirstResponder") {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .ghosttyStartSearch(paneId: paneId, needle: "test"))
         let effects = update(&model, .endSearch(paneId: paneId))
+        // searchState cleared -> the overlay projection drops this pane's key, so
+        // reconcilePaneChrome's `remove` tears the overlay down (no .hideSearchOverlay).
         try expect(model.searchState[paneId] == nil, "search state should be removed")
-        try expect(hasEffect(effects) {
-            if case .hideSearchOverlay(let pid) = $0 { return pid == paneId }
-            return false
-        }, "expected hideSearchOverlay")
         try expect(hasEffect(effects) {
             if case .sendEndSearch(let pid) = $0 { return pid == paneId }
             return false
@@ -122,10 +117,9 @@ func searchTests() {
         update(&model, .ghosttyStartSearch(paneId: paneId, needle: "x"))
         let effects = update(&model, .ghosttySearchTotal(paneId: paneId, total: 42))
         try expectEqual(model.searchState[paneId]?.total, 42)
-        try expect(hasEffect(effects) {
-            if case .showSearchOverlay(let pid) = $0 { return pid == paneId }
-            return false
-        }, "expected showSearchOverlay for total update")
+        // The match count re-renders via reconcilePaneChrome from the searchState
+        // change above; the handler emits no command.
+        try expect(effects.isEmpty, "ghosttySearchTotal emits no command")
     }
 
     test("ghosttySearchSelected updates selected") {
@@ -135,10 +129,9 @@ func searchTests() {
         update(&model, .ghosttyStartSearch(paneId: paneId, needle: "x"))
         let effects = update(&model, .ghosttySearchSelected(paneId: paneId, selected: 3))
         try expectEqual(model.searchState[paneId]?.selected, 3)
-        try expect(hasEffect(effects) {
-            if case .showSearchOverlay(let pid) = $0 { return pid == paneId }
-            return false
-        }, "expected showSearchOverlay for selected update")
+        // The match count re-renders via reconcilePaneChrome from the searchState
+        // change above; the handler emits no command.
+        try expect(effects.isEmpty, "ghosttySearchSelected emits no command")
     }
 
     test("closePane cleans up search state") {
