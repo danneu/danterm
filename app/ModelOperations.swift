@@ -1070,6 +1070,48 @@ func totalUnreadAlertCount(model: AppModel) -> Int {
   model.alerts.filter(\.isUnread).count
 }
 
+// MARK: - Window Chrome Projection (reconcileWindowChrome)
+
+/// The window's title-bar string: the selected tab's display title, plus
+/// " — <subtitle>" when a distinct subtitle (cwd) is present. Pure so the
+/// window-chrome projection can derive it and so it is test-visible; the
+/// reconcile executor only assigns the result. Moved here from Update.swift
+/// when the title stopped being a `.setWindowTitle` command (Stage 6).
+func windowTitle(for tab: TabModel) -> String {
+  if let subtitle = tab.subtitle, subtitle != tab.displayTitle {
+    return "\(tab.displayTitle) — \(subtitle)"
+  }
+  return tab.displayTitle
+}
+
+/// Everything the window chrome shows, in one Equatable value the reconciler
+/// diffs against its cache. Three channels, all on hosts that persist across
+/// container rebuilds (window, chromeView, dock tile): the window title and the
+/// chrome content title (which differ when a subtitle is present), the unread
+/// dock/toolbar-bell badge count, and the tab-todo button's rollup counts.
+struct WindowChromeProjection: Equatable {
+  let windowTitle: String       // window?.title (display title + optional " — subtitle")
+  let contentTitle: String      // chromeView content title (bare display title)
+  let unreadCount: Int          // dock + toolbar bell badge
+  let tabTodoTotal: Int         // tab-todo button total
+  let tabTodoUncompleted: Int   // tab-todo button uncompleted
+}
+
+/// Window-chrome projection. Derives from the *selected* tab (empty titles +
+/// a (0,0) rollup when there is none), the global unread-alert count, and the
+/// selected tab's todo rollup. Pure: same `(AppModel)` -> same projection.
+func desiredWindowChrome(in model: AppModel) -> WindowChromeProjection {
+  let tab = selectedTab(in: model)
+  let rollup = tab.map { tabTodoRollup($0.id, in: model) } ?? (total: 0, uncompleted: 0)
+  return WindowChromeProjection(
+    windowTitle: tab.map { windowTitle(for: $0) } ?? "",
+    contentTitle: tab?.displayTitle ?? "",
+    unreadCount: totalUnreadAlertCount(model: model),
+    tabTodoTotal: rollup.total,
+    tabTodoUncompleted: rollup.uncompleted
+  )
+}
+
 // MARK: - Sidebar Projection + Row-Op Diff (reconcileSidebar)
 
 /// One sidebar tab row's rendered attributes -- everything `configureTabCell` draws.

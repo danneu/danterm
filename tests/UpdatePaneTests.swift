@@ -173,12 +173,8 @@ func paneTests() {
             if case .makeFirstResponder = $0 { return true }
             return false
         }, "should not request first responder from first responder callback")
-        // The sidebar tab row now updates via reconcileSidebar; only the window title
-        // remains a command.
-        try expect(hasEffect(effects) {
-            if case .setWindowTitle = $0 { return true }
-            return false
-        }, "should emit setWindowTitle")
+        // The sidebar tab row (reconcileSidebar) and the window chrome
+        // (reconcileWindowChrome) now reconcile from the synced tab title/subtitle.
     }
 
     test("testPaneBecameFirstResponderSamePane") {
@@ -210,7 +206,7 @@ func paneTests() {
         try expectEqual(model.alerts[0].isUnread, true, "manual mode should leave alert unread")
     }
 
-    test("testClosePaneUpdatesSidebarAndWindowTitle") {
+    test("testClosePaneSyncsTabChromeFromSurvivingPane") {
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
@@ -222,18 +218,14 @@ func paneTests() {
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
         // Close paneB — paneA should become focused and its chrome should appear on the tab
-        let effects = update(&model, .closePane(paneId: paneB))
+        update(&model, .closePane(paneId: paneB))
 
         let tab = model.groups[0].tabs[0]
         try expectEqual(tab.focusedPaneId, paneA)
         try expectEqual(tab.title, "pane-a-title")
         try expectEqual(tab.subtitle, "/tmp/pane-a")
-        // The tab row's title/subtitle now reconcile from this model state via
-        // reconcileSidebar; only the window title remains a command.
-        try expect(hasEffect(effects) {
-            if case .setWindowTitle = $0 { return true }
-            return false
-        }, "should emit setWindowTitle")
+        // The tab row (reconcileSidebar) and the window chrome (reconcileWindowChrome)
+        // reconcile from the synced tab title/subtitle above -- no command emitted.
     }
 
     test("testClosePaneInCollapsedGroupClosesAndPersists") {

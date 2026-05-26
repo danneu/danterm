@@ -10,7 +10,7 @@
 | Yes          | 3              | Part 2 | `reconcileFocusBorders`                                                                      |
 | Yes          | 4              | Part 2 | `reconcilePaneChrome` (toolbars + search overlay)                                            |
 | Yes          | 5              | Part 2 | `reconcileSidebar` + Part 1b (`ViewLocalState`/`RenameTarget`)                               |
-|              | 6              | Part 2 | `reconcileWindowChrome`                                                                      |
+| Yes          | 6              | Part 2 | `reconcileWindowChrome`                                                                      |
 |              | 7              | Part 2 | `reconcileSwitcher`                                                                          |
 |              | 8              | Part 2 | `reconcileSurfaceExistence` + `reconcileContainers` + Part 1c (keyed surface reconciliation) |
 |              | 9              | Part 2 | Rename `Effect` -> `Command`                                                                 |
@@ -1524,3 +1524,111 @@ projection + guard are the pure nets, all under test):** run `just build-run` an
 - Stage 8 (`.destroySurface` still emitted in 4 handlers; the `surfaceCreationFailed`
   split-tab test still asserts one per sibling) and Stage 9 (`Effect` -> `Command` rename)
   handoffs above remain valid and untouched.
+
+### Stage 6 -- `reconcileWindowChrome` (window title / badges / tab-todo button)
+
+Landed. `just test` 985/985 (986 prior + 4 new `desiredWindowChrome` projection tests
+- 5 deleted emission-only selection tests), `just build` clean. This is the first
+  **single-struct-compare** pass (one `Equatable?` projection vs. a single-optional cache,
+  no `applyDiff` keyed set, no op-list) -- the template Stage 7's `reconcileSwitcher` copies.
+
+**What shipped:**
+
+- **`reconcileWindowChrome` pass** (`Reconcile.swift`), inserted into `reconcile()` after
+  `reconcileSidebar()`, before `syncSurfaceVisibility()`. New `caches.windowChrome:
+  WindowChromeProjection?`. It computes `desiredWindowChrome(in: model)`, early-returns if it
+  equals the cache, else applies **all** channels from the projected values and stores the
+  cache. The three hosts (`window`, `chromeView`, `NSApp.dockTile`) **persist across container
+  rebuilds**, so this cache needs **no cross-pass invalidation**; the sub-setters are
+  idempotent, so applying all on any change is fine. Driven by the projection, never by
+  re-reading the model (same discipline as Stage 4's toolbar).
+- **Pure layer in `ModelOperations.swift`** (test-visible): `struct WindowChromeProjection:
+  Equatable { windowTitle, contentTitle, unreadCount, tabTodoTotal, tabTodoUncompleted }` +
+  `desiredWindowChrome(in:)` (derives from `selectedTab`; empty titles + `(0,0)` rollup when
+  none; `unreadCount` from `totalUnreadAlertCount`; rollup from `tabTodoRollup`). **Moved
+  `windowTitle(for:)` from `Update.swift`** (was `private`) into `ModelOperations.swift`
+  (internal, test-visible), preserving its `" — subtitle"` em-dash string verbatim. Both
+  titles are captured because they differ when a subtitle is present (`windowTitle` carries
+  the suffix; `contentTitle` is the bare `displayTitle`).
+- **Per-stage deletions (compiler-enforced):** `Effect.setWindowTitle` (+ its 4 emission
+  sites + `perform` arm), `Effect.updateDockBadge` / `Effect.updateToolbarBellBadge` (+ their
+  `perform` arms), all three removed from the `isPostReconcile` exhaustive `false` list. In
+  `send()`: the unread-badge block (`oldUnreadCount`/`newUnreadCount`) and the **entire**
+  `refreshTabTodoButton` switch (every case body was already just that one call after Stage
+  4/5). No command-phase change (window chrome emits no focus commands).
+- **Dead code removed + inlined:** `refreshContentTitlebar()`, `refreshTabTodoButton()`, and
+  `paneIsInActiveTab(_:)` (all now callerless) are deleted; their projection-driven writes are
+  inlined into the pass (mirroring Stage 4's deletion of the singular `refreshPaneToolbar`).
+- **`commitRestoreSession`** dropped its `refreshContentTitlebar()` and manual dock/toolbar
+  badge block -- the `reconcile()` it already calls now drives all chrome (clean build from
+  the nil cache reset by `tearDownCurrentSession`).
+- **Tests:** 4 new `desiredWindowChrome` projection tests in `ModelOperationsTests.swift`
+  (both titles + unread + rollup; no-selected-tab empty case; subtitle-suppression guard;
+  selection-sensitivity). Migrated the `.setWindowTitle` emission assertions in
+  `CustomTitleTests` / `UpdatePaneTests` / `UpdateGhosttyTests` to the preserved model-state
+  assertions (see deviations).
+
+**Deviations / judgment calls:**
+
+- **`selectionSyncEffects` fully deleted** (not kept as a no-op) along with its 9 call sites,
+  cascade-cleaning two now-dead locals (`createTab`'s second `if !background` block,
+  `clearCustomTitles`' `selectedTabAffected`). **`syncFocusedPaneChrome` converted to
+  mutate-only `Void`** (it now only syncs `TabModel.title`/`.subtitle`; an `[Effect]` return
+  that is always `[]` would be misleading) and its 3 call sites became bare calls. This is the
+  honest end state and consistent with Stage 4 deleting dead helpers rather than leaving them
+  inert.
+- **Single-struct compare, not `applyDiff`.** Window chrome is one panel with three sub-views,
+  not a keyed set, so the pass diffs one `WindowChromeProjection?` against the cache directly
+  (the `caches.sidebar`/`switcher` single-optional shape, but simpler -- no op-list). On any
+  change it re-applies all three idempotent setters.
+- **Deleted the 5 emission-only "Selection-changing paths emit setWindowTitle" tests**
+  (`selectTab`/`closeTab`/`createTab`/`deleteGroup`/`movePaneToTab`) in `CustomTitleTests`.
+  Their sole assertion was the now-deleted emission; the property they proxied ("changing
+  selection updates the window title") is now (a) **structural** -- `reconcile()` runs after
+  every `send()` -- and (b) asserted directly at the projection layer by the new
+  `desiredWindowChrome: reflects the selected tab` test, while each handler's selection move
+  is covered in its own domain test file. Converted `testSetWindowTitleUsesDisplayTitle` ->
+  `testWindowChromeUsesDisplayTitle` (asserts `desiredWindowChrome` content/window title uses
+  the custom `displayTitle`). The rename/close/surface\* tests kept their model-state
+  assertions (`customTitle`, `tab.title`/`.subtitle`); `testSurfacePwdFocusedPane` gained an
+  explicit `tab.subtitle` assertion (the window-chrome input it previously only checked via
+  the emission); a couple were renamed to drop the stale `...EmitsSetWindowTitle` /
+  `...AndWindowTitle` names.
+- **`window?.title = ""` in the no-selected-tab edge case.** Per the spec's "empty title when
+  none," the pass now assigns `""` to `window?.title` when there is no selected tab; the old
+  code left `window.title` at its default in that transient case (the content title was
+  already `""` via `refreshContentTitlebar`). No change on the normal (selected-tab) path; the
+  no-tab state is transient (pre-first-tab / mid-teardown) and DanTerm's custom chrome hides
+  the native title anyway.
+
+**Manual QA still owed (the AppKit setters are unchanged; the projection + the single-struct
+diff are the pure nets, all under test). Run `just build-run` and verify:**
+
+- **Window title** updates on tab-select, tab rename, and focused-pane title/cwd change, and
+  shows `" — subtitle"` when a distinct subtitle (cwd) is present.
+- **Dock + toolbar bell badges** appear on alert arrival and clear on ack (QA item 4).
+- **Tab-todo button** counts update on todo changes in the *selected* tab and on tab switch.
+- **Snapshot restore** renders the title + badges + tab-todo button correctly -- now solely
+  via the `reconcile()` in `commitRestoreSession` (the manual title/badge writes there are
+  gone). Confirm a restored session with unread alerts + tab/pane todos shows the right badge
+  and button counts immediately.
+
+**Handoffs for later stages:**
+
+- **To Stage 7:** `caches.windowChrome` is the **single-struct-compare** template
+  `reconcileSwitcher` copies -- compute one `Equatable?` projection, diff against the cache,
+  apply on change. The switcher additionally **orders the panel out on a `nil` projection**
+  (no `model.mruCycle`); window chrome has no such hide transition (it always applies the
+  current chrome).
+- **To Stage 8:** I **removed** `finalizeTabSelection`'s `refreshContentTitlebar()` and
+  `refreshTabTodoButton()` -- it no longer touches window chrome (its hosts persist across
+  rebuilds, so `reconcileWindowChrome`, which runs after it in the same `send()` and after the
+  restore commit's `reconcile()`, covers them; verified chrome correct post-tab-select and
+  post-restore). `finalizeTabSelection` still owns `refreshPaneToolbars(in:)` + the
+  active-search rehydrate (Stage 8's to fold). **`commitRestoreSession` now drives all chrome
+  through its `reconcile()`** (dropped its manual title + badge writes); `showSelectedTab()`
+  still builds the container there for Stage 8.
+- Stage 8 (`.destroySurface` still emitted in 4 handlers; the `surfaceCreationFailed`
+  split-tab test still asserts one per sibling) and Stage 9 (`Effect` -> `Command` rename)
+  handoffs remain valid and untouched. `Effect` is **not** renamed; side-tables stay
+  `[PaneId: ...]`; `allPaneIds` is `allPanes.map(\.id)`.

@@ -29,7 +29,8 @@ enum Effect {
     // Sidebar (reloadSidebar / setSidebarSelection / updateSidebarTabRow /
     // updateSidebarGroupRow) is now derived by reconcileSidebar from the model after
     // every send(); the granular NSOutlineView diff replaced these effects in Stage 5.
-    case setWindowTitle(String)
+    // The window/content title is likewise derived by reconcileWindowChrome (Stage 6),
+    // so setWindowTitle is gone.
 
     // Export
     case exportState(AppModelSnapshot)
@@ -50,8 +51,7 @@ enum Effect {
     case activateApp
     case setAppFocus(Bool)
     case dismissAlertsPopover
-    case updateToolbarBellBadge(Int)
-    case updateDockBadge(Int)
+    // The dock + toolbar-bell unread badges are derived by reconcileWindowChrome (Stage 6).
 
     // Theme
     case applyPaneTheme(paneId: PaneId)
@@ -100,10 +100,10 @@ extension Effect {
             return true
         case .createSurface, .destroySurface, .sendText, .sendInputText, .sendInputKey,
              .focusSurface, .makeFirstResponder, .showSelectedTab, .rebuildTabContainer,
-             .removeTabContainer, .setWindowTitle, .exportState, .ipcReply, .ipcError,
+             .removeTabContainer, .exportState, .ipcReply, .ipcError,
              .readPaneText, .sendNotification, .showTerminateConfirmation,
              .showCloseTabConfirmation, .showCloseTabsConfirmation, .terminate, .activateApp,
-             .setAppFocus, .dismissAlertsPopover, .updateToolbarBellBadge, .updateDockBadge,
+             .setAppFocus, .dismissAlertsPopover,
              .applyPaneTheme, .saveDanTermConfigKey, .removeDanTermConfigKey,
              .reloadGhosttyConfig, .syncPreferencesPanel, .scheduleCheckpoint, .sendStartSearch,
              .sendSearchNeedle, .sendSearchNavigate, .sendEndSearch, .showTodoPopover,
