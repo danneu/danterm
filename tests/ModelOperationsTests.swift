@@ -1707,6 +1707,80 @@ func modelOperationsTests() {
                 "panes in a non-selected tab draw no border")
         }
     }
+
+    // MARK: - desiredPaneToolbar (pane-toolbar projection, Stage 4)
+
+    test("desiredPaneToolbar: derives all eight toolbar fields from the model + pane") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        model.updatePane(paneId) {
+            $0.title = "vim"
+            $0.cwd = "/work/proj"
+            $0.progress = .set(percent: 42)
+            $0.isRemote = true
+            $0.remoteSession = RemoteSession(user: "dan", host: "caja")
+            $0.todos = [
+                TodoItem(id: UUID(), text: "a", isDone: false),
+                TodoItem(id: UUID(), text: "b", isDone: true),
+                TodoItem(id: UUID(), text: "c", isDone: false),
+            ]
+        }
+        // Two unread alerts (counted) plus one read alert (excluded) for this pane.
+        for unread in [true, true, false] {
+            model.alerts.insert(AlertModel(
+                id: AlertId(), kind: .bell, paneId: paneId,
+                title: "DanTerm", body: "x", createdAt: Date(), isUnread: unread), at: 0)
+        }
+        try expectEqual(
+            desiredPaneToolbar(in: model)[paneId],
+            PaneToolbarRender(
+                title: "vim",
+                cwd: "/work/proj",
+                progress: .set(percent: 42),
+                isRemote: true,
+                remoteSession: RemoteSession(user: "dan", host: "caja"),
+                unreadAlertCount: 2,
+                totalTodoCount: 3,
+                uncompletedTodoCount: 2),
+            "all eight toolbar fields derive from the pane + model.alerts")
+    }
+
+    test("desiredPaneToolbar: keyed over every live pane") {
+        var model = makeModel()
+        createTab(&model)
+        let tab0Pane = selectedTab(in: model)!.focusedPaneId
+        update(&model, .splitPane(paneId: tab0Pane, direction: .horizontal))
+        createTab(&model)  // second tab, hidden, still projected
+        try expectEqual(Set(desiredPaneToolbar(in: model).keys), Set(model.allPaneIds),
+            "toolbar projection covers all live panes (host destroyed elsewhere -> default no-op remove)")
+    }
+
+    // MARK: - desiredSearchOverlays (search-overlay projection, Stage 4)
+
+    test("desiredSearchOverlays: keyed only while search is active; drops the key on endSearch") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        // No search yet: the pane has no overlay key.
+        try expect(desiredSearchOverlays(in: model)[paneId] == nil,
+            "no active search -> no key")
+
+        update(&model, .ghosttyStartSearch(paneId: paneId, needle: "foo"))
+        model.searchState[paneId]?.total = 7
+        model.searchState[paneId]?.selected = 2
+        try expectEqual(
+            desiredSearchOverlays(in: model)[paneId],
+            SearchOverlayRender(needle: "foo", total: 7, selected: 2),
+            "active search keys the pane with needle + match counts")
+
+        // Ending search clears searchState; the pane's key disappears. In the live
+        // pass that fires applyDiff's `remove` -> hideSearchOverlay while the pane
+        // (and its wrapper) survive.
+        update(&model, .endSearch(paneId: paneId))
+        try expect(desiredSearchOverlays(in: model)[paneId] == nil,
+            "ended search drops the pane's key (disappear-but-host-survives)")
+    }
 }
 
 /// Build a model with N tabs in one group; returns the tab ids in display order.

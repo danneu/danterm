@@ -983,6 +983,65 @@ func desiredFocusBorders(in model: AppModel) -> [PaneId: BorderState] {
   return result
 }
 
+/// Pane-toolbar render the reconciler diffs and pushes to a PaneWrapperView's
+/// toolbar. Carries exactly the eight values the old imperative `refreshPaneToolbar`
+/// read from the model before calling `PaneWrapperView.updateToolbar`. Equatable so
+/// the diff skips panes whose toolbar inputs are unchanged.
+struct PaneToolbarRender: Equatable {
+  let title: String
+  let cwd: String?
+  let progress: ProgressState?
+  let isRemote: Bool
+  let remoteSession: RemoteSession?
+  let unreadAlertCount: Int
+  let totalTodoCount: Int
+  let uncompletedTodoCount: Int
+}
+
+/// Pane-toolbar projection: one `PaneToolbarRender` per live pane. Keyed over every
+/// pane (`allPanes`) so a key leaves only when its pane is gone -- at which point the
+/// container pass has already torn down the host wrapper -- so `reconcilePaneChrome`
+/// diffs this with the default no-op `remove`.
+func desiredPaneToolbar(in model: AppModel) -> [PaneId: PaneToolbarRender] {
+  var result: [PaneId: PaneToolbarRender] = [:]
+  for pane in model.allPanes {
+    let (title, cwd) = paneToolbarText(for: pane.id, in: model)
+    result[pane.id] = PaneToolbarRender(
+      title: title,
+      cwd: cwd,
+      progress: pane.progress,
+      isRemote: pane.isRemote,
+      remoteSession: pane.remoteSession,
+      unreadAlertCount: model.alerts.count { $0.paneId == pane.id && $0.isUnread },
+      totalTodoCount: pane.todos.count,
+      uncompletedTodoCount: pane.todos.count { !$0.isDone }
+    )
+  }
+  return result
+}
+
+/// Per-pane search-overlay render the reconciler diffs and pushes to a
+/// PaneWrapperView's search overlay -- the needle plus the match counts the overlay
+/// displays, all from `model.searchState`. Equatable so the diff skips unchanged
+/// overlays.
+struct SearchOverlayRender: Equatable {
+  let needle: String
+  let total: Int?
+  let selected: Int?
+}
+
+/// Search-overlay projection: one `SearchOverlayRender` per pane *with active search*
+/// (keyed iff `model.searchState[paneId] != nil`). The key disappears the instant
+/// search ends, so `reconcilePaneChrome` diffs this with a non-default `remove` that
+/// tears the overlay down (disappear-but-host-survives) while the pane's wrapper lives on.
+func desiredSearchOverlays(in model: AppModel) -> [PaneId: SearchOverlayRender] {
+  var result: [PaneId: SearchOverlayRender] = [:]
+  for (paneId, search) in model.searchState {
+    result[paneId] = SearchOverlayRender(needle: search.needle, total: search.total, selected: search.selected)
+  }
+  return result
+}
+
 /// Generic diff/apply/prune backing every keyed reconcile pass. Applies `apply`
 /// only for keys whose desired value differs from the cached one (unchanged keys
 /// are skipped), invokes `remove` once for each key that left `desired` (the

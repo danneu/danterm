@@ -1042,7 +1042,6 @@ func ipcUpdateTests() {
         let added = try requireIpcReply(addEffects)
         let todoId = try requireString(added["todo"]?["id"], "todo add should return id")
         try expectEqual(model.pane(paneId)?.todos.first?.text, "ship cli")
-        try expect(hasEffect(addEffects) { if case .refreshPaneToolbar(let pid) = $0 { return pid == paneId }; return false })
 
         let editReply = try requireIpcReply(sendIpc(&model, method: Methods.todoEdit, params: .object(["todoId": .string(todoId), "text": .string("ship cli v2")]), context: ctx))
         try expectEqual(model.pane(paneId)?.todos.first?.text, "ship cli v2")

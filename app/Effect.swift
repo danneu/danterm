@@ -69,8 +69,6 @@ enum Effect {
 
     // Search
     case sendStartSearch(paneId: PaneId)
-    case showSearchOverlay(paneId: PaneId)
-    case hideSearchOverlay(paneId: PaneId)
     case focusSearchField(paneId: PaneId)
     case sendSearchNeedle(paneId: PaneId, needle: String)
     case sendSearchNavigate(paneId: PaneId, direction: SearchDirection)
@@ -82,9 +80,38 @@ enum Effect {
     case showTodoPopoverForTab(tabId: TabId)
     case dismissTodoPopoverForTab
     case showClosePaneConfirmation(paneId: PaneId, uncompletedCount: Int)
-    case refreshPaneToolbar(paneId: PaneId)
 
     // MRU tab switcher overlay
     case showSwitcherOverlay   // ensure panel is visible and redrawn from model
     case hideSwitcherOverlay   // order panel out
+}
+
+extension Effect {
+    /// Whether this command must run *after* `reconcile()` because it targets a view
+    /// the reconciler creates. In Stage 4 only `focusSearchField` qualifies: it focuses
+    /// the search field that `reconcilePaneChrome` builds, which does not exist until
+    /// after reconcile. `makeFirstResponder` stays pre-reconcile because its
+    /// `TerminalView` is still created by the effect-built container path (Stage 8 flips
+    /// it once `reconcileContainers` mounts the view); `focusSurface` is pre-reconcile
+    /// because it acts on an already-existing surface and deferring it is actively wrong.
+    /// Exhaustive with no `default` so a new case cannot be added without classifying it.
+    var isPostReconcile: Bool {
+        switch self {
+        case .focusSearchField:
+            return true
+        case .createSurface, .destroySurface, .sendText, .sendInputText, .sendInputKey,
+             .focusSurface, .makeFirstResponder, .showSelectedTab, .rebuildTabContainer,
+             .removeTabContainer, .reloadSidebar, .setSidebarSelection, .updateSidebarTabRow,
+             .updateSidebarGroupRow, .setWindowTitle, .exportState, .ipcReply, .ipcError,
+             .readPaneText, .sendNotification, .showTerminateConfirmation,
+             .showCloseTabConfirmation, .showCloseTabsConfirmation, .terminate, .activateApp,
+             .setAppFocus, .dismissAlertsPopover, .updateToolbarBellBadge, .updateDockBadge,
+             .applyPaneTheme, .saveDanTermConfigKey, .removeDanTermConfigKey,
+             .reloadGhosttyConfig, .syncPreferencesPanel, .scheduleCheckpoint, .sendStartSearch,
+             .sendSearchNeedle, .sendSearchNavigate, .sendEndSearch, .showTodoPopover,
+             .dismissTodoPopover, .showTodoPopoverForTab, .dismissTodoPopoverForTab,
+             .showClosePaneConfirmation, .showSwitcherOverlay, .hideSwitcherOverlay:
+            return false
+        }
+    }
 }

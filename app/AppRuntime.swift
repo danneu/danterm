@@ -217,10 +217,17 @@ class AppRuntime {
 
         let oldUnreadCount = totalUnreadAlertCount(model: model)
         let effects = update(&model, translatedMsg)
-        for effect in effects {
+        // Command-phase split: most commands run before reconcile(); the few that
+        // target a view the reconciler creates (Stage 4: only .focusSearchField,
+        // whose search field reconcilePaneChrome builds) run after. See
+        // Effect.isPostReconcile.
+        for effect in effects where !effect.isPostReconcile {
             perform(effect)
         }
         reconcile()
+        for effect in effects where effect.isPostReconcile {
+            perform(effect)
+        }
         if model.pendingConfirmation == .terminate {
             quitConfirmationPanel?.configure(paneCount: model.allPaneIds.count)
         }
@@ -239,19 +246,15 @@ class AppRuntime {
             flushPendingCheckpoint()
         }
 
-        // Refresh pane toolbar after title/cwd/progress/remote-state/todo changes,
-        // and refresh the chrome's tab-todo badge when a pane todo change lives in
-        // the active tab (the badge rolls up tab + every pane in that tab).
+        // Refresh the chrome's tab-todo badge after pane/tab todo changes and after
+        // selection or tab-membership changes (the badge rolls up the tab + every pane
+        // in that tab). Pane toolbars now reconcile via reconcilePaneChrome, so their
+        // imperative refreshes are gone from here.
         switch translatedMsg {
-        case .surfaceTitle(let paneId, _), .surfaceCwd(let paneId, _), .surfaceProgress(let paneId, _),
-             .remoteSessionStarted(let paneId), .remoteSessionReported(let paneId, _), .commandEnded(let paneId):
-            refreshPaneToolbar(for: paneId)
-
         case .addTodo(let paneId, _), .toggleTodoDone(let paneId, _),
              .setTodoDone(let paneId, _, _),
              .editTodoText(let paneId, _, _), .deleteTodo(let paneId, _),
              .reorderTodo(let paneId, _, _), .clearCompletedTodos(let paneId):
-            refreshPaneToolbar(for: paneId)
             if paneIsInActiveTab(paneId) { refreshTabTodoButton() }
 
         case .addTabTodo(let tabId, _), .toggleTabTodoDone(let tabId, _),
@@ -261,8 +264,6 @@ class AppRuntime {
             if tabId == model.selectedTabId { refreshTabTodoButton() }
 
         case .moveTodo(let from, _, let to, _):
-            if case .pane(let paneId) = from { refreshPaneToolbar(for: paneId) }
-            if case .pane(let paneId) = to { refreshPaneToolbar(for: paneId) }
             let movedTabId: TabId? = {
                 switch (from, to) {
                 case (.tab(let tabId), _), (_, .tab(let tabId)):
@@ -688,15 +689,6 @@ class AppRuntime {
                 }
             }
 
-        case .showSearchOverlay(let paneId):
-            guard let search = model.searchState[paneId],
-                  let contentArea = contentArea else { return }
-            findPaneWrapper(for: paneId, in: contentArea)?.showSearchOverlay(search: search, runtime: self)
-
-        case .hideSearchOverlay(let paneId):
-            guard let contentArea = contentArea else { return }
-            findPaneWrapper(for: paneId, in: contentArea)?.hideSearchOverlay()
-
         case .focusSearchField(let paneId):
             guard let contentArea = contentArea else { return }
             if let field = findPaneWrapper(for: paneId, in: contentArea)?.searchOverlay?.searchField {
@@ -800,9 +792,6 @@ class AppRuntime {
                     }
                 }
             }
-
-        case .refreshPaneToolbar(let paneId):
-            refreshPaneToolbar(for: paneId)
 
         case .showSwitcherOverlay:
             // Idempotent: render and order-front. Don't makeKeyAndOrderFront
@@ -1385,21 +1374,9 @@ class AppRuntime {
         }
     }
 
-    private func refreshPaneToolbar(for paneId: PaneId) {
-        guard let contentArea = contentArea else { return }
-        let (title, cwd) = paneToolbarText(for: paneId, in: model)
-        let pane = model.pane(paneId)
-        let progress = pane?.progress
-        let isRemote = pane?.isRemote ?? false
-        let remoteSession = pane?.remoteSession
-        let alertCount = model.alerts.count { $0.paneId == paneId && $0.isUnread }
-        let todos = pane?.todos ?? []
-        let totalTodo = todos.count
-        let uncompletedTodo = todos.count { !$0.isDone }
-        findPaneWrapper(for: paneId, in: contentArea)?.updateToolbar(title: title, cwd: cwd, progress: progress, isRemote: isRemote, remoteSession: remoteSession, unreadAlertCount: alertCount, totalTodoCount: totalTodo, uncompletedTodoCount: uncompletedTodo)
-    }
-
-    private func findPaneWrapper(for paneId: PaneId, in view: NSView) -> PaneWrapperView? {
+    // `internal` (not `private`) so reconcilePaneChrome in Reconcile.swift can reach
+    // a pane's wrapper to push toolbar/search-overlay renders.
+    func findPaneWrapper(for paneId: PaneId, in view: NSView) -> PaneWrapperView? {
         for sub in view.subviews {
             if let wrapper = sub as? PaneWrapperView {
                 if wrapper.paneId == paneId { return wrapper }
