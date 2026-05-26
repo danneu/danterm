@@ -144,8 +144,8 @@ func customTitleTests() {
         update(&model, .selectTab(id: tabAId))
         update(&model, .splitPane(direction: .horizontal))
 
-        let effects = update(&model, .requestCloseTab(id: tabAId))
-        let confirmEffect = effects.first(where: {
+        let commands = update(&model, .requestCloseTab(id: tabAId))
+        let confirmEffect = commands.first(where: {
             if case .showCloseTabConfirmation = $0 { return true }
             return false
         })
@@ -404,8 +404,8 @@ func customTitleTests() {
         createTab(&model)
         let focusedPaneId = model.groups[0].tabs[0].focusedPaneId
 
-        let effects = update(&model, .sidebarRenameEnded)
-        try expect(hasEffect(effects) {
+        let commands = update(&model, .sidebarRenameEnded)
+        try expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == focusedPaneId {
                 return true
             }
@@ -418,8 +418,8 @@ func customTitleTests() {
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
 
-        let effects = update(&model, .renameTab(id: tabId, name: "New"))
-        try expect(!hasEffect(effects) {
+        let commands = update(&model, .renameTab(id: tabId, name: "New"))
+        try expect(!hasEffect(commands) {
             if case .makeFirstResponder = $0 { return true }
             return false
         }, "renameTab should not restore focus (would steal from click-away)")
@@ -431,8 +431,8 @@ func customTitleTests() {
         update(&model, .createGroup(name: "Work"))
         let workId = model.groups[1].id
 
-        let effects = update(&model, .renameGroup(id: workId, name: "Projects"))
-        try expect(!hasEffect(effects) {
+        let commands = update(&model, .renameGroup(id: workId, name: "Projects"))
+        try expect(!hasEffect(commands) {
             if case .makeFirstResponder = $0 { return true }
             return false
         }, "renameGroup should not restore focus (would steal from click-away)")
@@ -497,13 +497,13 @@ func customTitleTests() {
         update(&model, .renameTab(id: id1, name: "alpha"))
         update(&model, .renameTab(id: id2, name: "beta"))
 
-        let effects = update(&model, .clearCustomTitles(
+        let commands = update(&model, .clearCustomTitles(
             tabIds: [id1, id1, stale, id2]))
 
         try expect(model.groups[0].tabs[0].customTitle == nil)
         try expect(model.groups[0].tabs[1].customTitle == nil)
         // Per-row sidebar updates now reconcile; the batch clear still persists.
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
         }, "should persist the batch clear via scheduleCheckpoint")
@@ -514,11 +514,11 @@ func customTitleTests() {
         createTab(&model)
         let snapshot = model.groups
 
-        let effects = update(&model, .clearCustomTitles(
+        let commands = update(&model, .clearCustomTitles(
             tabIds: [TabId(), TabId()]))
 
         try expectEqual(model.groups, snapshot)
-        try expectEqual(effects.count, 0)
+        try expectEqual(commands.count, 0)
     }
 
     test("testClearCustomTitlesRevertsSelectedTabDisplayTitle") {

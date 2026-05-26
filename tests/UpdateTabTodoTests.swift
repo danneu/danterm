@@ -28,7 +28,7 @@ func updateTabTodoTests() {
         let paneA = tabA.focusedPaneId
 
         update(&model, .addTodo(paneId: paneA, text: "pane task"))
-        let effects = update(&model, .addTabTodo(tabId: tabA.id, text: "tab task"))
+        let commands = update(&model, .addTabTodo(tabId: tabA.id, text: "tab task"))
 
         let updatedTabA = tabById(tabA.id, in: model)!
         try expectEqual(updatedTabA.todos.count, 1)
@@ -42,7 +42,7 @@ func updateTabTodoTests() {
         // Tab B has no todos
         try expectEqual(tabById(tabB.id, in: model)!.todos.count, 0)
 
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
         }, "expected scheduleCheckpoint")
@@ -82,8 +82,8 @@ func updateTabTodoTests() {
         update(&model, .setTabTodoDone(tabId: tabId, todoId: idA, isDone: true))
         try expectEqual(tabById(tabId, in: model)!.todos[0].isDone, true)
         // Setting to the same value is a no-op (no checkpoint)
-        let effects = update(&model, .setTabTodoDone(tabId: tabId, todoId: idA, isDone: true))
-        try expect(effects.isEmpty, "no-op when value unchanged")
+        let commands = update(&model, .setTabTodoDone(tabId: tabId, todoId: idA, isDone: true))
+        try expect(commands.isEmpty, "no-op when value unchanged")
     }
 
     // MARK: - editTabTodoText
@@ -128,8 +128,8 @@ func updateTabTodoTests() {
         try expectEqual(tabById(tabId, in: model)!.todos.map(\.text), ["C", "A", "B"])
 
         let idA = tabById(tabId, in: model)!.todos[1].id
-        let effects = update(&model, .reorderTabTodo(tabId: tabId, todoId: idA, toIndex: 99))
-        try expect(effects.isEmpty, "out of bounds is no-op")
+        let commands = update(&model, .reorderTabTodo(tabId: tabId, todoId: idA, toIndex: 99))
+        try expect(commands.isEmpty, "out of bounds is no-op")
     }
 
     // MARK: - moveTodo
@@ -199,9 +199,9 @@ func updateTabTodoTests() {
         update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
         let todoId = tabById(tabId, in: model)!.todos[0].id
 
-        let effects = update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .tab(tabId), atIndex: 0))
+        let commands = update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .tab(tabId), atIndex: 0))
 
-        try expect(effects.isEmpty, "same bucket should not checkpoint")
+        try expect(commands.isEmpty, "same bucket should not checkpoint")
         try expectEqual(tabById(tabId, in: model)!.todos.map(\.text), ["tab task"])
     }
 
@@ -209,9 +209,9 @@ func updateTabTodoTests() {
         var (model, tabId, paneA, _) = makeTwoPaneTabForMoveTests()
         update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
 
-        let effects = update(&model, .moveTodo(from: .tab(tabId), todoId: UUID(), to: .pane(paneA), atIndex: 0))
+        let commands = update(&model, .moveTodo(from: .tab(tabId), todoId: UUID(), to: .pane(paneA), atIndex: 0))
 
-        try expect(effects.isEmpty, "unknown todo should not checkpoint")
+        try expect(commands.isEmpty, "unknown todo should not checkpoint")
         try expectEqual(tabById(tabId, in: model)!.todos.map(\.text), ["tab task"])
         try expectEqual(model.pane(paneA)!.todos.count, 0)
     }
@@ -221,9 +221,9 @@ func updateTabTodoTests() {
         update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
         let todoId = tabById(tabId, in: model)!.todos[0].id
 
-        let effects = update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(PaneId()), atIndex: 0))
+        let commands = update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(PaneId()), atIndex: 0))
 
-        try expect(effects.isEmpty, "missing destination should not checkpoint")
+        try expect(commands.isEmpty, "missing destination should not checkpoint")
         try expectEqual(tabById(tabId, in: model)!.todos.map(\.text), ["tab task"])
     }
 
@@ -236,9 +236,9 @@ func updateTabTodoTests() {
         update(&model, .addTabTodo(tabId: tabA.id, text: "tab A task"))
         let todoId = tabById(tabA.id, in: model)!.todos[0].id
 
-        let effects = update(&model, .moveTodo(from: .tab(tabA.id), todoId: todoId, to: .tab(tabB.id), atIndex: 0))
+        let commands = update(&model, .moveTodo(from: .tab(tabA.id), todoId: todoId, to: .tab(tabB.id), atIndex: 0))
 
-        try expect(effects.isEmpty, "cross-tab move should not checkpoint")
+        try expect(commands.isEmpty, "cross-tab move should not checkpoint")
         try expectEqual(tabById(tabA.id, in: model)!.todos.map(\.text), ["tab A task"])
         try expectEqual(tabById(tabB.id, in: model)!.todos.count, 0)
     }
@@ -248,9 +248,9 @@ func updateTabTodoTests() {
         update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
         let todoId = tabById(tabId, in: model)!.todos[0].id
 
-        let effects = update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(paneA), atIndex: 0))
+        let commands = update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(paneA), atIndex: 0))
 
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
         }, "expected scheduleCheckpoint")
@@ -281,13 +281,13 @@ func updateTabTodoTests() {
         update(&model, .toggleTodoPopover(paneId: paneId))
         try expectEqual(model.todoPopover, .pane(paneId))
 
-        let effects = update(&model, .toggleTodoPopoverForTab(tabId: tab.id))
+        let commands = update(&model, .toggleTodoPopoverForTab(tabId: tab.id))
         try expectEqual(model.todoPopover, .tab(tab.id))
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .dismissTodoPopover = $0 { return true }
             return false
         }, "expected dismissTodoPopover")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .showTodoPopoverForTab(let tid) = $0 { return tid == tab.id }
             return false
         }, "expected showTodoPopoverForTab")
@@ -300,9 +300,9 @@ func updateTabTodoTests() {
         update(&model, .toggleTodoPopoverForTab(tabId: tab.id))
         try expectEqual(model.todoPopover, .tab(tab.id))
 
-        let effects = update(&model, .toggleTodoPopoverForTab(tabId: tab.id))
+        let commands = update(&model, .toggleTodoPopoverForTab(tabId: tab.id))
         try expect(model.todoPopover == nil, "should clear scope")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .dismissTodoPopoverForTab = $0 { return true }
             return false
         }, "expected dismissTodoPopoverForTab")
@@ -316,13 +316,13 @@ func updateTabTodoTests() {
         update(&model, .toggleTodoPopoverForTab(tabId: tab.id))
         try expectEqual(model.todoPopover, .tab(tab.id))
 
-        let effects = update(&model, .toggleTodoPopover(paneId: paneId))
+        let commands = update(&model, .toggleTodoPopover(paneId: paneId))
         try expectEqual(model.todoPopover, .pane(paneId))
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .dismissTodoPopoverForTab = $0 { return true }
             return false
         }, "expected dismissTodoPopoverForTab")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .showTodoPopover(let pid) = $0 { return pid == paneId }
             return false
         }, "expected showTodoPopover")
@@ -333,9 +333,9 @@ func updateTabTodoTests() {
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .toggleTodoPopover(paneId: paneId))
-        let effects = update(&model, .toggleTodoPopover(paneId: paneId))
+        let commands = update(&model, .toggleTodoPopover(paneId: paneId))
         try expect(model.todoPopover == nil)
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .dismissTodoPopover = $0 { return true }
             return false
         }, "expected dismissTodoPopover")
@@ -350,9 +350,9 @@ func updateTabTodoTests() {
         update(&model, .toggleTodoPopoverForTab(tabId: tabAId))
         try expectEqual(model.todoPopover, .tab(tabAId))
 
-        let effects = update(&model, .closeTab(id: tabAId))
+        let commands = update(&model, .closeTab(id: tabAId))
         try expect(model.todoPopover == nil, "scope should be cleared")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .dismissTodoPopoverForTab = $0 { return true }
             return false
         }, "expected dismissTodoPopoverForTab")
@@ -365,8 +365,8 @@ func updateTabTodoTests() {
         createTab(&model)
         createTab(&model) // second tab so close doesn't trigger terminate
         let firstTabId = model.groups[0].tabs[0].id
-        let effects = update(&model, .requestCloseTab(id: firstTabId))
-        try expect(!hasEffect(effects) {
+        let commands = update(&model, .requestCloseTab(id: firstTabId))
+        try expect(!hasEffect(commands) {
             if case .showCloseTabConfirmation = $0 { return true }
             return false
         }, "no confirmation for empty tab")
@@ -380,8 +380,8 @@ func updateTabTodoTests() {
         let firstTabId = model.groups[0].tabs[0].id
         update(&model, .addTabTodo(tabId: firstTabId, text: "pending"))
 
-        let effects = update(&model, .requestCloseTab(id: firstTabId))
-        try expect(hasEffect(effects) {
+        let commands = update(&model, .requestCloseTab(id: firstTabId))
+        try expect(hasEffect(commands) {
             if case .showCloseTabConfirmation(let tid, _, let pc, _, let utc) = $0 {
                 return tid == firstTabId && pc == 1 && utc == 1
             }
@@ -397,8 +397,8 @@ func updateTabTodoTests() {
         let firstTab = model.groups[0].tabs[0]
         update(&model, .addTodo(paneId: firstTab.focusedPaneId, text: "pane task"))
 
-        let effects = update(&model, .requestCloseTab(id: firstTab.id))
-        try expect(hasEffect(effects) {
+        let commands = update(&model, .requestCloseTab(id: firstTab.id))
+        try expect(hasEffect(commands) {
             if case .showCloseTabConfirmation(_, _, _, _, let utc) = $0 { return utc == 1 }
             return false
         }, "expected confirmation with rollup pane todos")
@@ -422,8 +422,8 @@ func updateTabTodoTests() {
         let lastB = model.pane(paneB)!.todos.last!.id
         update(&model, .toggleTodoDone(paneId: paneB, todoId: lastB))
 
-        let effects = update(&model, .requestCloseTab(id: firstTabId))
-        try expect(hasEffect(effects) {
+        let commands = update(&model, .requestCloseTab(id: firstTabId))
+        try expect(hasEffect(commands) {
             if case .showCloseTabConfirmation(_, _, let pc, _, let utc) = $0 {
                 return pc == 2 && utc == 4
             }
@@ -454,14 +454,14 @@ func updateTabTodoTests() {
         let firstTab = model.groups[0].tabs[0]
         update(&model, .addTabTodo(tabId: firstTab.id, text: "tab task"))
 
-        let effects = update(&model, .requestClosePane(paneId: firstTab.focusedPaneId))
-        try expect(hasEffect(effects) {
+        let commands = update(&model, .requestClosePane(paneId: firstTab.focusedPaneId))
+        try expect(hasEffect(commands) {
             if case .showCloseTabConfirmation(let tid, _, let pc, _, let utc) = $0 {
                 return tid == firstTab.id && pc == 1 && utc == 1
             }
             return false
         }, "expected close-tab confirmation")
-        try expect(!hasEffect(effects) {
+        try expect(!hasEffect(commands) {
             if case .showClosePaneConfirmation = $0 { return true }
             return false
         }, "should not show pane-level confirmation")
@@ -479,12 +479,12 @@ func updateTabTodoTests() {
         let paneB = selectedTab(in: model)!.focusedPaneId
         update(&model, .addTabTodo(tabId: firstTab.id, text: "tab task"))
 
-        let effects = update(&model, .requestClosePane(paneId: paneB))
-        try expect(!hasEffect(effects) {
+        let commands = update(&model, .requestClosePane(paneId: paneB))
+        try expect(!hasEffect(commands) {
             if case .showCloseTabConfirmation = $0 { return true }
             return false
         }, "no close-tab confirmation: tab still alive")
-        try expect(!hasEffect(effects) {
+        try expect(!hasEffect(commands) {
             if case .showClosePaneConfirmation = $0 { return true }
             return false
         }, "no pane confirmation: pane has no todos")
@@ -500,12 +500,12 @@ func updateTabTodoTests() {
         update(&model, .addTabTodo(tabId: firstTab.id, text: "tab task"))
         update(&model, .addTodo(paneId: paneA, text: "pane task"))
 
-        let effects = update(&model, .requestClosePane(paneId: paneA))
-        try expect(hasEffect(effects) {
+        let commands = update(&model, .requestClosePane(paneId: paneA))
+        try expect(hasEffect(commands) {
             if case .showCloseTabConfirmation(_, _, _, _, let utc) = $0 { return utc == 2 }
             return false
         }, "expected close-tab rollup of 2")
-        try expect(!hasEffect(effects) {
+        try expect(!hasEffect(commands) {
             if case .showClosePaneConfirmation = $0 { return true }
             return false
         }, "should not also show pane confirmation")
@@ -519,8 +519,8 @@ func updateTabTodoTests() {
         let paneA = firstTab.focusedPaneId
         update(&model, .addTodo(paneId: paneA, text: "pane only"))
 
-        let effects = update(&model, .requestClosePane(paneId: paneA))
-        try expect(hasEffect(effects) {
+        let commands = update(&model, .requestClosePane(paneId: paneA))
+        try expect(hasEffect(commands) {
             if case .showCloseTabConfirmation(_, _, _, _, let utc) = $0 { return utc == 1 }
             return false
         }, "expected close-tab confirmation with rollup 1")

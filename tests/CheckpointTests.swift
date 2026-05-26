@@ -21,8 +21,8 @@ func checkpointTests() {
 
     test("createTab emits scheduleCheckpoint") {
         var model = makeModel()
-        let effects = update(&model, .createTab(inGroupId: nil))
-        try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+        let commands = update(&model, .createTab(inGroupId: nil))
+        try expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
                    "createTab should emit scheduleCheckpoint")
     }
 
@@ -31,8 +31,8 @@ func checkpointTests() {
         createTab(&model)
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        let effects = update(&model, .selectTab(id: tabId))
-        try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+        let commands = update(&model, .selectTab(id: tabId))
+        try expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
                    "selectTab should emit scheduleCheckpoint")
     }
 
@@ -41,16 +41,16 @@ func checkpointTests() {
         createTab(&model)
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        let effects = update(&model, .closeTab(id: tabId))
-        try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+        let commands = update(&model, .closeTab(id: tabId))
+        try expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
                    "closeTab should emit scheduleCheckpoint")
     }
 
     test("splitPane emits scheduleCheckpoint") {
         var model = makeModel()
         createTab(&model)
-        let effects = update(&model, .splitPane(direction: .horizontal))
-        try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+        let commands = update(&model, .splitPane(direction: .horizontal))
+        try expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
                    "splitPane should emit scheduleCheckpoint")
     }
 
@@ -60,8 +60,8 @@ func checkpointTests() {
         update(&model, .splitPane(direction: .horizontal))
         let tab = selectedTab(in: model)!
         let paneToClose = allPaneIds(tab.rootNode).last!
-        let effects = update(&model, .closePane(paneId: paneToClose))
-        try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+        let commands = update(&model, .closePane(paneId: paneToClose))
+        try expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
                    "closePane should emit scheduleCheckpoint")
     }
 
@@ -69,8 +69,8 @@ func checkpointTests() {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        let effects = update(&model, .surfaceTitle(paneId: paneId, title: "new title"))
-        try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+        let commands = update(&model, .surfaceTitle(paneId: paneId, title: "new title"))
+        try expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
                    "surfaceTitle should emit scheduleCheckpoint")
     }
 
@@ -78,8 +78,8 @@ func checkpointTests() {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        let effects = update(&model, .surfaceCwd(paneId: paneId, cwd: "/tmp"))
-        try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+        let commands = update(&model, .surfaceCwd(paneId: paneId, cwd: "/tmp"))
+        try expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
                    "surfaceCwd should emit scheduleCheckpoint")
     }
 
@@ -87,8 +87,8 @@ func checkpointTests() {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        let effects = update(&model, .commandStarted(paneId: paneId, command: "ls"))
-        try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+        let commands = update(&model, .commandStarted(paneId: paneId, command: "ls"))
+        try expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
                    "commandStarted should emit scheduleCheckpoint")
     }
 
@@ -96,8 +96,8 @@ func checkpointTests() {
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        let effects = update(&model, .renameTab(id: tabId, name: "MyTab"))
-        try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+        let commands = update(&model, .renameTab(id: tabId, name: "MyTab"))
+        try expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
                    "renameTab should emit scheduleCheckpoint")
     }
 
@@ -105,24 +105,24 @@ func checkpointTests() {
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        let effects = update(&model, .setTabColors(tabIds: [tabId], color: .red))
-        try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+        let commands = update(&model, .setTabColors(tabIds: [tabId], color: .red))
+        try expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
                    "setTabColors should emit scheduleCheckpoint")
     }
 
     test("renameGroup emits scheduleCheckpoint") {
         var model = makeModel()
         createTab(&model)
-        let effects = update(&model, .renameGroup(id: model.groups[0].id, name: "Renamed"))
-        try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+        let commands = update(&model, .renameGroup(id: model.groups[0].id, name: "Renamed"))
+        try expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
                    "renameGroup should emit scheduleCheckpoint")
     }
 
     test("toggleGroupCollapse emits scheduleCheckpoint") {
         var model = makeModel()
         createTab(&model)
-        let effects = update(&model, .toggleGroupCollapse(groupId: model.groups[0].id))
-        try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+        let commands = update(&model, .toggleGroupCollapse(groupId: model.groups[0].id))
+        try expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
                    "toggleGroupCollapse should emit scheduleCheckpoint")
     }
 
@@ -130,8 +130,8 @@ func checkpointTests() {
         var model = makeModel()
         createTab(&model)
         update(&model, .splitPane(direction: .horizontal))
-        let effects = update(&model, .toggleZoomPane)
-        try expect(!hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+        let commands = update(&model, .toggleZoomPane)
+        try expect(!hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
                    "toggleZoomPane should not emit scheduleCheckpoint")
     }
 
@@ -143,8 +143,8 @@ func checkpointTests() {
         guard case .split(let splitId, _, _, _, _) = tab.rootNode else {
             throw TestFailure(message: "expected split node")
         }
-        let effects = update(&model, .splitRatioChanged(splitId: splitId, ratio: 0.3))
-        try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+        let commands = update(&model, .splitRatioChanged(splitId: splitId, ratio: 0.3))
+        try expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
                    "splitRatioChanged should emit scheduleCheckpoint")
     }
 
@@ -154,32 +154,32 @@ func checkpointTests() {
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
-        let effects = update(&model, .requestCloseTab(id: tabId))
-        try expect(!hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+        let commands = update(&model, .requestCloseTab(id: tabId))
+        try expect(!hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
                    "requestCloseTab should not emit scheduleCheckpoint")
     }
 
     test("exportState does not emit scheduleCheckpoint") {
         var model = makeModel()
         createTab(&model)
-        let effects = update(&model, .exportState)
-        try expect(!hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+        let commands = update(&model, .exportState)
+        try expect(!hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
                    "exportState should not emit scheduleCheckpoint")
     }
 
     test("appBecameActive does not emit scheduleCheckpoint") {
         var model = makeModel()
         createTab(&model)
-        let effects = update(&model, .appBecameActive)
-        try expect(!hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+        let commands = update(&model, .appBecameActive)
+        try expect(!hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
                    "appBecameActive should not emit scheduleCheckpoint")
     }
 
     test("appResignedActive does not emit scheduleCheckpoint") {
         var model = makeModel()
         createTab(&model)
-        let effects = update(&model, .appResignedActive)
-        try expect(!hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+        let commands = update(&model, .appResignedActive)
+        try expect(!hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
                    "appResignedActive should not emit scheduleCheckpoint")
     }
 
@@ -189,16 +189,16 @@ func checkpointTests() {
         createTab(&model)
         // Bell on non-focused pane of non-selected tab
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        let effects = update(&model, .surfaceBell(paneId: paneId))
-        try expect(!hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+        let commands = update(&model, .surfaceBell(paneId: paneId))
+        try expect(!hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
                    "surfaceBell should not emit scheduleCheckpoint")
     }
 
     test("cancelTerminate does not emit scheduleCheckpoint") {
         var model = makeModel()
         createTab(&model)
-        let effects = update(&model, .cancelTerminate)
-        try expect(!hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false },
+        let commands = update(&model, .cancelTerminate)
+        try expect(!hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
                    "cancelTerminate should not emit scheduleCheckpoint")
     }
 

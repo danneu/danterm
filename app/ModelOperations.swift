@@ -491,9 +491,9 @@ func wouldQuitFromClose(_ model: AppModel) -> Bool {
   totalTabCount(model) == 1
 }
 
-// Single chokepoint for asking the user before quitting. Returns no effects
+// Single chokepoint for asking the user before quitting. Returns no commands
 // when any confirmation sheet is already in flight.
-func emitTerminateConfirmation(_ model: inout AppModel) -> [Effect] {
+func emitTerminateConfirmation(_ model: inout AppModel) -> [Command] {
   guard model.pendingConfirmation == nil else { return [] }
   model.pendingConfirmation = .terminate
   return [.showTerminateConfirmation(paneCount: model.allPaneIds.count)]
@@ -505,7 +505,7 @@ func emitTerminateConfirmation(_ model: inout AppModel) -> [Effect] {
 func emitCloseTabConfirmation(
   _ model: inout AppModel, tabId: TabId, tabTitle: String, paneCount: Int, isLastTab: Bool,
   uncompletedTodoCount: Int
-) -> [Effect] {
+) -> [Command] {
   guard model.pendingConfirmation == nil else { return [] }
   model.pendingConfirmation = .closeTab
   return [.showCloseTabConfirmation(
@@ -519,7 +519,7 @@ func emitCloseTabConfirmation(
 
 // Single chokepoint for asking before closing a tab batch. It uses the same
 // pending-confirmation slot as single-tab close and quit confirmations.
-func emitCloseTabsConfirmation(_ model: inout AppModel, ids: [TabId]) -> [Effect] {
+func emitCloseTabsConfirmation(_ model: inout AppModel, ids: [TabId]) -> [Command] {
   guard model.pendingConfirmation == nil else { return [] }
   model.pendingConfirmation = .closeTab
 

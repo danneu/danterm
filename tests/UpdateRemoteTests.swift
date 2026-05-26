@@ -9,9 +9,9 @@ func remoteTests() {
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let effects = update(&model, .remoteSessionStarted(paneId: paneId))
+        let commands = update(&model, .remoteSessionStarted(paneId: paneId))
         try expectEqual(model.pane(paneId)?.isRemote, true, "pane should be remote")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .applyPaneTheme(let pid) = $0, pid == paneId { return true }
             return false
         }, "should emit applyPaneTheme")
@@ -52,10 +52,10 @@ func remoteTests() {
         let paneId = model.groups[0].tabs[0].focusedPaneId
         let session = RemoteSession(user: "dan", host: "caja")
 
-        let effects = update(&model, .remoteSessionReported(paneId: paneId, session: session))
+        let commands = update(&model, .remoteSessionReported(paneId: paneId, session: session))
         try expectEqual(model.pane(paneId)?.isRemote, true, "pane should be remote")
         try expectEqual(model.pane(paneId)?.remoteSession, session, "session should be stored")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .applyPaneTheme(let pid) = $0, pid == paneId { return true }
             return false
         }, "should emit applyPaneTheme on first remote transition")
@@ -86,9 +86,9 @@ func remoteTests() {
         let session = RemoteSession(user: "dan", host: "caja")
         _ = update(&model, .remoteSessionReported(paneId: paneId, session: session))
 
-        let effects = update(&model, .remoteSessionReported(paneId: paneId, session: session))
+        let commands = update(&model, .remoteSessionReported(paneId: paneId, session: session))
         try expectEqual(model.pane(paneId)?.remoteSession, session)
-        try expectEqual(effects.count, 0, "unchanged session should produce no effects")
+        try expectEqual(commands.count, 0, "unchanged session should produce no commands")
     }
 
     test("remoteSessionReported with different session updates without theme reapply") {
@@ -98,15 +98,15 @@ func remoteTests() {
         _ = update(&model, .remoteSessionReported(paneId: paneId, session: RemoteSession(user: "dan", host: "caja")))
         let nextSession = RemoteSession(user: "root", host: "silverstone")
 
-        let effects = update(&model, .remoteSessionReported(paneId: paneId, session: nextSession))
+        let commands = update(&model, .remoteSessionReported(paneId: paneId, session: nextSession))
         try expectEqual(model.pane(paneId)?.remoteSession, nextSession)
-        try expectEqual(effects.count, 0, "changed session while already remote should not reapply theme")
+        try expectEqual(commands.count, 0, "changed session while already remote should not reapply theme")
     }
 
-    test("remoteSessionReported on missing pane returns empty effects") {
+    test("remoteSessionReported on missing pane returns empty commands") {
         var model = makeModel()
-        let effects = update(&model, .remoteSessionReported(paneId: PaneId(), session: RemoteSession(user: "dan", host: "caja")))
-        try expectEqual(effects.count, 0, "no effects for missing pane")
+        let commands = update(&model, .remoteSessionReported(paneId: PaneId(), session: RemoteSession(user: "dan", host: "caja")))
+        try expectEqual(commands.count, 0, "no commands for missing pane")
     }
 
     test("commandEnded clears isRemote and remoteThemeOverride") {
@@ -116,11 +116,11 @@ func remoteTests() {
         model.updatePane(paneId) { $0.isRemote = true }
         model.updatePane(paneId) { $0.remoteSession = RemoteSession(user: "dan", host: "caja") }
         model.updatePane(paneId) { $0.remoteThemeOverride = "Purplepeter" }
-        let effects = update(&model, .commandEnded(paneId: paneId))
+        let commands = update(&model, .commandEnded(paneId: paneId))
         try expectEqual(model.pane(paneId)?.isRemote, false)
         try expectEqual(model.pane(paneId)?.remoteSession, nil, "remote session should be cleared")
         try expectEqual(model.pane(paneId)?.remoteThemeOverride, nil, "override should be cleared")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .applyPaneTheme(let pid) = $0, pid == paneId { return true }
             return false
         }, "should emit applyPaneTheme to revert")
@@ -132,10 +132,10 @@ func remoteTests() {
         let paneId = model.groups[0].tabs[0].focusedPaneId
         model.updatePane(paneId) { $0.isRemote = true }
         model.updatePane(paneId) { $0.remoteSession = RemoteSession(user: "dan", host: "caja") }
-        let effects = update(&model, .commandEnded(paneId: paneId))
+        let commands = update(&model, .commandEnded(paneId: paneId))
         try expectEqual(model.pane(paneId)?.isRemote, false)
         try expectEqual(model.pane(paneId)?.remoteSession, nil, "remote session should be cleared")
-        try expectEqual(effects.count, 0, "no theme effect when no override was set")
+        try expectEqual(commands.count, 0, "no theme command when no override was set")
     }
 
     test("commandEnded on non-remote pane is no-op") {
@@ -143,23 +143,23 @@ func remoteTests() {
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let effects = update(&model, .commandEnded(paneId: paneId))
+        let commands = update(&model, .commandEnded(paneId: paneId))
         try expectEqual(model.pane(paneId)?.isRemote, false, "pane should remain non-remote")
-        try expectEqual(effects.count, 0, "no effects expected")
+        try expectEqual(commands.count, 0, "no commands expected")
     }
 
-    test("remoteSessionStarted on missing pane returns empty effects") {
+    test("remoteSessionStarted on missing pane returns empty commands") {
         var model = makeModel()
         let fakePaneId = PaneId()
-        let effects = update(&model, .remoteSessionStarted(paneId: fakePaneId))
-        try expectEqual(effects.count, 0, "no effects for missing pane")
+        let commands = update(&model, .remoteSessionStarted(paneId: fakePaneId))
+        try expectEqual(commands.count, 0, "no commands for missing pane")
     }
 
-    test("commandEnded on missing pane returns empty effects") {
+    test("commandEnded on missing pane returns empty commands") {
         var model = makeModel()
         let fakePaneId = PaneId()
-        let effects = update(&model, .commandEnded(paneId: fakePaneId))
-        try expectEqual(effects.count, 0, "no effects for missing pane")
+        let commands = update(&model, .commandEnded(paneId: fakePaneId))
+        try expectEqual(commands.count, 0, "no commands for missing pane")
     }
 
     test("remote lifecycle: start then end restores theme") {
@@ -211,11 +211,11 @@ func remoteTests() {
         var model = makeModel()
         var newConfig = DanTermConfig()
         newConfig.remoteTheme = "Grape"
-        let effects = update(&model, .configLoaded(newConfig))
+        let commands = update(&model, .configLoaded(newConfig))
         try expectEqual(model.config.remoteTheme, "Grape")
         // Always emits syncPreferencesPanel, even with no remote panes
-        try expectEqual(effects.count, 1)
-        try expect(hasEffect(effects) {
+        try expectEqual(commands.count, 1)
+        try expect(hasEffect(commands) {
             if case .syncPreferencesPanel = $0 { return true }
             return false
         }, "should emit syncPreferencesPanel")
@@ -230,13 +230,13 @@ func remoteTests() {
 
         var newConfig = DanTermConfig()
         newConfig.remoteTheme = "Grape"
-        let effects = update(&model, .configLoaded(newConfig))
+        let commands = update(&model, .configLoaded(newConfig))
         try expectEqual(model.pane(paneId)?.remoteThemeOverride, "Grape", "remote pane should get new theme")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .applyPaneTheme(let pid) = $0, pid == paneId { return true }
             return false
         }, "should emit applyPaneTheme")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .syncPreferencesPanel = $0 { return true }
             return false
         }, "should emit syncPreferencesPanel")
@@ -249,9 +249,9 @@ func remoteTests() {
         _ = update(&model, .remoteSessionStarted(paneId: paneId))
 
         // Reload with same default config — no theme change
-        let effects = update(&model, .configLoaded(DanTermConfig.default))
-        try expectEqual(effects.count, 1)
-        try expect(hasEffect(effects) {
+        let commands = update(&model, .configLoaded(DanTermConfig.default))
+        try expectEqual(commands.count, 1)
+        try expect(hasEffect(commands) {
             if case .syncPreferencesPanel = $0 { return true }
             return false
         }, "should emit syncPreferencesPanel")
@@ -263,9 +263,9 @@ func remoteTests() {
         var model = makeModel()
         _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs()))
         _ = update(&model, .prefSetAlertClearMode(.manual))
-        let effects = update(&model, .prefSave)
+        let commands = update(&model, .prefSave)
         try expectEqual(model.config.alertClearMode, .manual)
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .saveDanTermConfigKey(let key, let value) = $0 {
                 return key == "alert-clear-mode" && value == "manual"
             }
@@ -277,8 +277,8 @@ func remoteTests() {
         var model = makeModel()
         _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs()))
         // Don't change anything — save should emit only syncPreferencesPanel.
-        let effects = update(&model, .prefSave)
-        try expect(!hasEffect(effects) {
+        let commands = update(&model, .prefSave)
+        try expect(!hasEffect(commands) {
             if case .saveDanTermConfigKey = $0 { return true }
             return false
         }, "should not emit saveDanTermConfigKey")
@@ -290,9 +290,9 @@ func remoteTests() {
         var model = makeModel()
         _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs()))
         _ = update(&model, .prefSetRemoteTheme("Grape"))
-        let effects = update(&model, .prefSave)
+        let commands = update(&model, .prefSave)
         try expectEqual(model.config.remoteTheme, "Grape")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .saveDanTermConfigKey(let key, let value) = $0 {
                 return key == "remote-theme" && value == "Grape"
             }
@@ -308,9 +308,9 @@ func remoteTests() {
 
         _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs()))
         _ = update(&model, .prefSetRemoteTheme("Grape"))
-        let effects = update(&model, .prefSave)
+        let commands = update(&model, .prefSave)
         try expectEqual(model.pane(paneId)?.remoteThemeOverride, "Grape")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .applyPaneTheme(let pid) = $0, pid == paneId { return true }
             return false
         }, "should emit applyPaneTheme for remote pane")

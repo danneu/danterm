@@ -138,9 +138,9 @@ func updateMruTests() {
         var model = makeModel()
         try expect(model.mruOrder.isEmpty, "preconditioned: no tabs")
 
-        let effects = update(&model, .mruCycleStepped(direction: .older))
+        let commands = update(&model, .mruCycleStepped(direction: .older))
         try expect(model.mruCycle == nil, "no cycle started")
-        try expectEqual(effects.count, 0, "no effects emitted")
+        try expectEqual(commands.count, 0, "no commands emitted")
     }
 
     test("mruCycleStepped(.older) from idle starts cycle at cursorIndex 1") {
@@ -148,11 +148,11 @@ func updateMruTests() {
         var model = m0
         let snapshot = model.mruOrder
 
-        let effects = update(&model, .mruCycleStepped(direction: .older))
+        let commands = update(&model, .mruCycleStepped(direction: .older))
         try expect(model.mruCycle != nil, "cycle started")
         try expectEqual(model.mruCycle?.frozenOrder ?? [], snapshot)
         try expectEqual(model.mruCycle?.cursorIndex ?? -1, 1)
-        try expect(effects.isEmpty, "step emits no commands; the switcher reconciles from mruCycle")
+        try expect(commands.isEmpty, "step emits no commands; the switcher reconciles from mruCycle")
     }
 
     test("mruCycleStepped(.newer) from idle wraps to last index") {
@@ -160,10 +160,10 @@ func updateMruTests() {
         var model = m0
         // Like cmd-shift-tab on macOS: summoning with the reverse direction
         // jumps straight to the least-recently-used tab.
-        let effects = update(&model, .mruCycleStepped(direction: .newer))
+        let commands = update(&model, .mruCycleStepped(direction: .newer))
         try expect(model.mruCycle != nil, "cycle started")
         try expectEqual(model.mruCycle?.cursorIndex ?? -1, 3, "wrapped to last index")
-        try expect(effects.isEmpty, "step emits no commands; the switcher reconciles from mruCycle")
+        try expect(commands.isEmpty, "step emits no commands; the switcher reconciles from mruCycle")
     }
 
     test("repeated mruCycleStepped(.older) advances and wraps") {
@@ -214,13 +214,13 @@ func updateMruTests() {
         }
         try expect(target != initiallySelected)
 
-        let effects = update(&model, .mruCycleCommitted)
+        let commands = update(&model, .mruCycleCommitted)
         try expectEqual(model.selectedTabId!, target, "target tab focused")
         try expect(model.mruCycle == nil, "cycle cleared")
         try expect(model.mruOrder.first == target, "chosen tab hoisted to MRU front")
         // The switcher hides structurally (mruCycle == nil -> reconcileSwitcher) and the
         // tab switch is structural too (reconcileContainers); the commit persists selection.
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
         }, "commit persists the new selection via scheduleCheckpoint")
@@ -234,10 +234,10 @@ func updateMruTests() {
         _ = update(&model, .mruCycleStepped(direction: .newer))
         try expectEqual(model.mruCycle?.cursorIndex ?? -1, 0)
 
-        let effects = update(&model, .mruCycleCommitted)
+        let commands = update(&model, .mruCycleCommitted)
         try expectEqual(model.selectedTabId!, initiallySelected, "selection unchanged")
         try expect(model.mruCycle == nil, "cycle cleared -> reconcileSwitcher hides the panel")
-        try expect(effects.isEmpty, "a no-op commit emits no commands")
+        try expect(commands.isEmpty, "a no-op commit emits no commands")
     }
 
     test("mruCycleCanceled clears cycle without changing selection") {
@@ -248,11 +248,11 @@ func updateMruTests() {
         _ = update(&model, .mruCycleStepped(direction: .older))
         _ = update(&model, .mruCycleStepped(direction: .older))
 
-        let effects = update(&model, .mruCycleCanceled)
+        let commands = update(&model, .mruCycleCanceled)
         try expectEqual(model.selectedTabId!, initiallySelected, "selection unchanged")
         try expect(model.mruCycle == nil)
         try expectEqual(model.mruOrder, initialMru, "mruOrder unchanged")
-        try expect(effects.isEmpty, "cancel emits no commands; mruCycle == nil -> reconcileSwitcher hides the panel")
+        try expect(commands.isEmpty, "cancel emits no commands; mruCycle == nil -> reconcileSwitcher hides the panel")
     }
 
     test("mruCycleOneShot is equivalent to step + commit") {
@@ -263,11 +263,11 @@ func updateMruTests() {
             throw TestFailure(message: "expected at least 2 tabs in MRU")
         }
 
-        let effects = update(&model, .mruCycleOneShot(direction: .older))
+        let commands = update(&model, .mruCycleOneShot(direction: .older))
         try expectEqual(model.selectedTabId!, nextOlderTarget, "jumped to next-older tab")
         try expect(initiallySelected != nextOlderTarget)
         try expect(model.mruCycle == nil, "cycle does not linger")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
         }, "commits the selection (persists via scheduleCheckpoint); the switcher hides via reconcile")
@@ -289,13 +289,13 @@ func updateMruTests() {
         try expect(!model.groups[0].tabs.contains { $0.id == ids[1] }, "tab is gone")
         try expect(model.mruCycle != nil, "cycle still active (frozenOrder kept)")
 
-        let effects = update(&model, .mruCycleCommitted)
+        let commands = update(&model, .mruCycleCommitted)
         try expect(model.selectedTabId != nil)
         try expect(model.selectedTabId! != ids[1], "did not select the deleted tab")
         let live = Set(model.groups.flatMap(\.tabs).map(\.id))
         try expect(live.contains(model.selectedTabId!), "selection is live")
         try expect(model.mruCycle == nil)
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
         }, "commits a live tab (persists via scheduleCheckpoint); the switcher hides via reconcile")

@@ -5,9 +5,9 @@ func lifecycleTests() {
 
     test("testAppBecameActive") {
         var model = makeModel()
-        let effects = update(&model, .appBecameActive)
-        try expectEqual(effects.count, 1)
-        if case .setAppFocus(let focused) = effects[0] {
+        let commands = update(&model, .appBecameActive)
+        try expectEqual(commands.count, 1)
+        if case .setAppFocus(let focused) = commands[0] {
             try expectEqual(focused, true)
         } else {
             throw TestFailure(message: "expected setAppFocus(true)")
@@ -16,9 +16,9 @@ func lifecycleTests() {
 
     test("testAppResignedActive") {
         var model = makeModel()
-        let effects = update(&model, .appResignedActive)
-        try expectEqual(effects.count, 1)
-        if case .setAppFocus(let focused) = effects[0] {
+        let commands = update(&model, .appResignedActive)
+        try expectEqual(commands.count, 1)
+        if case .setAppFocus(let focused) = commands[0] {
             try expectEqual(focused, false)
         } else {
             throw TestFailure(message: "expected setAppFocus(false)")
@@ -41,18 +41,18 @@ func lifecycleTests() {
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .activateAlert(alertId: alertId))
+        let commands = update(&model, .activateAlert(alertId: alertId))
         try expectEqual(model.selectedTabId, firstTabId, "should select the alert's tab")
         try expectEqual(model.alerts[0].isUnread, false, "alert should be marked read")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == firstPaneId { return true }
             return false
         }, "should make pane first responder")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .activateApp = $0 { return true }
             return false
         }, "should activate app")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .dismissAlertsPopover = $0 { return true }
             return false
         }, "should dismiss alerts popover")
@@ -70,13 +70,13 @@ func lifecycleTests() {
             title: "DanTerm", body: "stale", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .activateAlert(alertId: alertId))
+        let commands = update(&model, .activateAlert(alertId: alertId))
         try expectEqual(model.alerts[0].isUnread, false, "stale alert should be marked read")
-        try expect(!hasEffect(effects) {
+        try expect(!hasEffect(commands) {
             if case .makeFirstResponder = $0 { return true }
             return false
         }, "should not navigate when pane is gone")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .dismissAlertsPopover = $0 { return true }
             return false
         }, "should still dismiss popover")
@@ -100,9 +100,9 @@ func lifecycleTests() {
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        let effects = update(&model, .activateAlert(alertId: alertId))
+        let commands = update(&model, .activateAlert(alertId: alertId))
         try expectEqual(model.groups[0].tabs[0].isZoomed, false, "zoom should clear when alert targets different pane")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
             return false
         }, "should focus alert's pane")
@@ -130,21 +130,21 @@ func lifecycleTests() {
 
     test("testTerminate") {
         var model = makeModel()
-        let effects = update(&model, .terminate)
-        try expectEqual(effects.count, 1)
-        if case .terminate = effects[0] {
+        let commands = update(&model, .terminate)
+        try expectEqual(commands.count, 1)
+        if case .terminate = commands[0] {
             // good
         } else {
-            throw TestFailure(message: "expected terminate effect")
+            throw TestFailure(message: "expected terminate command")
         }
     }
 
     test("testRequestQuitWithOnePane") {
         var model = makeModel()
         createTab(&model)
-        let effects = update(&model, .requestQuit)
-        try expectEqual(effects.count, 1)
-        try expect(hasEffect(effects) {
+        let commands = update(&model, .requestQuit)
+        try expectEqual(commands.count, 1)
+        try expect(hasEffect(commands) {
             if case .showTerminateConfirmation(let count) = $0, count == 1 { return true }
             return false
         }, "should show confirmation with pane count 1")
@@ -156,9 +156,9 @@ func lifecycleTests() {
         createTab(&model)
         update(&model, .splitPane(direction: .horizontal))
         createTab(&model)
-        let effects = update(&model, .requestQuit)
-        try expectEqual(effects.count, 1)
-        try expect(hasEffect(effects) {
+        let commands = update(&model, .requestQuit)
+        try expectEqual(commands.count, 1)
+        try expect(hasEffect(commands) {
             if case .showTerminateConfirmation(let count) = $0, count == 3 { return true }
             return false
         }, "should show confirmation with correct pane count")
@@ -169,10 +169,10 @@ func lifecycleTests() {
         var model = makeModel()
         createTab(&model)
 
-        let effects = update(&model, .requestQuit)
+        let commands = update(&model, .requestQuit)
 
-        try expectEqual(effects.count, 1)
-        if case .showTerminateConfirmation = effects[0] {
+        try expectEqual(commands.count, 1)
+        if case .showTerminateConfirmation = commands[0] {
             // good
         } else {
             throw TestFailure(message: "expected showTerminateConfirmation")
@@ -185,9 +185,9 @@ func lifecycleTests() {
         createTab(&model)
         _ = update(&model, .requestQuit)
 
-        let effects = update(&model, .requestQuit)
+        let commands = update(&model, .requestQuit)
 
-        try expectEqual(effects.count, 0, "second requestQuit should not emit another confirmation")
+        try expectEqual(commands.count, 0, "second requestQuit should not emit another confirmation")
     }
 
     test("testCloseTabLastTabWhileQuitPendingIsNoOp") {
@@ -198,9 +198,9 @@ func lifecycleTests() {
         let tabId = model.groups[0].tabs[0].id
         model.pendingConfirmation = .terminate
 
-        let effects = update(&model, .closeTab(id: tabId))
+        let commands = update(&model, .closeTab(id: tabId))
 
-        try expectEqual(effects.count, 0, "closeTab should be blocked by pending quit confirmation")
+        try expectEqual(commands.count, 0, "closeTab should be blocked by pending quit confirmation")
         try expectEqual(model.groups, originalGroups, "groups should be unchanged")
         try expectEqual(model.allPanes, originalPanes, "panes should be unchanged")
     }
@@ -212,10 +212,10 @@ func lifecycleTests() {
         let originalPanes = model.allPanes
         model.pendingConfirmation = .terminate
 
-        let effects = update(&model, .closePane(paneId: paneId))
+        let commands = update(&model, .closePane(paneId: paneId))
 
-        try expectEqual(effects.count, 0, "closePane should be blocked by pending quit confirmation")
-        // No effects at all (asserted above) + the model unchanged means no surface is torn
+        try expectEqual(commands.count, 0, "closePane should be blocked by pending quit confirmation")
+        // No commands at all (asserted above) + the model unchanged means no surface is torn
         // down: reconcileSurfaceExistence only tears down panes absent from allPaneIds.
         try expectEqual(model.allPanes, originalPanes, "panes should be unchanged")
     }
@@ -228,9 +228,9 @@ func lifecycleTests() {
         model.groups.append(GroupModel(id: emptyGroupId, name: "Empty"))
         model.pendingConfirmation = .terminate
 
-        let effects = update(&model, .deleteGroup(id: tabsGroupId, moveTabs: false))
+        let commands = update(&model, .deleteGroup(id: tabsGroupId, moveTabs: false))
 
-        try expectEqual(effects.count, 0, "deleteGroup should be blocked by pending quit confirmation")
+        try expectEqual(commands.count, 0, "deleteGroup should be blocked by pending quit confirmation")
         try expect(model.groups.contains { $0.id == tabsGroupId }, "tabs group should remain")
         try expect(model.groups.contains { $0.id == emptyGroupId }, "empty group should remain")
     }
@@ -239,9 +239,9 @@ func lifecycleTests() {
         var model = makeModel()
         createTab(&model)
         createTab(&model)
-        let effects = update(&model, .confirmTerminate)
-        try expectEqual(effects.count, 1)
-        try expect(hasEffect(effects) {
+        let commands = update(&model, .confirmTerminate)
+        try expectEqual(commands.count, 1)
+        try expect(hasEffect(commands) {
             if case .terminate = $0 { return true }
             return false
         }, "should unconditionally terminate after confirmation")
@@ -252,13 +252,13 @@ func lifecycleTests() {
         createTab(&model)
         model.pendingConfirmation = .terminate
 
-        let effects = update(&model, .confirmTerminate)
+        let commands = update(&model, .confirmTerminate)
 
-        try expectEqual(effects.count, 1)
-        if case .terminate = effects[0] {
+        try expectEqual(commands.count, 1)
+        if case .terminate = commands[0] {
             // good
         } else {
-            throw TestFailure(message: "expected terminate effect")
+            throw TestFailure(message: "expected terminate command")
         }
         try expect(model.pendingConfirmation == nil, "confirm should clear pending confirmation")
     }
@@ -266,8 +266,8 @@ func lifecycleTests() {
     test("testCancelTerminate") {
         var model = makeModel()
         createTab(&model)
-        let effects = update(&model, .cancelTerminate)
-        try expectEqual(effects.count, 0, "cancel should produce no effects")
+        let commands = update(&model, .cancelTerminate)
+        try expectEqual(commands.count, 0, "cancel should produce no commands")
     }
 
     test("testCancelTerminateClearsPending") {
@@ -275,9 +275,9 @@ func lifecycleTests() {
         createTab(&model)
         model.pendingConfirmation = .terminate
 
-        let effects = update(&model, .cancelTerminate)
+        let commands = update(&model, .cancelTerminate)
 
-        try expectEqual(effects.count, 0, "cancel should produce no effects")
+        try expectEqual(commands.count, 0, "cancel should produce no commands")
         try expect(model.pendingConfirmation == nil, "cancel should clear pending confirmation")
     }
 
@@ -287,10 +287,10 @@ func lifecycleTests() {
         _ = update(&model, .requestQuit)
         _ = update(&model, .cancelTerminate)
 
-        let effects = update(&model, .requestQuit)
+        let commands = update(&model, .requestQuit)
 
-        try expectEqual(effects.count, 1)
-        if case .showTerminateConfirmation = effects[0] {
+        try expectEqual(commands.count, 1)
+        if case .showTerminateConfirmation = commands[0] {
             // good
         } else {
             throw TestFailure(message: "expected showTerminateConfirmation")
@@ -302,10 +302,10 @@ func lifecycleTests() {
         createTab(&model)
         model.pendingConfirmation = .closeTab
 
-        let effects = update(&model, .requestQuit)
+        let commands = update(&model, .requestQuit)
 
-        try expectEqual(effects.count, 0, "requestQuit should be blocked by pending close-tab confirmation")
-        try expect(!hasEffect(effects) {
+        try expectEqual(commands.count, 0, "requestQuit should be blocked by pending close-tab confirmation")
+        try expect(!hasEffect(commands) {
             if case .showTerminateConfirmation = $0 { return true }
             return false
         }, "should not emit terminate confirmation")

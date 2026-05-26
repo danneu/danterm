@@ -10,7 +10,7 @@
 //   2. a cache field on ReconcilerCaches (resets for free via tearDownCurrentSession)
 //   3. a reconcileX() running the projection through applyDiff (or, for a single
 //      panel, a direct compare against a single-optional cache field)
-//   4. delete the matching Effect case + its perform arm, in the same stage
+//   4. delete the matching Command case + its perform arm, in the same stage
 import Cocoa
 
 /// Per-pass diff caches, bundled so teardown resets them all by re-init (a newly

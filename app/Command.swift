@@ -1,7 +1,16 @@
+// Command: the side effects `update()` returns for `AppRuntime.perform` to execute.
+//
+// `update()` is pure and returns ONLY commands -- real imperatives / external side
+// effects (PTY create/text/key, focus moves, per-pane theme apply, notifications,
+// IPC reply/error/read, checkpoint, config persistence, modal confirmations, TODO
+// popovers, export). Everything the view *shows* is a projection derived by
+// `reconcile()` after every `send()`, so no view-sync/projection case lives here.
+// The type name declares that invariant: it was renamed from `Effect` once the last
+// projection case was gone, so the compiler now rejects reintroducing one.
 import Foundation
 import DanTermProtocol
 
-enum Effect {
+enum Command {
     // Surface
     case createSurface(paneId: PaneId, cwd: String?, command: String?, launchCommand: String? = nil, waitAfterCommand: Bool = true)
     // Surface *destruction* is a projection (reconcileSurfaceExistence tears down surfaces
@@ -81,7 +90,7 @@ enum Effect {
     // after every send() (Stage 7); showSwitcherOverlay/hideSwitcherOverlay are gone.
 }
 
-extension Effect {
+extension Command {
     /// Whether this command must run *after* `reconcile()` because it targets a view
     /// the reconciler creates. Exactly `makeFirstResponder` and `focusSearchField`:
     /// `reconcileContainers` mounts a pane's `TerminalView` during reconcile (Stage 8),

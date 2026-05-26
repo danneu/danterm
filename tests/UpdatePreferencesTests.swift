@@ -4,7 +4,7 @@ import Foundation
 private let defaultGhostty = GhosttyPrefs(theme: nil, fontSize: nil)
 
 /// Helper: open preferences with default Ghostty values.
-private func openPrefs(_ model: inout AppModel, ghostty: GhosttyPrefs = defaultGhostty) -> [Effect] {
+private func openPrefs(_ model: inout AppModel, ghostty: GhosttyPrefs = defaultGhostty) -> [Command] {
     update(&model, .preferencesOpened(ghostty: ghostty))
 }
 
@@ -18,13 +18,13 @@ func preferencesTests() {
         model.config.alertClearMode = .manual
         model.config.remoteTheme = "Grape"
         let ghostty = GhosttyPrefs(theme: "Dracula", fontSize: "14")
-        let effects = openPrefs(&model, ghostty: ghostty)
+        let commands = openPrefs(&model, ghostty: ghostty)
         try expectEqual(model.preferencesDraft?.alertClearMode, .manual)
         try expectEqual(model.preferencesDraft?.remoteTheme, "Grape")
         try expectEqual(model.preferencesDraft?.theme, "Dracula")
         try expectEqual(model.preferencesDraft?.fontSize, "14")
         try expectEqual(model.committedGhosttyPrefs, ghostty)
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .syncPreferencesPanel = $0 { return true }
             return false
         }, "should emit syncPreferencesPanel")
@@ -46,10 +46,10 @@ func preferencesTests() {
         _ = openPrefs(&model, ghostty: GhosttyPrefs(theme: "Dracula", fontSize: "14"))
         try expect(model.preferencesDraft != nil, "draft should exist")
         try expect(model.committedGhosttyPrefs != nil, "ghostty prefs should exist")
-        let effects = update(&model, .preferencesClosed)
+        let commands = update(&model, .preferencesClosed)
         try expect(model.preferencesDraft == nil, "draft should be nil")
         try expect(model.committedGhosttyPrefs == nil, "ghostty prefs should be nil")
-        try expectEqual(effects.count, 0)
+        try expectEqual(commands.count, 0)
     }
 
     // MARK: - Editing draft
@@ -57,10 +57,10 @@ func preferencesTests() {
     test("prefSetAlertClearMode updates draft only, not model.config") {
         var model = makeModel()
         _ = openPrefs(&model)
-        let effects = update(&model, .prefSetAlertClearMode(.manual))
+        let commands = update(&model, .prefSetAlertClearMode(.manual))
         try expectEqual(model.preferencesDraft?.alertClearMode, .manual)
         try expectEqual(model.config.alertClearMode, .focus, "committed config should not change")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .syncPreferencesPanel = $0 { return true }
             return false
         }, "should emit syncPreferencesPanel")
@@ -69,10 +69,10 @@ func preferencesTests() {
     test("prefSetRemoteTheme stores raw text without normalizing") {
         var model = makeModel()
         _ = openPrefs(&model)
-        let effects = update(&model, .prefSetRemoteTheme("  Grape  "))
+        let commands = update(&model, .prefSetRemoteTheme("  Grape  "))
         try expectEqual(model.preferencesDraft?.remoteTheme, "  Grape  ", "should store raw text")
         try expectEqual(model.config.remoteTheme, "Purplepeter", "committed config should not change")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .syncPreferencesPanel = $0 { return true }
             return false
         }, "should emit syncPreferencesPanel")
@@ -88,9 +88,9 @@ func preferencesTests() {
     test("prefSetTheme updates draft") {
         var model = makeModel()
         _ = openPrefs(&model)
-        let effects = update(&model, .prefSetTheme("Solarized"))
+        let commands = update(&model, .prefSetTheme("Solarized"))
         try expectEqual(model.preferencesDraft?.theme, "Solarized")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .syncPreferencesPanel = $0 { return true }
             return false
         }, "should emit syncPreferencesPanel")
@@ -106,9 +106,9 @@ func preferencesTests() {
     test("prefSetFontSize updates draft") {
         var model = makeModel()
         _ = openPrefs(&model)
-        let effects = update(&model, .prefSetFontSize("16"))
+        let commands = update(&model, .prefSetFontSize("16"))
         try expectEqual(model.preferencesDraft?.fontSize, "16")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .syncPreferencesPanel = $0 { return true }
             return false
         }, "should emit syncPreferencesPanel")
@@ -121,9 +121,9 @@ func preferencesTests() {
         _ = openPrefs(&model)
         _ = update(&model, .prefSetAlertClearMode(.manual))
         try expectEqual(model.preferencesDraft?.alertClearMode, .manual)
-        let effects = update(&model, .prefResetAlertClearMode)
+        let commands = update(&model, .prefResetAlertClearMode)
         try expectEqual(model.preferencesDraft?.alertClearMode, .focus, "should revert to committed")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .syncPreferencesPanel = $0 { return true }
             return false
         }, "should emit syncPreferencesPanel")
@@ -133,9 +133,9 @@ func preferencesTests() {
         var model = makeModel()
         _ = openPrefs(&model)
         _ = update(&model, .prefSetRemoteTheme("Grape"))
-        let effects = update(&model, .prefResetRemoteTheme)
+        let commands = update(&model, .prefResetRemoteTheme)
         try expectEqual(model.preferencesDraft?.remoteTheme, "Purplepeter", "should revert to committed")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .syncPreferencesPanel = $0 { return true }
             return false
         }, "should emit syncPreferencesPanel")
@@ -146,9 +146,9 @@ func preferencesTests() {
         _ = openPrefs(&model, ghostty: GhosttyPrefs(theme: "Dracula", fontSize: nil))
         _ = update(&model, .prefSetTheme("Solarized"))
         try expectEqual(model.preferencesDraft?.theme, "Solarized")
-        let effects = update(&model, .prefResetTheme)
+        let commands = update(&model, .prefResetTheme)
         try expectEqual(model.preferencesDraft?.theme, "Dracula", "should revert to committed")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .syncPreferencesPanel = $0 { return true }
             return false
         }, "should emit syncPreferencesPanel")
@@ -158,9 +158,9 @@ func preferencesTests() {
         var model = makeModel()
         _ = openPrefs(&model, ghostty: GhosttyPrefs(theme: nil, fontSize: "14"))
         _ = update(&model, .prefSetFontSize("20"))
-        let effects = update(&model, .prefResetFontSize)
+        let commands = update(&model, .prefResetFontSize)
         try expectEqual(model.preferencesDraft?.fontSize, "14", "should revert to committed")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .syncPreferencesPanel = $0 { return true }
             return false
         }, "should emit syncPreferencesPanel")
@@ -171,9 +171,9 @@ func preferencesTests() {
     test("prefSave with no changes emits only syncPreferencesPanel") {
         var model = makeModel()
         _ = openPrefs(&model)
-        let effects = update(&model, .prefSave)
-        try expectEqual(effects.count, 1)
-        try expect(hasEffect(effects) {
+        let commands = update(&model, .prefSave)
+        try expectEqual(commands.count, 1)
+        try expect(hasEffect(commands) {
             if case .syncPreferencesPanel = $0 { return true }
             return false
         }, "should emit syncPreferencesPanel")
@@ -183,9 +183,9 @@ func preferencesTests() {
         var model = makeModel()
         _ = openPrefs(&model)
         _ = update(&model, .prefSetAlertClearMode(.manual))
-        let effects = update(&model, .prefSave)
+        let commands = update(&model, .prefSave)
         try expectEqual(model.config.alertClearMode, .manual, "committed config should update")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .saveDanTermConfigKey(let key, let value) = $0 {
                 return key == "alert-clear-mode" && value == "manual"
             }
@@ -197,9 +197,9 @@ func preferencesTests() {
         var model = makeModel()
         _ = openPrefs(&model)
         _ = update(&model, .prefSetRemoteTheme("Grape"))
-        let effects = update(&model, .prefSave)
+        let commands = update(&model, .prefSave)
         try expectEqual(model.config.remoteTheme, "Grape", "committed config should update")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .saveDanTermConfigKey(let key, let value) = $0 {
                 return key == "remote-theme" && value == "Grape"
             }
@@ -242,9 +242,9 @@ func preferencesTests() {
 
         _ = openPrefs(&model)
         _ = update(&model, .prefSetRemoteTheme("Grape"))
-        let effects = update(&model, .prefSave)
+        let commands = update(&model, .prefSave)
         try expectEqual(model.pane(paneId)?.remoteThemeOverride, "Grape")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .applyPaneTheme(let pid) = $0, pid == paneId { return true }
             return false
         }, "should emit applyPaneTheme for remote pane")
@@ -254,14 +254,14 @@ func preferencesTests() {
         var model = makeModel()
         _ = openPrefs(&model)
         _ = update(&model, .prefSetTheme("Solarized"))
-        let effects = update(&model, .prefSave)
-        try expect(hasEffect(effects) {
+        let commands = update(&model, .prefSave)
+        try expect(hasEffect(commands) {
             if case .saveDanTermConfigKey(let key, let value) = $0 {
                 return key == "theme" && value == "Solarized"
             }
             return false
         }, "should save theme key")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .reloadGhosttyConfig = $0 { return true }
             return false
         }, "should emit reloadGhosttyConfig")
@@ -271,12 +271,12 @@ func preferencesTests() {
         var model = makeModel()
         _ = openPrefs(&model, ghostty: GhosttyPrefs(theme: "Dracula", fontSize: nil))
         _ = update(&model, .prefSetTheme(nil))
-        let effects = update(&model, .prefSave)
-        try expect(hasEffect(effects) {
+        let commands = update(&model, .prefSave)
+        try expect(hasEffect(commands) {
             if case .removeDanTermConfigKey(let key) = $0 { return key == "theme" }
             return false
         }, "should remove theme key")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .reloadGhosttyConfig = $0 { return true }
             return false
         }, "should emit reloadGhosttyConfig")
@@ -286,14 +286,14 @@ func preferencesTests() {
         var model = makeModel()
         _ = openPrefs(&model)
         _ = update(&model, .prefSetFontSize("16"))
-        let effects = update(&model, .prefSave)
-        try expect(hasEffect(effects) {
+        let commands = update(&model, .prefSave)
+        try expect(hasEffect(commands) {
             if case .saveDanTermConfigKey(let key, let value) = $0 {
                 return key == "font-size" && value == "16"
             }
             return false
         }, "should save font-size key")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .reloadGhosttyConfig = $0 { return true }
             return false
         }, "should emit reloadGhosttyConfig")
@@ -303,12 +303,12 @@ func preferencesTests() {
         var model = makeModel()
         _ = openPrefs(&model)
         _ = update(&model, .prefSetFontSize("abc"))
-        let effects = update(&model, .prefSave)
-        try expect(!hasEffect(effects) {
+        let commands = update(&model, .prefSave)
+        try expect(!hasEffect(commands) {
             if case .saveDanTermConfigKey(let key, _) = $0 { return key == "font-size" }
             return false
         }, "should not save invalid font-size")
-        try expect(!hasEffect(effects) {
+        try expect(!hasEffect(commands) {
             if case .reloadGhosttyConfig = $0 { return true }
             return false
         }, "should not reload for invalid font-size")
@@ -319,8 +319,8 @@ func preferencesTests() {
         _ = openPrefs(&model, ghostty: GhosttyPrefs(theme: "Dracula", fontSize: "14"))
         // Only change a DanTerm key.
         _ = update(&model, .prefSetAlertClearMode(.manual))
-        let effects = update(&model, .prefSave)
-        try expect(!hasEffect(effects) {
+        let commands = update(&model, .prefSave)
+        try expect(!hasEffect(commands) {
             if case .reloadGhosttyConfig = $0 { return true }
             return false
         }, "should not reload when Ghostty keys unchanged")
@@ -335,11 +335,11 @@ func preferencesTests() {
         try expectEqual(model.preferencesDraft?.theme, "Solarized")
 
         let newPrefs = GhosttyPrefs(theme: "Monokai", fontSize: "16")
-        let effects = update(&model, .ghosttyPrefsRefreshed(newPrefs))
+        let commands = update(&model, .ghosttyPrefsRefreshed(newPrefs))
         try expectEqual(model.committedGhosttyPrefs, newPrefs)
         try expectEqual(model.preferencesDraft?.theme, "Monokai", "draft should reset to new committed")
         try expectEqual(model.preferencesDraft?.fontSize, "16", "draft should reset to new committed")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .syncPreferencesPanel = $0 { return true }
             return false
         }, "should emit syncPreferencesPanel")
@@ -348,10 +348,10 @@ func preferencesTests() {
     test("ghosttyPrefsRefreshed with no draft open just updates committed") {
         var model = makeModel()
         let prefs = GhosttyPrefs(theme: "Dracula", fontSize: "14")
-        let effects = update(&model, .ghosttyPrefsRefreshed(prefs))
+        let commands = update(&model, .ghosttyPrefsRefreshed(prefs))
         try expectEqual(model.committedGhosttyPrefs, prefs)
         try expect(model.preferencesDraft == nil, "draft should remain nil")
-        try expectEqual(effects.count, 0, "no sync needed when panel not open")
+        try expectEqual(commands.count, 0, "no sync needed when panel not open")
     }
 
     // MARK: - External reload

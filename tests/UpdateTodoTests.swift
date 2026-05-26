@@ -11,11 +11,11 @@ func todoTests() {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        let effects = update(&model, .addTodo(paneId: paneId, text: "run tests"))
+        let commands = update(&model, .addTodo(paneId: paneId, text: "run tests"))
         try expectEqual(model.pane(paneId)!.todos.count, 1)
         try expectEqual(model.pane(paneId)!.todos[0].text, "run tests")
         try expectEqual(model.pane(paneId)!.todos[0].isDone, false)
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
         }, "expected scheduleCheckpoint")
@@ -46,9 +46,9 @@ func todoTests() {
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .addTodo(paneId: paneId, text: "task"))
         let todoId = model.pane(paneId)!.todos[0].id
-        let effects = update(&model, .toggleTodoDone(paneId: paneId, todoId: todoId))
+        let commands = update(&model, .toggleTodoDone(paneId: paneId, todoId: todoId))
         try expectEqual(model.pane(paneId)!.todos[0].isDone, true)
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
         }, "expected scheduleCheckpoint")
@@ -117,9 +117,9 @@ func todoTests() {
         update(&model, .addTodo(paneId: paneId, text: "A"))
         update(&model, .addTodo(paneId: paneId, text: "B"))
         let idA = model.pane(paneId)!.todos[0].id
-        let effects = update(&model, .reorderTodo(paneId: paneId, todoId: idA, toIndex: 0))
+        let commands = update(&model, .reorderTodo(paneId: paneId, todoId: idA, toIndex: 0))
         try expectEqual(model.pane(paneId)!.todos.map(\.text), ["A", "B"])
-        try expect(!hasEffect(effects) {
+        try expect(!hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
         }, "should not checkpoint on no-op reorder")
@@ -133,9 +133,9 @@ func todoTests() {
         update(&model, .addTodo(paneId: paneId, text: "B"))
         let idA = model.pane(paneId)!.todos[0].id
         // toIndex beyond count is rejected by guard
-        let effects = update(&model, .reorderTodo(paneId: paneId, todoId: idA, toIndex: 99))
+        let commands = update(&model, .reorderTodo(paneId: paneId, todoId: idA, toIndex: 99))
         // Should be no-op since 99 > count
-        try expect(effects.isEmpty, "out of bounds should be no-op")
+        try expect(commands.isEmpty, "out of bounds should be no-op")
     }
 
     // MARK: - clearCompletedTodos
@@ -166,8 +166,8 @@ func todoTests() {
         // last-pane gate would otherwise route to close-tab confirmation.
         update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
         update(&model, .addTodo(paneId: firstPaneId, text: "incomplete task"))
-        let effects = update(&model, .requestClosePane(paneId: firstPaneId))
-        try expect(hasEffect(effects) {
+        let commands = update(&model, .requestClosePane(paneId: firstPaneId))
+        try expect(hasEffect(commands) {
             if case .showClosePaneConfirmation(let pid, let count) = $0 {
                 return pid == firstPaneId && count == 1
             }
@@ -217,12 +217,12 @@ func todoTests() {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        // Split so closing one pane doesn't close the tab (which discards effects)
+        // Split so closing one pane doesn't close the tab (which discards commands)
         update(&model, .splitPane(paneId: paneId, direction: .horizontal))
         model.todoPopover = .pane(paneId)
-        let effects = update(&model, .closePane(paneId: paneId))
+        let commands = update(&model, .closePane(paneId: paneId))
         try expect(model.todoPopover == nil, "todoPopover should be nil")
-        try expect(hasEffect(effects) {
+        try expect(hasEffect(commands) {
             if case .dismissTodoPopover = $0 { return true }
             return false
         }, "expected dismissTodoPopover")
