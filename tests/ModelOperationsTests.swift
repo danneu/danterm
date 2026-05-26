@@ -1836,6 +1836,82 @@ func modelOperationsTests() {
         try expect(desiredSidebar(in: model).isSingleGroupMode,
             "a single group promotes tabs to roots (no group row)")
     }
+
+    // MARK: - desiredWindowChrome (window title / badges / tab-todo projection, Stage 6)
+
+    test("desiredWindowChrome: window/content titles, unread count, and tab-todo rollup from the selected tab") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        // Distinct custom title + subtitle so the window title carries the " — sub"
+        // suffix while the content title stays the bare display title.
+        model.groups[0].tabs[0].customTitle = "Custom"
+        model.groups[0].tabs[0].subtitle = "~/src"
+        // Tab-level + pane-level to-dos roll up together (tabTodoRollup).
+        model.groups[0].tabs[0].todos = [TodoItem(id: UUID(), text: "t1", isDone: false)]
+        model.updatePane(paneId) {
+            $0.todos = [
+                TodoItem(id: UUID(), text: "p1", isDone: true),
+                TodoItem(id: UUID(), text: "p2", isDone: false),
+            ]
+        }
+        // Two unread alerts (counted) plus one read alert (excluded) -> totalUnreadAlertCount 2.
+        for unread in [true, true, false] {
+            model.alerts.insert(AlertModel(
+                id: AlertId(), kind: .bell, paneId: paneId,
+                title: "DanTerm", body: "x", createdAt: Date(), isUnread: unread), at: 0)
+        }
+        try expectEqual(
+            desiredWindowChrome(in: model),
+            WindowChromeProjection(
+                windowTitle: "Custom — ~/src",
+                contentTitle: "Custom",
+                unreadCount: 2,
+                tabTodoTotal: 3,
+                tabTodoUncompleted: 2),
+            "window chrome derives both titles, the unread badge count, and the tab-todo rollup")
+    }
+
+    test("desiredWindowChrome: no selected tab -> empty titles, zero badge, zero rollup") {
+        let model = makeModel()  // no tabs -> selectedTabId == nil
+        try expect(selectedTab(in: model) == nil, "precondition: no selected tab")
+        try expectEqual(
+            desiredWindowChrome(in: model),
+            WindowChromeProjection(
+                windowTitle: "", contentTitle: "",
+                unreadCount: 0, tabTodoTotal: 0, tabTodoUncompleted: 0),
+            "no selected tab -> empty titles, zero badge, (0,0) rollup")
+    }
+
+    test("desiredWindowChrome: window title omits the subtitle when absent or equal to the display title") {
+        var model = makeModel()
+        createTab(&model)
+        model.groups[0].tabs[0].title = "vim"  // no customTitle, no subtitle
+        var proj = desiredWindowChrome(in: model)
+        try expectEqual(proj.windowTitle, "vim", "no subtitle -> window title is the bare display title")
+        try expectEqual(proj.contentTitle, "vim")
+        // A subtitle equal to the display title is treated as absent (no " — vim" dup).
+        model.groups[0].tabs[0].subtitle = "vim"
+        proj = desiredWindowChrome(in: model)
+        try expectEqual(proj.windowTitle, "vim", "subtitle == display title is suppressed")
+    }
+
+    test("desiredWindowChrome: reflects the selected tab, not background tabs") {
+        var model = makeModel()
+        createTab(&model)  // tab A
+        let tabAId = model.groups[0].tabs[0].id
+        model.groups[0].tabs[0].customTitle = "Alpha"
+        createTab(&model)  // tab B (now selected)
+        model.groups[0].tabs[1].customTitle = "Beta"
+
+        try expectEqual(desiredWindowChrome(in: model).contentTitle, "Beta",
+            "chrome reflects the selected tab B")
+        // Selection drives the projection (the property the deleted .setWindowTitle
+        // selection-change emission tests asserted, now structural via reconcile()).
+        model.selectedTabId = tabAId
+        try expectEqual(desiredWindowChrome(in: model).contentTitle, "Alpha",
+            "selecting tab A makes the chrome reflect A")
+    }
 }
 
 /// Build a model with N tabs in one group; returns the tab ids in display order.

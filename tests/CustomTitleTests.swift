@@ -28,14 +28,11 @@ func customTitleTests() {
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
 
-        let effects = update(&model, .renameTab(id: tabId, name: "My App"))
+        update(&model, .renameTab(id: tabId, name: "My App"))
         try expectEqual(model.groups[0].tabs[0].customTitle, "My App")
-        // The renamed row updates via reconcileSidebar (displayTitle is in the projection).
-        // Tab is selected, so it should also emit setWindowTitle.
-        try expect(hasEffect(effects) {
-            if case .setWindowTitle = $0 { return true }
-            return false
-        }, "should emit setWindowTitle for selected tab")
+        // The renamed row updates via reconcileSidebar and the selected tab's window
+        // chrome via reconcileWindowChrome (both read displayTitle, which is driven by
+        // the customTitle asserted above).
     }
 
     test("testRenameTabClear") {
@@ -45,13 +42,10 @@ func customTitleTests() {
         update(&model, .renameTab(id: tabId, name: "Custom"))
         try expectEqual(model.groups[0].tabs[0].customTitle, "Custom")
 
-        let effects = update(&model, .renameTab(id: tabId, name: nil))
+        update(&model, .renameTab(id: tabId, name: nil))
         try expect(model.groups[0].tabs[0].customTitle == nil, "customTitle should be nil")
-        // The renamed row updates via reconcileSidebar (displayTitle is in the projection).
-        try expect(hasEffect(effects) {
-            if case .setWindowTitle = $0 { return true }
-            return false
-        }, "should emit setWindowTitle")
+        // The renamed row + window chrome reconcile from the cleared customTitle
+        // (reconcileSidebar / reconcileWindowChrome).
     }
 
     test("testRenameTabEmptyStringClearsTitle") {
@@ -73,18 +67,19 @@ func customTitleTests() {
         try expectEqual(model.groups[0].tabs[0].customTitle, "My App")
     }
 
-    test("testRenameTabNonSelectedDoesNotEmitSetWindowTitle") {
+    test("testRenameTabNonSelectedUpdatesOnlyThatTabsCustomTitle") {
         var model = makeModel()
         createTab(&model) // tab A
         let tabAId = model.groups[0].tabs[0].id
         createTab(&model) // tab B (now selected)
 
-        let effects = update(&model, .renameTab(id: tabAId, name: "Custom"))
+        update(&model, .renameTab(id: tabAId, name: "Custom"))
         try expectEqual(model.groups[0].tabs[0].customTitle, "Custom")
-        try expect(!hasEffect(effects) {
-            if case .setWindowTitle = $0 { return true }
-            return false
-        }, "should not emit setWindowTitle for non-selected tab")
+        // Renaming a background tab does not touch the selected tab, so the window
+        // chrome (a projection of the selected tab B) is unaffected -- the model-state
+        // net for the old "non-selected tab emits no setWindowTitle" check.
+        try expectEqual(model.groups[0].tabs[1].displayTitle, "Terminal",
+            "selected tab B's display title is unchanged by renaming background tab A")
     }
 
     // MARK: - surfaceTitle does not override custom title
@@ -120,23 +115,21 @@ func customTitleTests() {
 
     // MARK: - windowTitle uses displayTitle
 
-    test("testSetWindowTitleUsesDisplayTitle") {
+    test("testWindowChromeUsesDisplayTitle") {
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
         let paneId = model.groups[0].tabs[0].focusedPaneId
         update(&model, .renameTab(id: tabId, name: "Custom"))
 
-        // surfaceTitle triggers setWindowTitle — it should contain custom title
-        let effects = update(&model, .surfaceTitle(paneId: paneId, title: "vim"))
-        let windowTitleEffect = effects.first(where: {
-            if case .setWindowTitle = $0 { return true }
-            return false
-        })
-        try expect(windowTitleEffect != nil, "should emit setWindowTitle")
-        if case .setWindowTitle(let title) = windowTitleEffect! {
-            try expect(title.contains("Custom"), "window title should contain custom title, got: \(title)")
-        }
+        // A surface-title update changes the pane/tab title, but customTitle still wins
+        // displayTitle -- so the window chrome projection (reconcileWindowChrome's input)
+        // keeps showing "Custom".
+        update(&model, .surfaceTitle(paneId: paneId, title: "vim"))
+        let chrome = desiredWindowChrome(in: model)
+        try expectEqual(chrome.contentTitle, "Custom", "content title uses the custom display title")
+        try expect(chrome.windowTitle.contains("Custom"),
+            "window title contains the custom display title, got: \(chrome.windowTitle)")
     }
 
     test("testCloseConfirmUsesDisplayTitle") {
@@ -162,78 +155,13 @@ func customTitleTests() {
         }
     }
 
-    // MARK: - Selection-changing paths emit setWindowTitle
-
-    test("testSelectTabEmitsSetWindowTitle") {
-        var model = makeModel()
-        createTab(&model) // tab A
-        let tabAId = model.groups[0].tabs[0].id
-        createTab(&model) // tab B (now selected)
-
-        let effects = update(&model, .selectTab(id: tabAId))
-        try expect(hasEffect(effects) {
-            if case .setWindowTitle = $0 { return true }
-            return false
-        }, "selectTab should emit setWindowTitle")
-    }
-
-    test("testCloseSelectedTabEmitsSetWindowTitle") {
-        var model = makeModel()
-        createTab(&model) // tab A
-        createTab(&model) // tab B (now selected)
-        let tabBId = model.groups[0].tabs[1].id
-
-        let effects = update(&model, .closeTab(id: tabBId))
-        try expect(hasEffect(effects) {
-            if case .setWindowTitle = $0 { return true }
-            return false
-        }, "closing selected tab should emit setWindowTitle for fallback tab")
-    }
-
-    test("testCreateTabEmitsSetWindowTitle") {
-        var model = makeModel()
-        let effects = createTab(&model)
-        try expect(hasEffect(effects) {
-            if case .setWindowTitle = $0 { return true }
-            return false
-        }, "createTab should emit setWindowTitle")
-    }
-
-    test("testDeleteGroupEmitsSetWindowTitle") {
-        var model = makeModel()
-        createTab(&model) // tab1 in General
-        createTab(&model) // tab2 keeps General alive after moveTab
-        let tabA = model.groups[0].tabs[0].id
-
-        update(&model, .createGroup(name: "Temp"))
-        let tempGroupId = model.groups[1].id
-        // Move tabA to Temp — General keeps tab2
-        update(&model, .moveTabs(tabIds: [tabA], toGroupId: tempGroupId, atIndex: 0))
-
-        // Select tabA (in Temp) so the deletion triggers a selection change.
-        update(&model, .selectTab(id: tabA))
-
-        let effects = update(&model, .deleteGroup(id: tempGroupId, moveTabs: false))
-        try expect(hasEffect(effects) {
-            if case .setWindowTitle = $0 { return true }
-            return false
-        }, "deleteGroup should emit setWindowTitle when selection changes")
-    }
-
-    test("testMovePaneToTabEmitsSetWindowTitle") {
-        var model = makeModel()
-        createTab(&model) // tab1
-        let paneA = model.groups[0].tabs[0].focusedPaneId
-
-        createTab(&model) // tab2
-        let tab2Id = model.groups[0].tabs[1].id
-
-        let effects = update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
-        try expect(hasEffect(effects) {
-            if case .setWindowTitle = $0 { return true }
-            return false
-        }, "movePaneToTab should emit setWindowTitle")
-    }
+    // The old "Selection-changing paths emit setWindowTitle" section (selectTab /
+    // closeTab / createTab / deleteGroup / movePaneToTab) is gone: the window title is
+    // no longer a command but a projection of the selected tab, recomputed by
+    // reconcileWindowChrome after every send(). The selection-sensitivity property those
+    // tests proxied is now asserted directly in ModelOperationsTests
+    // ("desiredWindowChrome: reflects the selected tab, not background tabs"), and each
+    // handler's selection move is covered in its own domain test file.
 
     // MARK: - Snapshot
 
@@ -593,24 +521,20 @@ func customTitleTests() {
         try expectEqual(effects.count, 0)
     }
 
-    test("testClearCustomTitlesEmitsSelectionSyncForSelectedTab") {
-        // Spec parity with single-tab .renameTab: when the focused tab's
-        // custom title is cleared, the toolbar/window-title needs to
-        // resync via selectionSyncEffects.
+    test("testClearCustomTitlesRevertsSelectedTabDisplayTitle") {
+        // When the focused tab's custom title is cleared, displayTitle reverts to the
+        // underlying tab.title. The window chrome (reconcileWindowChrome) and the row
+        // (reconcileSidebar) reconcile from that model state -- no command emitted.
         var model = makeModel()
         createTab(&model)
         let id = model.groups[0].tabs[0].id
         update(&model, .renameTab(id: id, name: "alpha"))
         try expectEqual(model.selectedTabId, id)
 
-        let effects = update(&model, .clearCustomTitles(tabIds: [id]))
+        update(&model, .clearCustomTitles(tabIds: [id]))
 
         try expect(model.groups[0].tabs[0].customTitle == nil)
-        // Clearing the focused tab's title resyncs the window title via selectionSyncEffects
-        // (the row itself reconciles via reconcileSidebar).
-        try expect(hasEffect(effects) {
-            if case .setWindowTitle = $0 { return true }
-            return false
-        }, "should emit setWindowTitle (selectionSync) for the selected tab")
+        try expectEqual(model.groups[0].tabs[0].displayTitle, model.groups[0].tabs[0].title,
+            "cleared custom title -> display title reverts to the underlying tab title")
     }
 }

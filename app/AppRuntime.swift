@@ -219,7 +219,6 @@ class AppRuntime {
     func send(_ msg: Msg) {
         guard let translatedMsg = translateMsg(msg, tokenForPane: { self.tokenStore.token(for: $0) }) else { return }
 
-        let oldUnreadCount = totalUnreadAlertCount(model: model)
         let effects = update(&model, translatedMsg)
         // Command-phase split: most commands run before reconcile(); the few that
         // target a view the reconciler creates (Stage 4: only .focusSearchField,
@@ -235,11 +234,6 @@ class AppRuntime {
         if model.pendingConfirmation == .terminate {
             quitConfirmationPanel?.configure(paneCount: model.allPaneIds.count)
         }
-        let newUnreadCount = totalUnreadAlertCount(model: model)
-        if newUnreadCount != oldUnreadCount {
-            perform(.updateDockBadge(newUnreadCount))
-            perform(.updateToolbarBellBadge(newUnreadCount))
-        }
 
         // Defensive backstop: cancel drag on app resign, in case the coordinator's
         // notification observer fires out of order.
@@ -249,47 +243,8 @@ class AppRuntime {
             // is killed while backgrounded (e.g. memory pressure, force quit).
             flushPendingCheckpoint()
         }
-
-        // Refresh the chrome's tab-todo badge after pane/tab todo changes and after
-        // selection or tab-membership changes (the badge rolls up the tab + every pane
-        // in that tab). Pane toolbars now reconcile via reconcilePaneChrome, so their
-        // imperative refreshes are gone from here.
-        switch translatedMsg {
-        case .addTodo(let paneId, _), .toggleTodoDone(let paneId, _),
-             .setTodoDone(let paneId, _, _),
-             .editTodoText(let paneId, _, _), .deleteTodo(let paneId, _),
-             .reorderTodo(let paneId, _, _), .clearCompletedTodos(let paneId):
-            if paneIsInActiveTab(paneId) { refreshTabTodoButton() }
-
-        case .addTabTodo(let tabId, _), .toggleTabTodoDone(let tabId, _),
-             .setTabTodoDone(let tabId, _, _),
-             .editTabTodoText(let tabId, _, _), .deleteTabTodo(let tabId, _),
-             .reorderTabTodo(let tabId, _, _), .clearCompletedTabTodos(let tabId):
-            if tabId == model.selectedTabId { refreshTabTodoButton() }
-
-        case .moveTodo(let from, _, let to, _):
-            let movedTabId: TabId? = {
-                switch (from, to) {
-                case (.tab(let tabId), _), (_, .tab(let tabId)):
-                    return tabId
-                case (.pane(let paneId), _):
-                    return tabForPane(paneId, in: model)?.id
-                }
-            }()
-            if let tabId = movedTabId, tabId == model.selectedTabId {
-                refreshTabTodoButton()
-            }
-
-        case .selectTab, .closeTab, .closePane, .createTab, .splitPane,
-             .movePaneToTab, .movePaneToNewTab, .mruCycleCommitted, .mruCycleOneShot,
-             .jumpModeKeyPressed:
-            // Selection or tab-membership changes shift which tab the chrome
-            // badge represents. Selection-affecting branches refresh too.
-            refreshTabTodoButton()
-
-        default:
-            break
-        }
+        // The chrome's tab-todo badge (and the dock/toolbar bell badges + window title)
+        // now reconcile via reconcileWindowChrome from the model after every send().
     }
 
     /// Close pane-level shortcut help without dismissing the parent todo popover.
@@ -316,23 +271,6 @@ class AppRuntime {
         tabTodoPopover?.performClose(nil)
         tabTodoPopover = nil
         tabTodoPopoverDelegate = nil
-    }
-
-    private func paneIsInActiveTab(_ paneId: PaneId) -> Bool {
-        guard let selId = model.selectedTabId else { return false }
-        return tabForPane(paneId, in: model)?.id == selId
-    }
-
-    /// Push the active tab's roll-up counts into the chrome's right-side button.
-    /// Renders neutral when there's no active tab so the badge isn't stale.
-    func refreshTabTodoButton() {
-        guard let button = chromeView?.tabTodoButton else { return }
-        if let tabId = model.selectedTabId {
-            let rollup = tabTodoRollup(tabId, in: model)
-            button.update(totalCount: rollup.total, uncompletedCount: rollup.uncompleted)
-        } else {
-            button.update(totalCount: 0, uncompletedCount: 0)
-        }
     }
 
     func terminalView(for paneId: PaneId) -> TerminalView? {
@@ -476,10 +414,6 @@ class AppRuntime {
 
         case .removeTabContainer(let tabId):
             removeTabContainer(tabId)
-
-        case .setWindowTitle(let title):
-            window?.title = title
-            refreshContentTitlebar()
 
         case .sendNotification(let alertId, let title, let body):
             let content = UNMutableNotificationContent()
@@ -663,13 +597,6 @@ class AppRuntime {
         case .dismissAlertsPopover:
             alertsPopover?.performClose(nil)
             alertsPopover = nil
-
-        case .updateToolbarBellBadge(let count):
-            chromeView?.updateBellBadge(count: count)
-
-        case .updateDockBadge(let count):
-            NSApp.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
-            NSApp.dockTile.display()
 
         // Search effects
 
@@ -1268,17 +1195,13 @@ class AppRuntime {
         // cmd-shift-i after a restore sees a populated mruOrder.
         reconcileMru(&model)
 
-        refreshContentTitlebar()
         showSelectedTab()
-        // Route the post-restore sync through reconcile() so focus borders + the sidebar
-        // land via the reconciler (clean build -- tearDownCurrentSession reset the caches,
-        // so reconcileSidebar's nil cache rebuilds every row). showSelectedTab() still
+        // Route the post-restore sync through reconcile() so focus borders, the sidebar,
+        // and the window chrome (title + dock/toolbar badges + tab-todo button) land via
+        // the reconciler (clean build -- tearDownCurrentSession reset the caches, so the
+        // nil windowChrome/sidebar caches build from scratch). showSelectedTab() still
         // builds the container here; Stage 8 folds that in.
         reconcile()
-        let unreadCount = totalUnreadAlertCount(model: model)
-        chromeView?.updateBellBadge(count: unreadCount)
-        NSApp.dockTile.badgeLabel = unreadCount > 0 ? "\(unreadCount)" : nil
-        NSApp.dockTile.display()
 
         // Apply per-pane themes after surfaces are live
         reapplyAllPaneThemes()
@@ -1335,18 +1258,6 @@ class AppRuntime {
         alert.messageText = "Import Failed"
         alert.informativeText = message
         alert.runModal()
-    }
-
-    // MARK: - Content Titlebar
-
-    /// Update the window chrome title with the selected tab's display title.
-    /// Called from .setWindowTitle effect (emitted on tab select, rename, title/cwd changes).
-    func refreshContentTitlebar() {
-        guard let tab = selectedTab(in: model) else {
-            chromeView?.updateTitle("")
-            return
-        }
-        chromeView?.updateTitle(tab.displayTitle)
     }
 
     // MARK: - Pane Toolbars
@@ -1511,11 +1422,11 @@ class AppRuntime {
         }
 
         refreshPaneToolbars(in: container)
-        refreshContentTitlebar()
-        // Refresh the chrome's tab-todo badge: restore-from-snapshot bypasses
-        // update() and lands here, so without this the badge would render
-        // neutral until the next refresh-emitting message.
-        refreshTabTodoButton()
+        // The window chrome (content title + dock/toolbar badges + tab-todo button) is
+        // owned by reconcileWindowChrome, which runs after this in the same send() (and
+        // after the restore commit's reconcile()). Its hosts persist across container
+        // rebuilds, so -- unlike the pane toolbars above -- there is no coherence reason
+        // to refresh them here.
 
         // Rehydrate search overlays for panes with active search
         for (paneId, search) in model.searchState {

@@ -30,12 +30,16 @@ struct ReconcilerCaches {
     // explicit per-pane cache invalidation when it folds containers into the reconciler.
     var paneToolbar: [PaneId: PaneToolbarRender] = [:]
     var searchOverlay: [PaneId: SearchOverlayRender] = [:]   // key present iff search active
-    // Single-optional ordered-pass cache (like the eventual windowChrome/switcher caches):
-    // the last sidebar projection reconcileSidebar applied. computeSidebarRowOps diffs the
-    // new projection against this into ordered NSOutlineView row ops. nil == not yet built
+    // Single-optional ordered-pass cache (like the eventual switcher cache): the last
+    // sidebar projection reconcileSidebar applied. computeSidebarRowOps diffs the new
+    // projection against this into ordered NSOutlineView row ops. nil == not yet built
     // (first reconcile inserts all rows via reloadAll). NSOutlineView owns selection, so it
     // is excluded from the projection and reapplied separately (resolveReloadSelection).
     var sidebar: SidebarProjection? = nil
+    // Single-struct-compare cache: the last window chrome reconcileWindowChrome applied.
+    // Its three hosts (window, chromeView, dock tile) persist across container rebuilds,
+    // so this cache needs no cross-pass invalidation. nil == not yet applied.
+    var windowChrome: WindowChromeProjection? = nil
 }
 
 extension AppRuntime {
@@ -47,6 +51,7 @@ extension AppRuntime {
         reconcileFocusBorders()
         reconcilePaneChrome()
         reconcileSidebar()
+        reconcileWindowChrome()
         syncSurfaceVisibility()  // existing occlusion pass; stays last
     }
 
@@ -131,5 +136,29 @@ extension AppRuntime {
         caches.sidebar = advanceSidebarCache(
             old: caches.sidebar, new: new,
             suppressedRenameTarget: viewLocalState.sidebarRenameTarget)
+    }
+
+    /// Push the window chrome -- window/content title, dock + toolbar-bell unread badge,
+    /// and the tab-todo button rollup -- from one diffed `WindowChromeProjection`. The
+    /// single-struct-compare template (the switcher pass follows it): compute the
+    /// projection, bail if it equals the cache, else apply every channel and store it.
+    /// Replaces the deleted `.setWindowTitle` / `.updateDockBadge` / `.updateToolbarBellBadge`
+    /// effects (and the imperative badge block + `refreshTabTodoButton` switch in `send()`).
+    /// All three hosts persist across container rebuilds, so no cross-pass invalidation; the
+    /// sub-setters are idempotent, so applying all of them on any change is fine. Driven by
+    /// the projected values -- never by re-reading the model (same discipline as Stage 4's
+    /// toolbar), which is why the old model-reading `refreshContentTitlebar`/
+    /// `refreshTabTodoButton` helpers are gone.
+    func reconcileWindowChrome() {
+        let new = desiredWindowChrome(in: model)
+        guard caches.windowChrome != new else { return }
+        window?.title = new.windowTitle
+        chromeView?.updateTitle(new.contentTitle)
+        chromeView?.updateBellBadge(count: new.unreadCount)
+        NSApp.dockTile.badgeLabel = new.unreadCount > 0 ? "\(new.unreadCount)" : nil
+        NSApp.dockTile.display()
+        chromeView?.tabTodoButton.update(
+            totalCount: new.tabTodoTotal, uncompletedCount: new.tabTodoUncompleted)
+        caches.windowChrome = new
     }
 }

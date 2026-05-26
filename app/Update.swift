@@ -110,9 +110,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         if !background {
             effects.append(.showSelectedTab)
         }
-        if !background {
-            effects.append(contentsOf: selectionSyncEffects(for: model))
-        }
         // Persist new tab + pane + selection so a crash doesn't lose the tab.
         effects.append(.scheduleCheckpoint)
         return effects
@@ -255,7 +252,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
 
         if let next = nextFocus {
-            effects.append(contentsOf: syncFocusedPaneChrome(next, in: &model))
+            syncFocusedPaneChrome(next, in: &model)
         }
 
         effects.append(.rebuildTabContainer(tabId: tab.id))
@@ -357,7 +354,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         effects.append(.rebuildTabContainer(tabId: targetTabId))
         effects.append(.showSelectedTab)
-        effects.append(contentsOf: selectionSyncEffects(for: model))
         effects.append(.makeFirstResponder(paneId: paneId))
         // Persist cross-tab pane move so the new tree layout survives a crash.
         effects.append(.scheduleCheckpoint)
@@ -429,7 +425,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         if !sourceHasOnlyThisPane {
             effects.append(.rebuildTabContainer(tabId: sourceTab.id))
         }
-        effects.append(contentsOf: selectionSyncEffects(for: model))
         effects.append(.makeFirstResponder(paneId: paneId))
         // Persist pane-to-new-tab extraction so the tab structure survives a crash.
         effects.append(.scheduleCheckpoint)
@@ -462,17 +457,12 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             seen.insert(id); return true
         }
         guard !validIds.isEmpty else { return [] }
-        var effects: [Effect] = []
-        var selectedTabAffected = false
         for id in validIds {
             updateTab(id, in: &model) { t in t.customTitle = nil }
-            if id == model.selectedTabId { selectedTabAffected = true }
         }
-        if selectedTabAffected {
-            effects.append(contentsOf: selectionSyncEffects(for: model))
-        }
-        effects.append(.scheduleCheckpoint)
-        return effects
+        // The cleared rows reconcile via reconcileSidebar and the selected tab's window
+        // chrome via reconcileWindowChrome. Persist so the batch clear survives a crash.
+        return [.scheduleCheckpoint]
 
     case .clearAlertsForTabs(let tabIds):
         var seen = Set<TabId>()
@@ -503,14 +493,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let trimmed = name?.trimmingCharacters(in: .whitespaces)
         let customTitle: String? = (trimmed?.isEmpty ?? true) ? nil : trimmed
         updateTab(id, in: &model) { t in t.customTitle = customTitle }
-        // The renamed row updates via reconcileSidebar (displayTitle is in the projection).
-        var effects: [Effect] = []
-        if id == model.selectedTabId {
-            effects.append(contentsOf: selectionSyncEffects(for: model))
-        }
-        // Persist custom title so user's rename survives a crash.
-        effects.append(.scheduleCheckpoint)
-        return effects
+        // The renamed row updates via reconcileSidebar (displayTitle is in the projection)
+        // and the selected tab's window chrome via reconcileWindowChrome. Persist so the
+        // rename survives a crash.
+        return [.scheduleCheckpoint]
 
     case .sidebarRenameEnded:
         guard let tab = selectedTab(in: model) else { return [] }
@@ -540,11 +526,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
 
         // Focus borders and the pane toolbar (incl. its unread-alert badge) reconcile
         // after send(); only downstream chrome remains as commands here.
-        var effects: [Effect] = []
-        effects.append(contentsOf: syncFocusedPaneChrome(paneId, in: &model))
+        syncFocusedPaneChrome(paneId, in: &model)
         // Persist focused pane so restore opens the right pane within each tab.
-        effects.append(.scheduleCheckpoint)
-        return effects
+        return [.scheduleCheckpoint]
 
     // MARK: - Command Tracking
 
@@ -762,14 +746,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         let abbrev = abbreviateHome(title)
         updateTab(tab.id, in: &model) { t in t.title = abbrev }
-        var effects: [Effect] = []
-        if tab.id == model.selectedTabId {
-            let updatedTab = selectedTab(in: model)!
-            effects.append(.setWindowTitle(windowTitle(for: updatedTab)))
-        }
-        // Persist pane title so restored tabs show the correct name.
-        effects.append(.scheduleCheckpoint)
-        return effects
+        // The selected tab's window/content title reconciles via reconcileWindowChrome
+        // from the title just set above. Persist so restored tabs show the correct name.
+        return [.scheduleCheckpoint]
 
     case .surfaceCwd(let paneId, let cwd):
         model.updatePane(paneId) { $0.cwd = cwd }
@@ -780,14 +759,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         let abbrev = abbreviateHome(cwd)
         updateTab(tab.id, in: &model) { t in t.subtitle = abbrev }
-        var effects: [Effect] = []
-        if tab.id == model.selectedTabId {
-            let updatedTab = selectedTab(in: model)!
-            effects.append(.setWindowTitle(windowTitle(for: updatedTab)))
-        }
-        // Persist cwd so restored panes open in the correct directory.
-        effects.append(.scheduleCheckpoint)
-        return effects
+        // The selected tab's window/content title reconciles via reconcileWindowChrome
+        // from the subtitle just set above. Persist so restored panes open in the right dir.
+        return [.scheduleCheckpoint]
 
     case .surfaceProgress(let paneId, let state):
         model.updatePane(paneId) { $0.progress = state }
@@ -886,7 +860,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 }
                 if selectionMoved {
                     effects.append(.showSelectedTab)
-                    effects.append(contentsOf: selectionSyncEffects(for: model))
                 }
                 // Persist tab removal after a failed surface so it doesn't reappear.
                 effects.append(.scheduleCheckpoint)
@@ -1057,7 +1030,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                !model.groups.flatMap(\.tabs).contains(where: { $0.id == selId }) {
                 model.selectedTabId = model.groups.flatMap(\.tabs).first?.id
                 effects.append(.showSelectedTab)
-                effects.append(contentsOf: selectionSyncEffects(for: model))
             }
             // Persist group deletion + tab removal so they don't reappear.
             effects.append(.scheduleCheckpoint)
@@ -2315,7 +2287,7 @@ private func applySelectTab(_ model: inout AppModel, id: TabId) -> [Effect] {
     effects.append(.showSelectedTab)
     // Selection is view-owned: reconcileSidebar reapplies it (replacing the deleted
     // .setSidebarSelection), and any cleared-alert bell badges update from the projection.
-    effects.append(contentsOf: selectionSyncEffects(for: model))
+    // The selected tab's window chrome reconciles via reconcileWindowChrome.
     effects.append(.scheduleCheckpoint)
     return effects
 }
@@ -2424,7 +2396,7 @@ private func navigateToPane(_ paneId: PaneId, in model: inout AppModel) -> [Effe
     if wasZoomed, paneId != oldFocusedPaneId {
         updateSelectedTab(&model) { t in t.isZoomed = false }
     }
-    effects.append(contentsOf: syncFocusedPaneChrome(paneId, in: &model))
+    syncFocusedPaneChrome(paneId, in: &model)
     // Same-tab navigation still needs selection finalization because selectTab
     // intentionally no-ops when the target tab is already selected.
     if !tabSwitched {
@@ -2463,35 +2435,17 @@ private func removeGroupIfEmpty(_ groupId: GroupId, from model: inout AppModel) 
     model.groups.remove(at: idx)
 }
 
-private func windowTitle(for tab: TabModel) -> String {
-    if let subtitle = tab.subtitle, subtitle != tab.displayTitle {
-        return "\(tab.displayTitle) — \(subtitle)"
+/// Sync the selected tab's title/subtitle from the given pane. Pure model
+/// mutation: the tab row reconciles via reconcileSidebar and the window/content
+/// title via reconcileWindowChrome (both read the title/subtitle set here), so
+/// this no longer emits any command.
+private func syncFocusedPaneChrome(_ paneId: PaneId, in model: inout AppModel) {
+    guard let pane = model.pane(paneId) else { return }
+    let chrome = deriveTabChrome(from: pane)
+    updateSelectedTab(&model) { t in
+        t.title = chrome.title
+        t.subtitle = chrome.subtitle
     }
-    return tab.displayTitle
-}
-
-/// Sync the selected tab's title/subtitle from the given pane and return
-/// sidebar + window-title effects.
-private func syncFocusedPaneChrome(_ paneId: PaneId, in model: inout AppModel) -> [Effect] {
-    if let pane = model.pane(paneId) {
-        let chrome = deriveTabChrome(from: pane)
-        updateSelectedTab(&model) { t in
-            t.title = chrome.title
-            t.subtitle = chrome.subtitle
-        }
-    }
-    var effects: [Effect] = []
-    if let tab = selectedTab(in: model) {
-        effects.append(.setWindowTitle(windowTitle(for: tab)))
-        // The tab row (title/subtitle, and any collapsed-group roll-up) updates via
-        // reconcileSidebar; only the window title remains a command here.
-    }
-    return effects
-}
-
-private func selectionSyncEffects(for model: AppModel) -> [Effect] {
-    guard let tab = selectedTab(in: model) else { return [] }
-    return [.setWindowTitle(windowTitle(for: tab))]
 }
 
 @discardableResult
@@ -2581,7 +2535,6 @@ private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Effect] {
     if id == model.selectedTabId, let newId = fallbackTabId {
         model.selectedTabId = newId
         effects.append(.showSelectedTab)
-        effects.append(contentsOf: selectionSyncEffects(for: model))
     }
     return effects
 }

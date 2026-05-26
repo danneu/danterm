@@ -121,14 +121,11 @@ func ghosttyTests() {
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let effects = update(&model, .surfaceTitle(paneId: paneId, title: "vim"))
+        update(&model, .surfaceTitle(paneId: paneId, title: "vim"))
         try expectEqual(model.pane(paneId)?.title, "vim")
         try expectEqual(model.groups[0].tabs[0].title, "vim")
-        // The tab row (title/subtitle) reconciles from the model via reconcileSidebar.
-        try expect(hasEffect(effects) {
-            if case .setWindowTitle = $0 { return true }
-            return false
-        }, "should set window title")
+        // The tab row (reconcileSidebar) and window chrome (reconcileWindowChrome)
+        // reconcile from the synced tab title above.
     }
 
     test("testSurfaceTitleUnfocusedPane") {
@@ -151,13 +148,12 @@ func ghosttyTests() {
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        let effects = update(&model, .surfaceCwd(paneId: paneId, cwd: "/home/dan/projects"))
+        update(&model, .surfaceCwd(paneId: paneId, cwd: "/home/dan/projects"))
         try expectEqual(model.pane(paneId)?.cwd, "/home/dan/projects")
-        // The tab row (title/subtitle) reconciles from the model via reconcileSidebar.
-        try expect(hasEffect(effects) {
-            if case .setWindowTitle = $0 { return true }
-            return false
-        }, "should set window title")
+        try expectEqual(model.groups[0].tabs[0].subtitle, abbreviateHome("/home/dan/projects"),
+            "focused-pane cwd syncs the selected tab's subtitle (the window-chrome input)")
+        // The tab row (reconcileSidebar) and window chrome (reconcileWindowChrome)
+        // reconcile from the synced subtitle above.
     }
 
     test("testSurfacePwdUnfocusedPane") {
@@ -183,14 +179,11 @@ func ghosttyTests() {
         createTab(&model) // Tab B (now selected)
         try expect(model.selectedTabId != tabAId, "Tab B should be selected")
 
-        let effects = update(&model, .surfaceTitle(paneId: paneA, title: "vim"))
+        update(&model, .surfaceTitle(paneId: paneA, title: "vim"))
         try expectEqual(model.pane(paneA)?.title, "vim", "pane title should update")
         try expectEqual(model.groups[0].tabs[0].title, "vim", "background tab title should update")
-        // The background tab's row reconciles from its updated model title/subtitle.
-        try expect(!hasEffect(effects) {
-            if case .setWindowTitle = $0 { return true }
-            return false
-        }, "should NOT set window title for background tab")
+        // The background tab's row reconciles from its updated title; the window chrome
+        // (a projection of the *selected* tab B) is unaffected by a background tab's title.
     }
 
     test("testSurfacePwdBackgroundTab") {
@@ -202,14 +195,11 @@ func ghosttyTests() {
         createTab(&model) // Tab B (now selected)
         try expect(model.selectedTabId != tabAId, "Tab B should be selected")
 
-        let effects = update(&model, .surfaceCwd(paneId: paneA, cwd: "/tmp"))
+        update(&model, .surfaceCwd(paneId: paneA, cwd: "/tmp"))
         try expectEqual(model.pane(paneA)?.cwd, "/tmp", "pane cwd should update")
         try expectEqual(model.groups[0].tabs[0].subtitle, "~" == abbreviateHome("/tmp") ? "~" : "/tmp", "background tab subtitle should update")
-        // The background tab's row reconciles from its updated model title/subtitle.
-        try expect(!hasEffect(effects) {
-            if case .setWindowTitle = $0 { return true }
-            return false
-        }, "should NOT set window title for background tab")
+        // The background tab's row reconciles from its updated subtitle; the window chrome
+        // (a projection of the *selected* tab B) is unaffected by a background tab's cwd.
     }
 
     test("testDesktopNotificationOnFocusedPaneIsIgnored") {
