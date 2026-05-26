@@ -48,16 +48,16 @@ func reconcileTests() {
 
     // MARK: - Effect.isPostReconcile (command-phase split, Stage 4)
 
-    test("Effect.isPostReconcile: only focusSearchField defers past reconcile") {
+    test("Effect.isPostReconcile: exactly makeFirstResponder + focusSearchField defer past reconcile") {
         let pane = PaneId()
         // focusSearchField targets the search field reconcilePaneChrome creates, so
         // it must run after reconcile().
         try expect(Effect.focusSearchField(paneId: pane).isPostReconcile,
             "focusSearchField is post-reconcile")
-        // makeFirstResponder stays pre-reconcile in Stage 4: its TerminalView is
-        // still built by the effect-built container path (flips in Stage 8).
-        try expect(!Effect.makeFirstResponder(paneId: pane).isPostReconcile,
-            "makeFirstResponder stays pre-reconcile")
+        // makeFirstResponder is post-reconcile as of Stage 8: reconcileContainers now mounts
+        // the pane's TerminalView during reconcile, so first responder must be set after.
+        try expect(Effect.makeFirstResponder(paneId: pane).isPostReconcile,
+            "makeFirstResponder is post-reconcile (Stage 8)")
         // focusSurface acts on an already-existing surface; deferring it is wrong.
         try expect(!Effect.focusSurface(paneId: pane, focused: true).isPostReconcile,
             "focusSurface is pre-reconcile")
@@ -219,6 +219,126 @@ func reconcileTests() {
         try expectEqual(guarded.ops, ops, "no edit -> ops unchanged")
         try expect(!guarded.clearRename, "no edit -> nothing to clear")
     }
+
+    // MARK: - computeContainerOps (model-apply, Stage 8)
+    //
+    // Like the sidebar diff, this is a model-apply test, NOT an exact-sequence assert:
+    // apply the ops in order to a plain [TabId: Bool] presence+visibility map and assert
+    // it equals new's keys with (tabId == selectedTabId) visibility. This catches a
+    // dropped-hide regression (leaving two containers visible) that an exact-sequence
+    // assert would bless.
+
+    test("computeContainerOps: remove drops a gone tab's container") {
+        let a = TabId(), b = TabId(), pa = PaneId(), pb = PaneId()
+        try checkContainerOps(
+            old: [a: cShape(pa), b: cShape(pb)], oldVisible: [a: true, b: false],
+            new: [a: cShape(pa)], newSelected: a,
+            "removing tab B reaches new (A visible, B gone)")
+    }
+
+    test("computeContainerOps: rebuild on a drifted shape keeps visibility") {
+        let a = TabId(), pa = PaneId(), pa2 = PaneId()
+        // A's shape drifts (single leaf -> split): the op list must rebuild A and keep it visible.
+        try checkContainerOps(
+            old: [a: cShape(pa)], oldVisible: [a: true],
+            new: [a: cSplitShape(pa, pa2)], newSelected: a,
+            "rebuilding A reaches new with A still visible")
+    }
+
+    test("computeContainerOps: visibility-only selected-tab switch hides old, shows new") {
+        // The dropped-hide net: A visible + B mounted-hidden at IDENTICAL shapes, switch to B.
+        // The ops must hide A and show B (not leave both visible).
+        let a = TabId(), b = TabId(), pa = PaneId(), pb = PaneId()
+        try checkContainerOps(
+            old: [a: cShape(pa), b: cShape(pb)], oldVisible: [a: true, b: false],
+            new: [a: cShape(pa), b: cShape(pb)], newSelected: b,
+            "switching A->B (identical shapes) hides A and shows B -- no rebuild")
+    }
+
+    test("computeContainerOps: no-op when the selected tab is unchanged (common eager path)") {
+        let a = TabId(), b = TabId(), pa = PaneId(), pb = PaneId()
+        try checkContainerOps(
+            old: [a: cShape(pa), b: cShape(pb)], oldVisible: [a: true, b: false],
+            new: [a: cShape(pa), b: cShape(pb)], newSelected: a,
+            "unchanged selection + shapes -> state unchanged (A visible, B hidden)")
+    }
+
+    // MARK: - ContainerShape (ratio carveout / payload excluded / structural change)
+
+    test("ContainerShape: same leaves+splits with different ratios compare equal") {
+        let p1 = PaneId(), p2 = PaneId(), sid = SplitId()
+        let lo = TabModel(id: TabId(), focusedPaneId: p1, rootNode: splitNode(sid, p1, p2, ratio: 0.3))
+        let hi = TabModel(id: TabId(), focusedPaneId: p1, rootNode: splitNode(sid, p1, p2, ratio: 0.8))
+        try expectEqual(containerShape(of: lo), containerShape(of: hi),
+            "split ratio is excluded -- splitRatioChanged must not rebuild")
+    }
+
+    test("ContainerShape: a leaf PaneModel metadata edit compares equal") {
+        let p1 = PaneId(), p2 = PaneId(), sid = SplitId()
+        var leftA = PaneModel(id: p1); leftA.title = "alpha"; leftA.cwd = "/a"
+        var leftB = PaneModel(id: p1); leftB.title = "beta"; leftB.cwd = "/b"
+        leftB.progress = .set(percent: 50)
+        leftB.todos = [TodoItem(id: UUID(), text: "do", isDone: false)]
+        leftB.theme = "Dracula"
+        let nodeA = SplitNodeModel.split(id: sid, direction: .horizontal, first: .leaf(leftA), second: .leaf(PaneModel(id: p2)), ratio: 0.5)
+        let nodeB = SplitNodeModel.split(id: sid, direction: .horizontal, first: .leaf(leftB), second: .leaf(PaneModel(id: p2)), ratio: 0.5)
+        let tabA = TabModel(id: TabId(), focusedPaneId: p1, rootNode: nodeA)
+        let tabB = TabModel(id: TabId(), focusedPaneId: p1, rootNode: nodeB)
+        try expectEqual(containerShape(of: tabA), containerShape(of: tabB),
+            "leaf payload (title/cwd/progress/todo/theme) is excluded -- a metadata edit must not rebuild")
+    }
+
+    test("ContainerShape: structural change / zoom toggle compare unequal") {
+        let p1 = PaneId(), p2 = PaneId(), p3 = PaneId(), sid = SplitId()
+        let single = TabModel(id: TabId(), focusedPaneId: p1, rootNode: .leaf(PaneModel(id: p1)))
+        let split = TabModel(id: TabId(), focusedPaneId: p1, rootNode: splitNode(sid, p1, p2, ratio: 0.5))
+        try expect(containerShape(of: single) != containerShape(of: split),
+            "adding a leaf (single -> split) changes the shape")
+        // Change direction.
+        let splitV = TabModel(id: TabId(), focusedPaneId: p1,
+            rootNode: .split(id: sid, direction: .vertical, first: .leaf(PaneModel(id: p1)), second: .leaf(PaneModel(id: p2)), ratio: 0.5))
+        try expect(containerShape(of: split) != containerShape(of: splitV),
+            "changing split direction changes the shape")
+        // Move a leaf (different leaf id).
+        let splitMoved = TabModel(id: TabId(), focusedPaneId: p1, rootNode: splitNode(sid, p1, p3, ratio: 0.5))
+        try expect(containerShape(of: split) != containerShape(of: splitMoved),
+            "swapping a leaf id changes the shape")
+        // Zoom toggle.
+        var zoomed = split; zoomed.isZoomed = true
+        try expect(containerShape(of: split) != containerShape(of: zoomed),
+            "toggling zoom changes the shape")
+    }
+
+    // MARK: - chromeInvalidation
+
+    test("chromeInvalidation: rebuild contributes its leaves, setVisible-only is empty") {
+        let a = TabId(), b = TabId(), pa = PaneId(), pa2 = PaneId(), pb = PaneId()
+        let newShapes: [TabId: ContainerShape] = [a: cSplitShape(pa, pa2), b: cShape(pb)]
+        // Rebuild A + show both: only A's two leaves are invalidated.
+        let ops: [ContainerOp] = [.rebuild(tabId: a), .setVisible(tabId: a, visible: true), .setVisible(tabId: b, visible: false)]
+        try expectEqual(chromeInvalidation(ops: ops, newShapes: newShapes), Set([pa, pa2]),
+            "a rebuilt container invalidates every one of its leaf panes")
+        // Visibility-only (a tab switch with no rebuild): nothing invalidated.
+        let visOnly: [ContainerOp] = [.setVisible(tabId: a, visible: false), .setVisible(tabId: b, visible: true)]
+        try expect(chromeInvalidation(ops: visOnly, newShapes: newShapes).isEmpty,
+            "a visibility-only switch invalidates no chrome (wrappers survive)")
+    }
+
+    // MARK: - surfacesToTearDown (migrated surfaceCreationFailed net)
+
+    test("surfacesToTearDown selects exactly the panes gone from the model") {
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .splitPane(direction: .horizontal))
+        let live = Set(model.allPaneIds)
+        let dead1 = PaneId(), dead2 = PaneId()
+        // Live surfaces = the model's panes plus two whose panes no longer exist.
+        let teardown = surfacesToTearDown(liveSurfaceIds: live.union([dead1, dead2]), model: model)
+        try expectEqual(teardown, Set([dead1, dead2]),
+            "only the surfaces whose pane left the model are selected")
+        try expect(teardown.isDisjoint(with: live),
+            "surviving panes are never selected for teardown")
+    }
 }
 
 // MARK: - Sidebar projection test builders + op model-apply
@@ -283,4 +403,49 @@ private func applySidebarRowOps(_ ops: [SidebarRowOp], to old: SidebarProjection
         }
     }
     return work
+}
+
+// MARK: - Container shape + op model-apply (Stage 8)
+
+/// A single-leaf container shape (deterministic: no random split id, so two calls
+/// with the same pane id compare equal -- needed for the visibility-only test).
+private func cShape(_ p: PaneId) -> ContainerShape {
+    ContainerShape(tree: .leaf(p), isZoomed: false, zoomedLeaf: nil)
+}
+/// A two-leaf split container shape (carries a fresh split id, so it never equals a
+/// single-leaf shape -- used as the "drifted" shape in the rebuild test).
+private func cSplitShape(_ a: PaneId, _ b: PaneId) -> ContainerShape {
+    ContainerShape(tree: .split(id: SplitId(), direction: .horizontal, first: .leaf(a), second: .leaf(b)), isZoomed: false, zoomedLeaf: nil)
+}
+/// A horizontal split SplitNodeModel of two single-pane leaves.
+private func splitNode(_ sid: SplitId, _ a: PaneId, _ b: PaneId, ratio: CGFloat) -> SplitNodeModel {
+    .split(id: sid, direction: .horizontal, first: .leaf(PaneModel(id: a)), second: .leaf(PaneModel(id: b)), ratio: ratio)
+}
+
+/// Apply a ContainerOp script to a [TabId: Bool] presence+visibility map (key present
+/// == container mounted; value == isVisible). Mirrors the executor: rebuild mounts a
+/// fresh (hidden-by-default) container, setVisible toggles, remove detaches.
+private func applyContainerOps(_ ops: [ContainerOp], to old: [TabId: Bool]) -> [TabId: Bool] {
+    var state = old
+    for op in ops {
+        switch op {
+        case .remove(let t): state[t] = nil
+        case .rebuild(let t): if state[t] == nil { state[t] = false }
+        case .setVisible(let t, let v): state[t] = v
+        }
+    }
+    return state
+}
+
+/// old(+visibility) -> apply(computeContainerOps(old,new,selected)) must equal new's
+/// keys, each visible iff it is the selected tab.
+private func checkContainerOps(
+    old: [TabId: ContainerShape], oldVisible: [TabId: Bool],
+    new: [TabId: ContainerShape], newSelected: TabId?, _ name: String
+) throws {
+    let ops = computeContainerOps(old: old, new: new, selectedTabId: newSelected)
+    let result = applyContainerOps(ops, to: oldVisible)
+    var expected: [TabId: Bool] = [:]
+    for t in new.keys { expected[t] = (t == newSelected) }
+    try expectEqual(result, expected, name)
 }

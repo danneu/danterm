@@ -29,7 +29,8 @@ class AppRuntime {
     // Per-pass diff caches for the view reconciler (see Reconcile.swift).
     // Reset on teardown so a post-restore reconcile is a clean build.
     var caches = ReconcilerCaches()
-    private var tabContainers: [TabId: SplitContainerView] = [:]
+    // internal (not private): the cross-file reconcileContainers extension reads/mutates it.
+    var tabContainers: [TabId: SplitContainerView] = [:]
     var tokenStore = PaneTokenStore()
     weak var window: NSWindow?
     weak var sidebarView: SidebarView?
@@ -345,15 +346,6 @@ class AppRuntime {
                 send(.surfaceCreationFailed(paneId: paneId))
             }
 
-        case .destroySurface(let paneId):
-            tokenStore.remove(paneId)
-            cleanupReplayFile(for: paneId)
-            searchDebounceTimers[paneId]?.cancel()
-            searchDebounceTimers.removeValue(forKey: paneId)
-            if let view = surfaces.removeValue(forKey: paneId) {
-                view.closeSurface()
-            }
-
         case .sendText(let paneId, let text):
             guard !text.isEmpty,
                   let surface = surfaces[paneId]?.surface else { break }
@@ -406,15 +398,6 @@ class AppRuntime {
             if let view = surfaces[paneId] {
                 window?.makeFirstResponder(view)
             }
-
-        case .showSelectedTab:
-            showSelectedTab()
-
-        case .rebuildTabContainer(let tabId):
-            rebuildTabContainer(tabId)
-
-        case .removeTabContainer(let tabId):
-            removeTabContainer(tabId)
 
         case .sendNotification(let alertId, let title, let body):
             let content = UNMutableNotificationContent()
@@ -804,6 +787,20 @@ class AppRuntime {
         }
     }
 
+    /// Tear down all runtime resources for one pane's surface. The body of the old
+    /// `.destroySurface` perform arm, now owned by `reconcileSurfaceExistence` (which
+    /// calls it for every pane absent from `model.allPaneIds`). `internal` so the
+    /// cross-file reconcile extension can reach it.
+    func tearDownSurface(_ paneId: PaneId) {
+        tokenStore.remove(paneId)
+        cleanupReplayFile(for: paneId)
+        searchDebounceTimers[paneId]?.cancel()
+        searchDebounceTimers.removeValue(forKey: paneId)
+        if let view = surfaces.removeValue(forKey: paneId) {
+            view.closeSurface()
+        }
+    }
+
     /// Delete all files in $TMPDIR/danterm-scrollback/ from prior sessions.
     func cleanupStaleReplayDirectory() {
         let dir = FileManager.default.temporaryDirectory
@@ -1143,12 +1140,10 @@ class AppRuntime {
 
     /// Tear down live runtime resources before swapping in a replacement session.
     private func tearDownCurrentSession() {
-        cancelPaneDrag()
+        dismissStrandedPopovers()  // cancelPaneDrag + dismiss todo/tab-todo popover pairs
         alertsPopover?.performClose(nil)
         alertsPopover = nil
-        dismissTodoPopoverPair()
-        dismissTabTodoPopoverPair()
-        model.todoPopover = nil
+        clearTodoPopoverForViewSwap(&model)
         preferencesPanel?.close()
         preferencesPanel = nil
         quitConfirmationPanel?.orderOut(nil)
@@ -1186,12 +1181,11 @@ class AppRuntime {
         // cmd-shift-i after a restore sees a populated mruOrder.
         reconcileMru(&model)
 
-        showSelectedTab()
-        // Route the post-restore sync through reconcile() so focus borders, the sidebar,
-        // and the window chrome (title + dock/toolbar badges + tab-todo button) land via
-        // the reconciler (clean build -- tearDownCurrentSession reset the caches, so the
-        // nil windowChrome/sidebar caches build from scratch). showSelectedTab() still
-        // builds the container here; Stage 8 folds that in.
+        // Drive the entire post-restore UI through reconcile() (clean build:
+        // tearDownCurrentSession reset the caches). reconcileContainers builds every
+        // tab's container eagerly from the nil containerShape cache -- selected visible,
+        // the rest mounted+hidden -- and the chrome/sidebar/window passes build from
+        // scratch. reconcileSurfaceExistence is a no-op (staged surfaces match allPaneIds).
         reconcile()
 
         // Apply per-pane themes after surfaces are live
@@ -1253,21 +1247,6 @@ class AppRuntime {
 
     // MARK: - Pane Toolbars
 
-    func refreshPaneToolbars(in root: NSView) {
-        forEachPaneWrapper(in: root) { wrapper in
-            let (title, cwd) = paneToolbarText(for: wrapper.paneId, in: model)
-            let pane = model.pane(wrapper.paneId)
-            let progress = pane?.progress
-            let isRemote = pane?.isRemote ?? false
-            let remoteSession = pane?.remoteSession
-            let alertCount = model.alerts.count { $0.paneId == wrapper.paneId && $0.isUnread }
-            let todos = pane?.todos ?? []
-            let totalTodo = todos.count
-            let uncompletedTodo = todos.count { !$0.isDone }
-            wrapper.updateToolbar(title: title, cwd: cwd, progress: progress, isRemote: isRemote, remoteSession: remoteSession, unreadAlertCount: alertCount, totalTodoCount: totalTodo, uncompletedTodoCount: uncompletedTodo)
-        }
-    }
-
     // `internal` (not `private`) so reconcilePaneChrome in Reconcile.swift can reach
     // a pane's wrapper to push toolbar/search-overlay renders.
     func findPaneWrapper(for paneId: PaneId, in view: NSView) -> PaneWrapperView? {
@@ -1281,53 +1260,11 @@ class AppRuntime {
         return nil
     }
 
-    private func forEachPaneWrapper(in view: NSView, _ body: (PaneWrapperView) -> Void) {
-        for sub in view.subviews {
-            if let wrapper = sub as? PaneWrapperView {
-                body(wrapper)
-            } else {
-                forEachPaneWrapper(in: sub, body)
-            }
-        }
-    }
-
     // MARK: - View Building
 
-    /// Clear transient UI anchored to pane/tab view objects before replacing or hiding them.
-    private func prepareForViewSwap() {
-        cancelPaneDrag()
-        dismissTodoPopoverPair()
-        dismissTabTodoPopoverPair()
-        model.todoPopover = nil
-    }
-
-    /// Ensure the selected tab has a mounted container and make it the visible tab.
-    private func showSelectedTab() {
-        guard contentArea != nil else { return }
-
-        prepareForViewSwap()
-        let browserFocus = themeBrowserView?.captureFocusTarget()
-
-        for (tabId, container) in tabContainers {
-            container.isHidden = tabId != model.selectedTabId
-        }
-
-        guard let tab = selectedTab(in: model) else { return }
-        let container = ensureTabContainer(for: tab)
-        container.isHidden = false
-        finalizeTabSelection(tab: tab, container: container, browserFocus: browserFocus)
-    }
-
-    /// Return an existing tab container or lazily build one from the current model.
-    private func ensureTabContainer(for tab: TabModel) -> SplitContainerView {
-        if let existing = tabContainers[tab.id] {
-            return existing
-        }
-        return buildAndInsertContainer(for: tab)
-    }
-
     /// Build a split container for one tab and insert it below the theme browser overlay.
-    private func buildAndInsertContainer(for tab: TabModel) -> SplitContainerView {
+    /// `internal` so the cross-file reconcileContainers executor can build a container.
+    func buildAndInsertContainer(for tab: TabModel) -> SplitContainerView {
         guard let contentArea = contentArea else { fatalError("contentArea unavailable") }
         let displayNode: SplitNodeModel
         if tab.isZoomed {
@@ -1362,79 +1299,51 @@ class AppRuntime {
         return container
     }
 
-    /// Rebuild a mounted tab's container after its split tree or zoom state changes.
-    private func rebuildTabContainer(_ tabId: TabId) {
-        guard let tab = tabById(tabId, in: model),
-              let existing = tabContainers[tabId] else { return }
-        let wasHidden = existing.isHidden
-        let browserFocus = !wasHidden ? themeBrowserView?.captureFocusTarget() : nil
-        if !wasHidden {
-            prepareForViewSwap()
-        }
-        existing.removeFromSuperview()
-        tabContainers.removeValue(forKey: tabId)
-
-        let container = buildAndInsertContainer(for: tab)
-        container.isHidden = wasHidden
-        if !wasHidden {
-            finalizeTabSelection(tab: tab, container: container, browserFocus: browserFocus)
-        }
-    }
-
-    /// Detach and forget the cached container for a removed tab.
-    private func removeTabContainer(_ tabId: TabId) {
+    /// Detach and forget the cached container for a removed tab. `internal` so the
+    /// cross-file reconcileContainers executor (and tearDownCurrentSession) can call it.
+    func removeTabContainer(_ tabId: TabId) {
         guard let container = tabContainers.removeValue(forKey: tabId) else { return }
         container.removeFromSuperview()
     }
 
-    /// Refresh chrome, focus, and overlays for the visible tab container.
-    private func finalizeTabSelection(
-        tab: TabModel,
-        container: SplitContainerView,
-        browserFocus: ThemeBrowserFocusTarget?
-    ) {
-        let displayNode: SplitNodeModel = tab.isZoomed ? .leaf(model.pane(tab.focusedPaneId) ?? PaneModel(id: tab.focusedPaneId)) : tab.rootNode
-        // Set focus borders based on model state (skip green border for single-pane tabs)
+    /// Cancel an in-flight pane drag and dismiss any open TODO popovers. The AppKit half
+    /// of a view swap (the model half is the pure `clearTodoPopoverForViewSwap` in
+    /// update()). `reconcileContainers` calls this when the visible container is hidden,
+    /// rebuilt, or removed, so an anchored popover never strands over the wrong content.
+    func dismissStrandedPopovers() {
+        cancelPaneDrag()
+        dismissTodoPopoverPair()
+        dismissTabTodoPopoverPair()
+    }
+
+    /// Establish mount-time focus for a just-(re)built or newly-shown selected container.
+    /// The folded `finalizeTabSelection` focus, minus the parts the reconciler now owns:
+    /// the focus-border loop (reconcileFocusBorders), the toolbar refresh (reconcilePaneChrome
+    /// + container cache invalidation), and the search-overlay rehydrate (reconcilePaneChrome).
+    /// reconcile() calls this *after* reconcilePaneChrome so the search field exists when an
+    /// active-search pane needs it. Scoped to the single selected container (never per built
+    /// container) so eager-mounted hidden tabs don't fight for first responder.
+    func applyMountTimeFocus(_ tabId: TabId?) {
+        guard let tabId = tabId,
+              let tab = tabById(tabId, in: model),
+              let container = tabContainers[tabId] else { return }
+        let browserFocus = themeBrowserView?.captureFocusTarget()
         let focusedId = tab.focusedPaneId
-        for paneId in allPaneIds(displayNode) {
-            let isFocused = isFocusedAndVisible(paneId, in: model)
-            let hasBell = paneHasUnreadAlert(paneId, alerts: model.alerts)
-            surfaces[paneId]?.setFocusBorder(isFocused, hasBell: hasBell)
+        // Focus the focused pane's surface -- unless the theme browser owns focus or the
+        // pane has an active search (whose field is focused just below instead).
+        if browserFocus == nil, model.searchState[focusedId] == nil,
+           let focusedView = surfaces[focusedId] {
+            window?.makeFirstResponder(focusedView)
         }
-
-        // Focus the right pane — but only if the theme browser doesn't own focus.
-        // This responder guard protects any overlay UI from being clobbered by rebuild.
-        if browserFocus == nil {
-            if model.searchState[focusedId] == nil {
-                if let focusedView = surfaces[focusedId] {
-                    window?.makeFirstResponder(focusedView)
-                }
-            }
-        }
-
-        refreshPaneToolbars(in: container)
-        // The window chrome (content title + dock/toolbar badges + tab-todo button) is
-        // owned by reconcileWindowChrome, which runs after this in the same send() (and
-        // after the restore commit's reconcile()). Its hosts persist across container
-        // rebuilds, so -- unlike the pane toolbars above -- there is no coherence reason
-        // to refresh them here.
-
-        // Rehydrate search overlays for panes with active search
-        for (paneId, search) in model.searchState {
-            findPaneWrapper(for: paneId, in: container)?.showSearchOverlay(search: search, runtime: self)
-        }
-        // If search is active on the focused pane, focus its text field (unless browser has focus)
-        if browserFocus == nil,
-           model.searchState[focusedId] != nil,
+        // Active search on the focused pane: focus its (paneChrome-rebuilt) search field.
+        if browserFocus == nil, model.searchState[focusedId] != nil,
            let field = findPaneWrapper(for: focusedId, in: container)?.searchOverlay?.searchField {
             window?.makeFirstResponder(field)
         }
-
+        // The theme browser owns its own filter/focus; reload it for the new selection.
         if let browser = themeBrowserView {
             browser.reloadFromRuntime()
-            if let target = browserFocus {
-                browser.restoreFocus(target)
-            }
+            if let target = browserFocus { browser.restoreFocus(target) }
         }
     }
 

@@ -36,6 +36,7 @@ func ghosttyTests() {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
+        let liveSurfaceIds = Set(model.allPaneIds)
 
         let effects = update(&model, .surfaceCreationFailed(paneId: paneId))
         try expect(model.pane(paneId) == nil, "pane should be removed")
@@ -44,18 +45,10 @@ func ghosttyTests() {
             if case .terminate = $0 { return true }
             return false
         }, "should terminate when no tabs left")
-        try expect(hasEffect(effects) {
-            if case .destroySurface(let pid) = $0, pid == paneId { return true }
-            return false
-        }, "should destroy failed pane surface")
-        try expect(hasEffect(effects) {
-            if case .removeTabContainer = $0 { return true }
-            return false
-        }, "should remove failed tab container")
-        try expect(!hasEffect(effects) {
-            if case .showSelectedTab = $0 { return true }
-            return false
-        }, "last-tab failure should not show a fallback tab")
+        // Surface teardown is reconcileSurfaceExistence's: the failed pane is selected for
+        // teardown once absent from the model (container removal + fallback are structural).
+        try expectEqual(surfacesToTearDown(liveSurfaceIds: liveSurfaceIds, model: model), Set([paneId]),
+            "failed pane surface is torn down")
     }
 
     test("surfaceCreationFailed removes split tab siblings") {
@@ -68,6 +61,7 @@ func ghosttyTests() {
         createTab(&model)
         let fallbackTabId = model.groups[0].tabs[1].id
         update(&model, .selectTab(id: tabId))
+        let liveSurfaceIds = Set(model.allPaneIds)
 
         let effects = update(&model, .surfaceCreationFailed(paneId: paneA))
 
@@ -75,22 +69,10 @@ func ghosttyTests() {
         try expect(model.pane(paneA) == nil, "failed pane should be removed")
         try expect(model.pane(paneB) == nil, "sibling pane should be removed")
         try expect(!model.groups[0].tabs.contains { $0.id == tabId }, "failed tab should be removed")
-        try expect(hasEffect(effects) {
-            if case .destroySurface(let pid) = $0, pid == paneA { return true }
-            return false
-        }, "should destroy failed pane surface")
-        try expect(hasEffect(effects) {
-            if case .destroySurface(let pid) = $0, pid == paneB { return true }
-            return false
-        }, "should destroy sibling pane surface")
-        try expect(hasEffect(effects) {
-            if case .removeTabContainer(let effectTabId) = $0, effectTabId == tabId { return true }
-            return false
-        }, "should remove failed tab container")
-        try expect(hasEffect(effects) {
-            if case .showSelectedTab = $0 { return true }
-            return false
-        }, "should show fallback tab")
+        // Surface teardown is reconcileSurfaceExistence's: both siblings are selected once
+        // absent from the model. Container removal + fallback selection are structural.
+        try expectEqual(surfacesToTearDown(liveSurfaceIds: liveSurfaceIds, model: model), Set([paneA, paneB]),
+            "both sibling pane surfaces are torn down")
         try expect(!hasEffect(effects) {
             if case .terminate = $0 { return true }
             return false

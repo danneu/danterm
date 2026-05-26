@@ -854,10 +854,9 @@ func ipcUpdateTests() {
         try expect(allPaneIds(tab.rootNode).contains(newPaneId), "target tab should contain new pane")
         try expectEqual(tab.focusedPaneId, focusedPaneId, "background split should preserve focused pane")
         try expectEqual(model.selectedTabId, tabId, "background split should not change selected tab")
-        try expect(hasEffect(effects) {
-            if case .rebuildTabContainer(let effectTabId) = $0, effectTabId == tabId { return true }
-            return false
-        }, "selected-tab background split should rebuild tab container")
+        // The container rebuild is structural now (the selected tab's ContainerShape
+        // drifted), scoped by reconcileContainers to exactly this tab -- the new pane
+        // landing in this tab's tree (asserted above) is the net.
     }
 
     test("pane.split background on unselected tab emits scoped rebuild") {
@@ -885,10 +884,9 @@ func ipcUpdateTests() {
         try expect(allPaneIds(backgroundTab.rootNode).contains(newPaneId), "background tab should contain new pane")
         try expectEqual(backgroundTab.focusedPaneId, backgroundPaneId, "background split should preserve target focus")
         try expectEqual(model.selectedTabId, selectedTabId, "background split should not change selected tab")
-        try expect(hasEffect(effects) {
-            if case .rebuildTabContainer(let effectTabId) = $0, effectTabId == backgroundTabId { return true }
-            return false
-        }, "unselected-tab background split should emit scoped rebuild")
+        // The rebuild is scoped structurally now: only the *background* tab's ContainerShape
+        // drifted (its tree gained a leaf), so reconcileContainers rebuilds only it. The new
+        // pane landing in the background tab's tree (asserted above) is the net.
     }
 
     test("pane.split with malformed background fails before mutation") {

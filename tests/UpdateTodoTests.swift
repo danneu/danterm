@@ -188,13 +188,13 @@ func todoTests() {
         update(&model, .addTodo(paneId: paneId, text: "task"))
         let todoId = model.pane(paneId)!.todos[0].id
         update(&model, .toggleTodoDone(paneId: paneId, todoId: todoId))
-        let effects = update(&model, .requestClosePane(paneId: paneId))
+        let liveBefore = Set(model.allPaneIds)
+        update(&model, .requestClosePane(paneId: paneId))
         // Pane should be removed (closePane was invoked)
         try expect(model.pane(paneId) == nil, "pane should be removed")
-        try expect(hasEffect(effects) {
-            if case .destroySurface(let pid) = $0 { return pid == paneId }
-            return false
-        }, "expected destroySurface")
+        // Surface teardown is reconcileSurfaceExistence's: the closed pane is selected once gone.
+        try expectEqual(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model), Set([paneId]),
+            "closed pane's surface is torn down")
     }
 
     test("requestClosePane with no todos proceeds to closePane") {
@@ -204,12 +204,11 @@ func todoTests() {
         let tab = model.groups[0].tabs[0]
         let paneId = tab.focusedPaneId
         model.selectedTabId = tab.id
-        let effects = update(&model, .requestClosePane(paneId: paneId))
+        let liveBefore = Set(model.allPaneIds)
+        update(&model, .requestClosePane(paneId: paneId))
         try expect(model.pane(paneId) == nil, "pane should be removed")
-        try expect(hasEffect(effects) {
-            if case .destroySurface(let pid) = $0 { return pid == paneId }
-            return false
-        }, "expected destroySurface")
+        try expectEqual(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model), Set([paneId]),
+            "closed pane's surface is torn down")
     }
 
     // MARK: - closePane + popover cleanup

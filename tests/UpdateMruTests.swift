@@ -218,12 +218,12 @@ func updateMruTests() {
         try expectEqual(model.selectedTabId!, target, "target tab focused")
         try expect(model.mruCycle == nil, "cycle cleared")
         try expect(model.mruOrder.first == target, "chosen tab hoisted to MRU front")
-        // The switcher hides structurally (mruCycle == nil -> reconcileSwitcher); the
-        // selectTab command for the chosen tab survives.
+        // The switcher hides structurally (mruCycle == nil -> reconcileSwitcher) and the
+        // tab switch is structural too (reconcileContainers); the commit persists selection.
         try expect(hasEffect(effects) {
-            if case .showSelectedTab = $0 { return true }
+            if case .scheduleCheckpoint = $0 { return true }
             return false
-        }, "should emit showSelectedTab (selectTab effect)")
+        }, "commit persists the new selection via scheduleCheckpoint")
     }
 
     test("mruCycleCommitted at cursorIndex 0 is a focus no-op") {
@@ -268,9 +268,9 @@ func updateMruTests() {
         try expect(initiallySelected != nextOlderTarget)
         try expect(model.mruCycle == nil, "cycle does not linger")
         try expect(hasEffect(effects) {
-            if case .showSelectedTab = $0 { return true }
+            if case .scheduleCheckpoint = $0 { return true }
             return false
-        }, "commits the selection (selectTab effect); the switcher hides via reconcile")
+        }, "commits the selection (persists via scheduleCheckpoint); the switcher hides via reconcile")
     }
 
     test("tab removed during active cycle: commit selects a live tab") {
@@ -296,9 +296,9 @@ func updateMruTests() {
         try expect(live.contains(model.selectedTabId!), "selection is live")
         try expect(model.mruCycle == nil)
         try expect(hasEffect(effects) {
-            if case .showSelectedTab = $0 { return true }
+            if case .scheduleCheckpoint = $0 { return true }
             return false
-        }, "commits a live tab (selectTab effect); the switcher hides via reconcile")
+        }, "commits a live tab (persists via scheduleCheckpoint); the switcher hides via reconcile")
     }
 
     test("restore-time reconciliation: empty mruOrder fills on next update()") {
