@@ -278,17 +278,16 @@ func customTitleTests() {
         let home = NSHomeDirectory()
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "name": "General",
               "tabs": [{
                 "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
                 "focusedPaneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
-                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+                "rootNode": { "type": "leaf", "pane": { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "\(home)/world", "cwd": "~/world" } }
               }]
-            }],
-            "panes": [{ "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "\(home)/world", "cwd": "~/world" }]
+            }]
           }
         }
         """
@@ -302,17 +301,16 @@ func customTitleTests() {
     test("testImportDerivesSubtitleFromLaunchCwd") {
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "name": "General",
               "tabs": [{
                 "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
                 "focusedPaneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
-                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+                "rootNode": { "type": "leaf", "pane": { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "T", "launch": { "cwd": "~/projects" } } }
               }]
-            }],
-            "panes": [{ "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "T", "launch": { "cwd": "~/projects" } }]
+            }]
           }
         }
         """
@@ -326,17 +324,16 @@ func customTitleTests() {
     test("testImportNilCwdDerivesNilSubtitle") {
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "name": "General",
               "tabs": [{
                 "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
                 "focusedPaneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
-                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+                "rootNode": { "type": "leaf", "pane": { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "Terminal" } }
               }]
-            }],
-            "panes": [{ "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "Terminal" }]
+            }]
           }
         }
         """
@@ -351,7 +348,7 @@ func customTitleTests() {
         // Old JSON that still includes tab-level "title" and "subtitle" should decode fine
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "name": "General",
@@ -360,10 +357,9 @@ func customTitleTests() {
                 "title": "vim",
                 "subtitle": "~/world",
                 "focusedPaneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
-                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+                "rootNode": { "type": "leaf", "pane": { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "Terminal", "cwd": "~/world" } }
               }]
-            }],
-            "panes": [{ "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "Terminal", "cwd": "~/world" }]
+            }]
           }
         }
         """
@@ -526,17 +522,16 @@ func customTitleTests() {
         // JSON without customTitle should decode to nil (backward compat)
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
               "name": "General",
               "tabs": [{
                 "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
-                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+                "rootNode": { "type": "leaf", "pane": { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "Terminal" } }
               }]
-            }],
-            "panes": [{ "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "Terminal" }]
+            }]
           }
         }
         """

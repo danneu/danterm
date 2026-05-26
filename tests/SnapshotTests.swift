@@ -8,7 +8,7 @@ func snapshotTests() {
     test("decode valid AppInitFile JSON") {
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -17,13 +17,12 @@ func snapshotTests() {
               "tabs": [{
                 "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
                 "focusedPaneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
-                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+                "rootNode": { "type": "leaf", "pane": {
+                  "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
+                  "title": "Terminal",
+                  "cwd": "~/world"
+                } }
               }]
-            }],
-            "panes": [{
-              "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
-              "title": "Terminal",
-              "cwd": "~/world"
             }],
             "selectedTabId": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2"
           }
@@ -31,9 +30,9 @@ func snapshotTests() {
         """
         let data = json.data(using: .utf8)!
         let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
-        try expectEqual(initFile.version, 1)
+        try expectEqual(initFile.version, 2)
         try expectEqual(initFile.model.groups.count, 1)
-        try expectEqual(initFile.model.panes.count, 1)
+        try expectEqual(allPaneSnapshots(initFile.model).count, 1)
         try expectEqual(initFile.model.selectedTabId, "89B4C232-C840-42A8-8CA6-C133C8EBBFF2")
     }
 
@@ -58,34 +57,17 @@ func snapshotTests() {
         }
     }
 
-    test("loadValidatedInitFile rejects unsupported version") {
-        let json = """
-        {
-          "version": 2,
-          "model": {
-            "groups": [{
-              "name": "General",
-              "tabs": [{
-                "rootNode": { "type": "leaf" }
-              }]
-            }],
-            "panes": [{
-              "title": "Terminal"
-            }]
-          }
-        }
-        """
-        let data = json.data(using: .utf8)!
-        do {
-            _ = try loadValidatedInitFile(from: data)
-            throw TestFailure(message: "expected unsupported version to fail")
-        } catch let error as AppInitFileLoadError {
-            try expectEqual(error, .unsupportedVersion(2))
-        }
-    }
+    // The version guard flipped: v2 is the only accepted format; v1 (the old flat
+    // panes array) and v3+ are rejected outright with no version-dispatch fork.
+    test("loadValidatedInitFile accepts v2 and rejects v1 / v3") {
+        // v2 round-trips through the loader.
+        var model = makeModel()
+        createTab(&model)
+        let v2data = try JSONEncoder().encode(toInitFile(model))
+        _ = try loadValidatedInitFile(from: v2data)
 
-    test("loadValidatedInitFile rejects invalid snapshot") {
-        let json = """
+        // v1 (flat panes array) is rejected on version, not silently imported.
+        let v1json = """
         {
           "version": 1,
           "model": {
@@ -95,8 +77,43 @@ func snapshotTests() {
                 "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
               }]
             }],
-            "panes": []
+            "panes": [{ "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "Terminal" }]
           }
+        }
+        """
+        do {
+            _ = try loadValidatedInitFile(from: v1json.data(using: .utf8)!)
+            throw TestFailure(message: "expected v1 to be rejected")
+        } catch let error as AppInitFileLoadError {
+            try expectEqual(error, .unsupportedVersion(1))
+        }
+
+        // v3 (a future format) is rejected too.
+        let v3json = """
+        {
+          "version": 3,
+          "model": {
+            "groups": [{
+              "name": "General",
+              "tabs": [{ "rootNode": { "type": "leaf", "pane": { "title": "Terminal" } } }]
+            }]
+          }
+        }
+        """
+        do {
+            _ = try loadValidatedInitFile(from: v3json.data(using: .utf8)!)
+            throw TestFailure(message: "expected v3 to be rejected")
+        } catch let error as AppInitFileLoadError {
+            try expectEqual(error, .unsupportedVersion(3))
+        }
+    }
+
+    test("loadValidatedInitFile rejects invalid snapshot") {
+        // A well-formed v2 file that still fails validation: no group/tab at all.
+        let json = """
+        {
+          "version": 2,
+          "model": { "groups": [] }
         }
         """
         let data = json.data(using: .utf8)!
@@ -121,7 +138,7 @@ func snapshotTests() {
     test("decode split node") {
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -134,16 +151,12 @@ func snapshotTests() {
                   "type": "split",
                   "id": "CCCC0000-0000-0000-0000-000000000001",
                   "direction": "horizontal",
-                  "first": { "type": "leaf", "paneId": "AAAA0000-0000-0000-0000-000000000001" },
-                  "second": { "type": "leaf", "paneId": "AAAA0000-0000-0000-0000-000000000002" },
+                  "first": { "type": "leaf", "pane": { "id": "AAAA0000-0000-0000-0000-000000000001", "title": "left" } },
+                  "second": { "type": "leaf", "pane": { "id": "AAAA0000-0000-0000-0000-000000000002", "title": "right" } },
                   "ratio": 0.6
                 }
               }]
             }],
-            "panes": [
-              { "id": "AAAA0000-0000-0000-0000-000000000001", "title": "left" },
-              { "id": "AAAA0000-0000-0000-0000-000000000002", "title": "right" }
-            ],
             "selectedTabId": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2"
           }
         }
@@ -158,64 +171,17 @@ func snapshotTests() {
     }
 
     // MARK: - Validation
+    //
+    // The orphan-pane and missing-pane-reference checks are gone: with the pane
+    // embedded in its leaf, a pane exists iff a leaf owns it, so both are
+    // structurally impossible. Leaf-id uniqueness (a pane id on two leaves) is
+    // the lone surviving duplicate check; it subsumes the old within-tab and
+    // cross-tree duplicate checks.
 
-    test("validation rejects missing pane references") {
+    test("validation rejects pane id shared across two tab leaves") {
         let json = """
         {
-          "version": 1,
-          "model": {
-            "groups": [{
-              "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
-              "name": "General",
-              "isDefault": true,
-              "tabs": [{
-                "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
-                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
-              }]
-            }],
-            "panes": [],
-            "selectedTabId": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2"
-          }
-        }
-        """
-        let data = json.data(using: .utf8)!
-        let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
-        let model = validateAndBuild(initFile.model)
-        try expect(model == nil, "should reject missing pane reference")
-    }
-
-    test("validation rejects orphan panes") {
-        let json = """
-        {
-          "version": 1,
-          "model": {
-            "groups": [{
-              "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
-              "name": "General",
-              "isDefault": true,
-              "tabs": [{
-                "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
-                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
-              }]
-            }],
-            "panes": [
-              { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "used" },
-              { "id": "BBBBBBBB-0000-0000-0000-000000000000", "title": "orphan" }
-            ],
-            "selectedTabId": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2"
-          }
-        }
-        """
-        let data = json.data(using: .utf8)!
-        let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
-        let model = validateAndBuild(initFile.model)
-        try expect(model == nil, "should reject orphan panes")
-    }
-
-    test("validation rejects pane in two tab trees") {
-        let json = """
-        {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -224,30 +190,27 @@ func snapshotTests() {
               "tabs": [
                 {
                   "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
-                  "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+                  "rootNode": { "type": "leaf", "pane": { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "shared" } }
                 },
                 {
                   "id": "DDDDDDDD-0000-0000-0000-000000000001",
-                  "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+                  "rootNode": { "type": "leaf", "pane": { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "shared" } }
                 }
               ]
-            }],
-            "panes": [
-              { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "shared" }
-            ]
+            }]
           }
         }
         """
         let data = json.data(using: .utf8)!
         let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
         let model = validateAndBuild(initFile.model)
-        try expect(model == nil, "should reject pane shared across tabs")
+        try expect(model == nil, "should reject the same pane id appearing on two leaves")
     }
 
     test("validation rejects duplicate pane ID within one tab tree") {
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -260,14 +223,11 @@ func snapshotTests() {
                   "type": "split",
                   "id": "CCCC0000-0000-0000-0000-000000000001",
                   "direction": "horizontal",
-                  "first": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" },
-                  "second": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+                  "first": { "type": "leaf", "pane": { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "a" } },
+                  "second": { "type": "leaf", "pane": { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "b" } }
                 }
               }]
-            }],
-            "panes": [
-              { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "shared" }
-            ]
+            }]
           }
         }
         """
@@ -280,7 +240,7 @@ func snapshotTests() {
     test("validation rejects pane ID colliding with group ID") {
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -288,12 +248,9 @@ func snapshotTests() {
               "isDefault": true,
               "tabs": [{
                 "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
-                "rootNode": { "type": "leaf", "paneId": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A" }
+                "rootNode": { "type": "leaf", "pane": { "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A", "title": "collision" } }
               }]
-            }],
-            "panes": [
-              { "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A", "title": "collision" }
-            ]
+            }]
           }
         }
         """
@@ -306,7 +263,7 @@ func snapshotTests() {
     test("validation normalizes missing selectedTabId to first tab") {
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -314,12 +271,9 @@ func snapshotTests() {
               "isDefault": true,
               "tabs": [{
                 "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
-                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+                "rootNode": { "type": "leaf", "pane": { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "T" } }
               }]
-            }],
-            "panes": [
-              { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "T" }
-            ]
+            }]
           }
         }
         """
@@ -333,7 +287,7 @@ func snapshotTests() {
     test("validation normalizes invalid selectedTabId to first tab") {
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -341,12 +295,9 @@ func snapshotTests() {
               "isDefault": true,
               "tabs": [{
                 "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
-                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+                "rootNode": { "type": "leaf", "pane": { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "T" } }
               }]
             }],
-            "panes": [
-              { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "T" }
-            ],
             "selectedTabId": "00000000-0000-0000-0000-000000000000"
           }
         }
@@ -361,17 +312,14 @@ func snapshotTests() {
     test("validation supports omitted IDs and focusedPaneId") {
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "name": "General",
               "tabs": [{
                 "rootNode": { "type": "leaf" }
               }]
-            }],
-            "panes": [
-              { "title": "Terminal", "cwd": "~/world" }
-            ]
+            }]
           }
         }
         """
@@ -392,7 +340,7 @@ func snapshotTests() {
     test("reconstructed model preserves all UUIDs") {
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -401,10 +349,9 @@ func snapshotTests() {
               "tabs": [{
                 "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
                 "focusedPaneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
-                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+                "rootNode": { "type": "leaf", "pane": { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "T" } }
               }]
             }],
-            "panes": [{ "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "T" }],
             "selectedTabId": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2"
           }
         }
@@ -445,52 +392,50 @@ func snapshotTests() {
     test("decode JSON without scrollback field yields nil scrollback") {
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
               "name": "General",
               "tabs": [{
                 "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
-                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+                "rootNode": { "type": "leaf", "pane": {
+                  "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
+                  "title": "Terminal"
+                } }
               }]
-            }],
-            "panes": [{
-              "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
-              "title": "Terminal"
             }]
           }
         }
         """
         let data = json.data(using: .utf8)!
         let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
-        try expect(initFile.model.panes[0].scrollback == nil, "scrollback should be nil when absent from JSON")
+        try expect(allPaneSnapshots(initFile.model)[0].scrollback == nil, "scrollback should be nil when absent from JSON")
     }
 
     test("decode JSON with scrollback field preserves value") {
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
               "name": "General",
               "tabs": [{
                 "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
-                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+                "rootNode": { "type": "leaf", "pane": {
+                  "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
+                  "title": "Terminal",
+                  "scrollback": "$ echo hello\\nhello\\n$ "
+                } }
               }]
-            }],
-            "panes": [{
-              "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
-              "title": "Terminal",
-              "scrollback": "$ echo hello\\nhello\\n$ "
             }]
           }
         }
         """
         let data = json.data(using: .utf8)!
         let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
-        try expectEqual(initFile.model.panes[0].scrollback, "$ echo hello\nhello\n$ ")
+        try expectEqual(allPaneSnapshots(initFile.model)[0].scrollback, "$ echo hello\nhello\n$ ")
     }
 
     test("round-trip encode/decode preserves scrollback") {
@@ -542,7 +487,7 @@ func snapshotTests() {
         // Use same UUID for group and tab
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -550,12 +495,9 @@ func snapshotTests() {
               "isDefault": true,
               "tabs": [{
                 "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
-                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+                "rootNode": { "type": "leaf", "pane": { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "T" } }
               }]
-            }],
-            "panes": [
-              { "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5", "title": "T" }
-            ]
+            }]
           }
         }
         """
@@ -618,18 +560,17 @@ func snapshotTests() {
     test("snapshot without tab todos field decodes with empty list") {
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "name": "General",
               "tabs": [{
-                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+                "rootNode": { "type": "leaf", "pane": {
+                  "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
+                  "title": "Terminal",
+                  "cwd": "~/world"
+                } }
               }]
-            }],
-            "panes": [{
-              "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
-              "title": "Terminal",
-              "cwd": "~/world"
             }]
           }
         }
@@ -645,18 +586,17 @@ func snapshotTests() {
     test("snapshot without todos field decodes with empty array") {
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "name": "General",
               "tabs": [{
-                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+                "rootNode": { "type": "leaf", "pane": {
+                  "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
+                  "title": "Terminal",
+                  "cwd": "~/world"
+                } }
               }]
-            }],
-            "panes": [{
-              "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
-              "title": "Terminal",
-              "cwd": "~/world"
             }]
           }
         }

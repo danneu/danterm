@@ -30,7 +30,10 @@ func ipcUpdateTests() {
             throw TestFailure(message: "expected object snapshot")
         }
         try expect(object["groups"] != nil, "snapshot should include groups")
-        try expect(object["panes"] != nil, "snapshot should include panes")
+        // Panes are embedded in the tree leaves now, not a top-level array.
+        try expect(object["panes"] == nil, "snapshot should not include a top-level panes array")
+        let leaf = object["groups"]?.asArray?.first?["tabs"]?.asArray?.first?["rootNode"]
+        try expect(leaf?["pane"]?["id"] != nil, "leaf rootNode should embed its pane")
     }
 
     test("pane.info explicit pane returns containing pane tab and group") {
@@ -624,7 +627,7 @@ func ipcUpdateTests() {
         let tabId = try requireTabId(reply["tab"]?["id"], "tab.new should return tab id")
         let paneId = try requirePaneId(reply["panes"]?.asArray?.first?["id"], "tab.new should return pane id")
         try expectEqual(reply["tab"]?["focusedPaneId"]?.asString, paneId.rawValue.uuidString)
-        try expectEqual(reply["tab"]?["rootNode"]?["paneId"]?.asString, paneId.rawValue.uuidString)
+        try expectEqual(reply["tab"]?["rootNode"]?["pane"]?["id"]?.asString, paneId.rawValue.uuidString)
         try expectEqual(reply["panes"]?.asArray?.first?.asObject?.keys.count, 1)
         try expectEqual(tabById(tabId, in: model)?.customTitle, "clock")
         try expectEqual(tabById(tabId, in: model)?.displayTitle, "clock")

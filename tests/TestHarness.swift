@@ -91,3 +91,24 @@ func createTab(_ model: inout AppModel, inGroupId: GroupId? = nil, background: B
 func hasEffect(_ effects: [Effect], _ check: (Effect) -> Bool) -> Bool {
     effects.contains(where: check)
 }
+
+// MARK: - Snapshot (v2 leaf-embedded) test helpers
+
+/// Collect every leaf's embedded PaneSnapshot from a snapshot split tree.
+func paneSnapshots(in node: SplitNodeSnapshot) -> [PaneSnapshot] {
+    switch node {
+    case .leaf(let ps): return [ps]
+    case .split(_, _, let first, let second, _):
+        return paneSnapshots(in: first) + paneSnapshots(in: second)
+    }
+}
+
+/// Every PaneSnapshot embedded across all of a snapshot's tab trees.
+func allPaneSnapshots(_ snapshot: AppModelSnapshot) -> [PaneSnapshot] {
+    snapshot.groups.flatMap(\.tabs).flatMap { paneSnapshots(in: $0.rootNode) }
+}
+
+/// Find an embedded PaneSnapshot by its id string.
+func paneSnapshot(_ id: String, in snapshot: AppModelSnapshot) -> PaneSnapshot? {
+    allPaneSnapshots(snapshot).first { $0.id == id }
+}

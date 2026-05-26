@@ -1,17 +1,36 @@
 # Tree-owns-panes model + full view reconciler
 
-**Supersedes** `plans/wip/fwiw-my-message-wasn-t-zazzy-muffin.md` (which is
-deleted). That plan migrated the view to a reconciler on top of today's model.
-This one puts the model restructure first as the foundation, so the worst bug
-classes die at the model layer before the view migration starts, then folds in
-the reconciler. Stages land sequentially (see Delivery sequence).
+## Stage map
+
+| Implemented? | Stage          | Part   | Section                                                                                      |
+| ------------ | -------------- | ------ | -------------------------------------------------------------------------------------------- |
+| Yes          | 1              | Part 1 | 1a -- Tree-owns-panes (live model, wire format unchanged)                                    |
+| Yes          | 2              | Part 1 | 1a -- One leaf-embedded snapshot format (v2)                                                 |
+|              | _(checkpoint)_ | --     | Part 1 -> Part 2 go/no-go                                                                    |
+|              | 3              | Part 2 | `reconcileFocusBorders`                                                                      |
+|              | 4              | Part 2 | `reconcilePaneChrome` (toolbars + search overlay)                                            |
+|              | 5              | Part 2 | `reconcileSidebar` + Part 1b (`ViewLocalState`/`RenameTarget`)                               |
+|              | 6              | Part 2 | `reconcileWindowChrome`                                                                      |
+|              | 7              | Part 2 | `reconcileSwitcher`                                                                          |
+|              | 8              | Part 2 | `reconcileSurfaceExistence` + `reconcileContainers` + Part 1c (keyed surface reconciliation) |
+|              | 9              | Part 2 | Rename `Effect` -> `Command`                                                                 |
+
+This plan does two things, in order. First it restructures the model so a pane
+exists iff a tree leaf owns it (Part 1) -- pane content moves into the leaf and
+the parallel `panes` dict is deleted, so the dual-write drift bugs become
+structurally impossible. Then it migrates the view to a reconciler (Part 2):
+`update()` returns only commands, and a `reconcile()` pass derives the
+AppKit/surface tree from the model after every `send()`, replacing ~91
+hand-emitted view-sync effects. The model restructure goes first as the
+foundation, so the worst bug classes die at the model layer before the view
+migration starts. Stages land sequentially (see Delivery sequence).
 
 ## Context
 
 Two long-standing sources of fragility, attacked in order:
 
 1. **Dual-stored panes.** Pane data lives twice: in the flat
-   `AppModel.panes: [PaneId: PaneModel]` dict (`app/Model.swift:179`) *and* in
+   `AppModel.panes: [PaneId: PaneModel]` dict (`app/Model.swift:179`) _and_ in
    each tab's split tree, whose leaves reference panes by id
    (`SplitNodeModel.leaf(PaneId)`, `app/Model.swift:89`). Every
    tree-mutating handler must hand-mirror the dict, and restore spends ~50 lines
@@ -29,7 +48,7 @@ Two long-standing sources of fragility, attacked in order:
 The fix is two governing principles:
 
 - **Single source of truth at the leaf.** A pane exists iff a tree leaf owns it.
-  Pane *content* moves into the leaf; the `panes` dict is deleted; the
+  Pane _content_ moves into the leaf; the `panes` dict is deleted; the
   drift invariant becomes structurally impossible.
 - **View is a projection of the model.** `update()` returns only commands
   (true side effects); a `reconcile()` pass derives the AppKit/surface tree from
@@ -54,7 +73,7 @@ value type and fully unit-testable.
   `panes:` label -- **two** production callers update: the restore builder
   (`Model.swift:485`) and `AppRuntime.init` (`AppRuntime.swift:63-66`), whose
   empty-launch model becomes `AppModel(groups: [GroupModel(id: GroupId(), name:
-  "General")])` (no `panes:` -- no tabs/leaves exist yet). Test helpers update in
+"General")])` (no `panes:` -- no tabs/leaves exist yet). Test helpers update in
   lockstep (see Tests).
 - `focusedPaneId` **stays a bare `PaneId` on `TabModel`** (`Model.swift:112`).
   It is a per-tab pointer, not pane content -- the one place a `PaneId`
@@ -75,7 +94,7 @@ mutating func updatePane(_ id: PaneId, _ body: (inout PaneModel) -> Void)  // wa
 render frame (Metal drives rendering through the ghostty surface, off the Elm
 loop), and the model already does whole-tree walks on every
 relevant `Msg` (`tabForPane`, `effectiveSurfaceVisibility`, `reconcileMru`).
-**No *stored* index** (`[PaneId: PaneModel]` or `[PaneId: TabId]`) -- that would
+**No _stored_ index** (`[PaneId: PaneModel]` or `[PaneId: TabId]`) -- that would
 reintroduce the drift this refactor removes. Per-call transient maps inside a
 single handler (e.g. the existing `paneToTabIdMap`, `Update.swift:2577`) are
 fine and stay.
@@ -93,15 +112,15 @@ rewritten too: `ThemeBrowserView.swift:146` (theme), `PaneWrapperView.swift:336`
 `:372` (cwd), `TabTodoPopoverView.swift:396`/`:552`/`:895` (todos/title),
 `TodoPopoverView.swift:66` (todos). The mechanical patterns:
 
-| Today | Becomes |
-|---|---|
-| `model.panes[id]` (read) | `model.pane(id)` |
-| `model.panes[id]?.field = x` / `.todos.append(...)` | `model.updatePane(id) { $0.field = x }` |
-| `model.panes.removeValue(forKey: id)` | **delete the line** (leaf removal covers it) |
-| `model.panes[id] = newPane` (insert) | build the leaf via the tree op (`splitLeaf`/`createTab`) |
-| `for (id, p) in model.panes` | iterate `model.allPanes`; for mutate-all that also emits effects, two passes (collect target ids, then `updatePane` + append effect each) -- e.g. the remote-theme loops (`Update.swift:615`/`:709`) |
-| `model.panes.keys` / `.count` | `model.allPaneIds` / `model.allPaneIds.count` |
-| `Set(model.panes.keys)` (diff idiom) | `Set(model.allPaneIds)` (`Update.swift:1603-1606` paneSplit new-id diff) |
+| Today                                               | Becomes                                                                                                                                                                                              |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `model.panes[id]` (read)                            | `model.pane(id)`                                                                                                                                                                                     |
+| `model.panes[id]?.field = x` / `.todos.append(...)` | `model.updatePane(id) { $0.field = x }`                                                                                                                                                              |
+| `model.panes.removeValue(forKey: id)`               | **delete the line** (leaf removal covers it)                                                                                                                                                         |
+| `model.panes[id] = newPane` (insert)                | build the leaf via the tree op (`splitLeaf`/`createTab`)                                                                                                                                             |
+| `for (id, p) in model.panes`                        | iterate `model.allPanes`; for mutate-all that also emits effects, two passes (collect target ids, then `updatePane` + append effect each) -- e.g. the remote-theme loops (`Update.swift:615`/`:709`) |
+| `model.panes.keys` / `.count`                       | `model.allPaneIds` / `model.allPaneIds.count`                                                                                                                                                        |
+| `Set(model.panes.keys)` (diff idiom)                | `Set(model.allPaneIds)` (`Update.swift:1603-1606` paneSplit new-id diff)                                                                                                                             |
 
 An optional read-only `subscript(_ id: PaneId) -> PaneModel?` (get = `pane(id)`)
 may be added as `model[id]` sugar -- it is a pure function of the tree, so no
@@ -114,7 +133,7 @@ These helpers can no longer reconstruct a leaf from an id alone -- they must
 thread the `PaneModel` payload:
 
 - `removeLeaf(_:paneId:)` -> returns `(newTree: SplitNodeModel?, nextFocus:
-  PaneId?, removed: PaneModel?)` (`ModelOperations.swift:128`). Close paths
+PaneId?, removed: PaneModel?)` (`ModelOperations.swift:128`). Close paths
   discard `removed`; move paths re-insert it.
 - `splitLeaf(...)` takes `newPane: PaneModel` (not `newPaneId`) and builds
   `.leaf(newPane)`; the original leaf is preserved as the existing node
@@ -135,13 +154,13 @@ The live-model restructure is **decoupled from the wire format**:
   The flat `panes` array stays as a pure encode/decode join, produced from and
   consumed back into leaves -- never a live store, so no drift.
   - Decode (`validateAndBuildDetailed`, `Model.swift:314-488`): attach the
-    built `PaneModel` to each leaf *during* the tree walk
+    built `PaneModel` to each leaf _during_ the tree walk
     (`parseSplitNode`) instead of building the dict at step 5
     (`:462-474`). Keep every existing check (missing-pane `:398-401`,
     orphan `:448-454`, duplicate-in-two-trees `:403-406`, id uniqueness) -- the
     flat array is still the input. The `autoPaneIds`/`autoPaneCursor` omitted-id
     logic (`Model.swift:317-343`, `:524-528`) is unchanged. Keep deriving restore
-    chrome from the *snapshot* form (`deriveTabChromeFromSnapshot`, launch-cwd
+    chrome from the _snapshot_ form (`deriveTabChromeFromSnapshot`, launch-cwd
     aware, `ModelOperations.swift:413`), **not** `deriveTabChrome(from: PaneModel)`
     (pane-cwd), to preserve restore titles.
   - Encode (`toSnapshot`, `ModelOperations.swift:947`): iterate leaves and read
@@ -156,7 +175,7 @@ The live-model restructure is **decoupled from the wire format**:
 
 - **Step 2: one leaf-embedded snapshot format (v2); the public/persisted split is dropped.**
   We are dropping external backwards-compat for persistence. There is **one**
-  snapshot type hierarchy, leaf-embedded, serving `ls`, export, import, *and* the
+  snapshot type hierarchy, leaf-embedded, serving `ls`, export, import, _and_ the
   checkpoint/recovery files alike -- no separate persisted types, no flat `panes`
   array, no version-dispatch fork.
   - **One leaf-embedded hierarchy.** `SplitNodeSnapshot.leaf(paneId: String?)` ->
@@ -173,10 +192,10 @@ The live-model restructure is **decoupled from the wire format**:
     `:1053`); `toSplitNodeSnapshot` (`:1058`) builds the `PaneSnapshot` from each
     leaf's `PaneModel` inline (with `scrollback: nil`) instead of emitting
     `.leaf(paneId:)`. This single encoder serves the IPC `ls` response
-    (`Update.swift:1544`), `.exportState` (`Update.swift:755`), import, *and* the
+    (`Update.swift:1544`), `.exportState` (`Update.swift:755`), import, _and_ the
     checkpoints. **Scrollback enrichment collapses to one pure helper**
     `graftScrollback(onto: AppModelSnapshot, scrollbackByPaneId: [PaneId: String])
-    -> AppModelSnapshot` that walks the embedded tree and sets each leaf's
+-> AppModelSnapshot` that walks the embedded tree and sets each leaf's
     `PaneSnapshot.scrollback` from the map. The live-surface read stays impure as a
     shared `scrollbackByPaneId() -> [PaneId: String]` step (today's `enrichSnapshot`
     inner loop, `AppRuntime.swift:966-974`; NOT in the pure target). Both
@@ -200,9 +219,9 @@ The live-model restructure is **decoupled from the wire format**:
     positionally paired id-less flat `panes` entries with id-less leaves; with the
     pane embedded in the leaf, an id-less leaf just mints a fresh `PaneId` inline
     during the walk (the omitted-id hand-authoring affordance survives; the pre-pass
-    + cursor threading does not). Restore chrome still derives from the snapshot
-    form (`deriveTabChromeFromSnapshot`, `:482`), now read from the focused leaf's
-    embedded `PaneSnapshot`.
+    - cursor threading does not). Restore chrome still derives from the snapshot
+      form (`deriveTabChromeFromSnapshot`, `:482`), now read from the focused leaf's
+      embedded `PaneSnapshot`.
   - **Version 2; reject v1 (no version dispatch).** Bump the written version to `2`
     (`toInitFile` `ModelOperations.swift:996`, `performEnrichedCheckpoint`
     `AppRuntime.swift:992`). `loadValidatedInitFile` (`ModelOperations.swift:869`)
@@ -222,12 +241,12 @@ The live-model restructure is **decoupled from the wire format**:
   - **`mergeCheckpoints` on the validated pair (single format).** Keep the
     merge-on-normalized-pair shape: `mergeCheckpoints` (`ModelOperations.swift:1109`,
     today reads the flat `.panes`) takes the two `ValidatedAppRestore`s' `[PaneId:
-    PaneSnapshot]` maps and grafts `enriched.paneSnapshots[id]?.scrollback` into
+PaneSnapshot]` maps and grafts `enriched.paneSnapshots[id]?.scrollback` into
     `light.paneSnapshots` by id, light authoritative for structure/model. This skips
     re-validation (light is already validated) and never tree-walks. `main.swift:93`
     passes the validated pair (not `.snapshot`), and the recovery carrier
     `delegate.lastSessionSnapshot` (`AppDelegate.swift:23`, consumed `:141`) holds
-    the merged *validated* result so the crash-recovery structure is never
+    the merged _validated_ result so the crash-recovery structure is never
     decoded/validated twice. **No mixed-version handling** -- under reject-v1 the
     merge only ever sees v2+v2. (The explicit `--init` `initSnapshot` path is
     unaffected in flow -- it still validates its snapshot -- but a hand-authored
@@ -238,10 +257,10 @@ The live-model restructure is **decoupled from the wire format**:
 `searchState` (`Model.swift:183`), `lastNotificationTime` (`:182`), and all
 runtime side-tables (`surfaces`, `surfaceVisibility`, `replayFiles`,
 `searchDebounceTimers`, `tokenStore`) stay `[PaneId: ...]`. They are per-pane
-*runtime/ephemeral* state, never persisted, never the orphan-bug source; a stale
+_runtime/ephemeral_ state, never persisted, never the orphan-bug source; a stale
 entry self-prunes harmlessly. Their cleanup calls (`removePaneSearchState`,
 `lastNotificationTime.removeValue`) stay in the destruction handlers -- they do
-*not* fold into `removeLeaf` (a pure tree function with no side-table access).
+_not_ fold into `removeLeaf` (a pure tree function with no side-table access).
 
 ### The 8 dual-write handlers collapse
 
@@ -259,7 +278,7 @@ move handlers stop relying on a global dict:
   (`:903-907`) becomes a near no-op** -- a pane in no tree cannot exist, so it
   reduces to side-table cleanup. Can no longer leave a half-removed pane.
 - `movePaneToTab` (`:297`) / `movePaneToNewTab` (`:368`): `removeLeaf` returns
-  the `removed` `PaneModel`; insert *that* into the target leaf
+  the `removed` `PaneModel`; insert _that_ into the target leaf
   (`.leaf(removed)`); derive chrome from `removed`. The pane physically moves
   between trees in one operation -- the scary global-dict indirection is gone.
 - `closeTabBody` (`:2618`): tab removal drops the subtree; per-pane `removeValue`
@@ -332,9 +351,9 @@ at pass entry (before the row diff, as `reload(model:)` does at
 ## 1c. Keyed surface reconciliation
 
 `surfaces: [PaneId: TerminalView]` (`AppRuntime.swift:21`) is already keyed by
-id. Surface *destruction* becomes a projection: `reconcileSurfaceExistence`
+id. Surface _destruction_ becomes a projection: `reconcileSurfaceExistence`
 tears down surfaces for panes no longer in `model.allPaneIds` (Part 2). Surface
-*creation* stays a command (it forks a PTY and has `.surfaceCreationFailed`
+_creation_ stays a command (it forks a PTY and has `.surfaceCreationFailed`
 feedback) -- and because the reconciler only destroys, the restore-race a
 create-capable reconciler would have does not exist. With tree-owns-panes,
 "desired surfaces" is simply `model.allPaneIds` -- no dict to cross-check.
@@ -346,7 +365,7 @@ create-capable reconciler would have does not exist. With tree-owns-panes,
 After Part 1, `update()` returns only **commands** (transient imperatives /
 external side effects): PTY **creation** (destruction is a projection -- see
 below), focus moves, **per-pane theme application**, notifications, IPC,
-checkpoint, config writes, modal confirmations, TODO popovers. Everything the view *shows* becomes a
+checkpoint, config writes, modal confirmations, TODO popovers. Everything the view _shows_ becomes a
 **projection** derived by `reconcile()`. Rename `Effect` -> `Command` (last; see
 Delivery sequence) so the compiler enforces that no projection emission survives.
 
@@ -375,13 +394,13 @@ per-pass cache, apply only the delta, self-prune dead keys.
 
 **Per-pane theme application stays a command, NOT a projection.**
 `applyPaneTheme`/`reapplyAllPaneThemes` (`AppRuntime.swift:1106`/`:1113`) re-apply
-config to every themed pane on a *config reload* (`reloadGhosttyConfig`, the
+config to every themed pane on a _config reload_ (`reloadGhosttyConfig`, the
 Ghostty config-change callback `GhosttyApp.swift:346`, prefs
 `PreferencesPanel.swift:382`) **even when the theme name is unchanged** -- the
 resolved theme changed, not the name. A name-keyed projection diff would skip
 that reapply and leave stale themes, so theme application is an external side
 effect (depends on the loaded Ghostty config, not model state) and remains a
-command. Only the focus *border* reconciles.
+command. Only the focus _border_ reconciles.
 
 **The `panes.keys == allLeaves` DEBUG assertion the old plan added is gone** --
 tree-owns-panes makes it structurally impossible to violate. `desiredSurfaceIds`
@@ -417,7 +436,7 @@ riskiest, AppKit-bound logic in Part 2 into structure-insensitive unit tests
 (the simple keyed passes already get this for free via `applyDiff`).
 
 - **Content (`SplitContainerView`) -- coarse, EAGER.** `computeContainerOps(old:
-  [TabId: ContainerShape], new:, selectedTabId:) -> [ContainerOp]` (pure) emits
+[TabId: ContainerShape], new:, selectedTabId:) -> [ContainerOp]` (pure) emits
   remove/rebuild/visibility ops; the thin executor applies them. **`new` (the
   desired set) is ALL model tabs' container shapes -- a total function of the
   model, no "mounted set" side-input.** The selected tab's container is visible;
@@ -437,18 +456,18 @@ riskiest, AppKit-bound logic in Part 2 into structure-insensitive unit tests
   **Rebuild/remove invalidates host-local chrome caches.** A `rebuild` (or
   `remove`) op recreates the tab's `PaneWrapperView`s
   (`SplitContainerView.rebuild()` removes all subviews), so the toolbar and
-  search overlay -- subviews of the *wrapper* -- are gone, while the focus border
+  search overlay -- subviews of the _wrapper_ -- are gone, while the focus border
   rides the persisted `TerminalView` and survives. Therefore the container
   executor, for every leaf pane in a removed-or-rebuilt container, **clears
   `caches.paneToolbar`/`caches.searchOverlay` for that pane id** before
   `reconcilePaneChrome` runs (the next pass). Without this, the value-unchanged
   chrome diff would skip the fresh wrapper, leaving it with no toolbar content or
-  a dropped active-search overlay. `focusBorders` is *not* invalidated (its host
+  a dropped active-search overlay. `focusBorders` is _not_ invalidated (its host
   persists). This mirrors today's `refreshPaneToolbars`/search-rehydrate that runs
   immediately after a container build (`AppRuntime.swift:1535`,`:1543`).
 - **Sidebar (`NSOutlineView`) -- fine.**
   `computeSidebarRowOps(old: SidebarProjection, new: SidebarProjection) ->
-  [SidebarRowOp]` (pure) diffs rows/order/per-row attributes/collapse/jump badge
+[SidebarRowOp]` (pure) diffs rows/order/per-row attributes/collapse/jump badge
   into minimal `insert`/`remove`/`move`/`reload` ops; the thin executor issues the
   matching `insertItems`/`removeItems`/`moveItem`/`reloadItem` (inconsistent batch
   ops crash `NSOutlineView` hard, so this is the highest-value pass to keep pure).
@@ -480,7 +499,7 @@ struct ReconcilerCaches {
 The `paneToolbar`/`searchOverlay`/`switcher` caches back `reconcilePaneChrome`
 and `reconcileSwitcher`; without them those passes could not diff and would
 re-apply (or fail to hide) on every `send()`. Cache-lifetime rule: any cache
-whose host view is *recreated* by an earlier pass must be invalidated for the
+whose host view is _recreated_ by an earlier pass must be invalidated for the
 affected keys before its own pass runs -- `reconcileContainers` clears
 `paneToolbar`/`searchOverlay` for panes in rebuilt/removed containers (see
 Content above); `focusBorders` needs no such invalidation (its `TerminalView`
@@ -505,7 +524,7 @@ func applyDiff<K: Hashable, V: Equatable>(
 ```
 
 **A key leaving `desired` is a removal, not just a cache prune.** The original
-sketch pruned the cache silently, so a projection that *disappears* (a search
+sketch pruned the cache silently, so a projection that _disappears_ (a search
 overlay after `.endSearch` `Update.swift:1250`, while its pane lives on) would
 never be torn down -- the overlay would linger. The `remove` callback fixes
 this. Two keying disciplines, both correct under it:
@@ -534,10 +553,10 @@ payload**), the sidebar projection (rows + attributes + jump badge from
 `model.jumpMode?.keyMap[tab.id]`; **selection excluded**), the per-pane
 focus-border state (`(focused, bell)` from `isFocusedAndVisible` +
 `paneHasUnreadAlert` -- note single-pane tabs draw no border,
-`ModelOperations.swift:900`), the search-overlay *render* projection
+`ModelOperations.swift:900`), the search-overlay _render_ projection
 (`[PaneId: SearchOverlayRender]` -- needle + total/selected, keyed only for panes
 with active search, so an ended search drops the key and triggers the `remove`
-teardown), the switcher render projection (a *single* `SwitcherProjection?` --
+teardown), the switcher render projection (a _single_ `SwitcherProjection?` --
 rows + `cursorIndex` from `model.mruCycle`, mirroring `SwitcherPanel.render`;
 `nil` when no cycle is active), `desiredPaneToolbar(model:pane:)` (title/cwd via
 `paneToolbarText`, progress, isRemote/remoteSession, unread-alert count,
@@ -568,7 +587,7 @@ out of AppKit so it is unit-testable.
   the migration removes a `.showSelectedTab` emission (all 8 sites) or a
   visible-tab `.rebuildTabContainer`, drop the helper in its place -- 1:1 parity
   with today's `prepareForViewSwap` clearing. The reconciler still dismisses a
-  *stranded* AppKit popover when its anchor container is torn down/rebuilt.
+  _stranded_ AppKit popover when its anchor container is torn down/rebuilt.
 - **Restore** (`commitRestoreSession`, `AppRuntime.swift:1275`) sets
   `surfaces`+`model` then calls `reconcile()`. `tearDownCurrentSession`
   (`:1245`, runs as commit's first line `:1276`) resets the whole
@@ -599,7 +618,7 @@ globally-coupled action and goes last.
 **Per-stage invariant:** each reconcile-pass stage deletes the projection
 emission sites AND the corresponding `Effect` case(s) + their `perform` arm(s)
 **in the same stage** (as stage 3 does). Deleting the case is what makes a
-*missed* emission a compile error within that stage; otherwise the stale
+_missed_ emission a compile error within that stage; otherwise the stale
 `perform` arm still runs alongside the new reconcile pass (double-sync) -- the
 exact silent-miss class this plan exists to kill, which the pure tests
 (commands-only on a handful of handlers, not global) cannot catch. With every
@@ -609,7 +628,7 @@ the surviving command enum.
 1. **Tree-owns-panes, live model (wire format unchanged).** `leaf(PaneModel)`,
    delete `panes`, add `pane`/`updatePane`/`allPaneIds`, tree-helper signature
    changes, rewrite ~98 app call sites + the 8 handlers, `toSnapshot`/decode
-   read-from/attach-to leaves (still v1). No view-*architecture* change, but the
+   read-from/attach-to leaves (still v1). No view-_architecture_ change, but the
    view files reading `model.panes` (ThemeBrowser/PaneWrapper/TabTodoPopover/
    TodoPopover, listed above) are rewritten to `model.pane(...)` to compile.
    **Banks the entire drift-bug elimination.**
@@ -617,7 +636,7 @@ the surviving command enum.
    delete the flat `panes` array from `AppModelSnapshot`, bump the written version
    to `2`. The single `toSnapshot` encoder emits the embedded shape for `ls`,
    `.exportState`, import, and checkpoints alike; one pure `graftScrollback(onto:
-   AppModelSnapshot, scrollbackByPaneId:)` over the embedded tree (fed by the shared
+AppModelSnapshot, scrollbackByPaneId:)` over the embedded tree (fed by the shared
    impure `scrollbackByPaneId()` read) enriches both export and the enriched
    checkpoint -- no `graftScrollbackFlat`, no separate persisted types. The decoder
    drops the orphan/missing/cross-tree-dup checks (structurally impossible) but
@@ -634,7 +653,7 @@ the surviving command enum.
 
 > **Checkpoint: Part 1 -> Part 2 is an explicit go/no-go, not a foregone
 > continuation.** Stages 1-2 carry most of the value at materially lower risk:
-> they delete the dual-write drift bug class *structurally* and ship a stable,
+> they delete the dual-write drift bug class _structurally_ and ship a stable,
 > bisectable resting point. Part 2 (stages 3-9) trades "forgot to emit X" bugs for
 > "host-local cache coherence across rebuilds" bugs (the `paneToolbar`/
 > `searchOverlay` invalidation dance). Re-evaluate here: if Part 2's
@@ -661,7 +680,7 @@ the surviving command enum.
    cases + `perform` arms; add `ViewLocalState.sidebarRenameTarget` (Part 1b) --
    hoist `RenameTarget` out of `SidebarView` into the model layer, store
    `ViewLocalState` on `AppRuntime`, and set/clear it from `beginRenaming` + every
-   rename-finish path *before* wiring the row guard; selection view-owned. Lands
+   rename-finish path _before_ wiring the row guard; selection view-owned. Lands
    the pure `computeSidebarRowOps` + thin executor (see Apply granularity). The
    trickiest code, landing isolated.
 6. `reconcileWindowChrome` -- delete `setWindowTitle`/badge emissions AND their
@@ -735,7 +754,7 @@ model and projection logic are pure and ARE tested.
   - **`insertAtLeaf` payload threading via `.movePane(intent: .splitRight)`** on a
     pane with distinct cwd/theme/todos: the full `PaneModel` payload lands at the
     new split position and the source position no longer holds it. This is the
-    *only* path through `insertAtLeaf` (`.movePane` split intent -> `moveLeaf` ->
+    _only_ path through `insertAtLeaf` (`.movePane` split intent -> `moveLeaf` ->
     `insertAtLeaf`, `Update.swift:285`); `movePaneToTab` does a manual
     `removeLeaf` + wrap (`Update.swift:306-321`) and `swapLeaves` uses
     `swapLeavesInner`, so neither covers it. `insertAtLeaf` today rebuilds leaves
@@ -751,11 +770,11 @@ model and projection logic are pure and ARE tested.
     (empty effects, model unchanged). **Stages 1-7** additionally assert it emits a
     `.destroySurface` per sibling pane (the sibling-leak regression this refactor
     closes). **Stage 8 deletes `.destroySurface`** (teardown moves to
-    `reconcileSurfaceExistence`), so this assertion *migrates in stage 8*: drop the
+    `reconcileSurfaceExistence`), so this assertion _migrates in stage 8_: drop the
     destroy-effect expectation (now empty for the structural part) and instead
     assert, via the pure surface-existence diff (Part 2 tests), that every sibling
     pane is selected for teardown once it is absent from `model.allPaneIds`.
-  - *(step 2)* embedded-format native round-trip (an `AppInitFile` v2 with panes
+  - _(step 2)_ embedded-format native round-trip (an `AppInitFile` v2 with panes
     nested in `rootNode` leaves decodes to leaf-owned panes and re-encodes
     identically); **`ls`/export JSON has the embedded shape** -- panes in the tree
     leaves, no top-level `panes` array (pins the new CLI contract that SKILL.md
@@ -774,7 +793,7 @@ model and projection logic are pure and ARE tested.
     normalized pair** -- grafting enriched `paneSnapshots` scrollback into light's
     map by id, light authoritative for structure (replacing `CheckpointTests`'
     hand-built flat arrays `:261-355`); the pure `graftScrollback(onto:
-    AppModelSnapshot, scrollbackByPaneId:)` helper embeds scrollback into the
+AppModelSnapshot, scrollbackByPaneId:)` helper embeds scrollback into the
     embedded leaves. The shared `scrollbackByPaneId()` live-surface read is impure
     (not in the pure target) -- its end-to-end path is manual QA step 11.
 
@@ -814,7 +833,7 @@ model and projection logic are pure and ARE tested.
     (ratio carveout); a leaf `PaneModel` metadata edit (title/cwd/progress/todo)
     compares **equal** (payload excluded); a structural change (add/remove/move
     leaf, change direction, zoom toggle) compares **unequal**.
-  - sidebar (incl. jump badge, *excluding* selection -- `resolveReloadSelection`
+  - sidebar (incl. jump badge, _excluding_ selection -- `resolveReloadSelection`
     keeps its existing tests); focus-border (incl. single-pane-no-border);
     pane-toolbar render projection; window title/badges.
   - **search-overlay disappearance**: with search active the projection has the
@@ -825,7 +844,7 @@ model and projection logic are pure and ARE tested.
     issues `orderOut`). Pure: assert non-nil then nil.
   - **surface-existence teardown selection** (the stage-8 target of the migrated
     `surfaceCreationFailed` assertion): pure `surfacesToTearDown(liveSurfaceIds:,
-    model:) = liveSurfaceIds - Set(model.allPaneIds)`. A model missing a pane
+model:) = liveSurfaceIds - Set(model.allPaneIds)`. A model missing a pane
     whose surface is still live selects exactly that pane (and its split siblings
     after a `surfaceCreationFailed` tab removal); surviving panes are never
     selected.
@@ -838,8 +857,8 @@ model and projection logic are pure and ARE tested.
   - **sidebar rename-guard scope**: apply a `reload` op for the rename-target row
     while editing -> suppressed (title/attrs not clobbered); apply a `remove`/
     `move` op for the rename-target row -> **applied** (row removed/moved) and
-    `sidebarRenameTarget` cleared; a `reload` for a *different* row -> applied.
-  All behavioral and structure-insensitive.
+    `sidebarRenameTarget` cleared; a `reload` for a _different_ row -> applied.
+    All behavioral and structure-insensitive.
 
 ---
 
@@ -888,7 +907,7 @@ model and projection logic are pure and ARE tested.
       search overlay re-appear on the rebuilt wrapper (chrome-cache invalidation),
       not blank.
   13. Inline-rename a tab, then from another path (menu, IPC, drag) move or close
-      *that* tab -- the row moves/closes and the edit ends cleanly (no stranded
+      _that_ tab -- the row moves/closes and the edit ends cleanly (no stranded
       field editor, no stale row; `sidebarRenameTarget` cleared).
   14. Restore a many-tab session (eager mounting) -- every tab's container is
       mounted but only the selected one is visible; hidden tabs stay occluded (no
@@ -919,7 +938,7 @@ model and projection logic are pure and ARE tested.
   is bounded: `stageValidatedRestore` already forks a PTY + ghostty surface per
   pane per tab, so eager adds only AppKit view-tree allocation, negligible next to
   N surfaces; and it preserves the `perf(tabs): reuse content containers across
-  switches` steady state (it only drops the near-worthless lazy initial build).
+switches` steady state (it only drops the near-worthless lazy initial build).
   Hidden surfaces stay occluded via `syncSurfaceVisibility()` (last pass,
   `occlusion=false` for non-visible), so no render churn after the first
   reconcile. Issue #31's scrollback-read leak is about reading, not surface count
@@ -930,13 +949,13 @@ model and projection logic are pure and ARE tested.
   would rebuild containers on every pane metadata edit. The projection test pins
   this.
 - **Host-local cache coherence across rebuilds.** A diffed cache holds the last
-  *applied* value, but a rebuilt host view loses what was applied. `reconcile`
+  _applied_ value, but a rebuilt host view loses what was applied. `reconcile`
   ordering (containers before chrome) plus the executor's
   `paneToolbar`/`searchOverlay` invalidation for rebuilt/removed containers
   re-applies chrome onto fresh wrappers; the focus border survives on the
   persisted `TerminalView`. The chrome-invalidation test is the net -- a silent
   skip here would leave a rebuilt pane chrome-less.
-- **Rename guard must stay narrow.** Suppressing *all* ops for the editing row
+- **Rename guard must stay narrow.** Suppressing _all_ ops for the editing row
   would strand a row if another `send()` moves/closes that tab mid-edit. The guard
   suppresses only same-row `reload`s; structural ops apply and clear
   `sidebarRenameTarget` when the target disappears. The edited-target-removal
@@ -944,7 +963,7 @@ model and projection logic are pure and ARE tested.
 - **Theme application is a command.** Config reload reapplies all themed panes
   regardless of name change; a projection diff would skip it. Kept as a command.
 - **Scrollback join (step 2).** One pure `graftScrollback(onto: AppModelSnapshot,
-  scrollbackByPaneId:)` walks the embedded tree and sets each leaf's scrollback;
+scrollbackByPaneId:)` walks the embedded tree and sets each leaf's scrollback;
   both export and the enriched checkpoint call it, fed by the one impure
   `scrollbackByPaneId()` live-surface read (manual QA step 11). The pure graft test
   is the net. Step 1 sidesteps this entirely by keeping the flat array.
@@ -999,12 +1018,12 @@ Landed. `just test` 961/961 (953 prior + 8 new), `just build` clean.
 **Deviations / judgment calls:**
 
 - **Orphan-injection test rewrite.** The plan said rewrite to "split on an
-  unknown PaneId -> null reply." But an unknown pane no longer *resolves*
+  unknown PaneId -> null reply." But an unknown pane no longer _resolves_
   (`resolveTargetPane` throws), so IPC returns an invalid-params error
   (`-32602`), not a null `pane` reply -- the null path required a pane that
   resolved but was orphaned from the tree, now structurally impossible. The
   explicit-unknown-pane error case was already covered by an adjacent test, so
-  the orphan test now uses the *context* path and asserts rejection + unchanged
+  the orphan test now uses the _context_ path and asserts rejection + unchanged
   `allPaneIds`.
 - **The `.leaf(...)` migration was a separate, larger sweep than the
   `model.panes` count implied** (~108 test + ~30 app sites). Constructions
@@ -1017,17 +1036,109 @@ Landed. `just test` 961/961 (953 prior + 8 new), `just build` clean.
 
 **Handoffs for later stages:**
 
-- *Stage 2 (1a step 2):* the codec still joins through the flat v1 array;
-  `enrichSnapshot` (`AppRuntime.swift`) and `mergeCheckpoints`
-  (`ModelOperations.swift`) are untouched. `AppInitFile`/`AppModelSnapshot`/
-  `SplitNodeSnapshot` are unchanged and `loadValidatedInitFile` still hard-rejects
-  `version != 1`.
-- *Stage 5 (1b):* `RenameTarget` is still a `private enum` in `SidebarView`; no
+- _Stage 2 (1a step 2): DONE -- see the Stage 2 notes below._ The codec is now
+  leaf-embedded v2: `SplitNodeSnapshot.leaf(PaneSnapshot)`, and `AppModelSnapshot`
+  has no flat `panes` array. `loadValidatedInitFile` now requires `version == 2`
+  (rejects v1/v3+). `enrichSnapshot` is **deleted**, replaced by the pure
+  `graftScrollback(onto:scrollbackByPaneId:)` + the impure
+  `AppRuntime.scrollbackByPaneId()`. `mergeCheckpoints` now merges on the
+  validated `ValidatedAppRestore` pair (grafts enriched scrollback into light's
+  `paneSnapshots` map by id), not the flat array.
+- _Stage 5 (1b):_ `RenameTarget` is still a `private enum` in `SidebarView`; no
   `ViewLocalState` exists yet.
-- *Stage 8 (1c):* `.destroySurface` is still emitted in 4 handlers (closePane /
+- _Stage 8 (1c):_ `.destroySurface` is still emitted in 4 handlers (closePane /
   surfaceCreationFailed / deleteGroup / closeTabBody); the
   `surfaceCreationFailed` split-tab test asserts one per sibling and must migrate
   when teardown moves to `reconcileSurfaceExistence`.
 - `Effect` not renamed (Stage 9). Side-tables (`searchState`,
   `lastNotificationTime`, runtime `surfaces`, etc.) remain `[PaneId: ...]` with
   cleanup in the destruction handlers, not folded into `removeLeaf`.
+
+### Stage 2 -- One leaf-embedded snapshot format (v2)
+
+Landed. `just test` 964/964 (961 prior + 3 new step-2 tests; the migration kept
+the prior count by reshaping in place), `just build` clean.
+
+**What shipped (1a step 2 -- the wire-format swap only; Part 2 untouched):**
+
+- `SplitNodeSnapshot.leaf(paneId: String?)` -> `leaf(PaneSnapshot)`; a leaf
+  encodes/decodes its pane under a `pane` key. `AppModelSnapshot` lost its flat
+  `panes` array (now `{ groups, selectedTabId }`); `AppInitFile` keeps
+  `{ version, model }`. No `PersistedInitFile`/`PersistedModelSnapshot`/
+  `PersistedSplitNode` parallel hierarchy (the discarded design).
+  `PaneSnapshot.scrollback` is now a `var`.
+- Decoder (`validateAndBuildDetailed` + `parseSplitNode`): walks the embedded
+  tree, building each leaf's `PaneModel` from its embedded `PaneSnapshot` and
+  collecting the returned `[PaneId: PaneSnapshot]` map from the leaves. The
+  orphan / missing-pane / cross-tree-dup checks are gone (structurally
+  impossible); one walk-wide `seenPaneIds` check keeps leaf-id uniqueness, and
+  the global `allIds` cross-domain guard stays. `autoPaneIds`/`autoPaneCursor`
+  deleted -- an id-less leaf mints a fresh `PaneId` inline. Restore chrome
+  derives from the focused leaf's embedded `PaneSnapshot`
+  (`deriveTabChromeFromSnapshot`), recomputed at decode.
+- Encoder: `toSnapshot`/`toSplitNodeSnapshot` emit the embedded shape via a new
+  private `toPaneSnapshot(_:)` (scrollback nil); the flat-array accumulator +
+  cross-tab dedup are gone. This one encoder serves `ls` (`Update` IPC),
+  `.exportState`, import, and the checkpoints.
+- Scrollback: `enrichSnapshot` **deleted**. New pure
+  `graftScrollback(onto:scrollbackByPaneId:)` in `ModelOperations` walks the
+  embedded tree and sets each matching leaf's scrollback; the impure
+  `AppRuntime.scrollbackByPaneId()` reads live surfaces. Both
+  `performEnrichedCheckpoint` and the `.exportState` perform-arm now
+  `graftScrollback(onto: <snapshot>, scrollbackByPaneId: scrollbackByPaneId())`.
+- Version: `appInitFileVersion = 2` constant; `toInitFile(_:)` plus a new
+  `toInitFile(snapshot:)` overload centralize the written version (used by the
+  checkpoint + export paths). `loadValidatedInitFile` guards
+  `version == appInitFileVersion`, rejecting v1 and v3+ with no dispatch fork.
+- `mergeCheckpoints(light:enriched:)` now takes/returns `ValidatedAppRestore` and
+  grafts `enriched.paneSnapshots[id].scrollback` into light's map by id (light
+  authoritative; no re-validation, no tree walk). `main.swift` passes the
+  validated pair; `delegate.lastSessionSnapshot` is now `ValidatedAppRestore?`;
+  added `AppRuntime.bootstrapFromValidatedRestore(_:)` so the recovered structure
+  is validated exactly once (in `main`). `bootstrapFromSnapshot` (the `--init`
+  path) validates then delegates to it.
+- `integrations/danterm/SKILL.md` updated in the same change: the `ls` recipe
+  recurses the tree (`.. | objects | select(.type=="leaf") | .pane`), and the
+  shape prose + stdout table now say `{groups, selectedTabId}` with each pane
+  embedded at its `rootNode` leaf under `.pane`.
+
+**Deviations / judgment calls:**
+
+- **`pane` is optional on decode.** A bare `{ "type": "leaf" }` decodes to an
+  empty `PaneSnapshot` then mints an id -- preserving the exact v1 omitted-leaf
+  authoring affordance, not just the omitted-id one. Encode always writes `pane`.
+- **`scrollback` made `var`** (was `let`) so graft/merge set it in place instead
+  of rebuilding the struct (which had risked silently dropping `todos`).
+- **`toInitFile(snapshot:)` overload** so the enriched-checkpoint and export
+  paths share the one version constant instead of repeating literal `2`s.
+- **Session loss on first post-upgrade launch is via the version guard, not a
+  decode failure.** A v1 checkpoint still decodes structurally under the new
+  types (the unknown `panes` key is ignored; a missing `pane` defaults), but
+  `loadValidatedInitFile`'s `version == 2` guard rejects it -> fresh session.
+  Accepted (reject-v1); no one-shot importer.
+- **TDD reds confirmed against broken impls:** the two marquee tests (written
+  pre-impl) failed for the right reason (version 1; top-level `panes` present);
+  the chrome-from-focused-leaf test was confirmed red ("Sibling != Editor")
+  against a decoder that read `firstLeafId` instead of `focusedPaneId` -- it puts
+  the focused pane in the *second* leaf so a first-leaf regression fails it.
+
+**Manual QA still owed (cannot be driven headless):**
+
+- **Step 11 -- restore with scrollback.** The pure tests cover `graftScrollback`
+  and the validated-pair merge, but the live-surface read (`scrollbackByPaneId()`)
+  end-to-end -> enriched checkpoint -> restore-into-replay-files path is
+  GUI-only. A human should run `just build-run`, open a few panes with
+  scrollback, quit (writes the enriched checkpoint), relaunch, and confirm
+  scrollback restores into every pane. (Also exercises the v1->v2 break: any
+  pre-upgrade checkpoint is rejected once, yielding a fresh session.)
+
+**Handoffs for later stages:**
+
+- Part 2 (the reconciler, stages 3-9) is untouched; `Effect` is **not** renamed
+  (still Stage 9). The Stage 5 (`RenameTarget`/`ViewLocalState`) and Stage 8
+  (`.destroySurface` in 4 handlers; the `surfaceCreationFailed` split-tab test
+  still asserts one `.destroySurface` per sibling) handoffs above remain valid.
+- New pure helpers available to later work: `graftScrollback(onto:scrollbackByPaneId:)`
+  and the test helpers `allPaneSnapshots`/`paneSnapshot(_:in:)` (TestHarness).
+- No new index or stored pane state was introduced (the format swap is read/write
+  only); the tree remains the single source of truth.

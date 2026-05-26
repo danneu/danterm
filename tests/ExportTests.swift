@@ -467,21 +467,22 @@ func exportTests() {
             throw TestFailure(message: "expected .exportState effect")
         }
         try expectEqual(snapshot.groups.count, expected.groups.count)
-        try expectEqual(snapshot.panes.count, expected.panes.count)
+        try expectEqual(allPaneSnapshots(snapshot).count, allPaneSnapshots(expected).count)
         try expectEqual(snapshot.selectedTabId, expected.selectedTabId)
         // Verify IDs match
         try expectEqual(snapshot.groups[0].id, expected.groups[0].id)
         try expectEqual(snapshot.groups[0].tabs[0].id, expected.groups[0].tabs[0].id)
         try expectEqual(snapshot.groups[0].tabs[0].focusedPaneId, expected.groups[0].tabs[0].focusedPaneId)
-        // Verify launch fields
-        try expectEqual(snapshot.panes[0].id, expected.panes[0].id)
-        try expectEqual(snapshot.panes[0].launch?.command, "vim")
-        try expectEqual(snapshot.panes[0].launch?.cwd, "~/projects")
+        // Verify launch fields (panes now live embedded in the tree leaves)
+        let snapPane = allPaneSnapshots(snapshot)[0]
+        try expectEqual(snapPane.id, allPaneSnapshots(expected)[0].id)
+        try expectEqual(snapPane.launch?.command, "vim")
+        try expectEqual(snapPane.launch?.cwd, "~/projects")
         // Pure snapshot has nil scrollback (enrichment happens in runtime)
-        try expect(snapshot.panes[0].scrollback == nil, "pure snapshot should have nil scrollback")
-        // Verify rootNode type
-        if case .leaf(let snapPaneId) = snapshot.groups[0].tabs[0].rootNode {
-            try expectEqual(snapPaneId, paneId.rawValue.uuidString)
+        try expect(snapPane.scrollback == nil, "pure snapshot should have nil scrollback")
+        // Verify rootNode type — the leaf embeds the focused pane.
+        if case .leaf(let leafPane) = snapshot.groups[0].tabs[0].rootNode {
+            try expectEqual(leafPane.id, paneId.rawValue.uuidString)
         } else {
             throw TestFailure(message: "expected leaf rootNode")
         }
@@ -565,7 +566,7 @@ func exportTests() {
         let paneId = model.groups[0].tabs[0].focusedPaneId
         model.updatePane(paneId) { $0.lastCommand = "vim" }
         let snapshot = toSnapshot(model)
-        try expectEqual(snapshot.panes[0].launch?.command, "vim")
+        try expectEqual(allPaneSnapshots(snapshot)[0].launch?.command, "vim")
     }
 
     test("launch omitted when no command and no cwd") {
@@ -575,7 +576,7 @@ func exportTests() {
         model.updatePane(paneId) { $0.cwd = nil }
         model.updatePane(paneId) { $0.lastCommand = nil }
         let snapshot = toSnapshot(model)
-        try expect(snapshot.panes[0].launch == nil, "launch should be nil when no command and no cwd")
+        try expect(allPaneSnapshots(snapshot)[0].launch == nil, "launch should be nil when no command and no cwd")
     }
 
     test("cwd abbreviated with ~ in export") {
@@ -585,7 +586,7 @@ func exportTests() {
         let home = NSHomeDirectory()
         model.updatePane(paneId) { $0.cwd = home + "/projects" }
         let snapshot = toSnapshot(model)
-        try expectEqual(snapshot.panes[0].cwd, "~/projects")
+        try expectEqual(allPaneSnapshots(snapshot)[0].cwd, "~/projects")
     }
 
     test("launch.cwd present when cwd is set") {
@@ -595,7 +596,7 @@ func exportTests() {
         let home = NSHomeDirectory()
         model.updatePane(paneId) { $0.cwd = home + "/work" }
         let snapshot = toSnapshot(model)
-        try expectEqual(snapshot.panes[0].launch?.cwd, "~/work")
+        try expectEqual(allPaneSnapshots(snapshot)[0].launch?.cwd, "~/work")
     }
 
     test("launch has both command and cwd when both set") {
@@ -606,7 +607,7 @@ func exportTests() {
         model.updatePane(paneId) { $0.cwd = home + "/code" }
         model.updatePane(paneId) { $0.lastCommand = "claude" }
         let snapshot = toSnapshot(model)
-        let launch = snapshot.panes[0].launch
+        let launch = allPaneSnapshots(snapshot)[0].launch
         try expect(launch != nil, "launch should be present")
         try expectEqual(launch?.command, "claude")
         try expectEqual(launch?.cwd, "~/code")
@@ -627,8 +628,8 @@ func exportTests() {
         let data = try encoder.encode(initFile)
         let decoded = try JSONDecoder().decode(AppInitFile.self, from: data)
 
-        // Verify snapshot-level launch fields survive encoding
-        let exportedPane = decoded.model.panes.first(where: { $0.id == paneId.rawValue.uuidString })
+        // Verify snapshot-level launch fields survive encoding (panes embedded in leaves)
+        let exportedPane = paneSnapshot(paneId.rawValue.uuidString, in: decoded.model)
         try expect(exportedPane != nil, "pane should exist in decoded snapshot")
         try expectEqual(exportedPane?.launch?.command, "claude")
         try expectEqual(exportedPane?.launch?.cwd, "~/work")

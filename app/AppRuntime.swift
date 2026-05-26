@@ -505,8 +505,8 @@ class AppRuntime {
             enqueueNotificationRequest(request)
 
         case .exportState(let snapshot):
-            let enrichedSnapshot = enrichSnapshot(snapshot)
-            let initFile = AppInitFile(version: 1, model: enrichedSnapshot)
+            let enrichedSnapshot = graftScrollback(onto: snapshot, scrollbackByPaneId: scrollbackByPaneId())
+            let initFile = toInitFile(snapshot: enrichedSnapshot)
 
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -961,35 +961,28 @@ class AppRuntime {
         writeCheckpoint(initFile, to: lightCheckpointURL())
     }
 
-    /// Enrich a snapshot's panes with scrollback text read from live surfaces.
-    private func enrichSnapshot(_ snapshot: AppModelSnapshot) -> AppModelSnapshot {
-        let enrichedPanes: [PaneSnapshot] = snapshot.panes.map { ps in
-            guard let idStr = ps.id,
-                  let uuid = UUID(uuidString: idStr),
-                  let view = surfaces[PaneId(rawValue: uuid)],
-                  let surface = view.surface,
+    /// Read scrollback text from each live surface, keyed by pane id. The impure
+    /// half of scrollback enrichment; the pure `graftScrollback(onto:...)` embeds
+    /// this map into a snapshot's tree leaves.
+    private func scrollbackByPaneId() -> [PaneId: String] {
+        var result: [PaneId: String] = [:]
+        for (paneId, view) in surfaces {
+            guard let surface = view.surface,
                   let rawText = readScrollbackText(surface: surface),
                   let scrollback = truncateScrollback(rawText) else {
-                return ps
+                continue
             }
-            return PaneSnapshot(
-                id: ps.id, title: ps.title, cwd: ps.cwd,
-                launch: ps.launch, scrollback: scrollback, theme: ps.theme
-            )
+            result[paneId] = scrollback
         }
-        return AppModelSnapshot(
-            groups: snapshot.groups,
-            panes: enrichedPanes,
-            selectedTabId: snapshot.selectedTabId
-        )
+        return result
     }
 
     /// Write an enriched checkpoint: model snapshot + scrollback text read from
     /// each live Ghostty surface. Expensive but gives full restore fidelity.
     /// Called by the 60s periodic timer and once at clean termination.
     func performEnrichedCheckpoint() {
-        let enrichedSnapshot = enrichSnapshot(toSnapshot(model))
-        writeCheckpoint(AppInitFile(version: 1, model: enrichedSnapshot), to: enrichedCheckpointURL())
+        let enrichedSnapshot = graftScrollback(onto: toSnapshot(model), scrollbackByPaneId: scrollbackByPaneId())
+        writeCheckpoint(toInitFile(snapshot: enrichedSnapshot), to: enrichedCheckpointURL())
     }
 
     /// Encode and atomically write a checkpoint to the given URL.
@@ -1169,13 +1162,23 @@ class AppRuntime {
 
     // MARK: - Snapshot Bootstrap
 
+    /// Validate a raw snapshot (the --init path) then stage + commit it.
     func bootstrapFromSnapshot(_ snapshot: AppModelSnapshot, restoreCommandBehavior: RestoreCommandBehavior = .prefill) {
         guard let built = validateAndBuildDetailed(snapshot) else {
             print("[init] Snapshot validation failed, falling back to default startup")
             send(.createTab(inGroupId: nil))
             return
         }
-        let loaded = ValidatedAppRestore(snapshot: snapshot, model: built.model, paneSnapshots: built.paneSnapshots)
+        bootstrapFromValidatedRestore(
+            ValidatedAppRestore(snapshot: snapshot, model: built.model, paneSnapshots: built.paneSnapshots),
+            restoreCommandBehavior: restoreCommandBehavior
+        )
+    }
+
+    /// Stage + commit an already-validated restore (the crash/clean-recovery path,
+    /// where main.swift validated and merged the checkpoints up front). Avoids
+    /// decoding/validating the recovered structure a second time.
+    func bootstrapFromValidatedRestore(_ loaded: ValidatedAppRestore, restoreCommandBehavior: RestoreCommandBehavior = .prefill) {
         do {
             let staged = try stageValidatedRestore(loaded, restoreCommandBehavior: restoreCommandBehavior)
             commitRestoreSession(staged)

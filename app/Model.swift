@@ -255,6 +255,11 @@ enum RestoreCommandBehavior: String, Equatable {
 
 // MARK: - Init Snapshot Types
 
+// Current on-disk/wire format version. v2 is the leaf-embedded format: each
+// split-tree leaf carries its full PaneSnapshot inline (no separate flat `panes`
+// array). v1 (flat array) is rejected outright -- see loadValidatedInitFile.
+let appInitFileVersion = 2
+
 struct AppInitFile: Codable {
     let version: Int
     let model: AppModelSnapshot
@@ -262,7 +267,6 @@ struct AppInitFile: Codable {
 
 struct AppModelSnapshot: Codable {
     let groups: [GroupSnapshot]
-    let panes: [PaneSnapshot]
     let selectedTabId: String?
 }
 
@@ -283,11 +287,12 @@ struct TabSnapshot: Codable {
 }
 
 indirect enum SplitNodeSnapshot: Codable {
-    case leaf(paneId: String?)
+    // v2 leaf-embedded format: a leaf owns its full PaneSnapshot inline.
+    case leaf(PaneSnapshot)
     case split(id: String?, direction: String, first: SplitNodeSnapshot, second: SplitNodeSnapshot, ratio: Double?)
 
     enum CodingKeys: String, CodingKey {
-        case type, paneId, id, direction, first, second, ratio
+        case type, pane, id, direction, first, second, ratio
     }
 
     init(from decoder: Decoder) throws {
@@ -295,8 +300,11 @@ indirect enum SplitNodeSnapshot: Codable {
         let type = try container.decode(String.self, forKey: .type)
         switch type {
         case "leaf":
-            let paneId = try container.decodeIfPresent(String.self, forKey: .paneId)
-            self = .leaf(paneId: paneId)
+            // `pane` is optional so a hand-authored snapshot can write a bare
+            // `{ "type": "leaf" }` (id and all fields minted/defaulted on decode) --
+            // preserving the v1 omitted-id authoring affordance.
+            let pane = try container.decodeIfPresent(PaneSnapshot.self, forKey: .pane)
+            self = .leaf(pane ?? PaneSnapshot(id: nil, title: nil, cwd: nil, launch: nil, scrollback: nil, theme: nil))
         case "split":
             let id = try container.decodeIfPresent(String.self, forKey: .id)
             let direction = try container.decode(String.self, forKey: .direction)
@@ -312,9 +320,9 @@ indirect enum SplitNodeSnapshot: Codable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case .leaf(let paneId):
+        case .leaf(let pane):
             try container.encode("leaf", forKey: .type)
-            try container.encode(paneId, forKey: .paneId)
+            try container.encode(pane, forKey: .pane)
         case .split(let id, let direction, let first, let second, let ratio):
             try container.encode("split", forKey: .type)
             try container.encode(id, forKey: .id)
@@ -337,7 +345,7 @@ struct PaneSnapshot: Codable {
     let title: String?
     let cwd: String?
     let launch: PaneLaunchSnapshot?
-    let scrollback: String?  // optional for backward compat
+    var scrollback: String?  // optional for backward compat; var so scrollback grafting can set it
     let theme: String?       // raw ghostty theme name; nil = default
     var todos: [TodoSnapshot]? = nil  // nil for backward compat
 }
@@ -358,52 +366,23 @@ func validateAndBuild(_ snapshot: AppModelSnapshot) -> AppModel? {
 }
 
 func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel, paneSnapshots: [PaneId: PaneSnapshot])? {
-    // 1. Parse all pane snapshots into a lookup
+    // Panes, groups, tabs, and splits share one UUID namespace. A leaf pane id
+    // colliding with any other domain's id is rejected -- surfaces / searchState /
+    // lastNotificationTime / updatePane are all id-keyed, so a dup would
+    // reintroduce exactly the drift this refactor removes.
+    var allIds = Set<UUID>()
+    // Walk-wide leaf-id uniqueness: a pane id may appear on at most one leaf. This
+    // is the lone surviving duplicate check (subsumes the old within-tab and
+    // cross-tree pane-id duplicate checks).
+    var seenPaneIds = Set<PaneId>()
+    // Each leaf's embedded PaneSnapshot, collected during the tree walk and
+    // returned for the restore replay path (carries scrollback). With the pane
+    // embedded in the leaf, a pane exists iff a leaf owns it -- the old
+    // orphan / missing-pane / cross-tree-duplicate checks are structurally
+    // impossible and gone.
     var paneSnapshotById: [PaneId: PaneSnapshot] = [:]
-    var autoPaneIds: [PaneId] = []
-    for ps in snapshot.panes {
-        let id: PaneId
-        if let idStr = ps.id {
-            guard let parsed = UUID(uuidString: idStr) else {
-                print("[init] Invalid pane UUID: \(idStr)")
-                return nil
-            }
-            id = PaneId(rawValue: parsed)
-        } else {
-            id = PaneId()
-            autoPaneIds.append(id)
-        }
-        guard paneSnapshotById[id] == nil else {
-            print("[init] Duplicate pane ID: \(id)")
-            return nil
-        }
-        paneSnapshotById[id] = ps
-    }
-
-    // 1b. Build the PaneModel for each snapshot up front. parseSplitNode attaches
-    // these to the leaves during the tree walk (the tree owns pane content -- no
-    // dict). The referenced-pane checks below still read paneSnapshotById, so a
-    // leaf whose id is missing from the array is rejected before the model escapes.
-    var paneModelById: [PaneId: PaneModel] = [:]
-    for (id, ps) in paneSnapshotById {
-        let expandedCwd = ps.cwd.map { expandTilde($0) }
-        var paneModel = PaneModel(id: id, title: ps.title ?? "Terminal", cwd: expandedCwd, theme: ps.theme)
-        if let todoSnaps = ps.todos {
-            paneModel.todos = todoSnaps.compactMap { ts in
-                guard let uuid = UUID(uuidString: ts.id) else { return nil }
-                return TodoItem(id: uuid, text: ts.text, isDone: ts.isDone)
-            }
-        }
-        paneModelById[id] = paneModel
-    }
-
-    // 2. Parse groups and tabs, collecting all referenced pane IDs.
-    // Seed global IDs with pane IDs so collisions across domains are rejected.
-    var allIds = Set(paneSnapshotById.keys.map(\.rawValue)) // track global uniqueness
-    var referencedPaneIds = Set<PaneId>()
     var parsedGroups: [GroupModel] = []
     var allTabIds: [TabId] = []
-    var autoPaneCursor = 0
 
     for gs in snapshot.groups {
         let groupId: GroupId
@@ -438,37 +417,19 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel,
                 return nil
             }
 
-            // Parse split tree
+            // Walk the split tree: builds each leaf's PaneModel from its embedded
+            // PaneSnapshot, mints an id for an id-less leaf, records the snapshot,
+            // and enforces leaf-id + cross-domain uniqueness.
             guard let rootNode = parseSplitNode(
                 ts.rootNode,
                 allIds: &allIds,
-                autoPaneIds: autoPaneIds,
-                autoPaneCursor: &autoPaneCursor,
-                paneModelById: paneModelById
+                seenPaneIds: &seenPaneIds,
+                paneSnapshotById: &paneSnapshotById
             ) else {
                 return nil
             }
 
-            let leafIdList = allPaneIds(rootNode)
-            let leafIds = Set(leafIdList)
-
-            // Reject duplicate pane references within one tab tree.
-            if leafIds.count != leafIdList.count {
-                print("[init] Duplicate pane ID appears multiple times within tab \(tabId)")
-                return nil
-            }
-
-            // Check all leaf pane IDs exist in panes array
-            for pid in leafIds {
-                guard paneSnapshotById[pid] != nil else {
-                    print("[init] Pane \(pid) referenced in tree but not in panes array")
-                    return nil
-                }
-                guard referencedPaneIds.insert(pid).inserted else {
-                    print("[init] Pane \(pid) appears in multiple tab trees")
-                    return nil
-                }
-            }
+            let leafIds = Set(allPaneIds(rootNode))
 
             // Validate focusedPaneId
             let focusedPaneId: PaneId
@@ -478,6 +439,8 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel,
                 focusedPaneId = firstLeafId(rootNode)
             }
 
+            // Restore chrome derives from the focused leaf's embedded PaneSnapshot
+            // (launch.cwd aware), recomputed at decode -- never stored in the snapshot.
             let focusedPs = paneSnapshotById[focusedPaneId]!
             let chrome = deriveTabChromeFromSnapshot(focusedPs)
 
@@ -509,21 +472,13 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel,
         parsedGroups.append(group)
     }
 
-    // 3. Check for orphan panes
-    let paneIds = Set(paneSnapshotById.keys)
-    let orphans = paneIds.subtracting(referencedPaneIds)
-    if !orphans.isEmpty {
-        print("[init] Orphan panes not referenced by any tab tree: \(orphans)")
-        return nil
-    }
-
-    // 4. Must have at least one group with at least one tab
+    // Must have at least one group with at least one tab
     guard !parsedGroups.isEmpty, !allTabIds.isEmpty else {
         print("[init] Must have at least one group with at least one tab")
         return nil
     }
 
-    // 5. Resolve selectedTabId. Default to first group's first tab.
+    // Resolve selectedTabId. Default to first group's first tab.
     let selectedTabId: TabId?
     if let selStr = snapshot.selectedTabId, let selId = UUID(uuidString: selStr), allTabIds.contains(TabId(rawValue: selId)) {
         selectedTabId = TabId(rawValue: selId)
@@ -559,29 +514,45 @@ func expandTilde(_ path: String) -> String {
 private func parseSplitNode(
     _ snapshot: SplitNodeSnapshot,
     allIds: inout Set<UUID>,
-    autoPaneIds: [PaneId],
-    autoPaneCursor: inout Int,
-    paneModelById: [PaneId: PaneModel]
+    seenPaneIds: inout Set<PaneId>,
+    paneSnapshotById: inout [PaneId: PaneSnapshot]
 ) -> SplitNodeModel? {
     switch snapshot {
-    case .leaf(let paneIdStr):
+    case .leaf(let ps):
+        // Resolve the pane id: explicit (validated UUID) or freshly minted for an
+        // id-less leaf. The mint is the hand-authoring affordance that the old
+        // autoPaneIds / autoPaneCursor pre-pass provided; it now happens inline.
         let paneId: PaneId
-        if let paneIdStr {
-            guard let parsed = UUID(uuidString: paneIdStr) else {
-                print("[init] Invalid pane UUID in tree: \(paneIdStr)")
+        if let idStr = ps.id {
+            guard let parsed = UUID(uuidString: idStr) else {
+                print("[init] Invalid pane UUID in tree: \(idStr)")
                 return nil
             }
             paneId = PaneId(rawValue: parsed)
-        } else if autoPaneCursor < autoPaneIds.count {
-            paneId = autoPaneIds[autoPaneCursor]
-            autoPaneCursor += 1
         } else {
             paneId = PaneId()
         }
-        // Attach the pane payload. On the success path every referenced id is in
-        // the map; the default fallback only covers a leaf whose backing snapshot
-        // is missing, which the post-walk missing-pane check rejects anyway.
-        return .leaf(paneModelById[paneId] ?? PaneModel(id: paneId))
+        // Leaf-id uniqueness, then cross-domain id-collision guard.
+        guard seenPaneIds.insert(paneId).inserted else {
+            print("[init] Pane \(paneId) appears on more than one leaf")
+            return nil
+        }
+        guard allIds.insert(paneId.rawValue).inserted else {
+            print("[init] Duplicate ID: \(paneId)")
+            return nil
+        }
+        // Build the PaneModel from the embedded snapshot; record the snapshot for
+        // the returned paneSnapshots map (the restore replay/scrollback source).
+        let expandedCwd = ps.cwd.map { expandTilde($0) }
+        var paneModel = PaneModel(id: paneId, title: ps.title ?? "Terminal", cwd: expandedCwd, theme: ps.theme)
+        if let todoSnaps = ps.todos {
+            paneModel.todos = todoSnaps.compactMap { ts in
+                guard let uuid = UUID(uuidString: ts.id) else { return nil }
+                return TodoItem(id: uuid, text: ts.text, isDone: ts.isDone)
+            }
+        }
+        paneSnapshotById[paneId] = ps
+        return .leaf(paneModel)
     case .split(let idStr, let dirStr, let first, let second, let ratio):
         let splitId: SplitId
         if let idStr {
@@ -608,16 +579,14 @@ private func parseSplitNode(
         guard let firstNode = parseSplitNode(
             first,
             allIds: &allIds,
-            autoPaneIds: autoPaneIds,
-            autoPaneCursor: &autoPaneCursor,
-            paneModelById: paneModelById
+            seenPaneIds: &seenPaneIds,
+            paneSnapshotById: &paneSnapshotById
         ),
               let secondNode = parseSplitNode(
                   second,
                   allIds: &allIds,
-                  autoPaneIds: autoPaneIds,
-                  autoPaneCursor: &autoPaneCursor,
-                  paneModelById: paneModelById
+                  seenPaneIds: &seenPaneIds,
+                  paneSnapshotById: &paneSnapshotById
               ) else {
             return nil
         }

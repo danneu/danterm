@@ -9,15 +9,16 @@ import Foundation
 func treeOwnsPanesTests() {
     print("Tree-Owns-Panes Tests...")
 
-    // A v1 snapshot (flat `panes` array) decodes into leaf-owned panes: each is
-    // reachable via model.pane(id) with its title/cwd/theme/todos, and
-    // allPaneIds equals exactly the tab's tree leaves.
-    test("v1 snapshot decodes flat panes into leaf-owned panes") {
+    // A v2 snapshot (panes nested in the tree leaves) decodes into leaf-owned
+    // panes: each is reachable via model.pane(id) with its title/cwd/theme/todos,
+    // allPaneIds equals exactly the tab's tree leaves, and the built model
+    // re-encodes back to an identical model (the embedded native round-trip).
+    test("v2 snapshot decodes embedded panes into leaf-owned panes and re-encodes identically") {
         let paneAId = "A13076E4-A29C-4358-A771-B4B4DF84C6C5"
         let paneBId = "B2222222-0000-4000-8000-000000000002"
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
@@ -27,23 +28,20 @@ func treeOwnsPanesTests() {
                 "focusedPaneId": "\(paneAId)",
                 "rootNode": {
                   "type": "split", "direction": "horizontal",
-                  "first": { "type": "leaf", "paneId": "\(paneAId)" },
-                  "second": { "type": "leaf", "paneId": "\(paneBId)" }
+                  "first": { "type": "leaf", "pane": {
+                    "id": "\(paneAId)", "title": "Editor", "cwd": "/work", "theme": "Dracula",
+                    "todos": [{ "id": "C3333333-0000-4000-8000-000000000003", "text": "ship it", "isDone": false }] } },
+                  "second": { "type": "leaf", "pane": { "id": "\(paneBId)", "title": "Shell" } }
                 }
               }]
-            }],
-            "panes": [
-              { "id": "\(paneAId)", "title": "Editor", "cwd": "/work", "theme": "Dracula",
-                "todos": [{ "id": "C3333333-0000-4000-8000-000000000003", "text": "ship it", "isDone": false }] },
-              { "id": "\(paneBId)", "title": "Shell" }
-            ]
+            }]
           }
         }
         """
         let data = json.data(using: .utf8)!
         let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
         guard let model = validateAndBuild(initFile.model) else {
-            throw TestFailure(message: "v1 snapshot should validate")
+            throw TestFailure(message: "v2 snapshot should validate")
         }
         let a = PaneId(rawValue: UUID(uuidString: paneAId)!)
         let b = PaneId(rawValue: UUID(uuidString: paneBId)!)
@@ -59,6 +57,9 @@ func treeOwnsPanesTests() {
         // allPaneIds == the tab tree's leaves (no separate dict).
         try expectEqual(Set(model.allPaneIds), Set([a, b]))
         try expectEqual(Set(model.allPaneIds), Set(allPaneIds(model.groups[0].tabs[0].rootNode)))
+
+        // Re-encode and rebuild: the embedded format round-trips to an identical model.
+        try expectEqual(validateAndBuild(toSnapshot(model)), model)
     }
 
     // updatePane mutates only the target leaf; sibling panes and the surrounding
@@ -259,5 +260,131 @@ func treeOwnsPanesTests() {
 
         try expect(effects.isEmpty, "unknown pane should emit no effects")
         try expectEqual(model, before, "model should be unchanged")
+    }
+
+    // MARK: - Stage 2: leaf-embedded v2 wire format
+
+    // The written init file is version 2. (Inspects raw JSON, independent of the
+    // snapshot types, so it pins the on-disk contract.)
+    test("toInitFile writes version 2") {
+        var model = makeModel()
+        createTab(&model)
+        let data = try JSONEncoder().encode(toInitFile(model))
+        let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        try expectEqual(obj?["version"] as? Int, 2, "init file version should be 2")
+    }
+
+    // The ls/export JSON has the embedded shape: no top-level `panes` array, and
+    // each tab's rootNode leaf carries its pane inline under `pane`.
+    test("toSnapshot JSON embeds panes in tree leaves with no top-level panes array") {
+        var model = makeModel()
+        createTab(&model)
+        let data = try JSONEncoder().encode(toSnapshot(model))
+        let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        try expect(obj?["panes"] == nil, "top-level panes array should be gone")
+        let groups = obj?["groups"] as? [[String: Any]]
+        let tabs = groups?[0]["tabs"] as? [[String: Any]]
+        let rootNode = tabs?[0]["rootNode"] as? [String: Any]
+        try expectEqual(rootNode?["type"] as? String, "leaf")
+        let pane = rootNode?["pane"] as? [String: Any]
+        try expect(pane != nil, "leaf should embed a pane object")
+        try expect(pane?["id"] != nil, "embedded pane should carry its id")
+    }
+
+    // An id-less embedded leaf decodes with a freshly-minted pane id (the
+    // omitted-id hand-authoring affordance survives the autoPaneIds deletion),
+    // and the leaf's content rides along onto the minted pane.
+    test("an id-less leaf decodes with a freshly-minted pane id and keeps its content") {
+        let json = """
+        {
+          "version": 2,
+          "model": {
+            "groups": [{
+              "name": "General",
+              "tabs": [{ "rootNode": { "type": "leaf", "pane": { "title": "Minty", "cwd": "/x", "theme": "Nord" } } }]
+            }]
+          }
+        }
+        """
+        let data = json.data(using: .utf8)!
+        let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
+        guard let model = validateAndBuild(initFile.model) else {
+            throw TestFailure(message: "id-less leaf should validate")
+        }
+        try expectEqual(model.allPaneIds.count, 1, "should mint exactly one pane")
+        let minted = model.allPaneIds[0]
+        try expectEqual(model.pane(minted)?.title, "Minty", "title survives the mint")
+        try expectEqual(model.pane(minted)?.cwd, "/x")
+        try expectEqual(model.pane(minted)?.theme, "Nord")
+        try expectEqual(model.groups[0].tabs[0].focusedPaneId, minted, "focus defaults to the minted leaf")
+    }
+
+    // Restore chrome is recomputed at decode from the FOCUSED leaf's embedded
+    // PaneSnapshot (launch.cwd preferred over pane.cwd). A non-focused sibling's
+    // cwd must not leak into the tab chrome. The chrome is derived, not stored, so
+    // the round-trip test can't catch a mis-relocated read -- this is its net.
+    test("restore chrome derives from the focused leaf's embedded PaneSnapshot, launch.cwd wins, sibling does not leak") {
+        let focusedId = "F1111111-0000-4000-8000-000000000001"
+        let siblingId = "55555555-0000-4000-8000-000000000002"
+        let json = """
+        {
+          "version": 2,
+          "model": {
+            "groups": [{
+              "name": "General",
+              "tabs": [{
+                "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
+                "focusedPaneId": "\(focusedId)",
+                "rootNode": {
+                  "type": "split", "direction": "horizontal",
+                  "first": { "type": "leaf", "pane": { "id": "\(siblingId)", "title": "Sibling", "cwd": "~/sibling" } },
+                  "second": { "type": "leaf", "pane": {
+                    "id": "\(focusedId)", "title": "Editor",
+                    "cwd": "~/focused-pane",
+                    "launch": { "cwd": "~/focused-launch" } } }
+                }
+              }]
+            }]
+          }
+        }
+        """
+        let data = json.data(using: .utf8)!
+        let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
+        guard let model = validateAndBuild(initFile.model) else {
+            throw TestFailure(message: "split snapshot should validate")
+        }
+        let tab = model.groups[0].tabs[0]
+
+        // Chrome equals deriveTabChromeFromSnapshot on the focused pane's snapshot.
+        let focusedPs = PaneSnapshot(id: focusedId, title: "Editor", cwd: "~/focused-pane",
+                                     launch: PaneLaunchSnapshot(command: nil, cwd: "~/focused-launch"),
+                                     scrollback: nil, theme: nil)
+        let expected = deriveTabChromeFromSnapshot(focusedPs)
+        try expectEqual(tab.title, expected.title)
+        try expectEqual(tab.subtitle, expected.subtitle)
+        // launch.cwd wins over pane.cwd for the subtitle.
+        try expectEqual(tab.subtitle, "~/focused-launch")
+        // The sibling's cwd never bleeds into the tab chrome.
+        try expectEqual(tab.title, "Editor")
+        try expect(tab.subtitle != "~/sibling", "sibling cwd must not leak into the tab subtitle")
+    }
+
+    // graftScrollback (pure) walks the embedded tree and sets each matching leaf's
+    // PaneSnapshot.scrollback from the map; leaves with no map entry stay nil. This
+    // is the encode-side enrichment for export + the enriched checkpoint.
+    test("graftScrollback embeds scrollback into the matching tree leaves only") {
+        var model = makeModel()
+        createTab(&model)
+        let p1 = selectedTab(in: model)!.focusedPaneId
+        update(&model, .splitPane(direction: .horizontal))
+        let p2 = selectedTab(in: model)!.focusedPaneId
+        try expect(p1 != p2, "split should add a second pane")
+
+        let snapshot = toSnapshot(model)
+        try expect(allPaneSnapshots(snapshot).allSatisfy { $0.scrollback == nil }, "pure snapshot leaves start with nil scrollback")
+
+        let grafted = graftScrollback(onto: snapshot, scrollbackByPaneId: [p1: "hello\nworld"])
+        try expectEqual(paneSnapshot(p1.rawValue.uuidString, in: grafted)?.scrollback, "hello\nworld", "matched leaf gets scrollback")
+        try expect(paneSnapshot(p2.rawValue.uuidString, in: grafted)?.scrollback == nil, "unmatched leaf stays nil")
     }
 }

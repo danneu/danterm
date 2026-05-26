@@ -20,7 +20,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     var initSnapshot: AppModelSnapshot?
     var restoreCommandBehavior: RestoreCommandBehavior = .prefill
     // Session recovery state set by main.swift before app launch.
-    var lastSessionSnapshot: AppModelSnapshot?  // merged from Recovery/last-light.json + last-enriched.json
+    var lastSessionSnapshot: ValidatedAppRestore?  // merged + validated from Recovery/last-light.json + last-enriched.json
     var previousSessionCrashed: Bool = false     // true if session.json lock was still present
     /// Set by the .terminate effect before calling NSApp.terminate to bypass the
     /// applicationShouldTerminate safety net (user already confirmed).
@@ -158,7 +158,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
             }
             let response = alert.runModal()
             if response == .alertFirstButtonReturn {
-                runtime.bootstrapFromSnapshot(lastSession, restoreCommandBehavior: .prefill)
+                runtime.bootstrapFromValidatedRestore(lastSession, restoreCommandBehavior: .prefill)
             } else {
                 runtime.send(.createTab(inGroupId: nil))
             }
@@ -182,9 +182,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     }
 
     /// Build a human-readable summary like "12 tabs in 3 groups" for the restore prompt.
-    private func sessionSummary(_ snapshot: AppModelSnapshot) -> String {
-        let tabCount = snapshot.groups.flatMap(\.tabs).count
-        let groupCount = snapshot.groups.count
+    private func sessionSummary(_ restore: ValidatedAppRestore) -> String {
+        let tabCount = restore.model.groups.flatMap(\.tabs).count
+        let groupCount = restore.model.groups.count
         let tabs = tabCount == 1 ? "1 tab" : "\(tabCount) tabs"
         let groups = groupCount == 1 ? "1 group" : "\(groupCount) groups"
         return "\(tabs) in \(groups)"

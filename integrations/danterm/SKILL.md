@@ -187,10 +187,12 @@ For the originating pane inside DanTerm:
 
 For broader discovery:
 
-    danterm ls | jq -r '.panes[] | "\(.id)\t\(.title // "")\t\(.cwd // "")"'
+    danterm ls | jq -r '.. | objects | select(.type == "leaf") | .pane | "\(.id)\t\(.title // "")\t\(.cwd // "")"'
 
-`ls` returns `{groups, panes, selectedTabId}`. `panes[]` is the flat list;
-`groups[].tabs[].rootNode` is the split tree per tab. Treat `selectedTabId` as
+`ls` returns `{groups, selectedTabId}`. Each pane lives inline at a split-tree
+leaf: `groups[].tabs[].rootNode` is the per-tab tree, and every
+`{ "type": "leaf" }` node carries its pane under `.pane` (`{id, title, cwd, ...}`).
+The `jq` above recurses the tree to list every pane. Treat `selectedTabId` as
 display state, not as a targeting source.
 
 ### Todos
@@ -239,7 +241,7 @@ else prints nothing on success and exits 0.
 
 | Command | Stdout |
 |---|---|
-| `ls` | JSON: `{groups, panes, selectedTabId}` |
+| `ls` | JSON: `{groups, selectedTabId}` (each pane embedded at its `rootNode` leaf under `.pane`) |
 | `pane info --pane <pane-id>` | JSON: `{pane: {id, title, cwd}, tab: {id, title, groupId}, group: {id, name}}` |
 | `tab new ...` | JSON: `{tab: {...}, panes: [{id}], group?: {id, name}}` |
 | `pane split --pane <pane-id>` | JSON: `{pane: {id}}` |

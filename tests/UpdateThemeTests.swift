@@ -80,7 +80,7 @@ func themeTests() {
         let paneId = model.groups[0].tabs[0].focusedPaneId
         update(&model, .setPaneTheme(paneId: paneId, themeName: "Gruvbox Dark"))
         let snapshot = toSnapshot(model)
-        let ps = snapshot.panes.first { $0.id == paneId.rawValue.uuidString }
+        let ps = paneSnapshot(paneId.rawValue.uuidString, in: snapshot)
         try expectEqual(ps?.theme, "Gruvbox Dark")
     }
 
@@ -101,27 +101,26 @@ func themeTests() {
     test("snapshot with unknown theme name decodes and preserves in model") {
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
               "name": "General",
               "tabs": [{
                 "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
-                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+                "rootNode": { "type": "leaf", "pane": {
+                  "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
+                  "title": "Terminal",
+                  "theme": "NonExistent Theme"
+                } }
               }]
-            }],
-            "panes": [{
-              "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
-              "title": "Terminal",
-              "theme": "NonExistent Theme"
             }]
           }
         }
         """
         let data = json.data(using: .utf8)!
         let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
-        try expectEqual(initFile.model.panes[0].theme, "NonExistent Theme")
+        try expectEqual(allPaneSnapshots(initFile.model)[0].theme, "NonExistent Theme")
         // validateAndBuild should succeed — unknown themes are preserved as-is
         let built = validateAndBuild(initFile.model)
         try expect(built != nil, "should rebuild despite unknown theme")
@@ -138,30 +137,23 @@ func themeTests() {
         guard case .exportState(let snapshot) = effects.first else {
             throw TestFailure(message: "expected exportState effect")
         }
-        let ps = snapshot.panes.first { $0.id == paneId.rawValue.uuidString }
+        let ps = paneSnapshot(paneId.rawValue.uuidString, in: snapshot)
         try expectEqual(ps?.theme, "Catppuccin Latte")
     }
 
     test("mergeCheckpoints preserves theme") {
-        let light = AppModelSnapshot(
-            groups: [GroupSnapshot(id: "g1", name: "Default", isCollapsed: nil, tabs: [
-                TabSnapshot(id: "t1", customTitle: nil, focusedPaneId: "p1", rootNode:
-                    SplitNodeSnapshot.leaf(paneId: "p1"), color: nil)
-            ])],
-            panes: [PaneSnapshot(id: "p1", title: "t", cwd: "/c", launch: nil, scrollback: nil, theme: "Dracula")],
-            selectedTabId: "t1"
+        let p1 = PaneId()
+        let light = ValidatedAppRestore(
+            snapshot: toSnapshot(makeModel()), model: makeModel(),
+            paneSnapshots: [p1: PaneSnapshot(id: p1.rawValue.uuidString, title: "t", cwd: "/c", launch: nil, scrollback: nil, theme: "Dracula")]
         )
-        let enriched = AppModelSnapshot(
-            groups: [GroupSnapshot(id: "g1", name: "Default", isCollapsed: nil, tabs: [
-                TabSnapshot(id: "t1", customTitle: nil, focusedPaneId: "p1", rootNode:
-                    SplitNodeSnapshot.leaf(paneId: "p1"), color: nil)
-            ])],
-            panes: [PaneSnapshot(id: "p1", title: "t", cwd: "/c", launch: nil, scrollback: "text", theme: "Dracula")],
-            selectedTabId: "t1"
+        let enriched = ValidatedAppRestore(
+            snapshot: toSnapshot(makeModel()), model: makeModel(),
+            paneSnapshots: [p1: PaneSnapshot(id: p1.rawValue.uuidString, title: "t", cwd: "/c", launch: nil, scrollback: "text", theme: "Dracula")]
         )
         let merged = mergeCheckpoints(light: light, enriched: enriched)
-        try expectEqual(merged.panes[0].theme, "Dracula")
-        try expectEqual(merged.panes[0].scrollback, "text")
+        try expectEqual(merged.paneSnapshots[p1]?.theme, "Dracula")
+        try expectEqual(merged.paneSnapshots[p1]?.scrollback, "text")
     }
 
     test("theme name round-trips as arbitrary string") {
@@ -179,20 +171,19 @@ func themeTests() {
     test("unknown theme name preserved in snapshot round-trip") {
         let json = """
         {
-          "version": 1,
+          "version": 2,
           "model": {
             "groups": [{
               "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
               "name": "General",
               "tabs": [{
                 "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
-                "rootNode": { "type": "leaf", "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5" }
+                "rootNode": { "type": "leaf", "pane": {
+                  "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
+                  "title": "Terminal",
+                  "theme": "NonExistent Theme"
+                } }
               }]
-            }],
-            "panes": [{
-              "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
-              "title": "Terminal",
-              "theme": "NonExistent Theme"
             }]
           }
         }
@@ -203,7 +194,7 @@ func themeTests() {
         try expect(built != nil, "should rebuild")
         // Round-trip the built model back to snapshot
         let snapshot = toSnapshot(built!)
-        try expectEqual(snapshot.panes[0].theme, "NonExistent Theme")
+        try expectEqual(allPaneSnapshots(snapshot)[0].theme, "NonExistent Theme")
     }
 
     test("nil theme round-trips through snapshot") {

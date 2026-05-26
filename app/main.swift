@@ -70,7 +70,9 @@ do {
 }
 
 // Session recovery: detect crash (stale lock file) and load last checkpoint.
-var lastSessionSnapshot: AppModelSnapshot? = nil
+// Carries the merged *validated* restore so the recovered structure is decoded
+// and validated exactly once (here), not again at bootstrap.
+var lastSessionSnapshot: ValidatedAppRestore? = nil
 var previousSessionCrashed = false
 
 if initSnapshot == nil {
@@ -90,11 +92,11 @@ if initSnapshot == nil {
     if let ld = lightData, let ed = enrichedData,
        let light = try? loadValidatedInitFile(from: ld),
        let enriched = try? loadValidatedInitFile(from: ed) {
-        lastSessionSnapshot = mergeCheckpoints(light: light.snapshot, enriched: enriched.snapshot)
+        lastSessionSnapshot = mergeCheckpoints(light: light, enriched: enriched)
     } else if let ld = lightData, let light = try? loadValidatedInitFile(from: ld) {
-        lastSessionSnapshot = light.snapshot
+        lastSessionSnapshot = light
     } else if let ed = enrichedData, let enriched = try? loadValidatedInitFile(from: ed) {
-        lastSessionSnapshot = enriched.snapshot
+        lastSessionSnapshot = enriched
     }
 }
 

@@ -2,6 +2,18 @@
 // round-tripping, and recovery path helpers.
 import Foundation
 
+// mergeCheckpoints now operates on the validated pair: it only reads each
+// restore's `paneSnapshots` map and copies light's `model`/`snapshot`. These
+// helpers build a ValidatedAppRestore from an explicit pane map + a model whose
+// identity the "structure wins" assertions check.
+private func makeRestore(_ paneSnapshots: [PaneId: PaneSnapshot], model: AppModel) -> ValidatedAppRestore {
+    ValidatedAppRestore(snapshot: toSnapshot(model), model: model, paneSnapshots: paneSnapshots)
+}
+
+private func paneSnap(_ id: PaneId, title: String, cwd: String? = nil, scrollback: String? = nil, theme: String? = nil) -> PaneSnapshot {
+    PaneSnapshot(id: id.rawValue.uuidString, title: title, cwd: cwd, launch: nil, scrollback: scrollback, theme: theme)
+}
+
 func checkpointTests() {
     print("Checkpoint Tests...")
 
@@ -256,103 +268,58 @@ func checkpointTests() {
         try expect(url.lastPathComponent == "session.json", "expected session.json, got \(url.lastPathComponent)")
     }
 
-    // MARK: - mergeCheckpoints
+    // MARK: - mergeCheckpoints (single-format, on the validated pair)
 
-    test("mergeCheckpoints grafts scrollback from enriched onto light structure") {
-        let light = AppModelSnapshot(
-            groups: [GroupSnapshot(id: "g1", name: "Default", isCollapsed: nil, tabs: [
-                TabSnapshot(id: "t1", customTitle: nil, focusedPaneId: "p1", rootNode:
-                    SplitNodeSnapshot.leaf(paneId: "p1"), color: nil)
-            ])],
-            panes: [PaneSnapshot(id: "p1", title: "light-title", cwd: "/light", launch: nil, scrollback: nil, theme: nil)],
-            selectedTabId: "t1"
-        )
-        let enriched = AppModelSnapshot(
-            groups: [GroupSnapshot(id: "g1", name: "Default", isCollapsed: nil, tabs: [
-                TabSnapshot(id: "t1", customTitle: nil, focusedPaneId: "p1", rootNode:
-                    SplitNodeSnapshot.leaf(paneId: "p1"), color: nil)
-            ])],
-            panes: [PaneSnapshot(id: "p1", title: "old-title", cwd: "/old", launch: nil, scrollback: "saved scrollback", theme: nil)],
-            selectedTabId: "t1"
-        )
+    test("mergeCheckpoints grafts enriched scrollback into light's pane map by id") {
+        let p1 = PaneId()
+        let light = makeRestore([p1: paneSnap(p1, title: "light-title", cwd: "/light")], model: makeModel())
+        let enriched = makeRestore([p1: paneSnap(p1, title: "old-title", cwd: "/old", scrollback: "saved scrollback")], model: makeModel())
         let merged = mergeCheckpoints(light: light, enriched: enriched)
-        try expectEqual(merged.panes.count, 1, "should have 1 pane")
-        try expectEqual(merged.panes[0].title, "light-title", "title should come from light")
-        try expectEqual(merged.panes[0].cwd, "/light", "cwd should come from light")
-        try expectEqual(merged.panes[0].scrollback, "saved scrollback", "scrollback should come from enriched")
+        try expectEqual(merged.paneSnapshots.count, 1, "should have 1 pane")
+        try expectEqual(merged.paneSnapshots[p1]?.title, "light-title", "title should come from light")
+        try expectEqual(merged.paneSnapshots[p1]?.cwd, "/light", "cwd should come from light")
+        try expectEqual(merged.paneSnapshots[p1]?.scrollback, "saved scrollback", "scrollback should come from enriched")
     }
 
     test("mergeCheckpoints — pane in light but not enriched gets nil scrollback") {
-        let light = AppModelSnapshot(
-            groups: [GroupSnapshot(id: "g1", name: "Default", isCollapsed: nil, tabs: [
-                TabSnapshot(id: "t1", customTitle: nil, focusedPaneId: "p1", rootNode:
-                    SplitNodeSnapshot.leaf(paneId: "p1"), color: nil)
-            ])],
-            panes: [PaneSnapshot(id: "p1", title: "new", cwd: "/new", launch: nil, scrollback: nil, theme: nil)],
-            selectedTabId: "t1"
-        )
-        let enriched = AppModelSnapshot(
-            groups: [], panes: [], selectedTabId: nil
-        )
+        let p1 = PaneId()
+        let light = makeRestore([p1: paneSnap(p1, title: "new", cwd: "/new")], model: makeModel())
+        let enriched = makeRestore([:], model: makeModel())
         let merged = mergeCheckpoints(light: light, enriched: enriched)
-        try expectEqual(merged.panes.count, 1, "should have 1 pane")
-        try expect(merged.panes[0].scrollback == nil, "new pane should have nil scrollback")
+        try expectEqual(merged.paneSnapshots.count, 1, "should have 1 pane")
+        try expect(merged.paneSnapshots[p1]?.scrollback == nil, "new pane should have nil scrollback")
     }
 
-    test("mergeCheckpoints — pane in enriched but not light is discarded") {
-        let light = AppModelSnapshot(
-            groups: [], panes: [], selectedTabId: nil
-        )
-        let enriched = AppModelSnapshot(
-            groups: [GroupSnapshot(id: "g1", name: "Default", isCollapsed: nil, tabs: [
-                TabSnapshot(id: "t1", customTitle: nil, focusedPaneId: "p1", rootNode:
-                    SplitNodeSnapshot.leaf(paneId: "p1"), color: nil)
-            ])],
-            panes: [PaneSnapshot(id: "p1", title: "old", cwd: "/old", launch: nil, scrollback: "old scrollback", theme: nil)],
-            selectedTabId: "t1"
-        )
+    test("mergeCheckpoints — pane in enriched but not light is discarded; light structure wins") {
+        let enrichedOnly = PaneId()
+        // light: a one-group model with no panes; enriched: a different (two-group) model.
+        var enrichedModel = makeModel()
+        enrichedModel.groups.append(GroupModel(id: GroupId(), name: "Extra"))
+        let light = makeRestore([:], model: makeModel())
+        let enriched = makeRestore([enrichedOnly: paneSnap(enrichedOnly, title: "old", scrollback: "old scrollback")], model: enrichedModel)
         let merged = mergeCheckpoints(light: light, enriched: enriched)
-        try expectEqual(merged.panes.count, 0, "deleted pane should not appear")
-        try expectEqual(merged.groups.count, 0, "light structure wins")
+        try expect(merged.paneSnapshots[enrichedOnly] == nil, "enriched-only pane should not appear")
+        try expectEqual(merged.paneSnapshots.count, 0, "only light's panes survive")
+        try expectEqual(merged.model.groups.count, light.model.groups.count, "model/structure comes from light")
     }
 
     test("mergeCheckpoints — light metadata wins over enriched") {
-        let light = AppModelSnapshot(
-            groups: [GroupSnapshot(id: "g1", name: "Default", isCollapsed: nil, tabs: [
-                TabSnapshot(id: "t1", customTitle: nil, focusedPaneId: "p1", rootNode:
-                    SplitNodeSnapshot.leaf(paneId: "p1"), color: nil)
-            ])],
-            panes: [PaneSnapshot(id: "p1", title: "fresh-title", cwd: "/fresh", launch: nil, scrollback: nil, theme: nil)],
-            selectedTabId: "t1"
-        )
-        let enriched = AppModelSnapshot(
-            groups: [GroupSnapshot(id: "g1", name: "Default", isCollapsed: nil, tabs: [
-                TabSnapshot(id: "t1", customTitle: nil, focusedPaneId: "p1", rootNode:
-                    SplitNodeSnapshot.leaf(paneId: "p1"), color: nil)
-            ])],
-            panes: [PaneSnapshot(id: "p1", title: "stale-title", cwd: "/stale", launch: nil, scrollback: "text", theme: nil)],
-            selectedTabId: "t1"
-        )
+        let p1 = PaneId()
+        let light = makeRestore([p1: paneSnap(p1, title: "fresh-title", cwd: "/fresh")], model: makeModel())
+        let enriched = makeRestore([p1: paneSnap(p1, title: "stale-title", cwd: "/stale", scrollback: "text")], model: makeModel())
         let merged = mergeCheckpoints(light: light, enriched: enriched)
-        try expectEqual(merged.panes[0].title, "fresh-title", "title from light")
-        try expectEqual(merged.panes[0].cwd, "/fresh", "cwd from light")
-        try expectEqual(merged.panes[0].scrollback, "text", "scrollback from enriched")
-        try expectEqual(merged.selectedTabId, "t1", "selectedTabId from light")
+        try expectEqual(merged.paneSnapshots[p1]?.title, "fresh-title", "title from light")
+        try expectEqual(merged.paneSnapshots[p1]?.cwd, "/fresh", "cwd from light")
+        try expectEqual(merged.paneSnapshots[p1]?.scrollback, "text", "scrollback from enriched")
     }
 
     test("mergeCheckpoints — empty enriched panes returns light unchanged") {
-        let light = AppModelSnapshot(
-            groups: [GroupSnapshot(id: "g1", name: "Default", isCollapsed: nil, tabs: [
-                TabSnapshot(id: "t1", customTitle: nil, focusedPaneId: "p1", rootNode:
-                    SplitNodeSnapshot.leaf(paneId: "p1"), color: nil)
-            ])],
-            panes: [PaneSnapshot(id: "p1", title: "t", cwd: "/c", launch: nil, scrollback: nil, theme: nil)],
-            selectedTabId: "t1"
-        )
-        let enriched = AppModelSnapshot(groups: [], panes: [], selectedTabId: nil)
+        let p1 = PaneId()
+        let light = makeRestore([p1: paneSnap(p1, title: "t", cwd: "/c")], model: makeModel())
+        let enriched = makeRestore([:], model: makeModel())
         let merged = mergeCheckpoints(light: light, enriched: enriched)
-        try expectEqual(merged.panes.count, 1, "pane count matches light")
-        try expect(merged.panes[0].scrollback == nil, "no scrollback available")
-        try expectEqual(merged.groups.count, 1, "groups from light")
+        try expectEqual(merged.paneSnapshots.count, 1, "pane count matches light")
+        try expect(merged.paneSnapshots[p1]?.scrollback == nil, "no scrollback available")
+        try expectEqual(merged.paneSnapshots[p1]?.title, "t", "metadata unchanged")
     }
 }
