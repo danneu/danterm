@@ -17,13 +17,6 @@ func updateJumpTests() {
         return (model, ids)
     }
 
-    func hasHideSwitcherOverlay(_ effects: [Effect]) -> Bool {
-        hasEffect(effects) {
-            if case .hideSwitcherOverlay = $0 { return true }
-            return false
-        }
-    }
-
     test("jumpModeActivated populates keyMap") {
         var model = makeModel()
         let visibleTabs = [TabId(), TabId(), TabId()]
@@ -35,16 +28,16 @@ func updateJumpTests() {
         try expect(effects.isEmpty, "plain activation emits no commands")
     }
 
-    test("jumpModeActivated clears active MRU cycle and hides switcher overlay") {
+    test("jumpModeActivated clears an active MRU cycle") {
         let (m0, ids) = buildModelWithTabs(3)
         var model = m0
         model.mruCycle = MruCycleState(frozenOrder: model.mruOrder, cursorIndex: 1)
 
         let effects = update(&model, .jumpModeActivated(visibleTabs: ids))
 
-        try expect(model.mruCycle == nil, "MRU cycle should be cleared")
+        try expect(model.mruCycle == nil, "MRU cycle cleared -> reconcileSwitcher hides the panel")
         try expect(model.jumpMode != nil, "jump mode should be active")
-        try expect(hasHideSwitcherOverlay(effects), "MRU overlay should hide")
+        try expect(effects.isEmpty, "no commands; jump badges + switcher hide both reconcile")
     }
 
     test("jumpModeKeyPressed selects mapped tab and clears mode") {

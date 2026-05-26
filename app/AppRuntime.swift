@@ -43,7 +43,8 @@ class AppRuntime {
     private var themeBrowserView: ThemeBrowserView?
     private var preferencesPanel: PreferencesPanel?
     private var quitConfirmationPanel: QuitConfirmationPanel?
-    private var switcherPanel: SwitcherPanel?
+    // internal (not private): the cross-file reconcileSwitcher extension reads it.
+    var switcherPanel: SwitcherPanel?
     private var switcherEventMonitor: Any?
     private var dragCoordinator: PaneDragCoordinator?
     private var replayFiles: [PaneId: URL] = [:]
@@ -76,7 +77,7 @@ class AppRuntime {
 
         // Build the MRU switcher panel eagerly — pay first-frame cost at
         // launch instead of on every cmd-shift-i. Keep it offscreen until
-        // showSwitcherOverlay fires.
+        // reconcileSwitcher orders it front (mruCycle becomes non-nil).
         self.switcherPanel = SwitcherPanel()
 
         // Install the local NSEvent monitor that drives ephemeral keyboard modes.
@@ -711,16 +712,6 @@ class AppRuntime {
                     }
                 }
             }
-
-        case .showSwitcherOverlay:
-            // Idempotent: render and order-front. Don't makeKeyAndOrderFront
-            // — the panel is non-activating; key would steal first responder.
-            switcherPanel?.render(from: model)
-            switcherPanel?.centerOnScreen(of: window)
-            switcherPanel?.orderFront(nil)
-
-        case .hideSwitcherOverlay:
-            switcherPanel?.orderOut(nil)
         }
     }
 

@@ -1,16 +1,9 @@
-// Non-activating NSPanel that renders the MRU tab switcher overlay. Built
-// once at app launch, shown and hidden via Effects driven by mruCycle state.
-// Uses domain-pure ResolvedCycle/SwitcherRow types for rendering so the
-// view layer never reads frozenOrder/cursorIndex directly.
+// Non-activating NSPanel that renders the MRU tab switcher overlay. Built once at
+// app launch; shown/redrawn and hidden by reconcileSwitcher from mruCycle state (via
+// the pure desiredSwitcher projection). Uses the domain-pure ResolvedCycle/SwitcherRow
+// types for rendering so the view layer never reads frozenOrder/cursorIndex directly.
 
 import Cocoa
-
-struct SwitcherRow: Equatable {
-    let tabId: TabId
-    let name: String
-    let color: TabColor?
-    let alertCount: Int
-}
 
 final class SwitcherPanel: NSPanel {
     private static let panelWidth: CGFloat = 320
@@ -38,26 +31,13 @@ final class SwitcherPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
-    // Render the overlay from current model state. Routed through
-    // resolveLiveCycle so a tab removed mid-cycle doesn't leave a stale
-    // highlight or crash on out-of-bounds.
-    func render(from model: AppModel) {
-        guard
-            let cycle = model.mruCycle,
-            let resolved = resolveLiveCycle(cycle, in: model),
-            let view = contentView as? SwitcherContentView
-        else { return }
-
-        let rows = resolved.liveOrder.compactMap { tabId -> SwitcherRow? in
-            guard let tab = tabById(tabId, in: model) else { return nil }
-            return SwitcherRow(
-                tabId: tabId,
-                name: tab.displayTitle,
-                color: tab.color,
-                alertCount: unreadAlertCount(for: tab, alerts: model.alerts)
-            )
-        }
-        view.update(rows: rows, cursorIndex: resolved.cursorIndex)
+    // Render the overlay from a pre-computed SwitcherProjection (desiredSwitcher,
+    // applied by reconcileSwitcher). View-only: update the rows and resize. The model
+    // read + resolveLiveCycle that used to live here now run in the pure projection,
+    // so a tab removed mid-cycle still can't leave a stale highlight or crash.
+    func apply(rows: [SwitcherRow], cursorIndex: Int) {
+        guard let view = contentView as? SwitcherContentView else { return }
+        view.update(rows: rows, cursorIndex: cursorIndex)
 
         let height = max(1, CGFloat(rows.count) * SwitcherContentView.rowHeight
                           + SwitcherContentView.padding * 2)

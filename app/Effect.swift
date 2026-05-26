@@ -79,10 +79,8 @@ enum Effect {
     case showTodoPopoverForTab(tabId: TabId)
     case dismissTodoPopoverForTab
     case showClosePaneConfirmation(paneId: PaneId, uncompletedCount: Int)
-
-    // MRU tab switcher overlay
-    case showSwitcherOverlay   // ensure panel is visible and redrawn from model
-    case hideSwitcherOverlay   // order panel out
+    // The MRU tab switcher overlay is derived by reconcileSwitcher from model.mruCycle
+    // after every send() (Stage 7); showSwitcherOverlay/hideSwitcherOverlay are gone.
 }
 
 extension Effect {
@@ -108,7 +106,7 @@ extension Effect {
              .reloadGhosttyConfig, .syncPreferencesPanel, .scheduleCheckpoint, .sendStartSearch,
              .sendSearchNeedle, .sendSearchNavigate, .sendEndSearch, .showTodoPopover,
              .dismissTodoPopover, .showTodoPopoverForTab, .dismissTodoPopoverForTab,
-             .showClosePaneConfirmation, .showSwitcherOverlay, .hideSwitcherOverlay:
+             .showClosePaneConfirmation:
             return false
         }
     }

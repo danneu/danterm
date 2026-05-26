@@ -152,10 +152,7 @@ func updateMruTests() {
         try expect(model.mruCycle != nil, "cycle started")
         try expectEqual(model.mruCycle?.frozenOrder ?? [], snapshot)
         try expectEqual(model.mruCycle?.cursorIndex ?? -1, 1)
-        try expect(hasEffect(effects) {
-            if case .showSwitcherOverlay = $0 { return true }
-            return false
-        }, "should emit showSwitcherOverlay")
+        try expect(effects.isEmpty, "step emits no commands; the switcher reconciles from mruCycle")
     }
 
     test("mruCycleStepped(.newer) from idle wraps to last index") {
@@ -166,10 +163,7 @@ func updateMruTests() {
         let effects = update(&model, .mruCycleStepped(direction: .newer))
         try expect(model.mruCycle != nil, "cycle started")
         try expectEqual(model.mruCycle?.cursorIndex ?? -1, 3, "wrapped to last index")
-        try expect(hasEffect(effects) {
-            if case .showSwitcherOverlay = $0 { return true }
-            return false
-        }, "should emit showSwitcherOverlay")
+        try expect(effects.isEmpty, "step emits no commands; the switcher reconciles from mruCycle")
     }
 
     test("repeated mruCycleStepped(.older) advances and wraps") {
@@ -224,17 +218,15 @@ func updateMruTests() {
         try expectEqual(model.selectedTabId!, target, "target tab focused")
         try expect(model.mruCycle == nil, "cycle cleared")
         try expect(model.mruOrder.first == target, "chosen tab hoisted to MRU front")
-        try expect(hasEffect(effects) {
-            if case .hideSwitcherOverlay = $0 { return true }
-            return false
-        }, "should emit hideSwitcherOverlay")
+        // The switcher hides structurally (mruCycle == nil -> reconcileSwitcher); the
+        // selectTab command for the chosen tab survives.
         try expect(hasEffect(effects) {
             if case .showSelectedTab = $0 { return true }
             return false
         }, "should emit showSelectedTab (selectTab effect)")
     }
 
-    test("mruCycleCommitted at cursorIndex 0 is a focus no-op but hides overlay") {
+    test("mruCycleCommitted at cursorIndex 0 is a focus no-op") {
         let (m0, _) = buildModelWithTabs(3)
         var model = m0
         let initiallySelected = model.selectedTabId!
@@ -244,11 +236,8 @@ func updateMruTests() {
 
         let effects = update(&model, .mruCycleCommitted)
         try expectEqual(model.selectedTabId!, initiallySelected, "selection unchanged")
-        try expect(model.mruCycle == nil)
-        try expect(hasEffect(effects) {
-            if case .hideSwitcherOverlay = $0 { return true }
-            return false
-        }, "should emit hideSwitcherOverlay")
+        try expect(model.mruCycle == nil, "cycle cleared -> reconcileSwitcher hides the panel")
+        try expect(effects.isEmpty, "a no-op commit emits no commands")
     }
 
     test("mruCycleCanceled clears cycle without changing selection") {
@@ -263,10 +252,7 @@ func updateMruTests() {
         try expectEqual(model.selectedTabId!, initiallySelected, "selection unchanged")
         try expect(model.mruCycle == nil)
         try expectEqual(model.mruOrder, initialMru, "mruOrder unchanged")
-        try expect(hasEffect(effects) {
-            if case .hideSwitcherOverlay = $0 { return true }
-            return false
-        }, "should emit hideSwitcherOverlay")
+        try expect(effects.isEmpty, "cancel emits no commands; mruCycle == nil -> reconcileSwitcher hides the panel")
     }
 
     test("mruCycleOneShot is equivalent to step + commit") {
@@ -282,9 +268,9 @@ func updateMruTests() {
         try expect(initiallySelected != nextOlderTarget)
         try expect(model.mruCycle == nil, "cycle does not linger")
         try expect(hasEffect(effects) {
-            if case .hideSwitcherOverlay = $0 { return true }
+            if case .showSelectedTab = $0 { return true }
             return false
-        }, "should emit hideSwitcherOverlay")
+        }, "commits the selection (selectTab effect); the switcher hides via reconcile")
     }
 
     test("tab removed during active cycle: commit selects a live tab") {
@@ -310,9 +296,9 @@ func updateMruTests() {
         try expect(live.contains(model.selectedTabId!), "selection is live")
         try expect(model.mruCycle == nil)
         try expect(hasEffect(effects) {
-            if case .hideSwitcherOverlay = $0 { return true }
+            if case .showSelectedTab = $0 { return true }
             return false
-        })
+        }, "commits a live tab (selectTab effect); the switcher hides via reconcile")
     }
 
     test("restore-time reconciliation: empty mruOrder fills on next update()") {

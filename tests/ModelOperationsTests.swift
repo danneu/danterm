@@ -898,6 +898,42 @@ func modelOperationsTests() {
         try expect(resolved == nil, "no live tabs → nil")
     }
 
+    // MARK: - desiredSwitcher (MRU switcher overlay projection, Stage 7)
+
+    // The disappearance net: a non-nil projection while cycling (rows in the live
+    // frozen order + the carried cursor index, name/alertCount reflecting the model),
+    // then nil once the cycle ends -- the nil is what reconcileSwitcher turns into an
+    // orderOut. resolveLiveCycle's own remapping is covered by the tests above.
+    test("desiredSwitcher: non-nil while cycling, nil once the cycle ends") {
+        let (m0, ids) = makeMruModel(tabCount: 3)
+        var model = m0
+        // No cycle -> nothing to show (the panel stays ordered out).
+        try expect(model.mruCycle == nil, "precondition: not cycling")
+        try expect(desiredSwitcher(in: model) == nil, "no MRU cycle -> nil projection")
+
+        // Distinctive name on the first tab and an unread alert on the second, so the
+        // projected rows demonstrably reflect the model.
+        model.groups[0].tabs[0].customTitle = "Alpha"
+        let alertPane = model.groups[0].tabs[1].focusedPaneId
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: alertPane,
+            title: "DanTerm", body: "x", createdAt: Date(), isUnread: true), at: 0)
+
+        model.mruCycle = MruCycleState(frozenOrder: ids, cursorIndex: 1)
+        guard let proj = desiredSwitcher(in: model) else {
+            throw TestFailure(message: "expected a non-nil projection while cycling")
+        }
+        try expectEqual(proj.rows.map(\.tabId), ids, "rows follow the live (frozen) order")
+        try expectEqual(proj.cursorIndex, 1, "cursor index carried from the cycle")
+        try expectEqual(proj.rows[0].name, "Alpha", "row name is the tab's displayTitle")
+        try expectEqual(proj.rows[1].alertCount, 1, "row alertCount reflects the model's unread alerts")
+        try expectEqual(proj.rows[0].alertCount, 0, "a tab with no unread alerts has zero count")
+
+        // Cycle ends -> projection disappears, so the diff issues orderOut.
+        model.mruCycle = nil
+        try expect(desiredSwitcher(in: model) == nil, "cycle ended -> nil projection (orderOut)")
+    }
+
     // MARK: - resolveContextTargets (sidebar Finder/Mail rule)
 
     test("resolveContextTargets clicked row in selection returns selection in row order") {

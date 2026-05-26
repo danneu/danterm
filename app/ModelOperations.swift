@@ -1816,6 +1816,48 @@ func resolveLiveCycle(_ cycle: MruCycleState, in model: AppModel) -> ResolvedCyc
   return ResolvedCycle(liveOrder: live, cursorIndex: 0)
 }
 
+// One row in the MRU switcher overlay. Pure data, moved here from SwitcherPanel
+// (an AppKit file) so desiredSwitcher and its tests can build it without Cocoa;
+// the view layer reads it back to render a row.
+struct SwitcherRow: Equatable {
+  let tabId: TabId
+  let name: String
+  let color: TabColor?
+  let alertCount: Int
+}
+
+// The whole MRU switcher overlay as a value: the ordered rows plus the highlighted
+// cursor index. A nil projection (see desiredSwitcher) means no cycle is active and
+// reconcileSwitcher orders the panel out.
+struct SwitcherProjection: Equatable {
+  let rows: [SwitcherRow]
+  let cursorIndex: Int
+}
+
+/// Project the MRU switcher overlay from the model. Returns nil when no cycle is
+/// active (mruCycle == nil) or every frozen tab has been removed mid-cycle
+/// (resolveLiveCycle == nil) -- reconcileSwitcher turns that nil into an orderOut.
+/// Otherwise builds one row per live tab in the resolved (frozen) order. Pure:
+/// mirrors SwitcherPanel.render's old body minus the view calls (resolveLiveCycle /
+/// tabById / unreadAlertCount are all pure).
+func desiredSwitcher(in model: AppModel) -> SwitcherProjection? {
+  guard
+    let cycle = model.mruCycle,
+    let resolved = resolveLiveCycle(cycle, in: model)
+  else { return nil }
+
+  let rows = resolved.liveOrder.compactMap { tabId -> SwitcherRow? in
+    guard let tab = tabById(tabId, in: model) else { return nil }
+    return SwitcherRow(
+      tabId: tabId,
+      name: tab.displayTitle,
+      color: tab.color,
+      alertCount: unreadAlertCount(for: tab, alerts: model.alerts)
+    )
+  }
+  return SwitcherProjection(rows: rows, cursorIndex: resolved.cursorIndex)
+}
+
 // MARK: - Switcher Event Classifier
 
 enum SwitcherInputKind: Equatable {

@@ -11,7 +11,7 @@
 | Yes          | 4              | Part 2 | `reconcilePaneChrome` (toolbars + search overlay)                                            |
 | Yes          | 5              | Part 2 | `reconcileSidebar` + Part 1b (`ViewLocalState`/`RenameTarget`)                               |
 | Yes          | 6              | Part 2 | `reconcileWindowChrome`                                                                      |
-|              | 7              | Part 2 | `reconcileSwitcher`                                                                          |
+| Yes          | 7              | Part 2 | `reconcileSwitcher`                                                                          |
 |              | 8              | Part 2 | `reconcileSurfaceExistence` + `reconcileContainers` + Part 1c (keyed surface reconciliation) |
 |              | 9              | Part 2 | Rename `Effect` -> `Command`                                                                 |
 
@@ -1632,3 +1632,103 @@ diff are the pure nets, all under test). Run `just build-run` and verify:**
   split-tab test still asserts one per sibling) and Stage 9 (`Effect` -> `Command` rename)
   handoffs remain valid and untouched. `Effect` is **not** renamed; side-tables stay
   `[PaneId: ...]`; `allPaneIds` is `allPanes.map(\.id)`.
+
+### Stage 7 -- `reconcileSwitcher` (MRU tab switcher overlay)
+
+Landed. `just test` 986/986 (985 prior + 1 new `desiredSwitcher` projection test; the 8
+migrated MRU/jump emission tests reshaped in place, no count change), `just build` clean.
+The simplest Part 2 pass: a single-optional projection on the Stage 6 windowChrome
+template, plus a `nil`-means-hide transition.
+
+**What shipped:**
+
+- **`reconcileSwitcher` pass** (`Reconcile.swift`), inserted into `reconcile()` after
+  `reconcileWindowChrome()`, before `syncSurfaceVisibility()`. New `caches.switcher:
+  SwitcherProjection?`. It computes `desiredSwitcher(in: model)`, early-returns if it equals
+  the cache, else: a non-nil projection renders the rows + centers + orders the panel front;
+  a `nil` projection orders it out. Then stores the cache. The single panel persists across
+  container rebuilds, so no cross-pass invalidation (like windowChrome).
+- **Pure layer in `ModelOperations.swift`** (test-visible): `struct SwitcherProjection:
+  Equatable { rows: [SwitcherRow]; cursorIndex: Int }` + `desiredSwitcher(in:) ->
+  SwitcherProjection?` -- the body is `SwitcherPanel.render`'s old guard/row-build minus the
+  view calls (`guard let cycle = model.mruCycle, let resolved = resolveLiveCycle(cycle, in:
+  model) else { return nil }`; build rows from `resolved.liveOrder` via `tabById` +
+  `unreadAlertCount`; return `SwitcherProjection(rows:, cursorIndex: resolved.cursorIndex)`).
+  All pure (`resolveLiveCycle`/`ResolvedCycle` were already domain-pure in this file).
+  **`SwitcherRow` moved from the AppKit `SwitcherPanel.swift` into `ModelOperations.swift`**
+  (already AppKit-free: `tabId`/`name`/`color: TabColor?`/`alertCount`) so the projection +
+  its test can build it.
+- **`SwitcherPanel.render(from: model)` -> view-only `apply(rows:cursorIndex:)`** -- it now
+  takes the already-computed rows + cursor (drops the model read + `resolveLiveCycle`, which
+  moved into `desiredSwitcher`) and does only `view.update(...)` + `setContentSize`.
+- **Per-stage deletions (compiler-enforced):** `Effect.showSwitcherOverlay` /
+  `.hideSwitcherOverlay` cases + their two `perform` arms (`AppRuntime.swift`) + both entries
+  in the `isPostReconcile` exhaustive `false` list + all 5 emission sites (`mruCycleStep`;
+  `mruCycleCommit` x2 -- the all-frozen-gone early return and the tail; `mruCycleCancel`; the
+  `jumpModeActivate` cycle-reset). Each branch kept its `mruCycle` mutation + non-switcher
+  effects (commit's `applySelectTab`), just without the overlay effect -- the `mruCycle`
+  mutation now drives `reconcileSwitcher`. No command-phase change (the switcher emits no
+  focus commands). Made `AppRuntime.switcherPanel` internal (was private) so the cross-file
+  pass can reach it.
+- **Tests:** new `desiredSwitcher` test in `ModelOperationsTests.swift` (the disappearance
+  net: non-nil rows in live order + the right `cursorIndex` while cycling, a row's name +
+  alertCount reflecting the model, then `nil` once `mruCycle == nil`). Migrated the 7
+  `UpdateMruTests` + 1 `UpdateJumpTests` emission assertions: the two step tests now assert
+  `effects.isEmpty`; the cursorIndex-0 commit + cancel assert `effects.isEmpty` (+ `mruCycle
+  == nil`); the cursorIndex->0 commit, oneShot, and tab-removed-mid-cycle commit assert the
+  surviving `.showSelectedTab` (the selectTab command); `jumpModeActivated` asserts `mruCycle
+  == nil` + `effects.isEmpty`. Removed the now-dead `hasHideSwitcherOverlay` helper.
+
+**Deviations / judgment calls:**
+
+- **Projection label `in:`** (`desiredSwitcher(in:)`) to match the sibling
+  `desiredWindowChrome(in:)` / `desiredFocusBorders(in:)`; type/return match the spec.
+- **`jumpModeActivate` sets `model.mruCycle = nil` unconditionally** instead of the old `if
+  model.mruCycle != nil { ... }` guard. The guard existed only to avoid emitting
+  `.hideSwitcherOverlay` when no cycle was active; with no effect to emit, `nil = nil` is a
+  harmless no-op and dropping the guard removes an otherwise-unused `effects` accumulator
+  (cleaner, no behavior change).
+- **The menu one-shot (`mruCycleOneShot`) never flashes the panel.** It is `step` + `commit`
+  within one `update()`, so `mruCycle` goes non-nil then back to `nil` before `reconcile()`
+  runs; `reconcileSwitcher` sees only the final `nil` (cache still `nil`), so it does nothing
+  -- the panel is never ordered front. Behaviorally equivalent to today: the old
+  `[.showSwitcherOverlay, .hideSwitcherOverlay]` pair ran in one synchronous `perform` loop
+  (orderFront then orderOut with no run-loop turn between), so the overlay was never visible
+  for a one-shot either. Net for both: a tab switch with no visible overlay.
+- **The overlay now re-renders on _any_ `send()` that changes the projection mid-cycle**
+  (e.g. a bell arriving on a listed tab updates that row's alert badge immediately), not only
+  on a step. The old per-step `.showSwitcherOverlay` left the badge stale until the next
+  step. This is the reconciler staying in sync with the model -- an improvement, not a
+  regression. `orderFront`/`centerOnScreen` are idempotent so the extra applies are free.
+
+**Manual QA still owed (the AppKit panel is unchanged; `desiredSwitcher` + the
+single-optional diff are the pure nets, under test). Run `just build-run` and verify QA 9:**
+
+- Hold Cmd-Shift-i/o through a multi-tab MRU cycle: the overlay appears, updates each step,
+  the cursor highlight moves, no lag.
+- Release Cmd-Shift (`mruCycle == nil`): the panel disappears (`orderOut`).
+- Press Esc mid-cycle: it cancels and hides.
+- The menu one-shot (`mruCycleOneShot`) switches tabs with no visible overlay flash (the
+  atomic step+commit -- see the deviation above).
+- A bell on a listed tab mid-cycle updates that row's badge live (the reconciler re-render).
+
+**Handoffs for later stages:**
+
+- **To Stage 8 (the coupled teardown core):** after Stage 7, the only projection `Effect`
+  cases left are the container/surface ones -- `showSelectedTab`, `rebuildTabContainer`,
+  `removeTabContainer`, `destroySurface`; everything else surviving in `Effect` is a real
+  command. Stage 8 deletes those four, lands `reconcileSurfaceExistence` +
+  `reconcileContainers` (eager mounting: desired = all tabs, selected visible / rest
+  mounted+hidden), folds `finalizeTabSelection` (still owns `refreshPaneToolbars(in:)` + the
+  active-search rehydrate per Stage 6's handoff) and `showSelectedTab` (still in
+  `commitRestoreSession`), adds the `paneToolbar`/`searchOverlay` cache invalidation for
+  rebuilt/removed containers, and **flips `makeFirstResponder` to post-reconcile**. The
+  single-optional `caches.switcher`/`windowChrome` sit at the end of `ReconcilerCaches` and
+  reset for free via `tearDownCurrentSession`'s `caches = ReconcilerCaches()` -- no Stage 8
+  action needed on them.
+- Stage 8 (`.destroySurface` still emitted in 4 handlers -- closePane / surfaceCreationFailed
+  / deleteGroup / closeTabBody; the `surfaceCreationFailed` split-tab test still asserts one
+  `.destroySurface` per sibling and must migrate to the pure surface-existence teardown
+  selection) and Stage 9 (`Effect` -> `Command` rename) handoffs remain valid and untouched.
+  `Effect` is **not** renamed; side-tables stay `[PaneId: ...]`; `allPaneIds` is
+  `allPanes.map(\.id)`.
