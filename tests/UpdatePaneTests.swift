@@ -16,16 +16,16 @@ func paneTests() {
         }
         try expectEqual(direction, .horizontal)
         if case .leaf(let fid) = first {
-            try expectEqual(fid, originalPaneId, "first child should be original pane")
+            try expectEqual(fid.id, originalPaneId, "first child should be original pane")
         } else {
             throw TestFailure(message: "first child should be a leaf")
         }
         if case .leaf(let sid) = second {
-            try expectEqual(sid, tab.focusedPaneId, "second child should be new focused pane")
+            try expectEqual(sid.id, tab.focusedPaneId, "second child should be new focused pane")
         } else {
             throw TestFailure(message: "second child should be a leaf")
         }
-        try expectEqual(model.panes.count, 2)
+        try expectEqual(model.allPaneIds.count, 2)
     }
 
     test("testClosePanePromotesSibling") {
@@ -39,9 +39,9 @@ func paneTests() {
 
         update(&model, .closePane(paneId: newPaneId))
         let updatedTab = model.groups[0].tabs[0]
-        try expect(model.panes[newPaneId] == nil, "closed pane should be removed from panes dict")
+        try expect(model.pane(newPaneId) == nil, "closed pane should be removed from panes dict")
         if case .leaf(let remainingId) = updatedTab.rootNode {
-            try expectEqual(remainingId, firstPaneId)
+            try expectEqual(remainingId.id, firstPaneId)
         } else {
             throw TestFailure(message: "root should be a leaf after closing one of two panes")
         }
@@ -106,12 +106,12 @@ func paneTests() {
         update(&model, .splitPane(direction: .vertical))
         let paneC = model.groups[0].tabs[0].focusedPaneId
 
-        try expectEqual(model.panes.count, 3)
+        try expectEqual(model.allPaneIds.count, 3)
 
         // Close B (inner leaf)
         update(&model, .closePane(paneId: paneB))
-        try expect(model.panes[paneB] == nil, "paneB should be removed")
-        try expectEqual(model.panes.count, 2)
+        try expect(model.pane(paneB) == nil, "paneB should be removed")
+        try expectEqual(model.allPaneIds.count, 2)
 
         // Tree should now be [A, C]
         let tab = model.groups[0].tabs[0]
@@ -119,12 +119,12 @@ func paneTests() {
             throw TestFailure(message: "root should be a horizontal split")
         }
         if case .leaf(let fid) = first {
-            try expectEqual(fid, paneA, "first should be paneA")
+            try expectEqual(fid.id, paneA, "first should be paneA")
         } else {
             throw TestFailure(message: "first child should be a leaf")
         }
         if case .leaf(let sid) = second {
-            try expectEqual(sid, paneC, "second should be paneC")
+            try expectEqual(sid.id, paneC, "second should be paneC")
         } else {
             throw TestFailure(message: "second child should be a leaf")
         }
@@ -149,9 +149,8 @@ func paneTests() {
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
         // Set some state on paneA
-        model.panes[paneA]?.title = "my-title"
-        model.panes[paneA]?.cwd = "/tmp/foo"
-
+        model.updatePane(paneA) { $0.title = "my-title" }
+        model.updatePane(paneA) { $0.cwd = "/tmp/foo" }
         // Add an unread alert for paneA
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
@@ -230,9 +229,8 @@ func paneTests() {
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        model.panes[paneA]?.title = "pane-a-title"
-        model.panes[paneA]?.cwd = "/tmp/pane-a"
-
+        model.updatePane(paneA) { $0.title = "pane-a-title" }
+        model.updatePane(paneA) { $0.cwd = "/tmp/pane-a" }
         // Split to create paneB (becomes focused)
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
@@ -259,7 +257,7 @@ func paneTests() {
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        model.panes[paneA]?.title = "pane-a-title"
+        model.updatePane(paneA) { $0.title = "pane-a-title" }
         model.groups[0].isCollapsed = true
 
         // Split to create paneB (becomes focused)
@@ -515,26 +513,26 @@ func paneTests() {
             throw TestFailure(message: "first child should be vertical split (pane A was split)")
         }
         if case .leaf(let fid) = innerFirst {
-            try expectEqual(fid, paneA, "inner first should be pane A")
+            try expectEqual(fid.id, paneA, "inner first should be pane A")
         } else {
             throw TestFailure(message: "inner first should be a leaf")
         }
         // The new pane should be the focused pane
         let paneC = tab.focusedPaneId
         if case .leaf(let sid) = innerSecond {
-            try expectEqual(sid, paneC, "inner second should be new pane C")
+            try expectEqual(sid.id, paneC, "inner second should be new pane C")
         } else {
             throw TestFailure(message: "inner second should be a leaf")
         }
 
         // Second child should still be B (untouched)
         if case .leaf(let bid) = second {
-            try expectEqual(bid, paneB, "second child should still be pane B")
+            try expectEqual(bid.id, paneB, "second child should still be pane B")
         } else {
             throw TestFailure(message: "second child should be a leaf")
         }
 
-        try expectEqual(model.panes.count, 3)
+        try expectEqual(model.allPaneIds.count, 3)
     }
 
     test("testSplitPaneBackgroundOnSelectedTabRebuildsButPreservesFocus") {
@@ -542,13 +540,13 @@ func paneTests() {
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
         let existingFocusedPaneId = model.groups[0].tabs[0].focusedPaneId
-        let beforePaneIds = Set(model.panes.keys)
+        let beforePaneIds = Set(model.allPaneIds)
 
         let effects = update(
             &model,
             .splitPane(paneId: existingFocusedPaneId, direction: .horizontal, background: true)
         )
-        let newPaneIds = Set(model.panes.keys).subtracting(beforePaneIds)
+        let newPaneIds = Set(model.allPaneIds).subtracting(beforePaneIds)
         let tab = tabById(tabId, in: model)!
 
         try expectEqual(newPaneIds.count, 1, "background split should create one pane")
@@ -583,13 +581,13 @@ func paneTests() {
         let tabBId = model.groups[0].tabs[1].id
         let tabBFocusedPaneId = model.groups[0].tabs[1].focusedPaneId
         _ = update(&model, .selectTab(id: tabAId))
-        let beforePaneIds = Set(model.panes.keys)
+        let beforePaneIds = Set(model.allPaneIds)
 
         let effects = update(
             &model,
             .splitPane(paneId: tabBFocusedPaneId, direction: .horizontal, background: true)
         )
-        let newPaneIds = Set(model.panes.keys).subtracting(beforePaneIds)
+        let newPaneIds = Set(model.allPaneIds).subtracting(beforePaneIds)
         let tabB = tabById(tabBId, in: model)!
 
         try expectEqual(newPaneIds.count, 1, "background split should create one pane")
@@ -620,13 +618,13 @@ func paneTests() {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        model.panes[paneId]?.theme = "Tokyo Night"
-        let beforePaneIds = Set(model.panes.keys)
+        model.updatePane(paneId) { $0.theme = "Tokyo Night" }
+        let beforePaneIds = Set(model.allPaneIds)
 
         let effects = update(&model, .splitPane(paneId: paneId, direction: .horizontal, background: true))
-        let newPaneId = Set(model.panes.keys).subtracting(beforePaneIds).first!
+        let newPaneId = Set(model.allPaneIds).subtracting(beforePaneIds).first!
 
-        try expectEqual(model.panes[newPaneId]?.theme, "Tokyo Night", "background split should inherit target theme")
+        try expectEqual(model.pane(newPaneId)?.theme, "Tokyo Night", "background split should inherit target theme")
         try expect(hasEffect(effects) {
             if case .applyPaneTheme(let paneId) = $0, paneId == newPaneId { return true }
             return false
@@ -638,10 +636,10 @@ func paneTests() {
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
         let focusedPaneId = model.groups[0].tabs[0].focusedPaneId
-        let beforePaneIds = Set(model.panes.keys)
+        let beforePaneIds = Set(model.allPaneIds)
 
         let effects = update(&model, .splitPane(paneId: focusedPaneId, direction: .horizontal))
-        let newPaneId = Set(model.panes.keys).subtracting(beforePaneIds).first!
+        let newPaneId = Set(model.allPaneIds).subtracting(beforePaneIds).first!
         let tab = tabById(tabId, in: model)!
 
         try expectEqual(tab.focusedPaneId, newPaneId, "foreground split should focus new pane")
@@ -764,7 +762,7 @@ func paneTests() {
         try expectEqual(model.groups[0].tabs.count, 2, "source tab should remain")
         let srcTab = model.groups[0].tabs.first(where: { $0.id == tab1Id })!
         if case .leaf(let id) = srcTab.rootNode {
-            try expectEqual(id, paneB, "source tab should have paneB as leaf")
+            try expectEqual(id.id, paneB, "source tab should have paneB as leaf")
         } else {
             throw TestFailure(message: "source tab should be a single leaf")
         }
@@ -919,7 +917,7 @@ func paneTests() {
         let srcTab = model.groups[0].tabs[0]
         try expectEqual(srcTab.id, tab1Id)
         if case .leaf(let id) = srcTab.rootNode {
-            try expectEqual(id, paneB, "source tab should have paneB")
+            try expectEqual(id.id, paneB, "source tab should have paneB")
         } else {
             throw TestFailure(message: "source tab should be a single leaf")
         }
@@ -928,7 +926,7 @@ func paneTests() {
         // New tab should be at index 1 with paneA
         let newTab = model.groups[0].tabs[1]
         if case .leaf(let id) = newTab.rootNode {
-            try expectEqual(id, paneA, "new tab should have paneA")
+            try expectEqual(id.id, paneA, "new tab should have paneA")
         } else {
             throw TestFailure(message: "new tab should be a single leaf")
         }
@@ -1026,7 +1024,7 @@ func paneTests() {
         try expectEqual(model.groups[1].tabs.count, 2, "group1 should have 2 tabs")
         let newTab = model.groups[1].tabs[0]
         if case .leaf(let id) = newTab.rootNode {
-            try expectEqual(id, paneA)
+            try expectEqual(id.id, paneA)
         } else {
             throw TestFailure(message: "new tab should be a leaf")
         }
@@ -1072,8 +1070,8 @@ func paneTests() {
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
-        model.panes[paneA]?.title = "/Users/dan/projects"
-        model.panes[paneA]?.cwd = "/Users/dan/projects"
+        model.updatePane(paneA) { $0.title = "/Users/dan/projects" }
+        model.updatePane(paneA) { $0.cwd = "/Users/dan/projects" }
         update(&model, .splitPane(direction: .horizontal))
         let groupId = model.groups[0].id
 
@@ -1118,7 +1116,7 @@ func paneTests() {
         // New tab should be at index 0
         let newTab = model.groups[0].tabs[0]
         if case .leaf(let id) = newTab.rootNode {
-            try expectEqual(id, paneA)
+            try expectEqual(id.id, paneA)
         } else {
             throw TestFailure(message: "new tab should be a leaf with paneA")
         }

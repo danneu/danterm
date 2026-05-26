@@ -194,7 +194,7 @@ func lifecycleTests() {
         var model = makeModel()
         createTab(&model)
         let originalGroups = model.groups
-        let originalPanes = model.panes
+        let originalPanes = model.allPanes
         let tabId = model.groups[0].tabs[0].id
         model.pendingConfirmation = .terminate
 
@@ -202,14 +202,14 @@ func lifecycleTests() {
 
         try expectEqual(effects.count, 0, "closeTab should be blocked by pending quit confirmation")
         try expectEqual(model.groups, originalGroups, "groups should be unchanged")
-        try expectEqual(model.panes, originalPanes, "panes should be unchanged")
+        try expectEqual(model.allPanes, originalPanes, "panes should be unchanged")
     }
 
     test("testClosePaneLastPaneWhileQuitPendingIsNoOp") {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        let originalPanes = model.panes
+        let originalPanes = model.allPanes
         model.pendingConfirmation = .terminate
 
         let effects = update(&model, .closePane(paneId: paneId))
@@ -219,7 +219,7 @@ func lifecycleTests() {
             if case .destroySurface = $0 { return true }
             return false
         }, "should not destroy a surface while confirmation is pending")
-        try expectEqual(model.panes, originalPanes, "panes should be unchanged")
+        try expectEqual(model.allPanes, originalPanes, "panes should be unchanged")
     }
 
     test("testDeleteGroupLastGroupTabsWhileQuitPendingIsNoOp") {

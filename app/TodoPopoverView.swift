@@ -63,7 +63,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     private var isSyncingTableSelection = false
     private var shortcutHelpPopover: NSPopover?
 
-    private var todos: [TodoItem] { runtime?.model.panes[paneId]?.todos ?? [] }
+    private var todos: [TodoItem] { runtime?.model.pane(paneId)?.todos ?? [] }
 
     init(paneId: PaneId, runtime: AppRuntime?) {
         self.paneId = paneId

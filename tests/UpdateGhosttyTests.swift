@@ -45,7 +45,7 @@ func ghosttyTests() {
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
         let effects = update(&model, .surfaceCreationFailed(paneId: paneId))
-        try expect(model.panes[paneId] == nil, "pane should be removed")
+        try expect(model.pane(paneId) == nil, "pane should be removed")
         try expectEqual(model.groups[0].tabs.count, 0, "tab should be removed")
         try expect(hasEffect(effects) {
             if case .terminate = $0 { return true }
@@ -79,8 +79,8 @@ func ghosttyTests() {
         let effects = update(&model, .surfaceCreationFailed(paneId: paneA))
 
         try expectEqual(model.selectedTabId, fallbackTabId, "selection should move to fallback tab")
-        try expect(model.panes[paneA] == nil, "failed pane should be removed")
-        try expect(model.panes[paneB] == nil, "sibling pane should be removed")
+        try expect(model.pane(paneA) == nil, "failed pane should be removed")
+        try expect(model.pane(paneB) == nil, "sibling pane should be removed")
         try expect(!model.groups[0].tabs.contains { $0.id == tabId }, "failed tab should be removed")
         try expect(hasEffect(effects) {
             if case .destroySurface(let pid) = $0, pid == paneA { return true }
@@ -130,7 +130,7 @@ func ghosttyTests() {
         let tabId = model.groups[0].tabs[0].id
 
         let effects = update(&model, .surfaceTitle(paneId: paneId, title: "vim"))
-        try expectEqual(model.panes[paneId]?.title, "vim")
+        try expectEqual(model.pane(paneId)?.title, "vim")
         try expectEqual(model.groups[0].tabs[0].title, "vim")
         try expect(hasEffect(effects) {
             if case .updateSidebarTabRow(let tid) = $0, tid == tabId { return true }
@@ -151,7 +151,7 @@ func ghosttyTests() {
         // paneB is focused
 
         let effects = update(&model, .surfaceTitle(paneId: paneA, title: "htop"))
-        try expectEqual(model.panes[paneA]?.title, "htop", "pane title should update")
+        try expectEqual(model.pane(paneA)?.title, "htop", "pane title should update")
         try expectEqual(model.groups[0].tabs[0].title, "Terminal", "tab title should not change")
         try expectEqual(effects.count, 1, "only scheduleCheckpoint for unfocused pane title")
         try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false })
@@ -164,7 +164,7 @@ func ghosttyTests() {
         let tabId = model.groups[0].tabs[0].id
 
         let effects = update(&model, .surfaceCwd(paneId: paneId, cwd: "/home/dan/projects"))
-        try expectEqual(model.panes[paneId]?.cwd, "/home/dan/projects")
+        try expectEqual(model.pane(paneId)?.cwd, "/home/dan/projects")
         try expect(hasEffect(effects) {
             if case .updateSidebarTabRow(let tid) = $0, tid == tabId { return true }
             return false
@@ -184,7 +184,7 @@ func ghosttyTests() {
         // paneB is now focused
 
         let effects = update(&model, .surfaceCwd(paneId: paneA, cwd: "/tmp"))
-        try expectEqual(model.panes[paneA]?.cwd, "/tmp", "pane cwd should update")
+        try expectEqual(model.pane(paneA)?.cwd, "/tmp", "pane cwd should update")
         try expectEqual(effects.count, 1, "only scheduleCheckpoint for unfocused pane cwd")
         try expect(hasEffect(effects) { if case .scheduleCheckpoint = $0 { return true }; return false })
     }
@@ -199,7 +199,7 @@ func ghosttyTests() {
         try expect(model.selectedTabId != tabAId, "Tab B should be selected")
 
         let effects = update(&model, .surfaceTitle(paneId: paneA, title: "vim"))
-        try expectEqual(model.panes[paneA]?.title, "vim", "pane title should update")
+        try expectEqual(model.pane(paneA)?.title, "vim", "pane title should update")
         try expectEqual(model.groups[0].tabs[0].title, "vim", "background tab title should update")
         try expect(hasEffect(effects) {
             if case .updateSidebarTabRow(let tid) = $0, tid == tabAId { return true }
@@ -221,7 +221,7 @@ func ghosttyTests() {
         try expect(model.selectedTabId != tabAId, "Tab B should be selected")
 
         let effects = update(&model, .surfaceCwd(paneId: paneA, cwd: "/tmp"))
-        try expectEqual(model.panes[paneA]?.cwd, "/tmp", "pane cwd should update")
+        try expectEqual(model.pane(paneA)?.cwd, "/tmp", "pane cwd should update")
         try expectEqual(model.groups[0].tabs[0].subtitle, "~" == abbreviateHome("/tmp") ? "~" : "/tmp", "background tab subtitle should update")
         try expect(hasEffect(effects) {
             if case .updateSidebarTabRow(let tid) = $0, tid == tabAId { return true }
@@ -303,7 +303,7 @@ func ghosttyTests() {
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
         let effects = update(&model, .surfaceProgress(paneId: paneId, state: .set(percent: 50)))
-        try expectEqual(model.panes[paneId]?.progress, .set(percent: 50))
+        try expectEqual(model.pane(paneId)?.progress, .set(percent: 50))
         try expectEqual(effects.count, 0, "no effects from progress update")
     }
 
@@ -313,10 +313,10 @@ func ghosttyTests() {
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
         update(&model, .surfaceProgress(paneId: paneId, state: .set(percent: 75)))
-        try expectEqual(model.panes[paneId]?.progress, .set(percent: 75))
+        try expectEqual(model.pane(paneId)?.progress, .set(percent: 75))
 
         update(&model, .surfaceProgress(paneId: paneId, state: nil))
-        try expect(model.panes[paneId]?.progress == nil, "progress should be cleared")
+        try expect(model.pane(paneId)?.progress == nil, "progress should be cleared")
     }
 
     test("testSurfaceProgressUnknownPaneIsNoop") {
@@ -336,8 +336,8 @@ func ghosttyTests() {
         update(&model, .surfaceProgress(paneId: paneId, state: .indeterminate))
         update(&model, .surfaceTitle(paneId: paneId, title: "vim"))
 
-        try expectEqual(model.panes[paneId]?.progress, .indeterminate, "progress should survive title update")
-        try expectEqual(model.panes[paneId]?.title, "vim")
+        try expectEqual(model.pane(paneId)?.progress, .indeterminate, "progress should survive title update")
+        try expectEqual(model.pane(paneId)?.title, "vim")
     }
 
     test("testProgressStateSurvivesCwdUpdate") {
@@ -348,8 +348,8 @@ func ghosttyTests() {
         update(&model, .surfaceProgress(paneId: paneId, state: .error(percent: 80)))
         update(&model, .surfaceCwd(paneId: paneId, cwd: "/tmp"))
 
-        try expectEqual(model.panes[paneId]?.progress, .error(percent: 80), "progress should survive cwd update")
-        try expectEqual(model.panes[paneId]?.cwd, "/tmp")
+        try expectEqual(model.pane(paneId)?.progress, .error(percent: 80), "progress should survive cwd update")
+        try expectEqual(model.pane(paneId)?.cwd, "/tmp")
     }
 
     test("testSurfaceClosed") {
@@ -358,7 +358,7 @@ func ghosttyTests() {
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
         let effects = update(&model, .surfaceClosed(paneId: paneId))
-        try expect(model.panes[paneId] != nil, "pane should still exist (confirmation pending)")
+        try expect(model.pane(paneId) != nil, "pane should still exist (confirmation pending)")
         try expect(hasEffect(effects) {
             if case .showTerminateConfirmation(let count) = $0, count == 1 { return true }
             return false

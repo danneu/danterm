@@ -36,8 +36,8 @@ func updateTabTodoTests() {
         try expectEqual(updatedTabA.todos[0].isDone, false)
 
         // Pane todos untouched
-        try expectEqual(model.panes[paneA]!.todos.count, 1)
-        try expectEqual(model.panes[paneA]!.todos[0].text, "pane task")
+        try expectEqual(model.pane(paneA)!.todos.count, 1)
+        try expectEqual(model.pane(paneA)!.todos[0].text, "pane task")
 
         // Tab B has no todos
         try expectEqual(tabById(tabB.id, in: model)!.todos.count, 0)
@@ -139,12 +139,12 @@ func updateTabTodoTests() {
         update(&model, .addTabTodo(tabId: tabId, text: "tab A"))
         update(&model, .addTabTodo(tabId: tabId, text: "tab B"))
         update(&model, .addTodo(paneId: paneA, text: "pane task"))
-        let todoId = model.panes[paneA]!.todos[0].id
+        let todoId = model.pane(paneA)!.todos[0].id
 
         update(&model, .moveTodo(from: .pane(paneA), todoId: todoId, to: .tab(tabId), atIndex: 1))
 
         try expectEqual(tabById(tabId, in: model)!.todos.map(\.text), ["tab A", "pane task", "tab B"])
-        try expectEqual(model.panes[paneA]!.todos.count, 0)
+        try expectEqual(model.pane(paneA)!.todos.count, 0)
     }
 
     test("moveTodo tab -> pane inserts at index and removes from tab") {
@@ -157,19 +157,19 @@ func updateTabTodoTests() {
         update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(paneA), atIndex: 1))
 
         try expectEqual(tabById(tabId, in: model)!.todos.count, 0)
-        try expectEqual(model.panes[paneA]!.todos.map(\.text), ["pane A", "tab task", "pane B"])
+        try expectEqual(model.pane(paneA)!.todos.map(\.text), ["pane A", "tab task", "pane B"])
     }
 
     test("moveTodo pane -> pane removes from source pane and inserts into dest pane") {
         var (model, _, paneA, paneB) = makeTwoPaneTabForMoveTests()
         update(&model, .addTodo(paneId: paneA, text: "source"))
         update(&model, .addTodo(paneId: paneB, text: "dest A"))
-        let todoId = model.panes[paneA]!.todos[0].id
+        let todoId = model.pane(paneA)!.todos[0].id
 
         update(&model, .moveTodo(from: .pane(paneA), todoId: todoId, to: .pane(paneB), atIndex: 0))
 
-        try expectEqual(model.panes[paneA]!.todos.count, 0)
-        try expectEqual(model.panes[paneB]!.todos.map(\.text), ["source", "dest A"])
+        try expectEqual(model.pane(paneA)!.todos.count, 0)
+        try expectEqual(model.pane(paneB)!.todos.map(\.text), ["source", "dest A"])
     }
 
     test("moveTodo with atIndex > destination.count clamps to count") {
@@ -180,7 +180,7 @@ func updateTabTodoTests() {
 
         update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(paneA), atIndex: 99))
 
-        try expectEqual(model.panes[paneA]!.todos.map(\.text), ["pane A", "tab task"])
+        try expectEqual(model.pane(paneA)!.todos.map(\.text), ["pane A", "tab task"])
     }
 
     test("moveTodo with atIndex < 0 clamps to 0") {
@@ -191,7 +191,7 @@ func updateTabTodoTests() {
 
         update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(paneA), atIndex: -5))
 
-        try expectEqual(model.panes[paneA]!.todos.map(\.text), ["tab task", "pane A"])
+        try expectEqual(model.pane(paneA)!.todos.map(\.text), ["tab task", "pane A"])
     }
 
     test("moveTodo where source == destination is a no-op") {
@@ -213,7 +213,7 @@ func updateTabTodoTests() {
 
         try expect(effects.isEmpty, "unknown todo should not checkpoint")
         try expectEqual(tabById(tabId, in: model)!.todos.map(\.text), ["tab task"])
-        try expectEqual(model.panes[paneA]!.todos.count, 0)
+        try expectEqual(model.pane(paneA)!.todos.count, 0)
     }
 
     test("moveTodo with missing destination pane is a no-op and leaves source intact") {
@@ -419,7 +419,7 @@ func updateTabTodoTests() {
         update(&model, .addTodo(paneId: paneA, text: "pane A 1"))
         update(&model, .addTodo(paneId: paneB, text: "pane B 1"))
         update(&model, .addTodo(paneId: paneB, text: "pane B 2 done"))
-        let lastB = model.panes[paneB]!.todos.last!.id
+        let lastB = model.pane(paneB)!.todos.last!.id
         update(&model, .toggleTodoDone(paneId: paneB, todoId: lastB))
 
         let effects = update(&model, .requestCloseTab(id: firstTabId))
@@ -465,7 +465,7 @@ func updateTabTodoTests() {
             if case .showClosePaneConfirmation = $0 { return true }
             return false
         }, "should not show pane-level confirmation")
-        try expect(model.panes[firstTab.focusedPaneId] != nil, "pane not yet removed")
+        try expect(model.pane(firstTab.focusedPaneId) != nil, "pane not yet removed")
     }
 
     test("requestClosePane on non-last pane with no pane todos but tab todos closes silently") {
@@ -488,7 +488,7 @@ func updateTabTodoTests() {
             if case .showClosePaneConfirmation = $0 { return true }
             return false
         }, "no pane confirmation: pane has no todos")
-        try expect(model.panes[paneB] == nil, "pane should be removed")
+        try expect(model.pane(paneB) == nil, "pane should be removed")
     }
 
     test("requestClosePane on last pane with tab + pane uncompleted todos prefers close-tab confirmation") {

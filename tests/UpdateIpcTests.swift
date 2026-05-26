@@ -212,7 +212,7 @@ func ipcUpdateTests() {
         let backgroundPaneId = selectedTab(in: model)!.focusedPaneId
         createTab(&model)
         let foregroundTabId = selectedTab(in: model)!.id
-        let beforePaneIds = Set(model.panes.keys)
+        let beforePaneIds = Set(model.allPaneIds)
 
         let effects = sendIpc(
             &model,
@@ -226,7 +226,7 @@ func ipcUpdateTests() {
         let reply = try requireIpcReply(effects)
         let returnedPaneId = try requirePaneId(reply["pane"]?["id"], "pane.split should return the new pane id")
         try expect(!beforePaneIds.contains(returnedPaneId), "returned pane id should be new")
-        try expectEqual(Set(model.panes.keys).subtracting(beforePaneIds), Set([returnedPaneId]))
+        try expectEqual(Set(model.allPaneIds).subtracting(beforePaneIds), Set([returnedPaneId]))
     }
 
     test("pane.split explicit pane targets sibling instead of caller context") {
@@ -236,7 +236,7 @@ func ipcUpdateTests() {
         let callerPaneId = selectedTab(in: model)!.focusedPaneId
         _ = update(&model, .splitPane(paneId: callerPaneId, direction: .horizontal))
         let siblingPaneId = selectedTab(in: model)!.focusedPaneId
-        let beforePaneIds = Set(model.panes.keys)
+        let beforePaneIds = Set(model.allPaneIds)
 
         let effects = sendIpc(
             &model,
@@ -251,22 +251,22 @@ func ipcUpdateTests() {
         let reply = try requireIpcReply(effects)
         let returnedPaneId = try requirePaneId(reply["pane"]?["id"], "pane.split should return the sibling split pane id")
         try expect(!beforePaneIds.contains(returnedPaneId), "returned pane id should be new")
-        try expectEqual(Set(model.panes.keys).subtracting(beforePaneIds), Set([returnedPaneId]))
+        try expectEqual(Set(model.allPaneIds).subtracting(beforePaneIds), Set([returnedPaneId]))
         guard case .split(_, .horizontal, .leaf(let first), .split(_, .vertical, .leaf(let second), .leaf(let third), _), _) =
             tabById(tabId, in: model)!.rootNode
         else {
             throw TestFailure(message: "expected explicit sibling pane to be split")
         }
-        try expectEqual(first, callerPaneId)
-        try expectEqual(second, siblingPaneId)
-        try expectEqual(third, returnedPaneId)
+        try expectEqual(first.id, callerPaneId)
+        try expectEqual(second.id, siblingPaneId)
+        try expectEqual(third.id, returnedPaneId)
     }
 
     test("pane.split malformed explicit pane does not fall back to context") {
         var model = makeModel()
         createTab(&model)
         let callerPaneId = selectedTab(in: model)!.focusedPaneId
-        let beforePaneIds = Set(model.panes.keys)
+        let beforePaneIds = Set(model.allPaneIds)
 
         let effects = sendIpc(
             &model,
@@ -280,14 +280,14 @@ func ipcUpdateTests() {
 
         let error = try requireIpcError(effects)
         try expectEqual(error.code, -32602)
-        try expectEqual(Set(model.panes.keys), beforePaneIds)
+        try expectEqual(Set(model.allPaneIds), beforePaneIds)
     }
 
     test("pane.split non-string explicit pane does not fall back to context") {
         var model = makeModel()
         createTab(&model)
         let callerPaneId = selectedTab(in: model)!.focusedPaneId
-        let beforePaneIds = Set(model.panes.keys)
+        let beforePaneIds = Set(model.allPaneIds)
 
         let effects = sendIpc(
             &model,
@@ -303,14 +303,14 @@ func ipcUpdateTests() {
         try expectEqual(error.code, -32602)
         try expect(error.message.contains("pane must be a string"),
                    "message should describe non-string pane, got: \(error.message)")
-        try expectEqual(Set(model.panes.keys), beforePaneIds)
+        try expectEqual(Set(model.allPaneIds), beforePaneIds)
     }
 
     test("pane.split unknown explicit pane does not fall back to context") {
         var model = makeModel()
         createTab(&model)
         let callerPaneId = selectedTab(in: model)!.focusedPaneId
-        let beforePaneIds = Set(model.panes.keys)
+        let beforePaneIds = Set(model.allPaneIds)
 
         let effects = sendIpc(
             &model,
@@ -324,13 +324,13 @@ func ipcUpdateTests() {
 
         let error = try requireIpcError(effects)
         try expectEqual(error.code, -32602)
-        try expectEqual(Set(model.panes.keys), beforePaneIds)
+        try expectEqual(Set(model.allPaneIds), beforePaneIds)
     }
 
     test("pane.split without explicit pane and without pane context fails before mutation") {
         var model = makeModel()
         createTab(&model)
-        let beforePaneIds = Set(model.panes.keys)
+        let beforePaneIds = Set(model.allPaneIds)
 
         let effects = sendIpc(
             &model,
@@ -341,26 +341,30 @@ func ipcUpdateTests() {
 
         let error = try requireIpcError(effects)
         try expectEqual(error.code, -32602)
-        try expectEqual(Set(model.panes.keys), beforePaneIds)
+        try expectEqual(Set(model.allPaneIds), beforePaneIds)
     }
 
-    test("pane.split no-op target returns null pane id") {
+    test("pane.split on a pane id absent from every tree is rejected without mutation") {
         var model = makeModel()
         createTab(&model)
-        let orphanPaneId = PaneId()
-        model.panes[orphanPaneId] = PaneModel(id: orphanPaneId)
-        let beforePaneIds = Set(model.panes.keys)
+        // With tree-owns-panes a pane exists iff a leaf owns it, so the old
+        // "orphan in the dict, referenced by no tree" state is structurally
+        // impossible. A context pane id absent from every tree is simply unknown
+        // and cannot resolve, so the split is rejected and panes are unchanged --
+        // the clean demonstration that the drift hole is closed.
+        let unknownPaneId = PaneId()
+        let beforePaneIds = Set(model.allPaneIds)
 
         let effects = sendIpc(
             &model,
             method: Methods.paneSplit,
             params: .object(["direction": .string("horizontal")]),
-            context: IpcRequestContext(paneId: orphanPaneId.rawValue.uuidString)
+            context: IpcRequestContext(paneId: unknownPaneId.rawValue.uuidString)
         )
 
-        let reply = try requireIpcReply(effects)
-        try expectEqual(reply["pane"], .null)
-        try expectEqual(Set(model.panes.keys), beforePaneIds)
+        let error = try requireIpcError(effects)
+        try expectEqual(error.code, -32602)
+        try expectEqual(Set(model.allPaneIds), beforePaneIds)
     }
 
     test("pane.focus selects target tab and requests first responder") {
@@ -551,7 +555,7 @@ func ipcUpdateTests() {
         var model = makeModel()
         createTab(&model)
         let groupId = model.groups[0].id
-        let paneIdsBefore = Set(model.panes.keys)
+        let paneIdsBefore = Set(model.allPaneIds)
         let tabsBefore = model.groups.flatMap(\.tabs).map(\.id)
 
         let effects = sendIpc(
@@ -565,7 +569,7 @@ func ipcUpdateTests() {
 
         let error = try requireIpcError(effects)
         try expectEqual(error.code, -32602)
-        try expectEqual(Set(model.panes.keys), paneIdsBefore)
+        try expectEqual(Set(model.allPaneIds), paneIdsBefore)
         try expectEqual(model.groups.flatMap(\.tabs).map(\.id), tabsBefore)
     }
 
@@ -575,10 +579,10 @@ func ipcUpdateTests() {
             createTab(&model)
             let selectedTabId = selectedTab(in: model)!.id
             let selectedPaneId = selectedTab(in: model)!.focusedPaneId
-            model.panes[selectedPaneId]?.cwd = "/selected"
+            model.updatePane(selectedPaneId) { $0.cwd = "/selected" }
             createTab(&model)
             let callerPaneId = selectedTab(in: model)!.focusedPaneId
-            model.panes[callerPaneId]?.cwd = "/caller"
+            model.updatePane(callerPaneId) { $0.cwd = "/caller" }
             _ = update(&model, .selectTab(id: selectedTabId))
 
             let effects = sendIpc(
@@ -624,7 +628,7 @@ func ipcUpdateTests() {
         try expectEqual(reply["panes"]?.asArray?.first?.asObject?.keys.count, 1)
         try expectEqual(tabById(tabId, in: model)?.customTitle, "clock")
         try expectEqual(tabById(tabId, in: model)?.displayTitle, "clock")
-        try expectEqual(model.panes[paneId]?.title, "clock")
+        try expectEqual(model.pane(paneId)?.title, "clock")
         try expect(hasEffect(effects) {
             if case .createSurface(let effectPaneId, let cwd, let command, let launchCommand, let waitAfterCommand) = $0 {
                 return effectPaneId == paneId
@@ -671,7 +675,7 @@ func ipcUpdateTests() {
         let targetGroupId = model.groups[0].id
         _ = update(&model, .createGroup(name: "Other"))
         let beforeGroupTabs = groupTabIds(in: model)
-        let panesBefore = Set(model.panes.keys)
+        let panesBefore = Set(model.allPaneIds)
 
         let effects = sendIpc(
             &model,
@@ -700,7 +704,7 @@ func ipcUpdateTests() {
         let refTabId = model.groups[0].tabs[0].id
         let targetGroupId = model.groups[0].id
         let beforeGroupTabs = groupTabIds(in: model)
-        let panesBefore = Set(model.panes.keys)
+        let panesBefore = Set(model.allPaneIds)
 
         let effects = sendIpc(
             &model,
@@ -812,7 +816,7 @@ func ipcUpdateTests() {
         )
 
         let newPaneId = try requirePaneId(try requireIpcReply(effects)["pane"]?["id"], "pane.split should return pane id")
-        try expectEqual(model.panes[newPaneId]?.title, "cargo")
+        try expectEqual(model.pane(newPaneId)?.title, "cargo")
         try expectEqual(tabById(tabId, in: model)?.customTitle, nil)
         try expect(hasEffect(effects) {
             if case .createSurface(let effectPaneId, let cwd, let command, let launchCommand, _) = $0 {
@@ -888,7 +892,7 @@ func ipcUpdateTests() {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        let paneIdsBefore = Set(model.panes.keys)
+        let paneIdsBefore = Set(model.allPaneIds)
 
         let effects = sendIpc(
             &model,
@@ -902,7 +906,7 @@ func ipcUpdateTests() {
 
         let error = try requireIpcError(effects)
         try expectEqual(error.code, -32602)
-        try expectEqual(Set(model.panes.keys), paneIdsBefore)
+        try expectEqual(Set(model.allPaneIds), paneIdsBefore)
     }
 
     test("malformed launch returns invalid params without mutation effects") {
@@ -914,14 +918,14 @@ func ipcUpdateTests() {
             var model = makeModel()
             createTab(&model)
             let contextPaneId = selectedTab(in: model)!.focusedPaneId
-            let paneIdsBefore = Set(model.panes.keys)
+            let paneIdsBefore = Set(model.allPaneIds)
             let tabEffects = sendIpc(
                 &model,
                 method: Methods.tabNew,
                 params: .object(["launch": launchValue])
             )
             try expectEqual(try requireIpcError(tabEffects).code, -32602)
-            try expectEqual(Set(model.panes.keys), paneIdsBefore)
+            try expectEqual(Set(model.allPaneIds), paneIdsBefore)
             try expect(!hasEffect(tabEffects) {
                 if case .createSurface = $0 { return true }
                 return false
@@ -937,7 +941,7 @@ func ipcUpdateTests() {
                 context: IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
             )
             try expectEqual(try requireIpcError(splitEffects).code, -32602)
-            try expectEqual(Set(model.panes.keys), paneIdsBefore)
+            try expectEqual(Set(model.allPaneIds), paneIdsBefore)
             try expect(!hasEffect(splitEffects) {
                 if case .createSurface = $0 { return true }
                 return false
@@ -952,11 +956,11 @@ func ipcUpdateTests() {
         let ctx = IpcRequestContext(paneId: paneId.rawValue.uuidString)
 
         let setEffects = sendIpc(&model, method: Methods.themeSet, params: .object(["themeName": .string("Tokyo Night")]), context: ctx)
-        try expectEqual(model.panes[paneId]?.theme, "Tokyo Night")
+        try expectEqual(model.pane(paneId)?.theme, "Tokyo Night")
         try expectEqual(try requireIpcReply(setEffects)["pane"]?["theme"]?.asString, "Tokyo Night")
 
         let clearEffects = sendIpc(&model, method: Methods.themeSet, params: .object(["themeName": .null]), context: ctx)
-        try expectEqual(model.panes[paneId]?.theme, nil)
+        try expectEqual(model.pane(paneId)?.theme, nil)
         try expectEqual(try requireIpcReply(clearEffects)["pane"]?["theme"], .null)
     }
 
@@ -977,8 +981,8 @@ func ipcUpdateTests() {
             context: IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
         )
 
-        try expectEqual(model.panes[targetPaneId]?.theme, "Tokyo Night")
-        try expectEqual(model.panes[contextPaneId]?.theme, nil)
+        try expectEqual(model.pane(targetPaneId)?.theme, "Tokyo Night")
+        try expectEqual(model.pane(contextPaneId)?.theme, nil)
         try expectEqual(try requireIpcReply(effects)["pane"]?["id"]?.asString, targetPaneId.rawValue.uuidString)
     }
 
@@ -1000,7 +1004,7 @@ func ipcUpdateTests() {
 
             let error = try requireIpcError(effects)
             try expectEqual(error.code, -32602)
-            try expectEqual(model.panes[contextPaneId]?.theme, nil)
+            try expectEqual(model.pane(contextPaneId)?.theme, nil)
         }
     }
 
@@ -1017,7 +1021,7 @@ func ipcUpdateTests() {
 
         let error = try requireIpcError(effects)
         try expectEqual(error.code, -32602)
-        try expectEqual(model.panes[paneId]?.theme, nil)
+        try expectEqual(model.pane(paneId)?.theme, nil)
     }
 
     test("todo list add edit done open delete clear-completed use context pane") {
@@ -1034,26 +1038,26 @@ func ipcUpdateTests() {
         )
         let added = try requireIpcReply(addEffects)
         let todoId = try requireString(added["todo"]?["id"], "todo add should return id")
-        try expectEqual(model.panes[paneId]?.todos.first?.text, "ship cli")
+        try expectEqual(model.pane(paneId)?.todos.first?.text, "ship cli")
         try expect(hasEffect(addEffects) { if case .refreshPaneToolbar(let pid) = $0 { return pid == paneId }; return false })
 
         let editReply = try requireIpcReply(sendIpc(&model, method: Methods.todoEdit, params: .object(["todoId": .string(todoId), "text": .string("ship cli v2")]), context: ctx))
-        try expectEqual(model.panes[paneId]?.todos.first?.text, "ship cli v2")
+        try expectEqual(model.pane(paneId)?.todos.first?.text, "ship cli v2")
         try expectEqual(editReply["todo"]?["text"]?.asString, "ship cli v2")
 
         let doneReply = try requireIpcReply(sendIpc(&model, method: Methods.todoDone, params: .object(["todoId": .string(todoId)]), context: ctx))
-        try expectEqual(model.panes[paneId]?.todos.first?.isDone, true)
+        try expectEqual(model.pane(paneId)?.todos.first?.isDone, true)
         try expectEqual(doneReply["todo"]?["isDone"]?.asBool, true)
 
         let openReply = try requireIpcReply(sendIpc(&model, method: Methods.todoOpen, params: .object(["todoId": .string(todoId)]), context: ctx))
-        try expectEqual(model.panes[paneId]?.todos.first?.isDone, false)
+        try expectEqual(model.pane(paneId)?.todos.first?.isDone, false)
         try expectEqual(openReply["todo"]?["isDone"]?.asBool, false)
 
         let list = try requireIpcReply(sendIpc(&model, method: Methods.todoList, context: ctx))
         try expectEqual(list["todos"]?.asArray?.count, 1)
 
         _ = sendIpc(&model, method: Methods.todoDelete, params: .object(["todoId": .string(todoId)]), context: ctx)
-        try expectEqual(model.panes[paneId]?.todos.count, 0)
+        try expectEqual(model.pane(paneId)?.todos.count, 0)
 
         let secondAdd = try requireIpcReply(sendIpc(
             &model,
@@ -1065,7 +1069,7 @@ func ipcUpdateTests() {
         _ = sendIpc(&model, method: Methods.todoDone, params: .object(["todoId": .string(secondTodoId)]), context: ctx)
         _ = sendIpc(&model, method: Methods.todoDone, params: .object(["todoId": .string(todoId)]), context: ctx)
         _ = sendIpc(&model, method: Methods.todoClearCompleted, context: ctx)
-        try expectEqual(model.panes[paneId]?.todos.count, 0)
+        try expectEqual(model.pane(paneId)?.todos.count, 0)
     }
 
     test("todo commands with explicit pane target that pane regardless of context") {
@@ -1086,8 +1090,8 @@ func ipcUpdateTests() {
             context: ctx
         ))
         let todoId = try requireString(addReply["todo"]?["id"], "todo add should return id")
-        try expectEqual(model.panes[targetPaneId]?.todos.first?.text, "ship cli")
-        try expectEqual(model.panes[contextPaneId]?.todos.count, 0)
+        try expectEqual(model.pane(targetPaneId)?.todos.first?.text, "ship cli")
+        try expectEqual(model.pane(contextPaneId)?.todos.count, 0)
 
         let listReply = try requireIpcReply(sendIpc(
             &model,
@@ -1107,7 +1111,7 @@ func ipcUpdateTests() {
             ]),
             context: ctx
         )
-        try expectEqual(model.panes[targetPaneId]?.todos.first?.text, "ship cli v2")
+        try expectEqual(model.pane(targetPaneId)?.todos.first?.text, "ship cli v2")
 
         _ = sendIpc(
             &model,
@@ -1118,7 +1122,7 @@ func ipcUpdateTests() {
             ]),
             context: ctx
         )
-        try expectEqual(model.panes[targetPaneId]?.todos.first?.isDone, true)
+        try expectEqual(model.pane(targetPaneId)?.todos.first?.isDone, true)
 
         _ = sendIpc(
             &model,
@@ -1129,7 +1133,7 @@ func ipcUpdateTests() {
             ]),
             context: ctx
         )
-        try expectEqual(model.panes[targetPaneId]?.todos.first?.isDone, false)
+        try expectEqual(model.pane(targetPaneId)?.todos.first?.isDone, false)
 
         _ = sendIpc(
             &model,
@@ -1146,7 +1150,7 @@ func ipcUpdateTests() {
             params: .object(["pane": .string(targetPaneId.rawValue.uuidString)]),
             context: ctx
         )
-        try expectEqual(model.panes[targetPaneId]?.todos.count, 0)
+        try expectEqual(model.pane(targetPaneId)?.todos.count, 0)
 
         let deleteReply = try requireIpcReply(sendIpc(
             &model,
@@ -1167,7 +1171,7 @@ func ipcUpdateTests() {
             ]),
             context: ctx
         )
-        try expectEqual(model.panes[targetPaneId]?.todos.count, 0)
+        try expectEqual(model.pane(targetPaneId)?.todos.count, 0)
     }
 
     test("todo commands malformed or unknown explicit pane do not fall back to context") {
@@ -1188,7 +1192,7 @@ func ipcUpdateTests() {
                 let contextPaneId = selectedTab(in: model)!.focusedPaneId
                 let item = appendTodoForTest(&model, paneId: contextPaneId, text: "context")
                 if method == Methods.todoClearCompleted || method == Methods.todoOpen {
-                    model.panes[contextPaneId]!.todos[0].isDone = true
+                    model.updatePane(contextPaneId) { $0.todos[0].isDone = true }
                 }
 
                 var params = baseParams
@@ -1206,8 +1210,8 @@ func ipcUpdateTests() {
 
                 let error = try requireIpcError(effects)
                 try expectEqual(error.code, -32602)
-                try expectEqual(model.panes[contextPaneId]?.todos.count, 1)
-                try expectEqual(model.panes[contextPaneId]?.todos[0].text, "context")
+                try expectEqual(model.pane(contextPaneId)?.todos.count, 1)
+                try expectEqual(model.pane(contextPaneId)?.todos[0].text, "context")
             }
         }
     }
@@ -1238,7 +1242,7 @@ func ipcUpdateTests() {
 
             let error = try requireIpcError(effects)
             try expectEqual(error.code, -32602)
-            try expectEqual(model.panes[paneId]?.todos.count, 1)
+            try expectEqual(model.pane(paneId)?.todos.count, 1)
         }
     }
 
@@ -1775,14 +1779,14 @@ private func expectAfterTabInserted(
         }
     }
 
-    let newPaneIds = Set(model.panes.keys).subtracting(panesBefore)
+    let newPaneIds = Set(model.allPaneIds).subtracting(panesBefore)
     try expectEqual(newPaneIds, [paneId])
     guard let tab = tabById(tabId, in: model) else {
         throw TestFailure(message: "new tab should exist")
     }
     try expectEqual(tab.focusedPaneId, paneId)
-    if case .leaf(let rootPaneId) = tab.rootNode {
-        try expectEqual(rootPaneId, paneId)
+    if case .leaf(let rootPane) = tab.rootNode {
+        try expectEqual(rootPane.id, paneId)
     } else {
         throw TestFailure(message: "new tab should have a root leaf")
     }
@@ -1832,7 +1836,7 @@ private func requireTabId(_ value: JSONValue?, _ message: String) throws -> TabI
 
 private func appendTodoForTest(_ model: inout AppModel, paneId: PaneId, text: String) -> TodoItem {
     let item = TodoItem(id: UUID(), text: text, isDone: false)
-    model.panes[paneId]!.todos.append(item)
+    model.updatePane(paneId) { $0.todos.append(item) }
     return item
 }
 

@@ -8,8 +8,8 @@ func paneToolbarTests() {
         createTab(&model)
         let tab = model.groups[0].tabs[0]
         let paneId = tab.focusedPaneId
-        model.panes[paneId]!.title = "zsh"
-        model.panes[paneId]!.cwd = nil
+        model.updatePane(paneId) { $0.title = "zsh" }
+        model.updatePane(paneId) { $0.cwd = nil }
         let (title, cwd) = paneToolbarText(for: paneId, in: model)
         try expectEqual(title, "zsh")
         try expect(cwd == nil, "cwd should be nil")
@@ -20,8 +20,8 @@ func paneToolbarTests() {
         createTab(&model)
         let tab = model.groups[0].tabs[0]
         let paneId = tab.focusedPaneId
-        model.panes[paneId]!.title = "vim"
-        model.panes[paneId]!.cwd = "/Users/dan/projects"
+        model.updatePane(paneId) { $0.title = "vim" }
+        model.updatePane(paneId) { $0.cwd = "/Users/dan/projects" }
         let (title, cwd) = paneToolbarText(for: paneId, in: model)
         try expectEqual(title, "vim")
         try expectEqual(cwd, "/Users/dan/projects")
@@ -40,7 +40,7 @@ func paneToolbarTests() {
         createTab(&model)
         let tab = model.groups[0].tabs[0]
         let paneId = tab.focusedPaneId
-        model.panes[paneId]!.title = ""
+        model.updatePane(paneId) { $0.title = "" }
         let (title, _) = paneToolbarText(for: paneId, in: model)
         try expectEqual(title, "")
     }

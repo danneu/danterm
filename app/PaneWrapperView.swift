@@ -333,7 +333,7 @@ class PaneWrapperView: NSView {
 
         let copyCwd = NSMenuItem(title: "Copy cwd", action: #selector(copyCwdAction), keyEquivalent: "")
         copyCwd.target = self
-        copyCwd.isEnabled = runtime?.model.panes[paneId]?.cwd != nil
+        copyCwd.isEnabled = runtime?.model.pane(paneId)?.cwd != nil
         menu.addItem(copyCwd)
 
         menu.addItem(.separator())
@@ -369,7 +369,7 @@ class PaneWrapperView: NSView {
     }
 
     @objc private func copyCwdAction() {
-        guard let cwd = runtime?.model.panes[paneId]?.cwd else { return }
+        guard let cwd = runtime?.model.pane(paneId)?.cwd else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(cwd, forType: .string)
     }

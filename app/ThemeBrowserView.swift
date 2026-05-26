@@ -143,7 +143,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
     func reloadFromRuntime() {
         guard let runtime = runtime else { return }
         if let tab = selectedTab(in: runtime.model) {
-            currentThemeName = runtime.model.panes[tab.focusedPaneId]?.theme
+            currentThemeName = runtime.model.pane(tab.focusedPaneId)?.theme
         } else {
             currentThemeName = nil
         }

@@ -60,9 +60,9 @@ class AppRuntime {
 
     init(ghosttyApp: GhosttyApp) {
         self.ghosttyApp = ghosttyApp
+        // Empty launch: one group, no tabs/leaves yet (panes live in leaves).
         self.model = AppModel(
-            groups: [GroupModel(id: GroupId(), name: "General")],
-            panes: [:]
+            groups: [GroupModel(id: GroupId(), name: "General")]
         )
         // Load DanTerm config before any tabs are created
         self.model.config = DanTermConfigParser.loadFromDisk()
@@ -219,7 +219,7 @@ class AppRuntime {
         }
         syncSurfaceVisibility()
         if model.pendingConfirmation == .terminate {
-            quitConfirmationPanel?.configure(paneCount: model.panes.count)
+            quitConfirmationPanel?.configure(paneCount: model.allPaneIds.count)
         }
         let newUnreadCount = totalUnreadAlertCount(model: model)
         if newUnreadCount != oldUnreadCount {
@@ -1091,7 +1091,7 @@ class AppRuntime {
     /// If effective theme is nil, reloads the base config (clearing any override).
     func applyPaneConfig(paneId: PaneId) {
         guard let view = surfaces[paneId], let surface = view.surface,
-              let pane = model.panes[paneId] else { return }
+              let pane = model.pane(paneId) else { return }
         if let theme = effectiveTheme(for: pane) {
             guard let config = ghosttyApp.loadConfigWithTheme(theme) else { return }
             ghostty_surface_update_config(surface, config)
@@ -1104,8 +1104,8 @@ class AppRuntime {
     /// Re-apply config for all panes that have a non-nil effective theme.
     /// Called after app-wide config reload.
     func reapplyAllPaneThemes() {
-        for (paneId, pane) in model.panes where effectiveTheme(for: pane) != nil {
-            applyPaneConfig(paneId: paneId)
+        for pane in model.allPanes where effectiveTheme(for: pane) != nil {
+            applyPaneConfig(paneId: pane.id)
         }
     }
 
@@ -1366,11 +1366,12 @@ class AppRuntime {
     func refreshPaneToolbars(in root: NSView) {
         forEachPaneWrapper(in: root) { wrapper in
             let (title, cwd) = paneToolbarText(for: wrapper.paneId, in: model)
-            let progress = model.panes[wrapper.paneId]?.progress
-            let isRemote = model.panes[wrapper.paneId]?.isRemote ?? false
-            let remoteSession = model.panes[wrapper.paneId]?.remoteSession
+            let pane = model.pane(wrapper.paneId)
+            let progress = pane?.progress
+            let isRemote = pane?.isRemote ?? false
+            let remoteSession = pane?.remoteSession
             let alertCount = model.alerts.count { $0.paneId == wrapper.paneId && $0.isUnread }
-            let todos = model.panes[wrapper.paneId]?.todos ?? []
+            let todos = pane?.todos ?? []
             let totalTodo = todos.count
             let uncompletedTodo = todos.count { !$0.isDone }
             wrapper.updateToolbar(title: title, cwd: cwd, progress: progress, isRemote: isRemote, remoteSession: remoteSession, unreadAlertCount: alertCount, totalTodoCount: totalTodo, uncompletedTodoCount: uncompletedTodo)
@@ -1380,11 +1381,12 @@ class AppRuntime {
     private func refreshPaneToolbar(for paneId: PaneId) {
         guard let contentArea = contentArea else { return }
         let (title, cwd) = paneToolbarText(for: paneId, in: model)
-        let progress = model.panes[paneId]?.progress
-        let isRemote = model.panes[paneId]?.isRemote ?? false
-        let remoteSession = model.panes[paneId]?.remoteSession
+        let pane = model.pane(paneId)
+        let progress = pane?.progress
+        let isRemote = pane?.isRemote ?? false
+        let remoteSession = pane?.remoteSession
         let alertCount = model.alerts.count { $0.paneId == paneId && $0.isUnread }
-        let todos = model.panes[paneId]?.todos ?? []
+        let todos = pane?.todos ?? []
         let totalTodo = todos.count
         let uncompletedTodo = todos.count { !$0.isDone }
         findPaneWrapper(for: paneId, in: contentArea)?.updateToolbar(title: title, cwd: cwd, progress: progress, isRemote: isRemote, remoteSession: remoteSession, unreadAlertCount: alertCount, totalTodoCount: totalTodo, uncompletedTodoCount: uncompletedTodo)
@@ -1451,7 +1453,7 @@ class AppRuntime {
         guard let contentArea = contentArea else { fatalError("contentArea unavailable") }
         let displayNode: SplitNodeModel
         if tab.isZoomed {
-            displayNode = .leaf(tab.focusedPaneId)
+            displayNode = .leaf(model.pane(tab.focusedPaneId) ?? PaneModel(id: tab.focusedPaneId))
         } else {
             displayNode = tab.rootNode
         }
@@ -1513,7 +1515,7 @@ class AppRuntime {
         container: SplitContainerView,
         browserFocus: ThemeBrowserFocusTarget?
     ) {
-        let displayNode: SplitNodeModel = tab.isZoomed ? .leaf(tab.focusedPaneId) : tab.rootNode
+        let displayNode: SplitNodeModel = tab.isZoomed ? .leaf(model.pane(tab.focusedPaneId) ?? PaneModel(id: tab.focusedPaneId)) : tab.rootNode
         // Set focus borders based on model state (skip green border for single-pane tabs)
         let focusedId = tab.focusedPaneId
         for paneId in allPaneIds(displayNode) {

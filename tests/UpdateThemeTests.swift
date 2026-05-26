@@ -10,7 +10,7 @@ func themeTests() {
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         update(&model, .setPaneTheme(paneId: paneId, themeName: "Dracula"))
-        try expectEqual(model.panes[paneId]?.theme, "Dracula")
+        try expectEqual(model.pane(paneId)?.theme, "Dracula")
     }
 
     test("setPaneTheme produces applyPaneTheme and scheduleCheckpoint effects") {
@@ -33,9 +33,9 @@ func themeTests() {
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         update(&model, .setPaneTheme(paneId: paneId, themeName: "Dracula"))
-        try expectEqual(model.panes[paneId]?.theme, "Dracula")
+        try expectEqual(model.pane(paneId)?.theme, "Dracula")
         update(&model, .setPaneTheme(paneId: paneId, themeName: nil))
-        try expect(model.panes[paneId]?.theme == nil, "theme should be nil after clearing")
+        try expect(model.pane(paneId)?.theme == nil, "theme should be nil after clearing")
     }
 
     test("splitPane inherits theme from parent") {
@@ -47,7 +47,7 @@ func themeTests() {
         let tab = selectedTab(in: model)!
         let newPaneId = tab.focusedPaneId
         try expect(newPaneId != paneId, "new pane should be different from parent")
-        try expectEqual(model.panes[newPaneId]?.theme, "Catppuccin Mocha")
+        try expectEqual(model.pane(newPaneId)?.theme, "Catppuccin Mocha")
     }
 
     test("splitPane with theme emits applyPaneTheme for new pane") {
@@ -93,7 +93,7 @@ func themeTests() {
         guard let restored = validateAndBuild(snapshot) else {
             throw TestFailure(message: "snapshot round-trip failed")
         }
-        let restoredPane = restored.panes[paneId]
+        let restoredPane = restored.pane(paneId)
         try expect(restoredPane != nil, "pane should exist in restored model")
         try expectEqual(restoredPane?.theme, "TokyoNight Night")
     }
@@ -126,7 +126,7 @@ func themeTests() {
         let built = validateAndBuild(initFile.model)
         try expect(built != nil, "should rebuild despite unknown theme")
         let paneId = PaneId(rawValue: UUID(uuidString: "A13076E4-A29C-4358-A771-B4B4DF84C6C5")!)
-        try expectEqual(built!.panes[paneId]?.theme, "NonExistent Theme")
+        try expectEqual(built!.pane(paneId)?.theme, "NonExistent Theme")
     }
 
     test("export preserves theme in snapshot") {
@@ -173,7 +173,7 @@ func themeTests() {
         guard let restored = validateAndBuild(snapshot) else {
             throw TestFailure(message: "snapshot round-trip failed")
         }
-        try expectEqual(restored.panes[paneId]?.theme, "My Custom Theme")
+        try expectEqual(restored.pane(paneId)?.theme, "My Custom Theme")
     }
 
     test("unknown theme name preserved in snapshot round-trip") {
@@ -215,6 +215,6 @@ func themeTests() {
         guard let restored = validateAndBuild(snapshot) else {
             throw TestFailure(message: "snapshot round-trip failed")
         }
-        try expect(restored.panes[paneId]?.theme == nil, "nil theme should survive round-trip")
+        try expect(restored.pane(paneId)?.theme == nil, "nil theme should survive round-trip")
     }
 }

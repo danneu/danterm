@@ -247,7 +247,7 @@ func alertTests() {
         // 101st alert via surfaceBell
         update(&model, .surfaceBell(paneId: paneId))
         try expectEqual(model.alerts.count, 100, "alerts should be capped at 100")
-        try expectEqual(model.alerts[0].body, model.panes[paneId]?.title ?? "", "newest alert should be first")
+        try expectEqual(model.alerts[0].body, model.pane(paneId)?.title ?? "", "newest alert should be first")
     }
 
     test("testSelectTabMarksAlertsReadForFocusedPane") {

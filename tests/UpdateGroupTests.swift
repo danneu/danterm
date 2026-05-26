@@ -227,7 +227,7 @@ func groupTests() {
         let newTab = workGroup.tabs[0]
         try expectEqual(model.selectedTabId, newTab.id, "new tab should be selected")
         try expect(model.selectedTabId != oldSelectedTabId, "selection should have changed")
-        try expect(model.panes[newTab.focusedPaneId] != nil, "pane should exist in model")
+        try expect(model.pane(newTab.focusedPaneId) != nil, "pane should exist in model")
 
         try expect(hasEffect(effects) {
             if case .createSurface = $0 { return true }

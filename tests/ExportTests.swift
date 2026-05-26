@@ -324,7 +324,7 @@ func exportTests() {
         let tab = model.groups[0].tabs[0]
         let paneId = tab.focusedPaneId
         update(&model, .commandStarted(paneId: paneId, command: "vim"))
-        try expectEqual(model.panes[paneId]?.lastCommand, "vim")
+        try expectEqual(model.pane(paneId)?.lastCommand, "vim")
     }
 
     test("commandStarted overwrites previous command") {
@@ -334,7 +334,7 @@ func exportTests() {
         let paneId = tab.focusedPaneId
         update(&model, .commandStarted(paneId: paneId, command: "vim"))
         update(&model, .commandStarted(paneId: paneId, command: "ssh"))
-        try expectEqual(model.panes[paneId]?.lastCommand, "ssh")
+        try expectEqual(model.pane(paneId)?.lastCommand, "ssh")
     }
 
     test("commandStarted does not affect title") {
@@ -342,9 +342,9 @@ func exportTests() {
         createTab(&model)
         let tab = model.groups[0].tabs[0]
         let paneId = tab.focusedPaneId
-        let titleBefore = model.panes[paneId]?.title
+        let titleBefore = model.pane(paneId)?.title
         update(&model, .commandStarted(paneId: paneId, command: "vim"))
-        try expectEqual(model.panes[paneId]?.title, titleBefore)
+        try expectEqual(model.pane(paneId)?.title, titleBefore)
     }
 
     test("surfaceTitle does not affect lastCommand") {
@@ -354,7 +354,7 @@ func exportTests() {
         let paneId = tab.focusedPaneId
         update(&model, .commandStarted(paneId: paneId, command: "vim"))
         update(&model, .surfaceTitle(paneId: paneId, title: "new title"))
-        try expectEqual(model.panes[paneId]?.lastCommand, "vim")
+        try expectEqual(model.pane(paneId)?.lastCommand, "vim")
     }
 
     // MARK: - truncateScrollback
@@ -458,9 +458,8 @@ func exportTests() {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        model.panes[paneId]?.lastCommand = "vim"
-        model.panes[paneId]?.cwd = NSHomeDirectory() + "/projects"
-
+        model.updatePane(paneId) { $0.lastCommand = "vim" }
+        model.updatePane(paneId) { $0.cwd = NSHomeDirectory() + "/projects" }
         let expected = toSnapshot(model)
         let effects = update(&model, .exportState)
         try expectEqual(effects.count, 1)
@@ -497,7 +496,7 @@ func exportTests() {
         let rebuilt = validateAndBuild(snapshot)
         try expect(rebuilt != nil, "round-trip should produce valid model")
         try expectEqual(rebuilt!.groups.count, model.groups.count)
-        try expectEqual(rebuilt!.panes.count, model.panes.count)
+        try expectEqual(rebuilt!.allPaneIds.count, model.allPaneIds.count)
     }
 
     test("toSnapshot preserves UUIDs through round-trip") {
@@ -509,7 +508,7 @@ func exportTests() {
         try expectEqual(rebuilt.groups[0].tabs[0].id, model.groups[0].tabs[0].id)
         try expectEqual(rebuilt.selectedTabId, model.selectedTabId)
         let origPaneId = model.groups[0].tabs[0].focusedPaneId
-        try expect(rebuilt.panes[origPaneId] != nil, "pane ID should survive round-trip")
+        try expect(rebuilt.pane(origPaneId) != nil, "pane ID should survive round-trip")
     }
 
     test("toSnapshot preserves selectedTabId") {
@@ -564,7 +563,7 @@ func exportTests() {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        model.panes[paneId]?.lastCommand = "vim"
+        model.updatePane(paneId) { $0.lastCommand = "vim" }
         let snapshot = toSnapshot(model)
         try expectEqual(snapshot.panes[0].launch?.command, "vim")
     }
@@ -573,8 +572,8 @@ func exportTests() {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        model.panes[paneId]?.cwd = nil
-        model.panes[paneId]?.lastCommand = nil
+        model.updatePane(paneId) { $0.cwd = nil }
+        model.updatePane(paneId) { $0.lastCommand = nil }
         let snapshot = toSnapshot(model)
         try expect(snapshot.panes[0].launch == nil, "launch should be nil when no command and no cwd")
     }
@@ -584,7 +583,7 @@ func exportTests() {
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         let home = NSHomeDirectory()
-        model.panes[paneId]?.cwd = home + "/projects"
+        model.updatePane(paneId) { $0.cwd = home + "/projects" }
         let snapshot = toSnapshot(model)
         try expectEqual(snapshot.panes[0].cwd, "~/projects")
     }
@@ -594,7 +593,7 @@ func exportTests() {
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         let home = NSHomeDirectory()
-        model.panes[paneId]?.cwd = home + "/work"
+        model.updatePane(paneId) { $0.cwd = home + "/work" }
         let snapshot = toSnapshot(model)
         try expectEqual(snapshot.panes[0].launch?.cwd, "~/work")
     }
@@ -604,8 +603,8 @@ func exportTests() {
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         let home = NSHomeDirectory()
-        model.panes[paneId]?.cwd = home + "/code"
-        model.panes[paneId]?.lastCommand = "claude"
+        model.updatePane(paneId) { $0.cwd = home + "/code" }
+        model.updatePane(paneId) { $0.lastCommand = "claude" }
         let snapshot = toSnapshot(model)
         let launch = snapshot.panes[0].launch
         try expect(launch != nil, "launch should be present")
@@ -620,9 +619,8 @@ func exportTests() {
         createTab(&model)
         update(&model, .splitPane(direction: .horizontal))
         let paneId = model.groups[0].tabs[0].focusedPaneId
-        model.panes[paneId]?.lastCommand = "claude"
-        model.panes[paneId]?.cwd = NSHomeDirectory() + "/work"
-
+        model.updatePane(paneId) { $0.lastCommand = "claude" }
+        model.updatePane(paneId) { $0.cwd = NSHomeDirectory() + "/work" }
         let initFile = toInitFile(model)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -638,6 +636,6 @@ func exportTests() {
         // Verify full rebuild succeeds
         let rebuilt = validateAndBuild(decoded.model)
         try expect(rebuilt != nil, "JSON round-trip should produce valid model")
-        try expectEqual(rebuilt!.panes.count, 2)
+        try expectEqual(rebuilt!.allPaneIds.count, 2)
     }
 }

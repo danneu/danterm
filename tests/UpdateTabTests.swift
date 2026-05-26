@@ -8,7 +8,7 @@ func tabTests() {
         let effects = createTab(&model)
 
         try expectEqual(model.groups[0].tabs.count, 1)
-        try expectEqual(model.panes.count, 1)
+        try expectEqual(model.allPaneIds.count, 1)
         try expect(model.selectedTabId == model.groups[0].tabs[0].id)
         try expect(hasEffect(effects) {
             if case .createSurface = $0 { return true }
@@ -25,10 +25,10 @@ func tabTests() {
         createTab(&model)
         let selectedTabId = model.groups[0].tabs[0].id
         let selectedPaneId = model.groups[0].tabs[0].focusedPaneId
-        let beforePaneIds = Set(model.panes.keys)
+        let beforePaneIds = Set(model.allPaneIds)
 
         let effects = createTab(&model, background: true)
-        let newPaneIds = Set(model.panes.keys).subtracting(beforePaneIds)
+        let newPaneIds = Set(model.allPaneIds).subtracting(beforePaneIds)
 
         try expectEqual(model.groups[0].tabs.count, 2)
         try expectEqual(model.selectedTabId, selectedTabId, "background tab should not steal selection")
@@ -57,8 +57,7 @@ func tabTests() {
         var model = makeModel()
         createTab(&model)
         let firstPaneId = model.groups[0].tabs[0].focusedPaneId
-        model.panes[firstPaneId]?.cwd = "/tmp/test"
-
+        model.updatePane(firstPaneId) { $0.cwd = "/tmp/test" }
         let effects = createTab(&model)
         let createEffect = effects.first(where: {
             if case .createSurface = $0 { return true }
@@ -199,7 +198,7 @@ func tabTests() {
         }, "should show confirmation when closing last pane")
         try expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
         try expectEqual(model.groups[0].tabs.count, 1, "model should be unchanged")
-        try expect(model.panes[paneId] != nil, "pane should still exist")
+        try expect(model.pane(paneId) != nil, "pane should still exist")
     }
 
     test("testCloseLastTabShowsConfirmation") {
@@ -657,7 +656,7 @@ func tabTests() {
                 if case .destroySurface(let pid) = $0, pid == paneId { return true }
                 return false
             }, "should not destroy panes before quit confirmation")
-            try expect(model.panes[paneId] != nil, "pane should still exist")
+            try expect(model.pane(paneId) != nil, "pane should still exist")
         }
         try expect(model.groups[0].tabs.contains { $0.id == tabId }, "tab should still exist")
         try expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
@@ -845,7 +844,7 @@ func tabTests() {
         try expectEqual(Set(model.groups.flatMap(\.tabs).map(\.id)), Set([thirdTabId]))
         try expectEqual(destroyedPaneIds(in: effects), expectedDestroyed)
         for paneId in expectedDestroyed {
-            try expect(model.panes[paneId] == nil, "closed tab pane should be removed")
+            try expect(model.pane(paneId) == nil, "closed tab pane should be removed")
         }
     }
 

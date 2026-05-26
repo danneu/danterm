@@ -115,7 +115,7 @@ func snapshotTests() {
         let loaded = try loadValidatedInitFile(from: data)
         try expectEqual(loaded.snapshot.selectedTabId, model.selectedTabId?.rawValue.uuidString)
         try expectEqual(loaded.model.groups.count, model.groups.count)
-        try expectEqual(loaded.model.panes.count, model.panes.count)
+        try expectEqual(loaded.model.allPaneIds.count, model.allPaneIds.count)
     }
 
     test("decode split node") {
@@ -152,7 +152,7 @@ func snapshotTests() {
         let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
         let model = validateAndBuild(initFile.model)
         try expect(model != nil, "should validate split tree")
-        try expectEqual(model!.panes.count, 2)
+        try expectEqual(model!.allPaneIds.count, 2)
         let tab = model!.groups[0].tabs[0]
         try expectEqual(allPaneIds(tab.rootNode).count, 2)
     }
@@ -384,7 +384,7 @@ func snapshotTests() {
         try expectEqual(built.selectedTabId, firstTab.id, "selected tab should default to first group's first tab")
         let firstPane = firstLeafId(firstTab.rootNode)
         try expectEqual(firstTab.focusedPaneId, firstPane, "focused pane should default to first pane in first tab")
-        try expect(built.panes[firstPane] != nil, "synthesized pane id should exist in pane dictionary")
+        try expect(built.pane(firstPane) != nil, "synthesized pane id should exist as a tree leaf")
     }
 
     // MARK: - Reconstruction invariants
@@ -415,7 +415,7 @@ func snapshotTests() {
 
         try expectEqual(model.groups[0].id, GroupId(rawValue: UUID(uuidString: "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A")!))
         try expectEqual(model.groups[0].tabs[0].id, TabId(rawValue: UUID(uuidString: "89B4C232-C840-42A8-8CA6-C133C8EBBFF2")!))
-        try expect(model.panes[PaneId(rawValue: UUID(uuidString: "A13076E4-A29C-4358-A771-B4B4DF84C6C5")!)] != nil)
+        try expect(model.pane(PaneId(rawValue: UUID(uuidString: "A13076E4-A29C-4358-A771-B4B4DF84C6C5")!)) != nil)
         try expectEqual(model.selectedTabId, TabId(rawValue: UUID(uuidString: "89B4C232-C840-42A8-8CA6-C133C8EBBFF2")!))
     }
 
@@ -573,13 +573,13 @@ func snapshotTests() {
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .addTodo(paneId: paneId, text: "task one"))
         update(&model, .addTodo(paneId: paneId, text: "task two"))
-        let todoId = model.panes[paneId]!.todos[0].id
+        let todoId = model.pane(paneId)!.todos[0].id
         update(&model, .toggleTodoDone(paneId: paneId, todoId: todoId))
 
         let snapshot = toSnapshot(model)
         let rebuilt = validateAndBuild(snapshot)
         try expect(rebuilt != nil, "should rebuild from snapshot with todos")
-        let todos = rebuilt!.panes[paneId]!.todos
+        let todos = rebuilt!.pane(paneId)!.todos
         try expectEqual(todos.count, 2)
         try expectEqual(todos[0].text, "task one")
         try expectEqual(todos[0].isDone, true)
@@ -665,7 +665,7 @@ func snapshotTests() {
         let initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
         let model = validateAndBuild(initFile.model)
         try expect(model != nil, "should rebuild snapshot without todos field")
-        let panes = Array(model!.panes.values)
+        let panes = Array(model!.allPanes)
         try expectEqual(panes[0].todos.count, 0, "todos should default to empty")
     }
 }

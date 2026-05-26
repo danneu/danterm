@@ -12,9 +12,9 @@ func todoTests() {
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let effects = update(&model, .addTodo(paneId: paneId, text: "run tests"))
-        try expectEqual(model.panes[paneId]!.todos.count, 1)
-        try expectEqual(model.panes[paneId]!.todos[0].text, "run tests")
-        try expectEqual(model.panes[paneId]!.todos[0].isDone, false)
+        try expectEqual(model.pane(paneId)!.todos.count, 1)
+        try expectEqual(model.pane(paneId)!.todos[0].text, "run tests")
+        try expectEqual(model.pane(paneId)!.todos[0].isDone, false)
         try expect(hasEffect(effects) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
@@ -26,7 +26,7 @@ func todoTests() {
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .addTodo(paneId: paneId, text: "  hello  "))
-        try expectEqual(model.panes[paneId]!.todos[0].text, "hello")
+        try expectEqual(model.pane(paneId)!.todos[0].text, "hello")
     }
 
     test("addTodo rejects empty and whitespace-only text") {
@@ -35,7 +35,7 @@ func todoTests() {
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .addTodo(paneId: paneId, text: ""))
         update(&model, .addTodo(paneId: paneId, text: "   "))
-        try expectEqual(model.panes[paneId]!.todos.count, 0)
+        try expectEqual(model.pane(paneId)!.todos.count, 0)
     }
 
     // MARK: - toggleTodoDone
@@ -45,16 +45,16 @@ func todoTests() {
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .addTodo(paneId: paneId, text: "task"))
-        let todoId = model.panes[paneId]!.todos[0].id
+        let todoId = model.pane(paneId)!.todos[0].id
         let effects = update(&model, .toggleTodoDone(paneId: paneId, todoId: todoId))
-        try expectEqual(model.panes[paneId]!.todos[0].isDone, true)
+        try expectEqual(model.pane(paneId)!.todos[0].isDone, true)
         try expect(hasEffect(effects) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
         }, "expected scheduleCheckpoint")
         // Toggle back
         update(&model, .toggleTodoDone(paneId: paneId, todoId: todoId))
-        try expectEqual(model.panes[paneId]!.todos[0].isDone, false)
+        try expectEqual(model.pane(paneId)!.todos[0].isDone, false)
     }
 
     // MARK: - editTodoText
@@ -64,9 +64,9 @@ func todoTests() {
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .addTodo(paneId: paneId, text: "old"))
-        let todoId = model.panes[paneId]!.todos[0].id
+        let todoId = model.pane(paneId)!.todos[0].id
         update(&model, .editTodoText(paneId: paneId, todoId: todoId, text: "new"))
-        try expectEqual(model.panes[paneId]!.todos[0].text, "new")
+        try expectEqual(model.pane(paneId)!.todos[0].text, "new")
     }
 
     test("editTodoText rejects empty text") {
@@ -74,11 +74,11 @@ func todoTests() {
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .addTodo(paneId: paneId, text: "keep"))
-        let todoId = model.panes[paneId]!.todos[0].id
+        let todoId = model.pane(paneId)!.todos[0].id
         update(&model, .editTodoText(paneId: paneId, todoId: todoId, text: ""))
-        try expectEqual(model.panes[paneId]!.todos[0].text, "keep")
+        try expectEqual(model.pane(paneId)!.todos[0].text, "keep")
         update(&model, .editTodoText(paneId: paneId, todoId: todoId, text: "   "))
-        try expectEqual(model.panes[paneId]!.todos[0].text, "keep")
+        try expectEqual(model.pane(paneId)!.todos[0].text, "keep")
     }
 
     // MARK: - deleteTodo
@@ -89,10 +89,10 @@ func todoTests() {
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .addTodo(paneId: paneId, text: "A"))
         update(&model, .addTodo(paneId: paneId, text: "B"))
-        let idA = model.panes[paneId]!.todos[0].id
+        let idA = model.pane(paneId)!.todos[0].id
         update(&model, .deleteTodo(paneId: paneId, todoId: idA))
-        try expectEqual(model.panes[paneId]!.todos.count, 1)
-        try expectEqual(model.panes[paneId]!.todos[0].text, "B")
+        try expectEqual(model.pane(paneId)!.todos.count, 1)
+        try expectEqual(model.pane(paneId)!.todos[0].text, "B")
     }
 
     // MARK: - reorderTodo
@@ -104,10 +104,10 @@ func todoTests() {
         update(&model, .addTodo(paneId: paneId, text: "A"))
         update(&model, .addTodo(paneId: paneId, text: "B"))
         update(&model, .addTodo(paneId: paneId, text: "C"))
-        let idC = model.panes[paneId]!.todos[2].id
+        let idC = model.pane(paneId)!.todos[2].id
         // Move C to position 0
         update(&model, .reorderTodo(paneId: paneId, todoId: idC, toIndex: 0))
-        try expectEqual(model.panes[paneId]!.todos.map(\.text), ["C", "A", "B"])
+        try expectEqual(model.pane(paneId)!.todos.map(\.text), ["C", "A", "B"])
     }
 
     test("reorderTodo no-ops on same position") {
@@ -116,9 +116,9 @@ func todoTests() {
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .addTodo(paneId: paneId, text: "A"))
         update(&model, .addTodo(paneId: paneId, text: "B"))
-        let idA = model.panes[paneId]!.todos[0].id
+        let idA = model.pane(paneId)!.todos[0].id
         let effects = update(&model, .reorderTodo(paneId: paneId, todoId: idA, toIndex: 0))
-        try expectEqual(model.panes[paneId]!.todos.map(\.text), ["A", "B"])
+        try expectEqual(model.pane(paneId)!.todos.map(\.text), ["A", "B"])
         try expect(!hasEffect(effects) {
             if case .scheduleCheckpoint = $0 { return true }
             return false
@@ -131,7 +131,7 @@ func todoTests() {
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .addTodo(paneId: paneId, text: "A"))
         update(&model, .addTodo(paneId: paneId, text: "B"))
-        let idA = model.panes[paneId]!.todos[0].id
+        let idA = model.pane(paneId)!.todos[0].id
         // toIndex beyond count is rejected by guard
         let effects = update(&model, .reorderTodo(paneId: paneId, todoId: idA, toIndex: 99))
         // Should be no-op since 99 > count
@@ -147,13 +147,13 @@ func todoTests() {
         update(&model, .addTodo(paneId: paneId, text: "done"))
         update(&model, .addTodo(paneId: paneId, text: "pending"))
         update(&model, .addTodo(paneId: paneId, text: "also done"))
-        let idDone = model.panes[paneId]!.todos[0].id
-        let idAlsoDone = model.panes[paneId]!.todos[2].id
+        let idDone = model.pane(paneId)!.todos[0].id
+        let idAlsoDone = model.pane(paneId)!.todos[2].id
         update(&model, .toggleTodoDone(paneId: paneId, todoId: idDone))
         update(&model, .toggleTodoDone(paneId: paneId, todoId: idAlsoDone))
         update(&model, .clearCompletedTodos(paneId: paneId))
-        try expectEqual(model.panes[paneId]!.todos.count, 1)
-        try expectEqual(model.panes[paneId]!.todos[0].text, "pending")
+        try expectEqual(model.pane(paneId)!.todos.count, 1)
+        try expectEqual(model.pane(paneId)!.todos[0].text, "pending")
     }
 
     // MARK: - requestClosePane
@@ -174,7 +174,7 @@ func todoTests() {
             return false
         }, "expected showClosePaneConfirmation with count 1")
         // Pane should still exist
-        try expect(model.panes[firstPaneId] != nil, "pane should not be removed")
+        try expect(model.pane(firstPaneId) != nil, "pane should not be removed")
     }
 
     test("requestClosePane with all todos completed proceeds to closePane") {
@@ -186,11 +186,11 @@ func todoTests() {
         let paneId = tab.focusedPaneId
         model.selectedTabId = tab.id
         update(&model, .addTodo(paneId: paneId, text: "task"))
-        let todoId = model.panes[paneId]!.todos[0].id
+        let todoId = model.pane(paneId)!.todos[0].id
         update(&model, .toggleTodoDone(paneId: paneId, todoId: todoId))
         let effects = update(&model, .requestClosePane(paneId: paneId))
         // Pane should be removed (closePane was invoked)
-        try expect(model.panes[paneId] == nil, "pane should be removed")
+        try expect(model.pane(paneId) == nil, "pane should be removed")
         try expect(hasEffect(effects) {
             if case .destroySurface(let pid) = $0 { return pid == paneId }
             return false
@@ -205,7 +205,7 @@ func todoTests() {
         let paneId = tab.focusedPaneId
         model.selectedTabId = tab.id
         let effects = update(&model, .requestClosePane(paneId: paneId))
-        try expect(model.panes[paneId] == nil, "pane should be removed")
+        try expect(model.pane(paneId) == nil, "pane should be removed")
         try expect(hasEffect(effects) {
             if case .destroySurface(let pid) = $0 { return pid == paneId }
             return false
@@ -281,9 +281,9 @@ func todoTests() {
         // The new pane is the focused one after split
         let newPaneId = tab.focusedPaneId
         try expect(newPaneId != paneId, "new pane should have different ID")
-        try expectEqual(model.panes[newPaneId]!.todos.count, 0, "new pane should have empty todos")
+        try expectEqual(model.pane(newPaneId)!.todos.count, 0, "new pane should have empty todos")
         // Parent still has its todo
-        try expectEqual(model.panes[paneId]!.todos.count, 1)
+        try expectEqual(model.pane(paneId)!.todos.count, 1)
     }
 
     // MARK: - classifyInputAction

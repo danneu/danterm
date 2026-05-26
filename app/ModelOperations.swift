@@ -12,7 +12,7 @@ func effectiveTheme(for pane: PaneModel) -> String? {
 // MARK: - Pane Toolbar
 
 func paneToolbarText(for paneId: PaneId, in model: AppModel) -> (title: String, cwd: String?) {
-  guard let pane = model.panes[paneId] else {
+  guard let pane = model.pane(paneId) else {
     return (title: "Terminal", cwd: nil)
   }
   return (title: pane.title, cwd: pane.cwd)
@@ -50,10 +50,51 @@ func shouldForceSidebarRowEmphasis(rowTabId: TabId?, focusedTabId: TabId?) -> Bo
 
 func allPaneIds(_ node: SplitNodeModel) -> [PaneId] {
   switch node {
-  case .leaf(let id):
-    return [id]
+  case .leaf(let pane):
+    return [pane.id]
   case .split(_, _, let first, let second, _):
     return allPaneIds(first) + allPaneIds(second)
+  }
+}
+
+/// All PaneModels in a node, in left-to-right tree order.
+func panesInNode(_ node: SplitNodeModel) -> [PaneModel] {
+  switch node {
+  case .leaf(let pane):
+    return [pane]
+  case .split(_, _, let first, let second, _):
+    return panesInNode(first) + panesInNode(second)
+  }
+}
+
+/// Find the pane with the given id within a node. Backs `AppModel.pane(_:)`.
+func paneInNode(_ node: SplitNodeModel, id: PaneId) -> PaneModel? {
+  switch node {
+  case .leaf(let pane):
+    return pane.id == id ? pane : nil
+  case .split(_, _, let first, let second, _):
+    return paneInNode(first, id: id) ?? paneInNode(second, id: id)
+  }
+}
+
+/// Rebuild a node with `body` applied to the leaf owning `id`, rebuilding only
+/// the spine down to that leaf (the `setRatio` pattern). Returns nil if `id` is
+/// not in this subtree, letting the caller try a sibling. Stops at the first
+/// match -- pane ids are unique, so `body` runs at most once.
+func updatePaneInNode(_ node: SplitNodeModel, id: PaneId, _ body: (inout PaneModel) -> Void) -> SplitNodeModel? {
+  switch node {
+  case .leaf(var pane):
+    guard pane.id == id else { return nil }
+    body(&pane)
+    return .leaf(pane)
+  case .split(let splitId, let dir, let first, let second, let ratio):
+    if let newFirst = updatePaneInNode(first, id: id, body) {
+      return .split(id: splitId, direction: dir, first: newFirst, second: second, ratio: ratio)
+    }
+    if let newSecond = updatePaneInNode(second, id: id, body) {
+      return .split(id: splitId, direction: dir, first: first, second: newSecond, ratio: ratio)
+    }
+    return nil
   }
 }
 
@@ -79,8 +120,8 @@ func effectiveSurfaceVisibility(in model: AppModel, windowVisible: Bool) -> [Pan
 
 func firstLeafId(_ node: SplitNodeModel) -> PaneId {
   switch node {
-  case .leaf(let id):
-    return id
+  case .leaf(let pane):
+    return pane.id
   case .split(_, _, let first, _, _):
     return firstLeafId(first)
   }
@@ -88,34 +129,34 @@ func firstLeafId(_ node: SplitNodeModel) -> PaneId {
 
 func lastLeafId(_ node: SplitNodeModel) -> PaneId {
   switch node {
-  case .leaf(let id):
-    return id
+  case .leaf(let pane):
+    return pane.id
   case .split(_, _, _, let second, _):
     return lastLeafId(second)
   }
 }
 
 func splitLeaf(
-  _ node: SplitNodeModel, paneId: PaneId, direction: SplitNodeModel.Direction, newPaneId: PaneId
+  _ node: SplitNodeModel, paneId: PaneId, direction: SplitNodeModel.Direction, newPane: PaneModel
 ) -> SplitNodeModel? {
   switch node {
-  case .leaf(let id):
-    if id == paneId {
+  case .leaf(let pane):
+    if pane.id == paneId {
       return .split(
         id: SplitId(),
         direction: direction,
-        first: .leaf(id),
-        second: .leaf(newPaneId),
+        first: .leaf(pane),
+        second: .leaf(newPane),
         ratio: 0.5
       )
     }
     return nil
 
   case .split(let splitId, let dir, let first, let second, let ratio):
-    if let newFirst = splitLeaf(first, paneId: paneId, direction: direction, newPaneId: newPaneId) {
+    if let newFirst = splitLeaf(first, paneId: paneId, direction: direction, newPane: newPane) {
       return .split(id: splitId, direction: dir, first: newFirst, second: second, ratio: ratio)
     }
-    if let newSecond = splitLeaf(second, paneId: paneId, direction: direction, newPaneId: newPaneId)
+    if let newSecond = splitLeaf(second, paneId: paneId, direction: direction, newPane: newPane)
     {
       return .split(id: splitId, direction: dir, first: first, second: newSecond, ratio: ratio)
     }
@@ -123,65 +164,73 @@ func splitLeaf(
   }
 }
 
-/// Remove a leaf from the tree. Returns (newTree, nextFocusPaneId).
-/// newTree is nil if the removed leaf was the only node (root leaf).
-func removeLeaf(_ node: SplitNodeModel, paneId: PaneId) -> (SplitNodeModel?, PaneId?) {
+/// Remove a leaf from the tree. Returns (newTree, nextFocusPaneId, removed).
+/// newTree is nil if the removed leaf was the only node (root leaf). `removed`
+/// is the PaneModel that lived at that leaf, or nil if `paneId` wasn't found:
+/// close paths discard it, move paths re-insert it so cwd/theme/todos travel
+/// with the pane to its new position.
+func removeLeaf(_ node: SplitNodeModel, paneId: PaneId) -> (SplitNodeModel?, PaneId?, PaneModel?) {
   switch node {
-  case .leaf(let id):
-    if id == paneId {
-      return (nil, nil)
+  case .leaf(let pane):
+    if pane.id == paneId {
+      return (nil, nil, pane)
     }
-    return (node, nil)
+    return (node, nil, nil)
 
   case .split(let splitId, let dir, let first, let second, let ratio):
     // Check if either direct child is the target leaf
-    if case .leaf(let firstId) = first, firstId == paneId {
-      return (second, firstLeafId(second))
+    if case .leaf(let firstPane) = first, firstPane.id == paneId {
+      return (second, firstLeafId(second), firstPane)
     }
-    if case .leaf(let secondId) = second, secondId == paneId {
-      return (first, lastLeafId(first))
+    if case .leaf(let secondPane) = second, secondPane.id == paneId {
+      return (first, lastLeafId(first), secondPane)
     }
 
     // Recurse into children
-    let (newFirst, focusFromFirst) = removeLeaf(first, paneId: paneId)
+    let (newFirst, focusFromFirst, removedFromFirst) = removeLeaf(first, paneId: paneId)
     if let newFirst = newFirst, newFirst != first {
       return (
         .split(id: splitId, direction: dir, first: newFirst, second: second, ratio: ratio),
-        focusFromFirst
+        focusFromFirst,
+        removedFromFirst
       )
     }
 
-    let (newSecond, focusFromSecond) = removeLeaf(second, paneId: paneId)
+    let (newSecond, focusFromSecond, removedFromSecond) = removeLeaf(second, paneId: paneId)
     if let newSecond = newSecond, newSecond != second {
       return (
         .split(id: splitId, direction: dir, first: first, second: newSecond, ratio: ratio),
-        focusFromSecond
+        focusFromSecond,
+        removedFromSecond
       )
     }
 
-    return (node, nil)
+    return (node, nil, nil)
   }
 }
 
-/// Swap two leaf IDs throughout the tree. Returns nil if either ID is missing.
+/// Swap two leaves' whole PaneModel payloads throughout the tree -- the pane at
+/// `a`'s position lands at `b`'s position and vice versa, carrying their full
+/// content (cwd/theme/todos). Returns nil if either ID is missing.
 func swapLeaves(_ node: SplitNodeModel, _ a: PaneId, _ b: PaneId) -> SplitNodeModel? {
   guard a != b else { return nil }
-  let ids = Set(allPaneIds(node))
-  guard ids.contains(a), ids.contains(b) else { return nil }
-  return swapLeavesInner(node, a, b)
+  guard let paneA = paneInNode(node, id: a), let paneB = paneInNode(node, id: b) else { return nil }
+  return swapLeavesInner(node, a: a, b: b, paneA: paneA, paneB: paneB)
 }
 
-private func swapLeavesInner(_ node: SplitNodeModel, _ a: PaneId, _ b: PaneId) -> SplitNodeModel {
+private func swapLeavesInner(
+  _ node: SplitNodeModel, a: PaneId, b: PaneId, paneA: PaneModel, paneB: PaneModel
+) -> SplitNodeModel {
   switch node {
-  case .leaf(let id):
-    if id == a { return .leaf(b) }
-    if id == b { return .leaf(a) }
+  case .leaf(let pane):
+    if pane.id == a { return .leaf(paneB) }
+    if pane.id == b { return .leaf(paneA) }
     return node
   case .split(let splitId, let dir, let first, let second, let ratio):
     return .split(
       id: splitId, direction: dir,
-      first: swapLeavesInner(first, a, b),
-      second: swapLeavesInner(second, a, b),
+      first: swapLeavesInner(first, a: a, b: b, paneA: paneA, paneB: paneB),
+      second: swapLeavesInner(second, a: a, b: b, paneA: paneA, paneB: paneB),
       ratio: ratio
     )
   }
@@ -199,36 +248,39 @@ func moveLeaf(
   guard source != target else { return nil }
   let ids = Set(allPaneIds(node))
   guard ids.contains(source), ids.contains(target) else { return nil }
-  let (stripped, _) = removeLeaf(node, paneId: source)
-  guard let stripped = stripped else { return nil }
+  // Capture the removed pane's full payload and re-insert THAT, so cwd/theme/
+  // todos move with the pane instead of being rebuilt as a fresh default leaf.
+  let (stripped, _, removed) = removeLeaf(node, paneId: source)
+  guard let stripped = stripped, let removed = removed else { return nil }
   return insertAtLeaf(
-    stripped, at: target, inserting: source, direction: direction, insertFirst: insertFirst)
+    stripped, at: target, inserting: removed, direction: direction, insertFirst: insertFirst)
 }
 
-/// Replace a target leaf with a split containing both source and target.
+/// Replace a target leaf with a split containing both the moved `source` pane
+/// (its full payload, threaded from `removeLeaf`) and the original target leaf.
 private func insertAtLeaf(
   _ node: SplitNodeModel,
   at targetId: PaneId,
-  inserting sourceId: PaneId,
+  inserting source: PaneModel,
   direction: SplitNodeModel.Direction,
   insertFirst: Bool
 ) -> SplitNodeModel? {
   switch node {
-  case .leaf(let id):
-    if id == targetId {
-      let first: SplitNodeModel = insertFirst ? .leaf(sourceId) : .leaf(targetId)
-      let second: SplitNodeModel = insertFirst ? .leaf(targetId) : .leaf(sourceId)
+  case .leaf(let pane):
+    if pane.id == targetId {
+      let first: SplitNodeModel = insertFirst ? .leaf(source) : .leaf(pane)
+      let second: SplitNodeModel = insertFirst ? .leaf(pane) : .leaf(source)
       return .split(id: SplitId(), direction: direction, first: first, second: second, ratio: 0.5)
     }
     return nil
   case .split(let splitId, let dir, let first, let second, let ratio):
     if let newFirst = insertAtLeaf(
-      first, at: targetId, inserting: sourceId, direction: direction, insertFirst: insertFirst)
+      first, at: targetId, inserting: source, direction: direction, insertFirst: insertFirst)
     {
       return .split(id: splitId, direction: dir, first: newFirst, second: second, ratio: ratio)
     }
     if let newSecond = insertAtLeaf(
-      second, at: targetId, inserting: sourceId, direction: direction, insertFirst: insertFirst)
+      second, at: targetId, inserting: source, direction: direction, insertFirst: insertFirst)
     {
       return .split(id: splitId, direction: dir, first: first, second: newSecond, ratio: ratio)
     }
@@ -276,8 +328,8 @@ private func enterSubtree(
   hints: [(SplitNodeModel, Bool)]
 ) -> PaneId {
   switch node {
-  case .leaf(let id):
-    return id
+  case .leaf(let pane):
+    return pane.id
   case .split(_, let dir, let first, let second, _):
     if dir == direction {
       // Same direction as navigation: pick the near edge
@@ -303,8 +355,8 @@ private func buildPath(_ node: SplitNodeModel, target: PaneId, path: inout [(Spl
   -> Bool
 {
   switch node {
-  case .leaf(let id):
-    return id == target
+  case .leaf(let pane):
+    return pane.id == target
 
   case .split(_, _, let first, let second, _):
     path.append((node, true))
@@ -373,7 +425,7 @@ func groupForTab(_ tabId: TabId, in model: AppModel) -> GroupModel? {
 
 func focusedPane(in model: AppModel) -> PaneModel? {
   guard let tab = selectedTab(in: model) else { return nil }
-  return model.panes[tab.focusedPaneId]
+  return model.pane(tab.focusedPaneId)
 }
 
 func currentCwd(in model: AppModel) -> String? {
@@ -381,7 +433,7 @@ func currentCwd(in model: AppModel) -> String? {
   // Fall back to most recent tab with a known cwd
   let allTabs = model.groups.flatMap(\.tabs)
   for tab in allTabs.reversed() {
-    if let cwd = model.panes[tab.focusedPaneId]?.cwd { return cwd }
+    if let cwd = model.pane(tab.focusedPaneId)?.cwd { return cwd }
   }
   return nil
 }
@@ -444,7 +496,7 @@ func wouldQuitFromClose(_ model: AppModel) -> Bool {
 func emitTerminateConfirmation(_ model: inout AppModel) -> [Effect] {
   guard model.pendingConfirmation == nil else { return [] }
   model.pendingConfirmation = .terminate
-  return [.showTerminateConfirmation(paneCount: model.panes.count)]
+  return [.showTerminateConfirmation(paneCount: model.allPaneIds.count)]
 }
 
 // Single chokepoint for asking before closing a multi-pane tab. It guards the
@@ -495,7 +547,7 @@ func tabTodoRollup(_ tabId: TabId, in model: AppModel) -> (total: Int, uncomplet
   var total = tab.todos.count
   var uncompleted = tab.todos.count { !$0.isDone }
   for paneId in allPaneIds(tab.rootNode) {
-    guard let todos = model.panes[paneId]?.todos else { continue }
+    guard let todos = model.pane(paneId)?.todos else { continue }
     total += todos.count
     uncompleted += todos.count { !$0.isDone }
   }
@@ -581,7 +633,7 @@ func tabTodoItemCount(_ tabId: TabId, in model: AppModel) -> Int {
   guard let tab = tabById(tabId, in: model) else { return 0 }
   var total = tab.todos.count
   for paneId in allPaneIds(tab.rootNode) {
-    total += model.panes[paneId]?.todos.count ?? 0
+    total += model.pane(paneId)?.todos.count ?? 0
   }
   return total
 }
@@ -597,7 +649,7 @@ func buildTabTodoRows(model: AppModel, tabId: TabId) -> [TabTodoRow] {
     }
   }
   for paneId in allPaneIds(tab.rootNode) {
-    guard let pane = model.panes[paneId] else { continue }
+    guard let pane = model.pane(paneId) else { continue }
     rows.append(.paneSectionHeader(paneId: paneId, title: pane.title))
     if pane.todos.isEmpty {
       rows.append(.paneEmptyPlaceholder(paneId: paneId))
@@ -625,12 +677,12 @@ func resolveTabTodoDropTarget(
       guard let tab = tabById(tabId, in: model) else { return nil }
       return (.tab(tabId), tab.todos.count)
     case .paneSectionHeader(let paneId, _):
-      guard let pane = model.panes[paneId] else { return nil }
+      guard let pane = model.pane(paneId) else { return nil }
       return (.pane(paneId), pane.todos.count)
     case .tabEmptyPlaceholder:
       return (.tab(tabId), 0)
     case .paneEmptyPlaceholder(let paneId):
-      guard model.panes[paneId] != nil else { return nil }
+      guard model.pane(paneId) != nil else { return nil }
       return (.pane(paneId), 0)
     case .tabItem, .paneItem:
       return nil
@@ -662,14 +714,14 @@ func resolveTabTodoDropTarget(
     case .tabEmptyPlaceholder:
       return (.tab(tabId), 0)
     case .paneItem(let paneId, _):
-      guard model.panes[paneId] != nil else { return nil }
+      guard model.pane(paneId) != nil else { return nil }
       let atIndex = rows[..<proposedRow].count { row in
         if case .paneItem(let rowPaneId, _) = row { return rowPaneId == paneId }
         return false
       }
       return (.pane(paneId), atIndex)
     case .paneEmptyPlaceholder(let paneId):
-      guard model.panes[paneId] != nil else { return nil }
+      guard model.pane(paneId) != nil else { return nil }
       return (.pane(paneId), 0)
     }
   }
@@ -751,7 +803,7 @@ private func tabTodoCount(for destination: TodoDestination, in model: AppModel) 
   case .tab(let tabId):
     return tabById(tabId, in: model)?.todos.count
   case .pane(let paneId):
-    return model.panes[paneId]?.todos.count
+    return model.pane(paneId)?.todos.count
   }
 }
 
@@ -950,11 +1002,9 @@ func toSnapshot(_ model: AppModel) -> AppModelSnapshot {
 
   let groupSnapshots: [GroupSnapshot] = model.groups.map { group in
     let tabSnapshots: [TabSnapshot] = group.tabs.map { tab in
-      // Collect panes in tree traversal order
-      for paneId in allPaneIds(tab.rootNode) {
-        guard seenPaneIds.insert(paneId).inserted,
-          let pane = model.panes[paneId]
-        else { continue }
+      // Collect panes in tree traversal order, reading each leaf's payload directly.
+      for pane in panesInNode(tab.rootNode) {
+        guard seenPaneIds.insert(pane.id).inserted else { continue }
         let abbrevCwd = pane.cwd.map { abbreviateHome($0) }
         let launch: PaneLaunchSnapshot?
         if pane.lastCommand != nil || abbrevCwd != nil {
@@ -966,7 +1016,7 @@ func toSnapshot(_ model: AppModel) -> AppModelSnapshot {
           TodoSnapshot(id: $0.id.uuidString, text: $0.text, isDone: $0.isDone)
         }
         var snapshot = PaneSnapshot(
-            id: paneId.rawValue.uuidString,
+            id: pane.id.rawValue.uuidString,
             title: pane.title,
             cwd: abbrevCwd,
             launch: launch,
@@ -1007,8 +1057,8 @@ func toSnapshot(_ model: AppModel) -> AppModelSnapshot {
 
 private func toSplitNodeSnapshot(_ node: SplitNodeModel) -> SplitNodeSnapshot {
   switch node {
-  case .leaf(let paneId):
-    return .leaf(paneId: paneId.rawValue.uuidString)
+  case .leaf(let pane):
+    return .leaf(paneId: pane.id.rawValue.uuidString)
   case .split(let id, let direction, let first, let second, let ratio):
     let dirStr: String
     switch direction {

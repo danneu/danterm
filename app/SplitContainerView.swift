@@ -72,7 +72,8 @@ class SplitContainerView: NSView {
 
     private func buildView(for node: SplitNodeModel) -> NSView {
         switch node {
-        case .leaf(let paneId):
+        case .leaf(let pane):
+            let paneId = pane.id
             if let terminalView = surfaceLookup(paneId) {
                 terminalView.frame = .zero
                 let wrapper = PaneWrapperView(paneId: paneId, terminalView: terminalView, isZoomed: isZoomed, hasSplits: hasSplits, runtime: runtime)

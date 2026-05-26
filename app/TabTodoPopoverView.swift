@@ -393,7 +393,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         case .tab(let todoId):
             return tabTodos.first { $0.id == todoId }
         case .pane(let paneId, let todoId):
-            return runtime?.model.panes[paneId]?.todos.first { $0.id == todoId }
+            return runtime?.model.pane(paneId)?.todos.first { $0.id == todoId }
         }
     }
 
@@ -549,7 +549,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         case .tab:
             return "Edit tab task"
         case .pane(let paneId, _):
-            let title = runtime?.model.panes[paneId]?.title ?? "pane"
+            let title = runtime?.model.pane(paneId)?.title ?? "pane"
             return "Edit pane task: \(title)"
         }
     }
@@ -892,7 +892,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
                 case .tab:
                     return tab.todos.count
                 case .pane(let paneId):
-                    return runtime?.model.panes[paneId]?.todos.count ?? 0
+                    return runtime?.model.pane(paneId)?.todos.count ?? 0
                 }
             },
             delta: delta

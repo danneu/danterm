@@ -243,7 +243,7 @@ func preferencesTests() {
         _ = openPrefs(&model)
         _ = update(&model, .prefSetRemoteTheme("Grape"))
         let effects = update(&model, .prefSave)
-        try expectEqual(model.panes[paneId]?.remoteThemeOverride, "Grape")
+        try expectEqual(model.pane(paneId)?.remoteThemeOverride, "Grape")
         try expect(hasEffect(effects) {
             if case .applyPaneTheme(let pid) = $0, pid == paneId { return true }
             return false

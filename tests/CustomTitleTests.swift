@@ -117,8 +117,7 @@ func customTitleTests() {
         // Split to create a second pane
         update(&model, .splitPane(direction: .horizontal))
         let paneA = allPaneIds(model.groups[0].tabs[0].rootNode).first!
-        model.panes[paneA]?.title = "zsh"
-
+        model.updatePane(paneA) { $0.title = "zsh" }
         // Focus change should update tab.title but not customTitle
         update(&model, .paneBecameFirstResponder(paneId: paneA))
         try expectEqual(model.groups[0].tabs[0].customTitle, "My App")
@@ -384,15 +383,14 @@ func customTitleTests() {
         let home = NSHomeDirectory()
 
         // Set pane title and cwd to absolute paths
-        model.panes[paneId]?.title = "\(home)/world"
-        model.panes[paneId]?.cwd = "\(home)/projects"
-
+        model.updatePane(paneId) { $0.title = "\(home)/world" }
+        model.updatePane(paneId) { $0.cwd = "\(home)/projects" }
         // Trigger paneBecameFirstResponder via split + refocus
         update(&model, .splitPane(direction: .horizontal))
         update(&model, .paneBecameFirstResponder(paneId: paneId))
 
         let tab = model.groups[0].tabs[0]
-        let pane = model.panes[paneId]!
+        let pane = model.pane(paneId)!
         let chrome = deriveTabChrome(from: pane)
 
         try expectEqual(tab.title, chrome.title)

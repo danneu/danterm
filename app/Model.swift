@@ -86,7 +86,11 @@ struct PaneModel: Equatable {
 }
 
 indirect enum SplitNodeModel: Equatable {
-    case leaf(PaneId)
+    // The leaf owns its pane's full content. A pane exists iff a tree leaf owns
+    // it (no separate `AppModel.panes` dict), so the old dual-write drift between
+    // dict and tree is structurally impossible. `PaneModel.id` is a `let`, so
+    // identity travels with the payload.
+    case leaf(PaneModel)
     case split(id: SplitId, direction: Direction, first: SplitNodeModel, second: SplitNodeModel, ratio: CGFloat)
 
     enum Direction: Equatable {
@@ -176,7 +180,6 @@ enum PendingConfirmation: Equatable {
 
 struct AppModel: Equatable {
     var groups: [GroupModel]
-    var panes: [PaneId: PaneModel]
     var selectedTabId: TabId?
     var alerts: [AlertModel] = []  // newest first, capped at 100
     var lastNotificationTime: [PaneId: [AlertKind: Date]] = [:]
@@ -190,6 +193,49 @@ struct AppModel: Equatable {
     var mruCycle: MruCycleState? = nil  // ephemeral — non-nil while cmd-shift held
     var jumpMode: JumpModeState? = nil  // ephemeral — non-nil while tab jump mode is active
     var pendingConfirmation: PendingConfirmation? = nil  // ephemeral -- non-nil while a confirmation sheet is active
+}
+
+// MARK: - Pane Access (tree is the single source of truth)
+//
+// Panes live only in the split-tree leaves; these walk groups -> tabs -> leaves
+// rather than reading a dict. Lookups are O(tree size) but run per-`Msg`, never
+// on a render frame, and the model already does whole-tree walks on every
+// relevant message. NO stored index is kept (that would reintroduce the drift
+// this refactor removes).
+extension AppModel {
+    /// Find a pane by id. Returns nil if no leaf owns it.
+    func pane(_ id: PaneId) -> PaneModel? {
+        for group in groups {
+            for tab in group.tabs {
+                if let found = paneInNode(tab.rootNode, id: id) { return found }
+            }
+        }
+        return nil
+    }
+
+    /// All panes, in tab then tree (left-to-right) order.
+    var allPanes: [PaneModel] {
+        groups.flatMap { $0.tabs.flatMap { panesInNode($0.rootNode) } }
+    }
+
+    /// All pane ids, in tab then tree order. Replaces the old `panes.keys`.
+    var allPaneIds: [PaneId] {
+        allPanes.map(\.id)
+    }
+
+    /// Mutate the leaf-owned pane with the given id in place, rebuilding only the
+    /// spine down to that leaf (like `setRatio`). No-op if no leaf owns the id.
+    /// Stops at the first match -- pane ids are unique across the whole model.
+    mutating func updatePane(_ id: PaneId, _ body: (inout PaneModel) -> Void) {
+        for gi in groups.indices {
+            for ti in groups[gi].tabs.indices {
+                if let newRoot = updatePaneInNode(groups[gi].tabs[ti].rootNode, id: id, body) {
+                    groups[gi].tabs[ti].rootNode = newRoot
+                    return
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Session Lock
@@ -334,6 +380,23 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel,
         paneSnapshotById[id] = ps
     }
 
+    // 1b. Build the PaneModel for each snapshot up front. parseSplitNode attaches
+    // these to the leaves during the tree walk (the tree owns pane content -- no
+    // dict). The referenced-pane checks below still read paneSnapshotById, so a
+    // leaf whose id is missing from the array is rejected before the model escapes.
+    var paneModelById: [PaneId: PaneModel] = [:]
+    for (id, ps) in paneSnapshotById {
+        let expandedCwd = ps.cwd.map { expandTilde($0) }
+        var paneModel = PaneModel(id: id, title: ps.title ?? "Terminal", cwd: expandedCwd, theme: ps.theme)
+        if let todoSnaps = ps.todos {
+            paneModel.todos = todoSnaps.compactMap { ts in
+                guard let uuid = UUID(uuidString: ts.id) else { return nil }
+                return TodoItem(id: uuid, text: ts.text, isDone: ts.isDone)
+            }
+        }
+        paneModelById[id] = paneModel
+    }
+
     // 2. Parse groups and tabs, collecting all referenced pane IDs.
     // Seed global IDs with pane IDs so collisions across domains are rejected.
     var allIds = Set(paneSnapshotById.keys.map(\.rawValue)) // track global uniqueness
@@ -380,7 +443,8 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel,
                 ts.rootNode,
                 allIds: &allIds,
                 autoPaneIds: autoPaneIds,
-                autoPaneCursor: &autoPaneCursor
+                autoPaneCursor: &autoPaneCursor,
+                paneModelById: paneModelById
             ) else {
                 return nil
             }
@@ -459,21 +523,7 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel,
         return nil
     }
 
-    // 5. Build panes dictionary
-    var panes: [PaneId: PaneModel] = [:]
-    for (id, ps) in paneSnapshotById {
-        let expandedCwd = ps.cwd.map { expandTilde($0) }
-        var paneModel = PaneModel(id: id, title: ps.title ?? "Terminal", cwd: expandedCwd, theme: ps.theme)
-        if let todoSnaps = ps.todos {
-            paneModel.todos = todoSnaps.compactMap { ts in
-                guard let uuid = UUID(uuidString: ts.id) else { return nil }
-                return TodoItem(id: uuid, text: ts.text, isDone: ts.isDone)
-            }
-        }
-        panes[id] = paneModel
-    }
-
-    // 6. Resolve selectedTabId. Default to first group's first tab.
+    // 5. Resolve selectedTabId. Default to first group's first tab.
     let selectedTabId: TabId?
     if let selStr = snapshot.selectedTabId, let selId = UUID(uuidString: selStr), allTabIds.contains(TabId(rawValue: selId)) {
         selectedTabId = TabId(rawValue: selId)
@@ -482,7 +532,7 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel,
     }
 
     return (
-        model: AppModel(groups: parsedGroups, panes: panes, selectedTabId: selectedTabId),
+        model: AppModel(groups: parsedGroups, selectedTabId: selectedTabId),
         paneSnapshots: paneSnapshotById
     )
 }
@@ -510,7 +560,8 @@ private func parseSplitNode(
     _ snapshot: SplitNodeSnapshot,
     allIds: inout Set<UUID>,
     autoPaneIds: [PaneId],
-    autoPaneCursor: inout Int
+    autoPaneCursor: inout Int,
+    paneModelById: [PaneId: PaneModel]
 ) -> SplitNodeModel? {
     switch snapshot {
     case .leaf(let paneIdStr):
@@ -527,7 +578,10 @@ private func parseSplitNode(
         } else {
             paneId = PaneId()
         }
-        return .leaf(paneId)
+        // Attach the pane payload. On the success path every referenced id is in
+        // the map; the default fallback only covers a leaf whose backing snapshot
+        // is missing, which the post-walk missing-pane check rejects anyway.
+        return .leaf(paneModelById[paneId] ?? PaneModel(id: paneId))
     case .split(let idStr, let dirStr, let first, let second, let ratio):
         let splitId: SplitId
         if let idStr {
@@ -555,13 +609,15 @@ private func parseSplitNode(
             first,
             allIds: &allIds,
             autoPaneIds: autoPaneIds,
-            autoPaneCursor: &autoPaneCursor
+            autoPaneCursor: &autoPaneCursor,
+            paneModelById: paneModelById
         ),
               let secondNode = parseSplitNode(
                   second,
                   allIds: &allIds,
                   autoPaneIds: autoPaneIds,
-                  autoPaneCursor: &autoPaneCursor
+                  autoPaneCursor: &autoPaneCursor,
+                  paneModelById: paneModelById
               ) else {
             return nil
         }

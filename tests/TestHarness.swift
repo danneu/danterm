@@ -10,6 +10,7 @@ struct TestRunner {
         lifecycleTests()
         alertTests()
         modelOperationsTests()
+        treeOwnsPanesTests()
         snapshotTests()
         dragDropInputTests()
         paneToolbarTests()
@@ -77,8 +78,7 @@ func expectEqual<T: Equatable>(_ a: T, _ b: T, _ message: String = "", file: Str
 func makeModel() -> AppModel {
     let generalId = GroupId()
     return AppModel(
-        groups: [GroupModel(id: generalId, name: "General")],
-        panes: [:]
+        groups: [GroupModel(id: generalId, name: "General")]
     )
 }
 

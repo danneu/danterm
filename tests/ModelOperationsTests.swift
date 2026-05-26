@@ -17,7 +17,7 @@ func modelOperationsTests() {
 
     test("testAllPaneIdsFlatLeaf") {
         let id = PaneId()
-        let node = SplitNodeModel.leaf(id)
+        let node = SplitNodeModel.leaf(PaneModel(id: id))
         let ids = allPaneIds(node)
         try expectEqual(ids.count, 1)
         try expectEqual(ids[0], id)
@@ -27,11 +27,11 @@ func modelOperationsTests() {
         let a = PaneId(), b = PaneId(), c = PaneId()
         let node = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal,
-            first: .leaf(a),
+            first: .leaf(PaneModel(id: a)),
             second: .split(
                 id: SplitId(), direction: .vertical,
-                first: .leaf(b),
-                second: .leaf(c),
+                first: .leaf(PaneModel(id: b)),
+                second: .leaf(PaneModel(id: c)),
                 ratio: 0.5
             ),
             ratio: 0.5
@@ -46,14 +46,9 @@ func modelOperationsTests() {
     // MARK: - effectiveSurfaceVisibility
 
     func makeVisibilityModel(tabs: [TabModel], selectedTabId: TabId?) -> AppModel {
-        let paneEntries = tabs.flatMap { tab in
-            allPaneIds(tab.rootNode).map { paneId in
-                (paneId, PaneModel(id: paneId))
-            }
-        }
+        // Panes already live in the leaves of the passed-in tabs.
         return AppModel(
             groups: [GroupModel(id: GroupId(), name: "General", tabs: tabs)],
-            panes: Dictionary(uniqueKeysWithValues: paneEntries),
             selectedTabId: selectedTabId
         )
     }
@@ -66,12 +61,12 @@ func modelOperationsTests() {
             focusedPaneId: a,
             rootNode: .split(
                 id: SplitId(), direction: .horizontal,
-                first: .leaf(a),
-                second: .leaf(b),
+                first: .leaf(PaneModel(id: a)),
+                second: .leaf(PaneModel(id: b)),
                 ratio: 0.5
             )
         )
-        let tabB = TabModel(id: tabBId, focusedPaneId: c, rootNode: .leaf(c))
+        let tabB = TabModel(id: tabBId, focusedPaneId: c, rootNode: .leaf(PaneModel(id: c)))
         let model = makeVisibilityModel(tabs: [tabA, tabB], selectedTabId: tabAId)
 
         let visibility = effectiveSurfaceVisibility(in: model, windowVisible: false)
@@ -82,7 +77,7 @@ func modelOperationsTests() {
     test("effectiveSurfaceVisibility marks a selected single-pane tab visible") {
         let paneId = PaneId()
         let tabId = TabId()
-        let tab = TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(paneId))
+        let tab = TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(PaneModel(id: paneId)))
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
 
         let visibility = effectiveSurfaceVisibility(in: model, windowVisible: true)
@@ -98,15 +93,15 @@ func modelOperationsTests() {
             focusedPaneId: selectedA,
             rootNode: .split(
                 id: SplitId(), direction: .horizontal,
-                first: .leaf(selectedA),
-                second: .leaf(selectedB),
+                first: .leaf(PaneModel(id: selectedA)),
+                second: .leaf(PaneModel(id: selectedB)),
                 ratio: 0.5
             )
         )
         let backgroundTab = TabModel(
             id: backgroundTabId,
             focusedPaneId: background,
-            rootNode: .leaf(background)
+            rootNode: .leaf(PaneModel(id: background))
         )
         let model = makeVisibilityModel(tabs: [selectedTab, backgroundTab], selectedTabId: selectedTabId)
 
@@ -123,8 +118,8 @@ func modelOperationsTests() {
             focusedPaneId: focused,
             rootNode: .split(
                 id: SplitId(), direction: .horizontal,
-                first: .leaf(focused),
-                second: .leaf(sibling),
+                first: .leaf(PaneModel(id: focused)),
+                second: .leaf(PaneModel(id: sibling)),
                 ratio: 0.5
             ),
             isZoomed: true
@@ -142,7 +137,7 @@ func modelOperationsTests() {
         let tab = TabModel(
             id: tabId,
             focusedPaneId: paneId,
-            rootNode: .leaf(paneId),
+            rootNode: .leaf(PaneModel(id: paneId)),
             isZoomed: true
         )
         let model = makeVisibilityModel(tabs: [tab], selectedTabId: tabId)
@@ -160,8 +155,8 @@ func modelOperationsTests() {
             focusedPaneId: a,
             rootNode: .split(
                 id: SplitId(), direction: .horizontal,
-                first: .leaf(a),
-                second: .leaf(b),
+                first: .leaf(PaneModel(id: a)),
+                second: .leaf(PaneModel(id: b)),
                 ratio: 0.5
             )
         )
@@ -180,11 +175,11 @@ func modelOperationsTests() {
             focusedPaneId: a,
             rootNode: .split(
                 id: SplitId(), direction: .horizontal,
-                first: .leaf(a),
+                first: .leaf(PaneModel(id: a)),
                 second: .split(
                     id: SplitId(), direction: .vertical,
-                    first: .leaf(b),
-                    second: .leaf(c),
+                    first: .leaf(PaneModel(id: b)),
+                    second: .leaf(PaneModel(id: c)),
                     ratio: 0.5
                 ),
                 ratio: 0.5
@@ -205,11 +200,11 @@ func modelOperationsTests() {
             id: SplitId(), direction: .horizontal,
             first: .split(
                 id: SplitId(), direction: .vertical,
-                first: .leaf(a),
-                second: .leaf(b),
+                first: .leaf(PaneModel(id: a)),
+                second: .leaf(PaneModel(id: b)),
                 ratio: 0.5
             ),
-            second: .leaf(c),
+            second: .leaf(PaneModel(id: c)),
             ratio: 0.5
         )
         try expectEqual(firstLeafId(node), a)
@@ -219,11 +214,11 @@ func modelOperationsTests() {
         let a = PaneId(), b = PaneId(), c = PaneId()
         let node = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal,
-            first: .leaf(a),
+            first: .leaf(PaneModel(id: a)),
             second: .split(
                 id: SplitId(), direction: .vertical,
-                first: .leaf(b),
-                second: .leaf(c),
+                first: .leaf(PaneModel(id: b)),
+                second: .leaf(PaneModel(id: c)),
                 ratio: 0.5
             ),
             ratio: 0.5
@@ -235,8 +230,8 @@ func modelOperationsTests() {
 
     test("testSplitLeafNotFound") {
         let a = PaneId()
-        let node = SplitNodeModel.leaf(a)
-        let result = splitLeaf(node, paneId: PaneId(), direction: .horizontal, newPaneId: PaneId())
+        let node = SplitNodeModel.leaf(PaneModel(id: a))
+        let result = splitLeaf(node, paneId: PaneId(), direction: .horizontal, newPane: PaneModel(id: PaneId()))
         try expect(result == nil, "should return nil for unknown paneId")
     }
 
@@ -244,8 +239,8 @@ func modelOperationsTests() {
 
     test("testRemoveLeafRootLeaf") {
         let a = PaneId()
-        let node = SplitNodeModel.leaf(a)
-        let (newTree, nextFocus) = removeLeaf(node, paneId: a)
+        let node = SplitNodeModel.leaf(PaneModel(id: a))
+        let (newTree, nextFocus, _) = removeLeaf(node, paneId: a)
         try expect(newTree == nil, "removing root leaf should return nil tree")
         try expect(nextFocus == nil, "removing root leaf should return nil focus")
     }
@@ -255,30 +250,30 @@ func modelOperationsTests() {
         // Tree: [A, [B, C]]
         let inner = SplitNodeModel.split(
             id: SplitId(), direction: .vertical,
-            first: .leaf(b),
-            second: .leaf(c),
+            first: .leaf(PaneModel(id: b)),
+            second: .leaf(PaneModel(id: c)),
             ratio: 0.5
         )
         let root = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal,
-            first: .leaf(a),
+            first: .leaf(PaneModel(id: a)),
             second: inner,
             ratio: 0.5
         )
 
         // Remove B — inner split should collapse to just C, result: [A, C]
-        let (newTree, nextFocus) = removeLeaf(root, paneId: b)
+        let (newTree, nextFocus, _) = removeLeaf(root, paneId: b)
         try expect(newTree != nil, "tree should not be nil")
         guard case .split(_, .horizontal, let first, let second, _) = newTree! else {
             throw TestFailure(message: "should be a horizontal split")
         }
-        if case .leaf(let fid) = first {
-            try expectEqual(fid, a)
+        if case .leaf(let fpane) = first {
+            try expectEqual(fpane.id, a)
         } else {
             throw TestFailure(message: "first should be leaf A")
         }
-        if case .leaf(let sid) = second {
-            try expectEqual(sid, c)
+        if case .leaf(let spane) = second {
+            try expectEqual(spane.id, c)
         } else {
             throw TestFailure(message: "second should be leaf C (promoted)")
         }
@@ -291,8 +286,8 @@ func modelOperationsTests() {
         let a = PaneId(), b = PaneId()
         let node = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal,
-            first: .leaf(a),
-            second: .leaf(b),
+            first: .leaf(PaneModel(id: a)),
+            second: .leaf(PaneModel(id: b)),
             ratio: 0.5
         )
         // From A, go right (second)
@@ -305,8 +300,8 @@ func modelOperationsTests() {
         let a = PaneId(), b = PaneId()
         let node = SplitNodeModel.split(
             id: SplitId(), direction: .vertical,
-            first: .leaf(a),
-            second: .leaf(b),
+            first: .leaf(PaneModel(id: a)),
+            second: .leaf(PaneModel(id: b)),
             ratio: 0.5
         )
         // From A, go down (second)
@@ -320,11 +315,11 @@ func modelOperationsTests() {
         // [A, [B, C]] where outer=horizontal, inner=vertical
         let node = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal,
-            first: .leaf(a),
+            first: .leaf(PaneModel(id: a)),
             second: .split(
                 id: SplitId(), direction: .vertical,
-                first: .leaf(b),
-                second: .leaf(c),
+                first: .leaf(PaneModel(id: b)),
+                second: .leaf(PaneModel(id: c)),
                 ratio: 0.5
             ),
             ratio: 0.5
@@ -343,8 +338,8 @@ func modelOperationsTests() {
         let a = PaneId(), b = PaneId()
         let node = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal,
-            first: .leaf(a),
-            second: .leaf(b),
+            first: .leaf(PaneModel(id: a)),
+            second: .leaf(PaneModel(id: b)),
             ratio: 0.5
         )
         // From A, go left — no neighbor
@@ -363,14 +358,14 @@ func modelOperationsTests() {
             id: SplitId(), direction: .horizontal,
             first: .split(
                 id: SplitId(), direction: .vertical,
-                first: .leaf(tl),
-                second: .leaf(bl),
+                first: .leaf(PaneModel(id: tl)),
+                second: .leaf(PaneModel(id: bl)),
                 ratio: 0.5
             ),
             second: .split(
                 id: SplitId(), direction: .vertical,
-                first: .leaf(tr),
-                second: .leaf(br),
+                first: .leaf(PaneModel(id: tr)),
+                second: .leaf(PaneModel(id: br)),
                 ratio: 0.5
             ),
             ratio: 0.5
@@ -392,8 +387,8 @@ func modelOperationsTests() {
         let a = PaneId(), b = PaneId()
         let node = SplitNodeModel.split(
             id: splitId, direction: .horizontal,
-            first: .leaf(a),
-            second: .leaf(b),
+            first: .leaf(PaneModel(id: a)),
+            second: .leaf(PaneModel(id: b)),
             ratio: 0.5
         )
         let updated = setRatio(node, splitId: splitId, ratio: 0.7)
@@ -408,11 +403,11 @@ func modelOperationsTests() {
         let a = PaneId(), b = PaneId(), c = PaneId()
         let node = SplitNodeModel.split(
             id: splitId1, direction: .horizontal,
-            first: .leaf(a),
+            first: .leaf(PaneModel(id: a)),
             second: .split(
                 id: splitId2, direction: .vertical,
-                first: .leaf(b),
-                second: .leaf(c),
+                first: .leaf(PaneModel(id: b)),
+                second: .leaf(PaneModel(id: c)),
                 ratio: 0.5
             ),
             ratio: 0.5
@@ -477,8 +472,8 @@ func modelOperationsTests() {
         let splitId = SplitId()
         let node = SplitNodeModel.split(
             id: splitId, direction: .horizontal,
-            first: .leaf(a),
-            second: .leaf(b),
+            first: .leaf(PaneModel(id: a)),
+            second: .leaf(PaneModel(id: b)),
             ratio: 0.6
         )
         let result = swapLeaves(node, a, b)
@@ -488,9 +483,9 @@ func modelOperationsTests() {
         }
         try expectEqual(rSplitId, splitId, "split id preserved")
         try expectEqual(ratio, 0.6, "ratio preserved")
-        if case .leaf(let fid) = first { try expectEqual(fid, b) }
+        if case .leaf(let fpane) = first { try expectEqual(fpane.id, b) }
         else { throw TestFailure(message: "first should be leaf B") }
-        if case .leaf(let sid) = second { try expectEqual(sid, a) }
+        if case .leaf(let spane) = second { try expectEqual(spane.id, a) }
         else { throw TestFailure(message: "second should be leaf A") }
     }
 
@@ -500,11 +495,11 @@ func modelOperationsTests() {
         let outerSplitId = SplitId()
         let node = SplitNodeModel.split(
             id: outerSplitId, direction: .horizontal,
-            first: .leaf(a),
+            first: .leaf(PaneModel(id: a)),
             second: .split(
                 id: innerSplitId, direction: .vertical,
-                first: .leaf(b),
-                second: .leaf(c),
+                first: .leaf(PaneModel(id: b)),
+                second: .leaf(PaneModel(id: c)),
                 ratio: 0.3
             ),
             ratio: 0.7
@@ -515,22 +510,22 @@ func modelOperationsTests() {
         }
         try expectEqual(rOuterId, outerSplitId, "outer split id preserved")
         try expectEqual(outerRatio, 0.7, "outer ratio preserved")
-        if case .leaf(let fid) = first { try expectEqual(fid, c, "first should now be C") }
+        if case .leaf(let fpane) = first { try expectEqual(fpane.id, c, "first should now be C") }
         else { throw TestFailure(message: "first should be a leaf") }
         guard case .split(let rInnerId, .vertical, let innerFirst, let innerSecond, let innerRatio) = second else {
             throw TestFailure(message: "second should be inner split")
         }
         try expectEqual(rInnerId, innerSplitId, "inner split id preserved")
         try expectEqual(innerRatio, 0.3, "inner ratio preserved")
-        if case .leaf(let fid) = innerFirst { try expectEqual(fid, b, "inner first still B") }
+        if case .leaf(let fpane) = innerFirst { try expectEqual(fpane.id, b, "inner first still B") }
         else { throw TestFailure(message: "inner first should be leaf") }
-        if case .leaf(let sid) = innerSecond { try expectEqual(sid, a, "inner second now A") }
+        if case .leaf(let spane) = innerSecond { try expectEqual(spane.id, a, "inner second now A") }
         else { throw TestFailure(message: "inner second should be leaf") }
     }
 
     test("testSwapLeavesSamePane") {
         let a = PaneId()
-        let node = SplitNodeModel.leaf(a)
+        let node = SplitNodeModel.leaf(PaneModel(id: a))
         try expect(swapLeaves(node, a, a) == nil, "same pane returns nil")
     }
 
@@ -538,8 +533,8 @@ func modelOperationsTests() {
         let a = PaneId(), b = PaneId()
         let node = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal,
-            first: .leaf(a),
-            second: .leaf(b),
+            first: .leaf(PaneModel(id: a)),
+            second: .leaf(PaneModel(id: b)),
             ratio: 0.5
         )
         try expect(swapLeaves(node, a, PaneId()) == nil, "missing pane returns nil")
@@ -552,8 +547,8 @@ func modelOperationsTests() {
         // [A, B] → move A to left of B → [A, B] (same shape but fresh split)
         let node = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal,
-            first: .leaf(a),
-            second: .leaf(b),
+            first: .leaf(PaneModel(id: a)),
+            second: .leaf(PaneModel(id: b)),
             ratio: 0.5
         )
         let result = moveLeaf(node, source: a, target: b, direction: .horizontal, insertFirst: true)
@@ -570,8 +565,8 @@ func modelOperationsTests() {
         let a = PaneId(), b = PaneId()
         let node = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal,
-            first: .leaf(a),
-            second: .leaf(b),
+            first: .leaf(PaneModel(id: a)),
+            second: .leaf(PaneModel(id: b)),
             ratio: 0.5
         )
         let result = moveLeaf(node, source: a, target: b, direction: .horizontal, insertFirst: false)
@@ -585,11 +580,11 @@ func modelOperationsTests() {
         // Tree: [A, [B, C]] — move B to top of A
         let node = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal,
-            first: .leaf(a),
+            first: .leaf(PaneModel(id: a)),
             second: .split(
                 id: SplitId(), direction: .vertical,
-                first: .leaf(b),
-                second: .leaf(c),
+                first: .leaf(PaneModel(id: b)),
+                second: .leaf(PaneModel(id: c)),
                 ratio: 0.5
             ),
             ratio: 0.5
@@ -607,8 +602,8 @@ func modelOperationsTests() {
         let origSplitId = SplitId()
         let node = SplitNodeModel.split(
             id: origSplitId, direction: .horizontal,
-            first: .leaf(a),
-            second: .leaf(b),
+            first: .leaf(PaneModel(id: a)),
+            second: .leaf(PaneModel(id: b)),
             ratio: 0.5
         )
         let result = moveLeaf(node, source: a, target: b, direction: .vertical, insertFirst: true)!
@@ -622,7 +617,7 @@ func modelOperationsTests() {
 
     test("testMoveLeafSameSourceTarget") {
         let a = PaneId()
-        let node = SplitNodeModel.leaf(a)
+        let node = SplitNodeModel.leaf(PaneModel(id: a))
         try expect(moveLeaf(node, source: a, target: a, direction: .horizontal, insertFirst: true) == nil, "same source/target returns nil")
     }
 
@@ -630,8 +625,8 @@ func modelOperationsTests() {
         let a = PaneId(), b = PaneId()
         let node = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal,
-            first: .leaf(a),
-            second: .leaf(b),
+            first: .leaf(PaneModel(id: a)),
+            second: .leaf(PaneModel(id: b)),
             ratio: 0.5
         )
         try expect(moveLeaf(node, source: PaneId(), target: b, direction: .horizontal, insertFirst: true) == nil, "missing source returns nil")
@@ -641,11 +636,11 @@ func modelOperationsTests() {
         let a = PaneId(), b = PaneId()
         let node = SplitNodeModel.split(
             id: SplitId(), direction: .horizontal,
-            first: .leaf(a),
-            second: .leaf(b),
+            first: .leaf(PaneModel(id: a)),
+            second: .leaf(PaneModel(id: b)),
             ratio: 0.5
         )
-        // removeLeaf(a) leaves .leaf(b), then insertAtLeaf for missing target returns nil
+        // removeLeaf(a) leaves .leaf(PaneModel(id: b)), then insertAtLeaf for missing target returns nil
         try expect(moveLeaf(node, source: a, target: PaneId(), direction: .horizontal, insertFirst: true) == nil, "missing target returns nil")
     }
 
@@ -704,8 +699,8 @@ func modelOperationsTests() {
             focusedPaneId: a,
             rootNode: .split(
                 id: SplitId(), direction: .horizontal,
-                first: .leaf(a),
-                second: .leaf(b),
+                first: .leaf(PaneModel(id: a)),
+                second: .leaf(PaneModel(id: b)),
                 ratio: 0.5
             )
         )
@@ -728,8 +723,8 @@ func modelOperationsTests() {
     test("testGroupUnreadAlertCount") {
         let a = PaneId(), b = PaneId()
         let tabId1 = TabId(), tabId2 = TabId()
-        let tab1 = TabModel(id: tabId1, focusedPaneId: a, rootNode: .leaf(a))
-        let tab2 = TabModel(id: tabId2, focusedPaneId: b, rootNode: .leaf(b))
+        let tab1 = TabModel(id: tabId1, focusedPaneId: a, rootNode: .leaf(PaneModel(id: a)))
+        let tab2 = TabModel(id: tabId2, focusedPaneId: b, rootNode: .leaf(PaneModel(id: b)))
         let group = GroupModel(id: GroupId(), name: "Test", tabs: [tab1, tab2])
         var alerts: [AlertModel] = []
 
@@ -1168,7 +1163,7 @@ func modelOperationsTests() {
         update(&model, .addTabTodo(tabId: tabA.id, text: "tab task"))
         update(&model, .addTodo(paneId: paneA, text: "p1 a"))
         update(&model, .addTodo(paneId: paneA, text: "p1 b done"))
-        let pAdone = model.panes[paneA]!.todos[1].id
+        let pAdone = model.pane(paneA)!.todos[1].id
         update(&model, .toggleTodoDone(paneId: paneA, todoId: pAdone))
         update(&model, .addTodo(paneId: paneA2, text: "p2 a"))
 
@@ -1207,9 +1202,9 @@ func modelOperationsTests() {
         try expectEqual(rows, [
             .tabSectionHeader,
             .tabEmptyPlaceholder,
-            .paneSectionHeader(paneId: paneA, title: model.panes[paneA]!.title),
+            .paneSectionHeader(paneId: paneA, title: model.pane(paneA)!.title),
             .paneEmptyPlaceholder(paneId: paneA),
-            .paneSectionHeader(paneId: paneB, title: model.panes[paneB]!.title),
+            .paneSectionHeader(paneId: paneB, title: model.pane(paneB)!.title),
             .paneEmptyPlaceholder(paneId: paneB),
         ])
     }
@@ -1660,8 +1655,7 @@ func makeMruModel(tabCount: Int) -> (model: AppModel, tabIds: [TabId]) {
         let paneId = PaneId()
         let tabId = TabId()
         ids.append(tabId)
-        model.panes[paneId] = PaneModel(id: paneId)
-        model.groups[0].tabs.append(TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(paneId)))
+        model.groups[0].tabs.append(TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(PaneModel(id: paneId))))
     }
     return (model, ids)
 }

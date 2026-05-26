@@ -50,9 +50,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         if let title = launch?.title {
             pane.title = title
         }
-        model.panes[paneId] = pane
 
-        var tab = TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(paneId))
+        // The leaf owns the pane content directly -- no separate dict write.
+        var tab = TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(pane))
         if let title = launch?.title {
             tab.customTitle = title
         }
@@ -181,17 +181,17 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         let targetPaneId = paneId ?? tab.focusedPaneId
         let newPaneId = PaneId()
-        let cwd = launch?.cwd ?? model.panes[targetPaneId]?.cwd
-        let theme = model.panes[targetPaneId]?.theme
-
-        guard let newRoot = splitLeaf(tab.rootNode, paneId: targetPaneId, direction: direction, newPaneId: newPaneId) else { return [] }
+        let cwd = launch?.cwd ?? model.pane(targetPaneId)?.cwd
+        let theme = model.pane(targetPaneId)?.theme
 
         var newPane = PaneModel(id: newPaneId)
         if let title = launch?.title {
             newPane.title = title
         }
         newPane.theme = theme
-        model.panes[newPaneId] = newPane
+
+        // splitLeaf embeds the new pane's payload directly into the leaf.
+        guard let newRoot = splitLeaf(tab.rootNode, paneId: targetPaneId, direction: direction, newPane: newPane) else { return [] }
 
         // Update the tab in place
         updateTab(tab.id, in: &model) { tab in
@@ -223,7 +223,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         guard let tabId = model.selectedTabId,
               let tab = selectedTab(in: model) else { return [] }
 
-        let (newTree, nextFocus) = removeLeaf(tab.rootNode, paneId: paneId)
+        // removeLeaf drops the leaf (and its pane payload) atomically; the close
+        // path discards the removed pane. Side-table cleanup stays here.
+        let (newTree, nextFocus, _) = removeLeaf(tab.rootNode, paneId: paneId)
 
         if newTree == nil && wouldQuitFromClose(model) {
             return emitTerminateConfirmation(&model)
@@ -237,7 +239,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             model.todoPopover = nil
             effects.append(.dismissTodoPopover)
         }
-        model.panes.removeValue(forKey: paneId)
 
         guard let newRoot = newTree else {
             // Last pane — close tab
@@ -302,22 +303,22 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         guard tabById(targetTabId, in: model) != nil else { return [] }
         let sourceGroupId = groupForTab(sourceTab.id, in: model)?.id
 
-        // Remove pane from source tab's tree
-        let (newSourceTree, nextFocus) = removeLeaf(sourceTab.rootNode, paneId: paneId)
+        // Remove pane from source tab's tree, capturing its full payload so cwd/
+        // theme/todos physically travel to the target tab (no global-dict ref).
+        let (newSourceTree, nextFocus, removed) = removeLeaf(sourceTab.rootNode, paneId: paneId)
+        guard let movedPane = removed else { return [] }
 
-        // Update target tab: wrap its root with the moved pane
-        let chrome = model.panes[paneId].map { deriveTabChrome(from: $0) }
+        // Update target tab: wrap its root with the moved pane.
+        let chrome = deriveTabChrome(from: movedPane)
         updateTab(targetTabId, in: &model) { tab in
             tab.rootNode = .split(
                 id: SplitId(), direction: .horizontal,
-                first: tab.rootNode, second: .leaf(paneId), ratio: 0.5
+                first: tab.rootNode, second: .leaf(movedPane), ratio: 0.5
             )
             tab.focusedPaneId = paneId
             tab.isZoomed = false
-            if let chrome {
-                tab.title = chrome.title
-                tab.subtitle = chrome.subtitle
-            }
+            tab.title = chrome.title
+            tab.subtitle = chrome.subtitle
         }
 
         let sourceEmptied = newSourceTree == nil
@@ -371,7 +372,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         guard let dstGroupIdx = model.groups.firstIndex(where: { $0.id == inGroupId }) else { return [] }
 
         let sourceHasOnlyThisPane: Bool = {
-            if case .leaf(let id) = sourceTab.rootNode { return id == paneId } else { return false }
+            if case .leaf(let p) = sourceTab.rootNode { return p.id == paneId } else { return false }
         }()
 
         // Guard: don't allow if this would leave zero tabs
@@ -401,8 +402,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             model.selectedTabId = tab.id
         } else {
             // Path B: Source tab has other panes — create new tab
-            let (newSourceTree, nextFocus) = removeLeaf(sourceTab.rootNode, paneId: paneId)
-            guard let newRoot = newSourceTree else { return [] }
+            let (newSourceTree, nextFocus, removed) = removeLeaf(sourceTab.rootNode, paneId: paneId)
+            guard let newRoot = newSourceTree, let movedPane = removed else { return [] }
 
             // Update source tab
             updateTab(sourceTab.id, in: &model) { tab in
@@ -413,13 +414,11 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 }
             }
 
-            // Create new tab for the moved pane
-            var newTab = TabModel(id: TabId(), focusedPaneId: paneId, rootNode: .leaf(paneId))
-            if let pane = model.panes[paneId] {
-                let chrome = deriveTabChrome(from: pane)
-                newTab.title = chrome.title
-                newTab.subtitle = chrome.subtitle
-            }
+            // Create new tab for the moved pane, carrying its full payload.
+            var newTab = TabModel(id: TabId(), focusedPaneId: paneId, rootNode: .leaf(movedPane))
+            let chrome = deriveTabChrome(from: movedPane)
+            newTab.title = chrome.title
+            newTab.subtitle = chrome.subtitle
             let clamped = max(0, min(atIndex, model.groups[dstGroupIdx].tabs.count))
             model.groups[dstGroupIdx].tabs.insert(newTab, at: clamped)
             model.selectedTabId = newTab.id
@@ -503,7 +502,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             + sidebarAlertUpdateEffects(for: affectedTabIds, in: model)
 
     case .setPaneTheme(let paneId, let themeName):
-        model.panes[paneId]?.theme = themeName
+        model.updatePane(paneId) { $0.theme = themeName }
         return [.applyPaneTheme(paneId: paneId), .scheduleCheckpoint]
 
     case .renameTab(let id, let name):
@@ -561,36 +560,44 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
     // MARK: - Command Tracking
 
     case .commandStarted(let paneId, let command):
-        model.panes[paneId]?.lastCommand = command
+        model.updatePane(paneId) { $0.lastCommand = command }
         // Persist last command so restore can prefill it in the shell.
         return [.scheduleCheckpoint]
 
     case .commandEnded(let paneId):
-        model.panes[paneId]?.isRemote = false
-        model.panes[paneId]?.remoteSession = nil
-        guard model.panes[paneId]?.remoteThemeOverride != nil else { return [] }
-        model.panes[paneId]?.remoteThemeOverride = nil
+        guard let pane = model.pane(paneId) else { return [] }
+        model.updatePane(paneId) { p in
+            p.isRemote = false
+            p.remoteSession = nil
+        }
+        guard pane.remoteThemeOverride != nil else { return [] }
+        model.updatePane(paneId) { $0.remoteThemeOverride = nil }
         return [.applyPaneTheme(paneId: paneId)]
 
     // MARK: - Remote Detection
 
     case .remoteSessionStarted(let paneId):
-        guard model.panes[paneId] != nil else { return [] }
-        model.panes[paneId]?.isRemote = true
-        model.panes[paneId]?.remoteSession = nil
-        model.panes[paneId]?.remoteThemeOverride = model.config.remoteTheme
+        guard model.pane(paneId) != nil else { return [] }
+        let remoteTheme = model.config.remoteTheme
+        model.updatePane(paneId) { p in
+            p.isRemote = true
+            p.remoteSession = nil
+            p.remoteThemeOverride = remoteTheme
+        }
         return [.applyPaneTheme(paneId: paneId)]
 
     case .remoteSessionReported(let paneId, let session):
-        guard var pane = model.panes[paneId] else { return [] }
-        let wasRemote = pane.isRemote
-        let oldSession = pane.remoteSession
-        pane.isRemote = true
-        pane.remoteSession = session
-        if !wasRemote {
-            pane.remoteThemeOverride = model.config.remoteTheme
+        guard let existing = model.pane(paneId) else { return [] }
+        let wasRemote = existing.isRemote
+        let oldSession = existing.remoteSession
+        let remoteTheme = model.config.remoteTheme
+        model.updatePane(paneId) { p in
+            p.isRemote = true
+            p.remoteSession = session
+            if !wasRemote {
+                p.remoteThemeOverride = remoteTheme
+            }
         }
-        model.panes[paneId] = pane
 
         guard !wasRemote || oldSession != session else { return [] }
         if !wasRemote {
@@ -612,8 +619,10 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         var effects: [Effect] = [.syncPreferencesPanel]
         if newConfig.remoteTheme != oldConfig.remoteTheme {
-            for (paneId, pane) in model.panes where pane.isRemote {
-                model.panes[paneId]?.remoteThemeOverride = newConfig.remoteTheme
+            // Two passes: collect remote pane ids, then updatePane + emit per pane
+            // (can't mutate via updatePane while iterating model.allPanes).
+            for paneId in model.allPanes.filter(\.isRemote).map(\.id) {
+                model.updatePane(paneId) { $0.remoteThemeOverride = newConfig.remoteTheme }
                 effects.append(.applyPaneTheme(paneId: paneId))
             }
         }
@@ -706,8 +715,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         model.preferencesDraft!.remoteTheme = resolvedTheme
         // Update remote panes if theme changed.
         if resolvedTheme != oldConfig.remoteTheme {
-            for (paneId, pane) in model.panes where pane.isRemote {
-                model.panes[paneId]?.remoteThemeOverride = resolvedTheme
+            for paneId in model.allPanes.filter(\.isRemote).map(\.id) {
+                model.updatePane(paneId) { $0.remoteThemeOverride = resolvedTheme }
                 effects.append(.applyPaneTheme(paneId: paneId))
             }
         }
@@ -757,7 +766,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
     // MARK: - Ghostty Callbacks
 
     case .surfaceTitle(let paneId, let title):
-        model.panes[paneId]?.title = title
+        model.updatePane(paneId) { $0.title = title }
         guard let tab = tabForPane(paneId, in: model), tab.focusedPaneId == paneId else {
             // Persist pane title even for unfocused panes — it appears in restore.
             return [.scheduleCheckpoint]
@@ -774,7 +783,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return effects
 
     case .surfaceCwd(let paneId, let cwd):
-        model.panes[paneId]?.cwd = cwd
+        model.updatePane(paneId) { $0.cwd = cwd }
         guard let tab = tabForPane(paneId, in: model), tab.focusedPaneId == paneId else {
             // Persist cwd even for unfocused panes — it determines the shell's starting
             // directory on restore.
@@ -792,7 +801,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return effects
 
     case .surfaceProgress(let paneId, let state):
-        model.panes[paneId]?.progress = state
+        model.updatePane(paneId) { $0.progress = state }
         return []
 
     case .surfaceBell(let paneId):
@@ -802,7 +811,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
 
         guard let tab = tabForPane(paneId, in: model) else { return [] }
-        let paneTitle = model.panes[paneId]?.title ?? "Terminal"
+        let paneTitle = model.pane(paneId)?.title ?? "Terminal"
 
         // Hack: ack previous alerts so each pane has at most 1 unread alert.
         // This keeps pane badges boolean and tab badges count panes-with-alerts
@@ -875,7 +884,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                     removeAlertsForPane(pid, in: &model)
                     removePaneSearchState(pid, from: &model)
                     model.lastNotificationTime.removeValue(forKey: pid)
-                    model.panes.removeValue(forKey: pid)
                 }
 
                 model.groups[gi].tabs.remove(at: ti)
@@ -900,7 +908,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 return effects
             }
         }
-        model.panes.removeValue(forKey: paneId)
+        // A pane in no tree cannot exist now, so this fallback is just defensive
+        // side-table cleanup -- no tree/pane removal needed.
         removeAlertsForPane(paneId, in: &model)
         removePaneSearchState(paneId, from: &model)
         model.lastNotificationTime.removeValue(forKey: paneId)
@@ -946,7 +955,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
     case .activateAlert(let alertId):
         guard let alert = model.alerts.first(where: { $0.id == alertId }) else { return [] }
         // Stale alert: pane no longer exists — just mark read, no navigation
-        guard model.panes[alert.paneId] != nil else {
+        guard model.pane(alert.paneId) != nil else {
             if let idx = model.alerts.firstIndex(where: { $0.id == alertId }) {
                 model.alerts[idx].isUnread = false
             }
@@ -974,7 +983,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let ackedTabIds = tabIdsForPanes(ackedPaneIds, in: model)
         let ackEffects = refreshPaneAlertChromeEffects(for: ackedPaneIds)
             + sidebarAlertUpdateEffects(for: ackedTabIds, in: model)
-        guard let alert = model.alerts.first(where: { $0.isUnread && model.panes[$0.paneId] != nil }) else {
+        guard let alert = model.alerts.first(where: { $0.isUnread && model.pane($0.paneId) != nil }) else {
             return ackEffects
         }
         return ackEffects + navigateToPane(alert.paneId, in: &model)
@@ -1069,7 +1078,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                     removeAlertsForPane(pid, in: &model)
                     removePaneSearchState(pid, from: &model)
                     model.lastNotificationTime.removeValue(forKey: pid)
-                    model.panes.removeValue(forKey: pid)
                 }
                 effects.append(.removeTabContainer(tabId: tab.id))
             }
@@ -1265,7 +1273,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
     // MARK: - TODO
 
     case .toggleTodoPopover(let paneId):
-        guard model.panes[paneId] != nil else { return [] }
+        guard model.pane(paneId) != nil else { return [] }
         if model.todoPopover == .pane(paneId) {
             model.todoPopover = nil
             return [.dismissTodoPopover]
@@ -1383,7 +1391,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             sourceItem = tab.todos[idx]
             sourceIndex = idx
         case .pane(let paneId):
-            guard let pane = model.panes[paneId],
+            guard let pane = model.pane(paneId),
                   let idx = pane.todos.firstIndex(where: { $0.id == todoId }),
                   let tab = tabForPane(paneId, in: model) else { return [] }
             sourceTabId = tab.id
@@ -1399,7 +1407,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
             destinationTabId = tabId
             destinationCount = tab.todos.count
         case .pane(let paneId):
-            guard let pane = model.panes[paneId],
+            guard let pane = model.pane(paneId),
                   let tab = tabForPane(paneId, in: model) else { return [] }
             destinationTabId = tab.id
             destinationCount = pane.todos.count
@@ -1414,7 +1422,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 t.todos.remove(at: sourceIndex)
             }
         case .pane(let paneId):
-            model.panes[paneId]!.todos.remove(at: sourceIndex)
+            model.updatePane(paneId) { $0.todos.remove(at: sourceIndex) }
         }
 
         switch destination {
@@ -1423,7 +1431,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
                 t.todos.insert(sourceItem, at: insertAt)
             }
         case .pane(let paneId):
-            model.panes[paneId]!.todos.insert(sourceItem, at: insertAt)
+            model.updatePane(paneId) { $0.todos.insert(sourceItem, at: insertAt) }
         }
         return [.scheduleCheckpoint]
 
@@ -1439,29 +1447,29 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         return [.scheduleCheckpoint]
 
     case .toggleTodoDone(let paneId, let todoId):
-        guard let idx = model.panes[paneId]?.todos.firstIndex(where: { $0.id == todoId }) else { return [] }
-        model.panes[paneId]!.todos[idx].isDone.toggle()
+        guard let idx = model.pane(paneId)?.todos.firstIndex(where: { $0.id == todoId }) else { return [] }
+        model.updatePane(paneId) { $0.todos[idx].isDone.toggle() }
         return [.scheduleCheckpoint]
 
     case .setTodoDone(let paneId, let todoId, let isDone):
-        guard let idx = model.panes[paneId]?.todos.firstIndex(where: { $0.id == todoId }) else { return [] }
-        guard model.panes[paneId]!.todos[idx].isDone != isDone else { return [] }
-        model.panes[paneId]!.todos[idx].isDone = isDone
+        guard let idx = model.pane(paneId)?.todos.firstIndex(where: { $0.id == todoId }) else { return [] }
+        guard model.pane(paneId)!.todos[idx].isDone != isDone else { return [] }
+        model.updatePane(paneId) { $0.todos[idx].isDone = isDone }
         return [.scheduleCheckpoint]
 
     case .editTodoText(let paneId, let todoId, let text):
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return [] }
-        guard let idx = model.panes[paneId]?.todos.firstIndex(where: { $0.id == todoId }) else { return [] }
-        model.panes[paneId]!.todos[idx].text = trimmed
+        guard let idx = model.pane(paneId)?.todos.firstIndex(where: { $0.id == todoId }) else { return [] }
+        model.updatePane(paneId) { $0.todos[idx].text = trimmed }
         return [.scheduleCheckpoint]
 
     case .deleteTodo(let paneId, let todoId):
-        model.panes[paneId]?.todos.removeAll { $0.id == todoId }
+        model.updatePane(paneId) { $0.todos.removeAll { $0.id == todoId } }
         return [.scheduleCheckpoint]
 
     case .reorderTodo(let paneId, let todoId, let toIndex):
-        guard var todos = model.panes[paneId]?.todos,
+        guard var todos = model.pane(paneId)?.todos,
               let fromIndex = todos.firstIndex(where: { $0.id == todoId }),
               toIndex >= 0, toIndex <= todos.count else { return [] }
         let clampedTo = min(toIndex, todos.count - 1)
@@ -1469,15 +1477,15 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         let item = todos.remove(at: fromIndex)
         let insertAt = clampedTo > fromIndex ? clampedTo : clampedTo
         todos.insert(item, at: min(insertAt, todos.count))
-        model.panes[paneId]!.todos = todos
+        model.updatePane(paneId) { $0.todos = todos }
         return [.scheduleCheckpoint]
 
     case .clearCompletedTodos(let paneId):
-        model.panes[paneId]?.todos.removeAll { $0.isDone }
+        model.updatePane(paneId) { $0.todos.removeAll { $0.isDone } }
         return [.scheduleCheckpoint]
 
     case .requestClosePane(let paneId):
-        guard let pane = model.panes[paneId] else { return [] }
+        guard let pane = model.pane(paneId) else { return [] }
         // If this is the only pane in its tab, the close cascades into closeTab
         // (destroying tab todos + every pane's todos). Route through the
         // close-tab confirmation when the full rollup has any uncompleted item;
@@ -1600,9 +1608,9 @@ private func handleIpcRequest(
             let launch = try parseLaunchSpec(object["launch"])
             let background = try parseOptionalBool(object["background"], name: "background")
             let paneId = try resolvePaneSplitTarget(params: params, context: context, in: model)
-            let before = Set(model.panes.keys)
+            let before = Set(model.allPaneIds)
             let effects = update(&model, .splitPane(paneId: paneId, direction: direction, launch: launch, background: background))
-            let newPaneId = model.panes.keys.first(where: { !before.contains($0) })
+            let newPaneId = model.allPaneIds.first(where: { !before.contains($0) })
             return effects + [.ipcReply(reqId: reqId, result: paneResult(newPaneId))]
         } catch let error as LaunchSpecParseError {
             return ipcInvalidParams(reqId, launchSpecErrorMessage(error))
@@ -1639,7 +1647,7 @@ private func handleIpcRequest(
         var effectiveLaunch = launch
         if effectiveLaunch?.cwd == nil,
            let callerPaneId = resolveIpcPaneId(context, in: model),
-           let cwd = model.panes[callerPaneId]?.cwd {
+           let cwd = model.pane(callerPaneId)?.cwd {
             effectiveLaunch = LaunchSpec(
                 cmd: effectiveLaunch?.cmd,
                 cwd: cwd,
@@ -1661,7 +1669,7 @@ private func handleIpcRequest(
         guard case .object(let object) = params,
               case .string(let rawPaneId)? = object["paneId"],
               let paneId = parsePaneId(rawPaneId),
-              model.panes[paneId] != nil
+              model.pane(paneId) != nil
         else {
             return ipcInvalidParams(reqId, "invalid pane id")
         }
@@ -1748,7 +1756,7 @@ private func handleIpcRequest(
             guard case .string(let rawPane)? = object["pane"] else {
                 throw IpcParamsError("pane required")
             }
-            guard let paneId = parsePaneId(rawPane), model.panes[paneId] != nil else {
+            guard let paneId = parsePaneId(rawPane), model.pane(paneId) != nil else {
                 throw IpcParamsError("pane not found")
             }
 
@@ -1774,7 +1782,7 @@ private func handleIpcRequest(
     case Methods.todoList:
         do {
             let paneId = try resolveTargetPane(params: params, context: context, in: model)
-            guard let todos = model.panes[paneId]?.todos else {
+            guard let todos = model.pane(paneId)?.todos else {
                 return ipcInvalidParams(reqId, "no pane in context")
             }
             return [.ipcReply(reqId: reqId, result: todoListResult(todos))]
@@ -1828,7 +1836,7 @@ private func handleIpcRequest(
             return ipcInvalidParams(reqId, "invalid todo")
         }
         let effects = update(&model, .editTodoText(paneId: paneId, todoId: todoId, text: text))
-        let updated = model.panes[paneId]?.todos.first(where: { $0.id == todoId })
+        let updated = model.pane(paneId)?.todos.first(where: { $0.id == todoId })
         return effects + [
             .refreshPaneToolbar(paneId: paneId),
             .ipcReply(reqId: reqId, result: todoResult(updated)),
@@ -1854,7 +1862,7 @@ private func handleIpcRequest(
         }
         let shouldBeDone = method == Methods.todoDone
         let effects = update(&model, .setTodoDone(paneId: paneId, todoId: todoId, isDone: shouldBeDone))
-        let updated = model.panes[paneId]?.todos.first(where: { $0.id == todoId })
+        let updated = model.pane(paneId)?.todos.first(where: { $0.id == todoId })
         return effects + [
             .refreshPaneToolbar(paneId: paneId),
             .ipcReply(reqId: reqId, result: todoResult(updated)),
@@ -1929,7 +1937,7 @@ private func parseTodoId(_ raw: String?) -> UUID? {
 }
 
 private func resolveIpcPaneId(_ context: IpcRequestContext, in model: AppModel) -> PaneId? {
-    guard let paneId = parsePaneId(context.paneId), model.panes[paneId] != nil else {
+    guard let paneId = parsePaneId(context.paneId), model.pane(paneId) != nil else {
         return nil
     }
     return paneId
@@ -2015,7 +2023,7 @@ private func resolveExplicitPane(_ raw: JSONValue, in model: AppModel) throws ->
     guard case .string(let str) = raw else {
         throw IpcParamsError("pane must be a string")
     }
-    guard let id = parsePaneId(str), model.panes[id] != nil else {
+    guard let id = parsePaneId(str), model.pane(id) != nil else {
         throw IpcParamsError("pane not found")
     }
     return id
@@ -2229,7 +2237,7 @@ private func paneResult(_ paneId: PaneId?) -> JSONValue {
 }
 
 private func paneInfoResult(_ paneId: PaneId, in model: AppModel) -> JSONValue? {
-    guard let pane = model.panes[paneId],
+    guard let pane = model.pane(paneId),
           let tab = tabForPane(paneId, in: model),
           let group = groupForTab(tab.id, in: model)
     else {
@@ -2257,7 +2265,7 @@ private func paneThemeResult(_ paneId: PaneId, in model: AppModel) -> JSONValue 
     .object([
         "pane": .object([
             "id": .string(paneId.rawValue.uuidString),
-            "theme": model.panes[paneId]?.theme.map(JSONValue.string) ?? .null,
+            "theme": model.pane(paneId)?.theme.map(JSONValue.string) ?? .null,
         ])
     ])
 }
@@ -2298,14 +2306,14 @@ private func launchSpecErrorMessage(_ error: LaunchSpecParseError) -> String {
 
 private func appendTodo(_ model: inout AppModel, paneId: PaneId, text: String, id: UUID) -> TodoItem? {
     let trimmed = text.trimmingCharacters(in: .whitespaces)
-    guard !trimmed.isEmpty, model.panes[paneId] != nil else { return nil }
+    guard !trimmed.isEmpty, model.pane(paneId) != nil else { return nil }
     let item = TodoItem(id: id, text: trimmed, isDone: false)
-    model.panes[paneId]!.todos.append(item)
+    model.updatePane(paneId) { $0.todos.append(item) }
     return item
 }
 
 private func todoExists(_ todoId: UUID, paneId: PaneId, in model: AppModel) -> Bool {
-    model.panes[paneId]?.todos.contains(where: { $0.id == todoId }) == true
+    model.pane(paneId)?.todos.contains(where: { $0.id == todoId }) == true
 }
 
 private func todoJSON(_ item: TodoItem) -> JSONValue {
@@ -2504,7 +2512,7 @@ private func windowTitle(for tab: TabModel) -> String {
 /// Sync the selected tab's title/subtitle from the given pane and return
 /// sidebar + window-title effects.
 private func syncFocusedPaneChrome(_ paneId: PaneId, in model: inout AppModel) -> [Effect] {
-    if let pane = model.panes[paneId] {
+    if let pane = model.pane(paneId) {
         let chrome = deriveTabChrome(from: pane)
         updateSelectedTab(&model) { t in
             t.title = chrome.title
@@ -2538,7 +2546,7 @@ private func markAlertsReadForPane(_ paneId: PaneId, in model: inout AppModel) -
 }
 
 private func unreadAlertPaneIds(in model: AppModel) -> [PaneId] {
-    unreadAlertPaneIds(for: Array(model.panes.keys), in: model)
+    unreadAlertPaneIds(for: model.allPaneIds, in: model)
 }
 
 private func unreadAlertPaneIds(for paneIds: [PaneId], in model: AppModel) -> [PaneId] {
@@ -2637,7 +2645,6 @@ private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Effect] {
         removeAlertsForPane(pid, in: &model)
         removePaneSearchState(pid, from: &model)
         model.lastNotificationTime.removeValue(forKey: pid)
-        model.panes.removeValue(forKey: pid)
         if model.todoPopover == .pane(pid) {
             model.todoPopover = nil
             effects.append(.dismissTodoPopover)
