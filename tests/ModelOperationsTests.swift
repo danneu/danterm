@@ -1644,6 +1644,69 @@ func modelOperationsTests() {
         try expect(keyMap[ids[jumpModeKeySequence.count]] == nil)
         try expect(keyMap[ids[jumpModeKeySequence.count + 2]] == nil)
     }
+
+    // MARK: - desiredFocusBorders (focus-border projection, Stage 3)
+
+    test("desiredFocusBorders: single-pane selected tab draws no focus border (bell still shows)") {
+        var model = makeModel()
+        createTab(&model)
+        let pane = selectedTab(in: model)!.focusedPaneId
+        // Single-pane tab: no green focus border even though it is the focused pane.
+        try expectEqual(
+            desiredFocusBorders(in: model)[pane],
+            BorderState(focused: false, bell: false),
+            "single-pane focused tab draws no border")
+        // An unread alert still lights the (red) bell border; the single-pane rule
+        // suppresses only the green focus border, not the bell.
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: pane,
+            title: "DanTerm", body: "x", createdAt: Date(), isUnread: true), at: 0)
+        try expectEqual(
+            desiredFocusBorders(in: model)[pane],
+            BorderState(focused: false, bell: true),
+            "single-pane tab still shows the bell border")
+    }
+
+    test("desiredFocusBorders: split tab marks the focused pane, bell follows unread alert") {
+        var model = makeModel()
+        createTab(&model)
+        let paneA = selectedTab(in: model)!.focusedPaneId
+        update(&model, .splitPane(paneId: paneA, direction: .horizontal))
+        let focusedId = selectedTab(in: model)!.focusedPaneId
+        let otherId = allPaneIds(selectedTab(in: model)!.rootNode).first { $0 != focusedId }!
+
+        var borders = desiredFocusBorders(in: model)
+        try expectEqual(borders[focusedId], BorderState(focused: true, bell: false),
+            "focused pane in a split tab draws the focus border")
+        try expectEqual(borders[otherId], BorderState(focused: false, bell: false),
+            "unfocused sibling draws no border")
+
+        // Unread alert on the unfocused sibling lights only its bell.
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: otherId,
+            title: "DanTerm", body: "x", createdAt: Date(), isUnread: true), at: 0)
+        borders = desiredFocusBorders(in: model)
+        try expectEqual(borders[otherId], BorderState(focused: false, bell: true),
+            "unfocused pane with an unread alert shows the bell border")
+        try expectEqual(borders[focusedId], BorderState(focused: true, bell: false),
+            "focused pane is unaffected by a sibling's alert")
+    }
+
+    test("desiredFocusBorders: keyed over all live panes; non-selected tabs draw no border") {
+        var model = makeModel()
+        createTab(&model)
+        let tab0Pane = selectedTab(in: model)!.focusedPaneId
+        update(&model, .splitPane(paneId: tab0Pane, direction: .horizontal))
+        createTab(&model)  // tab1 becomes selected; tab0's split panes are now hidden
+
+        let borders = desiredFocusBorders(in: model)
+        try expectEqual(Set(borders.keys), Set(model.allPaneIds),
+            "projection is keyed over every live pane")
+        for paneId in allPaneIds(model.groups[0].tabs[0].rootNode) {
+            try expectEqual(borders[paneId], BorderState(focused: false, bell: false),
+                "panes in a non-selected tab draw no border")
+        }
+    }
 }
 
 /// Build a model with N tabs in one group; returns the tab ids in display order.

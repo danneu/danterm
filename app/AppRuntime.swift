@@ -22,6 +22,9 @@ class AppRuntime {
     // Last libghostty occlusion value pushed for each live surface.
     // Cleared on teardown because restore/import can reuse pane IDs for fresh surfaces.
     private var surfaceVisibility: [PaneId: Bool] = [:]
+    // Per-pass diff caches for the view reconciler (see Reconcile.swift).
+    // Reset on teardown so a post-restore reconcile is a clean build.
+    var caches = ReconcilerCaches()
     private var tabContainers: [TabId: SplitContainerView] = [:]
     var tokenStore = PaneTokenStore()
     weak var window: NSWindow?
@@ -217,7 +220,7 @@ class AppRuntime {
         for effect in effects {
             perform(effect)
         }
-        syncSurfaceVisibility()
+        reconcile()
         if model.pendingConfirmation == .terminate {
             quitConfirmationPanel?.configure(paneCount: model.allPaneIds.count)
         }
@@ -468,11 +471,6 @@ class AppRuntime {
 
         case .removeTabContainer(let tabId):
             removeTabContainer(tabId)
-
-        case .refreshPaneBorder(let paneId):
-            let isFocused = isFocusedAndVisible(paneId, in: model)
-            let hasBell = paneHasUnreadAlert(paneId, alerts: model.alerts)
-            surfaces[paneId]?.setFocusBorder(isFocused, hasBell: hasBell)
 
         case .reloadSidebar:
             sidebarView?.reload(model: model)
@@ -1268,6 +1266,9 @@ class AppRuntime {
             }
         }
         surfaceVisibility.removeAll()
+        // Reset reconciler caches by re-init so the first post-restore reconcile is
+        // a clean build, not a stale diff (restore/import can reuse pane IDs).
+        caches = ReconcilerCaches()
         for paneId in Array(replayFiles.keys) {
             cleanupReplayFile(for: paneId)
         }
@@ -1288,7 +1289,10 @@ class AppRuntime {
 
         refreshContentTitlebar()
         showSelectedTab()
-        syncSurfaceVisibility()
+        // Route the post-restore sync through reconcile() so focus borders land via
+        // the reconciler (clean build -- tearDownCurrentSession reset the caches).
+        // showSelectedTab() still builds the container here; Stage 8 folds that in.
+        reconcile()
         sidebarView?.reload(model: model)
         let unreadCount = totalUnreadAlertCount(model: model)
         chromeView?.updateBellBadge(count: unreadCount)

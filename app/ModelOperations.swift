@@ -956,6 +956,48 @@ func isFocusedAndVisible(_ paneId: PaneId, in model: AppModel) -> Bool {
   return true
 }
 
+// MARK: - View Reconciler (pure projections + diff)
+
+/// Per-pane focus-border state the reconciler diffs and pushes to a TerminalView.
+/// `focused` drives the green focus border, `bell` the red unread-alert border --
+/// exactly the two values the old `.refreshPaneBorder` executor computed before
+/// calling `TerminalView.setFocusBorder`. Equatable so the diff can skip unchanged panes.
+struct BorderState: Equatable {
+  let focused: Bool
+  let bell: Bool
+}
+
+/// Focus-border projection: one `BorderState` per live pane. Keyed over every pane
+/// (`allPanes`) so a pane leaving the model drops its key and the reconciler's
+/// `applyDiff` prunes the cache. `isFocusedAndVisible` already encodes the
+/// single-pane-tab rule (a lone leaf draws no green border); `bell` is independent,
+/// so a single-pane tab can still show the red unread-alert border.
+func desiredFocusBorders(in model: AppModel) -> [PaneId: BorderState] {
+  var result: [PaneId: BorderState] = [:]
+  for pane in model.allPanes {
+    result[pane.id] = BorderState(
+      focused: isFocusedAndVisible(pane.id, in: model),
+      bell: paneHasUnreadAlert(pane.id, alerts: model.alerts)
+    )
+  }
+  return result
+}
+
+/// Generic diff/apply/prune backing every keyed reconcile pass. Applies `apply`
+/// only for keys whose desired value differs from the cached one (unchanged keys
+/// are skipped), invokes `remove` once for each key that left `desired` (the
+/// disappear-but-host-survives teardown -- e.g. an ended search overlay), and
+/// prunes the cache to exactly the desired key set. The cache holds the last
+/// *applied* value, so a pass can't drift it across `send()`s.
+func applyDiff<K: Hashable, V: Equatable>(
+  _ desired: [K: V], _ cache: inout [K: V],
+  apply: (K, V) -> Void, remove: (K) -> Void = { _ in }
+) {
+  for (k, v) in desired where cache[k] != v { apply(k, v); cache[k] = v }
+  for k in cache.keys where desired[k] == nil { remove(k) }   // teardown disappeared keys
+  cache = cache.filter { desired[$0.key] != nil }
+}
+
 func unreadAlertCount(for tab: TabModel, alerts: [AlertModel]) -> Int {
   let paneIds = Set(allPaneIds(tab.rootNode))
   return alerts.filter { $0.isUnread && paneIds.contains($0.paneId) }.count

@@ -545,10 +545,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Effect] {
         }
         updateSelectedTab(&model) { t in t.focusedPaneId = paneId }
 
-        var effects: [Effect] = [
-            .refreshPaneBorder(paneId: oldFocusedId),
-            .refreshPaneBorder(paneId: paneId),
-        ]
+        // Focus borders reconcile after send(); only the alert-cleared toolbar
+        // refresh and downstream chrome remain as commands here.
+        var effects: [Effect] = []
         if clearedAlerts {
             effects.append(.refreshPaneToolbar(paneId: paneId))
         }
@@ -2562,12 +2561,8 @@ private func unreadAlertPaneIds(for paneIds: [PaneId], in model: AppModel) -> [P
 }
 
 private func refreshPaneAlertChromeEffects(for paneIds: [PaneId]) -> [Effect] {
-    paneIds.flatMap {
-        [
-            .refreshPaneBorder(paneId: $0),
-            .refreshPaneToolbar(paneId: $0),
-        ]
-    }
+    // Focus borders reconcile after send(); only the toolbar refresh remains a command.
+    paneIds.map { .refreshPaneToolbar(paneId: $0) }
 }
 
 private func tabIdsForPanes(_ paneIds: [PaneId], in model: AppModel) -> [TabId] {
