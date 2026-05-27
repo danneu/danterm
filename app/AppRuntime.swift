@@ -320,10 +320,9 @@ class AppRuntime {
         }
     }
 
-    /// Make the given pane's surface the first responder. The view dispatches
-    /// `.paneBecameFirstResponder` from its becomeFirstResponder override, so
-    /// the model update + chrome refresh follow naturally. No-op when the
-    /// surface isn't live.
+    /// Make the pane first responder; AppKit focus is the reparent/display-link
+    /// recovery path for terminal activation.
+    /// See docs/design/2026-05-27-terminal-focus-display-link.md.
     func focusPaneSurface(_ paneId: PaneId) {
         guard let view = surfaces[paneId] else { return }
         window?.makeFirstResponder(view)

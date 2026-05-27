@@ -44,7 +44,9 @@ tests/
 
 docs/
 ├── ci.md                   # CI/CD pipeline, code signing, notarization
-├── scaling.md              # Display scaling (HiDPI/Retina), content scale
+├── design/
+│   ├── index.md            # Design-decision index
+│   └── ...                 # ADR-style design notes
 └── upgrading-ghostty.md    # Upgrading Ghostty version, CI cache
 ```
 
@@ -197,9 +199,13 @@ See [docs/ci.md](docs/ci.md) for details on secrets, signing, and troubleshootin
 
 ## Design Docs
 
-- [docs/scaling.md](docs/scaling.md) — Display scaling (HiDPI/Retina), content scale invariants, zero-frame guards
-- [docs/ci.md](docs/ci.md) — CI/CD pipeline, code signing, notarization, troubleshooting
-- [docs/upgrading-ghostty.md](docs/upgrading-ghostty.md) — Upgrading Ghostty version, CI cache
+- [docs/design/index.md](docs/design/index.md) -- ADR-style design-decision index.
+- [docs/design/2026-03-05-display-scaling.md](docs/design/2026-03-05-display-scaling.md) -- Display scaling (HiDPI/Retina), content scale invariants, zero-frame guards.
+
+## Operational Docs
+
+- [docs/ci.md](docs/ci.md) -- CI/CD pipeline, code signing, notarization, troubleshooting.
+- [docs/upgrading-ghostty.md](docs/upgrading-ghostty.md) -- Upgrading Ghostty version, CI cache.
 
 ## GitHub API
 
