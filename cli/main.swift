@@ -27,7 +27,7 @@ struct DanTermCLI {
 
         Commands:
           ls                          Print the full app snapshot as JSON
-          tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background]
+          tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
                   [--after-selected | --at-group-end | --after-tab <tab-id>]
                                       Open a new tab, optionally launching a command
           tab rename [--tab <tab-id>] <name>|--clear
@@ -35,7 +35,7 @@ struct DanTermCLI {
           pane focus <pane-id>        Focus a pane by id
           pane info [--pane <pane-id>]
                                       Print pane, tab, and group metadata as JSON
-          pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background]
+          pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
                                       Split a pane (horizontal/vertical)
           pane input [--pane <pane-id>] [--literal] -- <token>...
                                       Send keystrokes to a pane (tmux-style:
@@ -62,6 +62,12 @@ struct DanTermCLI {
           todo clear-completed [--pane <pane-id>]
                                       Remove all completed todos
           help, --help, -h            Print this message
+
+        CLI defaults:
+          tab new opens in the background at the target group end by default.
+          Position flags change placement; --foreground selects the new tab.
+          pane split opens in the background by default; --foreground focuses
+          the new pane within its tab. App UI shortcuts are unaffected.
 
         Environment:
           DANTERM_SOCK   Path to the DanTerm control socket

@@ -42,8 +42,11 @@ fi
 grep -qF 'Usage:' "$err"
 grep -qF 'ls' "$err"
 grep -qF 'pane info [--pane <pane-id>]' "$err"
+grep -qF 'tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]' "$err"
 grep -qF 'pane split [--pane <pane-id>] -h|-v' "$err"
+grep -qF 'pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]' "$err"
 grep -qF 'todo clear-completed [--pane <pane-id>]' "$err"
+grep -qF 'tab new opens in the background at the target group end' "$err"
 grep -qF 'DANTERM_SOCK' "$err"
 grep -qF 'DANTERM_PANE' "$err"
 ! grep -qF 'DANTERM_TAB' "$err"
@@ -58,8 +61,11 @@ for help_arg in help --help -h; do
     grep -qF 'Usage:' "$out"
     grep -qF 'ls' "$out"
     grep -qF 'pane info [--pane <pane-id>]' "$out"
+    grep -qF 'tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]' "$out"
     grep -qF 'pane split [--pane <pane-id>] -h|-v' "$out"
+    grep -qF 'pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]' "$out"
     grep -qF 'todo clear-completed [--pane <pane-id>]' "$out"
+    grep -qF 'tab new opens in the background at the target group end' "$out"
     grep -qF 'DANTERM_SOCK' "$out"
     grep -qF 'DANTERM_PANE' "$out"
     ! grep -qF 'DANTERM_TAB' "$out"
@@ -91,8 +97,8 @@ tab_id=""
 group_id=""
 for _ in $(seq 1 30); do
     if model="$("$CLI_PATH" ls 2>/dev/null)" \
-        && pane_id="$(printf '%s\n' "$model" | jq -er '.panes[0].id // empty')" \
         && tab_id="$(printf '%s\n' "$model" | jq -er '.selectedTabId // empty')" \
+        && pane_id="$(printf '%s\n' "$model" | jq -er --arg tab "$tab_id" '.groups[].tabs[] | select(.id == $tab) | .focusedPaneId // empty')" \
         && group_id="$(printf '%s\n' "$model" | jq -er --arg tab "$tab_id" '.groups[] | select([.tabs[].id] | index($tab)) | .id')"; then
         break
     fi

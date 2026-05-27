@@ -20,8 +20,22 @@ final class PaneSplitArgsTests: XCTestCase {
     }
 
     func testBackgroundFlagParses() throws {
+        // Intent: `--background` records only the background flag.
+        // Why it exists: preserves back-compat for existing split recipes while
+        //   the CLI layer flips the default to background.
+        // Scenario: an existing agent recipe still includes `--background`.
         let parsed = try parsePaneSplitArgs(["-h", "--background"])
-        XCTAssertEqual(parsed, ParsedPaneSplit(pane: nil, direction: .horizontal, background: true))
+        XCTAssertEqual(parsed, ParsedPaneSplit(pane: nil, direction: .horizontal, background: true, foreground: false))
+    }
+
+    func testForegroundFlagParses() throws {
+        // Intent: `--foreground` records a request to focus the new split pane
+        //   within its tab.
+        // Why it exists: keeps focus policy explicit without making the arg
+        //   parser infer command defaults.
+        // Scenario: the user asks an agent to split and focus the new pane.
+        let parsed = try parsePaneSplitArgs(["-h", "--foreground"])
+        XCTAssertEqual(parsed, ParsedPaneSplit(pane: nil, direction: .horizontal, background: false, foreground: true))
     }
 
     func testLaunchFlagsParse() throws {
@@ -47,9 +61,20 @@ final class PaneSplitArgsTests: XCTestCase {
                 pane: "P1",
                 direction: .horizontal,
                 launch: LaunchSpec(cmd: "just test", cwd: "/tmp", title: "tests"),
-                background: true
+                background: true,
+                foreground: false
             )
         )
+    }
+
+    func testConflictingFocusFlagsThrow() {
+        // Intent: `--background --foreground` is rejected for pane splits.
+        // Why it exists: prevents ambiguous focus policy before the command is
+        //   serialized for IPC.
+        // Scenario: a composed split command accidentally includes both flags.
+        XCTAssertThrowsError(try parsePaneSplitArgs(["-h", "--background", "--foreground"])) { err in
+            XCTAssertEqual(err as? PaneSplitParseError, .conflictingFocusFlags)
+        }
     }
 
     func testEmptyCommandIsOmittedFromLaunch() throws {

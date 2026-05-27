@@ -17,11 +17,11 @@ Keep this section synced with `danterm help` and the parser in
 `lib/DanTermProtocol/Sources/DanTermProtocol/CLIParser.swift`.
 
     danterm ls
-    danterm tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--after-selected | --at-group-end | --after-tab <tab-id>]
+    danterm tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected | --at-group-end | --after-tab <tab-id>]
     danterm tab rename [--tab <tab-id>] <name>|--clear
     danterm pane focus <pane-id>
     danterm pane info [--pane <pane-id>]
-    danterm pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background]
+    danterm pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
     danterm pane input [--pane <pane-id>] [--literal] -- <token>...
     danterm pane read --pane <pane-id> [--lines <n>]
     danterm theme set [--pane <pane-id>] <name>|--clear
@@ -33,12 +33,18 @@ Keep this section synced with `danterm help` and the parser in
     danterm todo delete [--pane <pane-id>] <todo-id>
     danterm todo clear-completed [--pane <pane-id>]
 
+CLI defaults are agent-safe: `tab new` opens in the background at the target
+group end, and `pane split` opens in the background. The interactive app UI
+keeps its own defaults. Use `--foreground` only when the user asked for focus:
+for `tab new`, it selects the new tab; for `pane split`, it focuses the new pane
+within its tab without selecting that tab.
+
 `tab new` position flags are mutually exclusive:
 
-- No position flag: insert after the currently selected tab in the target
+- No position flag: append at the end of the target group.
+- `--after-selected`: insert after the currently selected tab in the target
   group, falling back to the end of that group.
-- `--after-selected`: explicit form of the default behavior.
-- `--at-group-end`: append at the end of the target group.
+- `--at-group-end`: explicit form of the default append behavior.
 - `--after-tab <tab-id>`: insert immediately after the referenced tab. If
   `--group` is also supplied, it must name the referenced tab's group. If
   `--group` is omitted, the referenced tab's group is the target and
@@ -64,11 +70,14 @@ the app's currently focused group, tab, or pane.
 For agent commands:
 
 - `tab new`: always pass `--group <group-id>` or an explicit
-  `--after-tab <tab-id>` anchor. Prefer `--background` unless the user asked
-  to switch to the new tab.
+  `--after-tab <tab-id>` anchor. The default opens in the background at the
+  target group end. Pass `--foreground` only when the user asked to switch to
+  the new tab. Pass `--after-tab <tab-id>` or `--after-selected` only when the
+  user gave that placement anchor.
 - `tab rename`: always pass `--tab <tab-id>`.
-- `pane split`: always pass `--pane <pane-id>`; prefer `--background`
-  unless the user asked to focus the new pane.
+- `pane split`: always pass `--pane <pane-id>`. The default opens in the
+  background. Pass `--foreground` only when the user asked to focus the new pane
+  within its tab.
 - `pane input`, `theme set`, and todos: always pass `--pane <pane-id>`.
 - `pane focus` and `pane read` already require explicit pane ids; keep them
   explicit.
@@ -128,20 +137,21 @@ exactly one matching pane, tab, or group before running any mutation command.
     danterm tab new --group "$GROUP_ID"
     danterm tab new --group "$GROUP_ID" --cmd 'vim notes.md' --title notes
     danterm tab new --group "$GROUP_ID" --cmd 'cargo test --workspace' --cwd ~/proj --title tests
-    danterm tab new --group "$GROUP_ID" --background --cmd 'just test' --title tests
-    danterm tab new --group "$GROUP_ID" --at-group-end --background --cmd 'just test' --title tests
-    danterm tab new --after-tab "$TAB_ID" --background --cmd 'just test' --title tests
+    danterm tab new --group "$GROUP_ID" --foreground --cmd 'vim .' --title work
+    danterm tab new --group "$GROUP_ID" --at-group-end --cmd 'just test' --title tests
+    danterm tab new --after-tab "$TAB_ID" --cmd 'just test' --title tests
 
 `--cmd` runs inside your login shell, so shell config is sourced, PATH matches
 your interactive panes, and shell integration reports cwd. The pane returns to
 a shell prompt when the command exits.
 
-Use `--background` to keep the user's current tab focused.
+By default, the user's current tab stays focused. Use `--foreground` only when
+the user asked to switch to the new tab.
 
-Use `--at-group-end` when the new tab should not be inserted next to the
-selected tab. Use `--after-tab <tab-id>` when the user names an exact tab to
-place the new tab after; this is an explicit target and can work without
-`$DANTERM_PANE`.
+Use `--after-tab <tab-id>` when the user names an exact tab to place the new tab
+after; this is an explicit target and can work without `$DANTERM_PANE`. Use
+`--after-selected` only when the user explicitly wants selected-tab-relative
+placement.
 
 ### Split a pane and run a command in the new one
 
@@ -154,13 +164,19 @@ Prefer `--cmd` over splitting and then sending keys; it avoids the
 shell-prompt race.
 
     danterm pane split --pane "$PANE_ID" -h --cmd 'just test' --title tests
-    danterm pane split --pane "$PANE_ID" -h --background --cmd 'just test' --title tests
+    danterm pane split --pane "$PANE_ID" -h --foreground --cmd 'just test' --title tests
 
-Use `--background` to leave the caller's pane focused inside its tab.
+By default, the caller's pane stays focused inside its tab. Use `--foreground`
+only when the user asked to focus the new pane within that tab.
 
 To capture the new pane id for later:
 
     NEW=$(danterm pane split --pane "$PANE_ID" -v --cmd 'just test' | jq -r '.pane.id')
+
+To navigate to a new pane that was split in another tab:
+
+    NEW=$(danterm pane split --pane "$PANE_ID" -v --cmd 'just test' | jq -r '.pane.id')
+    danterm pane focus "$NEW"
 
 ### Read another pane's output
 
@@ -257,12 +273,12 @@ else prints nothing on success and exits 0.
   `pane split --pane <pane-id> --cmd` over the
   split-then-`pane input` pattern. `--cmd` seeds the command at surface
   creation time and avoids racing the shell prompt.
-- For `tab new`, choose exactly one position mode. Use `--at-group-end` for
-  append behavior and `--after-tab <tab-id>` when an exact tab anchor is known.
-- Prefer `--background` on `tab new` and `pane split` for autonomous work the
-  user did not just ask for. The user may be focused on another tab or pane;
-  stealing focus is disruptive. Omit `--background` only when the user
-  explicitly asked you to switch to the new tab or pane.
+- `tab new` and `pane split` default to background behavior for autonomous work.
+  Pass `--foreground` only when the user explicitly asked you to switch to the
+  new tab or focus the new split pane within its tab.
+- For `tab new`, the default position is the target group end. Use
+  `--after-tab <tab-id>` or `--after-selected` only when the user gave that
+  placement anchor.
 - When a recipe needs an id, derive it from `pane info` or `ls` using the
   targeting rule above; do not guess UUIDs.
 - Errors print to stderr as `danterm: <message>` and exit non-zero. Surface

@@ -82,7 +82,7 @@ public func parseCLI(_ args: [String]) throws -> CLICommand {
 }
 
 private func parseTabNewCommand(_ args: [String]) throws -> CLICommand {
-    let usage = "usage: danterm tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--after-selected | --at-group-end | --after-tab <tab-id>]"
+    let usage = "usage: danterm tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected | --at-group-end | --after-tab <tab-id>]"
     let parsed: ParsedTabNew
     do {
         parsed = try parseTabNewArgs(args)
@@ -96,6 +96,8 @@ private func parseTabNewCommand(_ args: [String]) throws -> CLICommand {
             throw CLIParseError("unexpected argument: \(argument)")
         case .conflictingPositionFlags:
             throw CLIParseError("--after-selected, --at-group-end, and --after-tab are mutually exclusive\n\(usage)")
+        case .conflictingFocusFlags:
+            throw CLIParseError("--background and --foreground are mutually exclusive\n\(usage)")
         }
     }
 
@@ -106,12 +108,10 @@ private func parseTabNewCommand(_ args: [String]) throws -> CLICommand {
     if let launch = parsed.launch {
         params["launch"] = launch.jsonValue
     }
-    if parsed.background {
-        params["background"] = .bool(true)
-    }
+    params["background"] = .bool(parsed.foreground ? false : true)
     switch parsed.position {
     case .none:
-        break
+        params["position"] = .string("atGroupEnd")
     case .afterSelected:
         params["position"] = .string("afterSelected")
     case .atGroupEnd:
@@ -166,17 +166,20 @@ private func parsePaneInfoCommand(_ args: [String]) throws -> CLICommand {
 }
 
 private func parsePaneSplitCommand(_ args: [String]) throws -> CLICommand {
+    let usage = "usage: danterm pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]"
     let parsed: ParsedPaneSplit
     do {
         parsed = try parsePaneSplitArgs(args)
     } catch let error as PaneSplitParseError {
         switch error {
         case .missingDirection, .missingPaneArg, .missingValue(_):
-            throw CLIParseError("usage: danterm pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background]")
+            throw CLIParseError(usage)
         case .unknownFlag(let flag):
             throw CLIParseError("unknown flag: \(flag)")
         case .unexpectedArgument(let argument):
             throw CLIParseError("unexpected argument: \(argument)")
+        case .conflictingFocusFlags:
+            throw CLIParseError("--background and --foreground are mutually exclusive\n\(usage)")
         }
     }
 
@@ -189,9 +192,7 @@ private func parsePaneSplitCommand(_ args: [String]) throws -> CLICommand {
     if let launch = parsed.launch {
         params["launch"] = launch.jsonValue
     }
-    if parsed.background {
-        params["background"] = .bool(true)
-    }
+    params["background"] = .bool(parsed.foreground ? false : true)
     return CLICommand(method: Methods.paneSplit, params: params, outputMode: .json)
 }
 

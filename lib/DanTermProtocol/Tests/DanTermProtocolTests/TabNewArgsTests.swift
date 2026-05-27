@@ -16,9 +16,25 @@ final class TabNewArgsTests: XCTestCase {
     }
 
     func testBackgroundFlagParses() throws {
+        // Intent: `--background` records only the background flag.
+        // Why it exists: preserves back-compat for scripts that already pass the
+        //   now-redundant explicit background request.
+        // Scenario: an existing agent recipe still includes `--background`;
+        //   parsing must keep accepting it without implying foreground.
         XCTAssertEqual(
             try parseTabNewArgs(["--background"]),
-            ParsedTabNew(group: nil, launch: nil, background: true)
+            ParsedTabNew(group: nil, launch: nil, background: true, foreground: false)
+        )
+    }
+
+    func testForegroundFlagParses() throws {
+        // Intent: `--foreground` records a request to focus/select the new tab.
+        // Why it exists: keeps the arg parser as a faithful flag-presence layer
+        //   before CLI policy maps absent focus flags to background execution.
+        // Scenario: the user explicitly asks an agent to switch to the new tab.
+        XCTAssertEqual(
+            try parseTabNewArgs(["--foreground"]),
+            ParsedTabNew(group: nil, launch: nil, background: false, foreground: true)
         )
     }
 
@@ -50,9 +66,20 @@ final class TabNewArgsTests: XCTestCase {
             ParsedTabNew(
                 group: "G1",
                 launch: LaunchSpec(cmd: "date", cwd: nil, title: nil),
-                background: true
+                background: true,
+                foreground: false
             )
         )
+    }
+
+    func testConflictingFocusFlagsThrow() {
+        // Intent: `--background --foreground` is rejected instead of letting the
+        //   last parsed flag win.
+        // Why it exists: prevents ambiguous focus policy on the agent-facing CLI.
+        // Scenario: a composed command accidentally includes both focus flags.
+        XCTAssertThrowsError(try parseTabNewArgs(["--background", "--foreground"])) { err in
+            XCTAssertEqual(err as? TabNewParseError, .conflictingFocusFlags)
+        }
     }
 
     func testMissingValueThrows() {

@@ -11,12 +11,22 @@ public struct ParsedPaneSplit: Equatable {
     public let direction: PaneSplitDirection
     public let launch: LaunchSpec?
     public let background: Bool
+    /// Records that `--foreground` was typed while leaving background-default
+    /// policy to the command parser.
+    public let foreground: Bool
 
-    public init(pane: String?, direction: PaneSplitDirection, launch: LaunchSpec? = nil, background: Bool = false) {
+    public init(
+        pane: String?,
+        direction: PaneSplitDirection,
+        launch: LaunchSpec? = nil,
+        background: Bool = false,
+        foreground: Bool = false
+    ) {
         self.pane = pane
         self.direction = direction
         self.launch = launch
         self.background = background
+        self.foreground = foreground
     }
 }
 
@@ -26,6 +36,7 @@ public enum PaneSplitParseError: Error, Equatable {
     case missingValue(String)
     case unknownFlag(String)
     case unexpectedArgument(String)
+    case conflictingFocusFlags
 }
 
 public func parsePaneSplitArgs(_ args: [String]) throws -> ParsedPaneSplit {
@@ -35,6 +46,7 @@ public func parsePaneSplitArgs(_ args: [String]) throws -> ParsedPaneSplit {
     var cwd: String?
     var title: String?
     var background = false
+    var foreground = false
     var i = 0
 
     while i < args.count {
@@ -65,7 +77,16 @@ public func parsePaneSplitArgs(_ args: [String]) throws -> ParsedPaneSplit {
             title = args[i + 1]
             i += 2
         case "--background":
+            guard !foreground else {
+                throw PaneSplitParseError.conflictingFocusFlags
+            }
             background = true
+            i += 1
+        case "--foreground":
+            guard !background else {
+                throw PaneSplitParseError.conflictingFocusFlags
+            }
+            foreground = true
             i += 1
         case "-h":
             guard direction == nil else {
@@ -91,5 +112,11 @@ public func parsePaneSplitArgs(_ args: [String]) throws -> ParsedPaneSplit {
         throw PaneSplitParseError.missingDirection
     }
     let spec = LaunchSpec(cmd: cmd, cwd: cwd, title: title)
-    return ParsedPaneSplit(pane: pane, direction: direction, launch: spec.isEmpty ? nil : spec, background: background)
+    return ParsedPaneSplit(
+        pane: pane,
+        direction: direction,
+        launch: spec.isEmpty ? nil : spec,
+        background: background,
+        foreground: foreground
+    )
 }

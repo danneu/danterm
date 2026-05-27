@@ -37,10 +37,15 @@ final class CLIParserTests: XCTestCase {
         XCTAssertEqual(afterTab.params["afterTabId"], .string(tabId))
     }
 
-    func testTabNewWithoutPositionFlagOmitsPositionParams() throws {
+    func testTabNewWithoutPositionFlagDefaultsToGroupEndInBackground() throws {
+        // Intent: bare `tab new` emits deterministic, background CLI policy.
+        // Why it exists: agents should not insert relative to live focus or steal
+        //   focus when they forget optional flags.
+        // Scenario: an agent opens a tab with no position or focus flags.
         let command = try parseCLI(["tab", "new"])
-        XCTAssertEqual(command.params["position"], nil)
+        XCTAssertEqual(command.params["position"], .string("atGroupEnd"))
         XCTAssertEqual(command.params["afterTabId"], nil)
+        XCTAssertEqual(command.params["background"], .bool(true))
     }
 
     func testTabNewConflictingPositionFlagsThrowUsageError() {
@@ -109,12 +114,17 @@ final class CLIParserTests: XCTestCase {
     }
 
     func testImplicitHumanMutationFormsStillParseWithoutExplicitTargets() throws {
+        // Intent: implicit target commands still parse while tab/split defaults
+        //   are made agent-safe.
+        // Why it exists: the CLI contract still allows context-derived targets,
+        //   but no longer leaves tab creation or pane splitting foregrounded.
+        // Scenario: command parsing before IPC context is attached.
         XCTAssertEqual(try parseCLI(["tab", "new"]).params["group"], nil)
-        XCTAssertEqual(try parseCLI(["tab", "new"]).params["background"], nil)
+        XCTAssertEqual(try parseCLI(["tab", "new"]).params["background"], .bool(true))
         XCTAssertEqual(try parseCLI(["tab", "rename", "work"]).params["tab"], nil)
         XCTAssertEqual(try parseCLI(["tab", "rename", "--clear"]).params["tab"], nil)
         XCTAssertEqual(try parseCLI(["pane", "split", "-h"]).params["pane"], nil)
-        XCTAssertEqual(try parseCLI(["pane", "split", "-h"]).params["background"], nil)
+        XCTAssertEqual(try parseCLI(["pane", "split", "-h"]).params["background"], .bool(true))
         XCTAssertEqual(try parseCLI(["pane", "input", "--", "ls"]).params["pane"], nil)
         XCTAssertEqual(try parseCLI(["theme", "set", "TokyoNight"]).params["pane"], nil)
         XCTAssertEqual(try parseCLI(["theme", "set", "--clear"]).params["pane"], nil)
@@ -185,6 +195,85 @@ final class CLIParserTests: XCTestCase {
         XCTAssertEqual(command.params["background"], .bool(true))
     }
 
+    func testTabNewAfterSelectedDefaultsToBackground() throws {
+        // Intent: explicit position choices do not opt into foreground focus.
+        // Why it exists: focus policy is independent from tab-placement policy.
+        // Scenario: an agent intentionally anchors after the selected tab but
+        //   still expects the new tab to open in the background.
+        let command = try parseCLI(["tab", "new", "--after-selected"])
+        XCTAssertEqual(command.params["position"], .string("afterSelected"))
+        XCTAssertEqual(command.params["background"], .bool(true))
+    }
+
+    func testTabNewForegroundDisablesBackgroundAtGroupEnd() throws {
+        // Intent: `--foreground` is the explicit inverse of the new background
+        //   default for tab creation.
+        // Why it exists: switching to a new tab remains possible when the user
+        //   asks for it, while placement stays deterministic by default.
+        // Scenario: the user asks the agent to open a tab and switch to it.
+        let command = try parseCLI(["tab", "new", "--foreground"])
+        XCTAssertEqual(command.params["position"], .string("atGroupEnd"))
+        XCTAssertEqual(command.params["background"], .bool(false))
+    }
+
+    func testTabNewAtGroupEndExplicitFormMatchesDefault() throws {
+        // Intent: the explicit at-group-end flag still serializes the same
+        //   placement as the new default.
+        // Why it exists: existing commands that already chose deterministic
+        //   placement should keep their wire shape.
+        // Scenario: an agent keeps passing `--at-group-end` after the default
+        //   changes to that same policy.
+        let command = try parseCLI(["tab", "new", "--at-group-end"])
+        XCTAssertEqual(command.params["position"], .string("atGroupEnd"))
+        XCTAssertEqual(command.params["background"], .bool(true))
+    }
+
+    func testTabNewConflictingFocusFlagsThrowUsageError() {
+        // Intent: ambiguous tab focus flags produce a usage error.
+        // Why it exists: command composition should fail loudly instead of
+        //   silently choosing background or foreground.
+        // Scenario: a recipe leaves legacy `--background` while adding
+        //   `--foreground` for a user-requested switch.
+        XCTAssertThrowsError(try parseCLI(["tab", "new", "--background", "--foreground"])) { err in
+            let message = (err as? CLIParseError)?.message
+            XCTAssertTrue(message?.contains("--background and --foreground are mutually exclusive") == true)
+            XCTAssertTrue(message?.contains(tabNewUsageWithPositionFlags) == true)
+        }
+    }
+
+    func testPaneSplitDefaultsToBackground() throws {
+        // Intent: pane split defaults to leaving the caller's pane focused.
+        // Why it exists: autonomous splits should not steal focus when the
+        //   agent omits optional focus flags.
+        // Scenario: an agent splits a known pane horizontally.
+        let command = try parseCLI(["pane", "split", "-h"])
+        XCTAssertEqual(command.params["direction"], .string("horizontal"))
+        XCTAssertEqual(command.params["background"], .bool(true))
+    }
+
+    func testPaneSplitForegroundDisablesBackground() throws {
+        // Intent: `pane split --foreground` asks the app to focus the new pane
+        //   within the target tab.
+        // Why it exists: foreground split remains available without changing
+        //   selected-tab navigation semantics.
+        // Scenario: the user asks the agent to split and focus the new pane.
+        let command = try parseCLI(["pane", "split", "-h", "--foreground"])
+        XCTAssertEqual(command.params["direction"], .string("horizontal"))
+        XCTAssertEqual(command.params["background"], .bool(false))
+    }
+
+    func testPaneSplitConflictingFocusFlagsThrowUsageError() {
+        // Intent: ambiguous pane-split focus flags produce a usage error.
+        // Why it exists: focus policy should be explicit when both inverse flags
+        //   appear in one command.
+        // Scenario: a composed split command accidentally includes both flags.
+        XCTAssertThrowsError(try parseCLI(["pane", "split", "-h", "--background", "--foreground"])) { err in
+            let message = (err as? CLIParseError)?.message
+            XCTAssertTrue(message?.contains("--background and --foreground are mutually exclusive") == true)
+            XCTAssertTrue(message?.contains(paneSplitUsageWithFocusFlags) == true)
+        }
+    }
+
     func testRemovedLegacyCommandsAreUnknown() {
         for command in ["new-tab", "send-keys", "read-pane"] {
             XCTAssertThrowsError(try parseCLI([command])) { err in
@@ -199,7 +288,7 @@ final class CLIParserTests: XCTestCase {
             (["tab", "new", "--group"], tabNewUsageWithPositionFlags),
             (["tab", "rename", "--tab"], "usage: danterm tab rename [--tab <tab-id>] <name>|--clear"),
             (["tab", "rename", "--tab", "T1", "--clear", "extra"], "usage: danterm tab rename [--tab <tab-id>] --clear"),
-            (["pane", "split", "--pane"], "usage: danterm pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background]"),
+            (["pane", "split", "--pane"], paneSplitUsageWithFocusFlags),
             (["pane", "input", "--pane"], "usage: danterm pane input --pane <pane-id> ..."),
             (["theme", "set", "--pane"], "usage: danterm theme set [--pane <pane-id>] <name>|--clear"),
             (["theme", "set", "--pane", "P1", "--clear", "extra"], "usage: danterm theme set [--pane <pane-id>] --clear"),
@@ -215,4 +304,5 @@ final class CLIParserTests: XCTestCase {
     }
 }
 
-private let tabNewUsageWithPositionFlags = "usage: danterm tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--after-selected | --at-group-end | --after-tab <tab-id>]"
+private let tabNewUsageWithPositionFlags = "usage: danterm tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected | --at-group-end | --after-tab <tab-id>]"
+private let paneSplitUsageWithFocusFlags = "usage: danterm pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]"
