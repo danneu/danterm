@@ -1418,6 +1418,125 @@ func modelOperationsTests() {
         try expectEqual(panePlaceholder.sectionIdentifier, Optional(AnyHashable(paneId)))
     }
 
+    // MARK: - TODO Popover Projections
+
+    test("desiredPaneTodoPopover returns rows, pane id, and completed visibility") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        update(&model, .addTodo(paneId: paneId, text: "done"))
+        update(&model, .addTodo(paneId: paneId, text: "pending"))
+        let doneId = model.pane(paneId)!.todos[0].id
+        update(&model, .toggleTodoDone(paneId: paneId, todoId: doneId))
+
+        let projection = desiredPaneTodoPopover(paneId: paneId, in: model)
+
+        try expectEqual(projection?.paneId, paneId)
+        try expectEqual(projection?.rows, model.pane(paneId)!.todos)
+        try expectEqual(projection?.hasCompleted, true)
+    }
+
+    test("desiredPaneTodoPopover returns nil for a missing pane") {
+        let model = makeModel()
+
+        let projection = desiredPaneTodoPopover(paneId: PaneId(), in: model)
+
+        try expect(projection == nil)
+    }
+
+    test("desiredTabTodoPopover includes rows, pane order, and tab-only completed visibility") {
+        var (model, tabId, paneA, paneB) = makeTwoPaneTabTodoRowsModel()
+        update(&model, .addTabTodo(tabId: tabId, text: "tab pending"))
+        update(&model, .addTodo(paneId: paneA, text: "pane done"))
+        let paneDoneId = model.pane(paneA)!.todos[0].id
+        update(&model, .toggleTodoDone(paneId: paneA, todoId: paneDoneId))
+
+        var projection = desiredTabTodoPopover(tabId: tabId, in: model)
+
+        try expectEqual(projection?.tabId, tabId)
+        try expectEqual(projection?.rows, buildTabTodoRows(model: model, tabId: tabId))
+        try expectEqual(projection?.paneOrder, [paneA, paneB])
+        try expectEqual(projection?.tabHasCompleted, false, "pane completion should not show tab clear button")
+
+        let tabTodoId = tabById(tabId, in: model)!.todos[0].id
+        update(&model, .toggleTabTodoDone(tabId: tabId, todoId: tabTodoId))
+        projection = desiredTabTodoPopover(tabId: tabId, in: model)
+
+        try expectEqual(projection?.tabHasCompleted, true)
+    }
+
+    test("desiredTabTodoPopover changes for pane todo, tab todo, and pane title changes") {
+        var (model, tabId, paneA, _) = makeTwoPaneTabTodoRowsModel()
+        var previous = desiredTabTodoPopover(tabId: tabId, in: model)
+
+        update(&model, .addTodo(paneId: paneA, text: "pane task"))
+        var next = desiredTabTodoPopover(tabId: tabId, in: model)
+        try expect(previous != next, "pane todo changes should update the projection")
+
+        previous = next
+        update(&model, .addTabTodo(tabId: tabId, text: "tab task"))
+        next = desiredTabTodoPopover(tabId: tabId, in: model)
+        try expect(previous != next, "tab todo changes should update the projection")
+
+        previous = next
+        model.updatePane(paneA) { $0.title = "renamed pane" }
+        next = desiredTabTodoPopover(tabId: tabId, in: model)
+        try expect(previous != next, "pane title changes should update the projection")
+    }
+
+    test("resolveTabTodoEditTarget follows a todo across tab and pane buckets") {
+        var (model, tabId, paneA, _) = makeTwoPaneTabTodoRowsModel()
+        update(&model, .addTabTodo(tabId: tabId, text: "movable"))
+        let todoId = tabById(tabId, in: model)!.todos[0].id
+
+        update(&model, .moveTodo(from: .tab(tabId), todoId: todoId, to: .pane(paneA), atIndex: 0))
+        var projection = desiredTabTodoPopover(tabId: tabId, in: model)!
+        try expectEqual(
+            resolveTabTodoEditTarget(.tab(todoId: todoId), in: projection),
+            .pane(paneId: paneA, todoId: todoId)
+        )
+
+        update(&model, .moveTodo(from: .pane(paneA), todoId: todoId, to: .tab(tabId), atIndex: 0))
+        projection = desiredTabTodoPopover(tabId: tabId, in: model)!
+        try expectEqual(
+            resolveTabTodoEditTarget(.pane(paneId: paneA, todoId: todoId), in: projection),
+            .tab(todoId: todoId)
+        )
+    }
+
+    test("resolveTabTodoEditTarget is scoped to the open tab projection") {
+        var model = makeModel()
+        createTab(&model)
+        let tabA = selectedTab(in: model)!.id
+        update(&model, .addTabTodo(tabId: tabA, text: "outside"))
+        let outsideTodoId = tabById(tabA, in: model)!.todos[0].id
+        createTab(&model)
+        let tabB = selectedTab(in: model)!.id
+
+        let projection = desiredTabTodoPopover(tabId: tabB, in: model)!
+
+        try expect(resolveTabTodoEditTarget(.tab(todoId: outsideTodoId), in: projection) == nil)
+    }
+
+    test("newlyAddedTabTodoTarget returns the first tab item missing from the captured id set") {
+        var (model, tabId, _, _) = makeTwoPaneTabTodoRowsModel()
+        update(&model, .addTabTodo(tabId: tabId, text: "existing"))
+        let previousProjection = desiredTabTodoPopover(tabId: tabId, in: model)!
+        let previousIds = Set(previousProjection.rows.compactMap { row -> UUID? in
+            if case .tabItem(let item) = row { return item.id }
+            return nil
+        })
+
+        update(&model, .addTabTodo(tabId: tabId, text: "new"))
+        let updatedProjection = desiredTabTodoPopover(tabId: tabId, in: model)!
+        let newTodoId = tabById(tabId, in: model)!.todos[1].id
+
+        try expectEqual(
+            newlyAddedTabTodoTarget(previousTabTodoIds: previousIds, in: updatedProjection),
+            .tab(todoId: newTodoId)
+        )
+    }
+
     test("resolveTabTodoDropTarget .on tabSectionHeader appends to tab") {
         var (model, tabId, _, _) = makeTwoPaneTabTodoRowsModel()
         update(&model, .addTabTodo(tabId: tabId, text: "tab A"))

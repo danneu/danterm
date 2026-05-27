@@ -674,6 +674,9 @@ class AppRuntime {
             popover.contentViewController = vc
             popover.behavior = .transient
             popover.delegate = delegate
+            vc.loadViewIfNeeded()
+            guard let projection = desiredPaneTodoPopover(paneId: paneId, in: model) else { return }
+            vc.apply(projection)
             popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
             todoPopover = popover
             todoPopoverDelegate = delegate
@@ -690,6 +693,9 @@ class AppRuntime {
             popover.contentViewController = vc
             popover.behavior = .transient
             popover.delegate = delegate
+            vc.loadViewIfNeeded()
+            guard let projection = desiredTabTodoPopover(tabId: tabId, in: model) else { return }
+            vc.apply(projection)
             popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
             tabTodoPopover = popover
             tabTodoPopoverDelegate = delegate

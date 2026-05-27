@@ -62,12 +62,14 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     private var popoverState = TodoPopoverState<UUID>()
     private var isSyncingTableSelection = false
     private var shortcutHelpPopover: NSPopover?
+    private var projection: PaneTodoPopoverProjection
 
-    private var todos: [TodoItem] { runtime?.model.pane(paneId)?.todos ?? [] }
+    private var todos: [TodoItem] { projection.rows }
 
     init(paneId: PaneId, runtime: AppRuntime?) {
         self.paneId = paneId
         self.runtime = runtime
+        self.projection = PaneTodoPopoverProjection(paneId: paneId, rows: [], hasCompleted: false)
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -223,7 +225,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
 
     override func viewWillAppear() {
         super.viewWillAppear()
-        rebuildRows()
+        apply(projection)
     }
 
     override func viewDidAppear() {
@@ -236,34 +238,61 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         closeShortcutHelpPopover()
     }
 
-    func rebuildRows(preservingSelectedId selectedIdOverride: UUID? = nil) {
-        let items = todos
-        let selectedId = selectedIdOverride ?? selectedTodo()?.id
+    /// Render the latest model projection while preserving view-local drafts,
+    /// selection, and first responder when their targets still exist.
+    func apply(_ newProjection: PaneTodoPopoverProjection) {
+        let composeWasFirstResponder = view.window?.firstResponder === addInput.textView
+        let editWasFirstResponder = view.window?.firstResponder === editInput.textView
+        let tableWasFirstResponder = view.window?.firstResponder === tableView
+        let saveWasFirstResponder = view.window?.firstResponder === saveButton
+        let cancelWasFirstResponder = view.window?.firstResponder === cancelButton
+        let selectedId = selectedTodo()?.id
         let selectedRowBeforeReload = tableView.selectedRow
         let wasEditing = popoverState.isEditing
-        popoverState.rebuild { target in
-            items.contains { $0.id == target }
+        let previousEditTarget = popoverState.editTarget
+        let editDraft = editInput.string
+        popoverState.setComposeDraft(addInput.string)
+
+        projection = newProjection
+        popoverState.reconcileEditTarget { target in
+            newProjection.rows.contains { $0.id == target } ? target : nil
+        }
+        if let editId = popoverState.editTarget {
+            editTitleLabel.stringValue = "Edit pane task"
+            if wasEditing, editId == previousEditTarget {
+                editInput.string = editDraft
+            } else if let item = todo(id: editId) {
+                editInput.string = item.text
+            }
         }
         syncModeVisibility()
         isSyncingTableSelection = true
         tableView.reloadData()
         if let editId = popoverState.editTarget {
-            if let newIndex = items.firstIndex(where: { $0.id == editId }) {
+            if let newIndex = todos.firstIndex(where: { $0.id == editId }) {
                 tableView.selectRowIndexes(IndexSet(integer: newIndex), byExtendingSelection: false)
             } else {
                 tableView.deselectAll(nil)
             }
         } else if let selectedId,
-                  let newIndex = items.firstIndex(where: { $0.id == selectedId }) {
+                  let newIndex = todos.firstIndex(where: { $0.id == selectedId }) {
             tableView.selectRowIndexes(IndexSet(integer: newIndex), byExtendingSelection: false)
         } else {
             tableView.deselectAll(nil)
         }
         isSyncingTableSelection = false
 
-        if wasEditing && !popoverState.isEditing {
-            selectNearestSelectableRow(near: selectedRowBeforeReload)
+        let selectedDisappeared = selectedId != nil && !todos.contains { $0.id == selectedId }
+        if (wasEditing && !popoverState.isEditing) || selectedDisappeared {
+            selectNearestSelectableRow(near: selectedRowBeforeReload, focus: false)
         }
+        restoreFirstResponder(
+            composeWasFirstResponder: composeWasFirstResponder,
+            editWasFirstResponder: editWasFirstResponder,
+            tableWasFirstResponder: tableWasFirstResponder,
+            saveWasFirstResponder: saveWasFirstResponder,
+            cancelWasFirstResponder: cancelWasFirstResponder
+        )
     }
 
     // MARK: - Focus and edit transitions
@@ -275,6 +304,10 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         let items = todos
         guard row >= 0, row < items.count else { return nil }
         return items[row]
+    }
+
+    private func todo(id: UUID) -> TodoItem? {
+        todos.first { $0.id == id }
     }
 
     private func setSelectedRow(_ row: Int) {
@@ -291,19 +324,60 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         return true
     }
 
-    private func selectNearestSelectableRow(near row: Int) {
+    private func selectNearestSelectableRow(near row: Int, focus: Bool = true) {
         let items = todos
         if items.indices.contains(row) {
             setSelectedRow(row)
-            view.window?.makeFirstResponder(tableView)
+            if focus { view.window?.makeFirstResponder(tableView) }
             return
         }
         if let previous = nextSelectableRow(in: items, from: min(row, items.count), delta: -1, canSelect: { _ in true }) {
             setSelectedRow(previous)
-            view.window?.makeFirstResponder(tableView)
+            if focus { view.window?.makeFirstResponder(tableView) }
             return
         }
-        focusComposeInput()
+        if focus {
+            focusComposeInput()
+        } else {
+            tableView.deselectAll(nil)
+        }
+    }
+
+    private func restoreFirstResponder(
+        composeWasFirstResponder: Bool,
+        editWasFirstResponder: Bool,
+        tableWasFirstResponder: Bool,
+        saveWasFirstResponder: Bool,
+        cancelWasFirstResponder: Bool
+    ) {
+        guard let window = view.window else { return }
+        if isEditing {
+            if editWasFirstResponder {
+                window.makeFirstResponder(editInput.textView)
+            } else if saveWasFirstResponder {
+                window.makeFirstResponder(saveButton)
+            } else if cancelWasFirstResponder {
+                window.makeFirstResponder(cancelButton)
+            }
+            return
+        }
+        if editWasFirstResponder || saveWasFirstResponder || cancelWasFirstResponder {
+            if tableView.selectedRow >= 0 {
+                window.makeFirstResponder(tableView)
+            } else {
+                focusComposeInput()
+            }
+            return
+        }
+        if composeWasFirstResponder {
+            window.makeFirstResponder(addInput.textView)
+        } else if tableWasFirstResponder {
+            if tableView.selectedRow >= 0 {
+                window.makeFirstResponder(tableView)
+            } else {
+                focusComposeInput()
+            }
+        }
     }
 
     private func focusInitialMode() {
@@ -349,7 +423,6 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         case .saved(let editId, let text):
             saveEdit(todoId: editId, text: text)
             syncModeVisibility()
-            rebuildRows(preservingSelectedId: editId)
             _ = selectTodo(id: editId)
             view.window?.makeFirstResponder(tableView)
             return true
@@ -371,7 +444,6 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         guard let editId = popoverState.editTarget else { return }
         popoverState.cancelEdit()
         syncModeVisibility()
-        rebuildRows()
         _ = selectTodo(id: editId)
         view.window?.makeFirstResponder(tableView)
     }
@@ -382,7 +454,6 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         runtime?.send(.addTodo(paneId: paneId, text: text))
         popoverState.clearComposeDraft()
         addInput.string = ""
-        rebuildRows()
         view.window?.makeFirstResponder(addInput.textView)
     }
 
@@ -394,7 +465,7 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
 
     private func syncModeVisibility() {
         let editMode = popoverState.isEditing
-        clearButton.isHidden = editMode || !todos.contains(where: \.isDone)
+        clearButton.isHidden = editMode || !projection.hasCompleted
         editContainer.isHidden = !editMode
         scrollView.isHidden = editMode || todos.isEmpty
         emptyLabel.isHidden = editMode || !todos.isEmpty
@@ -491,7 +562,9 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
               let uuid = UUID(uuidString: idStr) else { return false }
         let selectedIdBeforeMutation = selectedTodo()?.id
         runtime?.send(.reorderTodo(paneId: paneId, todoId: uuid, toIndex: row))
-        rebuildRows(preservingSelectedId: selectedIdBeforeMutation)
+        if let selectedIdBeforeMutation {
+            _ = selectTodo(id: selectedIdBeforeMutation)
+        }
         return true
     }
 
@@ -502,7 +575,9 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         guard row >= 0, row < todos.count else { return }
         let selectedIdBeforeMutation = selectedTodo()?.id
         runtime?.send(.toggleTodoDone(paneId: paneId, todoId: todos[row].id))
-        rebuildRows(preservingSelectedId: selectedIdBeforeMutation)
+        if let selectedIdBeforeMutation {
+            _ = selectTodo(id: selectedIdBeforeMutation)
+        }
     }
 
     @objc private func deleteTask(_ sender: NSButton) {
@@ -510,13 +585,17 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         guard row >= 0, row < todos.count else { return }
         let selectedIdBeforeMutation = selectedTodo()?.id
         runtime?.send(.deleteTodo(paneId: paneId, todoId: todos[row].id))
-        rebuildRows(preservingSelectedId: selectedIdBeforeMutation)
+        if let selectedIdBeforeMutation {
+            _ = selectTodo(id: selectedIdBeforeMutation)
+        }
     }
 
     @objc private func clearCompleted() {
         let selectedIdBeforeMutation = selectedTodo()?.id
         runtime?.send(.clearCompletedTodos(paneId: paneId))
-        rebuildRows(preservingSelectedId: selectedIdBeforeMutation)
+        if let selectedIdBeforeMutation {
+            _ = selectTodo(id: selectedIdBeforeMutation)
+        }
     }
 
     @objc private func tableRowDoubleClicked(_ sender: Any?) {
@@ -576,7 +655,6 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
     private func toggleSelectedTodoDone() {
         guard let item = selectedTodo() else { return }
         runtime?.send(.toggleTodoDone(paneId: paneId, todoId: item.id))
-        rebuildRows(preservingSelectedId: item.id)
         _ = selectTodo(id: item.id)
         view.window?.makeFirstResponder(tableView)
     }
@@ -585,7 +663,6 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         let row = tableView.selectedRow
         guard let item = selectedTodo() else { return }
         runtime?.send(.deleteTodo(paneId: paneId, todoId: item.id))
-        rebuildRows(preservingSelectedId: item.id)
         selectNearestSelectableRow(near: row)
     }
 
@@ -594,7 +671,6 @@ class TodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTabl
         let destination = row + delta
         guard let item = selectedTodo(), todos.indices.contains(destination) else { return }
         runtime?.send(.reorderTodo(paneId: paneId, todoId: item.id, toIndex: destination))
-        rebuildRows(preservingSelectedId: item.id)
         _ = selectTodo(id: item.id)
         view.window?.makeFirstResponder(tableView)
     }

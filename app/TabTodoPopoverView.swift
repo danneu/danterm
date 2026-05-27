@@ -169,29 +169,23 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
     private var popoverState = TodoPopoverState<TabTodoEditTarget>()
     private var isSyncingTableSelection = false
     private var shortcutHelpPopover: NSPopover?
-    private var rows: [TabTodoRow] = []
+    private var projection: TabTodoPopoverProjection
+    private var rows: [TabTodoRow] { projection.rows }
 
     init(tabId: TabId, runtime: AppRuntime?) {
         self.tabId = tabId
         self.runtime = runtime
+        self.projection = TabTodoPopoverProjection(
+            tabId: tabId,
+            rows: [],
+            paneOrder: [],
+            tabHasCompleted: false
+        )
         super.init(nibName: nil, bundle: nil)
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) not implemented")
-    }
-
-    private var tab: TabModel? {
-        guard let model = runtime?.model else { return nil }
-        return tabById(tabId, in: model)
-    }
-
-    private var tabTodos: [TodoItem] { tab?.todos ?? [] }
-
-    /// Build the row enum from the current model.
-    private func buildRows() -> [TabTodoRow] {
-        guard let runtime = runtime else { return [] }
-        return buildTabTodoRows(model: runtime.model, tabId: tabId)
     }
 
     override func loadView() {
@@ -334,7 +328,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
 
     override func viewWillAppear() {
         super.viewWillAppear()
-        rebuildRows()
+        apply(projection)
     }
 
     override func viewDidAppear() {
@@ -347,16 +341,39 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         closeShortcutHelpPopover()
     }
 
-    func rebuildRows() {
+    /// Render the latest model projection while preserving view-local drafts,
+    /// selection, and first responder when their targets still exist.
+    func apply(_ newProjection: TabTodoPopoverProjection) {
+        let composeWasFirstResponder = view.window?.firstResponder === addInput.textView
+        let editWasFirstResponder = view.window?.firstResponder === editInput.textView
+        let tableWasFirstResponder = view.window?.firstResponder === tableView
+        let saveWasFirstResponder = view.window?.firstResponder === saveButton
+        let cancelWasFirstResponder = view.window?.firstResponder === cancelButton
         let selectedTarget = selectedEditTarget()
         let selectedRowBeforeReload = tableView.selectedRow
-        rows = buildRows()
-        let tabItems = tabTodos
         let wasEditing = popoverState.isEditing
-        popoverState.rebuild { [weak self] target in
-            self?.item(for: target) != nil
+        let previousEditTarget = popoverState.editTarget
+        let editDraft = editInput.string
+        popoverState.setComposeDraft(addInput.string)
+
+        projection = newProjection
+        popoverState.reconcileEditTarget { target in
+            resolveTabTodoEditTarget(target, in: newProjection)
         }
-        syncModeVisibility(tabItems: tabItems)
+        if let editTarget = popoverState.editTarget {
+            editTitleLabel.stringValue = editTitle(for: editTarget)
+            if wasEditing,
+               let previousEditTarget,
+               tabTodoTargetsReferToSameTodo(previousEditTarget, editTarget) {
+                editInput.string = editDraft
+            } else if let item = item(for: editTarget) {
+                editInput.string = item.text
+            }
+        }
+        let resolvedSelectedTarget = selectedTarget.flatMap {
+            resolveTabTodoEditTarget($0, in: newProjection)
+        }
+        syncModeVisibility()
         isSyncingTableSelection = true
         tableView.reloadData()
         if let target = popoverState.editTarget {
@@ -365,17 +382,24 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
             } else {
                 tableView.deselectAll(nil)
             }
-        } else if let selectedTarget,
-                  let newIndex = rowIndex(for: selectedTarget) {
+        } else if let resolvedSelectedTarget,
+                  let newIndex = rowIndex(for: resolvedSelectedTarget) {
             tableView.selectRowIndexes(IndexSet(integer: newIndex), byExtendingSelection: false)
         } else {
             tableView.deselectAll(nil)
         }
         isSyncingTableSelection = false
 
-        if wasEditing && !popoverState.isEditing {
-            selectNearestSelectableRow(near: selectedRowBeforeReload)
+        if (wasEditing && !popoverState.isEditing) || (selectedTarget != nil && resolvedSelectedTarget == nil) {
+            selectNearestSelectableRow(near: selectedRowBeforeReload, focus: false)
         }
+        restoreFirstResponder(
+            composeWasFirstResponder: composeWasFirstResponder,
+            editWasFirstResponder: editWasFirstResponder,
+            tableWasFirstResponder: tableWasFirstResponder,
+            saveWasFirstResponder: saveWasFirstResponder,
+            cancelWasFirstResponder: cancelWasFirstResponder
+        )
     }
 
     // MARK: - Focus and edit transitions
@@ -389,12 +413,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
     }
 
     private func item(for target: TabTodoEditTarget) -> TodoItem? {
-        switch target {
-        case .tab(let todoId):
-            return tabTodos.first { $0.id == todoId }
-        case .pane(let paneId, let todoId):
-            return runtime?.model.pane(paneId)?.todos.first { $0.id == todoId }
-        }
+        rows.first { $0.editTarget == target }?.item
     }
 
     private func rowIndex(for target: TabTodoEditTarget) -> Int? {
@@ -415,23 +434,69 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         return true
     }
 
-    private func selectNearestSelectableRow(near row: Int) {
+    private func selectResolvedTarget(_ target: TabTodoEditTarget) -> Bool {
+        guard let resolved = resolveTabTodoEditTarget(target, in: projection) else { return false }
+        return selectTarget(resolved)
+    }
+
+    private func selectNearestSelectableRow(near row: Int, focus: Bool = true) {
         if rows.indices.contains(row), rows[row].isSelectable {
             setSelectedRow(row)
-            view.window?.makeFirstResponder(tableView)
+            if focus { view.window?.makeFirstResponder(tableView) }
             return
         }
         if let next = nextSelectableRow(in: rows, from: row, delta: 1, canSelect: { $0.isSelectable }) {
             setSelectedRow(next)
-            view.window?.makeFirstResponder(tableView)
+            if focus { view.window?.makeFirstResponder(tableView) }
             return
         }
         if let previous = nextSelectableRow(in: rows, from: min(row, rows.count), delta: -1, canSelect: { $0.isSelectable }) {
             setSelectedRow(previous)
-            view.window?.makeFirstResponder(tableView)
+            if focus { view.window?.makeFirstResponder(tableView) }
             return
         }
-        focusComposeInput()
+        if focus {
+            focusComposeInput()
+        } else {
+            tableView.deselectAll(nil)
+        }
+    }
+
+    private func restoreFirstResponder(
+        composeWasFirstResponder: Bool,
+        editWasFirstResponder: Bool,
+        tableWasFirstResponder: Bool,
+        saveWasFirstResponder: Bool,
+        cancelWasFirstResponder: Bool
+    ) {
+        guard let window = view.window else { return }
+        if isEditing {
+            if editWasFirstResponder {
+                window.makeFirstResponder(editInput.textView)
+            } else if saveWasFirstResponder {
+                window.makeFirstResponder(saveButton)
+            } else if cancelWasFirstResponder {
+                window.makeFirstResponder(cancelButton)
+            }
+            return
+        }
+        if editWasFirstResponder || saveWasFirstResponder || cancelWasFirstResponder {
+            if tableView.selectedRow >= 0 {
+                window.makeFirstResponder(tableView)
+            } else {
+                focusComposeInput()
+            }
+            return
+        }
+        if composeWasFirstResponder {
+            window.makeFirstResponder(addInput.textView)
+        } else if tableWasFirstResponder {
+            if tableView.selectedRow >= 0 {
+                window.makeFirstResponder(tableView)
+            } else {
+                focusComposeInput()
+            }
+        }
     }
 
     private func focusInitialMode() {
@@ -448,14 +513,14 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         }
         setSelectedRow(row)
         popoverState.selectRow(selectedEditTarget())
-        syncModeVisibility(tabItems: tabTodos)
+        syncModeVisibility()
         view.window?.makeFirstResponder(tableView)
         return true
     }
 
     private func focusComposeInput() {
         addInput.string = popoverState.composeDraft
-        syncModeVisibility(tabItems: tabTodos)
+        syncModeVisibility()
         view.window?.makeFirstResponder(addInput.textView)
         addInput.textView.moveToEndOfDocument(nil)
     }
@@ -465,7 +530,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         popoverState.enterEdit(target: target, itemText: item.text)
         editInput.string = item.text
         editTitleLabel.stringValue = editTitle(for: target)
-        syncModeVisibility(tabItems: tabTodos)
+        syncModeVisibility()
         view.window?.makeFirstResponder(editInput.textView)
         editInput.textView.moveToEndOfDocument(nil)
     }
@@ -475,9 +540,8 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         switch popoverState.saveEdit(text: editInput.string) {
         case .saved(let target, let text):
             saveEdit(target: target, text: text)
-            syncModeVisibility(tabItems: tabTodos)
-            rebuildRows()
-            _ = selectTarget(target)
+            syncModeVisibility()
+            _ = selectResolvedTarget(target)
             view.window?.makeFirstResponder(tableView)
             return true
         case .rejected:
@@ -489,14 +553,18 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
     private func addTodoAndStayInCompose() {
         let text = addInput.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+        let previousTabTodoIds = Set(rows.compactMap { row -> UUID? in
+            if case .tabItem(let item) = row { return item.id }
+            return nil
+        })
         runtime?.send(.addTabTodo(tabId: tabId, text: text))
         popoverState.clearComposeDraft()
         addInput.string = ""
-        rebuildRows()
-        // Pre-select the new item so Tab from compose lands on it.
-        if let newId = tab?.todos.last?.id,
-           let row = rowIndex(for: .tab(todoId: newId)) {
-            setSelectedRow(row)
+        if let target = newlyAddedTabTodoTarget(
+            previousTabTodoIds: previousTabTodoIds,
+            in: projection
+        ) {
+            _ = selectTarget(target)
         }
         view.window?.makeFirstResponder(addInput.textView)
     }
@@ -504,8 +572,8 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
     private func cancelEditAndReturnToList() {
         guard let target = popoverState.editTarget else { return }
         popoverState.cancelEdit()
-        syncModeVisibility(tabItems: tabTodos)
-        if selectTarget(target) {
+        syncModeVisibility()
+        if selectResolvedTarget(target) {
             view.window?.makeFirstResponder(tableView)
         } else {
             focusListFromInput()
@@ -549,14 +617,38 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         case .tab:
             return "Edit tab task"
         case .pane(let paneId, _):
-            let title = runtime?.model.pane(paneId)?.title ?? "pane"
+            let title = paneTitle(for: paneId) ?? "pane"
             return "Edit pane task: \(title)"
         }
     }
 
-    private func syncModeVisibility(tabItems: [TodoItem]) {
+    private func paneTitle(for paneId: PaneId) -> String? {
+        for row in rows {
+            if case .paneSectionHeader(let rowPaneId, let title) = row, rowPaneId == paneId {
+                return title
+            }
+        }
+        return nil
+    }
+
+    private func sectionItemCount(for destination: TodoDestination) -> Int {
+        switch destination {
+        case .tab:
+            return rows.count { row in
+                if case .tabItem = row { return true }
+                return false
+            }
+        case .pane(let paneId):
+            return rows.count { row in
+                if case .paneItem(let rowPaneId, _) = row { return rowPaneId == paneId }
+                return false
+            }
+        }
+    }
+
+    private func syncModeVisibility() {
         let editMode = popoverState.isEditing
-        clearButton.isHidden = editMode || !tabItems.contains(where: \.isDone)
+        clearButton.isHidden = editMode || !projection.tabHasCompleted
         newButton.isHidden = editMode
         editContainer.isHidden = !editMode
         scrollView.isHidden = editMode
@@ -701,11 +793,9 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
     }
 
     func tableView(_ tableView: NSTableView, validateDrop info: NSDraggingInfo, proposedRow row: Int, proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation {
-        guard let runtime = runtime,
-              let operation = tabTodoDropOperation(from: dropOperation),
+        guard let operation = tabTodoDropOperation(from: dropOperation),
               resolveTabTodoDropTarget(
                 rows: rows,
-                model: runtime.model,
                 tabId: tabId,
                 proposedRow: row,
                 dropOperation: operation
@@ -722,13 +812,19 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
               let operation = tabTodoDropOperation(from: dropOperation),
               let target = resolveTabTodoDropTarget(
                 rows: rows,
-                model: runtime.model,
                 tabId: tabId,
                 proposedRow: row,
                 dropOperation: operation
               ) else { return false }
 
         let source = todoSource(from: payload.source, tabId: tabId)
+        let targetToSelect: TabTodoEditTarget
+        switch target.destination {
+        case .tab:
+            targetToSelect = .tab(todoId: payload.todoId)
+        case .pane(let paneId):
+            targetToSelect = .pane(paneId: paneId, todoId: payload.todoId)
+        }
         if sameTodoBucket(source: source, destination: target.destination) {
             switch source {
             case .tab(let sourceTabId):
@@ -744,7 +840,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
                 atIndex: target.atIndex
             ))
         }
-        rebuildRows()
+        _ = selectTarget(targetToSelect)
         return true
     }
 
@@ -753,36 +849,41 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
     @objc private func tabCheckboxToggled(_ sender: NSButton) {
         let row = tableView.row(for: sender)
         guard row >= 0, row < rows.count, case .tabItem(let item) = rows[row] else { return }
+        let selectedTarget = selectedEditTarget()
         runtime?.send(.toggleTabTodoDone(tabId: tabId, todoId: item.id))
-        rebuildRows()
+        if let selectedTarget { _ = selectResolvedTarget(selectedTarget) }
     }
 
     @objc private func tabDeleteTask(_ sender: NSButton) {
         let row = tableView.row(for: sender)
         guard row >= 0, row < rows.count, case .tabItem(let item) = rows[row] else { return }
+        let selectedTarget = selectedEditTarget()
         runtime?.send(.deleteTabTodo(tabId: tabId, todoId: item.id))
-        rebuildRows()
+        if let selectedTarget { _ = selectResolvedTarget(selectedTarget) }
     }
 
     @objc private func paneCheckboxToggled(_ sender: NSButton) {
         let row = tableView.row(for: sender)
         guard row >= 0, row < rows.count,
               case .paneItem(let paneId, let item) = rows[row] else { return }
+        let selectedTarget = selectedEditTarget()
         runtime?.send(.setTodoDone(paneId: paneId, todoId: item.id, isDone: !item.isDone))
-        rebuildRows()
+        if let selectedTarget { _ = selectResolvedTarget(selectedTarget) }
     }
 
     @objc private func paneDeleteTask(_ sender: NSButton) {
         let row = tableView.row(for: sender)
         guard row >= 0, row < rows.count,
               case .paneItem(let paneId, let item) = rows[row] else { return }
+        let selectedTarget = selectedEditTarget()
         runtime?.send(.deleteTodo(paneId: paneId, todoId: item.id))
-        rebuildRows()
+        if let selectedTarget { _ = selectResolvedTarget(selectedTarget) }
     }
 
     @objc private func clearCompleted() {
+        let selectedTarget = selectedEditTarget()
         runtime?.send(.clearCompletedTabTodos(tabId: tabId))
-        rebuildRows()
+        if let selectedTarget { _ = selectResolvedTarget(selectedTarget) }
     }
 
     @objc private func tableRowDoubleClicked(_ sender: Any?) {
@@ -847,8 +948,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         case .pane(let paneId, let todoId):
             runtime?.send(.toggleTodoDone(paneId: paneId, todoId: todoId))
         }
-        rebuildRows()
-        _ = selectTarget(target)
+        _ = selectResolvedTarget(target)
         view.window?.makeFirstResponder(tableView)
     }
 
@@ -861,7 +961,6 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         case .pane(let paneId, let todoId):
             runtime?.send(.deleteTodo(paneId: paneId, todoId: todoId))
         }
-        rebuildRows()
         selectNearestSelectableRow(near: row)
     }
 
@@ -869,7 +968,6 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         let row = tableView.selectedRow
         guard rows.indices.contains(row),
               let target = selectedEditTarget(),
-              let tab = tab,
               let currentIndex = sectionLocalIndex(
                   rows: rows,
                   at: row,
@@ -883,17 +981,12 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         }
         guard let step = resolveTabTodoReorderStep(
             current: target,
-            paneOrder: allPaneIds(tab.rootNode),
+            paneOrder: projection.paneOrder,
             tabId: tabId,
             currentIndex: currentIndex,
             currentSectionCount: currentSectionCount,
             destinationSectionCount: { destination in
-                switch destination {
-                case .tab:
-                    return tab.todos.count
-                case .pane(let paneId):
-                    return runtime?.model.pane(paneId)?.todos.count ?? 0
-                }
+                self.sectionItemCount(for: destination)
             },
             delta: delta
         ) else { return }
@@ -925,7 +1018,6 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
                 targetToSelect = .pane(paneId: paneId, todoId: item.id)
             }
         }
-        rebuildRows()
         _ = selectTarget(targetToSelect)
         view.window?.makeFirstResponder(tableView)
     }
@@ -943,10 +1035,9 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         }
         guard let current = selectedEditTarget(),
               let item = item(for: current),
-              let tab = tab,
               let destination = resolveTabTodoBucketStep(
                 current: current,
-                paneOrder: allPaneIds(tab.rootNode),
+                paneOrder: projection.paneOrder,
                 tabId: tabId,
                 delta: delta
               ) else { return true }
@@ -960,7 +1051,6 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         }
 
         runtime?.send(.moveTodo(from: source, todoId: item.id, to: destination, atIndex: 0))
-        rebuildRows()
         let newTarget: TabTodoEditTarget
         switch destination {
         case .tab:
@@ -1165,6 +1255,16 @@ private func sameTodoBucket(source: TodoSource, destination: TodoDestination) ->
         return sourceId == destinationId
     case (.tab, .pane), (.pane, .tab):
         return false
+    }
+}
+
+private func tabTodoTargetsReferToSameTodo(_ lhs: TabTodoEditTarget, _ rhs: TabTodoEditTarget) -> Bool {
+    switch (lhs, rhs) {
+    case (.tab(let left), .tab(let right)),
+         (.tab(let left), .pane(_, let right)),
+         (.pane(_, let left), .tab(let right)),
+         (.pane(_, let left), .pane(_, let right)):
+        return left == right
     }
 }
 

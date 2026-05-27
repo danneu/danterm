@@ -18,6 +18,44 @@ func todoPopoverStateTests() {
         target: tabTarget,
         otherTarget: paneTarget
     )
+
+    test("retargeting edit mode preserves compose draft") {
+        var state = TodoPopoverState<Int>(mode: .edit(1), composeDraft: "abc")
+        state.reconcileEditTarget { target in target == 1 ? 2 : nil }
+        try expectEqual(state.mode, .edit(2))
+        try expectEqual(state.composeDraft, "abc")
+    }
+
+    test("missing edit target exits edit mode and preserves compose draft") {
+        var state = TodoPopoverState<Int>(mode: .edit(1), composeDraft: "abc")
+        state.reconcileEditTarget { _ in nil }
+        try expectEqual(state.mode, .list)
+        try expectEqual(state.composeDraft, "abc")
+    }
+
+    test("tab todo retarget keeps edit mode across cross-bucket movement") {
+        let todoId = UUID()
+        let paneId = PaneId()
+        var state = TodoPopoverState<TabTodoEditTarget>(
+            mode: .edit(.tab(todoId: todoId)),
+            composeDraft: "abc"
+        )
+
+        state.reconcileEditTarget { target in
+            target == .tab(todoId: todoId) ? .pane(paneId: paneId, todoId: todoId) : nil
+        }
+
+        try expectEqual(state.mode, .edit(.pane(paneId: paneId, todoId: todoId)))
+        try expectEqual(state.composeDraft, "abc")
+    }
+
+    test("rejected save preserves compose draft and edit mode") {
+        var state = TodoPopoverState<Int>(mode: .edit(1), composeDraft: "abc")
+        let result = state.saveEdit(text: "   ")
+        try expectEqual(result, .rejected)
+        try expectEqual(state.mode, .edit(1))
+        try expectEqual(state.composeDraft, "abc")
+    }
 }
 
 private func runTodoPopoverStateCases<Target: Equatable>(

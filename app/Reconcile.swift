@@ -54,6 +54,10 @@ struct ReconcilerCaches {
     // Single-optional alerts-popover cache. nil means no open popover projection
     // has been applied; non-nil is the last value pushed while the popover was shown.
     var alertsPopover: AlertsPopoverProjection? = nil
+    // Single-optional TODO popover caches. nil means no shown matching popover;
+    // non-nil is the last projection pushed to the open pane/tab TODO popover.
+    var paneTodoPopover: PaneTodoPopoverProjection? = nil
+    var tabTodoPopover: TabTodoPopoverProjection? = nil
     // Single-optional theme-browser content cache. nil == no browser open; non-nil
     // == last focused-pane theme content applied.
     var themeBrowser: ThemeBrowserProjection? = nil
@@ -92,6 +96,8 @@ extension AppRuntime {
         reconcileQuitConfirmation()
         reconcilePreferencesPanel()
         reconcileAlertsPopover()
+        reconcilePaneTodoPopover()
+        reconcileTabTodoPopover()
         reconcileThemeBrowser()
         syncSurfaceVisibility()  // existing occlusion pass; stays last
     }
@@ -371,6 +377,44 @@ extension AppRuntime {
             vc.apply(proj)
         }
         caches.alertsPopover = new
+    }
+
+    /// Push the current pane TODO projection into the shown pane popover. The
+    /// popover itself is AppKit-owned, so a closed or mismatched scope projects
+    /// as nil and clears the cache.
+    func reconcilePaneTodoPopover() {
+        let new: PaneTodoPopoverProjection?
+        if todoPopover?.isShown == true,
+           case .pane(let paneId) = model.todoPopover {
+            new = desiredPaneTodoPopover(paneId: paneId, in: model)
+        } else {
+            new = nil
+        }
+        guard caches.paneTodoPopover != new else { return }
+        if let proj = new,
+           let vc = todoPopover?.contentViewController as? TodoPopoverViewController {
+            vc.apply(proj)
+        }
+        caches.paneTodoPopover = new
+    }
+
+    /// Push the current tab TODO projection into the shown tab popover. The
+    /// popover itself is AppKit-owned, so a closed or mismatched scope projects
+    /// as nil and clears the cache.
+    func reconcileTabTodoPopover() {
+        let new: TabTodoPopoverProjection?
+        if tabTodoPopover?.isShown == true,
+           case .tab(let tabId) = model.todoPopover {
+            new = desiredTabTodoPopover(tabId: tabId, in: model)
+        } else {
+            new = nil
+        }
+        guard caches.tabTodoPopover != new else { return }
+        if let proj = new,
+           let vc = tabTodoPopover?.contentViewController as? TabTodoPopoverViewController {
+            vc.apply(proj)
+        }
+        caches.tabTodoPopover = new
     }
 
     /// Push the focused pane's user theme into the open theme browser. The browser's

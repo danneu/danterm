@@ -57,6 +57,17 @@ struct TodoPopoverState<Target: Equatable>: Equatable {
         mode = .list
     }
 
+    /// Reconcile edit mode against a rebuilt target set, allowing callers to
+    /// retarget the edit before falling back to list mode.
+    mutating func reconcileEditTarget(resolve: (Target) -> Target?) {
+        guard let target = editTarget else { return }
+        if let resolved = resolve(target) {
+            mode = .edit(resolved)
+        } else {
+            mode = .list
+        }
+    }
+
     /// Mirror user edits in the compose field.
     mutating func setComposeDraft(_ text: String) {
         composeDraft = text

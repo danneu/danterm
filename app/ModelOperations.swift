@@ -616,6 +616,40 @@ func tabTodoRollup(_ tabId: TabId, in model: AppModel) -> (total: Int, uncomplet
   return (total, uncompleted)
 }
 
+// MARK: - TODO Popover Projections
+
+struct PaneTodoPopoverProjection: Equatable {
+  let paneId: PaneId
+  let rows: [TodoItem]
+  let hasCompleted: Bool
+}
+
+func desiredPaneTodoPopover(paneId: PaneId, in model: AppModel) -> PaneTodoPopoverProjection? {
+  guard let pane = model.pane(paneId) else { return nil }
+  return PaneTodoPopoverProjection(
+    paneId: paneId,
+    rows: pane.todos,
+    hasCompleted: pane.todos.contains(where: \.isDone)
+  )
+}
+
+struct TabTodoPopoverProjection: Equatable {
+  let tabId: TabId
+  let rows: [TabTodoRow]
+  let paneOrder: [PaneId]
+  let tabHasCompleted: Bool
+}
+
+func desiredTabTodoPopover(tabId: TabId, in model: AppModel) -> TabTodoPopoverProjection? {
+  guard let tab = tabById(tabId, in: model) else { return nil }
+  return TabTodoPopoverProjection(
+    tabId: tabId,
+    rows: buildTabTodoRows(model: model, tabId: tabId),
+    paneOrder: allPaneIds(tab.rootNode),
+    tabHasCompleted: tab.todos.contains(where: \.isDone)
+  )
+}
+
 // MARK: - Tab Todo Popover
 
 enum TabTodoRow: Equatable {
@@ -681,6 +715,15 @@ extension TabTodoRow {
     }
   }
 
+  var item: TodoItem? {
+    switch self {
+    case .tabItem(let item), .paneItem(_, let item):
+      return item
+    case .tabSectionHeader, .tabEmptyPlaceholder, .paneSectionHeader, .paneEmptyPlaceholder:
+      return nil
+    }
+  }
+
   var sectionIdentifier: AnyHashable? {
     switch self {
     case .tabSectionHeader, .tabItem, .tabEmptyPlaceholder:
@@ -688,6 +731,37 @@ extension TabTodoRow {
     case .paneSectionHeader(let paneId, _), .paneItem(let paneId, _), .paneEmptyPlaceholder(let paneId):
       return AnyHashable(paneId)
     }
+  }
+}
+
+func resolveTabTodoEditTarget(
+  _ target: TabTodoEditTarget,
+  in projection: TabTodoPopoverProjection
+) -> TabTodoEditTarget? {
+  if projection.rows.contains(where: { $0.editTarget == target }) {
+    return target
+  }
+
+  let todoId = tabTodoTargetId(target)
+  return projection.rows.compactMap(\.editTarget).first { tabTodoTargetId($0) == todoId }
+}
+
+func newlyAddedTabTodoTarget(
+  previousTabTodoIds: Set<UUID>,
+  in projection: TabTodoPopoverProjection
+) -> TabTodoEditTarget? {
+  for row in projection.rows {
+    if case .tabItem(let item) = row, !previousTabTodoIds.contains(item.id) {
+      return .tab(todoId: item.id)
+    }
+  }
+  return nil
+}
+
+private func tabTodoTargetId(_ target: TabTodoEditTarget) -> UUID {
+  switch target {
+  case .tab(let todoId), .pane(_, let todoId):
+    return todoId
   }
 }
 
@@ -726,7 +800,6 @@ func buildTabTodoRows(model: AppModel, tabId: TabId) -> [TabTodoRow] {
 
 func resolveTabTodoDropTarget(
   rows: [TabTodoRow],
-  model: AppModel,
   tabId: TabId,
   proposedRow: Int,
   dropOperation: TabTodoDropOperation
@@ -736,15 +809,12 @@ func resolveTabTodoDropTarget(
     guard rows.indices.contains(proposedRow) else { return nil }
     switch rows[proposedRow] {
     case .tabSectionHeader:
-      guard let tab = tabById(tabId, in: model) else { return nil }
-      return (.tab(tabId), tab.todos.count)
+      return (.tab(tabId), tabTodoCount(for: .tab(tabId), rows: rows))
     case .paneSectionHeader(let paneId, _):
-      guard let pane = model.pane(paneId) else { return nil }
-      return (.pane(paneId), pane.todos.count)
+      return (.pane(paneId), tabTodoCount(for: .pane(paneId), rows: rows))
     case .tabEmptyPlaceholder:
       return (.tab(tabId), 0)
     case .paneEmptyPlaceholder(let paneId):
-      guard model.pane(paneId) != nil else { return nil }
       return (.pane(paneId), 0)
     case .tabItem, .paneItem:
       return nil
@@ -754,9 +824,8 @@ func resolveTabTodoDropTarget(
     guard proposedRow >= 0, proposedRow <= rows.count else { return nil }
     if proposedRow == rows.count {
       guard let last = rows.last,
-            let destination = tabTodoDestination(for: last, tabId: tabId),
-            let count = tabTodoCount(for: destination, in: model) else { return nil }
-      return (destination, count)
+            let destination = tabTodoDestination(for: last, tabId: tabId) else { return nil }
+      return (destination, tabTodoCount(for: destination, rows: rows))
     }
 
     switch rows[proposedRow] {
@@ -764,9 +833,8 @@ func resolveTabTodoDropTarget(
       return nil
     case .paneSectionHeader:
       guard proposedRow > 0,
-            let destination = tabTodoDestination(for: rows[proposedRow - 1], tabId: tabId),
-            let count = tabTodoCount(for: destination, in: model) else { return nil }
-      return (destination, count)
+            let destination = tabTodoDestination(for: rows[proposedRow - 1], tabId: tabId) else { return nil }
+      return (destination, tabTodoCount(for: destination, rows: rows))
     case .tabItem:
       let atIndex = rows[..<proposedRow].count { row in
         if case .tabItem = row { return true }
@@ -776,17 +844,38 @@ func resolveTabTodoDropTarget(
     case .tabEmptyPlaceholder:
       return (.tab(tabId), 0)
     case .paneItem(let paneId, _):
-      guard model.pane(paneId) != nil else { return nil }
       let atIndex = rows[..<proposedRow].count { row in
         if case .paneItem(let rowPaneId, _) = row { return rowPaneId == paneId }
         return false
       }
       return (.pane(paneId), atIndex)
     case .paneEmptyPlaceholder(let paneId):
-      guard model.pane(paneId) != nil else { return nil }
       return (.pane(paneId), 0)
     }
   }
+}
+
+func resolveTabTodoDropTarget(
+  rows: [TabTodoRow],
+  model: AppModel,
+  tabId: TabId,
+  proposedRow: Int,
+  dropOperation: TabTodoDropOperation
+) -> (destination: TodoDestination, atIndex: Int)? {
+  guard tabById(tabId, in: model) != nil,
+        let target = resolveTabTodoDropTarget(
+          rows: rows,
+          tabId: tabId,
+          proposedRow: proposedRow,
+          dropOperation: dropOperation
+        ) else { return nil }
+  switch target.destination {
+  case .tab(let destinationTabId):
+    guard tabById(destinationTabId, in: model) != nil else { return nil }
+  case .pane(let paneId):
+    guard model.pane(paneId) != nil else { return nil }
+  }
+  return target
 }
 
 func resolveTabTodoBucketStep(
@@ -866,6 +955,21 @@ private func tabTodoCount(for destination: TodoDestination, in model: AppModel) 
     return tabById(tabId, in: model)?.todos.count
   case .pane(let paneId):
     return model.pane(paneId)?.todos.count
+  }
+}
+
+private func tabTodoCount(for destination: TodoDestination, rows: [TabTodoRow]) -> Int {
+  switch destination {
+  case .tab:
+    return rows.count { row in
+      if case .tabItem = row { return true }
+      return false
+    }
+  case .pane(let paneId):
+    return rows.count { row in
+      if case .paneItem(let rowPaneId, _) = row { return rowPaneId == paneId }
+      return false
+    }
   }
 }
 
