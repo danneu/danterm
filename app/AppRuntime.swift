@@ -1160,6 +1160,9 @@ class AppRuntime {
             }
         }
         surfaceVisibility.removeAll()
+        // The switcher panel persists across sessions; hide it before resetting
+        // caches.switcher so nil continues to mean the panel is already hidden.
+        switcherPanel?.orderOut(nil)
         // Reset reconciler caches by re-init so the first post-restore reconcile is
         // a clean build, not a stale diff (restore/import can reuse pane IDs).
         caches = ReconcilerCaches()
