@@ -64,8 +64,6 @@ func reconcileTests() {
         // A representative sample of other commands are pre-reconcile.
         try expect(!Command.createSurface(paneId: pane, cwd: nil, command: nil).isPostReconcile,
             "createSurface is pre-reconcile")
-        try expect(!Command.applyPaneTheme(paneId: pane).isPostReconcile,
-            "applyPaneTheme is pre-reconcile")
         try expect(!Command.sendEndSearch(paneId: pane).isPostReconcile,
             "sendEndSearch is pre-reconcile")
         try expect(!Command.scheduleCheckpoint.isPostReconcile,

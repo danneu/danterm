@@ -574,14 +574,11 @@ func paneTests() {
         model.updatePane(paneId) { $0.theme = "Tokyo Night" }
         let beforePaneIds = Set(model.allPaneIds)
 
-        let commands = update(&model, .splitPane(paneId: paneId, direction: .horizontal, background: true))
+        update(&model, .splitPane(paneId: paneId, direction: .horizontal, background: true))
         let newPaneId = Set(model.allPaneIds).subtracting(beforePaneIds).first!
 
         try expectEqual(model.pane(newPaneId)?.theme, "Tokyo Night", "background split should inherit target theme")
-        try expect(hasEffect(commands) {
-            if case .applyPaneTheme(let paneId) = $0, paneId == newPaneId { return true }
-            return false
-        }, "background split should apply inherited theme")
+        try expectEqual(desiredPaneConfig(in: model)[newPaneId]?.theme, "Tokyo Night")
     }
 
     test("testSplitPaneForegroundStillMovesFocus") {

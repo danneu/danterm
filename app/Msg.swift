@@ -111,6 +111,7 @@ enum Msg {
 
     // Config (external reload)
     case configLoaded(DanTermConfig)
+    case ghosttyConfigReloaded
 
     // Preferences panel
     case preferencesOpened(ghostty: GhosttyPrefs)

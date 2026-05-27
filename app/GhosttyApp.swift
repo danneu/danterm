@@ -346,18 +346,15 @@ class GhosttyApp {
             switch target.tag {
             case GHOSTTY_TARGET_APP:
                 reloadConfig(soft: soft)
-                // Re-apply per-pane themes so global reload doesn't reset overrides
+                // Bump the model generation so themed panes re-layer over the new base config.
                 DispatchQueue.main.async { [weak self] in
-                    self?.runtime?.reapplyAllPaneThemes()
+                    self?.runtime?.send(.ghosttyConfigReloaded)
                 }
             case GHOSTTY_TARGET_SURFACE:
                 if let surface = Self.targetSurface(target) {
                     reloadConfig(surface: surface, soft: soft)
-                    if let bridge = Self.surfaceBridge(from: surface),
-                       let paneId = bridge.paneId {
-                        DispatchQueue.main.async { [weak self] in
-                            self?.runtime?.applyPaneConfig(paneId: paneId)
-                        }
+                    DispatchQueue.main.async { [weak self] in
+                        self?.runtime?.send(.ghosttyConfigReloaded)
                     }
                 }
             default:

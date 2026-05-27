@@ -191,9 +191,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
         ]
         // Persist new split tree so the pane layout survives a crash.
         commands.append(.scheduleCheckpoint)
-        if theme != nil {
-            commands.append(.applyPaneTheme(paneId: newPaneId))
-        }
         return commands
 
     case .closePane(let paneId):
@@ -457,7 +454,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
 
     case .setPaneTheme(let paneId, let themeName):
         model.updatePane(paneId) { $0.theme = themeName }
-        return [.applyPaneTheme(paneId: paneId), .scheduleCheckpoint]
+        return [.scheduleCheckpoint]
 
     case .renameTab(let id, let name):
         let trimmed = name?.trimmingCharacters(in: .whitespaces)
@@ -515,7 +512,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
         }
         guard pane.remoteThemeOverride != nil else { return [] }
         model.updatePane(paneId) { $0.remoteThemeOverride = nil }
-        return [.applyPaneTheme(paneId: paneId)]
+        return []
 
     // MARK: - Remote Detection
 
@@ -527,7 +524,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
             p.remoteSession = nil
             p.remoteThemeOverride = remoteTheme
         }
-        return [.applyPaneTheme(paneId: paneId)]
+        return []
 
     case .remoteSessionReported(let paneId, let session):
         guard let existing = model.pane(paneId) else { return [] }
@@ -543,9 +540,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
         }
 
         guard !wasRemote || oldSession != session else { return [] }
-        if !wasRemote {
-            return [.applyPaneTheme(paneId: paneId)]
-        }
         return []
 
     // MARK: - Config (external reload)
@@ -560,16 +554,18 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
             model.preferencesDraft!.alertClearMode = newConfig.alertClearMode
             model.preferencesDraft!.remoteTheme = newConfig.remoteTheme
         }
-        var commands: [Command] = []
         if newConfig.remoteTheme != oldConfig.remoteTheme {
-            // Two passes: collect remote pane ids, then updatePane + emit per pane
+            // Two passes: collect remote pane ids, then updatePane
             // (can't mutate via updatePane while iterating model.allPanes).
             for paneId in model.allPanes.filter(\.isRemote).map(\.id) {
                 model.updatePane(paneId) { $0.remoteThemeOverride = newConfig.remoteTheme }
-                commands.append(.applyPaneTheme(paneId: paneId))
             }
         }
-        return commands
+        return []
+
+    case .ghosttyConfigReloaded:
+        model.ghosttyConfigGeneration += 1
+        return []
 
     // MARK: - Preferences Panel
 
@@ -660,7 +656,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
         if resolvedTheme != oldConfig.remoteTheme {
             for paneId in model.allPanes.filter(\.isRemote).map(\.id) {
                 model.updatePane(paneId) { $0.remoteThemeOverride = resolvedTheme }
-                commands.append(.applyPaneTheme(paneId: paneId))
             }
         }
         // Save changed Ghostty keys and trigger reload if any changed.

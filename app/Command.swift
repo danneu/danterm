@@ -1,7 +1,7 @@
 // Command: the side effects `update()` returns for `AppRuntime.perform` to execute.
 //
 // `update()` is pure and returns ONLY commands -- real imperatives / external side
-// effects (PTY create/text/key, focus moves, per-pane theme apply, notifications,
+// effects (PTY create/text/key, focus moves, notifications,
 // IPC reply/error/read, checkpoint, config persistence, modal confirmations, TODO
 // popovers, export). Everything the view *shows* is a projection derived by
 // `reconcile()` after every `send()`, so no view-sync/projection case lives here.
@@ -60,9 +60,6 @@ enum Command {
     case dismissAlertsPopover
     // The dock + toolbar-bell unread badges are derived by reconcileWindowChrome (Stage 6).
 
-    // Theme
-    case applyPaneTheme(paneId: PaneId)
-
     // Config persistence
     case saveDanTermConfigKey(key: String, value: String)
     case removeDanTermConfigKey(key: String)
@@ -109,7 +106,7 @@ extension Command {
              .readPaneText, .sendNotification, .showTerminateConfirmation,
              .showCloseTabConfirmation, .showCloseTabsConfirmation, .terminate, .activateApp,
              .setAppFocus, .dismissAlertsPopover,
-             .applyPaneTheme, .saveDanTermConfigKey, .removeDanTermConfigKey,
+             .saveDanTermConfigKey, .removeDanTermConfigKey,
              .reloadGhosttyConfig, .scheduleCheckpoint, .sendStartSearch,
              .sendSearchNeedle, .sendSearchNavigate, .sendEndSearch, .showTodoPopover,
              .dismissTodoPopover, .showTodoPopoverForTab, .dismissTodoPopoverForTab,

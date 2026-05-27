@@ -193,6 +193,7 @@ struct AppModel: Equatable {
     var mruCycle: MruCycleState? = nil  // ephemeral — non-nil while cmd-shift held
     var jumpMode: JumpModeState? = nil  // ephemeral — non-nil while tab jump mode is active
     var pendingConfirmation: PendingConfirmation? = nil  // ephemeral -- non-nil while a confirmation sheet is active
+    var ghosttyConfigGeneration: Int = 0  // ephemeral -- bumps when Ghostty base config reloads
 }
 
 // MARK: - Pane Access (tree is the single source of truth)

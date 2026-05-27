@@ -330,10 +330,13 @@ func preferencesTests() {
         _ = update(&model, .prefSetRemoteTheme("Grape"))
         let commands = update(&model, .prefSave)
         try expectEqual(model.pane(paneId)?.remoteThemeOverride, "Grape")
+        try expectEqual(desiredPaneConfig(in: model)[paneId]?.theme, "Grape")
         try expect(hasEffect(commands) {
-            if case .applyPaneTheme(let pid) = $0, pid == paneId { return true }
+            if case .saveDanTermConfigKey(let key, let value) = $0 {
+                return key == "remote-theme" && value == "Grape"
+            }
             return false
-        }, "should emit applyPaneTheme for remote pane")
+        }, "should save remote theme")
     }
 
     test("prefSave with theme change emits saveDanTermConfigKey and reloadGhosttyConfig") {

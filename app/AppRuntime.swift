@@ -557,9 +557,6 @@ class AppRuntime {
             quitConfirmationPanel?.center(on: window)
             quitConfirmationPanel?.makeKeyAndOrderFront(nil)
 
-        case .applyPaneTheme(let paneId):
-            applyPaneConfig(paneId: paneId)
-
         case .saveDanTermConfigKey(let key, let value):
             let path = DanTermConfigParser.configFilePath()
             let url = URL(fileURLWithPath: path)
@@ -1033,36 +1030,11 @@ class AppRuntime {
         dragCoordinator = nil
     }
 
-    // MARK: - Per-Pane Theme
-
-    /// Apply the pane's effective theme to its surface.
-    /// Uses remoteThemeOverride (if set) over the user's theme.
-    /// If effective theme is nil, reloads the base config (clearing any override).
-    func applyPaneConfig(paneId: PaneId) {
-        guard let view = surfaces[paneId], let surface = view.surface,
-              let pane = model.pane(paneId) else { return }
-        if let theme = effectiveTheme(for: pane) {
-            guard let config = ghosttyApp.loadConfigWithTheme(theme) else { return }
-            ghostty_surface_update_config(surface, config)
-            ghostty_config_free(config)
-        } else {
-            ghosttyApp.reloadConfig(surface: surface, soft: false)
-        }
-    }
-
-    /// Re-apply config for all panes that have a non-nil effective theme.
-    /// Called after app-wide config reload.
-    func reapplyAllPaneThemes() {
-        for pane in model.allPanes where effectiveTheme(for: pane) != nil {
-            applyPaneConfig(paneId: pane.id)
-        }
-    }
-
-    /// Full config reload: Ghostty files → pane theme re-application → DanTerm config.
+    /// Full config reload: Ghostty files, DanTerm config, then themed pane re-layering.
     func reloadAllConfig() {
         ghosttyApp.reloadConfig()
-        reapplyAllPaneThemes()
         reloadDanTermConfig()
+        send(.ghosttyConfigReloaded)
     }
 
     /// Re-parse DanTerm-specific config keys and dispatch through the Elm loop.
@@ -1254,8 +1226,6 @@ class AppRuntime {
         // scratch. reconcileSurfaceExistence is a no-op (staged surfaces match allPaneIds).
         reconcile()
 
-        // Apply per-pane themes after surfaces are live
-        reapplyAllPaneThemes()
     }
 
     /// Dispose of a staged restore after a failed build so no temp state leaks into the live session.

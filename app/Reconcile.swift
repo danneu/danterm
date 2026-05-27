@@ -12,6 +12,7 @@
 //      panel, a direct compare against a single-optional cache field)
 //   4. delete the matching Command case + its perform arm, in the same stage
 import Cocoa
+import GhosttyKit
 
 /// Per-pass diff caches, bundled so teardown resets them all by re-init (a newly
 /// added field resets for free). Each cache holds the last value its pass applied,
@@ -22,6 +23,9 @@ struct ReconcilerCaches {
     // focusBorders rides the persisted TerminalView in `surfaces`, which survives
     // container rebuilds, so this cache needs no cross-pass invalidation.
     var focusBorders: [PaneId: BorderState] = [:]
+    // paneConfig also rides the persisted TerminalView in `surfaces`, so the
+    // cache needs no cross-pass invalidation.
+    var paneConfig: [PaneId: PaneConfigKey] = [:]
     // paneToolbar / searchOverlay are the *host-recreated* caches: their host is the
     // PaneWrapperView, which a container rebuild destroys (toolbar + overlay are subviews
     // of the wrapper). reconcileContainers keeps them coherent by clearing the affected
@@ -57,12 +61,14 @@ struct ReconcilerCaches {
 extension AppRuntime {
     /// Reconcile derived AppKit/surface state from the model. Runs after the
     /// pre-reconcile command phase in send() and at the end of a restore commit.
-    /// Ordered existence -> containers -> content/chrome -> occlusion: surface teardown
-    /// first (so a removed pane's surface is gone before its container is rebuilt),
-    /// containers second (they invalidate the chrome caches the chrome pass then reads),
-    /// occlusion last (it reads `surfaces`).
+    /// Ordered existence -> pane config -> containers -> content/chrome -> occlusion:
+    /// surface teardown first (so a removed pane's surface is gone before config
+    /// or container work), pane config once surviving surfaces are known, containers
+    /// before chrome (they invalidate the chrome caches the chrome pass then reads),
+    /// and occlusion last (it reads `surfaces`).
     func reconcile() {
         reconcileSurfaceExistence()         // destroy surfaces for panes gone from model.allPaneIds
+        reconcilePaneConfig()
         let mountFocusTab = reconcileContainers()  // eager: selected visible, rest mounted+hidden
         reconcileFocusBorders()
         reconcilePaneChrome()
@@ -89,7 +95,7 @@ extension AppRuntime {
         }
     }
 
-    /// SECOND pass: reconcile the per-tab SplitContainerViews (eager -- every tab is
+    /// Container pass: reconcile the per-tab SplitContainerViews (eager -- every tab is
     /// mounted, the selected one visible, the rest hidden). Returns the tab whose
     /// container was just built/rebuilt or newly shown -- the sole container that gets
     /// mount-time focus, applied by reconcile() *after* reconcilePaneChrome rebuilds the
@@ -159,6 +165,21 @@ extension AppRuntime {
     func reconcileFocusBorders() {
         applyDiff(desiredFocusBorders(in: model), &caches.focusBorders, apply: { paneId, state in
             surfaces[paneId]?.setFocusBorder(state.focused, hasBell: state.bell)
+        })
+    }
+
+    /// Push each themed pane's effective Ghostty config to its TerminalView, diffed
+    /// against the paneConfig cache. A key disappearing means the pane still exists
+    /// but no longer has a theme override, so reload the base config for that surface.
+    func reconcilePaneConfig() {
+        applyDiff(desiredPaneConfig(in: model), &caches.paneConfig, apply: { paneId, key in
+            guard let surface = surfaces[paneId]?.surface,
+                  let config = ghosttyApp.loadConfigWithTheme(key.theme) else { return }
+            ghostty_surface_update_config(surface, config)
+            ghostty_config_free(config)
+        }, remove: { paneId in
+            guard let surface = surfaces[paneId]?.surface else { return }
+            ghosttyApp.reloadConfig(surface: surface, soft: false)
         })
     }
 

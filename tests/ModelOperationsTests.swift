@@ -1818,6 +1818,74 @@ func modelOperationsTests() {
             "ended search drops the pane's key (disappear-but-host-survives)")
     }
 
+    // MARK: - desiredPaneConfig (pane-config projection)
+
+    test("desiredPaneConfig: keyed only for themed panes; drops the key on clear") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+
+        try expect(desiredPaneConfig(in: model)[paneId] == nil,
+            "nil theme -> no config key")
+
+        update(&model, .setPaneTheme(paneId: paneId, themeName: "Dracula"))
+        try expectEqual(
+            desiredPaneConfig(in: model)[paneId],
+            PaneConfigKey(theme: "Dracula", generation: 0),
+            "set theme keys the pane")
+
+        update(&model, .setPaneTheme(paneId: paneId, themeName: nil))
+        try expect(desiredPaneConfig(in: model)[paneId] == nil,
+            "cleared theme drops the pane's key")
+    }
+
+    test("desiredPaneConfig: remote override takes priority over user theme") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        model.updatePane(paneId) { pane in
+            pane.theme = "Dracula"
+            pane.remoteThemeOverride = "Purplepeter"
+        }
+
+        try expectEqual(
+            desiredPaneConfig(in: model)[paneId],
+            PaneConfigKey(theme: "Purplepeter", generation: 0),
+            "effective theme prefers remote override")
+    }
+
+    test("desiredPaneConfig: ghosttyConfigReloaded changes every themed pane generation") {
+        var model = makeModel()
+        createTab(&model)
+        let firstPaneId = selectedTab(in: model)!.focusedPaneId
+        update(&model, .setPaneTheme(paneId: firstPaneId, themeName: "Dracula"))
+        update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
+        let themedPaneIds = Set(desiredPaneConfig(in: model).keys)
+        createTab(&model)
+        let unthemedPaneId = selectedTab(in: model)!.focusedPaneId
+
+        let before = desiredPaneConfig(in: model)
+        try expectEqual(Set(before.keys), themedPaneIds)
+        try expect(before[unthemedPaneId] == nil, "unthemed pane is absent before reload")
+
+        update(&model, .ghosttyConfigReloaded)
+        let after = desiredPaneConfig(in: model)
+        try expectEqual(Set(after.keys), themedPaneIds)
+        try expect(after[unthemedPaneId] == nil, "unthemed pane stays absent after reload")
+        for paneId in themedPaneIds {
+            try expectEqual(after[paneId]?.generation, (before[paneId]?.generation ?? -1) + 1)
+            try expectEqual(after[paneId]?.theme, before[paneId]?.theme)
+        }
+    }
+
+    test("ghosttyConfigReloaded increments generation and returns no commands") {
+        var model = makeModel()
+        let commands = update(&model, .ghosttyConfigReloaded)
+
+        try expectEqual(model.ghosttyConfigGeneration, 1)
+        try expectEqual(commands.count, 0)
+    }
+
     // MARK: - desiredSidebar (sidebar projection, Stage 5)
 
     test("desiredSidebar: ordered groups -> tabs with rendered attrs, collapse, jump badge") {

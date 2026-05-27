@@ -1097,6 +1097,27 @@ func desiredSearchOverlays(in model: AppModel) -> [PaneId: SearchOverlayRender] 
   return result
 }
 
+/// Per-pane Ghostty config render the reconciler diffs and pushes to the surface.
+/// The theme is keyed iff a pane has a non-nil effective theme; generation changes
+/// when the app's base Ghostty config reloads, forcing themed panes to re-layer.
+struct PaneConfigKey: Equatable {
+  let theme: String
+  let generation: Int
+}
+
+/// Pane-config projection: one key per live themed pane. Unthemed panes are absent,
+/// so removing a theme makes the key disappear and the reconciler reloads base config
+/// while the surface host survives.
+func desiredPaneConfig(in model: AppModel) -> [PaneId: PaneConfigKey] {
+  var result: [PaneId: PaneConfigKey] = [:]
+  for pane in model.allPanes {
+    if let theme = effectiveTheme(for: pane) {
+      result[pane.id] = PaneConfigKey(theme: theme, generation: model.ghosttyConfigGeneration)
+    }
+  }
+  return result
+}
+
 /// Generic diff/apply/prune backing every keyed reconcile pass. Applies `apply`
 /// only for keys whose desired value differs from the cached one (unchanged keys
 /// are skipped), invokes `remove` once for each key that left `desired` (the

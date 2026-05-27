@@ -13,16 +13,12 @@ func themeTests() {
         try expectEqual(model.pane(paneId)?.theme, "Dracula")
     }
 
-    test("setPaneTheme produces applyPaneTheme and scheduleCheckpoint commands") {
+    test("setPaneTheme projects theme and schedules checkpoint") {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         let commands = update(&model, .setPaneTheme(paneId: paneId, themeName: "Nord"))
-        try expect(hasEffect(commands) {
-            if case .applyPaneTheme(let id) = $0 {
-                return id == paneId
-            }; return false
-        }, "should emit applyPaneTheme")
+        try expectEqual(desiredPaneConfig(in: model)[paneId]?.theme, "Nord")
         try expect(hasEffect(commands) {
             if case .scheduleCheckpoint = $0 { return true }; return false
         }, "should emit scheduleCheckpoint")
@@ -50,28 +46,23 @@ func themeTests() {
         try expectEqual(model.pane(newPaneId)?.theme, "Catppuccin Mocha")
     }
 
-    test("splitPane with theme emits applyPaneTheme for new pane") {
+    test("splitPane with theme projects config for new pane") {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         update(&model, .setPaneTheme(paneId: paneId, themeName: "Rose Pine"))
-        let commands = update(&model, .splitPane(paneId: paneId, direction: .vertical))
+        update(&model, .splitPane(paneId: paneId, direction: .vertical))
         let tab = selectedTab(in: model)!
         let newPaneId = tab.focusedPaneId
-        try expect(hasEffect(commands) {
-            if case .applyPaneTheme(let id) = $0 {
-                return id == newPaneId
-            }; return false
-        }, "should emit applyPaneTheme for new pane")
+        try expectEqual(desiredPaneConfig(in: model)[newPaneId]?.theme, "Rose Pine")
     }
 
-    test("splitPane without theme does not emit applyPaneTheme") {
+    test("splitPane without theme has no projected config") {
         var model = makeModel()
         createTab(&model)
-        let commands = update(&model, .splitPane(direction: .horizontal))
-        try expect(!hasEffect(commands) {
-            if case .applyPaneTheme = $0 { return true }; return false
-        }, "should not emit applyPaneTheme when no theme")
+        update(&model, .splitPane(direction: .horizontal))
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        try expect(desiredPaneConfig(in: model)[paneId] == nil, "no theme -> no config key")
     }
 
     test("toSnapshot preserves theme") {
