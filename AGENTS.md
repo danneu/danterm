@@ -74,8 +74,6 @@ typealias SplitId = TypedId<SplitTag>
 
 ## Code Style
 
-Every `.swift` file should have a top-level comment explaining the file's purpose.
-
 Every non-trivial method should have a comment explaining intent, not mechanics.
 For AppKit delegate/protocol methods, identify which protocol is being targeted
 so it's clear the method isn't just a custom addition.
@@ -83,6 +81,104 @@ so it's clear the method isn't just a custom addition.
 ```swift
 // NSSplitViewDelegate: called on divider double-click. We reset to 50/50 instead of collapsing.
 func splitView(_ splitView: NSSplitView, ...) -> Bool {
+```
+
+### File header comments
+
+Every `.swift` file opens with a top-of-file `//` comment block on line 1, above
+the imports. (We do not use Xcode's `//  FileName.swift` banner.) A single line is
+fine for a small, focused file; for anything larger the block should convey:
+
+- what the file contains / what it is generally for
+- its intent
+- what belongs in it — and, by implication, what does not
+- why it earns its own file
+
+Use `//`, not `///`: the header describes the file, not a declaration.
+
+```swift
+// Before -- accurate, but undersells a hub file:
+// Core value types for the DanTerm Elm-style application model.
+import Foundation
+```
+
+```swift
+// After:
+// Pure value types for DanTerm's Elm-style model: typed IDs (`TypedId<Tag>`), the
+// tab/pane/group/alert structs, and snapshot validation. This is the data the pure
+// core (`update`, `ModelOperations`) and the reconciler both read. Keep it free of
+// AppKit and side effects -- Cocoa views live in TerminalView/SidebarView, runtime
+// effects in AppRuntime -- which is what keeps the whole model layer unit-testable
+// without Cocoa or GhosttyKit. Its own file because nearly everything imports it.
+import Foundation
+```
+
+### Doc comments on declarations
+
+Give every new type (`class`/`struct`/`enum`/`actor`/`protocol`) and every
+top-level function a `///` doc comment that justifies *why it exists*: capture
+intent, an invariant, ownership, or call-site coupling — not the signature. For a
+*member* (method or property), add one only when it is `public` (the `lib/` module
+boundary) or a non-obvious entry point called from another file or type; the gate
+below settles the rest.
+
+- Prefer one to three lines. If deleting the comment would lose nothing a reader
+  could not recover from the code itself, do not write it.
+- Skip: protocol conformances whose purpose is the protocol (`Equatable`,
+  `Codable`, `CustomStringConvertible`, ...), enum cases already covered by an
+  enum-level doc, and test-only fixtures/helpers.
+
+```swift
+// Good -- says why this type is split out and states an invariant a reader can't infer:
+/// Ephemeral view state with no natural AppKit owner that the reconciler reads as a
+/// second input (alongside `AppModel`) and never clobbers. Deliberately minimal.
+struct ViewLocalState { var sidebarRenameTarget: RenameTarget? }
+
+// Bad:
+/// The view-local state struct.   // restates the name
+/// Helper used by the runtime.    // vague: which helper, and why does it exist?
+struct ViewLocalState { var sidebarRenameTarget: RenameTarget? }
+```
+
+### Test preambles
+
+Every individual test opens with a `//` preamble of three labeled sections. This
+applies to both test idioms: a `test("...") { ... }` closure in the app harness
+(`tests/`, preamble at the top of the closure) and an XCTest `func testX()` in
+`lib/` (preamble at the top of the method body).
+
+1. **Intent** — the behavior this test verifies.
+2. **Why it exists** — the risk it guards: a regression for a bug-fix test, or
+   the behavior contract it pins down for a spec-first test.
+3. **Scenario** — the concrete user/system story the test models. If the test was
+   written for a specific bug or incident, name it; otherwise describe the
+   user-facing behavior being specified. Do not invent an incident — DanTerm is
+   TDD-first, so most tests are spec-first and legitimately have none.
+
+```swift
+// App harness (tests/) -- a bug-fix test, so the Scenario names the real incident:
+test("movePane(.splitRight) threads the moved pane's payload through insertAtLeaf") {
+    // Intent: moving a pane via .splitRight preserves the moved pane's full
+    //   payload (cwd, theme, todos) at its new split position.
+    // Why it exists: locks down the moveLeaf -> insertAtLeaf path, the only route
+    //   through insertAtLeaf, against silently dropping pane state.
+    // Scenario: earlier code rebuilt a fresh default leaf from the bare pane id,
+    //   so dragging a pane to split-right wiped its cwd/theme/todos; this is the
+    //   regression that fix is pinned against.
+    var model = makeModel()
+    // ...
+}
+
+// XCTest (lib/) -- a spec-first test, so the Scenario is the behavior, no incident:
+func testTabNewParsesBackgroundFlag() throws {
+    // Intent: `--background` parses into params["background"] == .bool(true).
+    // Why it exists: pins the CLI -> JSON contract the app's IPC handler reads.
+    // Scenario: `danterm tab new --background` issued by an agent; the flag must
+    //   survive parsing so the new tab opens in the background. Spec-first -- no
+    //   incident to cite, and none should be invented.
+    let command = try parseCLI(["tab", "new", "--background"])
+    // ...
+}
 ```
 
 ## Build
