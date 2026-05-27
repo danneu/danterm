@@ -31,6 +31,7 @@ echo "Compiling tests..."
         "$SCRIPT_DIR/app/DragDropInput.swift" \
         "$SCRIPT_DIR/app/DropZone.swift" \
         "$SCRIPT_DIR/app/ScrollbarMath.swift" \
+        "$SCRIPT_DIR/app/SurfaceGeometry.swift" \
         "$SCRIPT_DIR/app/ThemeColorParser.swift" \
         "$SCRIPT_DIR/app/DanTermConfig.swift" \
         "$SCRIPT_DIR/app/TodoPopoverState.swift" \

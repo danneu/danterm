@@ -1,3 +1,5 @@
+// NSView host for Ghostty surfaces and terminal input forwarding.
+
 import Cocoa
 import GhosttyKit
 
@@ -168,75 +170,47 @@ class TerminalView: NSView, NSTextInputClient {
 
     // MARK: - View Lifecycle
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        guard let surface = surface else { return }
+    // Single source of truth for pushing content scale plus backing-pixel size
+    // to Ghostty. Degenerate sizes are skipped because 0x0 corrupts terminal
+    // state and divide-by-zero scale can clobber Retina rendering.
+    private func syncSurfaceGeometry(logicalSize: NSSize) {
+        guard let surface else { return }
+        let backingSize = convertToBacking(logicalSize)
+        guard let geometry = surfaceGeometry(logicalSize: logicalSize, backingSize: backingSize) else { return }
 
-        if let window = window {
-            if let screen = window.screen {
-                ghostty_surface_set_display_id(surface, screen.displayID)
-            }
-
-            // Sync content scale and size if we have a valid frame.
-            // Frame is zero here when layout hasn't happened yet — dividing by
-            // zero would pass nan to ghostty_surface_set_content_scale, clobbering
-            // the correct initial value from config.scale_factor. setFrameSize
-            // handles it once layout gives us real dimensions.
-            if frame.width > 0 && frame.height > 0 {
-                let fbFrame = convertToBacking(frame)
-                let xScale = fbFrame.size.width / frame.size.width
-                let yScale = fbFrame.size.height / frame.size.height
-                ghostty_surface_set_content_scale(surface, xScale, yScale)
-                ghostty_surface_set_size(surface, UInt32(fbFrame.size.width), UInt32(fbFrame.size.height))
-            }
-        }
+        ghostty_surface_set_content_scale(surface, geometry.xScale, geometry.yScale)
+        ghostty_surface_set_size(surface, geometry.pixelWidth, geometry.pixelHeight)
     }
 
+    // NSView: seed display ID and initial geometry after the view enters a window.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard let surface, let window else { return }
+
+        if let screen = window.screen {
+            ghostty_surface_set_display_id(surface, screen.displayID)
+        }
+
+        syncSurfaceGeometry(logicalSize: frame.size)
+    }
+
+    // NSView: resync layer scale and Ghostty geometry after backing-store changes.
     override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
-        guard let surface = surface else { return }
+        guard surface != nil else { return }
 
         // Update layer's contentsScale
         if let window = window {
             layer?.contentsScale = window.backingScaleFactor
         }
 
-        // Skip zero-size frames (view not yet laid out). Dividing by zero
-        // produces NaN which ghostty clamps to scale=1, clobbering Retina.
-        guard frame.width > 0 && frame.height > 0 else { return }
-
-        // Update content scale
-        let fbFrame = convertToBacking(frame)
-        let xScale = fbFrame.size.width / frame.size.width
-        let yScale = fbFrame.size.height / frame.size.height
-        ghostty_surface_set_content_scale(surface, xScale, yScale)
-
-        // Update size with backing-scaled dimensions
-        let scaledSize = convertToBacking(frame.size)
-        ghostty_surface_set_size(
-            surface,
-            UInt32(scaledSize.width),
-            UInt32(scaledSize.height)
-        )
+        syncSurfaceGeometry(logicalSize: frame.size)
     }
 
+    // NSView: push new layout geometry to Ghostty after AppKit changes the frame.
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        guard let surface = surface else { return }
-        // Skip zero-size updates. showSplitContainer resets frames to .zero
-        // before layout; sending 0x0 to ghostty corrupts terminal state and
-        // causes offset/double-prompt artifacts on tab switch and split.
-        guard newSize.width > 0 && newSize.height > 0 else { return }
-
-        let scaledSize = convertToBacking(newSize)
-        let xScale = scaledSize.width / newSize.width
-        let yScale = scaledSize.height / newSize.height
-        ghostty_surface_set_content_scale(surface, xScale, yScale)
-        ghostty_surface_set_size(
-            surface,
-            UInt32(scaledSize.width),
-            UInt32(scaledSize.height)
-        )
+        syncSurfaceGeometry(logicalSize: newSize)
     }
 
     override func updateTrackingAreas() {
