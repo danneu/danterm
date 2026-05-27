@@ -51,6 +51,9 @@ struct ReconcilerCaches {
     // Single-optional preferences projection cache. nil == no open preferences
     // draft/panel; a non-nil value is the last form render pushed into the panel.
     var preferencesPanel: PreferencesPanelProjection? = nil
+    // Single-optional theme-browser content cache. nil == no browser open; non-nil
+    // == last focused-pane theme content applied.
+    var themeBrowser: ThemeBrowserProjection? = nil
     // Single-optional MRU switcher cache (the windowChrome template, plus a hide
     // transition): the last switcher projection reconcileSwitcher applied. nil == no MRU
     // cycle == panel ordered out. The panel persists across container rebuilds, so this
@@ -85,6 +88,7 @@ extension AppRuntime {
         reconcileSwitcher()      // single-optional MRU projection; nil (no mruCycle) -> orderOut
         reconcileQuitConfirmation()
         reconcilePreferencesPanel()
+        reconcileThemeBrowser()
         syncSurfaceVisibility()  // existing occlusion pass; stays last
     }
 
@@ -350,5 +354,16 @@ extension AppRuntime {
             preferencesPanel?.orderOut(nil)
         }
         caches.preferencesPanel = new
+    }
+
+    /// Push the focused pane's user theme into the open theme browser. The browser's
+    /// filter and first-responder state stay view-local; nil means no browser is open.
+    func reconcileThemeBrowser() {
+        let new = themeBrowserView == nil ? nil : desiredThemeBrowser(in: model)
+        guard caches.themeBrowser != new else { return }
+        if let proj = new {
+            themeBrowserView?.apply(proj)
+        }
+        caches.themeBrowser = new
     }
 }

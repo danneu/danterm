@@ -139,16 +139,25 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
 
     // MARK: - Public
 
-    /// Sync the panel's state with the runtime's focused pane and current theme.
-    func reloadFromRuntime() {
-        guard let runtime = runtime else { return }
-        if let tab = selectedTab(in: runtime.model) {
-            currentThemeName = runtime.model.pane(tab.focusedPaneId)?.theme
-        } else {
-            currentThemeName = nil
-        }
-        resetButton.isHidden = currentThemeName == nil
+    /// Reload all rows when the browser is first opened.
+    func reloadTable() {
         tableView.reloadData()
+    }
+
+    /// Single entry point the reconciler uses to push focused-pane theme content.
+    /// Filter text and focus stay view-local.
+    func apply(_ proj: ThemeBrowserProjection) {
+        let old = currentThemeName
+        currentThemeName = proj.currentThemeName
+        resetButton.isHidden = currentThemeName == nil
+        var rows = IndexSet()
+        if let old, let idx = filteredNames.firstIndex(of: old) { rows.insert(idx) }
+        if let currentThemeName, let idx = filteredNames.firstIndex(of: currentThemeName) {
+            rows.insert(idx)
+        }
+        if !rows.isEmpty {
+            tableView.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integer: 0))
+        }
         selectCurrentThemeRow()
     }
 
@@ -177,13 +186,10 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
 
     /// Clear the DanTerm theme override, reverting to the user's Ghostty config.
     @objc private func resetTheme() {
+        guard currentThemeName != nil else { return }
         guard let runtime = runtime,
               let tab = selectedTab(in: runtime.model) else { return }
         runtime.send(.setPaneTheme(paneId: tab.focusedPaneId, themeName: nil))
-        currentThemeName = nil
-        resetButton.isHidden = true
-        tableView.deselectAll(nil)
-        tableView.reloadData()
     }
 
     @objc private func closeBrowser() {
@@ -208,6 +214,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
             tableView.deselectAll(nil)
             return
         }
+        guard tableView.selectedRow != idx else { return }
         tableView.selectRowIndexes(IndexSet(integer: idx), byExtendingSelection: false)
         tableView.scrollRowToVisible(idx)
     }
@@ -229,13 +236,6 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         guard let runtime = runtime,
               let tab = selectedTab(in: runtime.model) else { return }
         runtime.send(.setPaneTheme(paneId: tab.focusedPaneId, themeName: name))
-        let oldName = currentThemeName
-        currentThemeName = name
-        resetButton.isHidden = false
-        // Partial reload: update only affected rows so selection is not cleared
-        var rows = IndexSet(integer: row)
-        if let old = oldName, let idx = filteredNames.firstIndex(of: old) { rows.insert(idx) }
-        tableView.reloadData(forRowIndexes: rows, columnIndexes: IndexSet(integer: 0))
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {

@@ -1721,6 +1721,46 @@ func modelOperationsTests() {
         try expect(keyMap[ids[jumpModeKeySequence.count + 2]] == nil)
     }
 
+    // MARK: - desiredThemeBrowser
+
+    test("desiredThemeBrowser: tracks the focused pane's theme across same-tab focus") {
+        var model = makeModel()
+        createTab(&model)
+        let paneA = selectedTab(in: model)!.focusedPaneId
+        update(&model, .splitPane(paneId: paneA, direction: .horizontal))
+        let focused = selectedTab(in: model)!.focusedPaneId
+        let other = allPaneIds(selectedTab(in: model)!.rootNode).first { $0 != focused }!
+        update(&model, .setPaneTheme(paneId: focused, themeName: "Dracula"))
+        update(&model, .setPaneTheme(paneId: other, themeName: "Nord"))
+
+        try expectEqual(desiredThemeBrowser(in: model).currentThemeName, "Dracula",
+            "projection returns the focused pane's theme")
+
+        update(&model, .paneBecameFirstResponder(paneId: other))
+        try expectEqual(desiredThemeBrowser(in: model).currentThemeName, "Nord",
+            "projection updates on same-tab focus change -- the bug this fixes")
+    }
+
+    test("desiredThemeBrowser: nil theme when no selected tab or no override") {
+        var model = makeModel()
+
+        try expectEqual(desiredThemeBrowser(in: model).currentThemeName, nil)
+
+        createTab(&model)
+        try expectEqual(desiredThemeBrowser(in: model).currentThemeName, nil)
+    }
+
+    test("desiredThemeBrowser: reports the user theme, not the remote override") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        update(&model, .setPaneTheme(paneId: paneId, themeName: "Dracula"))
+        model.updatePane(paneId) { $0.remoteThemeOverride = "Purplepeter" }
+
+        try expectEqual(desiredThemeBrowser(in: model).currentThemeName, "Dracula",
+            "projection reads pane.theme, never effectiveTheme")
+    }
+
     // MARK: - desiredFocusBorders (focus-border projection, Stage 3)
 
     test("desiredFocusBorders: single-pane selected tab draws no focus border (bell still shows)") {

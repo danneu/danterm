@@ -41,7 +41,8 @@ class AppRuntime {
     private var todoPopoverDelegate: TodoPopoverDelegateAdapter?
     var tabTodoPopover: NSPopover?
     private var tabTodoPopoverDelegate: TabTodoPopoverDelegateAdapter?
-    private var themeBrowserView: ThemeBrowserView?
+    // internal (not private): the cross-file reconcileThemeBrowser extension reads it.
+    var themeBrowserView: ThemeBrowserView?
     // internal (not private): the cross-file reconcilePreferencesPanel extension reads it.
     var preferencesPanel: PreferencesPanel?
     // internal (not private): the cross-file reconcileQuitConfirmation extension reads it.
@@ -1054,6 +1055,7 @@ class AppRuntime {
         if let existing = themeBrowserView {
             existing.removeFromSuperview()
             themeBrowserView = nil
+            reconcileThemeBrowser()
             // Restore focus to the focused pane's surface
             if let tab = selectedTab(in: model),
                let view = surfaces[tab.focusedPaneId] {
@@ -1071,8 +1073,9 @@ class AppRuntime {
             browser.bottomAnchor.constraint(equalTo: contentArea.bottomAnchor),
             browser.trailingAnchor.constraint(equalTo: contentArea.trailingAnchor),
         ])
-        browser.reloadFromRuntime()
         themeBrowserView = browser
+        browser.reloadTable()
+        reconcileThemeBrowser()
     }
 
     // MARK: - Snapshot Bootstrap
@@ -1358,9 +1361,8 @@ class AppRuntime {
            let field = findPaneWrapper(for: focusedId)?.searchOverlay?.searchField {
             window?.makeFirstResponder(field)
         }
-        // The theme browser owns its own filter/focus; reload it for the new selection.
+        // The theme browser owns its own filter/focus; content updates via reconcileThemeBrowser.
         if let browser = themeBrowserView {
-            browser.reloadFromRuntime()
             if let target = browserFocus { browser.restoreFocus(target) }
         }
     }

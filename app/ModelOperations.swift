@@ -15,6 +15,22 @@ func effectiveTheme(for pane: PaneModel) -> String? {
   pane.remoteThemeOverride ?? pane.theme
 }
 
+// MARK: - Theme Browser
+
+/// Pure value describing the model-derived content shown in the theme browser.
+struct ThemeBrowserProjection: Equatable {
+    var currentThemeName: String?
+}
+
+/// Project the focused pane's user-set theme for the selected tab. This reads
+/// `pane.theme`, not `effectiveTheme`, so remote theme overrides do not move
+/// the browser checkmark.
+func desiredThemeBrowser(in model: AppModel) -> ThemeBrowserProjection {
+    ThemeBrowserProjection(
+        currentThemeName: selectedTab(in: model).flatMap { model.pane($0.focusedPaneId)?.theme }
+    )
+}
+
 // MARK: - Preferences Panel
 
 /// Whether the preferences draft has any changes compared to the committed config.
