@@ -56,6 +56,10 @@ struct ReconcilerCaches {
     // cycle == panel ordered out. The panel persists across container rebuilds, so this
     // cache needs no cross-pass invalidation.
     var switcher: SwitcherProjection? = nil
+    // Single-optional quit-confirmation cache. Unlike switcher, the panel is
+    // destroyed on teardown, so nil after ReconcilerCaches() re-init correctly
+    // means "no panel, nothing shown".
+    var quitConfirmation: QuitConfirmationProjection? = nil
 }
 
 extension AppRuntime {
@@ -79,6 +83,7 @@ extension AppRuntime {
         reconcileSidebar()
         reconcileWindowChrome()
         reconcileSwitcher()      // single-optional MRU projection; nil (no mruCycle) -> orderOut
+        reconcileQuitConfirmation()
         reconcilePreferencesPanel()
         syncSurfaceVisibility()  // existing occlusion pass; stays last
     }
@@ -297,6 +302,31 @@ extension AppRuntime {
             switcherPanel?.orderOut(nil)  // nil == no cycle == hide
         }
         caches.switcher = new
+    }
+
+    /// Show, refresh, or hide the non-modal quit confirmation panel from one
+    /// diffed `QuitConfirmationProjection?`. Unlike reconcileSwitcher, the panel
+    /// must take key focus on appear so Esc/Enter activate its buttons, but only
+    /// on the nil -> non-nil transition. Later pane-count refreshes reconfigure
+    /// the copy without re-centering a dragged panel or stealing key focus from
+    /// the terminal pane the user is closing underneath it.
+    func reconcileQuitConfirmation() {
+        let new = desiredQuitConfirmation(in: model)
+        guard caches.quitConfirmation != new else { return }
+        let wasShowing = caches.quitConfirmation != nil
+        if let proj = new {
+            if quitConfirmationPanel == nil {
+                quitConfirmationPanel = QuitConfirmationPanel(runtime: self)
+            }
+            quitConfirmationPanel?.configure(paneCount: proj.paneCount)
+            if !wasShowing {
+                quitConfirmationPanel?.center(on: window)
+                quitConfirmationPanel?.makeKeyAndOrderFront(nil)
+            }
+        } else {
+            quitConfirmationPanel?.orderOut(nil)
+        }
+        caches.quitConfirmation = new
     }
 
     /// Push the preferences panel form render from one diffed projection. The panel

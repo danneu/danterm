@@ -44,7 +44,8 @@ class AppRuntime {
     private var themeBrowserView: ThemeBrowserView?
     // internal (not private): the cross-file reconcilePreferencesPanel extension reads it.
     var preferencesPanel: PreferencesPanel?
-    private var quitConfirmationPanel: QuitConfirmationPanel?
+    // internal (not private): the cross-file reconcileQuitConfirmation extension reads it.
+    var quitConfirmationPanel: QuitConfirmationPanel?
     // internal (not private): the cross-file reconcileSwitcher extension reads it.
     var switcherPanel: SwitcherPanel?
     private var switcherEventMonitor: Any?
@@ -252,9 +253,6 @@ class AppRuntime {
         }
         for command in commands where command.isPostReconcile {
             perform(command)
-        }
-        if model.pendingConfirmation == .terminate {
-            quitConfirmationPanel?.configure(paneCount: model.allPaneIds.count)
         }
 
         // Defensive backstop: cancel drag on app resign, in case the coordinator's
@@ -548,14 +546,6 @@ class AppRuntime {
                 let isConfirm = response == .alertFirstButtonReturn
                 self.send(closeTabsConfirmationResponse(isConfirm: isConfirm, ids: tabIds))
             }
-
-        case .showTerminateConfirmation(let paneCount):
-            if quitConfirmationPanel == nil {
-                quitConfirmationPanel = QuitConfirmationPanel(runtime: self)
-            }
-            quitConfirmationPanel?.configure(paneCount: paneCount)
-            quitConfirmationPanel?.center(on: window)
-            quitConfirmationPanel?.makeKeyAndOrderFront(nil)
 
         case .saveDanTermConfigKey(let key, let value):
             let path = DanTermConfigParser.configFilePath()

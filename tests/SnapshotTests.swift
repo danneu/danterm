@@ -135,6 +135,18 @@ func snapshotTests() {
         try expectEqual(loaded.model.allPaneIds.count, model.allPaneIds.count)
     }
 
+    test("loadValidatedInitFile does not restore pending confirmation") {
+        var model = makeModel()
+        createTab(&model)
+        model.pendingConfirmation = .terminate
+
+        let data = try JSONEncoder().encode(toInitFile(model))
+        let loaded = try loadValidatedInitFile(from: data)
+
+        try expect(loaded.model.pendingConfirmation == nil,
+            "pending confirmation is ephemeral and must not be serialized")
+    }
+
     test("decode split node") {
         let json = """
         {

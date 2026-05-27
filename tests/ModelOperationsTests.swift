@@ -934,6 +934,46 @@ func modelOperationsTests() {
         try expect(desiredSwitcher(in: model) == nil, "cycle ended -> nil projection (orderOut)")
     }
 
+    test("desiredQuitConfirmation projects terminate pane count only") {
+        var model = makeModel()
+        createTab(&model)
+
+        try expect(desiredQuitConfirmation(in: model) == nil, "no pending confirmation -> nil projection")
+
+        model.pendingConfirmation = .closeTab
+        try expect(desiredQuitConfirmation(in: model) == nil, "close-tab confirmation uses NSAlert, not the quit panel")
+
+        model.pendingConfirmation = .terminate
+        try expectEqual(desiredQuitConfirmation(in: model), QuitConfirmationProjection(paneCount: 1),
+            "single-pane terminate confirmation projects pane count 1")
+
+        var multi = makeMruModel(tabCount: 3).model
+        multi.pendingConfirmation = .terminate
+        try expectEqual(desiredQuitConfirmation(in: multi), QuitConfirmationProjection(paneCount: 3),
+            "multi-pane terminate confirmation projects the live pane count")
+
+        multi.pendingConfirmation = nil
+        try expect(desiredQuitConfirmation(in: multi) == nil, "cleared confirmation -> nil projection")
+    }
+
+    test("desiredQuitConfirmation decrements as panes close while pending") {
+        var model = makeModel()
+        createTab(&model)
+        _ = update(&model, .splitPane(direction: .horizontal))
+        try expectEqual(model.allPaneIds.count, 2, "precondition: split created two panes")
+        model.pendingConfirmation = .terminate
+        try expectEqual(desiredQuitConfirmation(in: model)?.paneCount, 2,
+            "open quit panel starts with both panes")
+
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        _ = update(&model, .closePane(paneId: paneId))
+
+        try expectEqual(model.allPaneIds.count, 1, "non-last pane close removes one pane")
+        try expect(model.pendingConfirmation == .terminate, "non-last pane close keeps quit confirmation pending")
+        try expectEqual(desiredQuitConfirmation(in: model)?.paneCount, 1,
+            "projection reflects the decremented live pane count")
+    }
+
     // MARK: - resolveContextTargets (sidebar Finder/Mail rule)
 
     test("resolveContextTargets clicked row in selection returns selection in row order") {

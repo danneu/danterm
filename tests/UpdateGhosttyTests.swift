@@ -373,9 +373,7 @@ func ghosttyTests() {
 
         let commands = update(&model, .surfaceClosed(paneId: paneId))
         try expect(model.pane(paneId) != nil, "pane should still exist (confirmation pending)")
-        try expect(hasEffect(commands) {
-            if case .showTerminateConfirmation(let count) = $0, count == 1 { return true }
-            return false
-        }, "should show confirmation when last pane closed via surfaceClosed")
+        try expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
+        try expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
     }
 }

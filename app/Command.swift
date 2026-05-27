@@ -49,7 +49,6 @@ enum Command {
 
     // System
     case sendNotification(alertId: AlertId, title: String, body: String)
-    case showTerminateConfirmation(paneCount: Int)
     // `uncompletedTodoCount` rolls up the tab's own todos plus every pane's
     // todos in that tab (the same number the chrome's tab-todo badge shows).
     case showCloseTabConfirmation(tabId: TabId, tabTitle: String, paneCount: Int, isLastTab: Bool, uncompletedTodoCount: Int)
@@ -103,7 +102,7 @@ extension Command {
             return true
         case .createSurface, .sendText, .sendInputText, .sendInputKey,
              .focusSurface, .exportState, .ipcReply, .ipcError,
-             .readPaneText, .sendNotification, .showTerminateConfirmation,
+             .readPaneText, .sendNotification,
              .showCloseTabConfirmation, .showCloseTabsConfirmation, .terminate, .activateApp,
              .setAppFocus, .dismissAlertsPopover,
              .saveDanTermConfigKey, .removeDanTermConfigKey,

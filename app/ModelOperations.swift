@@ -551,7 +551,7 @@ func wouldQuitFromClose(_ model: AppModel) -> Bool {
 func emitTerminateConfirmation(_ model: inout AppModel) -> [Command] {
   guard model.pendingConfirmation == nil else { return [] }
   model.pendingConfirmation = .terminate
-  return [.showTerminateConfirmation(paneCount: model.allPaneIds.count)]
+  return []
 }
 
 // Single chokepoint for asking before closing a multi-pane tab. It guards the
@@ -2118,6 +2118,20 @@ func desiredSwitcher(in model: AppModel) -> SwitcherProjection? {
     )
   }
   return SwitcherProjection(rows: rows, cursorIndex: resolved.cursorIndex)
+}
+
+// The quit confirmation panel as pure data: non-nil only for the non-modal
+// terminate confirmation. Close-tab confirmation is a separate NSAlert path.
+struct QuitConfirmationProjection: Equatable {
+  let paneCount: Int
+}
+
+/// Project the non-modal quit confirmation panel from the model. Returns nil for
+/// no pending confirmation and for `.closeTab`, because close-tab confirmation is
+/// driven by modal NSAlert commands instead.
+func desiredQuitConfirmation(in model: AppModel) -> QuitConfirmationProjection? {
+  guard model.pendingConfirmation == .terminate else { return nil }
+  return QuitConfirmationProjection(paneCount: model.allPaneIds.count)
 }
 
 // MARK: - Switcher Event Classifier

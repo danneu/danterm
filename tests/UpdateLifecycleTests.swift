@@ -143,11 +143,7 @@ func lifecycleTests() {
         var model = makeModel()
         createTab(&model)
         let commands = update(&model, .requestQuit)
-        try expectEqual(commands.count, 1)
-        try expect(hasEffect(commands) {
-            if case .showTerminateConfirmation(let count) = $0, count == 1 { return true }
-            return false
-        }, "should show confirmation with pane count 1")
+        try expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
         try expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
     }
 
@@ -157,11 +153,7 @@ func lifecycleTests() {
         update(&model, .splitPane(direction: .horizontal))
         createTab(&model)
         let commands = update(&model, .requestQuit)
-        try expectEqual(commands.count, 1)
-        try expect(hasEffect(commands) {
-            if case .showTerminateConfirmation(let count) = $0, count == 3 { return true }
-            return false
-        }, "should show confirmation with correct pane count")
+        try expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
         try expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
     }
 
@@ -171,12 +163,7 @@ func lifecycleTests() {
 
         let commands = update(&model, .requestQuit)
 
-        try expectEqual(commands.count, 1)
-        if case .showTerminateConfirmation = commands[0] {
-            // good
-        } else {
-            throw TestFailure(message: "expected showTerminateConfirmation")
-        }
+        try expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
         try expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
     }
 
@@ -289,12 +276,8 @@ func lifecycleTests() {
 
         let commands = update(&model, .requestQuit)
 
-        try expectEqual(commands.count, 1)
-        if case .showTerminateConfirmation = commands[0] {
-            // good
-        } else {
-            throw TestFailure(message: "expected showTerminateConfirmation")
-        }
+        try expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
+        try expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
     }
 
     test("testRequestQuitWhileCloseTabPendingIsNoOp") {
@@ -305,10 +288,6 @@ func lifecycleTests() {
         let commands = update(&model, .requestQuit)
 
         try expectEqual(commands.count, 0, "requestQuit should be blocked by pending close-tab confirmation")
-        try expect(!hasEffect(commands) {
-            if case .showTerminateConfirmation = $0 { return true }
-            return false
-        }, "should not emit terminate confirmation")
     }
 
     test("testCloseTabConfirmationResponseConfirm") {

@@ -170,11 +170,7 @@ func tabTests() {
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
         let commands = update(&model, .closePane(paneId: paneId))
-        try expectEqual(commands.count, 1)
-        try expect(hasEffect(commands) {
-            if case .showTerminateConfirmation(let count) = $0, count == 1 { return true }
-            return false
-        }, "should show confirmation when closing last pane")
+        try expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
         try expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
         try expectEqual(model.groups[0].tabs.count, 1, "model should be unchanged")
         try expect(model.pane(paneId) != nil, "pane should still exist")
@@ -186,11 +182,7 @@ func tabTests() {
         let tabId = model.groups[0].tabs[0].id
 
         let commands = update(&model, .closeTab(id: tabId))
-        try expectEqual(commands.count, 1)
-        try expect(hasEffect(commands) {
-            if case .showTerminateConfirmation(let count) = $0, count == 1 { return true }
-            return false
-        }, "should show confirmation when closing last tab")
+        try expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
         try expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
         try expectEqual(model.groups[0].tabs.count, 1, "model should be unchanged")
     }
@@ -622,12 +614,7 @@ func tabTests() {
 
         let commands = update(&model, .confirmCloseTab(id: tabId))
 
-        try expectEqual(commands.count, 1)
-        if case .showTerminateConfirmation = commands[0] {
-            // good
-        } else {
-            throw TestFailure(message: "expected showTerminateConfirmation")
-        }
+        try expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
         for paneId in paneIds {
             try expect(model.pane(paneId) != nil, "pane should still exist")
         }
@@ -657,10 +644,7 @@ func tabTests() {
 
         let commands = update(&model, .requestCloseTab(id: tabId))
         try expectEqual(model.groups[0].tabs.count, 1, "tab should NOT be removed")
-        try expect(hasEffect(commands) {
-            if case .showTerminateConfirmation(let count) = $0, count == 1 { return true }
-            return false
-        }, "should show terminate confirmation for last single-pane tab")
+        try expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
         try expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
     }
 

@@ -103,12 +103,10 @@ final class QuitConfirmationPanel: NSPanel, NSWindowDelegate {
     // MARK: - Actions
 
     @objc private func confirmQuit(_ sender: Any?) {
-        orderOut(nil)
         runtime?.send(.confirmTerminate)
     }
 
     @objc private func cancelQuit(_ sender: Any?) {
-        orderOut(nil)
         runtime?.send(.cancelTerminate)
     }
 }
