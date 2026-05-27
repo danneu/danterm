@@ -153,6 +153,32 @@ after; this is an explicit target and can work without `$DANTERM_PANE`. Use
 `--after-selected` only when the user explicitly wants selected-tab-relative
 placement.
 
+### Launch Claude with an initial prompt
+
+To open Claude Code in the new tab and seed its first prompt, keep stdout
+attached to the terminal and pass simple prompts as an argument. This is Claude
+Code's documented interactive initial-prompt form. Claude stays interactive
+unless you use `--print` or send its stdout somewhere other than the terminal.
+For serious agent work -- implementing a plan, verifying an issue, reviewing a
+plan, reviewing an implementation, or similarly high-judgment tasks -- launch
+Claude with `--effort max`.
+
+    danterm tab new --group "$GROUP_ID" --title review \
+      --cmd 'claude --effort max "review the staged diff"'
+
+For shell-hostile or multi-line prompts -- backticks, `$`, quotes, parens,
+newlines, which are common in code-review findings and `file:line` refs -- stage
+the prompt in a file and feed it on stdin. This is not the docs' primary example,
+but it is verified on Claude Code 2.1.152 and avoids shell-quoting the prompt
+contents:
+
+    # write $PROMPT to the file first (heredoc/editor/agent write, not inline quoting)
+    danterm tab new --group "$GROUP_ID" --title verify \
+      --cmd 'claude --effort max < /tmp/danterm-prompt.txt'
+
+Single-quote the whole `--cmd` value so the redirection is interpreted by the
+tab's login shell. Use a unique filename per tab when launching several at once.
+
 ### Split a pane and run a command in the new one
 
 Orientation:
@@ -273,6 +299,12 @@ else prints nothing on success and exits 0.
   `pane split --pane <pane-id> --cmd` over the
   split-then-`pane input` pattern. `--cmd` seeds the command at surface
   creation time and avoids racing the shell prompt.
+- To launch Claude with an initial prompt, keep its stdout attached to the
+  terminal. For serious agent work (implementing a plan, verifying an issue,
+  reviewing a plan, reviewing an implementation, etc.), use `claude --effort
+  max`. Pass simple prompts as arguments. For shell-hostile prompt text, stage
+  it in a file and use the DanTerm-verified stdin form
+  `--cmd 'claude --effort max < /tmp/danterm-prompt.txt'`. See the recipe above.
 - `tab new` and `pane split` default to background behavior for autonomous work.
   Pass `--foreground` only when the user explicitly asked you to switch to the
   new tab or focus the new split pane within its tab.
