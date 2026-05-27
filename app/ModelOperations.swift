@@ -1883,6 +1883,23 @@ struct PaneTokenStore {
   }
 }
 
+/// How send() should drive reconcile() for a translated message.
+enum ReconcileDecision: Equatable {
+  case reconcileNow
+  case scheduleCoalesced
+  case coalesceIntoPending
+}
+
+/// Classify reconcile scheduling separately from the DispatchSourceTimer glue.
+func reconcileDecision(
+  for msg: Msg,
+  coalescedSweepPending: Bool,
+  emitsPostReconcile: Bool
+) -> ReconcileDecision {
+  guard msg.coalescesReconcile, !emitsPostReconcile else { return .reconcileNow }
+  return coalescedSweepPending ? .coalesceIntoPending : .scheduleCoalesced
+}
+
 /// Translate a Msg through the event protocol layer.
 /// Returns nil when the message should be dropped (bad token, malformed event).
 /// Normal (non-event) messages pass through unchanged.

@@ -60,12 +60,16 @@ class AppRuntime {
     private var checkpointTimer: DispatchSourceTimer?          // debounce timer for light checkpoints
     private var enrichedCheckpointTimer: DispatchSourceTimer?  // repeating timer for enriched checkpoints
     private var checkpointPending = false                      // true while a debounced write is scheduled
+    private var coalescedReconcileTimer: DispatchSourceTimer?   // rate-limited whole-model sweep
     // Serializes checkpoint writes and gives sync flushes one fence for pending async I/O.
     private static let checkpointIOQueue = DispatchQueue(label: "danterm.checkpoint.io", qos: .utility)
     private var searchDebounceTimers: [PaneId: DispatchSourceTimer] = [:]
     private var ipcConnections: [UUID: IpcConnection] = [:]
     private var ipcServer: IpcServer?
     private static let checkpointDebounceInterval: TimeInterval = 2.0
+    // Matches Ghostty's title coalesce interval: quick enough to feel live, slow
+    // enough to avoid flickering chrome under terminal-title spam.
+    private static let reconcileCoalesceInterval: TimeInterval = 0.075
     // Slowed from 60s to 10min until the libghostty memory leak is fixed.
     // https://github.com/danneu/danterm/issues/31
     private static let enrichedCheckpointInterval: TimeInterval = 600.0
@@ -232,7 +236,20 @@ class AppRuntime {
         for command in commands where !command.isPostReconcile {
             perform(command)
         }
-        reconcile()
+        let emitsPostReconcile = commands.contains { $0.isPostReconcile }
+        switch reconcileDecision(
+            for: translatedMsg,
+            coalescedSweepPending: coalescedReconcileTimer != nil,
+            emitsPostReconcile: emitsPostReconcile
+        ) {
+        case .reconcileNow:
+            cancelCoalescedReconcile()
+            reconcile()
+        case .scheduleCoalesced:
+            scheduleCoalescedReconcile()
+        case .coalesceIntoPending:
+            break
+        }
         for command in commands where command.isPostReconcile {
             perform(command)
         }
@@ -573,6 +590,7 @@ class AppRuntime {
             scheduleDebouncedCheckpoint()
 
         case .terminate:
+            cancelCoalescedReconcile()
             checkpointTimer?.cancel()
             checkpointTimer = nil
             enrichedCheckpointTimer?.cancel()
@@ -835,6 +853,27 @@ class AppRuntime {
         }
         timer.resume()
         checkpointTimer = timer
+    }
+
+    /// Defer the whole-model reconcile() sweep while title/cwd/progress messages
+    /// arrive at high frequency. The timer reads the latest model when it fires.
+    private func scheduleCoalescedReconcile() {
+        guard coalescedReconcileTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + Self.reconcileCoalesceInterval)
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            self.coalescedReconcileTimer = nil
+            self.reconcile()
+        }
+        timer.resume()
+        coalescedReconcileTimer = timer
+    }
+
+    /// Cancel any deferred sweep because an inline reconcile will cover the latest model.
+    private func cancelCoalescedReconcile() {
+        coalescedReconcileTimer?.cancel()
+        coalescedReconcileTimer = nil
     }
 
     /// Flush a pending debounced checkpoint immediately. Called on appResignedActive
@@ -1202,6 +1241,7 @@ class AppRuntime {
         surfaces = staged.surfaces
         tokenStore = staged.tokenStore
         replayFiles = staged.replayFiles
+        cancelCoalescedReconcile()
 
         // Restore bypasses update(); reconcile MRU here so the first
         // cmd-shift-i after a restore sees a populated mruOrder.

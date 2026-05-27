@@ -98,6 +98,76 @@ func ghosttyTests() {
         }, "second bell should be throttled (no sendNotification)")
     }
 
+    test("reconcileDecision coalesces only eligible surface metadata") {
+        let paneId = PaneId()
+        let coalescedMessages: [Msg] = [
+            .surfaceTitle(paneId: paneId, title: "vim"),
+            .surfaceCwd(paneId: paneId, cwd: "/tmp"),
+            .surfaceProgress(paneId: paneId, state: .set(percent: 50))
+        ]
+
+        for msg in coalescedMessages {
+            try expectEqual(
+                reconcileDecision(for: msg, coalescedSweepPending: false, emitsPostReconcile: false),
+                .scheduleCoalesced
+            )
+            try expectEqual(
+                reconcileDecision(for: msg, coalescedSweepPending: true, emitsPostReconcile: false),
+                .coalesceIntoPending
+            )
+            try expectEqual(
+                reconcileDecision(for: msg, coalescedSweepPending: false, emitsPostReconcile: true),
+                .reconcileNow
+            )
+            try expectEqual(
+                reconcileDecision(for: msg, coalescedSweepPending: true, emitsPostReconcile: true),
+                .reconcileNow
+            )
+        }
+
+        let inlineMessages: [Msg] = [
+            .surfaceBell(paneId: paneId),
+            .commandStarted(paneId: paneId, command: "make test")
+        ]
+        for msg in inlineMessages {
+            try expectEqual(
+                reconcileDecision(for: msg, coalescedSweepPending: false, emitsPostReconcile: false),
+                .reconcileNow
+            )
+            try expectEqual(
+                reconcileDecision(for: msg, coalescedSweepPending: true, emitsPostReconcile: false),
+                .reconcileNow
+            )
+        }
+    }
+
+    test("surface metadata updates stay coalesce eligible") {
+        var focusedModel = makeModel()
+        createTab(&focusedModel)
+        let focusedPane = focusedModel.groups[0].tabs[0].focusedPaneId
+
+        var unfocusedModel = makeModel()
+        createTab(&unfocusedModel)
+        let unfocusedPane = unfocusedModel.groups[0].tabs[0].focusedPaneId
+        update(&unfocusedModel, .splitPane(direction: .horizontal))
+
+        let scenarios: [(Msg, AppModel)] = [
+            (.surfaceTitle(paneId: focusedPane, title: "vim"), focusedModel),
+            (.surfaceCwd(paneId: focusedPane, cwd: "/tmp"), focusedModel),
+            (.surfaceProgress(paneId: focusedPane, state: .set(percent: 50)), focusedModel),
+            (.surfaceTitle(paneId: unfocusedPane, title: "htop"), unfocusedModel),
+            (.surfaceCwd(paneId: unfocusedPane, cwd: "/var/tmp"), unfocusedModel),
+            (.surfaceProgress(paneId: unfocusedPane, state: .indeterminate), unfocusedModel)
+        ]
+
+        for (msg, seedModel) in scenarios {
+            var model = seedModel
+            let commands = update(&model, msg)
+            try expect(commands.allSatisfy { !$0.isPostReconcile },
+                "coalesced surface metadata update should not emit post-reconcile commands")
+        }
+    }
+
     test("testSurfaceTitleFocusedPane") {
         var model = makeModel()
         createTab(&model)

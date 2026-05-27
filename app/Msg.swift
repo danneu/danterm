@@ -183,6 +183,22 @@ enum Msg {
     case jumpModeCanceled
 }
 
+extension Msg {
+    /// Whether this message is eligible to defer its reconcile() sweep so bursts
+    /// coalesce. Only high-frequency surface metadata opts in; update() still runs
+    /// immediately, so the model stays current and the final value is never dropped.
+    /// The runtime evaluates this after translateMsg(), keeping title-channel IPC
+    /// events on the inline reconcile path.
+    var coalescesReconcile: Bool {
+        switch self {
+        case .surfaceTitle, .surfaceCwd, .surfaceProgress:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
 /// Which entity was being renamed (used by renameCompletionMessages).
 enum RenameAction {
     case tab(TabId)
