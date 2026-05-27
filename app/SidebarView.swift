@@ -254,10 +254,9 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
         // Reapply selection (NSOutlineView-owned) through the existing pure rule, then
         // refresh the forced-accent emphasis on the surviving rows.
-        let liveTabIds = Set(model.groups.flatMap(\.tabs).map(\.id))
         let restoreSet = resolveReloadSelection(
             priorSelectedTabIds: priorSelectedTabIds,
-            liveTabIds: liveTabIds,
+            liveTabIds: liveTabIds(in: model),
             selectedTabId: model.selectedTabId)
         applyRestoreSelection(restoreSet, selectedTabId: model.selectedTabId)
         refreshRowEmphasis(focusedTabId: model.selectedTabId)

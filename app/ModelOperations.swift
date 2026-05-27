@@ -402,6 +402,17 @@ func tabById(_ tabId: TabId, in model: AppModel) -> TabModel? {
   return model.groups[gi].tabs[ti]
 }
 
+/// Live tab ids across all groups, built without materializing tab values.
+func liveTabIds(in model: AppModel) -> Set<TabId> {
+  var ids = Set<TabId>()
+  for group in model.groups {
+    for tab in group.tabs {
+      ids.insert(tab.id)
+    }
+  }
+  return ids
+}
+
 func selectedTab(in model: AppModel) -> TabModel? {
   guard let id = model.selectedTabId else { return nil }
   return tabById(id, in: model)
@@ -868,21 +879,37 @@ func moveToFront<T: Equatable>(_ array: inout [T], _ value: T) {
 /// appends missing live tabs at the back, and (when not cycling) hoists
 /// selectedTabId to index 0 so mruOrder[0] always equals the focused tab.
 func reconcileMru(_ model: inout AppModel) {
-  let liveTabs = Set(model.groups.flatMap(\.tabs).map(\.id))
+  let liveTabs = liveTabIds(in: model)
+  if mruOrderIsCanonical(model, liveTabs: liveTabs) { return }
+
   var seen = Set<TabId>()
   var rebuilt: [TabId] = []
-  for tabId in model.mruOrder {
-    guard liveTabs.contains(tabId), seen.insert(tabId).inserted else { continue }
+  rebuilt.reserveCapacity(liveTabs.count)
+  for tabId in model.mruOrder where liveTabs.contains(tabId) && seen.insert(tabId).inserted {
     rebuilt.append(tabId)
   }
-  for tab in model.groups.flatMap(\.tabs) where !seen.contains(tab.id) {
-    rebuilt.append(tab.id)
-    seen.insert(tab.id)
+  for group in model.groups {
+    for tab in group.tabs where seen.insert(tab.id).inserted {
+      rebuilt.append(tab.id)
+    }
   }
   model.mruOrder = rebuilt
   if model.mruCycle == nil, let sel = model.selectedTabId {
     moveToFront(&model.mruOrder, sel)
   }
+}
+
+/// True when mruOrder already matches reconcileMru's canonical output.
+private func mruOrderIsCanonical(_ model: AppModel, liveTabs: Set<TabId>) -> Bool {
+  guard model.mruCycle != nil || model.mruOrder.first == model.selectedTabId else {
+    return false
+  }
+  var seen = Set<TabId>()
+  seen.reserveCapacity(liveTabs.count)
+  for id in model.mruOrder {
+    guard liveTabs.contains(id), seen.insert(id).inserted else { return false }
+  }
+  return seen.count == liveTabs.count
 }
 
 struct ResolvedCycle: Equatable {
@@ -898,7 +925,7 @@ struct ResolvedCycle: Equatable {
 ///   3. If no preceding live id exists, fall back to liveOrder index 0.
 /// Returns nil iff no tabs in frozenOrder remain live.
 func resolveLiveCycle(_ cycle: MruCycleState, in model: AppModel) -> ResolvedCycle? {
-  let liveTabs = Set(model.groups.flatMap(\.tabs).map(\.id))
+  let liveTabs = liveTabIds(in: model)
   let live = cycle.frozenOrder.filter { liveTabs.contains($0) }
   guard !live.isEmpty else { return nil }
 

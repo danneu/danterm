@@ -837,6 +837,38 @@ func modelOperationsTests() {
         try expect(Set(model.mruOrder) == Set(ids), "all live tabs present")
     }
 
+    test("reconcileMru does not early-out when count matches but a live tab is missing") {
+        // Intent: mruOrder with a matching count but stale id is rebuilt, not
+        //   treated as canonical.
+        // Why it exists: pins the fast path against a count-only check that
+        //   would drop the missing live tab from the switcher.
+        // Scenario: spec-first; a restore/import-like swap leaves a stale MRU
+        //   entry while live tab count stays unchanged.
+        let (m0, ids) = makeMruModel(tabCount: 2)
+        var model = m0
+        let ghost = TabId()
+        model.mruOrder = [ids[0], ghost]
+        model.selectedTabId = ids[0]
+        reconcileMru(&model)
+        try expect(!model.mruOrder.contains(ghost), "stale id must be pruned")
+        try expectEqual(Set(model.mruOrder), Set(ids), "missing live tab must be appended")
+    }
+
+    test("reconcileMru does not early-out on a duplicate live id") {
+        // Intent: mruOrder with a repeated live id is rebuilt, not treated as
+        //   canonical.
+        // Why it exists: pins the fast path against accepting [A, A] for live
+        //   {A, B}, which has the right count and a valid head but lacks coverage.
+        // Scenario: spec-first; a corrupt/transient MRU order repeats one live
+        //   id and omits another.
+        let (m0, ids) = makeMruModel(tabCount: 2)
+        var model = m0
+        model.mruOrder = [ids[0], ids[0]]
+        model.selectedTabId = ids[0]
+        reconcileMru(&model)
+        try expectEqual(model.mruOrder, [ids[0], ids[1]], "dedup to [A], then append B")
+    }
+
     // MARK: - resolveLiveCycle
 
     test("resolveLiveCycle all live → identity") {

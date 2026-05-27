@@ -1537,7 +1537,7 @@ private func handleIpcRequest(
                 title: effectiveLaunch?.title
             )
         }
-        let before = Set(model.groups.flatMap(\.tabs).map(\.id))
+        let before = liveTabIds(in: model)
         let createTabMsg: Msg
         if let position {
             createTabMsg = .createTab(inGroupId: groupId, position: position, launch: effectiveLaunch, background: background)
