@@ -44,6 +44,9 @@ struct ReconcilerCaches {
     // Its three hosts (window, chromeView, dock tile) persist across container rebuilds,
     // so this cache needs no cross-pass invalidation. nil == not yet applied.
     var windowChrome: WindowChromeProjection? = nil
+    // Single-optional preferences projection cache. nil == no open preferences
+    // draft/panel; a non-nil value is the last form render pushed into the panel.
+    var preferencesPanel: PreferencesPanelProjection? = nil
     // Single-optional MRU switcher cache (the windowChrome template, plus a hide
     // transition): the last switcher projection reconcileSwitcher applied. nil == no MRU
     // cycle == panel ordered out. The panel persists across container rebuilds, so this
@@ -70,6 +73,7 @@ extension AppRuntime {
         reconcileSidebar()
         reconcileWindowChrome()
         reconcileSwitcher()      // single-optional MRU projection; nil (no mruCycle) -> orderOut
+        reconcilePreferencesPanel()
         syncSurfaceVisibility()  // existing occlusion pass; stays last
     }
 
@@ -277,5 +281,17 @@ extension AppRuntime {
             switcherPanel?.orderOut(nil)  // nil == no cycle == hide
         }
         caches.switcher = new
+    }
+
+    /// Push the preferences panel form render from one diffed projection. The panel
+    /// exists outside the model, so a missing panel is treated like no desired UI:
+    /// clear the cache and do not render committed fallback values.
+    func reconcilePreferencesPanel() {
+        let new = preferencesPanel == nil ? nil : desiredPreferencesPanel(in: model)
+        guard caches.preferencesPanel != new else { return }
+        if let proj = new {
+            preferencesPanel?.apply(proj)
+        }
+        caches.preferencesPanel = new
     }
 }
