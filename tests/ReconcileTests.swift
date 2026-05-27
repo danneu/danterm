@@ -220,6 +220,54 @@ func reconcileTests() {
         try expect(!guarded.clearRename, "no edit -> nothing to clear")
     }
 
+    test("desiredContainerShapes: eager projection includes selected and background tabs") {
+        let selectedPaneId = PaneId(), siblingPaneId = PaneId(), otherPaneId = PaneId()
+        let selectedTabId = TabId(), siblingTabId = TabId(), otherTabId = TabId()
+        let selectedTab = TabModel(
+            id: selectedTabId,
+            focusedPaneId: selectedPaneId,
+            rootNode: .leaf(PaneModel(id: selectedPaneId))
+        )
+        let siblingTab = TabModel(
+            id: siblingTabId,
+            focusedPaneId: siblingPaneId,
+            rootNode: .leaf(PaneModel(id: siblingPaneId))
+        )
+        let otherTab = TabModel(
+            id: otherTabId,
+            focusedPaneId: otherPaneId,
+            rootNode: .leaf(PaneModel(id: otherPaneId))
+        )
+        var model = AppModel(
+            groups: [
+                GroupModel(id: GroupId(), name: "Selected", tabs: [selectedTab, siblingTab]),
+                GroupModel(id: GroupId(), name: "Collapsed", isCollapsed: true, tabs: [otherTab]),
+            ],
+            selectedTabId: selectedTabId
+        )
+        let expectedShapes = [
+            selectedTabId: containerShape(of: selectedTab),
+            siblingTabId: containerShape(of: siblingTab),
+            otherTabId: containerShape(of: otherTab),
+        ]
+        let expectedKeys = Set(expectedShapes.keys)
+
+        let initial = desiredContainerShapes(in: model)
+
+        try expectEqual(Set(initial.keys), expectedKeys,
+            "projection includes selected, same-group background, and collapsed-group background tabs")
+        try expectEqual(initial, expectedShapes,
+            "each projected shape matches the tab's container shape")
+
+        model.selectedTabId = otherTabId
+        let afterSelectionChange = desiredContainerShapes(in: model)
+
+        try expectEqual(Set(afterSelectionChange.keys), expectedKeys,
+            "selection changes do not change projected tab keys")
+        try expectEqual(afterSelectionChange, initial,
+            "selection changes do not change projected container shapes")
+    }
+
     // MARK: - computeContainerOps (model-apply, Stage 8)
     //
     // Like the sidebar diff, this is a model-apply test, NOT an exact-sequence assert:
