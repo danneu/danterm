@@ -725,6 +725,9 @@ class AppRuntime {
 
     // Deliver notifications only after checking authorization state so the
     // first real alert can recover if the launch-time prompt was skipped.
+    // Both completion closures run off the main actor (the center dispatches
+    // them on a background queue), so keep them free of main-actor state --
+    // no model/view mutation here without hopping back to main.
     private func enqueueNotificationRequest(_ request: UNNotificationRequest) {
         let center = UNUserNotificationCenter.current()
         center.getNotificationSettings { settings in
