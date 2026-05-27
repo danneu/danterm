@@ -25,6 +25,9 @@ class PaneWrapperView: NSView {
     private let remoteSessionLabel: NonHitTestingLabel
     private var compactRemoteConstraints: [NSLayoutConstraint] = []
     private var expandedRemoteConstraints: [NSLayoutConstraint] = []
+    // Tracks which remote constraint set is active so toolbar text churn does not
+    // re-toggle layout constraints unless the compact/expanded mode changes.
+    private var remoteExpanded = false
     private let progressIndicator: ProgressIndicatorView
     private var currentProgress: ProgressState?
 
@@ -253,12 +256,16 @@ class PaneWrapperView: NSView {
         remoteAccessory.isHidden = !isRemote
         remoteSessionLabel.stringValue = remoteSession?.displayString ?? ""
         remoteSessionLabel.isHidden = remoteSession == nil
-        if remoteSession == nil {
-            NSLayoutConstraint.deactivate(expandedRemoteConstraints)
-            NSLayoutConstraint.activate(compactRemoteConstraints)
-        } else {
-            NSLayoutConstraint.deactivate(compactRemoteConstraints)
-            NSLayoutConstraint.activate(expandedRemoteConstraints)
+        let expanded = remoteSession != nil
+        if expanded != remoteExpanded {
+            remoteExpanded = expanded
+            if expanded {
+                NSLayoutConstraint.deactivate(compactRemoteConstraints)
+                NSLayoutConstraint.activate(expandedRemoteConstraints)
+            } else {
+                NSLayoutConstraint.deactivate(expandedRemoteConstraints)
+                NSLayoutConstraint.activate(compactRemoteConstraints)
+            }
         }
         alertBadge.updateBadge(count: unreadAlertCount)
         todoButton.update(totalCount: totalTodoCount, uncompletedCount: uncompletedTodoCount)
