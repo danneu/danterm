@@ -37,6 +37,7 @@ class AppRuntime {
     weak var contentArea: NSView?
     weak var chromeView: WindowChromeView?
     var alertsPopover: NSPopover?
+    private lazy var alertsPopoverDelegate = AlertsPopoverDelegateAdapter(runtime: self)
     var todoPopover: NSPopover?
     private var todoPopoverDelegate: TodoPopoverDelegateAdapter?
     var tabTodoPopover: NSPopover?
@@ -1378,11 +1379,29 @@ class AppRuntime {
         guard let anchor = chromeView?.bellButton else { return }
         let vc = AlertsPopoverViewController()
         vc.runtime = self
+        vc.loadViewIfNeeded()
+        vc.apply(desiredAlertsPopover(in: model))
         let popover = NSPopover()
         popover.contentViewController = vc
         popover.behavior = .transient
+        popover.delegate = alertsPopoverDelegate
         popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
         alertsPopover = popover
+    }
+}
+
+/// NSPopoverDelegate adapter for the alerts popover. Alerts popover visibility is
+/// AppKit-owned, so close events only clear the retained popover handle.
+private final class AlertsPopoverDelegateAdapter: NSObject, NSPopoverDelegate {
+    weak var runtime: AppRuntime?
+
+    init(runtime: AppRuntime?) {
+        self.runtime = runtime
+    }
+
+    /// NSPopoverDelegate: release the popover handle after click-away or programmatic close.
+    func popoverDidClose(_ notification: Notification) {
+        runtime?.alertsPopover = nil
     }
 }
 

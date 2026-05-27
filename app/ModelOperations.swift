@@ -1012,6 +1012,43 @@ func alertsEmptyText(tab: AlertTab) -> String {
     }
 }
 
+struct AlertRowProjection: Equatable {
+  let id: AlertId
+  let kind: AlertKind
+  let title: String
+  let body: String
+  let createdAt: Date
+  let isUnread: Bool
+}
+
+struct AlertsPopoverProjection: Equatable {
+  let rows: [AlertRowProjection]
+  let showAll: Bool
+  let markAllVisible: Bool
+  let emptyText: String?
+}
+
+/// Project the alert feed rows and controls for an open alerts popover.
+func desiredAlertsPopover(in model: AppModel) -> AlertsPopoverProjection {
+  let tab: AlertTab = model.showAllAlerts ? .history : .unread
+  let displayed = filteredAlerts(model.alerts, tab: tab)
+  return AlertsPopoverProjection(
+    rows: displayed.map {
+      AlertRowProjection(
+        id: $0.id,
+        kind: $0.kind,
+        title: $0.title,
+        body: $0.body,
+        createdAt: $0.createdAt,
+        isUnread: $0.isUnread
+      )
+    },
+    showAll: model.showAllAlerts,
+    markAllVisible: model.alerts.contains(where: \.isUnread),
+    emptyText: displayed.isEmpty ? alertsEmptyText(tab: tab) : nil
+  )
+}
+
 func paneHasUnreadAlert(_ paneId: PaneId, alerts: [AlertModel]) -> Bool {
   alerts.contains { $0.isUnread && $0.paneId == paneId }
 }

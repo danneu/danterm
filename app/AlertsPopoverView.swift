@@ -12,14 +12,8 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
     private let markAllButton = NSButton(title: "Mark All Read", target: nil, action: nil)
     private let emptyLabel = NSTextField(labelWithString: "No alerts")
     private let showAllCheckbox = NSButton(checkboxWithTitle: "Show all", target: nil, action: nil)
-
-    private var alertTab: AlertTab {
-        (runtime?.model.showAllAlerts ?? false) ? .history : .unread
-    }
-
-    private var displayedAlerts: [AlertModel] {
-        filteredAlerts(runtime?.model.alerts ?? [], tab: alertTab)
-    }
+    private var projection = AlertsPopoverProjection(
+        rows: [], showAll: false, markAllVisible: false, emptyText: "No unread alerts")
 
     override func loadView() {
         let size = NSSize(width: 320, height: 400)
@@ -106,18 +100,12 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
         self.view = wrapper
     }
 
-    override func viewWillAppear() {
-        super.viewWillAppear()
-        showAllCheckbox.state = (runtime?.model.showAllAlerts ?? false) ? .on : .off
-        rebuildRows()
-    }
-
-    private func rebuildRows() {
-        let displayed = displayedAlerts
-        let allAlerts = runtime?.model.alerts ?? []
-
-        if displayed.isEmpty {
-            emptyLabel.stringValue = alertsEmptyText(tab: alertTab)
+    /// Render the latest model-derived popover state pushed by the reconciler.
+    func apply(_ projection: AlertsPopoverProjection) {
+        self.projection = projection
+        showAllCheckbox.state = projection.showAll ? .on : .off
+        if let emptyText = projection.emptyText {
+            emptyLabel.stringValue = emptyText
             emptyLabel.isHidden = false
             scrollView.isHidden = true
         } else {
@@ -125,33 +113,34 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
             scrollView.isHidden = false
         }
 
-        markAllButton.isHidden = !allAlerts.contains(where: \.isUnread)
+        markAllButton.isHidden = !projection.markAllVisible
         tableView.reloadData()
     }
 
     // MARK: - NSTableViewDataSource
 
+    /// NSTableViewDataSource: render one row for each projected alert.
     func numberOfRows(in tableView: NSTableView) -> Int {
-        return displayedAlerts.count
+        return projection.rows.count
     }
 
     // MARK: - NSTableViewDelegate
 
+    /// NSTableViewDelegate: build a row from the same projection used for clicks.
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let displayed = displayedAlerts
-        guard row < displayed.count else { return nil }
-        return makeAlertRow(displayed[row])
+        guard row < projection.rows.count else { return nil }
+        return makeAlertRow(projection.rows[row])
     }
 
+    /// NSTableViewDelegate: activate the alert represented by the selected rendered row.
     func tableViewSelectionDidChange(_ notification: Notification) {
         let row = tableView.selectedRow
-        let displayed = displayedAlerts
-        guard row >= 0, row < displayed.count else { return }
-        runtime?.send(.activateAlert(alertId: displayed[row].id))
+        guard row >= 0, row < projection.rows.count else { return }
+        runtime?.send(.activateAlert(alertId: projection.rows[row].id))
         tableView.deselectRow(row)
     }
 
-    private func makeAlertRow(_ alert: AlertModel) -> NSView {
+    private func makeAlertRow(_ alert: AlertRowProjection) -> NSView {
         let row = NSView()
         row.translatesAutoresizingMaskIntoConstraints = false
 
@@ -229,12 +218,10 @@ class AlertsPopoverViewController: NSViewController, NSTableViewDataSource, NSTa
 
     @objc private func showAllToggled() {
         runtime?.send(.setShowAllAlerts(showAllCheckbox.state == .on))
-        rebuildRows()
     }
 
     @objc private func markAllRead() {
         runtime?.send(.markAllAlertsRead)
-        rebuildRows()
     }
 
     private func relativeTime(_ date: Date) -> String {

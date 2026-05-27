@@ -51,6 +51,9 @@ struct ReconcilerCaches {
     // Single-optional preferences projection cache. nil == no open preferences
     // draft/panel; a non-nil value is the last form render pushed into the panel.
     var preferencesPanel: PreferencesPanelProjection? = nil
+    // Single-optional alerts-popover cache. nil means no open popover projection
+    // has been applied; non-nil is the last value pushed while the popover was shown.
+    var alertsPopover: AlertsPopoverProjection? = nil
     // Single-optional theme-browser content cache. nil == no browser open; non-nil
     // == last focused-pane theme content applied.
     var themeBrowser: ThemeBrowserProjection? = nil
@@ -88,6 +91,7 @@ extension AppRuntime {
         reconcileSwitcher()      // single-optional MRU projection; nil (no mruCycle) -> orderOut
         reconcileQuitConfirmation()
         reconcilePreferencesPanel()
+        reconcileAlertsPopover()
         reconcileThemeBrowser()
         syncSurfaceVisibility()  // existing occlusion pass; stays last
     }
@@ -354,6 +358,19 @@ extension AppRuntime {
             preferencesPanel?.orderOut(nil)
         }
         caches.preferencesPanel = new
+    }
+
+    /// Push the current alert-feed projection into the popover while it is shown.
+    /// The popover itself is AppKit-owned, so a closed popover projects as nil.
+    func reconcileAlertsPopover() {
+        let shown = alertsPopover?.isShown ?? false
+        let new: AlertsPopoverProjection? = shown ? desiredAlertsPopover(in: model) : nil
+        guard caches.alertsPopover != new else { return }
+        if let proj = new,
+           let vc = alertsPopover?.contentViewController as? AlertsPopoverViewController {
+            vc.apply(proj)
+        }
+        caches.alertsPopover = new
     }
 
     /// Push the focused pane's user theme into the open theme browser. The browser's

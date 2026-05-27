@@ -898,6 +898,90 @@ func modelOperationsTests() {
         try expect(resolved == nil, "no live tabs → nil")
     }
 
+    // MARK: - desiredAlertsPopover
+
+    test("desiredAlertsPopover filters unread vs show-all rows") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let unread = AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneId,
+            title: "Unread", body: "bell", createdAt: Date(timeIntervalSince1970: 10), isUnread: true)
+        let read = AlertModel(
+            id: AlertId(), kind: .desktopNotification, paneId: paneId,
+            title: "Read", body: "osc", createdAt: Date(timeIntervalSince1970: 20), isUnread: false)
+        model.alerts = [unread, read]
+
+        var proj = desiredAlertsPopover(in: model)
+        try expectEqual(proj.rows.map(\.id), [unread.id], "unread tab shows only unread alerts")
+        try expectEqual(proj.showAll, false, "projection carries the show-all flag")
+
+        model.showAllAlerts = true
+        proj = desiredAlertsPopover(in: model)
+        try expectEqual(proj.rows.map(\.id), [unread.id, read.id], "show-all tab shows all alerts")
+        try expectEqual(proj.showAll, true, "projection carries the show-all flag")
+    }
+
+    test("desiredAlertsPopover mark-all visibility reads the full alert list") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let read = AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneId,
+            title: "Read", body: "x", createdAt: Date(timeIntervalSince1970: 10), isUnread: false)
+        var unread = AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneId,
+            title: "Unread", body: "x", createdAt: Date(timeIntervalSince1970: 20), isUnread: true)
+        model.showAllAlerts = true
+        model.alerts = [read, unread]
+
+        var proj = desiredAlertsPopover(in: model)
+        try expectEqual(proj.rows.map(\.id), [read.id, unread.id], "show-all keeps read rows visible")
+        try expectEqual(proj.markAllVisible, true, "any unread alert shows the mark-all button")
+
+        unread.isUnread = false
+        model.alerts = [read, unread]
+        proj = desiredAlertsPopover(in: model)
+        try expectEqual(proj.rows.map(\.id), [read.id, unread.id], "show-all rows remain after all alerts are read")
+        try expectEqual(proj.markAllVisible, false, "no unread alerts hides the mark-all button")
+    }
+
+    test("desiredAlertsPopover empty text follows the selected alert tab") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+
+        var proj = desiredAlertsPopover(in: model)
+        try expectEqual(proj.emptyText, "No unread alerts", "empty unread tab uses unread copy")
+
+        model.showAllAlerts = true
+        proj = desiredAlertsPopover(in: model)
+        try expectEqual(proj.emptyText, "No alerts", "empty history tab uses history copy")
+
+        model.alerts = [AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneId,
+            title: "DanTerm", body: "x", createdAt: Date(timeIntervalSince1970: 10), isUnread: true)]
+        proj = desiredAlertsPopover(in: model)
+        try expectEqual(proj.emptyText, nil, "rows present means no empty text")
+    }
+
+    test("desiredAlertsPopover changes when a background alert is inserted") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+
+        let proj0 = desiredAlertsPopover(in: model)
+        let alert = AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneId,
+            title: "DanTerm", body: "build", createdAt: Date(timeIntervalSince1970: 10), isUnread: true)
+        model.alerts.insert(alert, at: 0)
+        let proj1 = desiredAlertsPopover(in: model)
+
+        try expect(proj0 != proj1, "inserted alert changes the projection")
+        try expectEqual(proj1.rows.first?.id, alert.id, "new alert is the first rendered row")
+        try expectEqual(proj1.markAllVisible, true, "unread background alert shows the mark-all button")
+    }
+
     // MARK: - desiredSwitcher (MRU switcher overlay projection, Stage 7)
 
     // The disappearance net: a non-nil projection while cycling (rows in the live
