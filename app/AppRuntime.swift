@@ -607,8 +607,7 @@ class AppRuntime {
             }
 
         case .focusSearchField(let paneId):
-            guard let contentArea = contentArea else { return }
-            if let field = findPaneWrapper(for: paneId, in: contentArea)?.searchOverlay?.searchField {
+            if let field = findPaneWrapper(for: paneId)?.searchOverlay?.searchField {
                 window?.makeFirstResponder(field)
             }
 
@@ -660,8 +659,7 @@ class AppRuntime {
 
         case .showTodoPopover(let paneId):
             dismissTodoPopoverPair()
-            guard let contentArea = contentArea,
-                  let wrapper = findPaneWrapper(for: paneId, in: contentArea) else { return }
+            guard let wrapper = findPaneWrapper(for: paneId) else { return }
             let anchor = wrapper.todoButtonView
             let vc = TodoPopoverViewController(paneId: paneId, runtime: self)
             let delegate = TodoPopoverDelegateAdapter(paneId: paneId, runtime: self)
@@ -959,8 +957,8 @@ class AppRuntime {
 
         // Build pane frame provider: converts PaneWrapperView frames to window coordinates
         let provider: (PaneId) -> NSRect? = { [weak self] targetPaneId in
-            guard let self = self, let contentArea = self.contentArea else { return nil }
-            guard let wrapper = self.findPaneWrapper(for: targetPaneId, in: contentArea) else { return nil }
+            guard let self = self else { return nil }
+            guard let wrapper = self.findPaneWrapper(for: targetPaneId) else { return nil }
             return wrapper.convert(wrapper.bounds, to: nil)
         }
 
@@ -1275,17 +1273,10 @@ class AppRuntime {
 
     // MARK: - Pane Toolbars
 
-    // `internal` (not `private`) so reconcilePaneChrome in Reconcile.swift can reach
-    // a pane's wrapper to push toolbar/search-overlay renders.
-    func findPaneWrapper(for paneId: PaneId, in view: NSView) -> PaneWrapperView? {
-        for sub in view.subviews {
-            if let wrapper = sub as? PaneWrapperView {
-                if wrapper.paneId == paneId { return wrapper }
-            } else if let found = findPaneWrapper(for: paneId, in: sub) {
-                return found
-            }
-        }
-        return nil
+    // Resolve via the existing PaneId -> TerminalView index. `internal` (not `private`)
+    // so reconcilePaneChrome in Reconcile.swift can reach the live wrapper.
+    func findPaneWrapper(for paneId: PaneId) -> PaneWrapperView? {
+        surfaces[paneId]?.paneWrapper
     }
 
     // MARK: - View Building
@@ -1354,7 +1345,7 @@ class AppRuntime {
     func applyMountTimeFocus(_ tabId: TabId?) {
         guard let tabId = tabId,
               let tab = tabById(tabId, in: model),
-              let container = tabContainers[tabId] else { return }
+              tabContainers[tabId] != nil else { return }
         let browserFocus = themeBrowserView?.captureFocusTarget()
         let focusedId = tab.focusedPaneId
         // Focus the focused pane's surface -- unless the theme browser owns focus or the
@@ -1365,7 +1356,7 @@ class AppRuntime {
         }
         // Active search on the focused pane: focus its (paneChrome-rebuilt) search field.
         if browserFocus == nil, model.searchState[focusedId] != nil,
-           let field = findPaneWrapper(for: focusedId, in: container)?.searchOverlay?.searchField {
+           let field = findPaneWrapper(for: focusedId)?.searchOverlay?.searchField {
             window?.makeFirstResponder(field)
         }
         // The theme browser owns its own filter/focus; reload it for the new selection.

@@ -26,6 +26,9 @@ class TerminalView: NSView, NSTextInputClient {
     // Scrollbar support: updated synchronously from ghostty action callbacks.
     weak var scrollDelegate: ScrollableTerminalView?
 
+    // Back-pointer to the wrapper currently hosting this terminal. Weak: the wrapper owns us.
+    weak var paneWrapper: PaneWrapperView?
+
     var cellSize: NSSize = .zero {
         didSet { scrollDelegate?.scrollbarStateDidChange() }
     }

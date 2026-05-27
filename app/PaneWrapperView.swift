@@ -76,6 +76,7 @@ class PaneWrapperView: NSView {
         self.todoButton = TodoToolbarButton()
 
         super.init(frame: .zero)
+        terminalView.paneWrapper = self
 
         menuButton.target = self
         menuButton.action = #selector(showPaneMenu)
@@ -233,6 +234,13 @@ class PaneWrapperView: NSView {
         }
 
         NSLayoutConstraint.activate(constraints)
+    }
+
+    deinit {
+        // A rebuild can point the terminal at a new wrapper before this one deallocates.
+        if terminalView.paneWrapper === self {
+            terminalView.paneWrapper = nil
+        }
     }
 
     required init?(coder: NSCoder) {

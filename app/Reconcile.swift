@@ -178,8 +178,7 @@ extension AppRuntime {
     /// tears the overlay down (the disappear-but-host-survives discipline).
     func reconcilePaneChrome() {
         applyDiff(desiredPaneToolbar(in: model), &caches.paneToolbar, apply: { paneId, render in
-            guard let contentArea = contentArea else { return }
-            findPaneWrapper(for: paneId, in: contentArea)?.updateToolbar(
+            findPaneWrapper(for: paneId)?.updateToolbar(
                 title: render.title,
                 cwd: render.cwd,
                 progress: render.progress,
@@ -191,12 +190,10 @@ extension AppRuntime {
             )
         })
         applyDiff(desiredSearchOverlays(in: model), &caches.searchOverlay, apply: { paneId, render in
-            guard let contentArea = contentArea else { return }
             let search = SearchModel(needle: render.needle, total: render.total, selected: render.selected)
-            findPaneWrapper(for: paneId, in: contentArea)?.showSearchOverlay(search: search, runtime: self)
+            findPaneWrapper(for: paneId)?.showSearchOverlay(search: search, runtime: self)
         }, remove: { paneId in
-            guard let contentArea = contentArea else { return }
-            findPaneWrapper(for: paneId, in: contentArea)?.hideSearchOverlay()
+            findPaneWrapper(for: paneId)?.hideSearchOverlay()
         })
     }
 
