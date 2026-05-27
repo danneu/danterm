@@ -23,6 +23,7 @@ struct TestRunner {
         searchTests()
         scrollbarMathTests()
         tickCoalescerTests()
+        debouncerTests()
         surfaceGeometryTests()
         themeTests()
         remoteTests()

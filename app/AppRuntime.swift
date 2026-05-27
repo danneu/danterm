@@ -60,13 +60,13 @@ class AppRuntime {
     //   Enriched — model + scrollback text read from live Ghostty surfaces, written on
     //              a 10 min repeating timer and once at clean termination. Expensive but
     //              gives full restore fidelity including terminal history.
-    private var checkpointTimer: DispatchSourceTimer?          // debounce timer for light checkpoints
+    private let checkpointDebouncer = Debouncer(queue: .main)  // trailing debounce for light checkpoints
     private var enrichedCheckpointTimer: DispatchSourceTimer?  // repeating timer for enriched checkpoints
     private var checkpointPending = false                      // true while a debounced write is scheduled
     private var coalescedReconcileTimer: DispatchSourceTimer?   // rate-limited whole-model sweep
     // Serializes checkpoint writes and gives sync flushes one fence for pending async I/O.
     private static let checkpointIOQueue = DispatchQueue(label: "danterm.checkpoint.io", qos: .utility)
-    private var searchDebounceTimers: [PaneId: DispatchSourceTimer] = [:]
+    private var searchDebouncers: [PaneId: Debouncer] = [:]
     private var ipcConnections: [UUID: IpcConnection] = [:]
     private var ipcServer: IpcServer?
     private static let checkpointDebounceInterval: TimeInterval = 2.0
@@ -580,8 +580,7 @@ class AppRuntime {
 
         case .terminate:
             cancelCoalescedReconcile()
-            checkpointTimer?.cancel()
-            checkpointTimer = nil
+            checkpointDebouncer.cancel()
             enrichedCheckpointTimer?.cancel()
             enrichedCheckpointTimer = nil
             for paneId in replayFiles.keys {
@@ -620,9 +619,6 @@ class AppRuntime {
 
         case .sendSearchNeedle(let paneId, let needle):
             // Debounce: immediate for empty or 3+ chars, 300ms for 1-2 chars
-            searchDebounceTimers[paneId]?.cancel()
-            searchDebounceTimers.removeValue(forKey: paneId)
-
             let delay: TimeInterval = (needle.isEmpty || needle.count >= 3) ? 0 : 0.3
             let sendNeedle = { [weak self] in
                 guard let self = self,
@@ -635,13 +631,15 @@ class AppRuntime {
             }
 
             if delay == 0 {
+                searchDebouncers[paneId]?.cancel()
                 sendNeedle()
             } else {
-                let timer = DispatchSource.makeTimerSource(queue: .main)
-                timer.schedule(deadline: .now() + delay)
-                timer.setEventHandler(handler: sendNeedle)
-                timer.resume()
-                searchDebounceTimers[paneId] = timer
+                let debouncer = searchDebouncers[paneId] ?? {
+                    let debouncer = Debouncer(queue: .main)
+                    searchDebouncers[paneId] = debouncer
+                    return debouncer
+                }()
+                debouncer.schedule(after: delay, perform: sendNeedle)
             }
 
         case .sendSearchNavigate(let paneId, let direction):
@@ -653,8 +651,8 @@ class AppRuntime {
             }
 
         case .sendEndSearch(let paneId):
-            searchDebounceTimers[paneId]?.cancel()
-            searchDebounceTimers.removeValue(forKey: paneId)
+            searchDebouncers[paneId]?.cancel()
+            searchDebouncers.removeValue(forKey: paneId)
             if let view = surfaces[paneId], let surface = view.surface {
                 let action = "end_search"
                 _ = action.withCString { ptr in
@@ -822,8 +820,8 @@ class AppRuntime {
     func tearDownSurface(_ paneId: PaneId) {
         tokenStore.remove(paneId)
         cleanupReplayFile(for: paneId)
-        searchDebounceTimers[paneId]?.cancel()
-        searchDebounceTimers.removeValue(forKey: paneId)
+        searchDebouncers[paneId]?.cancel()
+        searchDebouncers.removeValue(forKey: paneId)
         if let view = surfaces.removeValue(forKey: paneId) {
             view.closeSurface()
         }
@@ -842,19 +840,15 @@ class AppRuntime {
     /// timer so rapid-fire model changes (e.g. dragging a split divider) coalesce
     /// into a single disk write.
     private func scheduleDebouncedCheckpoint() {
-        checkpointTimer?.cancel()
         checkpointPending = true
-        let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + Self.checkpointDebounceInterval)
-        timer.setEventHandler { [weak self] in
+        checkpointDebouncer.schedule(after: Self.checkpointDebounceInterval) { [weak self] in
             self?.performLightCheckpoint(async: true)
         }
-        timer.resume()
-        checkpointTimer = timer
     }
 
     /// Defer the whole-model reconcile() sweep while title/cwd/progress messages
     /// arrive at high frequency. The timer reads the latest model when it fires.
+    /// This is fixed-window coalescing; use Debouncer for trailing-edge debounce.
     private func scheduleCoalescedReconcile() {
         guard coalescedReconcileTimer == nil else { return }
         let timer = DispatchSource.makeTimerSource(queue: .main)
@@ -877,8 +871,7 @@ class AppRuntime {
     /// Flush a pending debounced checkpoint immediately. Called on appResignedActive
     /// so we don't lose the last 2s of state changes when the user switches away.
     func flushPendingCheckpoint() {
-        checkpointTimer?.cancel()
-        checkpointTimer = nil
+        checkpointDebouncer.cancel()
         if checkpointPending {
             performLightCheckpoint(async: false)
         } else {
