@@ -693,6 +693,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         runtime?.syncSurfaceVisibility()
     }
 
+    // NSWindowDelegate: window screen changes alter the display link each
+    // surface should sync against.
+    func windowDidChangeScreen(_ notification: Notification) {
+        guard notification.object is NSWindow else { return }
+        runtime?.syncSurfaceDisplayID()
+    }
+
     // MARK: - App Lifecycle
 
     // NSApplicationDelegate: catch-all safety net for any NSApp.terminate call.
@@ -709,7 +716,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     // delete the session lock so the next launch knows this was a clean exit.
     func applicationWillTerminate(_ notification: Notification) {
         runtime?.stopIpcServer()
-        runtime?.performEnrichedCheckpoint()
+        runtime?.performEnrichedCheckpoint(async: false)
         deleteSessionLockFile()
     }
 

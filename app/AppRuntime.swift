@@ -60,6 +60,8 @@ class AppRuntime {
     private var checkpointTimer: DispatchSourceTimer?          // debounce timer for light checkpoints
     private var enrichedCheckpointTimer: DispatchSourceTimer?  // repeating timer for enriched checkpoints
     private var checkpointPending = false                      // true while a debounced write is scheduled
+    // Serializes checkpoint writes and gives sync flushes one fence for pending async I/O.
+    private static let checkpointIOQueue = DispatchQueue(label: "danterm.checkpoint.io", qos: .utility)
     private var searchDebounceTimers: [PaneId: DispatchSourceTimer] = [:]
     private var ipcConnections: [UUID: IpcConnection] = [:]
     private var ipcServer: IpcServer?
@@ -296,6 +298,25 @@ class AppRuntime {
 
         surfaceVisibility = surfaceVisibility.filter { paneId, _ in
             surfaces[paneId] != nil
+        }
+    }
+
+    /// Push the active monitor's display id to every live surface so libghostty's
+    /// per-surface CVDisplayLink re-syncs to that monitor's refresh rate.
+    func syncSurfaceDisplayID() {
+        guard let displayID = window?.screen?.displayID else { return }
+        for (_, view) in surfaces {
+            guard let surface = view.surface else { continue }
+            ghostty_surface_set_display_id(surface, displayID)
+        }
+
+        // Mirror Ghostty's screen-change path: nudge backing properties on the
+        // next main-loop turn because AppKit can skip the automatic callback.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            for (_, view) in self.surfaces {
+                view.viewDidChangeBackingProperties()
+            }
         }
     }
 
@@ -813,7 +834,7 @@ class AppRuntime {
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + Self.checkpointDebounceInterval)
         timer.setEventHandler { [weak self] in
-            self?.performLightCheckpoint()
+            self?.performLightCheckpoint(async: true)
         }
         timer.resume()
         checkpointTimer = timer
@@ -822,20 +843,23 @@ class AppRuntime {
     /// Flush a pending debounced checkpoint immediately. Called on appResignedActive
     /// so we don't lose the last 2s of state changes when the user switches away.
     func flushPendingCheckpoint() {
-        guard checkpointPending else { return }
         checkpointTimer?.cancel()
         checkpointTimer = nil
-        performLightCheckpoint()
+        if checkpointPending {
+            performLightCheckpoint(async: false)
+        } else {
+            Self.checkpointIOQueue.sync {}
+        }
     }
 
-    /// Start a repeating 60s timer that writes enriched checkpoints (model +
+    /// Start a repeating timer that writes enriched checkpoints (model +
     /// scrollback from live surfaces). Called once from applicationDidFinishLaunching.
     func startEnrichedCheckpointTimer() {
         enrichedCheckpointTimer?.cancel()
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(deadline: .now() + Self.enrichedCheckpointInterval, repeating: Self.enrichedCheckpointInterval)
         timer.setEventHandler { [weak self] in
-            self?.performEnrichedCheckpoint()
+            self?.performEnrichedCheckpoint(async: true)
         }
         timer.resume()
         enrichedCheckpointTimer = timer
@@ -843,10 +867,10 @@ class AppRuntime {
 
     /// Write a light checkpoint: pure model serialization with scrollback: nil.
     /// Cheap — no Ghostty surface interaction.
-    private func performLightCheckpoint() {
+    private func performLightCheckpoint(async: Bool) {
         checkpointPending = false
         let initFile = toInitFile(model)
-        writeCheckpoint(initFile, to: lightCheckpointURL())
+        writeCheckpoint(initFile, to: lightCheckpointURL(), async: async)
     }
 
     /// Read scrollback text from each live surface, keyed by pane id. The impure
@@ -867,21 +891,29 @@ class AppRuntime {
 
     /// Write an enriched checkpoint: model snapshot + scrollback text read from
     /// each live Ghostty surface. Expensive but gives full restore fidelity.
-    /// Called by the 60s periodic timer and once at clean termination.
-    func performEnrichedCheckpoint() {
+    /// Called by the periodic timer and once at clean termination.
+    func performEnrichedCheckpoint(async: Bool) {
         let enrichedSnapshot = graftScrollback(onto: toSnapshot(model), scrollbackByPaneId: scrollbackByPaneId())
-        writeCheckpoint(toInitFile(snapshot: enrichedSnapshot), to: enrichedCheckpointURL())
+        writeCheckpoint(toInitFile(snapshot: enrichedSnapshot), to: enrichedCheckpointURL(), async: async)
     }
 
     /// Encode and atomically write a checkpoint to the given URL.
     /// Uses .sortedKeys for stable output (no .prettyPrinted — this is a machine file).
-    private func writeCheckpoint(_ initFile: AppInitFile, to url: URL) {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        guard let data = try? encoder.encode(initFile) else { return }
+    private func writeCheckpoint(_ initFile: AppInitFile, to url: URL, async: Bool) {
         let dir = recoveryDirectoryURL()
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try? data.write(to: url, options: .atomic)
+        let work = DispatchWorkItem {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            guard let data = try? encoder.encode(initFile) else { return }
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try? data.write(to: url, options: .atomic)
+        }
+
+        if async {
+            Self.checkpointIOQueue.async(execute: work)
+        } else {
+            Self.checkpointIOQueue.sync(execute: work)
+        }
     }
 
     // MARK: - State Import
