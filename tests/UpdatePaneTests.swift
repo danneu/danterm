@@ -250,23 +250,17 @@ func paneTests() {
         }, "should persist via scheduleCheckpoint")
     }
 
-    test("closePane with remaining panes rebuilds the visible tab and clears stranded popover") {
+    test("closePane with remaining panes rebuilds the visible tab") {
         var model = makeModel()
         createTab(&model)
         update(&model, .splitPane(direction: .horizontal))
         let paneToClose = model.groups[0].tabs[0].focusedPaneId
         let sibling = allPaneIds(model.groups[0].tabs[0].rootNode).first { $0 != paneToClose }!
-        // A sibling pane's TODO popover is open; closing a pane rebuilds the visible
-        // container (its ContainerShape drifts), stranding the popover -> the record clears.
-        model.todoPopover = .pane(sibling)
 
         update(&model, .closePane(paneId: paneToClose))
 
         try expect(model.pane(paneToClose) == nil, "closed pane's leaf is gone")
         try expect(model.pane(sibling) != nil, "sibling survives, so selection stays on this tab")
-        // The visible tab's ContainerShape drifted (a leaf left), so reconcileContainers
-        // rebuilds it; the stranded popover record clears (the visible-rebuild kind).
-        try expect(model.todoPopover == nil, "a visible structural rebuild clears the stranded TODO popover")
     }
 
     test("closePane closing selected tab removes container and shows fallback") {
@@ -644,8 +638,6 @@ func paneTests() {
         let tab2Id = model.groups[0].tabs[1].id
         let paneB = model.groups[0].tabs[1].focusedPaneId
         let liveBefore = Set(model.allPaneIds)
-        // A TODO popover open before a cross-tab move (a view swap) must clear.
-        model.todoPopover = .tab(model.selectedTabId!)
 
         let commands = update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
 
@@ -673,8 +665,6 @@ func paneTests() {
         // tab gained the pane + became selected (asserted above). reconcileContainers handles
         // the container remove/rebuild/show.
         try expect(tabById(tab1Id, in: model) == nil, "emptied source tab is removed")
-        // A cross-tab move is a view swap, so the stranded TODO popover record clears.
-        try expect(model.todoPopover == nil, "cross-tab move clears the stranded TODO popover")
 
         try expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }

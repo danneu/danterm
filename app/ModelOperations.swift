@@ -1531,6 +1531,40 @@ func computeContainerOps(
   return ops
 }
 
+/// Does this container-op script strand the previously-visible tab -- i.e. is the
+/// visible container removed, rebuilt, or hidden? This is the "view swap" condition.
+/// A pane TODO popover anchored to that container's wrapper button is physically
+/// orphaned when it holds; a tab popover is closed on view swap by policy.
+func containerOpsStrandVisible(ops: [ContainerOp], previouslyVisibleTabId: TabId?) -> Bool {
+  guard let visible = previouslyVisibleTabId else { return false }
+  return ops.contains { op in
+    switch op {
+    case .remove(let tabId), .rebuild(let tabId):
+      return tabId == visible
+    case .setVisible(let tabId, let visibleFlag):
+      return tabId == visible && !visibleFlag
+    }
+  }
+}
+
+/// The TODO-popover outcome of a container reconcile. On a view swap the record
+/// clears and the AppKit teardown runs; otherwise nothing changes.
+struct StrandedPopoverOutcome: Equatable {
+  var popover: TodoPopoverScope?
+  var dismissStranded: Bool
+}
+
+/// Derive both halves of TODO-popover cleanup from the container-op script so the
+/// reconciler owns the common view-swap rule.
+func reconcilePopover(
+  current: TodoPopoverScope?, ops: [ContainerOp], previouslyVisibleTabId: TabId?
+) -> StrandedPopoverOutcome {
+  if containerOpsStrandVisible(ops: ops, previouslyVisibleTabId: previouslyVisibleTabId) {
+    return StrandedPopoverOutcome(popover: nil, dismissStranded: true)
+  }
+  return StrandedPopoverOutcome(popover: current, dismissStranded: false)
+}
+
 /// Leaf pane ids of a container shape (backs `chromeInvalidation`).
 func leafPaneIds(of shape: ContainerShape) -> [PaneId] {
   func walk(_ node: ContainerShapeNode) -> [PaneId] {
@@ -1568,16 +1602,6 @@ func chromeInvalidation(ops: [ContainerOp], newShapes: [TabId: ContainerShape]) 
 /// command (it forks a PTY), so the reconciler only ever destroys.
 func surfacesToTearDown(liveSurfaceIds: Set<PaneId>, model: AppModel) -> Set<PaneId> {
   liveSurfaceIds.subtracting(Set(model.allPaneIds))
-}
-
-/// Clear the open-TODO-popover model record on a view swap (tab switch or visible
-/// container rebuild). The record drives guards + close callbacks but is never read
-/// by the reconciler to *present* a popover; the matching AppKit dismiss lives in
-/// `reconcileContainers`. Placed by a 1:1 rule wherever the migration removed a
-/// `.showSelectedTab` emission or a visible-tab `.rebuildTabContainer`, preserving
-/// today's `prepareForViewSwap` clearing.
-func clearTodoPopoverForViewSwap(_ model: inout AppModel) {
-  model.todoPopover = nil
 }
 
 // MARK: - Delete Group

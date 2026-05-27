@@ -93,11 +93,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
             launchCommand: nil,
             waitAfterCommand: true
         ))
-        if !background {
-            // Foreground createTab selects the new tab (a view swap); clear the stranded
-            // TODO popover record. reconcileContainers builds + shows the new container.
-            clearTodoPopoverForViewSwap(&model)
-        }
         // Persist new tab + pane + selection so a crash doesn't lose the tab.
         commands.append(.scheduleCheckpoint)
         return commands
@@ -194,12 +189,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
                 waitAfterCommand: true
             ),
         ]
-        // reconcileContainers rebuilds the container (its shape drifted). If the split is
-        // on the *visible* (selected) tab, the rebuild strands an anchored TODO popover --
-        // clear the model record (a background-tab split leaves the visible popover alone).
-        if tab.id == model.selectedTabId {
-            clearTodoPopoverForViewSwap(&model)
-        }
         // Persist new split tree so the pane layout survives a crash.
         commands.append(.scheduleCheckpoint)
         if theme != nil {
@@ -250,9 +239,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
             syncFocusedPaneChrome(next, in: &model)
         }
 
-        // closePane operates on the selected (visible) tab; its rebuild strands an
-        // anchored TODO popover, so clear the model record. reconcileContainers rebuilds.
-        clearTodoPopoverForViewSwap(&model)
         // Persist pane removal + updated tree so closed panes stay closed on restore.
         commands.append(.scheduleCheckpoint)
         return commands
@@ -284,9 +270,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
             tab.focusedPaneId = source
             tab.isZoomed = false
         }
-        // movePane operates on the selected (visible) tab; its rebuild strands an
-        // anchored TODO popover, so clear the model record. reconcileContainers rebuilds.
-        clearTodoPopoverForViewSwap(&model)
         // Persist rearranged split tree so pane positions survive a crash.
         return [.scheduleCheckpoint]
 
@@ -345,10 +328,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
             }
         }
         model.selectedTabId = targetTabId
-        // The source container reconciles (removed if emptied, else rebuilt) and the target
-        // is rebuilt + shown -- all by reconcileContainers from the model. Selection moved
-        // to the target (a view swap), so clear the stranded TODO popover record.
-        clearTodoPopoverForViewSwap(&model)
         commands.append(.makeFirstResponder(paneId: paneId))
         // Persist cross-tab pane move so the new tree layout survives a crash.
         commands.append(.scheduleCheckpoint)
@@ -416,9 +395,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
             markAlertsReadForPane(paneId, in: &model)
         }
 
-        // Selection moved to the new tab (a view swap); the source + new containers
-        // reconcile from the model via reconcileContainers. Clear the stranded popover record.
-        clearTodoPopoverForViewSwap(&model)
         commands.append(.makeFirstResponder(paneId: paneId))
         // Persist pane-to-new-tab extraction so the tab structure survives a crash.
         commands.append(.scheduleCheckpoint)
@@ -500,8 +476,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
         guard let tab = selectedTab(in: model) else { return [] }
         if tab.isZoomed {
             updateSelectedTab(&model) { t in t.isZoomed = false }
-            // Unzoom rebuilds the selected (visible) container; clear the stranded popover.
-            clearTodoPopoverForViewSwap(&model)
             return []
         }
         guard let target = nearestLeaf(tab.rootNode, from: tab.focusedPaneId, direction: direction, side: side) else { return [] }
@@ -845,17 +819,11 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
                 model.groups[gi].tabs.remove(at: ti)
                 removeGroupIfEmpty(groupId, from: &model)
 
-                var selectionMoved = false
                 if model.selectedTabId == tabId {
                     model.selectedTabId = model.groups.flatMap(\.tabs).first?.id
-                    selectionMoved = model.selectedTabId != nil
                 }
                 if model.groups.flatMap(\.tabs).isEmpty {
                     return commands + [.terminate]
-                }
-                if selectionMoved {
-                    // Selection moved to a surviving tab (a view swap); clear the popover record.
-                    clearTodoPopoverForViewSwap(&model)
                 }
                 // Persist tab removal after a failed surface so it doesn't reappear.
                 commands.append(.scheduleCheckpoint)
@@ -1025,8 +993,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
             if let selId = model.selectedTabId,
                !model.groups.flatMap(\.tabs).contains(where: { $0.id == selId }) {
                 model.selectedTabId = model.groups.flatMap(\.tabs).first?.id
-                // Selection moved to a surviving tab (a view swap); clear the popover record.
-                clearTodoPopoverForViewSwap(&model)
             }
             // Persist group deletion + tab removal so they don't reappear.
             commands.append(.scheduleCheckpoint)
@@ -1147,16 +1113,12 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
 
     case .toggleZoomPane:
         guard let tab = selectedTab(in: model) else { return [] }
-        // Zoom toggle changes the selected (visible) tab's container shape, so
-        // reconcileContainers rebuilds it; clear the stranded TODO popover record.
         if tab.isZoomed {
             updateSelectedTab(&model) { t in t.isZoomed = false }
-            clearTodoPopoverForViewSwap(&model)
             return []
         }
         if case .split = tab.rootNode {
             updateSelectedTab(&model) { t in t.isZoomed = true }
-            clearTodoPopoverForViewSwap(&model)
             return []
         }
         return []
@@ -2285,10 +2247,6 @@ private func applySelectTab(_ model: inout AppModel, id: TabId) -> [Command] {
     if model.config.alertClearMode == .focus, let tab = selectedTab(in: model) {
         markAlertsReadForPane(tab.focusedPaneId, in: &model)
     }
-    // Tab switch (a view swap): reconcileContainers hides the old container and shows the
-    // new one + applies mount-time focus. Clear the stranded TODO popover record (the old
-    // showSelectedTab's prepareForViewSwap clear).
-    clearTodoPopoverForViewSwap(&model)
     // Selection is view-owned: reconcileSidebar reapplies it (replacing the deleted
     // .setSidebarSelection), and any cleared-alert bell badges update from the projection.
     // The selected tab's window chrome reconciles via reconcileWindowChrome.
@@ -2403,14 +2361,13 @@ private func navigateToPane(_ paneId: PaneId, in model: inout AppModel) -> [Comm
         updateSelectedTab(&model) { t in t.isZoomed = false }
     }
     syncFocusedPaneChrome(paneId, in: &model)
-    // Same-tab navigation still needs popover finalization because selectTab
-    // intentionally no-ops when the target tab is already selected (so applySelectTab's
-    // clear didn't run). A tab-switch path already cleared it via applySelectTab.
+    // Same-tab navigation finalizes the open popover. selectTab no-ops when the tab is
+    // already selected, so applySelectTab's view-swap path did not run. For a focus
+    // change with no container op the reconciler's view-swap clear will not fire either;
+    // when this navigation also unzooms, the reconciler clears too and this is harmless.
     if !tabSwitched {
-        clearTodoPopoverForViewSwap(&model)
+        model.todoPopover = nil
     }
-    // A zoom change here rebuilds the selected (visible) container via reconcileContainers;
-    // its stranded-popover clear is already covered above (same-tab) or by applySelectTab.
     commands.append(.makeFirstResponder(paneId: paneId))
     if focusChanged {
         commands.append(.scheduleCheckpoint)
@@ -2541,8 +2498,6 @@ private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Command] {
     // Select fallback tab if we closed the selected one.
     if id == model.selectedTabId, let newId = fallbackTabId {
         model.selectedTabId = newId
-        // Selection moved to the fallback (a view swap); clear the stranded popover record.
-        clearTodoPopoverForViewSwap(&model)
     }
     return commands
 }

@@ -220,6 +220,53 @@ func reconcileTests() {
         try expect(!guarded.clearRename, "no edit -> nothing to clear")
     }
 
+    test("advanceSidebarCache retains suppressed row attrs while applying structure") {
+        let g1 = GroupId(); let g2 = GroupId()
+        let a = TabId(); let b = TabId(); let c = TabId()
+        let oldTabA = sbTabFull(a, "old-a", bell: 1)
+        let newTabA = sbTabFull(a, "new-a", bell: 9)
+        let old = sbProj(false, [
+            sbGroup(g1, "Old G1", first: true, [oldTabA, sbTabFull(b, "old-b", bell: 2)]),
+            sbGroup(g2, "Old G2", [sbTabFull(c, "old-c", bell: 3)]),
+        ])
+        let new = sbProj(false, [
+            sbGroup(g1, "New G1", collapsed: true, [newTabA, sbTabFull(c, "new-c", bell: 4)]),
+            sbGroup(g2, "New G2", first: true, [sbTabFull(b, "new-b", bell: 5)]),
+        ])
+
+        let tabSuppressed = advanceSidebarCache(old: old, new: new, suppressedRenameTarget: .tab(a))
+        try expectEqual(tabSuppressed.groups[0].tabs[0], oldTabA,
+            "suppressed tab keeps its old projection")
+        try expectEqual(tabSuppressed.groups[0].tabs[1], new.groups[0].tabs[1],
+            "sibling tab takes the new projection")
+
+        let groupSuppressed = advanceSidebarCache(old: old, new: new, suppressedRenameTarget: .group(g1))
+        let mergedGroup = groupSuppressed.groups[0]
+        try expectEqual(mergedGroup.name, old.groups[0].name,
+            "suppressed group keeps its old name")
+        try expectEqual(mergedGroup.unreadAlertCount, old.groups[0].unreadAlertCount,
+            "suppressed group keeps its old unread badge")
+        try expectEqual(mergedGroup.tabCount, old.groups[0].tabCount,
+            "suppressed group keeps its old tab-count badge")
+        try expectEqual(mergedGroup.isFirst, old.groups[0].isFirst,
+            "suppressed group keeps its old first-row attrs")
+        try expectEqual(mergedGroup.isCollapsed, new.groups[0].isCollapsed,
+            "suppressed group applies the new collapse structure")
+        try expectEqual(mergedGroup.tabs, new.groups[0].tabs,
+            "suppressed group applies the new tab structure")
+
+        try expectEqual(advanceSidebarCache(old: old, new: new, suppressedRenameTarget: nil), new,
+            "nil suppressed target leaves the cache at new")
+        let removedA = sbProj(false, [
+            sbGroup(g1, "New G1", collapsed: true, [sbTabFull(c, "new-c", bell: 4)]),
+            sbGroup(g2, "New G2", first: true, [sbTabFull(b, "new-b", bell: 5)]),
+        ])
+        try expectEqual(advanceSidebarCache(old: old, new: removedA, suppressedRenameTarget: .tab(a)), removedA,
+            "absent suppressed target leaves the cache at new")
+        try expectEqual(advanceSidebarCache(old: nil, new: new, suppressedRenameTarget: .tab(a)), new,
+            "missing old cache leaves the cache at new")
+    }
+
     test("desiredContainerShapes: eager projection includes selected and background tabs") {
         let selectedPaneId = PaneId(), siblingPaneId = PaneId(), otherPaneId = PaneId()
         let selectedTabId = TabId(), siblingTabId = TabId(), otherTabId = TabId()
@@ -309,6 +356,43 @@ func reconcileTests() {
             old: [a: cShape(pa), b: cShape(pb)], oldVisible: [a: true, b: false],
             new: [a: cShape(pa), b: cShape(pb)], newSelected: a,
             "unchanged selection + shapes -> state unchanged (A visible, B hidden)")
+    }
+
+    test("reconcilePopover clears the record only when container ops strand the visible tab") {
+        let visible = TabId(), background = TabId(), pane = PaneId(), tab = TabId()
+
+        try expectEqual(
+            reconcilePopover(current: .pane(pane), ops: [.rebuild(tabId: visible)], previouslyVisibleTabId: visible),
+            StrandedPopoverOutcome(popover: nil, dismissStranded: true),
+            "visible rebuild clears a pane popover and requests AppKit teardown")
+        try expectEqual(
+            reconcilePopover(current: .tab(tab), ops: [.remove(tabId: visible)], previouslyVisibleTabId: visible),
+            StrandedPopoverOutcome(popover: nil, dismissStranded: true),
+            "visible remove clears a tab popover and requests AppKit teardown")
+        try expectEqual(
+            reconcilePopover(current: .pane(pane), ops: [.setVisible(tabId: visible, visible: false)], previouslyVisibleTabId: visible),
+            StrandedPopoverOutcome(popover: nil, dismissStranded: true),
+            "hiding the visible container clears the popover")
+        try expectEqual(
+            reconcilePopover(
+                current: .pane(pane),
+                ops: [.rebuild(tabId: background), .setVisible(tabId: visible, visible: true)],
+                previouslyVisibleTabId: visible
+            ),
+            StrandedPopoverOutcome(popover: .pane(pane), dismissStranded: false),
+            "background rebuild and visible show leave the popover alone")
+        try expectEqual(
+            reconcilePopover(current: nil, ops: [.remove(tabId: visible)], previouslyVisibleTabId: visible),
+            StrandedPopoverOutcome(popover: nil, dismissStranded: true),
+            "a stranding op still requests AppKit teardown when no model record is open")
+        try expectEqual(
+            reconcilePopover(current: nil, ops: [], previouslyVisibleTabId: visible),
+            StrandedPopoverOutcome(popover: nil, dismissStranded: false),
+            "no stranding op leaves nil unchanged")
+        try expectEqual(
+            reconcilePopover(current: .tab(tab), ops: [.remove(tabId: visible)], previouslyVisibleTabId: nil),
+            StrandedPopoverOutcome(popover: .tab(tab), dismissStranded: false),
+            "without a previously-visible tab there is no stranded container")
     }
 
     // MARK: - ContainerShape (ratio carveout / payload excluded / structural change)

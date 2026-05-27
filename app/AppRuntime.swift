@@ -1205,7 +1205,7 @@ class AppRuntime {
         dismissStrandedPopovers()  // cancelPaneDrag + dismiss todo/tab-todo popover pairs
         alertsPopover?.performClose(nil)
         alertsPopover = nil
-        clearTodoPopoverForViewSwap(&model)
+        model.todoPopover = nil  // session teardown bypasses the reconciler; clear directly
         preferencesPanel?.close()
         preferencesPanel = nil
         quitConfirmationPanel?.orderOut(nil)
@@ -1365,10 +1365,10 @@ class AppRuntime {
         container.removeFromSuperview()
     }
 
-    /// Cancel an in-flight pane drag and dismiss any open TODO popovers. The AppKit half
-    /// of a view swap (the model half is the pure `clearTodoPopoverForViewSwap` in
-    /// update()). `reconcileContainers` calls this when the visible container is hidden,
-    /// rebuilt, or removed, so an anchored popover never strands over the wrong content.
+    /// Cancel an in-flight pane drag and dismiss any open TODO popovers.
+    /// `reconcileContainers` calls this after clearing the model record when the
+    /// visible container is hidden, rebuilt, or removed, so a popover never strands
+    /// over the wrong content.
     func dismissStrandedPopovers() {
         cancelPaneDrag()
         dismissTodoPopoverPair()

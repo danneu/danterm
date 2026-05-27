@@ -111,17 +111,15 @@ extension AppRuntime {
             caches.searchOverlay.removeValue(forKey: paneId)
         }
 
-        // A view swap (the visible container hidden, rebuilt, or removed) strands the
-        // anchored TODO popover; dismiss it -- the AppKit half of clearTodoPopoverForViewSwap,
-        // whose model half already ran in update(). Capture the currently-visible tab first.
+        // A view swap closes the open TODO popover (both scopes): the model record
+        // and the AppKit popover pairs. Safe here: no reconcile pass or
+        // pre-reconcile command reads model.todoPopover; close callbacks fire next
+        // cycle and see it already nil.
         let previouslyVisibleTabId = tabContainers.first(where: { !$0.value.isHidden })?.key
-        let strandsVisible = ops.contains { op in
-            switch op {
-            case .remove(let t), .rebuild(let t): return t == previouslyVisibleTabId
-            case .setVisible(let t, let v): return t == previouslyVisibleTabId && !v
-            }
-        }
-        if strandsVisible { dismissStrandedPopovers() }
+        let popoverOutcome = reconcilePopover(
+            current: model.todoPopover, ops: ops, previouslyVisibleTabId: previouslyVisibleTabId)
+        model.todoPopover = popoverOutcome.popover
+        if popoverOutcome.dismissStranded { dismissStrandedPopovers() }
 
         // Apply ops (remove -> rebuild -> setVisible). Track whether the selected
         // container was activated (built/rebuilt or shown-from-hidden) so mount-time focus

@@ -79,21 +79,17 @@ func tabTests() {
         try expectEqual(model.selectedTabId, firstTabId)
     }
 
-    test("testSelectTabSwitchesSelectionAndClearsStrandedTodoPopover") {
+    test("testSelectTabSwitchesSelection") {
         var model = makeModel()
         createTab(&model)
         let firstTabId = model.groups[0].tabs[0].id
         createTab(&model)
-        // Open a tab TODO popover, then switch tabs: the popover is stranded, so the model
-        // record clears (clearTodoPopoverForViewSwap); the AppKit dismiss is reconcileContainers'.
-        model.todoPopover = .tab(model.selectedTabId!)
 
         update(&model, .selectTab(id: firstTabId))
 
         // Selection is view-owned (reconcileSidebar reapplies it) and the container swap is
-        // structural (reconcileContainers); the model selection + cleared popover are the net.
+        // structural (reconcileContainers); the model selection is the net.
         try expectEqual(model.selectedTabId, firstTabId, "model selection should change")
-        try expect(model.todoPopover == nil, "tab switch clears the stranded TODO popover record")
     }
 
     test("testSelectTabClearsBell") {
