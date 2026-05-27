@@ -132,9 +132,9 @@ exactly one matching pane, tab, or group before running any mutation command.
     danterm tab new --group "$GROUP_ID" --at-group-end --background --cmd 'just test' --title tests
     danterm tab new --after-tab "$TAB_ID" --background --cmd 'just test' --title tests
 
-`--cmd` launches the program directly via libghostty, not by typing into a
-shell prompt, so it does not race shell startup. The pane stays open after the
-command exits.
+`--cmd` runs inside your login shell, so shell config is sourced, PATH matches
+your interactive panes, and shell integration reports cwd. The pane returns to
+a shell prompt when the command exits.
 
 Use `--background` to keep the user's current tab focused.
 
@@ -255,8 +255,8 @@ else prints nothing on success and exits 0.
   user request; you would be typing into your own input stream.
 - Prefer `tab new --group <group-id> --cmd` and
   `pane split --pane <pane-id> --cmd` over the
-  split-then-`pane input` pattern. `--cmd` launches the program directly and
-  avoids racing the shell prompt.
+  split-then-`pane input` pattern. `--cmd` seeds the command at surface
+  creation time and avoids racing the shell prompt.
 - For `tab new`, choose exactly one position mode. Use `--at-group-end` for
   append behavior and `--after-tab <tab-id>` when an exact tab anchor is known.
 - Prefer `--background` on `tab new` and `pane split` for autonomous work the

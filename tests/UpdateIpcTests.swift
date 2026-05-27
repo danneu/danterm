@@ -606,7 +606,7 @@ func ipcUpdateTests() {
         }
     }
 
-    test("tab.new with launch creates direct-launch surface and custom tab title") {
+    test("tab.new with launch seeds shell input and custom tab title") {
         var model = makeModel()
         createTab(&model)
         let paneIdInContext = selectedTab(in: model)!.focusedPaneId
@@ -636,12 +636,12 @@ func ipcUpdateTests() {
             if case .createSurface(let effectPaneId, let cwd, let command, let launchCommand, let waitAfterCommand) = $0 {
                 return effectPaneId == paneId
                     && cwd == "/tmp"
-                    && command == nil
-                    && launchCommand == "date"
+                    && command == "date"
+                    && launchCommand == nil
                     && waitAfterCommand
             }
             return false
-        }, "expected createSurface with direct launch command")
+        }, "expected createSurface with shell input command")
     }
 
     test("tab.new with explicit group id forwards launch to created tab") {
@@ -664,10 +664,10 @@ func ipcUpdateTests() {
         try expect(paneId != nil, "target group should have a new tab")
         try expect(hasEffect(commands) {
             if case .createSurface(let effectPaneId, _, let command, let launchCommand, _) = $0 {
-                return effectPaneId == paneId && command == nil && launchCommand == "make test"
+                return effectPaneId == paneId && command == "make test" && launchCommand == nil
             }
             return false
-        }, "expected launch command to reach group-created tab")
+        }, "expected shell input command to reach group-created tab")
     }
 
     test("tab.new afterTab without group uses referenced tab group without pane context") {
@@ -825,11 +825,11 @@ func ipcUpdateTests() {
             if case .createSurface(let effectPaneId, let cwd, let command, let launchCommand, _) = $0 {
                 return effectPaneId == newPaneId
                     && cwd == "/tmp"
-                    && command == nil
-                    && launchCommand == "cargo --version"
+                    && command == "cargo --version"
+                    && launchCommand == nil
             }
             return false
-        }, "expected split createSurface to use direct launch")
+        }, "expected split createSurface to seed shell input")
     }
 
     test("pane.split background on selected tab preserves focused pane") {

@@ -80,9 +80,9 @@ class TerminalView: NSView, NSTextInputClient {
             self.surface = newSurface
         }
 
-        // Restored snapshots may choose to prefill the command instead of
-        // executing it immediately. IPC launches use Ghostty's command field
-        // and must not also seed shell input.
+        // Direct Ghostty commands use `launchCommand` and must not also seed
+        // shell input. Without `launchCommand`, `command` becomes initial shell
+        // input for restore and IPC --cmd launches.
         let initialInput = launchCommand == nil
             ? restoreInitialInput(for: command, behavior: restoreCommandBehavior)
             : nil

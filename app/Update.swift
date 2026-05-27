@@ -89,8 +89,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
         commands.append(.createSurface(
             paneId: paneId,
             cwd: cwd,
-            command: nil,
-            launchCommand: launch?.cmd,
+            command: launch?.cmd,
+            launchCommand: nil,
             waitAfterCommand: true
         ))
         if !background {
@@ -189,8 +189,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
             .createSurface(
                 paneId: newPaneId,
                 cwd: cwd,
-                command: nil,
-                launchCommand: launch?.cmd,
+                command: launch?.cmd,
+                launchCommand: nil,
                 waitAfterCommand: true
             ),
         ]
