@@ -187,6 +187,7 @@ enum PendingConfirmation: Equatable {
 struct AppModel: Equatable {
     var groups: [GroupModel]
     var selectedTabId: TabId?
+    var isAppActive: Bool = true  // ephemeral -- excluded from snapshots; gates focused-pane notification suppression
     var alerts: [AlertModel] = []  // newest first, capped at 100
     var lastNotificationTime: [PaneId: [AlertKind: Date]] = [:]
     var searchState: [PaneId: SearchModel] = [:]  // ephemeral — excluded from snapshots

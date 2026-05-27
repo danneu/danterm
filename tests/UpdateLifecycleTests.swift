@@ -4,6 +4,12 @@ func lifecycleTests() {
     print("Lifecycle Tests...")
 
     test("testAppBecameActive") {
+        // Intent: app activation still forwards focus to Ghostty.
+        // Why it exists: lifecycle model bookkeeping must not disturb the
+        //   runtime command that informs libghostty focus changed.
+        // Scenario: the user switches back to DanTerm; Ghostty receives an app
+        //   focus command. Spec-first -- no incident to cite, and none should be
+        //   invented.
         var model = makeModel()
         let commands = update(&model, .appBecameActive)
         try expectEqual(commands.count, 1)
@@ -15,6 +21,12 @@ func lifecycleTests() {
     }
 
     test("testAppResignedActive") {
+        // Intent: app deactivation still forwards focus loss to Ghostty.
+        // Why it exists: lifecycle model bookkeeping must not disturb the
+        //   runtime command that informs libghostty focus changed.
+        // Scenario: the user switches away from DanTerm; Ghostty receives an app
+        //   defocus command. Spec-first -- no incident to cite, and none should
+        //   be invented.
         var model = makeModel()
         let commands = update(&model, .appResignedActive)
         try expectEqual(commands.count, 1)
@@ -23,6 +35,115 @@ func lifecycleTests() {
         } else {
             throw TestFailure(message: "expected setAppFocus(false)")
         }
+    }
+
+    test("testAppResignedActiveClearsActiveFlag") {
+        // Intent: app deactivation records that DanTerm is no longer active in
+        //   the pure model.
+        // Why it exists: focused-pane notification suppression depends on a
+        //   model-owned foreground/background flag.
+        // Scenario: the user switches to another app; subsequent focused-pane
+        //   bells should be treated as unseen. Spec-first -- no incident to
+        //   cite, and none should be invented.
+        var model = makeModel()
+
+        let commands = update(&model, .appResignedActive)
+
+        try expectEqual(model.isAppActive, false, "app should be marked inactive")
+        try expect(hasEffect(commands) {
+            if case .setAppFocus(false) = $0 { return true }
+            return false
+        }, "should still defocus Ghostty")
+    }
+
+    test("testAppBecameActiveSetsActiveFlag") {
+        // Intent: app activation records that DanTerm is active in the pure
+        //   model.
+        // Why it exists: focused-pane notification suppression should resume as
+        //   soon as the app is foregrounded.
+        // Scenario: the user switches back to DanTerm; subsequent focused-pane
+        //   bells should be suppressed as visible-pane noise. Spec-first -- no
+        //   incident to cite, and none should be invented.
+        var model = makeModel()
+        model.isAppActive = false
+
+        let commands = update(&model, .appBecameActive)
+
+        try expectEqual(model.isAppActive, true, "app should be marked active")
+        try expect(hasEffect(commands) {
+            if case .setAppFocus(true) = $0 { return true }
+            return false
+        }, "should still focus Ghostty")
+    }
+
+    test("testAppBecameActiveMarksFocusedPaneAlertReadInFocusMode") {
+        // Intent: returning to DanTerm in focus-clear mode marks the selected
+        //   tab's focused-pane alert read.
+        // Why it exists: inactive focused-pane notifications need backing
+        //   alerts for click navigation, but should not leave a stale badge on
+        //   the pane the user is now viewing.
+        // Scenario: a focused pane rings while DanTerm is backgrounded, then the
+        //   user switches back without clicking the notification. Spec-first --
+        //   no incident to cite, and none should be invented.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        model.isAppActive = false
+        update(&model, .surfaceBell(paneId: paneId))
+
+        update(&model, .appBecameActive)
+
+        try expectEqual(model.alerts.count, 1, "setup should create one alert")
+        try expectEqual(model.alerts[0].paneId, paneId)
+        try expectEqual(model.alerts[0].isUnread, false, "focused pane alert should be marked read")
+    }
+
+    test("testAppBecameActiveDoesNotMarkReadInManualMode") {
+        // Intent: returning to DanTerm in manual-clear mode leaves the selected
+        //   tab's focused-pane alert unread.
+        // Why it exists: the app-active auto-clear must respect the user's
+        //   explicit alert-clear preference.
+        // Scenario: a user who chose manual alert clearing switches back after a
+        //   backgrounded focused-pane bell; the badge remains until explicit ack.
+        //   Spec-first -- no incident to cite, and none should be invented.
+        var model = makeModel()
+        model.config.alertClearMode = .manual
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        model.isAppActive = false
+        update(&model, .surfaceBell(paneId: paneId))
+
+        update(&model, .appBecameActive)
+
+        try expectEqual(model.alerts.count, 1, "setup should create one alert")
+        try expectEqual(model.alerts[0].paneId, paneId)
+        try expectEqual(model.alerts[0].isUnread, true, "manual mode should leave alert unread")
+    }
+
+    test("testAppBecameActiveLeavesBackgroundPaneAlertUnread") {
+        // Intent: returning to DanTerm clears only the selected tab's focused
+        //   pane alert, not alerts from background tabs.
+        // Why it exists: auto-clear on activation models the pane now visible to
+        //   the user, not every alert created while the app was inactive.
+        // Scenario: one focused-pane alert and one background-tab alert arrive
+        //   while DanTerm is backgrounded; only the visible pane's badge clears
+        //   on return. Spec-first -- no incident to cite, and none should be
+        //   invented.
+        var model = makeModel()
+        createTab(&model)
+        let backgroundPaneId = model.groups[0].tabs[0].focusedPaneId
+        createTab(&model)
+        let focusedPaneId = model.groups[0].tabs[1].focusedPaneId
+        model.isAppActive = false
+
+        update(&model, .surfaceBell(paneId: backgroundPaneId))
+        update(&model, .surfaceBell(paneId: focusedPaneId))
+        update(&model, .appBecameActive)
+
+        let backgroundAlert = model.alerts.first { $0.paneId == backgroundPaneId }
+        let focusedAlert = model.alerts.first { $0.paneId == focusedPaneId }
+        try expectEqual(backgroundAlert?.isUnread, true, "background pane alert should stay unread")
+        try expectEqual(focusedAlert?.isUnread, false, "focused pane alert should be marked read")
     }
 
     test("testActivateAlert") {

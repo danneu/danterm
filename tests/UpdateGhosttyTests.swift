@@ -4,6 +4,13 @@ func ghosttyTests() {
     print("Ghostty Tests...")
 
     test("testBellOnFocusedPaneIsIgnored") {
+        // Intent: a bell from the selected tab's focused pane is ignored while
+        //   DanTerm is active.
+        // Why it exists: pins the foreground noise-suppression contract after
+        //   backgrounded focused panes become notification-worthy.
+        // Scenario: the user is looking at the focused pane and it rings; no
+        //   alert or macOS notification should be created. Spec-first -- no
+        //   incident to cite, and none should be invented.
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
@@ -30,6 +37,31 @@ func ghosttyTests() {
             return false
         }, "should emit sendNotification for background bell")
         // The toolbar's unread-alert badge now reconciles (no .refreshPaneToolbar).
+    }
+
+    test("testBellOnFocusedPaneWhileInactiveCreatesAlertAndNotification") {
+        // Intent: a bell from the selected tab's focused pane creates an unread
+        //   alert and macOS notification while DanTerm is inactive.
+        // Why it exists: a backgrounded app cannot rely on focused-pane
+        //   visibility, so the focused pane must follow the unseen-pane path.
+        // Scenario: a foreground shell finishes after the user switches to
+        //   another app; the notification should still surface and remain
+        //   clickable back to the pane. Spec-first -- no incident to cite, and
+        //   none should be invented.
+        var model = makeModel()
+        model.isAppActive = false
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+
+        let commands = update(&model, .surfaceBell(paneId: paneId))
+        try expectEqual(model.alerts.count, 1, "should create one alert")
+        try expectEqual(model.alerts[0].kind, .bell)
+        try expectEqual(model.alerts[0].isUnread, true, "alert should be unread")
+        try expectEqual(model.alerts[0].paneId, paneId)
+        try expect(hasEffect(commands) {
+            if case .sendNotification = $0 { return true }
+            return false
+        }, "should emit sendNotification for inactive focused-pane bell")
     }
 
     test("testSurfaceCreationFailedCleansUp") {
@@ -268,6 +300,13 @@ func ghosttyTests() {
     }
 
     test("testDesktopNotificationOnFocusedPaneIsIgnored") {
+        // Intent: an OSC desktop notification from the selected tab's focused
+        //   pane is ignored while DanTerm is active.
+        // Why it exists: pins the foreground noise-suppression contract after
+        //   backgrounded focused panes become notification-worthy.
+        // Scenario: the user is looking at the focused pane when it emits OSC-9;
+        //   no alert or macOS notification should be created. Spec-first -- no
+        //   incident to cite, and none should be invented.
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
@@ -275,6 +314,34 @@ func ghosttyTests() {
         let commands = update(&model, .desktopNotification(paneId: paneId, title: "Build complete", body: "make finished"))
         try expectEqual(model.alerts.count, 0, "should not create alert for focused pane")
         try expectEqual(commands.count, 0, "should produce no commands for focused pane")
+    }
+
+    test("testDesktopNotificationOnFocusedPaneWhileInactiveCreatesAlertAndNotification") {
+        // Intent: an OSC desktop notification from the selected tab's focused
+        //   pane creates an unread alert and macOS notification while DanTerm is
+        //   inactive.
+        // Why it exists: a backgrounded app cannot rely on focused-pane
+        //   visibility, so OSC notifications must keep their backing alert for
+        //   notification-click navigation.
+        // Scenario: a foreground task emits OSC-9 after the user switches to
+        //   another app; the notification should carry the OSC title/body and
+        //   navigate back to the pane. Spec-first -- no incident to cite, and
+        //   none should be invented.
+        var model = makeModel()
+        model.isAppActive = false
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+
+        let commands = update(&model, .desktopNotification(paneId: paneId, title: "Hello", body: "World"))
+        try expectEqual(model.alerts.count, 1, "should create one alert")
+        try expectEqual(model.alerts[0].kind, .desktopNotification)
+        try expectEqual(model.alerts[0].isUnread, true, "alert should be unread")
+        try expectEqual(model.alerts[0].paneId, paneId)
+        try expect(hasEffect(commands) {
+            if case .sendNotification(_, let title, let body) = $0,
+               title == "Hello", body == "World" { return true }
+            return false
+        }, "should send notification with OSC title/body")
     }
 
     test("testDesktopNotificationOnBackgroundPaneCreatesUnreadAlert") {

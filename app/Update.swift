@@ -710,8 +710,9 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
         return []
 
     case .surfaceBell(let paneId):
-        // No alert for bell on the focused pane of the selected tab
-        if let tab = selectedTab(in: model), tab.focusedPaneId == paneId {
+        // No alert for the focused pane while the app is active; when inactive,
+        // the focused pane is unseen and should follow the normal alert path.
+        if model.isAppActive, let tab = selectedTab(in: model), tab.focusedPaneId == paneId {
             return []
         }
 
@@ -741,8 +742,8 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
         return commands
 
     case .desktopNotification(let paneId, let title, let body):
-        // Same as bell: no alert for the focused pane of the selected tab
-        if let tab = selectedTab(in: model), tab.focusedPaneId == paneId {
+        // Same as bell: suppress focused-pane noise only while the app is active.
+        if model.isAppActive, let tab = selectedTab(in: model), tab.focusedPaneId == paneId {
             return []
         }
 
@@ -813,9 +814,15 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
     // MARK: - Lifecycle
 
     case .appBecameActive:
+        model.isAppActive = true
+        if model.config.alertClearMode == .focus,
+           let focusedPaneId = selectedTab(in: model)?.focusedPaneId {
+            markAlertsReadForPane(focusedPaneId, in: &model)
+        }
         return [.setAppFocus(true)]
 
     case .appResignedActive:
+        model.isAppActive = false
         if model.jumpMode != nil {
             model.jumpMode = nil   // jump badges clear via reconcileSidebar
         }
