@@ -134,7 +134,7 @@ extension AppRuntime {
         // removed, rebuilt, or hidden, the anchored popover(s) strand -- dismiss them.
         // The model half (clearing model.todoPopover) is the pure reconcileTodoPopover
         // in update(); the two halves read different inputs because they run in
-        // different layers (see the read-only-reconciler ADR).
+        // different layers (see the model-driven view reconciliation ADR).
         let previouslyVisibleTabId = tabContainers.first(where: { !$0.value.isHidden })?.key
         if containerOpsStrandVisible(ops: ops, previouslyVisibleTabId: previouslyVisibleTabId) {
             dismissStrandedPopovers()

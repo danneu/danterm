@@ -1,4 +1,4 @@
-# Read-Only View Reconciler
+# Model-Driven View Reconciliation
 
 Status: Accepted
 Date: 2026-05-27
@@ -8,7 +8,7 @@ Date: 2026-05-27
 DanTerm uses Elm architecture: user/Ghostty actions become `Msg` values,
 `update(&model, msg)` is the pure model transition and returns `[Command]`, and
 `AppRuntime.perform(command)` runs side effects. The view reconciler is the next
-step in that pipeline: after update and pre-reconcile commands, `reconcile()`
+stage in that pipeline: after update and pre-reconcile commands, `reconcile()`
 derives AppKit and Ghostty/surface state from the current model.
 
 The reconciler migration moved view-sync work out of `update()` and
@@ -24,35 +24,22 @@ from the template at the top of `app/Reconcile.swift`, is:
 - the matching `Command` case and `perform` arm disappear in the same change, so
   missed view-sync emissions become compile errors.
 
-Commands are for true side effects and transient imperative actions: PTY/surface
-creation, IPC replies, notifications, checkpoint/config writes, focus requests,
-export, and popover presentation. Everything the view merely shows should be a
-projection of the model. Some commands run after reconcile when they target
-views the reconciler creates; that classification is explicit and exhaustive.
+## Architectural Goal
 
-The "read-only reconciler" rule was implicit in that architecture, but it was
-not written down. The current TODO popover view-swap cleanup writes
-`model.todoPopover` inside `reconcileContainers`. That solved the scattered
-update-site obligation, but crossed the layer boundary: after `update()`
-returned, reconcile could mutate model state that later `update()` guards and
-popover close callbacks read.
+DanTerm uses retained-mode, model-driven view reconciliation. AppKit views,
+Ghostty surfaces, panels, and runtime handles are long-lived host objects. After
+each model transition, `reconcile()` derives small desired projections from
+`AppModel`, diffs them against `ReconcilerCaches`, and patches the existing
+hosts.
 
-This ADR makes the rule explicit and describes the ideal shape for future
-reconcile work, not just the current implementation.
+The goal is to make displayed view state a consequence of the model without
+rebuilding all AppKit objects, scattering one-off view-sync commands through
+`update()`, or hiding model transitions inside AppKit code.
 
 ## Decision
 
-The view reconciler is a read-only projection of `AppModel`. A reconcile pass
-may read `AppModel` and `ViewLocalState`; it may write AppKit views,
-Ghostty/surface state, runtime-owned view handles, and `ReconcilerCaches`. It
-must not write `AppModel`.
-
-For ordinary `Msg` handling, `AppModel` transitions happen in `update()` and are
-covered by behavior tests at the pure layer. If view-sync needs derived model
-state, compute it in `update()` before reconcile runs. If state is genuinely
-view-derived and should not be serialized or owned by the domain model, keep it
-in `ViewLocalState` or a runtime-owned handle rather than writing it back into
-`AppModel` from a reconcile pass.
+View-sync work should be expressed as ordered reconcile passes rather than
+one-off commands whose only purpose is to make views match the model.
 
 New reconcile passes should follow the migration template:
 
@@ -65,17 +52,59 @@ New reconcile passes should follow the migration template:
 - delete the matching `Command` case, `perform` arm, and emission sites in the
   same change.
 
+Commands are for true side effects and transient imperative actions: PTY/surface
+creation, IPC replies, notifications, checkpoint/config writes, focus requests,
+export, and popover presentation. Everything the view merely shows should be a
+projection of the model. Some commands run after reconcile when they target
+views the reconciler creates; that classification is explicit and exhaustive.
+
+## Pass Shapes
+
+DanTerm uses a few explicit pass shapes rather than a generic virtual tree:
+
+- keyed projections for per-pane values such as borders, toolbar renders,
+  search overlays, and Ghostty config;
+- structural op diffs for host trees such as tab containers and sidebar rows;
+- single projection compares for persistent hosts such as window chrome,
+  switcher, confirmation, preferences, and theme browser state.
+
+A pure projection or diff helper should have behavioral tests that prove the
+observable contract: unchanged projections do not require host mutation, and
+changed projections produce the expected delta.
+
+## Read-Only Model Rule
+
+The view reconciler is a read-only projection of `AppModel`. Pure projections
+and diff helpers derive desired state from `AppModel` and `ViewLocalState`.
+Thin reconcile executors may also read runtime-owned host/view state needed for
+host presence, visibility, anchors, and open-state. Reconcile passes may write
+AppKit views, Ghostty/surface state, runtime-owned view handles, and
+`ReconcilerCaches`. They must not write `AppModel`.
+
+For ordinary `Msg` handling, `AppModel` transitions happen in `update()` and are
+covered by behavior tests at the pure layer. If view-sync needs derived model
+state, compute it in `update()` before reconcile runs. If state is genuinely
+view-derived and should not be serialized or owned by the domain model, keep it
+in `ViewLocalState` or a runtime-owned handle rather than writing it back into
+`AppModel` from a reconcile pass.
+
+## Ordering And Host Lifetime
+
 Reconcile pass ordering is part of the contract. Passes that destroy or recreate
 hosts must run before passes that render into those hosts, and they must
-invalidate affected host-local caches. Surface teardown runs before container
-reconciliation; container reconciliation runs before pane chrome; mount-time
-focus runs after pane chrome when it may target a search field the chrome pass
-creates; occlusion remains last because it reads the final visible/mounted
-surface state.
+invalidate affected host-local caches.
 
-Post-reconcile commands target views that reconcile creates. `Command.isPostReconcile`
-must stay an exhaustive switch with no `default`, so adding a command requires an
-explicit phase decision.
+Surface teardown runs before container reconciliation. Container reconciliation
+runs before pane chrome because container rebuilds recreate pane wrapper hosts.
+Mount-time focus runs after pane chrome when it may target a search field the
+chrome pass creates. Occlusion remains last because it reads the final
+visible/mounted surface state.
+
+Post-reconcile commands target views that reconcile creates.
+`Command.isPostReconcile` must stay an exhaustive switch with no `default`, so
+adding a command requires an explicit phase decision.
+
+## Scheduling And External Invalidation
 
 Reconcile scheduling may coalesce only changes whose delayed application is
 semantically safe. Today that means high-frequency cosmetic surface metadata.
@@ -99,6 +128,17 @@ Other exceptions to read-only reconcile require either an ADR update or an
 explicit in-code justification plus a behavioral test proving the exception does
 not observe stale, double-written, or out-of-order state.
 
+## Non-Goals
+
+This is not a virtual DOM or generic component reconciler. DanTerm does not build
+a full intermediate UI tree and recursively diff it.
+
+This is not Solid-style fine-grained reactivity. DanTerm does not track signal
+dependencies from individual model fields to individual view sinks.
+
+This is not a license to rebuild all AppKit hosts after every message. Host
+identity and cache invalidation remain part of each pass's contract.
+
 ## Consequences
 
 "What is the model after message X?" is answerable from `update()` and from
@@ -118,10 +158,11 @@ the live `ContainerOp` diff and the previously visible container. That
 duplication is accepted because each half reads the inputs its layer owns. Tests
 keep the behavioral boundary aligned.
 
-The cost of the rule is occasional extra model helpers, generation counters, or
-`ViewLocalState` plumbing. The payoff is stronger directionality: `update()`
-owns domain/model transitions, `Command` owns true external effects, and
-`reconcile()` owns rendering the current model into AppKit and surface state.
+The cost of this architecture is occasional extra model helpers, generation
+counters, host-lifetime invalidation, or `ViewLocalState` plumbing. The payoff is
+stronger directionality: `update()` owns domain/model transitions, `Command` owns
+true external effects, and `reconcile()` owns rendering the current model into
+AppKit and surface state.
 
 ## References
 
