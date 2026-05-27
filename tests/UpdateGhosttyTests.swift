@@ -98,12 +98,23 @@ func ghosttyTests() {
         }, "second bell should be throttled (no sendNotification)")
     }
 
-    test("reconcileDecision coalesces only eligible surface metadata") {
+    test("reconcileDecision coalesces only eligible high-frequency messages") {
+        // Intent: high-frequency split-ratio and search-count messages classify
+        //   as coalesce-eligible while post-reconcile commands still force inline.
+        // Why it exists: pins reconcile coalescing policy against regressions in
+        //   message classification, pending-state handling, and post-reconcile
+        //   command forcing.
+        // Scenario: divider drags and streaming search scans emit bursts whose
+        //   empty or cosmetic sweeps defer into the 75 ms timer. Spec-first -- no
+        //   incident to cite, and none should be invented.
         let paneId = PaneId()
         let coalescedMessages: [Msg] = [
             .surfaceTitle(paneId: paneId, title: "vim"),
             .surfaceCwd(paneId: paneId, cwd: "/tmp"),
-            .surfaceProgress(paneId: paneId, state: .set(percent: 50))
+            .surfaceProgress(paneId: paneId, state: .set(percent: 50)),
+            .splitRatioChanged(splitId: SplitId(), ratio: 0.3),
+            .ghosttySearchTotal(paneId: paneId, total: 42),
+            .ghosttySearchSelected(paneId: paneId, selected: 3)
         ]
 
         for msg in coalescedMessages {

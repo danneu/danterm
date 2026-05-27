@@ -186,13 +186,27 @@ enum Msg {
 
 extension Msg {
     /// Whether this message is eligible to defer its reconcile() sweep so bursts
-    /// coalesce. Only high-frequency surface metadata opts in; update() still runs
-    /// immediately, so the model stays current and the final value is never dropped.
-    /// The runtime evaluates this after translateMsg(), keeping title-channel IPC
-    /// events on the inline reconcile path.
+    /// coalesce. A message opts in when its sweep is either empty (split-ratio:
+    /// ContainerShape drops ratios) or merely cosmetic and safe to throttle to
+    /// ~13 Hz (title/cwd/progress, live search match count). update() still runs
+    /// immediately, so the model stays current and the final value is never
+    /// dropped; only the whole-model view sweep is deferred. The runtime evaluates
+    /// this on the translated message, keeping title-channel IPC events on the
+    /// inline path. Eligibility is necessary but not sufficient: reconcileDecision
+    /// still forces an inline reconcile when update() emitted a post-reconcile
+    /// command, so opting a message in here is always safe.
     var coalescesReconcile: Bool {
         switch self {
-        case .surfaceTitle, .surfaceCwd, .surfaceProgress:
+        // Cosmetic chrome a TUI/search updates at 30-60 Hz: the sweep produces a
+        // real but throttleable diff (tab title/subtitle, progress, the search
+        // overlay's live "N/M" match count).
+        case .surfaceTitle, .surfaceCwd, .surfaceProgress,
+             .ghosttySearchTotal, .ghosttySearchSelected:
+            return true
+        // Window/divider live-resize fires this every tick, but ContainerShape
+        // drops split ratios (see ReconcileTests "split ratio is excluded"), so
+        // the sweep is an empty diff -- pure waste; defer it.
+        case .splitRatioChanged:
             return true
         default:
             return false
