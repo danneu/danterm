@@ -152,6 +152,17 @@ func desiredAlertsPopover(in model: AppModel) -> AlertsPopoverProjection {
 }
 
 // MARK: - View Reconciler (pure projections + diff)
+//
+// These projections intentionally prefer local model reads over a shared
+// precomputed reconcile input. Focus borders, pane toolbar, and pane config walk
+// `model.allPanes` during each reconcile sweep; alert-derived renders rescan
+// `model.alerts` per pane, which is O(panes x alerts). That is accepted because
+// rapidly-firing title/cwd/progress updates are coalesced to about 75ms by
+// `AppRuntime.reconcileCoalesceInterval` / `Msg.coalescesReconcile`, while
+// inline reconciles are human-paced (tab/pane creation, focus, sidebar ops).
+// `model.alerts` is hard-capped at 100, pane/tab counts are expected to stay
+// human-scale, and reconcile never runs per render frame or typed keystroke. See
+// `Projection Scan Cost` in `docs/design/2026-05-27-model-driven-view-reconciliation.md`.
 
 /// Return whether a pane should show the green focus border in the current content view.
 func isFocusedAndVisible(_ paneId: PaneId, in model: AppModel) -> Bool {
@@ -285,6 +296,9 @@ func applyDiff<K: Hashable, V: Equatable>(
 }
 
 // MARK: - Window Chrome Projection (reconcileWindowChrome)
+//
+// Unread-alert scans intentionally stay local projection work; see
+// `Projection Scan Cost` in `docs/design/2026-05-27-model-driven-view-reconciliation.md`.
 
 /// The window's title-bar string: the selected tab's display title, plus
 /// " — <subtitle>" when a distinct subtitle (cwd) is present. Pure so the
@@ -327,6 +341,9 @@ func desiredWindowChrome(in model: AppModel) -> WindowChromeProjection {
 }
 
 // MARK: - Sidebar Projection + Row-Op Diff (reconcileSidebar)
+//
+// The sidebar's per-tab and per-group alert scans intentionally stay local; see
+// `Projection Scan Cost` in `docs/design/2026-05-27-model-driven-view-reconciliation.md`.
 
 /// One sidebar tab row's rendered attributes -- everything `configureTabCell` draws.
 /// `id` keys the row; the remaining fields are compared to decide a `reloadTab` op.

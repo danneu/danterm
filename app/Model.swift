@@ -220,7 +220,10 @@ extension AppModel {
         return nil
     }
 
-    /// All panes, in tab then tree (left-to-right) order.
+    /// All panes, in tab then tree (left-to-right) order. A few reconcile passes
+    /// rebuild this per sweep, which is acceptable for the same per-`Msg`,
+    /// never-per-render-frame reason above; see `Projection Scan Cost` in
+    /// `docs/design/2026-05-27-model-driven-view-reconciliation.md`.
     var allPanes: [PaneModel] {
         groups.flatMap { $0.tabs.flatMap { panesInNode($0.rootNode) } }
     }
