@@ -21,6 +21,7 @@ struct TestRunner {
         checkpointTests()
         searchTests()
         scrollbarMathTests()
+        tickCoalescerTests()
         surfaceGeometryTests()
         themeTests()
         remoteTests()

@@ -6,6 +6,8 @@ class GhosttyApp {
     weak var runtime: AppRuntime?
     /// Retained clone of the ghostty config for runtime reads (e.g. scrollbar setting).
     var config: ghostty_config_t?
+    /// Coalesces high-volume libghostty wakeups into one main-queue tick per turn.
+    let tickCoalescer = TickCoalescer()
 
     /// Read the scrollbar setting from any config. Returns true unless set to "never".
     static func readScrollbarEnabled(from config: ghostty_config_t?) -> Bool {
@@ -138,9 +140,12 @@ class GhosttyApp {
             wakeup_cb: { userdata in
                 guard let userdata = userdata else { return }
                 let ghosttyApp = Unmanaged<GhosttyApp>.fromOpaque(userdata).takeUnretainedValue()
+                guard ghosttyApp.tickCoalescer.noteWakeup() else { return }
                 DispatchQueue.main.async {
-                    guard let app = ghosttyApp.app else { return }
-                    ghostty_app_tick(app)
+                    ghosttyApp.tickCoalescer.runTick {
+                        guard let app = ghosttyApp.app else { return }
+                        ghostty_app_tick(app)
+                    }
                 }
             },
             action_cb: { app, target, action in

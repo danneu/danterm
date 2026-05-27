@@ -27,6 +27,12 @@ If the new Ghostty version requires a different Zig version, also update:
 1. **Check Ghostty release notes** for breaking API changes or new Zig
    requirements.
 
+   Re-audit `App.drainMailbox` early returns and every embedded
+   `App.Mailbox.push` path, including the `.surface_message` wrapper in
+   `apprt/surface.zig`. `TickCoalescer` assumes `ghostty_app_tick` fully drains
+   the app mailbox, so no push path should enqueue an early-returning
+   `App.Message` such as `.quit`.
+
 2. **Update all four tag references** listed above.
 
 3. **Rebuild locally:**
