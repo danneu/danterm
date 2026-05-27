@@ -168,6 +168,7 @@ extension AppRuntime {
                 guard let container = tabContainers[tabId] else { break }
                 let wasHidden = container.isHidden
                 container.isHidden = !visible
+                if visible { container.ensureLaidOut() }
                 if tabId == model.selectedTabId, visible, wasHidden { activatedSelected = true }
             }
         }

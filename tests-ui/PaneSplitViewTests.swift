@@ -7,6 +7,7 @@ struct UITestRunner {
         let _ = NSApplication.shared
 
         paneSplitViewTests()
+        splitContainerViewTests()
         sidebarBadgeTests()
         todoInputViewTests()
         sidebarSelectionCacheTests()

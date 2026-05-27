@@ -1,3 +1,9 @@
+// AppKit view layer for rendering one tab's SplitNodeModel as nested PaneSplitViews
+// that host each pane's PaneWrapperView. Construction is eager so restored tabs stay
+// mounted, but DanTerm's explicit layout and split-ratio pass is deferred until first
+// reveal through ensureLaidOut(), keeping launch restore from laying out every hidden
+// tab. The model decides which tab is visible; this file realizes that tree and
+// positions split dividers.
 import Cocoa
 
 class SplitContainerView: NSView {
@@ -6,6 +12,7 @@ class SplitContainerView: NSView {
     let isZoomed: Bool
     let hasSplits: Bool
     weak var runtime: AppRuntime?
+    private var hasBeenLaidOut = false
 
     init(rootNode: SplitNodeModel, surfaceLookup: @escaping (PaneId) -> TerminalView?, runtime: AppRuntime?, isZoomed: Bool, hasSplits: Bool, frame: NSRect) {
         self.rootNode = rootNode
@@ -20,6 +27,8 @@ class SplitContainerView: NSView {
         fatalError("init(coder:) not implemented")
     }
 
+    // Builds the split tree and arms the resize-feedback guard for the deferral
+    // window. First-reveal layout is applied by ensureLaidOut().
     func rebuild() {
         for sub in subviews {
             sub.removeFromSuperview()
@@ -36,11 +45,17 @@ class SplitContainerView: NSView {
             view.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])
 
-        // Guard against splitViewDidResizeSubviews during layout + ratio application
         setApplyingRatio(true, in: self)
-        defer { setApplyingRatio(false, in: self) }
+        hasBeenLaidOut = false
+    }
+
+    /// Applies stored split ratios exactly once, when the container is first revealed.
+    func ensureLaidOut() {
+        guard !hasBeenLaidOut else { return }
         layoutSubtreeIfNeeded()
         applyRatios(for: rootNode)
+        setApplyingRatio(false, in: self)
+        hasBeenLaidOut = true
     }
 
     private func applyRatios(for node: SplitNodeModel) {
