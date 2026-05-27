@@ -11,7 +11,7 @@
       "Bash(gh search:*)",
       "Bash(command -v claude)",
       "Read(//private/tmp/**)",
-      "Bash(gh api *)"
+      "Skill(danterm)"
     ]
   },
   "autoMemoryEnabled": false
