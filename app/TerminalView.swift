@@ -199,9 +199,14 @@ class TerminalView: NSView, NSTextInputClient {
         super.viewDidChangeBackingProperties()
         guard surface != nil else { return }
 
-        // Update layer's contentsScale
+        // The view is layer-hosting: Ghostty assigns its IOSurfaceLayer to
+        // .layer. AppKit only suppresses implicit actions for layer-backed
+        // views, so disable animations around the scale write.
         if let window = window {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
             layer?.contentsScale = window.backingScaleFactor
+            CATransaction.commit()
         }
 
         syncSurfaceGeometry(logicalSize: frame.size)
