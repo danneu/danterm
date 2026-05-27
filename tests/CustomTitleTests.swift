@@ -9,14 +9,16 @@ func customTitleTests() {
         var model = makeModel()
         createTab(&model)
         model.groups[0].tabs[0].customTitle = "My App"
-        model.groups[0].tabs[0].title = "vim"
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        model.updatePane(paneId) { $0.title = "vim" }
         try expectEqual(model.groups[0].tabs[0].displayTitle, "My App")
     }
 
     test("testDisplayTitleFallback") {
         var model = makeModel()
         createTab(&model)
-        model.groups[0].tabs[0].title = "vim"
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        model.updatePane(paneId) { $0.title = "vim" }
         try expect(model.groups[0].tabs[0].customTitle == nil)
         try expectEqual(model.groups[0].tabs[0].displayTitle, "vim")
     }

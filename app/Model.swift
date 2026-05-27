@@ -110,8 +110,6 @@ enum TabColor: String, Codable, CaseIterable, Equatable {
 
 struct TabModel: Equatable {
     let id: TabId
-    var title: String = "Terminal"
-    var subtitle: String?
     var customTitle: String?
     var focusedPaneId: PaneId
     var rootNode: SplitNodeModel
@@ -119,7 +117,15 @@ struct TabModel: Equatable {
     var color: TabColor? = nil
     var todos: [TodoItem] = []
 
+    // The focused leaf owns the pane chrome; derive tab chrome on read so focus
+    // changes cannot leave a stale tab-level cache behind.
+    var focusedPane: PaneModel? { paneInNode(rootNode, id: focusedPaneId) }
+    private var derivedChrome: (title: String, subtitle: String?) {
+        focusedPane.map { deriveTabChrome(from: $0) } ?? ("Terminal", nil)
+    }
+    var title: String { derivedChrome.title }
     var displayTitle: String { customTitle ?? title }
+    var subtitle: String? { derivedChrome.subtitle }
 }
 
 /// Which TODO popover (if any) is currently open. Replaces the old
@@ -461,15 +467,8 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel,
                 focusedPaneId = firstLeafId(rootNode)
             }
 
-            // Restore chrome derives from the focused leaf's embedded PaneSnapshot
-            // (launch.cwd aware), recomputed at decode -- never stored in the snapshot.
-            let focusedPs = paneSnapshotById[focusedPaneId]!
-            let chrome = deriveTabChromeFromSnapshot(focusedPs)
-
             var tab = TabModel(
                 id: tabId,
-                title: chrome.title,
-                subtitle: chrome.subtitle,
                 customTitle: ts.customTitle,
                 focusedPaneId: focusedPaneId,
                 rootNode: rootNode,
@@ -565,7 +564,7 @@ private func parseSplitNode(
         }
         // Build the PaneModel from the embedded snapshot; record the snapshot for
         // the returned paneSnapshots map (the restore replay/scrollback source).
-        let expandedCwd = ps.cwd.map { expandTilde($0) }
+        let expandedCwd = resolveLaunch(ps).cwd
         var paneModel = PaneModel(id: paneId, title: ps.title ?? "Terminal", cwd: expandedCwd, theme: ps.theme)
         if let todoSnaps = ps.todos {
             paneModel.todos = todoSnaps.compactMap { ts in

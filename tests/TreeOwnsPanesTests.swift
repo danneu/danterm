@@ -360,17 +360,10 @@ func treeOwnsPanesTests() {
         }
         let tab = model.groups[0].tabs[0]
 
-        // Chrome equals deriveTabChromeFromSnapshot on the focused pane's snapshot.
-        let focusedPs = PaneSnapshot(id: focusedId, title: "Editor", cwd: "~/focused-pane",
-                                     launch: PaneLaunchSnapshot(command: nil, cwd: "~/focused-launch"),
-                                     scrollback: nil, theme: nil)
-        let expected = deriveTabChromeFromSnapshot(focusedPs)
-        try expectEqual(tab.title, expected.title)
-        try expectEqual(tab.subtitle, expected.subtitle)
         // launch.cwd wins over pane.cwd for the subtitle.
+        try expectEqual(tab.title, "Editor")
         try expectEqual(tab.subtitle, "~/focused-launch")
         // The sibling's cwd never bleeds into the tab chrome.
-        try expectEqual(tab.title, "Editor")
         try expect(tab.subtitle != "~/sibling", "sibling cwd must not leak into the tab subtitle")
     }
 

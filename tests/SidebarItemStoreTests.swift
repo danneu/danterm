@@ -326,10 +326,11 @@ private func sidebarStoreModel(
 
 private func sidebarStoreTab(_ id: TabId) -> TabModel {
     let paneId = PaneId()
+    var pane = PaneModel(id: paneId)
+    pane.title = String(id.rawValue.uuidString.prefix(8))
     return TabModel(
         id: id,
-        title: String(id.rawValue.uuidString.prefix(8)),
         focusedPaneId: paneId,
-        rootNode: .leaf(PaneModel(id: paneId))
+        rootNode: .leaf(pane)
     )
 }

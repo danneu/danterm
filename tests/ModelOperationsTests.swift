@@ -2056,8 +2056,11 @@ func modelOperationsTests() {
         let g1 = GroupId(); let g2 = GroupId()
         let tA = TabId(); let tB = TabId(); let tC = TabId()
         let pA = PaneId(); let pB = PaneId(); let pC = PaneId()
-        var tabA = TabModel(id: tA, focusedPaneId: pA, rootNode: .leaf(PaneModel(id: pA)))
-        tabA.title = "shell"; tabA.customTitle = "Edited"; tabA.subtitle = "~/src"; tabA.color = .blue
+        var paneA = PaneModel(id: pA)
+        paneA.title = "shell"
+        paneA.cwd = "\(NSHomeDirectory())/src"
+        var tabA = TabModel(id: tA, focusedPaneId: pA, rootNode: .leaf(paneA))
+        tabA.customTitle = "Edited"; tabA.color = .blue
         let tabB = TabModel(id: tB, focusedPaneId: pB, rootNode: .leaf(PaneModel(id: pB)))
         let tabC = TabModel(id: tC, focusedPaneId: pC, rootNode: .leaf(PaneModel(id: pC)))
         var model = AppModel(groups: [
@@ -2114,7 +2117,7 @@ func modelOperationsTests() {
         // Distinct custom title + subtitle so the window title carries the " — sub"
         // suffix while the content title stays the bare display title.
         model.groups[0].tabs[0].customTitle = "Custom"
-        model.groups[0].tabs[0].subtitle = "~/src"
+        model.updatePane(paneId) { $0.cwd = "\(NSHomeDirectory())/src" }
         // Tab-level + pane-level to-dos roll up together (tabTodoRollup).
         model.groups[0].tabs[0].todos = [TodoItem(id: UUID(), text: "t1", isDone: false)]
         model.updatePane(paneId) {
@@ -2154,14 +2157,16 @@ func modelOperationsTests() {
     test("desiredWindowChrome: window title omits the subtitle when absent or equal to the display title") {
         var model = makeModel()
         createTab(&model)
-        model.groups[0].tabs[0].title = "vim"  // no customTitle, no subtitle
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        model.updatePane(paneId) { $0.title = "vim" }  // no customTitle, no subtitle
         var proj = desiredWindowChrome(in: model)
         try expectEqual(proj.windowTitle, "vim", "no subtitle -> window title is the bare display title")
         try expectEqual(proj.contentTitle, "vim")
-        // A subtitle equal to the display title is treated as absent (no " — vim" dup).
-        model.groups[0].tabs[0].subtitle = "vim"
+        // A subtitle equal to the display title is treated as absent.
+        model.groups[0].tabs[0].customTitle = "~/src"
+        model.updatePane(paneId) { $0.cwd = "\(NSHomeDirectory())/src" }
         proj = desiredWindowChrome(in: model)
-        try expectEqual(proj.windowTitle, "vim", "subtitle == display title is suppressed")
+        try expectEqual(proj.windowTitle, "~/src", "subtitle == display title is suppressed")
     }
 
     test("desiredWindowChrome: reflects the selected tab, not background tabs") {

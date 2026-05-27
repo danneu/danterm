@@ -623,6 +623,22 @@ func paneTests() {
         }, "should not request first responder from first responder callback")
     }
 
+    test("testMovePaneSwapUpdatesVisibleTabChrome") {
+        var model = makeModel()
+        createTab(&model)
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .surfaceTitle(paneId: paneA, title: "alpha"))
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .surfaceTitle(paneId: paneB, title: "beta"))
+
+        update(&model, .movePane(source: paneA, target: paneB, intent: .swap))
+
+        let tab = model.groups[0].tabs[0]
+        try expectEqual(tab.focusedPaneId, paneA)
+        try expectEqual(tab.displayTitle, "alpha", "swapping focus to pane A should show pane A chrome")
+    }
+
     // MARK: - movePaneToTab Tests
 
     test("testMovePaneToTabBasicCrossTab") {
@@ -705,6 +721,27 @@ func paneTests() {
         // reconcileContainers rebuilds both; the source survives (not removed) because it
         // still has paneB. The model structure asserted above is the net.
         try expect(tabById(tab1Id, in: model) != nil, "surviving source tab is not removed")
+    }
+
+    test("testMovePaneToTabUpdatesSourceTabChrome") {
+        var model = makeModel()
+        createTab(&model)
+        let sourceTabId = model.groups[0].tabs[0].id
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .surfaceTitle(paneId: paneA, title: "alpha"))
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .surfaceTitle(paneId: paneB, title: "beta"))
+        update(&model, .paneBecameFirstResponder(paneId: paneA))
+
+        createTab(&model)
+        let targetTabId = model.groups[0].tabs[1].id
+
+        update(&model, .movePaneToTab(paneId: paneA, targetTabId: targetTabId))
+
+        let sourceTab = tabById(sourceTabId, in: model)!
+        try expectEqual(sourceTab.focusedPaneId, paneB)
+        try expectEqual(sourceTab.displayTitle, "beta", "source tab should show the surviving focused pane")
     }
 
     test("testMovePaneToTabSameTabIsNoOp") {
@@ -959,6 +996,25 @@ func paneTests() {
         // Source lost a leaf, so its ContainerShape drifted -> reconcileContainers rebuilds
         // it; the extracted tab becomes selected + shown. focusedPaneId is the net.
         try expectEqual(srcTab.focusedPaneId, paneA, "source tab should focus remaining pane")
+    }
+
+    test("testMovePaneToNewTabUpdatesSourceTabChrome") {
+        var model = makeModel()
+        createTab(&model)
+        let sourceTabId = model.groups[0].tabs[0].id
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .surfaceTitle(paneId: paneA, title: "alpha"))
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .surfaceTitle(paneId: paneB, title: "beta"))
+        update(&model, .paneBecameFirstResponder(paneId: paneA))
+        let groupId = model.groups[0].id
+
+        update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 1))
+
+        let sourceTab = tabById(sourceTabId, in: model)!
+        try expectEqual(sourceTab.focusedPaneId, paneB)
+        try expectEqual(sourceTab.displayTitle, "beta", "source tab should show the surviving focused pane")
     }
 
     test("testMovePaneToNewTabPathB_ChromeDerived") {

@@ -531,15 +531,6 @@ func deriveTabChrome(from pane: PaneModel) -> (title: String, subtitle: String?)
   return (title, subtitle)
 }
 
-/// Derive initial tab chrome from a pane snapshot at import time.
-/// Uses resolveLaunch semantics so launch.cwd is preferred over pane.cwd.
-func deriveTabChromeFromSnapshot(_ ps: PaneSnapshot) -> (title: String, subtitle: String?) {
-  let title = abbreviateHome(ps.title ?? "Terminal")
-  let (resolvedCwd, _) = resolveLaunch(ps)
-  let subtitle = resolvedCwd.map { abbreviateHome($0) }
-  return (title, subtitle)
-}
-
 func adjacentTabId(direction: TabDirection, in model: AppModel) -> TabId? {
   let allTabs = model.groups.flatMap(\.tabs)
   guard let idx = allTabs.firstIndex(where: { $0.id == model.selectedTabId }) else { return nil }

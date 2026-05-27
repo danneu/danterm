@@ -236,10 +236,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
             }
         }
 
-        if let next = nextFocus {
-            syncFocusedPaneChrome(next, in: &model)
-        }
-
         // Persist pane removal + updated tree so closed panes stay closed on restore.
         commands.append(.scheduleCheckpoint)
         return commands
@@ -288,7 +284,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
         guard let movedPane = removed else { return [] }
 
         // Update target tab: wrap its root with the moved pane.
-        let chrome = deriveTabChrome(from: movedPane)
         updateTab(targetTabId, in: &model) { tab in
             tab.rootNode = .split(
                 id: SplitId(), direction: .horizontal,
@@ -296,8 +291,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
             )
             tab.focusedPaneId = paneId
             tab.isZoomed = false
-            tab.title = chrome.title
-            tab.subtitle = chrome.subtitle
         }
 
         // Handle source tab
@@ -383,10 +376,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
             }
 
             // Create new tab for the moved pane, carrying its full payload.
-            var newTab = TabModel(id: TabId(), focusedPaneId: paneId, rootNode: .leaf(movedPane))
-            let chrome = deriveTabChrome(from: movedPane)
-            newTab.title = chrome.title
-            newTab.subtitle = chrome.subtitle
+            let newTab = TabModel(id: TabId(), focusedPaneId: paneId, rootNode: .leaf(movedPane))
             let clamped = max(0, min(atIndex, model.groups[dstGroupIdx].tabs.count))
             model.groups[dstGroupIdx].tabs.insert(newTab, at: clamped)
             model.selectedTabId = newTab.id
@@ -495,9 +485,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
         }
         updateSelectedTab(&model) { t in t.focusedPaneId = paneId }
 
-        // Focus borders and the pane toolbar (incl. its unread-alert badge) reconcile
-        // after send(); only downstream chrome remains as commands here.
-        syncFocusedPaneChrome(paneId, in: &model)
         // Persist focused pane so restore opens the right pane within each tab.
         return [.scheduleCheckpoint]
 
@@ -708,27 +695,14 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
 
     case .surfaceTitle(let paneId, let title):
         model.updatePane(paneId) { $0.title = title }
-        guard let tab = tabForPane(paneId, in: model), tab.focusedPaneId == paneId else {
-            // Persist pane title even for unfocused panes — it appears in restore.
-            return [.scheduleCheckpoint]
-        }
-        let abbrev = abbreviateHome(title)
-        updateTab(tab.id, in: &model) { t in t.title = abbrev }
-        // The selected tab's window/content title reconciles via reconcileWindowChrome
-        // from the title just set above. Persist so restored tabs show the correct name.
+        // Tab/window chrome derives from the focused pane title just set above.
+        // Persist so restored tabs show the correct name.
         return [.scheduleCheckpoint]
 
     case .surfaceCwd(let paneId, let cwd):
         model.updatePane(paneId) { $0.cwd = cwd }
-        guard let tab = tabForPane(paneId, in: model), tab.focusedPaneId == paneId else {
-            // Persist cwd even for unfocused panes — it determines the shell's starting
-            // directory on restore.
-            return [.scheduleCheckpoint]
-        }
-        let abbrev = abbreviateHome(cwd)
-        updateTab(tab.id, in: &model) { t in t.subtitle = abbrev }
-        // The selected tab's window/content title reconciles via reconcileWindowChrome
-        // from the subtitle just set above. Persist so restored panes open in the right dir.
+        // Tab/window chrome derives from the focused pane cwd just set above.
+        // Persist so restored panes open in the right dir.
         return [.scheduleCheckpoint]
 
     case .surfaceProgress(let paneId, let state):
@@ -2358,7 +2332,6 @@ private func navigateToPane(_ paneId: PaneId, in model: inout AppModel) -> [Comm
     if wasZoomed, paneId != oldFocusedPaneId {
         updateSelectedTab(&model) { t in t.isZoomed = false }
     }
-    syncFocusedPaneChrome(paneId, in: &model)
     // No popover clear on same-tab navigation: the anchor button and the visible
     // container stay intact, so nothing is stranded (consistent with
     // paneBecameFirstResponder). A cross-tab navigate clears via the nested selectTab;
@@ -2391,19 +2364,6 @@ private func removeGroupIfEmpty(_ groupId: GroupId, from model: inout AppModel) 
           let idx = model.groups.firstIndex(where: { $0.id == groupId }),
           model.groups[idx].tabs.isEmpty else { return }
     model.groups.remove(at: idx)
-}
-
-/// Sync the selected tab's title/subtitle from the given pane. Pure model
-/// mutation: the tab row reconciles via reconcileSidebar and the window/content
-/// title via reconcileWindowChrome (both read the title/subtitle set here), so
-/// this no longer emits any command.
-private func syncFocusedPaneChrome(_ paneId: PaneId, in model: inout AppModel) {
-    guard let pane = model.pane(paneId) else { return }
-    let chrome = deriveTabChrome(from: pane)
-    updateSelectedTab(&model) { t in
-        t.title = chrome.title
-        t.subtitle = chrome.subtitle
-    }
 }
 
 @discardableResult
