@@ -200,7 +200,6 @@ private func sidebarSelectionTab(_ id: TabId) -> TabModel {
     let paneId = PaneId()
     return TabModel(
         id: id,
-        title: String(id.rawValue.uuidString.prefix(8)),
         focusedPaneId: paneId,
         rootNode: .leaf(PaneModel(id: paneId))
     )
