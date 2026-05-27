@@ -10,7 +10,11 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
     // callers. Without this, MRU updates would have to be sprinkled into
     // every handler that touches tabs (movePaneToTab, surfaceCreationFailed,
     // deleteGroup, restore/import paths, etc.).
-    defer { reconcileMru(&model) }
+    let strandedPopoverPrev = todoPopoverStrandKey(model)
+    defer {
+        reconcileMru(&model)
+        reconcileTodoPopover(&model, previous: strandedPopoverPrev)
+    }
 
     switch msg {
 
@@ -2345,7 +2349,6 @@ private func navigateToPane(_ paneId: PaneId, in model: inout AppModel) -> [Comm
     let oldFocusedPaneId = currentTab.focusedPaneId
     let focusChanged = paneId != oldFocusedPaneId
     var commands = update(&model, .selectTab(id: currentTab.id))
-    let tabSwitched = !commands.isEmpty
     updateTab(currentTab.id, in: &model) { tab in
         tab.focusedPaneId = paneId
     }
@@ -2356,13 +2359,10 @@ private func navigateToPane(_ paneId: PaneId, in model: inout AppModel) -> [Comm
         updateSelectedTab(&model) { t in t.isZoomed = false }
     }
     syncFocusedPaneChrome(paneId, in: &model)
-    // Same-tab navigation finalizes the open popover. selectTab no-ops when the tab is
-    // already selected, so applySelectTab's view-swap path did not run. For a focus
-    // change with no container op the reconciler's view-swap clear will not fire either;
-    // when this navigation also unzooms, the reconciler clears too and this is harmless.
-    if !tabSwitched {
-        model.todoPopover = nil
-    }
+    // No popover clear on same-tab navigation: the anchor button and the visible
+    // container stay intact, so nothing is stranded (consistent with
+    // paneBecameFirstResponder). A cross-tab navigate clears via the nested selectTab;
+    // an unzoom drifts the shape and clears via update()'s reconcileTodoPopover.
     commands.append(.makeFirstResponder(paneId: paneId))
     if focusChanged {
         commands.append(.scheduleCheckpoint)

@@ -356,40 +356,49 @@ func reconcileTests() {
             "unchanged selection + shapes -> state unchanged (A visible, B hidden)")
     }
 
-    test("reconcilePopover clears the record only when container ops strand the visible tab") {
-        let visible = TabId(), background = TabId(), pane = PaneId(), tab = TabId()
+    test("containerOpsStrandVisible flags only ops that strand the visible tab") {
+        let visible = TabId(), background = TabId()
 
         try expectEqual(
-            reconcilePopover(current: .pane(pane), ops: [.rebuild(tabId: visible)], previouslyVisibleTabId: visible),
-            StrandedPopoverOutcome(popover: nil, dismissStranded: true),
-            "visible rebuild clears a pane popover and requests AppKit teardown")
+            containerOpsStrandVisible(ops: [.rebuild(tabId: visible)], previouslyVisibleTabId: visible),
+            true,
+            "visible rebuild strands the visible container")
         try expectEqual(
-            reconcilePopover(current: .tab(tab), ops: [.remove(tabId: visible)], previouslyVisibleTabId: visible),
-            StrandedPopoverOutcome(popover: nil, dismissStranded: true),
-            "visible remove clears a tab popover and requests AppKit teardown")
+            containerOpsStrandVisible(ops: [.remove(tabId: visible)], previouslyVisibleTabId: visible),
+            true,
+            "visible remove strands the visible container")
         try expectEqual(
-            reconcilePopover(current: .pane(pane), ops: [.setVisible(tabId: visible, visible: false)], previouslyVisibleTabId: visible),
-            StrandedPopoverOutcome(popover: nil, dismissStranded: true),
-            "hiding the visible container clears the popover")
+            containerOpsStrandVisible(
+                ops: [.setVisible(tabId: visible, visible: false)],
+                previouslyVisibleTabId: visible),
+            true,
+            "hiding the visible container strands it")
         try expectEqual(
-            reconcilePopover(
-                current: .pane(pane),
-                ops: [.rebuild(tabId: background), .setVisible(tabId: visible, visible: true)],
+            containerOpsStrandVisible(
+                ops: [.rebuild(tabId: background)],
                 previouslyVisibleTabId: visible
             ),
-            StrandedPopoverOutcome(popover: .pane(pane), dismissStranded: false),
-            "background rebuild and visible show leave the popover alone")
+            false,
+            "background rebuild leaves the visible container mounted")
         try expectEqual(
-            reconcilePopover(current: nil, ops: [.remove(tabId: visible)], previouslyVisibleTabId: visible),
-            StrandedPopoverOutcome(popover: nil, dismissStranded: true),
-            "a stranding op still requests AppKit teardown when no model record is open")
+            containerOpsStrandVisible(
+                ops: [.setVisible(tabId: visible, visible: true)],
+                previouslyVisibleTabId: visible),
+            false,
+            "showing the visible container is not a stranding op")
         try expectEqual(
-            reconcilePopover(current: nil, ops: [], previouslyVisibleTabId: visible),
-            StrandedPopoverOutcome(popover: nil, dismissStranded: false),
-            "no stranding op leaves nil unchanged")
+            containerOpsStrandVisible(
+                ops: [.setVisible(tabId: background, visible: true)],
+                previouslyVisibleTabId: visible),
+            false,
+            "showing a background container is not a stranding op")
         try expectEqual(
-            reconcilePopover(current: .tab(tab), ops: [.remove(tabId: visible)], previouslyVisibleTabId: nil),
-            StrandedPopoverOutcome(popover: .tab(tab), dismissStranded: false),
+            containerOpsStrandVisible(ops: [], previouslyVisibleTabId: visible),
+            false,
+            "no ops do not strand the visible container")
+        try expectEqual(
+            containerOpsStrandVisible(ops: [.remove(tabId: visible)], previouslyVisibleTabId: nil),
+            false,
             "without a previously-visible tab there is no stranded container")
     }
 

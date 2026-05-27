@@ -268,6 +268,81 @@ func todoTests() {
         try expectEqual(model.todoPopover, .pane(paneB), "paneB popover should still be open")
     }
 
+    // MARK: - reconcileTodoPopover
+
+    test("reconcileTodoPopover clears pane and tab popovers on selected-tab change") {
+        func check(_ scopeFor: (TabId, PaneId) -> TodoPopoverScope, _ label: String) throws {
+            var model = makeModel()
+            createTab(&model)
+            let firstTab = selectedTab(in: model)!
+            createTab(&model, background: true)
+            let secondTab = model.groups[0].tabs.first { $0.id != firstTab.id }!
+            model.todoPopover = scopeFor(firstTab.id, firstTab.focusedPaneId)
+
+            update(&model, .selectTab(id: secondTab.id))
+
+            try expect(model.todoPopover == nil, "\(label) popover should clear when selected tab changes")
+        }
+
+        try check({ _, paneId in .pane(paneId) }, "pane")
+        try check({ tabId, _ in .tab(tabId) }, "tab")
+    }
+
+    test("reconcileTodoPopover clears pane and tab popovers on selected-tab shape change") {
+        func check(_ scopeFor: (TabId, PaneId) -> TodoPopoverScope, _ label: String) throws {
+            var model = makeModel()
+            createTab(&model)
+            let tab = selectedTab(in: model)!
+            let paneId = tab.focusedPaneId
+            model.todoPopover = scopeFor(tab.id, paneId)
+
+            update(&model, .splitPane(paneId: paneId, direction: .horizontal))
+
+            try expect(model.todoPopover == nil, "\(label) popover should clear when selected tab shape changes")
+        }
+
+        try check({ _, paneId in .pane(paneId) }, "pane")
+        try check({ tabId, _ in .tab(tabId) }, "tab")
+    }
+
+    test("reconcileTodoPopover preserves pane popover on same-tab focus change") {
+        var model = makeModel()
+        createTab(&model)
+        let firstPaneId = selectedTab(in: model)!.focusedPaneId
+        update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
+        let secondPaneId = selectedTab(in: model)!.focusedPaneId
+        update(&model, .paneBecameFirstResponder(paneId: firstPaneId))
+        model.todoPopover = .pane(firstPaneId)
+
+        update(&model, .paneBecameFirstResponder(paneId: secondPaneId))
+
+        try expectEqual(model.todoPopover, .pane(firstPaneId))
+    }
+
+    test("reconcileTodoPopover preserves pane popover on background-tab shape change") {
+        var model = makeModel()
+        createTab(&model)
+        let selected = selectedTab(in: model)!
+        createTab(&model, background: true)
+        let background = model.groups[0].tabs.first { $0.id != selected.id }!
+        model.todoPopover = .pane(selected.focusedPaneId)
+
+        update(&model, .splitPane(paneId: background.focusedPaneId, direction: .horizontal))
+
+        try expectEqual(model.selectedTabId, selected.id)
+        try expectEqual(model.todoPopover, .pane(selected.focusedPaneId))
+    }
+
+    test("reconcileTodoPopover preserves popover opened by the current message") {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+
+        update(&model, .toggleTodoPopover(paneId: paneId))
+
+        try expectEqual(model.todoPopover, .pane(paneId))
+    }
+
     // MARK: - splitPane starts empty
 
     test("splitPane starts child with empty todos") {

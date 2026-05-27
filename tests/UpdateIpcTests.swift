@@ -413,6 +413,27 @@ func ipcUpdateTests() {
         try expectEqual(tabById(tabId, in: model)?.focusedPaneId, secondPaneId)
     }
 
+    test("pane.focus preserves popover on same-tab focus in unzoomed tab") {
+        var model = makeModel()
+        createTab(&model)
+        let tabId = selectedTab(in: model)!.id
+        let firstPaneId = selectedTab(in: model)!.focusedPaneId
+        _ = update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
+        let secondPaneId = selectedTab(in: model)!.focusedPaneId
+        updateTabForTest(tabId, in: &model) { $0.focusedPaneId = firstPaneId }
+        model.todoPopover = .pane(firstPaneId)
+
+        _ = sendIpc(
+            &model,
+            method: Methods.paneFocus,
+            params: .object(["paneId": .string(secondPaneId.rawValue.uuidString)]),
+            context: contextForSelectedPane(in: model)
+        )
+
+        try expectEqual(model.todoPopover, .pane(firstPaneId))
+        try expectEqual(tabById(tabId, in: model)?.focusedPaneId, secondPaneId)
+    }
+
     test("pane.focus clears target pane alerts in focus mode") {
         var model = makeModel()
         model.config.alertClearMode = .focus

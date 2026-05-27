@@ -1325,9 +1325,9 @@ class AppRuntime {
     }
 
     /// Cancel an in-flight pane drag and dismiss any open TODO popovers.
-    /// `reconcileContainers` calls this after clearing the model record when the
-    /// visible container is hidden, rebuilt, or removed, so a popover never strands
-    /// over the wrong content.
+    /// `reconcileContainers` calls this when containerOpsStrandVisible says the
+    /// visible container was hidden, rebuilt, or removed. The model record is
+    /// cleared separately by reconcileTodoPopover in update().
     func dismissStrandedPopovers() {
         cancelPaneDrag()
         dismissTodoPopoverPair()

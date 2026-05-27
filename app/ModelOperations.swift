@@ -1568,24 +1568,6 @@ func containerOpsStrandVisible(ops: [ContainerOp], previouslyVisibleTabId: TabId
   }
 }
 
-/// The TODO-popover outcome of a container reconcile. On a view swap the record
-/// clears and the AppKit teardown runs; otherwise nothing changes.
-struct StrandedPopoverOutcome: Equatable {
-  var popover: TodoPopoverScope?
-  var dismissStranded: Bool
-}
-
-/// Derive both halves of TODO-popover cleanup from the container-op script so the
-/// reconciler owns the common view-swap rule.
-func reconcilePopover(
-  current: TodoPopoverScope?, ops: [ContainerOp], previouslyVisibleTabId: TabId?
-) -> StrandedPopoverOutcome {
-  if containerOpsStrandVisible(ops: ops, previouslyVisibleTabId: previouslyVisibleTabId) {
-    return StrandedPopoverOutcome(popover: nil, dismissStranded: true)
-  }
-  return StrandedPopoverOutcome(popover: current, dismissStranded: false)
-}
-
 /// Leaf pane ids of a container shape (backs `chromeInvalidation`).
 func leafPaneIds(of shape: ContainerShape) -> [PaneId] {
   func walk(_ node: ContainerShapeNode) -> [PaneId] {
@@ -2012,6 +1994,38 @@ func parseDantermEvent(_ raw: String, expectedToken: String) -> DantermEvent? {
 }
 
 // MARK: - MRU Tab Switcher
+
+/// Identity of the visible container an open TODO popover is anchored to.
+/// nil from todoPopoverStrandKey means no popover is open, so callers can skip
+/// the tree walk and avoid clearing a popover opened during the current message.
+struct TodoPopoverStrandKey: Equatable {
+  let visibleTabId: TabId?
+  let visibleShape: ContainerShape?
+}
+
+/// Capture the visible container identity before a message runs.
+func todoPopoverStrandKey(_ model: AppModel) -> TodoPopoverStrandKey? {
+  guard model.todoPopover != nil else { return nil }
+  let sel = model.selectedTabId
+  return TodoPopoverStrandKey(
+    visibleTabId: sel,
+    visibleShape: sel.flatMap { tabById($0, in: model) }.map(containerShape(of:))
+  )
+}
+
+/// Pure model half of view-swap popover dismissal. Clears model.todoPopover iff
+/// the message stranded the visible container the popover was anchored to: the
+/// selected tab changed, or the selected tab's ContainerShape drifted. A same-tab
+/// focus change strands nothing, so it is intentionally not a trigger.
+func reconcileTodoPopover(_ model: inout AppModel, previous: TodoPopoverStrandKey?) {
+  guard let previous, model.todoPopover != nil else { return }
+  let sel = model.selectedTabId
+  let current = TodoPopoverStrandKey(
+    visibleTabId: sel,
+    visibleShape: sel.flatMap { tabById($0, in: model) }.map(containerShape(of:))
+  )
+  if current != previous { model.todoPopover = nil }
+}
 
 /// Move `value` to index 0 of the array, removing all other occurrences.
 /// No-op if the value is not present.

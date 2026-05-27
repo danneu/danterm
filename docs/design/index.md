@@ -32,3 +32,4 @@ Default statuses are:
 
 - [2026-03-05: Display Scaling](2026-03-05-display-scaling.md)
 - [2026-05-27: Terminal Focus and Display Link Recovery](2026-05-27-terminal-focus-display-link.md)
+- [2026-05-27: Read-Only View Reconciler](2026-05-27-read-only-reconciler.md)
