@@ -19,6 +19,8 @@ class PaneDragOverlayView: NSView {
     func update(rect: NSRect, intent: PaneDropIntent) {
         self.highlightRect = rect
         self.intent = intent
+        // Invalidate the whole view because the highlight moves between panes, so the
+        // previous rounded rect must be erased too. The draw itself is cheap.
         needsDisplay = true
     }
 

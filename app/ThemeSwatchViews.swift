@@ -2,6 +2,33 @@
 // and the remote theme picker sheet.
 import Cocoa
 
+/// Bold/regular monospaced fonts at the size where "test\u{2588}" just fits a swatch's
+/// text area, plus the rendered size used to center it.
+fileprivate struct SwatchTextFit {
+    let bold: NSFont
+    let regular: NSFont
+    let textSize: NSSize
+}
+
+/// Largest monospaced size at which "test\u{2588}" fits within the swatch text area.
+fileprivate func swatchTextFit(textAreaSize: NSSize, padding: CGFloat = 3) -> SwatchTextFit {
+    let available = textAreaSize.width - padding * 2
+    var fontSize: CGFloat = textAreaSize.height
+    var textSize = NSSize.zero
+    var boldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
+    var regularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+    while fontSize > 4 {
+        boldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
+        regularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        let probe = NSMutableAttributedString(string: "test", attributes: [.font: boldFont])
+        probe.append(NSAttributedString(string: "\u{2588}", attributes: [.font: regularFont]))
+        textSize = probe.size()
+        if textSize.width <= available && textSize.height <= textAreaSize.height { break }
+        fontSize -= 0.5
+    }
+    return SwatchTextFit(bold: boldFont, regular: regularFont, textSize: textSize)
+}
+
 /// Tiny terminal thumbnail: bg-colored rounded rect with "test█" text in the upper area
 /// and a 6-color ANSI palette bar flush against the bottom edge.
 final class ColorSwatchView: NSView {
@@ -38,31 +65,17 @@ final class ColorSwatchView: NSView {
 
         // "test█" sized to fill the area above the bar, with "test" bold.
         let textArea = NSRect(x: rect.minX, y: rect.minY + barHeight, width: rect.width, height: rect.height - barHeight)
-        let padding: CGFloat = 3
-        let available = textArea.width - padding * 2
-        var fontSize: CGFloat = textArea.height
-        var textSize = NSSize.zero
-        var boldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
-        var regularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        while fontSize > 4 {
-            boldFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
-            regularFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-            let probe = NSMutableAttributedString(string: "test", attributes: [.font: boldFont])
-            probe.append(NSAttributedString(string: "\u{2588}", attributes: [.font: regularFont]))
-            textSize = probe.size()
-            if textSize.width <= available && textSize.height <= textArea.height { break }
-            fontSize -= 0.5
-        }
+        let fit = swatchTextFit(textAreaSize: textArea.size)
         let text = NSMutableAttributedString(
             string: "test",
-            attributes: [.font: boldFont, .foregroundColor: colors.fg]
+            attributes: [.font: fit.bold, .foregroundColor: colors.fg]
         )
         text.append(NSAttributedString(
             string: "\u{2588}",
-            attributes: [.font: regularFont, .foregroundColor: colors.accent]
+            attributes: [.font: fit.regular, .foregroundColor: colors.accent]
         ))
-        let textX = textArea.midX - textSize.width / 2
-        let textY = textArea.midY - textSize.height / 2
+        let textX = textArea.midX - fit.textSize.width / 2
+        let textY = textArea.midY - fit.textSize.height / 2
         text.draw(at: NSPoint(x: textX, y: textY))
 
         NSGraphicsContext.restoreGraphicsState()
