@@ -2,20 +2,6 @@
 import Foundation
 import DanTermProtocol
 
-/// Normalize a raw remote theme string: trim whitespace, default empty to the config default.
-func resolveRemoteTheme(_ raw: String) -> String {
-    let trimmed = raw.trimmingCharacters(in: .whitespaces)
-    return trimmed.isEmpty ? DanTermConfig.default.remoteTheme : trimmed
-}
-
-/// Whether the preferences draft has any changes compared to the committed config.
-func isDraftDirty(_ draft: PreferencesDraft, vs config: DanTermConfig, ghostty: GhosttyPrefs?) -> Bool {
-    draft.alertClearMode != config.alertClearMode
-        || resolveRemoteTheme(draft.remoteTheme) != config.remoteTheme
-        || draft.theme != ghostty?.theme
-        || draft.fontSize != ghostty?.fontSize
-}
-
 @discardableResult
 func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
     // Single chokepoint: every code path that mutates tab membership or
@@ -600,7 +586,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
             model.preferencesDraft!.alertClearMode = newConfig.alertClearMode
             model.preferencesDraft!.remoteTheme = newConfig.remoteTheme
         }
-        var commands: [Command] = [.syncPreferencesPanel]
+        var commands: [Command] = []
         if newConfig.remoteTheme != oldConfig.remoteTheme {
             // Two passes: collect remote pane ids, then updatePane + emit per pane
             // (can't mutate via updatePane while iterating model.allPanes).
@@ -624,7 +610,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
             )
             model.committedGhosttyPrefs = ghostty
         }
-        return [.syncPreferencesPanel]
+        return []
 
     case .preferencesClosed:
         model.preferencesDraft = nil
@@ -634,42 +620,42 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
     case .prefSetAlertClearMode(let mode):
         guard model.preferencesDraft != nil else { return [] }
         model.preferencesDraft!.alertClearMode = mode
-        return [.syncPreferencesPanel]
+        return []
 
     case .prefSetRemoteTheme(let rawText):
         guard model.preferencesDraft != nil else { return [] }
         model.preferencesDraft!.remoteTheme = rawText
-        return [.syncPreferencesPanel]
+        return []
 
     case .prefResetAlertClearMode:
         guard model.preferencesDraft != nil else { return [] }
         model.preferencesDraft!.alertClearMode = model.config.alertClearMode
-        return [.syncPreferencesPanel]
+        return []
 
     case .prefResetRemoteTheme:
         guard model.preferencesDraft != nil else { return [] }
         model.preferencesDraft!.remoteTheme = model.config.remoteTheme
-        return [.syncPreferencesPanel]
+        return []
 
     case .prefSetTheme(let text):
         guard model.preferencesDraft != nil else { return [] }
         model.preferencesDraft!.theme = text
-        return [.syncPreferencesPanel]
+        return []
 
     case .prefSetFontSize(let text):
         guard model.preferencesDraft != nil else { return [] }
         model.preferencesDraft!.fontSize = text
-        return [.syncPreferencesPanel]
+        return []
 
     case .prefResetTheme:
         guard model.preferencesDraft != nil else { return [] }
         model.preferencesDraft!.theme = model.committedGhosttyPrefs?.theme
-        return [.syncPreferencesPanel]
+        return []
 
     case .prefResetFontSize:
         guard model.preferencesDraft != nil else { return [] }
         model.preferencesDraft!.fontSize = model.committedGhosttyPrefs?.fontSize
-        return [.syncPreferencesPanel]
+        return []
 
     case .ghosttyPrefsRefreshed(let ghostty):
         model.committedGhosttyPrefs = ghostty
@@ -677,7 +663,7 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
             model.preferencesDraft!.theme = ghostty.theme
             model.preferencesDraft!.fontSize = ghostty.fontSize
         }
-        return model.preferencesDraft != nil ? [.syncPreferencesPanel] : []
+        return []
 
     case .prefSave:
         guard let draft = model.preferencesDraft else { return [] }
@@ -738,7 +724,6 @@ func update(_ model: inout AppModel, _ msg: Msg) -> [Command] {
                 model.committedGhosttyPrefs?.fontSize = draft.fontSize
             }
         }
-        commands.append(.syncPreferencesPanel)
         return commands
 
     // MARK: - Export

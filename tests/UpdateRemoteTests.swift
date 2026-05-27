@@ -213,12 +213,7 @@ func remoteTests() {
         newConfig.remoteTheme = "Grape"
         let commands = update(&model, .configLoaded(newConfig))
         try expectEqual(model.config.remoteTheme, "Grape")
-        // Always emits syncPreferencesPanel, even with no remote panes
-        try expectEqual(commands.count, 1)
-        try expect(hasEffect(commands) {
-            if case .syncPreferencesPanel = $0 { return true }
-            return false
-        }, "should emit syncPreferencesPanel")
+        try expectEqual(commands.count, 0)
     }
 
     test("configLoaded reapplies remote theme to remote panes") {
@@ -236,13 +231,10 @@ func remoteTests() {
             if case .applyPaneTheme(let pid) = $0, pid == paneId { return true }
             return false
         }, "should emit applyPaneTheme")
-        try expect(hasEffect(commands) {
-            if case .syncPreferencesPanel = $0 { return true }
-            return false
-        }, "should emit syncPreferencesPanel")
+        try expectEqual(commands.count, 1)
     }
 
-    test("configLoaded with same config emits only syncPreferencesPanel") {
+    test("configLoaded with same config emits no commands") {
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
@@ -250,11 +242,7 @@ func remoteTests() {
 
         // Reload with same default config — no theme change
         let commands = update(&model, .configLoaded(DanTermConfig.default))
-        try expectEqual(commands.count, 1)
-        try expect(hasEffect(commands) {
-            if case .syncPreferencesPanel = $0 { return true }
-            return false
-        }, "should emit syncPreferencesPanel")
+        try expectEqual(commands.count, 0)
     }
 
     // MARK: - setAlertClearMode (via pref draft + save)
@@ -276,8 +264,9 @@ func remoteTests() {
     test("pref save alertClearMode with same value does not emit save key") {
         var model = makeModel()
         _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs()))
-        // Don't change anything — save should emit only syncPreferencesPanel.
+        // Don't change anything, so there is no persistence or theme side effect.
         let commands = update(&model, .prefSave)
+        try expectEqual(commands.count, 0)
         try expect(!hasEffect(commands) {
             if case .saveDanTermConfigKey = $0 { return true }
             return false

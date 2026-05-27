@@ -67,7 +67,6 @@ enum Command {
     case saveDanTermConfigKey(key: String, value: String)
     case removeDanTermConfigKey(key: String)
     case reloadGhosttyConfig
-    case syncPreferencesPanel
 
     // Persistence — triggers a debounced write of the model snapshot to disk.
     // Returned by state-mutating update() branches so the recovery file stays current.
@@ -111,7 +110,7 @@ extension Command {
              .showCloseTabConfirmation, .showCloseTabsConfirmation, .terminate, .activateApp,
              .setAppFocus, .dismissAlertsPopover,
              .applyPaneTheme, .saveDanTermConfigKey, .removeDanTermConfigKey,
-             .reloadGhosttyConfig, .syncPreferencesPanel, .scheduleCheckpoint, .sendStartSearch,
+             .reloadGhosttyConfig, .scheduleCheckpoint, .sendStartSearch,
              .sendSearchNeedle, .sendSearchNavigate, .sendEndSearch, .showTodoPopover,
              .dismissTodoPopover, .showTodoPopoverForTab, .dismissTodoPopoverForTab,
              .showClosePaneConfirmation:

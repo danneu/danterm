@@ -3,10 +3,65 @@ import Foundation
 
 // MARK: - Pane Theme
 
+/// Normalize a raw remote theme string: trim whitespace, default empty to the config default.
+func resolveRemoteTheme(_ raw: String) -> String {
+    let trimmed = raw.trimmingCharacters(in: .whitespaces)
+    return trimmed.isEmpty ? DanTermConfig.default.remoteTheme : trimmed
+}
+
 /// Returns the theme that should be applied to a pane's Ghostty surface.
 /// Remote override takes priority over user-set theme.
 func effectiveTheme(for pane: PaneModel) -> String? {
   pane.remoteThemeOverride ?? pane.theme
+}
+
+// MARK: - Preferences Panel
+
+/// Whether the preferences draft has any changes compared to the committed config.
+func isDraftDirty(_ draft: PreferencesDraft, vs config: DanTermConfig, ghostty: GhosttyPrefs?) -> Bool {
+    draft.alertClearMode != config.alertClearMode
+        || resolveRemoteTheme(draft.remoteTheme) != config.remoteTheme
+        || draft.theme != ghostty?.theme
+        || draft.fontSize != ghostty?.fontSize
+}
+
+/// Pure value describing the visible preferences panel state.
+struct PreferencesPanelProjection: Equatable {
+    var selectedAlertClearMode: AlertClearMode
+    var remoteThemeText: String
+    var ghosttyThemeText: String
+    var fontSizeText: String
+    var ghosttyThemeDirtyLabel: String?
+    var fontSizeDirtyLabel: String?
+    var alertClearModeDirtyLabel: String?
+    var remoteThemeDirtyLabel: String?
+    var saveEnabled: Bool
+}
+
+/// Project the preferences panel from the model. nil means no draft is open, so
+/// the runtime has no preferences UI to update and clears the reconcile cache.
+func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? {
+    guard let draft = model.preferencesDraft else { return nil }
+
+    let committed = model.config
+    let ghostty = model.committedGhosttyPrefs
+    let ghosttyThemeDirty = draft.theme != ghostty?.theme
+    let fontSizeDirty = draft.fontSize != ghostty?.fontSize
+    let alertDirty = draft.alertClearMode != committed.alertClearMode
+    let remoteThemeDirty = resolveRemoteTheme(draft.remoteTheme) != committed.remoteTheme
+
+    let alertDisplayValue = committed.alertClearMode == .focus ? "Focus" : "Manual"
+    return PreferencesPanelProjection(
+        selectedAlertClearMode: draft.alertClearMode,
+        remoteThemeText: draft.remoteTheme,
+        ghosttyThemeText: draft.theme ?? "",
+        fontSizeText: draft.fontSize ?? "",
+        ghosttyThemeDirtyLabel: ghosttyThemeDirty ? "Prev: \(ghostty?.theme ?? "(default)")" : nil,
+        fontSizeDirtyLabel: fontSizeDirty ? "Prev: \(ghostty?.fontSize ?? "(default)")" : nil,
+        alertClearModeDirtyLabel: alertDirty ? "Prev: \(alertDisplayValue)" : nil,
+        remoteThemeDirtyLabel: remoteThemeDirty ? "Prev: \(committed.remoteTheme)" : nil,
+        saveEnabled: ghosttyThemeDirty || fontSizeDirty || alertDirty || remoteThemeDirty
+    )
 }
 
 // MARK: - Pane Toolbar

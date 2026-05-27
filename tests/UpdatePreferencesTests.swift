@@ -24,10 +24,7 @@ func preferencesTests() {
         try expectEqual(model.preferencesDraft?.theme, "Dracula")
         try expectEqual(model.preferencesDraft?.fontSize, "14")
         try expectEqual(model.committedGhosttyPrefs, ghostty)
-        try expect(hasEffect(commands) {
-            if case .syncPreferencesPanel = $0 { return true }
-            return false
-        }, "should emit syncPreferencesPanel")
+        try expectEqual(commands.count, 0)
     }
 
     test("preferencesOpened when draft exists does not wipe it") {
@@ -52,6 +49,123 @@ func preferencesTests() {
         try expectEqual(commands.count, 0)
     }
 
+    // MARK: - Preferences panel projection
+
+    test("desiredPreferencesPanel returns nil when no draft is open") {
+        let model = makeModel()
+        try expect(desiredPreferencesPanel(in: model) == nil, "closed preferences should not project UI")
+    }
+
+    test("desiredPreferencesPanel clean draft renders values with save disabled") {
+        var model = makeModel()
+        model.config.alertClearMode = .manual
+        model.config.remoteTheme = "Grape"
+        _ = openPrefs(&model, ghostty: GhosttyPrefs(theme: "Dracula", fontSize: "14"))
+
+        guard let projection = desiredPreferencesPanel(in: model) else {
+            throw TestFailure(message: "expected preferences projection")
+        }
+        try expectEqual(projection.selectedAlertClearMode, .manual)
+        try expectEqual(projection.remoteThemeText, "Grape")
+        try expectEqual(projection.ghosttyThemeText, "Dracula")
+        try expectEqual(projection.fontSizeText, "14")
+        try expect(projection.ghosttyThemeDirtyLabel == nil, "theme row hidden")
+        try expect(projection.fontSizeDirtyLabel == nil, "font-size row hidden")
+        try expect(projection.alertClearModeDirtyLabel == nil, "alert row hidden")
+        try expect(projection.remoteThemeDirtyLabel == nil, "remote theme row hidden")
+        try expect(!projection.saveEnabled, "clean draft disables Save")
+    }
+
+    test("desiredPreferencesPanel renders alert clear mode dirty label") {
+        var model = makeModel()
+        _ = openPrefs(&model, ghostty: GhosttyPrefs(theme: "Dracula", fontSize: "14"))
+        _ = update(&model, .prefSetAlertClearMode(.manual))
+
+        guard let projection = desiredPreferencesPanel(in: model) else {
+            throw TestFailure(message: "expected preferences projection")
+        }
+        try expectEqual(projection.alertClearModeDirtyLabel, "Prev: Focus")
+        try expect(projection.saveEnabled, "dirty alert clear mode enables Save")
+    }
+
+    test("desiredPreferencesPanel renders remote theme dirty label") {
+        var model = makeModel()
+        _ = openPrefs(&model, ghostty: GhosttyPrefs(theme: "Dracula", fontSize: "14"))
+        _ = update(&model, .prefSetRemoteTheme("Grape"))
+
+        guard let projection = desiredPreferencesPanel(in: model) else {
+            throw TestFailure(message: "expected preferences projection")
+        }
+        try expectEqual(projection.remoteThemeDirtyLabel, "Prev: Purplepeter")
+        try expect(projection.saveEnabled, "dirty remote theme enables Save")
+    }
+
+    test("desiredPreferencesPanel renders Ghostty theme dirty label") {
+        var model = makeModel()
+        _ = openPrefs(&model, ghostty: GhosttyPrefs(theme: "Dracula", fontSize: "14"))
+        _ = update(&model, .prefSetTheme("Solarized"))
+
+        guard let projection = desiredPreferencesPanel(in: model) else {
+            throw TestFailure(message: "expected preferences projection")
+        }
+        try expectEqual(projection.ghosttyThemeDirtyLabel, "Prev: Dracula")
+        try expect(projection.saveEnabled, "dirty Ghostty theme enables Save")
+    }
+
+    test("desiredPreferencesPanel renders font-size dirty label") {
+        var model = makeModel()
+        _ = openPrefs(&model, ghostty: GhosttyPrefs(theme: "Dracula", fontSize: "14"))
+        _ = update(&model, .prefSetFontSize("16"))
+
+        guard let projection = desiredPreferencesPanel(in: model) else {
+            throw TestFailure(message: "expected preferences projection")
+        }
+        try expectEqual(projection.fontSizeDirtyLabel, "Prev: 14")
+        try expect(projection.saveEnabled, "dirty font size enables Save")
+    }
+
+    test("desiredPreferencesPanel normalizes remote theme dirtiness") {
+        var model = makeModel()
+        _ = openPrefs(&model)
+        _ = update(&model, .prefSetRemoteTheme("  Purplepeter  "))
+
+        guard let projection = desiredPreferencesPanel(in: model) else {
+            throw TestFailure(message: "expected preferences projection")
+        }
+        try expectEqual(projection.remoteThemeText, "  Purplepeter  ", "field keeps raw draft text")
+        try expect(projection.remoteThemeDirtyLabel == nil, "normalized remote theme is clean")
+        try expect(!projection.saveEnabled, "normalized clean draft disables Save")
+    }
+
+    test("desiredPreferencesPanel uses default labels for Ghostty defaults") {
+        var model = makeModel()
+        _ = openPrefs(&model)
+        _ = update(&model, .prefSetTheme("Solarized"))
+        _ = update(&model, .prefSetFontSize("16"))
+
+        guard let projection = desiredPreferencesPanel(in: model) else {
+            throw TestFailure(message: "expected preferences projection")
+        }
+        try expectEqual(projection.ghosttyThemeDirtyLabel, "Prev: (default)")
+        try expectEqual(projection.fontSizeDirtyLabel, "Prev: (default)")
+        try expect(projection.saveEnabled, "dirty Ghostty draft enables Save")
+    }
+
+    test("invalid font-size stays dirty after save") {
+        var model = makeModel()
+        _ = openPrefs(&model)
+        _ = update(&model, .prefSetFontSize("abc"))
+        let commands = update(&model, .prefSave)
+
+        guard let projection = desiredPreferencesPanel(in: model) else {
+            throw TestFailure(message: "expected preferences projection")
+        }
+        try expectEqual(commands.count, 0)
+        try expectEqual(projection.fontSizeText, "abc")
+        try expectEqual(projection.fontSizeDirtyLabel, "Prev: (default)")
+        try expect(projection.saveEnabled, "invalid unsaved font size remains dirty")
+    }
+
     // MARK: - Editing draft
 
     test("prefSetAlertClearMode updates draft only, not model.config") {
@@ -60,10 +174,7 @@ func preferencesTests() {
         let commands = update(&model, .prefSetAlertClearMode(.manual))
         try expectEqual(model.preferencesDraft?.alertClearMode, .manual)
         try expectEqual(model.config.alertClearMode, .focus, "committed config should not change")
-        try expect(hasEffect(commands) {
-            if case .syncPreferencesPanel = $0 { return true }
-            return false
-        }, "should emit syncPreferencesPanel")
+        try expectEqual(commands.count, 0)
     }
 
     test("prefSetRemoteTheme stores raw text without normalizing") {
@@ -72,10 +183,7 @@ func preferencesTests() {
         let commands = update(&model, .prefSetRemoteTheme("  Grape  "))
         try expectEqual(model.preferencesDraft?.remoteTheme, "  Grape  ", "should store raw text")
         try expectEqual(model.config.remoteTheme, "Purplepeter", "committed config should not change")
-        try expect(hasEffect(commands) {
-            if case .syncPreferencesPanel = $0 { return true }
-            return false
-        }, "should emit syncPreferencesPanel")
+        try expectEqual(commands.count, 0)
     }
 
     test("prefSetRemoteTheme stores empty string without defaulting") {
@@ -90,10 +198,7 @@ func preferencesTests() {
         _ = openPrefs(&model)
         let commands = update(&model, .prefSetTheme("Solarized"))
         try expectEqual(model.preferencesDraft?.theme, "Solarized")
-        try expect(hasEffect(commands) {
-            if case .syncPreferencesPanel = $0 { return true }
-            return false
-        }, "should emit syncPreferencesPanel")
+        try expectEqual(commands.count, 0)
     }
 
     test("prefSetTheme nil clears draft theme") {
@@ -108,10 +213,7 @@ func preferencesTests() {
         _ = openPrefs(&model)
         let commands = update(&model, .prefSetFontSize("16"))
         try expectEqual(model.preferencesDraft?.fontSize, "16")
-        try expect(hasEffect(commands) {
-            if case .syncPreferencesPanel = $0 { return true }
-            return false
-        }, "should emit syncPreferencesPanel")
+        try expectEqual(commands.count, 0)
     }
 
     // MARK: - Reset
@@ -123,10 +225,7 @@ func preferencesTests() {
         try expectEqual(model.preferencesDraft?.alertClearMode, .manual)
         let commands = update(&model, .prefResetAlertClearMode)
         try expectEqual(model.preferencesDraft?.alertClearMode, .focus, "should revert to committed")
-        try expect(hasEffect(commands) {
-            if case .syncPreferencesPanel = $0 { return true }
-            return false
-        }, "should emit syncPreferencesPanel")
+        try expectEqual(commands.count, 0)
     }
 
     test("prefResetRemoteTheme reverts draft to committed") {
@@ -135,10 +234,7 @@ func preferencesTests() {
         _ = update(&model, .prefSetRemoteTheme("Grape"))
         let commands = update(&model, .prefResetRemoteTheme)
         try expectEqual(model.preferencesDraft?.remoteTheme, "Purplepeter", "should revert to committed")
-        try expect(hasEffect(commands) {
-            if case .syncPreferencesPanel = $0 { return true }
-            return false
-        }, "should emit syncPreferencesPanel")
+        try expectEqual(commands.count, 0)
     }
 
     test("prefResetTheme reverts draft to committed Ghostty value") {
@@ -148,10 +244,7 @@ func preferencesTests() {
         try expectEqual(model.preferencesDraft?.theme, "Solarized")
         let commands = update(&model, .prefResetTheme)
         try expectEqual(model.preferencesDraft?.theme, "Dracula", "should revert to committed")
-        try expect(hasEffect(commands) {
-            if case .syncPreferencesPanel = $0 { return true }
-            return false
-        }, "should emit syncPreferencesPanel")
+        try expectEqual(commands.count, 0)
     }
 
     test("prefResetFontSize reverts draft to committed Ghostty value") {
@@ -160,23 +253,16 @@ func preferencesTests() {
         _ = update(&model, .prefSetFontSize("20"))
         let commands = update(&model, .prefResetFontSize)
         try expectEqual(model.preferencesDraft?.fontSize, "14", "should revert to committed")
-        try expect(hasEffect(commands) {
-            if case .syncPreferencesPanel = $0 { return true }
-            return false
-        }, "should emit syncPreferencesPanel")
+        try expectEqual(commands.count, 0)
     }
 
     // MARK: - Save
 
-    test("prefSave with no changes emits only syncPreferencesPanel") {
+    test("prefSave with no changes emits no commands") {
         var model = makeModel()
         _ = openPrefs(&model)
         let commands = update(&model, .prefSave)
-        try expectEqual(commands.count, 1)
-        try expect(hasEffect(commands) {
-            if case .syncPreferencesPanel = $0 { return true }
-            return false
-        }, "should emit syncPreferencesPanel")
+        try expectEqual(commands.count, 0)
     }
 
     test("prefSave with alertClearMode change emits saveDanTermConfigKey") {
@@ -304,6 +390,7 @@ func preferencesTests() {
         _ = openPrefs(&model)
         _ = update(&model, .prefSetFontSize("abc"))
         let commands = update(&model, .prefSave)
+        try expectEqual(commands.count, 0)
         try expect(!hasEffect(commands) {
             if case .saveDanTermConfigKey(let key, _) = $0 { return key == "font-size" }
             return false
@@ -339,10 +426,7 @@ func preferencesTests() {
         try expectEqual(model.committedGhosttyPrefs, newPrefs)
         try expectEqual(model.preferencesDraft?.theme, "Monokai", "draft should reset to new committed")
         try expectEqual(model.preferencesDraft?.fontSize, "16", "draft should reset to new committed")
-        try expect(hasEffect(commands) {
-            if case .syncPreferencesPanel = $0 { return true }
-            return false
-        }, "should emit syncPreferencesPanel")
+        try expectEqual(commands.count, 0)
     }
 
     test("ghosttyPrefsRefreshed with no draft open just updates committed") {

@@ -174,7 +174,7 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
     }
 
     /// Build a dirty-indicator row: empty label column, [prevLabel, resetButton] in control column.
-    /// The row's container is hidden by default; sync() shows it when dirty.
+    /// The row's container is hidden by default; apply() shows it when dirty.
     private func dirtyRow(
         _ container: NSStackView,
         _ prevLabel: NSTextField,
@@ -221,64 +221,44 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
         return button
     }
 
-    // MARK: - Sync from model
+    // MARK: - Apply projection
 
-    /// Update controls and dirty indicators from committed config, draft, and Ghostty prefs.
-    func sync(committed: DanTermConfig, draft: PreferencesDraft?, ghostty: GhosttyPrefs?) {
-        guard let draft = draft else {
-            // No draft — show committed values, hide dirty indicators.
-            switch committed.alertClearMode {
-            case .focus: alertClearModePopup.selectItem(at: 0)
-            case .manual: alertClearModePopup.selectItem(at: 1)
-            }
-            remoteThemeField.stringValue = committed.remoteTheme
-            ghosttyThemeField.stringValue = ghostty?.theme ?? ""
-            fontSizeField.stringValue = ghostty?.fontSize ?? ""
-            ghosttyThemeDirtyRow.isHidden = true
-            fontSizeDirtyRow.isHidden = true
-            alertClearModeDirtyRow.isHidden = true
-            remoteThemeDirtyRow.isHidden = true
-            saveButton.isEnabled = false
-            return
+    /// Apply the already-rendered preferences projection without recomputing model state.
+    func apply(_ projection: PreferencesPanelProjection) {
+        let alertIndex = projection.selectedAlertClearMode == .focus ? 0 : 1
+        if alertClearModePopup.indexOfSelectedItem != alertIndex {
+            alertClearModePopup.selectItem(at: alertIndex)
         }
 
-        // Set control values from draft.
-        switch draft.alertClearMode {
-        case .focus: alertClearModePopup.selectItem(at: 0)
-        case .manual: alertClearModePopup.selectItem(at: 1)
+        if remoteThemeField.stringValue != projection.remoteThemeText {
+            remoteThemeField.stringValue = projection.remoteThemeText
         }
-        remoteThemeField.stringValue = draft.remoteTheme
-        ghosttyThemeField.stringValue = draft.theme ?? ""
-        fontSizeField.stringValue = draft.fontSize ?? ""
-
-        // Compute per-field dirtiness.
-        let ghosttyThemeDirty = draft.theme != ghostty?.theme
-        let fontSizeDirty = draft.fontSize != ghostty?.fontSize
-        let alertDirty = draft.alertClearMode != committed.alertClearMode
-        let remoteThemeDirty = resolveRemoteTheme(draft.remoteTheme) != committed.remoteTheme
-
-        ghosttyThemeDirtyRow.isHidden = !ghosttyThemeDirty
-        if ghosttyThemeDirty {
-            ghosttyThemePrevLabel.stringValue = "Prev: \(ghostty?.theme ?? "(default)")"
+        if ghosttyThemeField.stringValue != projection.ghosttyThemeText {
+            ghosttyThemeField.stringValue = projection.ghosttyThemeText
+        }
+        if fontSizeField.stringValue != projection.fontSizeText {
+            fontSizeField.stringValue = projection.fontSizeText
         }
 
-        fontSizeDirtyRow.isHidden = !fontSizeDirty
-        if fontSizeDirty {
-            fontSizePrevLabel.stringValue = "Prev: \(ghostty?.fontSize ?? "(default)")"
-        }
+        applyDirtyRow(ghosttyThemeDirtyRow, ghosttyThemePrevLabel, label: projection.ghosttyThemeDirtyLabel)
+        applyDirtyRow(fontSizeDirtyRow, fontSizePrevLabel, label: projection.fontSizeDirtyLabel)
+        applyDirtyRow(alertClearModeDirtyRow, alertClearModePrevLabel, label: projection.alertClearModeDirtyLabel)
+        applyDirtyRow(remoteThemeDirtyRow, remoteThemePrevLabel, label: projection.remoteThemeDirtyLabel)
 
-        alertClearModeDirtyRow.isHidden = !alertDirty
-        if alertDirty {
-            let displayValue = committed.alertClearMode == .focus ? "Focus" : "Manual"
-            alertClearModePrevLabel.stringValue = "Prev: \(displayValue)"
+        if saveButton.isEnabled != projection.saveEnabled {
+            saveButton.isEnabled = projection.saveEnabled
         }
+    }
 
-        remoteThemeDirtyRow.isHidden = !remoteThemeDirty
-        if remoteThemeDirty {
-            remoteThemePrevLabel.stringValue = "Prev: \(committed.remoteTheme)"
+    /// Apply one dirty row while leaving unchanged labels alone.
+    private func applyDirtyRow(_ row: NSStackView, _ labelField: NSTextField, label: String?) {
+        let shouldHide = label == nil
+        if row.isHidden != shouldHide {
+            row.isHidden = shouldHide
         }
-
-        saveButton.isEnabled = ghosttyThemeDirty || fontSizeDirty || alertDirty || remoteThemeDirty
+        if let label, labelField.stringValue != label {
+            labelField.stringValue = label
+        }
     }
 
     // MARK: - NSWindowDelegate

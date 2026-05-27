@@ -42,7 +42,8 @@ class AppRuntime {
     var tabTodoPopover: NSPopover?
     private var tabTodoPopoverDelegate: TabTodoPopoverDelegateAdapter?
     private var themeBrowserView: ThemeBrowserView?
-    private var preferencesPanel: PreferencesPanel?
+    // internal (not private): the cross-file reconcilePreferencesPanel extension reads it.
+    var preferencesPanel: PreferencesPanel?
     private var quitConfirmationPanel: QuitConfirmationPanel?
     // internal (not private): the cross-file reconcileSwitcher extension reads it.
     var switcherPanel: SwitcherPanel?
@@ -548,13 +549,6 @@ class AppRuntime {
         case .reloadGhosttyConfig:
             reloadAllConfig()
 
-        case .syncPreferencesPanel:
-            preferencesPanel?.sync(
-                committed: model.config,
-                draft: model.preferencesDraft,
-                ghostty: model.committedGhosttyPrefs
-            )
-
         case .scheduleCheckpoint:
             scheduleDebouncedCheckpoint()
 
@@ -1013,7 +1007,7 @@ class AppRuntime {
 
     /// Show or re-focus the preferences panel. Created lazily on first call.
     /// Dispatches .preferencesOpened which is idempotent — only creates a draft
-    /// on the closed → open transition; re-focus just resyncs.
+    /// on the closed → open transition; re-focus keeps the existing draft render.
     func showPreferencesPanel() {
         if preferencesPanel == nil {
             preferencesPanel = PreferencesPanel(runtime: self)
