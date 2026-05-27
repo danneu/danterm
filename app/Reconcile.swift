@@ -329,14 +329,25 @@ extension AppRuntime {
         caches.quitConfirmation = new
     }
 
-    /// Push the preferences panel form render from one diffed projection. The panel
-    /// exists outside the model, so a missing panel is treated like no desired UI:
-    /// clear the cache and do not render committed fallback values.
+    /// Create/show, render, or hide the preferences panel from one diffed
+    /// `PreferencesPanelProjection?`. Mirrors reconcileQuitConfirmation: nil
+    /// means no draft and orders the panel out; non-nil lazily creates the panel,
+    /// renders the form, and brings it key/front only on the open transition so
+    /// per-keystroke projection changes do not steal key focus.
     func reconcilePreferencesPanel() {
-        let new = preferencesPanel == nil ? nil : desiredPreferencesPanel(in: model)
+        let new = desiredPreferencesPanel(in: model)
         guard caches.preferencesPanel != new else { return }
+        let wasOpen = caches.preferencesPanel != nil
         if let proj = new {
+            if preferencesPanel == nil {
+                preferencesPanel = PreferencesPanel(runtime: self)
+            }
             preferencesPanel?.apply(proj)
+            if !wasOpen {
+                preferencesPanel?.makeKeyAndOrderFront(nil)
+            }
+        } else {
+            preferencesPanel?.orderOut(nil)
         }
         caches.preferencesPanel = new
     }

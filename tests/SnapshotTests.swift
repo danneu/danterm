@@ -495,6 +495,22 @@ func snapshotTests() {
         try expect(rebuilt!.groups[0].tabs[0].color == nil, "color should remain nil")
     }
 
+    test("snapshot round-trip drops open preferences draft") {
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .preferencesOpened(ghostty: GhosttyPrefs(theme: "Dracula", fontSize: "14")))
+        update(&model, .prefSetTheme("Solarized"))
+        try expect(model.preferencesDraft != nil, "draft should exist before snapshot")
+        try expect(model.committedGhosttyPrefs != nil, "ghostty prefs should exist before snapshot")
+
+        let snapshot = toSnapshot(model)
+        let rebuilt = validateAndBuild(snapshot)
+
+        try expect(rebuilt != nil, "should rebuild from snapshot")
+        try expect(rebuilt!.preferencesDraft == nil, "draft should not be serialized")
+        try expect(rebuilt!.committedGhosttyPrefs == nil, "ghostty prefs should not be serialized")
+    }
+
     test("validation rejects duplicate IDs across domains") {
         // Use same UUID for group and tab
         let json = """

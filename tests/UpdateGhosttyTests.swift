@@ -127,7 +127,9 @@ func ghosttyTests() {
 
         let inlineMessages: [Msg] = [
             .surfaceBell(paneId: paneId),
-            .commandStarted(paneId: paneId, command: "make test")
+            .commandStarted(paneId: paneId, command: "make test"),
+            .preferencesOpened(ghostty: GhosttyPrefs(theme: "Dracula", fontSize: "14")),
+            .preferencesClosed
         ]
         for msg in inlineMessages {
             try expectEqual(

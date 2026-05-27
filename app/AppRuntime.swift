@@ -1035,19 +1035,16 @@ class AppRuntime {
 
     // MARK: - Preferences Panel
 
-    /// Show or re-focus the preferences panel. Created lazily on first call.
-    /// Dispatches .preferencesOpened which is idempotent — only creates a draft
-    /// on the closed → open transition; re-focus keeps the existing draft render.
+    /// Show or re-focus the preferences panel. Reads the live Ghostty config to
+    /// seed the draft, then lets reconcile create/show from the model. The final
+    /// makeKeyAndOrderFront call re-raises an already-open normal-level panel.
     func showPreferencesPanel() {
-        if preferencesPanel == nil {
-            preferencesPanel = PreferencesPanel(runtime: self)
-        }
         let ghostty = GhosttyPrefs(
             theme: ghosttyApp.readConfigString(key: "theme"),
             fontSize: ghosttyApp.readConfigFloatString(key: "font-size")
         )
         send(.preferencesOpened(ghostty: ghostty))
-        preferencesPanel!.makeKeyAndOrderFront(nil)
+        preferencesPanel?.makeKeyAndOrderFront(nil)
     }
 
     // MARK: - Theme Browser
@@ -1168,6 +1165,8 @@ class AppRuntime {
         alertsPopover?.performClose(nil)
         alertsPopover = nil
         model.todoPopover = nil  // session teardown bypasses the reconciler; clear directly
+        // Hide/destroy before resetting caches so nil keeps meaning "already hidden"
+        // for the first post-restore reconcile. Restored models carry no draft.
         preferencesPanel?.close()
         preferencesPanel = nil
         quitConfirmationPanel?.orderOut(nil)

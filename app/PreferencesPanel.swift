@@ -263,7 +263,8 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
 
     // MARK: - NSWindowDelegate
 
-    // NSWindowDelegate: clean up draft state when the panel closes.
+    // NSWindowDelegate: red-X / performClose. Translate the gesture to a model
+    // intent; reconcile orders the panel out before AppKit performs its close.
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         runtime?.send(.preferencesClosed)
         return true
@@ -296,7 +297,6 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
 
     @objc private func cancelPreferences(_ sender: Any?) {
         runtime?.send(.preferencesClosed)
-        close()
     }
 
     @objc private func resetAlertClearMode(_ sender: Any?) {
