@@ -1,12 +1,12 @@
 // View reconciler: derives AppKit/surface state from the model after every send()
 // (and after a restore commit). Stage 3 stands up the scaffolding -- reconcile(),
 // ReconcilerCaches, and the first keyed pass reconcileFocusBorders -- that stages
-// 4-8 extend. Pure projections live in ModelOperations.swift (AppKit-free, unit
+// 4-8 extend. Pure projections live in Projections.swift (AppKit-free, unit
 // tested); the reconcile* passes here are the thin impure executors that apply the
 // diff to AppKit and are manual-QA-only.
 //
 // Template for adding a pass (per the migration plan):
-//   1. a pure projection in ModelOperations.swift returning an Equatable value
+//   1. a pure projection in Projections.swift returning an Equatable value
 //   2. a cache field on ReconcilerCaches (resets for free via tearDownCurrentSession)
 //   3. a reconcileX() running the projection through applyDiff (or, for a single
 //      panel, a direct compare against a single-optional cache field)

@@ -26,7 +26,10 @@ app/
 ├── Msg.swift               # All messages (user actions, ghostty callbacks, lifecycle)
 ├── Command.swift           # Commands (side effects) update() returns; AppRuntime.perform runs them
 ├── Update.swift            # Pure update function: (inout AppModel, Msg) -> [Command]
-├── ModelOperations.swift   # Pure helpers: split tree ops, query helpers, bell counts
+├── ModelOperations.swift   # Pure model core: split-tree ops, AppModel queries, MRU/jump/event-protocol, tab color
+├── Projections.swift        # Pure view projections + diff (AppKit-free peer to Reconcile.swift)
+├── TabTodo.swift            # Pure tab-todo popover model: rows, drag/drop, reorder
+├── Persistence.swift        # Model <-> disk: snapshot/export, restore, checkpoints, session-lock, scrollback trunc
 ├── DanTermConfig.swift     # User-facing config (init file, preferences)
 ├── GhosttyApp.swift        # Wraps ghostty_app_t, runtime callbacks → Msg
 ├── TerminalView.swift      # NSView subclass hosting ghostty_surface_t

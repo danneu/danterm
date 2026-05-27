@@ -16,7 +16,7 @@ The reconciler migration moved view-sync work out of `update()` and
 from the template at the top of `app/Reconcile.swift`, is:
 
 - pure projections and structural diff/op helpers live in
-  `ModelOperations.swift`, stay AppKit-free, and are unit-tested;
+  `Projections.swift`, stay AppKit-free, and are unit-tested;
 - `ReconcilerCaches` stores each pass's last applied projection so the next pass
   applies only the delta;
 - `Reconcile.swift` contains thin impure executors that apply the computed delta
@@ -43,7 +43,7 @@ one-off commands whose only purpose is to make views match the model.
 
 New reconcile passes should follow the migration template:
 
-- put pure projections and structural diff/op helpers in `ModelOperations.swift`,
+- put pure projections and structural diff/op helpers in `Projections.swift`,
   with `Equatable` outputs where possible;
 - add cache fields to `ReconcilerCaches`, with reset behavior provided by
   `tearDownCurrentSession` reinitializing the cache struct;
@@ -168,7 +168,8 @@ AppKit and surface state.
 
 - `AGENTS.md`: Elm architecture and data flow
 - `app/Reconcile.swift`: reconciler template, pass ordering, `ReconcilerCaches`
-- `app/ModelOperations.swift`: pure projections, diff/op helpers, reconcile scheduling
+- `app/Projections.swift`: pure view projections + structural diff/op helpers
+- `app/ModelOperations.swift`: shared model helpers, reconcile scheduling (`reconcileDecision`)
 - `plans/impl/2026-05-26-tree-owns-panes-reconciler.md`: main reconciler migration plan
 - `plans/impl/2026-05-27-coalesce-reconcile-sweeps.md`: reconcile scheduling policy
 - `plans/impl/2026-05-27-quit-confirmation-reconcile.md`: single-optional panel projection precedent

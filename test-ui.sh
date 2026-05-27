@@ -22,6 +22,9 @@ echo "Compiling UI tests..."
         -lDanTermProtocol \
         "$SCRIPT_DIR/app/Model.swift" \
         "$SCRIPT_DIR/app/ModelOperations.swift" \
+        "$SCRIPT_DIR/app/Projections.swift" \
+        "$SCRIPT_DIR/app/TabTodo.swift" \
+        "$SCRIPT_DIR/app/Persistence.swift" \
         "$SCRIPT_DIR/app/Msg.swift" \
         "$SCRIPT_DIR/app/Command.swift" \
         "$SCRIPT_DIR/app/DanTermConfig.swift" \
