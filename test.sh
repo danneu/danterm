@@ -22,6 +22,7 @@ echo "Compiling tests..."
         -lDanTermProtocol \
         "$SCRIPT_DIR/app/Model.swift" \
         "$SCRIPT_DIR/app/ModelOperations.swift" \
+        "$SCRIPT_DIR/app/SidebarItemStore.swift" \
         "$SCRIPT_DIR/app/Msg.swift" \
         "$SCRIPT_DIR/app/Command.swift" \
         "$SCRIPT_DIR/app/TerminalLaunchEnvironment.swift" \

@@ -28,8 +28,12 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/BadgeLabel.swift" \
         "$SCRIPT_DIR/app/PaneSplitView.swift" \
         "$SCRIPT_DIR/app/TodoInputView.swift" \
+        "$SCRIPT_DIR/app/SidebarItemStore.swift" \
+        "$SCRIPT_DIR/tests-ui/SidebarViewTestShim.swift" \
+        "$SCRIPT_DIR/app/SidebarView.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarBadgeTests.swift" \
         "$SCRIPT_DIR/tests-ui/TodoInputViewTests.swift" \
+        "$SCRIPT_DIR/tests-ui/SidebarSelectionCacheTests.swift" \
         "$SCRIPT_DIR/tests-ui/PaneSplitViewTests.swift" \
         -framework Cocoa
 )

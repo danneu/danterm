@@ -10,6 +10,7 @@ struct TestRunner {
         lifecycleTests()
         alertTests()
         modelOperationsTests()
+        sidebarItemStoreTests()
         reconcileTests()
         treeOwnsPanesTests()
         snapshotTests()

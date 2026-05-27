@@ -1,3 +1,4 @@
+// AppKit sidebar outline view for tabs, groups, selection, drag/drop, and rename UI.
 import Cocoa
 
 // MARK: - TabColor → NSColor
@@ -23,22 +24,6 @@ extension TabColor {
             NSBezierPath(ovalIn: rect).fill()
             return true
         }
-    }
-}
-
-// MARK: - SidebarItem (reference-type wrapper for NSOutlineView identity stability)
-
-class SidebarItem {
-    let id: UUID
-    var kind: Kind
-    enum Kind {
-        case group(GroupModel)
-        case tab(TabModel)
-    }
-
-    init(id: UUID, kind: Kind) {
-        self.id = id
-        self.kind = kind
     }
 }
 
@@ -149,12 +134,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     private var isReloading = false
     weak var runtime: AppRuntime?
 
-    // Cached sidebar items for outline view identity stability
-    private var tabItemCache: [TabId: SidebarItem] = [:]
-    private var groupItemCache: [GroupId: SidebarItem] = [:]
-    // Current ordered items (groups and their tabs)
-    private var rootItems: [SidebarItem] = []
-    private var childItems: [GroupId: [SidebarItem]] = [:]
+    private var store = SidebarItemStore()
+    private var tabItemCache: [TabId: SidebarItem] { store.tabItemCache }
+    private var groupItemCache: [GroupId: SidebarItem] { store.groupItemCache }
+    private var rootItems: [SidebarItem] { store.rootItems }
+    private var childItems: [GroupId: [SidebarItem]] { store.childItems }
     private var currentModel: AppModel?
 
     private var isSingleGroupMode: Bool {
@@ -243,38 +227,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     private func reconcile(model: AppModel) {
         currentModel = model
-        var newRootItems: [SidebarItem] = []
-        var newChildItems: [GroupId: [SidebarItem]] = [:]
-
-        if isSingleGroupMode {
-            // Single group: tabs are root items
-            let group = model.groups[0]
-            for tab in group.tabs {
-                let item = tabItemCache[tab.id] ?? SidebarItem(id: tab.id.rawValue, kind: .tab(tab))
-                item.kind = .tab(tab)
-                tabItemCache[tab.id] = item
-                newRootItems.append(item)
-            }
-        } else {
-            for group in model.groups {
-                let groupItem = groupItemCache[group.id] ?? SidebarItem(id: group.id.rawValue, kind: .group(group))
-                groupItem.kind = .group(group)
-                groupItemCache[group.id] = groupItem
-                newRootItems.append(groupItem)
-
-                var tabItems: [SidebarItem] = []
-                for tab in group.tabs {
-                    let tabItem = tabItemCache[tab.id] ?? SidebarItem(id: tab.id.rawValue, kind: .tab(tab))
-                    tabItem.kind = .tab(tab)
-                    tabItemCache[tab.id] = tabItem
-                    tabItems.append(tabItem)
-                }
-                newChildItems[group.id] = tabItems
-            }
-        }
-
-        rootItems = newRootItems
-        childItems = newChildItems
+        store.apply(.reloadAll, model: model, isSingleGroupMode: isSingleGroupMode)
     }
 
     /// Entry point for the reconcileSidebar pass: apply an ordered row-op script to the
@@ -329,70 +282,49 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             rebuildAllRows(model: model)
 
         case .insertGroup(let id, let index):
-            guard let group = model.groups.first(where: { $0.id == id }) else { return }
-            let item = groupItemCache[id] ?? SidebarItem(id: id.rawValue, kind: .group(group))
-            item.kind = .group(group)
-            groupItemCache[id] = item
-            // Build the group's child tab items so the dataSource can serve them.
-            childItems[id] = group.tabs.map { tab in
-                let ti = tabItemCache[tab.id] ?? SidebarItem(id: tab.id.rawValue, kind: .tab(tab))
-                ti.kind = .tab(tab)
-                tabItemCache[tab.id] = ti
-                return ti
-            }
-            rootItems.insert(item, at: index)
+            guard store.apply(op, model: model, isSingleGroupMode: isSingleGroupMode),
+                  let item = groupItemCache[id],
+                  let group = model.groups.first(where: { $0.id == id })
+            else { return }
             outlineView.insertItems(at: IndexSet(integer: index), inParent: nil, withAnimation: [])
             // Inserts default expanded; match the model (a setGroupCollapsed op may also
             // follow for a collapsed insert -- idempotent).
             if group.isCollapsed { outlineView.collapseItem(item) } else { outlineView.expandItem(item) }
 
         case .removeGroup(let index):
-            let item = rootItems[index]
-            if case .group(let g) = item.kind {
-                for child in childItems[g.id] ?? [] {
-                    if case .tab(let t) = child.kind { tabItemCache.removeValue(forKey: t.id) }
-                }
-                childItems.removeValue(forKey: g.id)
-                groupItemCache.removeValue(forKey: g.id)
-            }
-            rootItems.remove(at: index)
+            guard store.apply(op, model: model, isSingleGroupMode: isSingleGroupMode) else { return }
             outlineView.removeItems(at: IndexSet(integer: index), inParent: nil, withAnimation: [])
 
         case .reloadGroup(let id):
+            _ = store.apply(op, model: model, isSingleGroupMode: isSingleGroupMode)
             updateGroupRow(groupId: id, model: model)
 
         case .setGroupCollapsed(let id, let collapsed):
+            _ = store.apply(op, model: model, isSingleGroupMode: isSingleGroupMode)
             guard let item = groupItemCache[id] else { return }
             if collapsed { outlineView.collapseItem(item) } else { outlineView.expandItem(item) }
             applyGroupCollapseState(for: item, collapsed: collapsed)
 
-        case .insertTab(let id, let groupId, let index):
-            guard let tab = tabById(id, in: model) else { return }
-            let item = tabItemCache[id] ?? SidebarItem(id: id.rawValue, kind: .tab(tab))
-            item.kind = .tab(tab)
-            tabItemCache[id] = item
+        case .insertTab(_, let groupId, let index):
+            guard store.apply(op, model: model, isSingleGroupMode: isSingleGroupMode) else { return }
             if isSingleGroupMode {
-                rootItems.insert(item, at: index)
                 outlineView.insertItems(at: IndexSet(integer: index), inParent: nil, withAnimation: [])
             } else {
-                childItems[groupId, default: []].insert(item, at: index)
-                outlineView.insertItems(at: IndexSet(integer: index), inParent: groupItemCache[groupId], withAnimation: [])
+                guard let parent = groupItemCache[groupId] else { return }
+                outlineView.insertItems(at: IndexSet(integer: index), inParent: parent, withAnimation: [])
             }
 
         case .removeTab(let groupId, let index):
+            guard store.apply(op, model: model, isSingleGroupMode: isSingleGroupMode) else { return }
             if isSingleGroupMode {
-                if case .tab(let t) = rootItems[index].kind { tabItemCache.removeValue(forKey: t.id) }
-                rootItems.remove(at: index)
                 outlineView.removeItems(at: IndexSet(integer: index), inParent: nil, withAnimation: [])
             } else {
-                guard var children = childItems[groupId] else { return }
-                if case .tab(let t) = children[index].kind { tabItemCache.removeValue(forKey: t.id) }
-                children.remove(at: index)
-                childItems[groupId] = children
-                outlineView.removeItems(at: IndexSet(integer: index), inParent: groupItemCache[groupId], withAnimation: [])
+                guard let parent = groupItemCache[groupId] else { return }
+                outlineView.removeItems(at: IndexSet(integer: index), inParent: parent, withAnimation: [])
             }
 
         case .reloadTab(let id):
+            _ = store.apply(op, model: model, isSingleGroupMode: isSingleGroupMode)
             updateTabRow(tabId: id, model: model)
         }
     }
@@ -491,14 +423,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// skipped; they'll render from current state when scrolled into view.
     func updateTabRow(tabId: TabId, model: AppModel) {
         currentModel = model
-        // Update cached item data
-        for group in model.groups {
-            if let tab = group.tabs.first(where: { $0.id == tabId }) {
-                tabItemCache[tabId]?.kind = .tab(tab)
-                break
-            }
-        }
-        guard let item = tabItemCache[tabId] else { return }
+        guard let item = store.updateTabItem(tabId: tabId, model: model) else { return }
         let row = outlineView.row(forItem: item)
         guard row >= 0,
               let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView,
@@ -511,10 +436,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// group name, collapse caret, and bell badge without recreating the cell.
     func updateGroupRow(groupId: GroupId, model: AppModel) {
         currentModel = model
-        if let group = model.groups.first(where: { $0.id == groupId }) {
-            groupItemCache[groupId]?.kind = .group(group)
-        }
-        guard let item = groupItemCache[groupId] else { return }
+        guard let item = store.updateGroupItem(groupId: groupId, model: model) else { return }
         let row = outlineView.row(forItem: item)
         guard row >= 0,
               let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView,

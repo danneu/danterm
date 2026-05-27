@@ -9,6 +9,7 @@ struct UITestRunner {
         paneSplitViewTests()
         sidebarBadgeTests()
         todoInputViewTests()
+        sidebarSelectionCacheTests()
 
         print("\n\(uiTotal - uiFailures)/\(uiTotal) passed")
         if uiFailures > 0 { exit(1) }
