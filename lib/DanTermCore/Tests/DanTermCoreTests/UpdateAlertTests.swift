@@ -1,9 +1,26 @@
+// Swift Testing migration of the legacy `tests/UpdateAlertTests.swift`
+// harness suite. Pins the alert-domain Msg paths: markAlertRead /
+// markAllAlertsRead, activateAlert (selection + focus + popover dismiss,
+// stale-pane fail-closed, zoom clear), the alert-history cap, focus-mode
+// auto-clear vs manual mode, throttle isolation per pane per kind, alert +
+// throttle cleanup on closePane / closeTab / surfaceCreationFailed,
+// goToMostRecentAlertPane (cross-tab/intra-tab navigation, repeated-press
+// walks, current-tab ack, stale skip, zoom clear), filteredAlerts /
+// alertsEmptyText helpers, setShowAllAlerts, and the manual-mode preservation
+// rules on selectTab / paneBecameFirstResponder / closeZoomedPane /
+// movePaneToTab / movePaneToNewTab, plus the explicit clearAlertsForPane /
+// ackTabAlerts / clearAlertsForTab / clearAlertsForTabs paths.
 import Foundation
+import Testing
 
-func alertTests() {
-    print("Alert Tests...")
+@testable import DanTermCore
 
-    test("testMarkAlertRead") {
+@Suite struct UpdateAlertTests {
+    @Test("testMarkAlertRead")
+    func testMarkAlertRead() {
+        // Intent: markAlertRead flips isUnread on the targeted alert.
+        // Why it exists: pins the bare mark-read mutation.
+        // Scenario: spec-first mark read.
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
@@ -15,11 +32,15 @@ func alertTests() {
         ), at: 0)
 
         update(&model, .markAlertRead(alertId: alertId))
-        try expectEqual(model.alerts[0].isUnread, false)
-        // The tab's alert badge reconciles via reconcileSidebar.
+        #expect(model.alerts[0].isUnread == false)
     }
 
-    test("testMarkAlertReadForStalePaneSkipsSidebarUpdate") {
+    @Test("testMarkAlertReadForStalePaneSkipsSidebarUpdate")
+    func testMarkAlertReadForStalePaneSkipsSidebarUpdate() {
+        // Intent: marking a stale-pane alert read still works but emits
+        //   no commands (badges reconcile from the model).
+        // Why it exists: pins the no-side-effect path for stale pane ids.
+        // Scenario: spec-first stale-pane mark.
         var model = makeModel()
         createTab(&model)
         let stalePaneId = PaneId()
@@ -31,11 +52,16 @@ func alertTests() {
         ), at: 0)
 
         let commands = update(&model, .markAlertRead(alertId: alertId))
-        try expectEqual(model.alerts[0].isUnread, false)
-        try expect(commands.isEmpty, "stale alert marks read but emits no commands (badges reconcile)")
+        #expect(model.alerts[0].isUnread == false)
+        #expect(commands.isEmpty, "stale alert marks read but emits no commands (badges reconcile)")
     }
 
-    test("testMarkAllAlertsRead") {
+    @Test("testMarkAllAlertsRead")
+    func testMarkAllAlertsRead() {
+        // Intent: markAllAlertsRead clears every alert's isUnread flag
+        //   and emits no commands.
+        // Why it exists: pins the bulk-mark path.
+        // Scenario: spec-first mark all.
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
@@ -50,17 +76,22 @@ func alertTests() {
         }
 
         let commands = update(&model, .markAllAlertsRead)
-        try expect(model.alerts.allSatisfy { !$0.isUnread }, "all alerts should be read")
-        try expect(commands.isEmpty, "marking all read emits no commands (badges reconcile)")
+        #expect(model.alerts.allSatisfy { !$0.isUnread }, "all alerts should be read")
+        #expect(commands.isEmpty, "marking all read emits no commands (badges reconcile)")
     }
 
-    test("testActivateAlertNavigatesAndMarksRead") {
+    @Test("testActivateAlertNavigatesAndMarksRead")
+    func testActivateAlertNavigatesAndMarksRead() {
+        // Intent: activateAlert navigates to the alert's tab, marks the
+        //   alert read, focuses the pane, activates the app, and dismisses
+        //   the popover.
+        // Why it exists: pins the full popover-row-click navigation path.
+        // Scenario: spec-first popover activate.
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        // Switch to second tab
         createTab(&model)
 
         let alertId = AlertId()
@@ -70,25 +101,29 @@ func alertTests() {
         ), at: 0)
 
         let commands = update(&model, .activateAlert(alertId: alertId))
-        try expectEqual(model.selectedTabId, tabId, "should navigate to alert's tab")
-        try expectEqual(model.alerts[0].isUnread, false, "alert should be marked read")
-        try expect(hasEffect(commands) {
+        #expect(model.selectedTabId == tabId, "should navigate to alert's tab")
+        #expect(model.alerts[0].isUnread == false, "alert should be marked read")
+        #expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneId { return true }
             return false
         }, "should focus alert's pane")
-        try expect(hasEffect(commands) {
+        #expect(hasEffect(commands) {
             if case .activateApp = $0 { return true }
             return false
         }, "should activate app")
-        try expect(hasEffect(commands) {
+        #expect(hasEffect(commands) {
             if case .dismissAlertsPopover = $0 { return true }
             return false
         }, "should dismiss popover")
-        // The tab switch itself is structural now (reconcileContainers shows the selected
-        // tab); model.selectedTabId (asserted above) is the net.
     }
 
-    test("testActivateAlertSameTabShowsSelectedTab") {
+    @Test("testActivateAlertSameTabShowsSelectedTab")
+    func testActivateAlertSameTabShowsSelectedTab() {
+        // Intent: activateAlert that targets a non-zoom same-tab pane
+        //   leaves selection on the tab and focuses the targeted pane.
+        // Why it exists: pins the in-tab activate path (no container
+        //   rebuild needed).
+        // Scenario: spec-first same-tab activate.
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
@@ -103,22 +138,25 @@ func alertTests() {
 
         update(&model, .activateAlert(alertId: alertId))
 
-        try expectEqual(model.selectedTabId, tabId, "should stay on current tab")
-        try expectEqual(model.groups[0].tabs[0].focusedPaneId, paneA, "should focus alert pane")
-        // Same-tab non-zoom navigation does not change the tab's ContainerShape, so
-        // reconcileContainers does not rebuild it; focusedPaneId (asserted above) is the net.
-        try expectEqual(model.groups[0].tabs[0].isZoomed, false, "non-zoom navigation leaves zoom off")
+        #expect(model.selectedTabId == tabId, "should stay on current tab")
+        #expect(model.groups[0].tabs[0].focusedPaneId == paneA, "should focus alert pane")
+        #expect(model.groups[0].tabs[0].isZoomed == false, "non-zoom navigation leaves zoom off")
     }
 
-    test("testActivateAlertSameTabZoomClearRebuildsContainer") {
+    @Test("testActivateAlertSameTabZoomClearRebuildsContainer")
+    func testActivateAlertSameTabZoomClearRebuildsContainer() {
+        // Intent: activateAlert that targets a different pane while
+        //   zoomed clears the zoom.
+        // Why it exists: pins the zoom-clear rule for cross-pane activate.
+        // Scenario: spec-first zoom clear on activate.
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
         update(&model, .toggleZoomPane)
-        try expectEqual(model.groups[0].tabs[0].focusedPaneId, paneB, "paneB should be focused before navigation")
-        try expectEqual(model.groups[0].tabs[0].isZoomed, true, "tab should be zoomed before navigation")
+        #expect(model.groups[0].tabs[0].focusedPaneId == paneB, "paneB should be focused before navigation")
+        #expect(model.groups[0].tabs[0].isZoomed == true, "tab should be zoomed before navigation")
 
         let alertId = AlertId()
         model.alerts.insert(AlertModel(
@@ -129,20 +167,23 @@ func alertTests() {
         update(&model, .activateAlert(alertId: alertId))
 
         let tab = model.groups[0].tabs[0]
-        try expectEqual(tab.focusedPaneId, paneA, "should focus alert pane")
-        // Clearing zoom changes the tab's ContainerShape (isZoomed), so reconcileContainers
-        // rebuilds it -- isZoomed == false is the structural net for that rebuild.
-        try expectEqual(tab.isZoomed, false, "zoom should clear when navigating to hidden pane")
+        #expect(tab.focusedPaneId == paneA, "should focus alert pane")
+        #expect(tab.isZoomed == false, "zoom should clear when navigating to hidden pane")
     }
 
-    test("testActivateAlertDoesNotMarkReadInManualMode") {
+    @Test("testActivateAlertDoesNotMarkReadInManualMode")
+    func testActivateAlertDoesNotMarkReadInManualMode() {
+        // Intent: in manual mode, activateAlert navigates but does NOT
+        //   mark the alert read.
+        // Why it exists: pins the manual-mode preservation rule for
+        //   navigation paths.
+        // Scenario: spec-first manual activate.
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        // Switch to second tab
         createTab(&model)
 
         let alertId = AlertId()
@@ -152,15 +193,20 @@ func alertTests() {
         ), at: 0)
 
         let commands = update(&model, .activateAlert(alertId: alertId))
-        try expectEqual(model.selectedTabId, tabId, "should still navigate to alert's tab")
-        try expectEqual(model.alerts[0].isUnread, true, "manual mode: activateAlert should NOT mark alert read")
-        try expect(hasEffect(commands) {
+        #expect(model.selectedTabId == tabId, "should still navigate to alert's tab")
+        #expect(model.alerts[0].isUnread == true, "manual mode: activateAlert should NOT mark alert read")
+        #expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneId { return true }
             return false
         }, "should still focus alert's pane")
     }
 
-    test("testActivateStaleAlertMarksReadButNoNavigation") {
+    @Test("testActivateStaleAlertMarksReadButNoNavigation")
+    func testActivateStaleAlertMarksReadButNoNavigation() {
+        // Intent: activating a stale-pane alert marks it read, dismisses
+        //   the popover, but does NOT emit a first-responder request.
+        // Why it exists: pins fail-closed for stale alert paneIds.
+        // Scenario: spec-first stale activate.
         var model = makeModel()
         createTab(&model)
 
@@ -172,44 +218,52 @@ func alertTests() {
         ), at: 0)
 
         let commands = update(&model, .activateAlert(alertId: alertId))
-        try expectEqual(model.alerts[0].isUnread, false, "should mark read")
-        try expect(!hasEffect(commands) {
+        #expect(model.alerts[0].isUnread == false, "should mark read")
+        #expect(!hasEffect(commands) {
             if case .makeFirstResponder = $0 { return true }
             return false
         }, "should not navigate")
-        try expect(hasEffect(commands) {
+        #expect(hasEffect(commands) {
             if case .dismissAlertsPopover = $0 { return true }
             return false
         }, "should dismiss popover")
     }
 
-    test("testAlertHistoryCappedAt100") {
+    @Test("testAlertHistoryCappedAt100")
+    func testAlertHistoryCappedAt100() {
+        // Intent: model.alerts is capped at 100 items; the oldest gets
+        //   dropped when a new alert is inserted.
+        // Why it exists: pins the bounded history.
+        // Scenario: spec-first cap -- insert 100, then surfaceBell adds
+        //   one more; total stays at 100 with the new alert at the front.
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
-        // Create second tab so pane is in background
         createTab(&model)
 
-        // Insert 100 alerts manually
         for i in 0..<100 {
             model.alerts.append(AlertModel(
                 id: AlertId(), kind: .bell, paneId: paneId,
                 title: "DanTerm", body: "alert \(i)", createdAt: Date(), isUnread: false
             ))
         }
-        try expectEqual(model.alerts.count, 100)
+        #expect(model.alerts.count == 100)
 
-        // Reset throttle so notification fires
         model.lastNotificationTime[paneId] = [.bell: Date.distantPast]
 
-        // 101st alert via surfaceBell
         update(&model, .surfaceBell(paneId: paneId))
-        try expectEqual(model.alerts.count, 100, "alerts should be capped at 100")
-        try expectEqual(model.alerts[0].body, model.pane(paneId)?.title ?? "", "newest alert should be first")
+        #expect(model.alerts.count == 100, "alerts should be capped at 100")
+        #expect(model.alerts[0].body == (model.pane(paneId)?.title ?? ""), "newest alert should be first")
     }
 
-    test("testSelectTabMarksAlertsReadForFocusedPane") {
+    @Test("testSelectTabMarksAlertsReadForFocusedPane")
+    func testSelectTabMarksAlertsReadForFocusedPane() {
+        // Intent: selectTab in default focus mode marks the focused
+        //   pane's alerts read.
+        // Why it exists: pins the focus-mode default behavior on tab
+        //   switches.
+        // Scenario: spec-first selectTab clear.
         var model = makeModel()
         createTab(&model)
         let tabAId = model.groups[0].tabs[0].id
@@ -217,17 +271,22 @@ func alertTests() {
 
         createTab(&model)
 
-        // Add unread alert for paneA
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
         update(&model, .selectTab(id: tabAId))
-        try expectEqual(model.alerts[0].isUnread, false, "selecting tab should mark focused pane's alerts read")
+        #expect(model.alerts[0].isUnread == false, "selecting tab should mark focused pane's alerts read")
     }
 
-    test("testPaneBecameFirstResponderMarksAlertsRead") {
+    @Test("testPaneBecameFirstResponderMarksAlertsRead")
+    func testPaneBecameFirstResponderMarksAlertsRead() {
+        // Intent: paneBecameFirstResponder marks the new pane's alerts
+        //   read (default focus mode).
+        // Why it exists: pins the focus-mode default behavior on pane
+        //   focus changes.
+        // Scenario: spec-first focus clear.
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
@@ -235,19 +294,23 @@ func alertTests() {
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
-        // Add unread alert for paneA
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        // Focus paneA
         update(&model, .paneBecameFirstResponder(paneId: paneA))
-        try expectEqual(model.alerts[0].isUnread, false, "focusing pane should mark its alerts read")
+        #expect(model.alerts[0].isUnread == false, "focusing pane should mark its alerts read")
         _ = paneB
     }
 
-    test("testCloseZoomedPaneClearsAlertOnNewlyFocusedPane") {
+    @Test("testCloseZoomedPaneClearsAlertOnNewlyFocusedPane")
+    func testCloseZoomedPaneClearsAlertOnNewlyFocusedPane() {
+        // Intent: closing the zoomed pane refocuses the sibling and
+        //   clears its alerts (default focus mode).
+        // Why it exists: pins the focus-mode auto-clear during a
+        //   zoom-close transition.
+        // Scenario: spec-first zoom-close clear.
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
@@ -255,30 +318,32 @@ func alertTests() {
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
-        // Focus paneA and zoom it
         update(&model, .paneBecameFirstResponder(paneId: paneA))
         update(&model, .toggleZoomPane)
 
-        // paneB gets an alert while paneA is zoomed
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneB,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        // Close the zoomed pane — focus should move to paneB and clear its alerts
         update(&model, .closePane(paneId: paneA))
-        try expect(model.groups[0].tabs[0].focusedPaneId == paneB, "paneB should be focused after closing paneA")
-        try expect(!model.alerts[0].isUnread, "alert on newly focused pane should be marked read")
+        #expect(model.groups[0].tabs[0].focusedPaneId == paneB, "paneB should be focused after closing paneA")
+        #expect(!model.alerts[0].isUnread, "alert on newly focused pane should be marked read")
     }
 
-    test("testClosePaneRemovesAlertsAndCleansUpThrottle") {
+    @Test("testClosePaneRemovesAlertsAndCleansUpThrottle")
+    func testClosePaneRemovesAlertsAndCleansUpThrottle() {
+        // Intent: closePane removes the pane's alerts and throttle
+        //   bookkeeping.
+        // Why it exists: pins the per-pane teardown of alert + throttle
+        //   state.
+        // Scenario: spec-first closePane cleanup.
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
         update(&model, .splitPane(direction: .horizontal))
 
-        // Add unread alert and throttle data for paneA
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
@@ -286,24 +351,25 @@ func alertTests() {
         model.lastNotificationTime[paneA] = [.bell: Date()]
 
         update(&model, .closePane(paneId: paneA))
-        try expect(model.alerts.isEmpty, "closing pane should remove its alerts")
-        try expect(model.lastNotificationTime[paneA] == nil, "closing pane should clean up throttle data")
+        #expect(model.alerts.isEmpty, "closing pane should remove its alerts")
+        #expect(model.lastNotificationTime[paneA] == nil, "closing pane should clean up throttle data")
     }
 
-    test("testCloseTabRemovesAlertsForAllPanes") {
+    @Test("testCloseTabRemovesAlertsForAllPanes")
+    func testCloseTabRemovesAlertsForAllPanes() {
+        // Intent: closeTab removes alerts for every pane in the tab.
+        // Why it exists: pins the per-tab cleanup.
+        // Scenario: spec-first closeTab cleanup.
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        // Split to get a second pane
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
-        // Create second tab so closing the first doesn't terminate
         createTab(&model)
 
-        // Add alerts for both panes
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "a", createdAt: Date(), isUnread: true
@@ -314,18 +380,21 @@ func alertTests() {
         ), at: 0)
 
         update(&model, .closeTab(id: tabId))
-        try expect(model.alerts.isEmpty, "closing tab should remove alerts for all its panes")
+        #expect(model.alerts.isEmpty, "closing tab should remove alerts for all its panes")
     }
 
-    test("testSurfaceCreationFailedRemovesAlerts") {
+    @Test("testSurfaceCreationFailedRemovesAlerts")
+    func testSurfaceCreationFailedRemovesAlerts() {
+        // Intent: surfaceCreationFailed removes the failed pane's alerts
+        //   and throttle bookkeeping.
+        // Why it exists: pins the failure-path cleanup symmetry.
+        // Scenario: spec-first failure cleanup.
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        // Create second tab so closing the first doesn't terminate
         createTab(&model)
 
-        // Add alert and throttle data for paneA
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
@@ -333,41 +402,47 @@ func alertTests() {
         model.lastNotificationTime[paneA] = [.bell: Date()]
 
         update(&model, .surfaceCreationFailed(paneId: paneA))
-        try expect(model.alerts.isEmpty, "surfaceCreationFailed should remove pane's alerts")
-        try expect(model.lastNotificationTime[paneA] == nil, "surfaceCreationFailed should clean up throttle data")
+        #expect(model.alerts.isEmpty, "surfaceCreationFailed should remove pane's alerts")
+        #expect(model.lastNotificationTime[paneA] == nil, "surfaceCreationFailed should clean up throttle data")
     }
 
-    test("testThrottleIsPerPanePerKind") {
+    @Test("testThrottleIsPerPanePerKind")
+    func testThrottleIsPerPanePerKind() {
+        // Intent: bell and desktop notifications throttle independently
+        //   per kind.
+        // Why it exists: pins per-kind throttle isolation.
+        // Scenario: spec-first per-kind throttle.
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
 
         createTab(&model)
 
-        // Fire a bell (creates alert + notification)
         let effects1 = update(&model, .surfaceBell(paneId: paneId))
-        try expect(hasEffect(effects1) {
+        #expect(hasEffect(effects1) {
             if case .sendNotification = $0 { return true }
             return false
         }, "first bell should send notification")
 
-        // Fire a desktop notification (different kind — should not be throttled)
         let effects2 = update(&model, .desktopNotification(paneId: paneId, title: "Done", body: "ok"))
-        try expect(hasEffect(effects2) {
+        #expect(hasEffect(effects2) {
             if case .sendNotification = $0 { return true }
             return false
         }, "desktop notification should not be throttled by bell")
 
-        // Fire another bell — should be throttled
         let effects3 = update(&model, .surfaceBell(paneId: paneId))
-        try expect(!hasEffect(effects3) {
+        #expect(!hasEffect(effects3) {
             if case .sendNotification = $0 { return true }
             return false
         }, "second bell should be throttled")
     }
 
-    test("testActivateAlertFromMacOSNotification") {
-        // Same code path as popover row click — just verifying the Msg works
+    @Test("testActivateAlertFromMacOSNotification")
+    func testActivateAlertFromMacOSNotification() {
+        // Intent: activateAlert hit from a notification follows the same
+        //   path as a popover row click.
+        // Why it exists: pins the single-entry-point invariant.
+        // Scenario: spec-first activate-from-notification.
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
@@ -382,9 +457,9 @@ func alertTests() {
         ), at: 0)
 
         let commands = update(&model, .activateAlert(alertId: alertId))
-        try expectEqual(model.selectedTabId, tabId)
-        try expectEqual(model.alerts[0].isUnread, false)
-        try expect(hasEffect(commands) {
+        #expect(model.selectedTabId == tabId)
+        #expect(model.alerts[0].isUnread == false)
+        #expect(hasEffect(commands) {
             if case .activateApp = $0 { return true }
             return false
         }, "should activate app")
@@ -392,67 +467,83 @@ func alertTests() {
 
     // MARK: - goToMostRecentAlertPane Tests
 
-    test("testGoToMostRecentAlertPaneNavigatesToPaneAndTab") {
+    @Test("testGoToMostRecentAlertPaneNavigatesToPaneAndTab")
+    func testGoToMostRecentAlertPaneNavigatesToPaneAndTab() {
+        // Intent: goToMostRecentAlertPane switches to the alert pane's
+        //   tab and focuses the pane.
+        // Why it exists: pins the keyboard "go-to-most-recent" path.
+        // Scenario: spec-first go-to navigation.
         var model = makeModel()
-        createTab(&model)  // tab1 with paneA
+        createTab(&model)
         let tab1Id = model.groups[0].tabs[0].id
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        createTab(&model)  // tab2 (now selected)
-        try expect(model.selectedTabId != tab1Id, "tab2 should be selected")
+        createTab(&model)
+        #expect(model.selectedTabId != tab1Id, "tab2 should be selected")
 
-        // Add alert for paneA on tab1
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
         let commands = update(&model, .goToMostRecentAlertPane)
-        try expectEqual(model.selectedTabId, tab1Id, "should switch to tab containing alert pane")
-        try expect(hasEffect(commands) {
+        #expect(model.selectedTabId == tab1Id, "should switch to tab containing alert pane")
+        #expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
             return false
         }, "should focus the alert's pane")
     }
 
-    test("testGoToMostRecentAlertPaneSkipsStaleAlert") {
+    @Test("testGoToMostRecentAlertPaneSkipsStaleAlert")
+    func testGoToMostRecentAlertPaneSkipsStaleAlert() {
+        // Intent: the helper skips alerts whose pane is gone and
+        //   navigates to the first valid alert.
+        // Why it exists: pins fail-open for stale newest alerts.
+        // Scenario: spec-first stale skip.
         var model = makeModel()
-        createTab(&model)  // tab1
+        createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        createTab(&model)  // tab2 (now selected)
+        createTab(&model)
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
-        // Newest alert references a deleted pane (stale)
         let stalePaneId = PaneId()
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: stalePaneId,
             title: "DanTerm", body: "stale", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        // Second alert references valid paneA
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "valid", createdAt: Date(), isUnread: true
         ), at: 1)
 
         let commands = update(&model, .goToMostRecentAlertPane)
-        try expect(hasEffect(commands) {
+        #expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
             return false
         }, "should navigate to the first valid alert's pane")
         _ = paneB
     }
 
-    test("testGoToMostRecentAlertPaneNoAlerts") {
+    @Test("testGoToMostRecentAlertPaneNoAlerts")
+    func testGoToMostRecentAlertPaneNoAlerts() {
+        // Intent: with no alerts, the helper emits no commands.
+        // Why it exists: pins the empty-state guard.
+        // Scenario: spec-first no-alerts.
         var model = makeModel()
         createTab(&model)
 
         let commands = update(&model, .goToMostRecentAlertPane)
-        try expectEqual(commands.count, 0, "no alerts should produce no commands")
+        #expect(commands.count == 0, "no alerts should produce no commands")
     }
 
-    test("testGoToMostRecentAlertPaneIntraTabNavigatesToAlertPane") {
+    @Test("testGoToMostRecentAlertPaneIntraTabNavigatesToAlertPane")
+    func testGoToMostRecentAlertPaneIntraTabNavigatesToAlertPane() {
+        // Intent: an intra-tab alert hops to the sibling pane and marks
+        //   its alert read.
+        // Why it exists: pins the per-tab focus hop path.
+        // Scenario: spec-first intra-tab hop.
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
@@ -461,7 +552,7 @@ func alertTests() {
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
         update(&model, .paneBecameFirstResponder(paneId: paneA))
-        try expectEqual(model.groups[0].tabs[0].focusedPaneId, paneA)
+        #expect(model.groups[0].tabs[0].focusedPaneId == paneA)
 
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneB,
@@ -470,18 +561,24 @@ func alertTests() {
 
         let commands = update(&model, .goToMostRecentAlertPane)
 
-        try expect(hasEffect(commands) {
+        #expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneB { return true }
             return false
         }, "should focus paneB")
 
-        try expectEqual(model.groups[0].tabs[0].focusedPaneId, paneB,
+        #expect(model.groups[0].tabs[0].focusedPaneId == paneB,
             "tab's focusedPaneId should be paneB after navigation")
-        try expectEqual(model.alerts[0].isUnread, false,
+        #expect(model.alerts[0].isUnread == false,
             "paneB's alert should be marked read after focus moves to it")
     }
 
-    test("testGoToMostRecentAlertPaneIntraTabDoesNotAckSiblingInManualMode") {
+    @Test("testGoToMostRecentAlertPaneIntraTabDoesNotAckSiblingInManualMode")
+    func testGoToMostRecentAlertPaneIntraTabDoesNotAckSiblingInManualMode() {
+        // Intent: in manual mode, the intra-tab hop still focuses but
+        //   does NOT mark the sibling's alert read.
+        // Why it exists: pins the manual-mode preservation for the
+        //   intra-tab walk.
+        // Scenario: spec-first manual intra-tab.
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
@@ -499,16 +596,22 @@ func alertTests() {
 
         let commands = update(&model, .goToMostRecentAlertPane)
 
-        try expect(hasEffect(commands) {
+        #expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneB { return true }
             return false
         }, "should focus paneB")
 
-        try expectEqual(model.alerts[0].isUnread, true,
+        #expect(model.alerts[0].isUnread == true,
             "paneB's alert should remain unread")
     }
 
-    test("testGoToMostRecentAlertPaneRepeatedPressWalksPanesInTab") {
+    @Test("testGoToMostRecentAlertPaneRepeatedPressWalksPanesInTab")
+    func testGoToMostRecentAlertPaneRepeatedPressWalksPanesInTab() {
+        // Intent: in manual mode, repeated presses walk through
+        //   alert-bearing panes within the current tab in newest-first
+        //   order.
+        // Why it exists: pins the multi-press walk semantics.
+        // Scenario: spec-first repeated-press in tab.
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
@@ -521,7 +624,7 @@ func alertTests() {
         let paneC = model.groups[0].tabs[0].focusedPaneId
 
         update(&model, .paneBecameFirstResponder(paneId: paneA))
-        try expectEqual(model.groups[0].tabs[0].focusedPaneId, paneA)
+        #expect(model.groups[0].tabs[0].focusedPaneId == paneA)
 
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneC,
@@ -533,100 +636,110 @@ func alertTests() {
         ), at: 0)
 
         update(&model, .goToMostRecentAlertPane)
-        try expectEqual(model.groups[0].tabs[0].focusedPaneId, paneB,
+        #expect(model.groups[0].tabs[0].focusedPaneId == paneB,
             "press 1 should land on paneB")
-        try expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == true,
+        #expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == true,
             "paneB unread after press 1")
-        try expect(model.alerts.first(where: { $0.paneId == paneC })?.isUnread == true,
+        #expect(model.alerts.first(where: { $0.paneId == paneC })?.isUnread == true,
             "paneC unread after press 1")
 
         update(&model, .goToMostRecentAlertPane)
-        try expectEqual(model.groups[0].tabs[0].focusedPaneId, paneC,
+        #expect(model.groups[0].tabs[0].focusedPaneId == paneC,
             "press 2 should land on paneC")
-        try expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false,
+        #expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false,
             "paneB acked on press 2")
-        try expect(model.alerts.first(where: { $0.paneId == paneC })?.isUnread == true,
+        #expect(model.alerts.first(where: { $0.paneId == paneC })?.isUnread == true,
             "paneC unread until press 3")
 
         update(&model, .goToMostRecentAlertPane)
-        try expect(model.alerts.first(where: { $0.paneId == paneC })?.isUnread == false,
+        #expect(model.alerts.first(where: { $0.paneId == paneC })?.isUnread == false,
             "paneC acked on press 3")
-        try expect(!model.alerts.contains(where: { $0.isUnread }),
+        #expect(!model.alerts.contains(where: { $0.isUnread }),
             "all alerts read after walking through siblings")
     }
 
-    test("testGoToMostRecentAlertPaneUsesCurrentTabAfterMove") {
+    @Test("testGoToMostRecentAlertPaneUsesCurrentTabAfterMove")
+    func testGoToMostRecentAlertPaneUsesCurrentTabAfterMove() {
+        // Intent: the helper uses the pane's CURRENT tab id, not a stale
+        //   one captured at alert creation time.
+        // Why it exists: pins the live-lookup contract.
+        // Scenario: spec-first live tab lookup -- alert on paneA, move
+        //   paneA, navigate; lands on paneA's new tab.
         var model = makeModel()
-        createTab(&model)  // tab1 with paneA
+        createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        createTab(&model)  // tab2
+        createTab(&model)
         let tab2Id = model.groups[0].tabs[1].id
 
-        // Add alert for paneA (while it's on tab1)
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        // Move paneA to tab2 (this marks paneA's alerts read)
         update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
-        model.alerts[0].isUnread = true  // re-mark unread so goToMostRecentAlertPane finds it
+        model.alerts[0].isUnread = true
 
-        // Now create tab3 so we're not already on tab2
         createTab(&model)
 
-        // goToMostRecentAlertPane should use paneA's CURRENT tab (tab2), not the stale tab1
         let commands = update(&model, .goToMostRecentAlertPane)
-        try expectEqual(model.selectedTabId, tab2Id, "should navigate to pane's current tab, not original tab")
-        try expect(hasEffect(commands) {
+        #expect(model.selectedTabId == tab2Id, "should navigate to pane's current tab, not original tab")
+        #expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
             return false
         }, "should focus the alert's pane")
     }
 
-    test("testGoToMostRecentAlertPaneSkipsReadAlerts") {
+    @Test("testGoToMostRecentAlertPaneSkipsReadAlerts")
+    func testGoToMostRecentAlertPaneSkipsReadAlerts() {
+        // Intent: read alerts are skipped (only unread are valid
+        //   targets).
+        // Why it exists: pins the "unread filter" rule.
+        // Scenario: spec-first read-skip.
         var model = makeModel()
-        createTab(&model)  // tab1 with paneA
+        createTab(&model)
         let tab1Id = model.groups[0].tabs[0].id
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        createTab(&model)  // tab2 with paneB
+        createTab(&model)
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
-        createTab(&model)  // tab3 (now selected)
+        createTab(&model)
 
-        // Newest alert (index 0) is read — should be skipped
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneB,
             title: "DanTerm", body: "read", createdAt: Date(), isUnread: false
         ), at: 0)
 
-        // Second alert (index 1) is unread — should be targeted
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "unread", createdAt: Date(), isUnread: true
         ), at: 1)
 
         let commands = update(&model, .goToMostRecentAlertPane)
-        try expectEqual(model.selectedTabId, tab1Id, "should navigate to the unread alert's tab, skipping read alert")
-        try expect(hasEffect(commands) {
+        #expect(model.selectedTabId == tab1Id, "should navigate to the unread alert's tab, skipping read alert")
+        #expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
             return false
         }, "should focus the unread alert's pane")
     }
 
-    test("testGoToMostRecentAlertPaneAcksCurrentTabFirst") {
+    @Test("testGoToMostRecentAlertPaneAcksCurrentTabFirst")
+    func testGoToMostRecentAlertPaneAcksCurrentTabFirst() {
+        // Intent: in manual mode, the helper acks the current tab's
+        //   alerts before navigating elsewhere.
+        // Why it exists: pins the "ack current first" rule that backs the
+        //   walk algorithm.
+        // Scenario: spec-first ack-current.
         var model = makeModel()
         model.config.alertClearMode = .manual
-        createTab(&model)  // tab1 with paneA
+        createTab(&model)
         let tab1Id = model.groups[0].tabs[0].id
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        createTab(&model)  // tab2 (selected) with paneB
+        createTab(&model)
         let paneB = model.groups[0].tabs[1].focusedPaneId
 
-        // paneA's alert at index 0 (most recent), paneB's at index 1
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "tab1 alert", createdAt: Date(), isUnread: true
@@ -637,22 +750,24 @@ func alertTests() {
         ), at: 1)
 
         let commands = update(&model, .goToMostRecentAlertPane)
-        // tab2's alert should be acked
-        try expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false, "current tab's alert should be acked")
-        // paneA's alert should still be unread (manual mode, selectTab won't auto-clear)
-        try expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == true, "destination alert should still be unread")
-        // Should navigate to tab1/paneA
-        try expectEqual(model.selectedTabId, tab1Id, "should navigate to tab1")
-        try expect(hasEffect(commands) {
+        #expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false, "current tab's alert should be acked")
+        #expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == true, "destination alert should still be unread")
+        #expect(model.selectedTabId == tab1Id, "should navigate to tab1")
+        #expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
             return false
         }, "should focus paneA")
     }
 
-    test("testGoToMostRecentAlertPaneAcksCurrentTabThenNoMoreAlerts") {
+    @Test("testGoToMostRecentAlertPaneAcksCurrentTabThenNoMoreAlerts")
+    func testGoToMostRecentAlertPaneAcksCurrentTabThenNoMoreAlerts() {
+        // Intent: if the current tab's ack consumes the last unread
+        //   alert, no navigation happens.
+        // Why it exists: pins the "ack-then-done" branch.
+        // Scenario: spec-first ack-only.
         var model = makeModel()
         model.config.alertClearMode = .manual
-        createTab(&model)  // single tab (selected)
+        createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
         model.alerts.insert(AlertModel(
@@ -661,28 +776,32 @@ func alertTests() {
         ), at: 0)
 
         let commands = update(&model, .goToMostRecentAlertPane)
-        try expectEqual(model.alerts[0].isUnread, false, "alert should be acked")
-        try expect(!hasEffect(commands) {
+        #expect(model.alerts[0].isUnread == false, "alert should be acked")
+        #expect(!hasEffect(commands) {
             if case .makeFirstResponder = $0 { return true }
             return false
         }, "no unread alerts remained after acking current tab")
-        // The selected tab's alert badge reconciles via reconcileSidebar.
     }
 
-    test("testGoToMostRecentAlertPaneRepeatedPressWalksTabs") {
+    @Test("testGoToMostRecentAlertPaneRepeatedPressWalksTabs")
+    func testGoToMostRecentAlertPaneRepeatedPressWalksTabs() {
+        // Intent: repeated presses walk across alert-bearing tabs in
+        //   newest-first order.
+        // Why it exists: pins the cross-tab walk symmetry of the
+        //   intra-tab walk.
+        // Scenario: spec-first cross-tab walk.
         var model = makeModel()
         model.config.alertClearMode = .manual
-        createTab(&model)  // tab1 with paneA
+        createTab(&model)
         let tab1Id = model.groups[0].tabs[0].id
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        createTab(&model)  // tab2 with paneB
+        createTab(&model)
         let tab2Id = model.groups[0].tabs[1].id
         let paneB = model.groups[0].tabs[1].focusedPaneId
 
-        createTab(&model)  // tab3 (selected), no alerts
+        createTab(&model)
 
-        // paneA alert at index 0, paneB alert at index 1
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "tab1 alert", createdAt: Date(), isUnread: true
@@ -692,40 +811,40 @@ func alertTests() {
             title: "DanTerm", body: "tab2 alert", createdAt: Date(), isUnread: true
         ), at: 1)
 
-        // First press: tab3 has no alerts (no-op ack), navigates to tab1 (index 0)
         update(&model, .goToMostRecentAlertPane)
-        try expectEqual(model.selectedTabId, tab1Id, "first press should navigate to tab1")
-        try expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == true, "paneA alert still unread after first press")
+        #expect(model.selectedTabId == tab1Id, "first press should navigate to tab1")
+        #expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == true, "paneA alert still unread after first press")
 
-        // Second press: acks tab1, navigates to tab2 (index 1)
         update(&model, .goToMostRecentAlertPane)
-        try expectEqual(model.selectedTabId, tab2Id, "second press should navigate to tab2")
-        try expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == false, "paneA alert should be acked after second press")
-        try expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == true, "paneB alert still unread after second press")
+        #expect(model.selectedTabId == tab2Id, "second press should navigate to tab2")
+        #expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == false, "paneA alert should be acked after second press")
+        #expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == true, "paneB alert still unread after second press")
 
-        // Third press: acks tab2, no more unread alerts
         let commands = update(&model, .goToMostRecentAlertPane)
-        try expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false, "paneB alert should be acked after third press")
-        try expect(!hasEffect(commands) {
+        #expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false, "paneB alert should be acked after third press")
+        #expect(!hasEffect(commands) {
             if case .makeFirstResponder = $0 { return true }
             return false
         }, "third press should not navigate")
     }
 
-    test("testGoToMostRecentAlertPaneAcksOnlyFocusedPaneInSplit") {
+    @Test("testGoToMostRecentAlertPaneAcksOnlyFocusedPaneInSplit")
+    func testGoToMostRecentAlertPaneAcksOnlyFocusedPaneInSplit() {
+        // Intent: ack-current acks only the focused pane in a split, not
+        //   its siblings.
+        // Why it exists: pins the per-pane scope of the ack.
+        // Scenario: spec-first split ack scope.
         var model = makeModel()
         model.config.alertClearMode = .manual
-        createTab(&model)  // tab1 with paneA
+        createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        createTab(&model)  // tab2 (selected), split into paneB + paneC
+        createTab(&model)
         update(&model, .splitPane(direction: .horizontal))
         let paneC = model.groups[0].tabs[1].focusedPaneId
-        // paneB is the other pane in the split
         let tab2PaneIds = allPaneIds(model.groups[0].tabs[1].rootNode)
         let paneB = tab2PaneIds.first(where: { $0 != paneC })!
 
-        // Alert on paneA (another tab), alerts on both split panes
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "tab1 alert", createdAt: Date(), isUnread: true
@@ -740,14 +859,12 @@ func alertTests() {
         ), at: 2)
 
         let commands = update(&model, .goToMostRecentAlertPane)
-        try expect(model.alerts.first(where: { $0.paneId == paneC })?.isUnread == false,
+        #expect(model.alerts.first(where: { $0.paneId == paneC })?.isUnread == false,
             "focused pane's alert should be acked")
-        try expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == true,
+        #expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == true,
             "non-focused sibling alert should remain unread")
-        // paneA alert should still be unread
-        try expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == true, "paneA alert should still be unread")
-        // Should navigate to tab1/paneA
-        try expect(hasEffect(commands) {
+        #expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == true, "paneA alert should still be unread")
+        #expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
             return false
         }, "should navigate to paneA")
@@ -755,7 +872,11 @@ func alertTests() {
 
     // MARK: - filteredAlerts / alertsEmptyText Tests
 
-    test("testFilteredAlertsUnreadReturnsOnlyUnread") {
+    @Test("testFilteredAlertsUnreadReturnsOnlyUnread")
+    func testFilteredAlertsUnreadReturnsOnlyUnread() {
+        // Intent: filteredAlerts(.unread) keeps only isUnread items.
+        // Why it exists: pins the unread-tab filter.
+        // Scenario: spec-first unread filter.
         let paneId = PaneId()
         let alerts = [
             AlertModel(id: AlertId(), kind: .bell, paneId: paneId, title: "T", body: "a", createdAt: Date(), isUnread: true),
@@ -763,50 +884,72 @@ func alertTests() {
             AlertModel(id: AlertId(), kind: .bell, paneId: paneId, title: "T", body: "c", createdAt: Date(), isUnread: true),
         ]
         let result = filteredAlerts(alerts, tab: .unread)
-        try expectEqual(result.count, 2, "should return only unread alerts")
-        try expectEqual(result[0].body, "a")
-        try expectEqual(result[1].body, "c")
+        #expect(result.count == 2, "should return only unread alerts")
+        #expect(result[0].body == "a")
+        #expect(result[1].body == "c")
     }
 
-    test("testFilteredAlertsHistoryReturnsAll") {
+    @Test("testFilteredAlertsHistoryReturnsAll")
+    func testFilteredAlertsHistoryReturnsAll() {
+        // Intent: filteredAlerts(.history) returns every alert.
+        // Why it exists: pins the history-tab filter.
+        // Scenario: spec-first history filter.
         let paneId = PaneId()
         let alerts = [
             AlertModel(id: AlertId(), kind: .bell, paneId: paneId, title: "T", body: "a", createdAt: Date(), isUnread: true),
             AlertModel(id: AlertId(), kind: .bell, paneId: paneId, title: "T", body: "b", createdAt: Date(), isUnread: false),
         ]
         let result = filteredAlerts(alerts, tab: .history)
-        try expectEqual(result.count, 2, "history should return all alerts")
-        try expectEqual(result[0].body, "a")
-        try expectEqual(result[1].body, "b")
+        #expect(result.count == 2, "history should return all alerts")
+        #expect(result[0].body == "a")
+        #expect(result[1].body == "b")
     }
 
-    test("testFilteredAlertsUnreadAllReadReturnsEmpty") {
+    @Test("testFilteredAlertsUnreadAllReadReturnsEmpty")
+    func testFilteredAlertsUnreadAllReadReturnsEmpty() {
+        // Intent: an all-read list returns empty for the unread tab.
+        // Why it exists: pins the empty filter case.
+        // Scenario: spec-first empty unread.
         let paneId = PaneId()
         let alerts = [
             AlertModel(id: AlertId(), kind: .bell, paneId: paneId, title: "T", body: "a", createdAt: Date(), isUnread: false),
             AlertModel(id: AlertId(), kind: .bell, paneId: paneId, title: "T", body: "b", createdAt: Date(), isUnread: false),
         ]
         let result = filteredAlerts(alerts, tab: .unread)
-        try expectEqual(result.count, 0, "all-read list should return empty for unread tab")
+        #expect(result.count == 0, "all-read list should return empty for unread tab")
     }
 
-    test("testAlertsEmptyTextReturnsCorrectString") {
-        try expectEqual(alertsEmptyText(tab: .unread), "No unread alerts")
-        try expectEqual(alertsEmptyText(tab: .history), "No alerts")
+    @Test("testAlertsEmptyTextReturnsCorrectString")
+    func testAlertsEmptyTextReturnsCorrectString() {
+        // Intent: alertsEmptyText carries per-tab copy.
+        // Why it exists: pins the per-tab copy lookup.
+        // Scenario: spec-first empty text.
+        #expect(alertsEmptyText(tab: .unread) == "No unread alerts")
+        #expect(alertsEmptyText(tab: .history) == "No alerts")
     }
 
-    test("testSetShowAllAlerts") {
+    @Test("testSetShowAllAlerts")
+    func testSetShowAllAlerts() {
+        // Intent: setShowAllAlerts sets the model flag (default false).
+        // Why it exists: pins the flag setter.
+        // Scenario: spec-first flag toggle.
         var model = makeModel()
-        try expectEqual(model.showAllAlerts, false, "defaults to false")
+        #expect(model.showAllAlerts == false, "defaults to false")
         update(&model, .setShowAllAlerts(true))
-        try expectEqual(model.showAllAlerts, true)
+        #expect(model.showAllAlerts == true)
         update(&model, .setShowAllAlerts(false))
-        try expectEqual(model.showAllAlerts, false)
+        #expect(model.showAllAlerts == false)
     }
 
     // MARK: - alert-clear-mode = manual
 
-    test("testSelectTabDoesNotClearAlertsInManualMode") {
+    @Test("testSelectTabDoesNotClearAlertsInManualMode")
+    func testSelectTabDoesNotClearAlertsInManualMode() {
+        // Intent: in manual mode, selectTab does NOT mark the focused
+        //   pane's alerts read.
+        // Why it exists: pins the manual-mode preservation rule for
+        //   selectTab.
+        // Scenario: spec-first manual selectTab.
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
@@ -821,10 +964,16 @@ func alertTests() {
         ), at: 0)
 
         update(&model, .selectTab(id: tabAId))
-        try expectEqual(model.alerts[0].isUnread, true, "manual mode: selecting tab should NOT mark alerts read")
+        #expect(model.alerts[0].isUnread == true, "manual mode: selecting tab should NOT mark alerts read")
     }
 
-    test("testPaneBecameFirstResponderDoesNotClearAlertsInManualMode") {
+    @Test("testPaneBecameFirstResponderDoesNotClearAlertsInManualMode")
+    func testPaneBecameFirstResponderDoesNotClearAlertsInManualMode() {
+        // Intent: in manual mode, paneBecameFirstResponder does NOT
+        //   mark the new pane's alerts read.
+        // Why it exists: pins the manual-mode preservation for focus
+        //   changes.
+        // Scenario: spec-first manual focus.
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
@@ -838,10 +987,16 @@ func alertTests() {
         ), at: 0)
 
         update(&model, .paneBecameFirstResponder(paneId: paneA))
-        try expectEqual(model.alerts[0].isUnread, true, "manual mode: focusing pane should NOT mark alerts read")
+        #expect(model.alerts[0].isUnread == true, "manual mode: focusing pane should NOT mark alerts read")
     }
 
-    test("testCloseZoomedPaneDoesNotClearAlertsInManualMode") {
+    @Test("testCloseZoomedPaneDoesNotClearAlertsInManualMode")
+    func testCloseZoomedPaneDoesNotClearAlertsInManualMode() {
+        // Intent: in manual mode, the closeZoomedPane refocus does NOT
+        //   mark the new pane's alerts read.
+        // Why it exists: pins the manual-mode preservation for the
+        //   close-zoom-refocus path.
+        // Scenario: spec-first manual close-zoom.
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
@@ -859,10 +1014,16 @@ func alertTests() {
         ), at: 0)
 
         update(&model, .closePane(paneId: paneA))
-        try expectEqual(model.alerts[0].isUnread, true, "manual mode: closePane should NOT clear alerts on newly focused pane")
+        #expect(model.alerts[0].isUnread == true, "manual mode: closePane should NOT clear alerts on newly focused pane")
     }
 
-    test("testMovePaneToTabDoesNotClearAlertsInManualMode") {
+    @Test("testMovePaneToTabDoesNotClearAlertsInManualMode")
+    func testMovePaneToTabDoesNotClearAlertsInManualMode() {
+        // Intent: in manual mode, movePaneToTab does NOT clear the moved
+        //   pane's alerts.
+        // Why it exists: pins the manual-mode preservation for the
+        //   reparent path.
+        // Scenario: spec-first manual movePaneToTab.
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
@@ -877,10 +1038,16 @@ func alertTests() {
         ), at: 0)
 
         update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
-        try expectEqual(model.alerts[0].isUnread, true, "manual mode: movePaneToTab should NOT clear alerts")
+        #expect(model.alerts[0].isUnread == true, "manual mode: movePaneToTab should NOT clear alerts")
     }
 
-    test("testMovePaneToNewTabDoesNotClearAlertsInManualMode") {
+    @Test("testMovePaneToNewTabDoesNotClearAlertsInManualMode")
+    func testMovePaneToNewTabDoesNotClearAlertsInManualMode() {
+        // Intent: in manual mode, movePaneToNewTab does NOT clear the
+        //   extracted pane's alerts.
+        // Why it exists: pins the manual-mode preservation for the
+        //   extraction path.
+        // Scenario: spec-first manual movePaneToNewTab.
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
@@ -894,12 +1061,16 @@ func alertTests() {
         ), at: 0)
 
         update(&model, .movePaneToNewTab(paneId: paneA, inGroupId: groupId, atIndex: 1))
-        try expectEqual(model.alerts[0].isUnread, true, "manual mode: movePaneToNewTab should NOT clear alerts")
+        #expect(model.alerts[0].isUnread == true, "manual mode: movePaneToNewTab should NOT clear alerts")
     }
 
     // MARK: - clearAlertsForPane
 
-    test("testClearAlertsForPaneClearsAlerts") {
+    @Test("testClearAlertsForPaneClearsAlerts")
+    func testClearAlertsForPaneClearsAlerts() {
+        // Intent: clearAlertsForPane marks the pane's alerts read.
+        // Why it exists: pins the explicit per-pane clear.
+        // Scenario: spec-first clearAlertsForPane.
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
@@ -911,55 +1082,65 @@ func alertTests() {
         ), at: 0)
 
         update(&model, .clearAlertsForPane(paneId: paneA))
-        try expectEqual(model.alerts[0].isUnread, false, "clearAlertsForPane should mark pane's alerts read")
-        // The pane's tab alert badge reconciles via reconcileSidebar.
+        #expect(model.alerts[0].isUnread == false, "clearAlertsForPane should mark pane's alerts read")
     }
 
-    test("testClearAlertsForPaneNoopsWhenNoUnreadAlerts") {
+    @Test("testClearAlertsForPaneNoopsWhenNoUnreadAlerts")
+    func testClearAlertsForPaneNoopsWhenNoUnreadAlerts() {
+        // Intent: clearAlertsForPane on a pane with no unread alerts
+        //   emits no commands.
+        // Why it exists: pins the no-op guard.
+        // Scenario: spec-first no-op clear.
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
         let commands = update(&model, .clearAlertsForPane(paneId: paneA))
-        try expectEqual(commands.count, 0, "clearAlertsForPane with no unread alerts should be a no-op")
+        #expect(commands.count == 0, "clearAlertsForPane with no unread alerts should be a no-op")
     }
 
-    test("testClearAlertsForNonFocusedPane") {
+    @Test("testClearAlertsForNonFocusedPane")
+    func testClearAlertsForNonFocusedPane() {
+        // Intent: clearAlertsForPane works on a non-focused pane in
+        //   manual mode.
+        // Why it exists: pins that the explicit per-pane clear works
+        //   regardless of focus state.
+        // Scenario: spec-first manual non-focused clear.
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        // Split to create a second pane (which becomes focused)
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
-        try expect(paneA != paneB, "split should create a new pane")
+        #expect(paneA != paneB, "split should create a new pane")
 
-        // Add alert for the non-focused pane
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        // Clear alerts for paneA (not focused) while paneB is focused
         update(&model, .clearAlertsForPane(paneId: paneA))
-        try expectEqual(model.alerts[0].isUnread, false, "clearAlertsForPane should clear non-focused pane's alerts")
+        #expect(model.alerts[0].isUnread == false, "clearAlertsForPane should clear non-focused pane's alerts")
     }
 
     // MARK: - ackTabAlerts
 
-    test("testAckTabAlertsClearsAllPaneAlertsInTab") {
+    @Test("testAckTabAlertsClearsAllPaneAlertsInTab")
+    func testAckTabAlertsClearsAllPaneAlertsInTab() {
+        // Intent: ackTabAlerts marks every pane's alerts in the selected
+        //   tab as read.
+        // Why it exists: pins the tab-wide ack scope.
+        // Scenario: spec-first ack-tab.
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        // Split to create a second pane
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
-        try expect(paneA != paneB, "split should create a new pane")
+        #expect(paneA != paneB, "split should create a new pane")
 
-        // Add unread alerts for both panes
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
@@ -970,17 +1151,20 @@ func alertTests() {
         ), at: 0)
 
         update(&model, .ackTabAlerts)
-        try expectEqual(model.alerts.filter { $0.isUnread }.count, 0, "all tab alerts should be marked read")
-        // The selected tab's alert badge reconciles via reconcileSidebar.
+        #expect(model.alerts.filter { $0.isUnread }.count == 0, "all tab alerts should be marked read")
     }
 
-    test("testAckTabAlertsDoesNotAffectOtherTabs") {
+    @Test("testAckTabAlertsDoesNotAffectOtherTabs")
+    func testAckTabAlertsDoesNotAffectOtherTabs() {
+        // Intent: ackTabAlerts scope is the selected tab; other tabs
+        //   stay unread.
+        // Why it exists: pins the per-tab scope.
+        // Scenario: spec-first ack-tab scope.
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
         let tab1PaneId = model.groups[0].tabs[0].focusedPaneId
 
-        // Create a second tab and add alerts to both
         createTab(&model)
         let tab2PaneId = model.groups[0].tabs[1].focusedPaneId
 
@@ -993,27 +1177,35 @@ func alertTests() {
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        // Select tab 2 and clear its alerts
         update(&model, .selectTab(id: model.groups[0].tabs[1].id))
         update(&model, .ackTabAlerts)
 
         let tab1Alert = model.alerts.first { $0.paneId == tab1PaneId }!
         let tab2Alert = model.alerts.first { $0.paneId == tab2PaneId }!
-        try expectEqual(tab1Alert.isUnread, true, "other tab's alerts should remain unread")
-        try expectEqual(tab2Alert.isUnread, false, "selected tab's alerts should be cleared")
+        #expect(tab1Alert.isUnread == true, "other tab's alerts should remain unread")
+        #expect(tab2Alert.isUnread == false, "selected tab's alerts should be cleared")
     }
 
-    test("testAckTabAlertsNoopsWhenNoUnreadAlerts") {
+    @Test("testAckTabAlertsNoopsWhenNoUnreadAlerts")
+    func testAckTabAlertsNoopsWhenNoUnreadAlerts() {
+        // Intent: ackTabAlerts is a no-op when no unread alerts exist.
+        // Why it exists: pins the empty-state guard.
+        // Scenario: spec-first ack-empty.
         var model = makeModel()
         createTab(&model)
 
         let commands = update(&model, .ackTabAlerts)
-        try expectEqual(commands.count, 0, "ackTabAlerts with no unread alerts should be a no-op")
+        #expect(commands.count == 0, "ackTabAlerts with no unread alerts should be a no-op")
     }
 
     // MARK: - clearAlertsForTab
 
-    test("testClearAlertsForTabClearsSpecificTab") {
+    @Test("testClearAlertsForTabClearsSpecificTab")
+    func testClearAlertsForTabClearsSpecificTab() {
+        // Intent: clearAlertsForTabs([id]) clears alerts for that tab
+        //   only.
+        // Why it exists: pins the per-tab explicit clear.
+        // Scenario: spec-first per-tab clear.
         var model = makeModel()
         createTab(&model)
         let tab1Id = model.groups[0].tabs[0].id
@@ -1022,7 +1214,6 @@ func alertTests() {
         createTab(&model)
         let tab2Pane = model.groups[0].tabs[1].focusedPaneId
 
-        // Add unread alerts for both tabs
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: tab1Pane,
             title: "DanTerm", body: "tab1", createdAt: Date(), isUnread: true
@@ -1035,52 +1226,63 @@ func alertTests() {
         update(&model, .clearAlertsForTabs(tabIds: [tab1Id]))
         let tab1Alert = model.alerts.first { $0.paneId == tab1Pane }!
         let tab2Alert = model.alerts.first { $0.paneId == tab2Pane }!
-        try expectEqual(tab1Alert.isUnread, false, "target tab's alerts should be cleared")
-        try expectEqual(tab2Alert.isUnread, true, "other tab's alerts should remain unread")
-        // The cleared tab's alert badge reconciles via reconcileSidebar.
+        #expect(tab1Alert.isUnread == false, "target tab's alerts should be cleared")
+        #expect(tab2Alert.isUnread == true, "other tab's alerts should remain unread")
     }
 
-    test("testClearAlertsForTabNoopsWhenNoUnreadAlerts") {
+    @Test("testClearAlertsForTabNoopsWhenNoUnreadAlerts")
+    func testClearAlertsForTabNoopsWhenNoUnreadAlerts() {
+        // Intent: clearAlertsForTabs on a tab with no alerts is a no-op.
+        // Why it exists: pins the no-op guard.
+        // Scenario: spec-first no-op per-tab clear.
         var model = makeModel()
         createTab(&model)
         let tabId = model.groups[0].tabs[0].id
 
         let commands = update(&model, .clearAlertsForTabs(tabIds: [tabId]))
-        try expectEqual(commands.count, 0, "clearAlertsForTabs with no unread alerts should be a no-op")
+        #expect(commands.count == 0, "clearAlertsForTabs with no unread alerts should be a no-op")
     }
 
-    test("testGoToMostRecentAlertPaneUnzoomsIfNeeded") {
+    @Test("testGoToMostRecentAlertPaneUnzoomsIfNeeded")
+    func testGoToMostRecentAlertPaneUnzoomsIfNeeded() {
+        // Intent: goToMostRecentAlertPane clears zoom when the alert
+        //   targets a different pane than the zoomed focus.
+        // Why it exists: pins the zoom-clear interaction on cross-pane
+        //   navigation.
+        // Scenario: spec-first go-to unzoom.
         var model = makeModel()
-        createTab(&model)  // tab1 with paneA
+        createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
 
-        // Split tab1 to get paneB, then zoom paneB
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
         update(&model, .toggleZoomPane)
-        try expectEqual(model.groups[0].tabs[0].isZoomed, true)
+        #expect(model.groups[0].tabs[0].isZoomed == true)
 
-        // Create tab2 so we navigate back to tab1 (acking tab2 first is a no-op)
         createTab(&model)
 
-        // Alert targets paneA on tab1 (not the zoomed paneB)
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
 
         update(&model, .goToMostRecentAlertPane)
-        try expectEqual(model.groups[0].tabs[0].isZoomed, false, "zoom should clear when navigating to different pane")
+        #expect(model.groups[0].tabs[0].isZoomed == false, "zoom should clear when navigating to different pane")
         _ = paneB
     }
 
     // MARK: - clearAlertsForTabs (batch from multi-select context menu)
 
-    test("testClearAlertsForTabsClearsAllSelected") {
+    @Test("testClearAlertsForTabsClearsAllSelected")
+    func testClearAlertsForTabsClearsAllSelected() {
+        // Intent: clearAlertsForTabs(ids) clears every selected tab's
+        //   alerts; non-selected tabs are untouched.
+        // Why it exists: pins the batch context-menu path.
+        // Scenario: spec-first batch clear.
         var model = makeModel()
-        createTab(&model) // tab1
-        createTab(&model) // tab2
-        createTab(&model) // tab3 — alerts should remain on this one
+        createTab(&model)
+        createTab(&model)
+        createTab(&model)
         let id1 = model.groups[0].tabs[0].id
         let id2 = model.groups[0].tabs[1].id
         let id3 = model.groups[0].tabs[2].id
@@ -1100,14 +1302,19 @@ func alertTests() {
         let unreadByPane: (PaneId) -> Bool = { pid in
             model.alerts.contains { $0.paneId == pid && $0.isUnread }
         }
-        try expect(!unreadByPane(pane1), "tab1 alerts cleared")
-        try expect(!unreadByPane(pane2), "tab2 alerts cleared")
-        try expect(unreadByPane(pane3), "tab3 alert preserved")
-        try expect(commands.isEmpty, "clearing emits no commands (badges reconcile)")
+        #expect(!unreadByPane(pane1), "tab1 alerts cleared")
+        #expect(!unreadByPane(pane2), "tab2 alerts cleared")
+        #expect(unreadByPane(pane3), "tab3 alert preserved")
+        #expect(commands.isEmpty, "clearing emits no commands (badges reconcile)")
         _ = id3
     }
 
-    test("testClearAlertsForTabsRefreshesOnlyTabsWithUnreadAlerts") {
+    @Test("testClearAlertsForTabsRefreshesOnlyTabsWithUnreadAlerts")
+    func testClearAlertsForTabsRefreshesOnlyTabsWithUnreadAlerts() {
+        // Intent: only tabs with unread alerts trigger model mutations
+        //   in the batch; empty tabs are no-ops within the batch.
+        // Why it exists: pins the batch's per-tab filtering.
+        // Scenario: spec-first batch filter.
         var model = makeModel()
         createTab(&model)
         createTab(&model)
@@ -1122,28 +1329,33 @@ func alertTests() {
 
         let commands = update(&model, .clearAlertsForTabs(tabIds: [id1, id2]))
 
-        // Only id1 had an unread alert; clearing marks it read while id2 (no alerts) is
-        // untouched. The per-row badge refresh now reconciles via reconcileSidebar, so the
-        // model state is the net.
-        try expect(!model.alerts.contains { $0.paneId == pane1 && $0.isUnread },
+        #expect(!model.alerts.contains { $0.paneId == pane1 && $0.isUnread },
             "id1's unread alert should be cleared")
-        try expect(commands.isEmpty, "clearing emits no commands (badges reconcile)")
+        #expect(commands.isEmpty, "clearing emits no commands (badges reconcile)")
     }
 
-    test("testClearAlertsForTabsNoUnreadIsNoop") {
+    @Test("testClearAlertsForTabsNoUnreadIsNoop")
+    func testClearAlertsForTabsNoUnreadIsNoop() {
+        // Intent: a batch over tabs with no unread alerts is a no-op.
+        // Why it exists: pins the empty-batch guard.
+        // Scenario: spec-first batch no-op.
         var model = makeModel()
         createTab(&model)
         createTab(&model)
         let id1 = model.groups[0].tabs[0].id
         let id2 = model.groups[0].tabs[1].id
-        // No alerts inserted.
 
         let commands = update(&model, .clearAlertsForTabs(tabIds: [id1, id2]))
-        try expectEqual(commands.count, 0,
-            "no unread alerts on any selected tab → no-op")
+        #expect(commands.count == 0,
+            "no unread alerts on any selected tab -> no-op")
     }
 
-    test("testClearAlertsForTabsAllStaleIsNoop") {
+    @Test("testClearAlertsForTabsAllStaleIsNoop")
+    func testClearAlertsForTabsAllStaleIsNoop() {
+        // Intent: an all-stale-id batch is a no-op; real alerts are
+        //   untouched.
+        // Why it exists: pins the stale-id fail-closed.
+        // Scenario: spec-first batch stale.
         var model = makeModel()
         createTab(&model)
         let pane = model.groups[0].tabs[0].focusedPaneId
@@ -1155,9 +1367,8 @@ func alertTests() {
         let commands = update(&model, .clearAlertsForTabs(
             tabIds: [TabId(), TabId()]))
 
-        try expectEqual(commands.count, 0, "all stale ids → no-op")
-        try expect(model.alerts.contains { $0.isUnread },
+        #expect(commands.count == 0, "all stale ids -> no-op")
+        #expect(model.alerts.contains { $0.isUnread },
             "real alerts unaffected by stale-id batch")
     }
 }
-
