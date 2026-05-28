@@ -1035,8 +1035,11 @@
   - isDraftDirty returns true when theme differs from Ghostty committed
   - isDraftDirty returns true when fontSize differs from Ghostty committed
 
-## UpdateRemoteTests -- PENDING
-# tests=26  expect=6  expectEqual=49  throwTF=0  TOTAL=55
+## UpdateRemoteTests -- MIGRATED (Wave C)
+# baseline: tests=26 expect=6 expectEqual=49 throwTF=0 TOTAL=55
+# new:      @Test=26 #expect=55 expectNoDifference=0 #require=0 Issue.record=0 TOTAL=55
+# delta:    0
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/UpdateRemoteTests.swift
   - remoteSessionStarted sets isRemote
   - remoteSessionStarted sets remoteThemeOverride without changing theme
   - remoteSessionStarted uses config.remoteTheme
