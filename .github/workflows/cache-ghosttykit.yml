@@ -21,7 +21,14 @@ on:
 
 jobs:
   cache:
-    runs-on: macos-15
+    # Must match the consumers' runner. ci.yml and release-stable.yml build on
+    # macos-26, and the cache key varies only on runner.os/runner.arch -- both
+    # macOS/ARM64 here, not the image version -- so the artifact built here is
+    # restored verbatim by those jobs. An older image would ship a GhosttyKit
+    # built against a different SDK / Metal toolchain / libtool than it's linked
+    # into, and its Xcode also lacks `xcodebuild -downloadComponent` (16.1+),
+    # which build-lib.sh calls. Keep in sync if the consumers' runner changes.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v6
 
