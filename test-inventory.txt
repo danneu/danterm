@@ -1202,8 +1202,11 @@
   - testSetTabColorsDedupesAndIgnoresStale
   - testSetTabColorsAllStaleIsNoop
 
-## UpdateTabTodoTests -- PENDING
-# tests=32  expect=32  expectEqual=42  throwTF=0  TOTAL=74
+## UpdateTabTodoTests -- MIGRATED (Wave D)
+# baseline: tests=32 expect=32 expectEqual=42 throwTF=0 TOTAL=74
+# new:      @Test=32 #expect=74 expectNoDifference=0 #require=0 Issue.record=0 TOTAL=74
+# delta:    0
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/UpdateTabTodoTests.swift
   - addTabTodo appends to the tab and leaves panes/other tabs untouched
   - addTabTodo trims whitespace and rejects empty
   - toggleTabTodoDone flips only the matched item
