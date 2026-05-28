@@ -1,5 +1,9 @@
-# Built XCFramework (rebuild with ./build-lib.sh)
-lib/
+# Built artifacts under lib/ (rebuild with ./build-lib.sh).
+# Source packages (DanTermProtocol, DanTermCore) ARE tracked -- only the build
+# artifacts (GhosttyKit.xcframework, ghostty-themes) are ignored.
+lib/*
+!lib/DanTermProtocol/
+!lib/DanTermCore/
 
 # Ghostty source cache
 .ghostty-src/

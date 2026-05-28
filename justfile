@@ -20,6 +20,7 @@ build-icons:
 # Run all tests
 test:
     swift test --package-path lib/DanTermProtocol --filter DanTermProtocolTests
+    swift test --package-path lib/DanTermCore
     ./test.sh
 
 # Run UI tests (AppKit, requires display)
