@@ -12,7 +12,6 @@ struct TestRunner {
         modelOperationsTests()
         sidebarItemStoreTests()
         reconcileTests()
-        snapshotTests()
         paneToolbarTests()
         exportTests()
         customTitleTests()

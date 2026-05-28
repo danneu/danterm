@@ -486,8 +486,12 @@
   - topmost tab close evicts closed tab and keeps next tab cached
   - multi-group to single-group reloadAll prunes closed topmost tab
 
-## SnapshotTests -- PENDING
-# tests=32  expect=28  expectEqual=41  throwTF=4  TOTAL=73
+## SnapshotTests -- MIGRATED (Wave B)
+# baseline: tests=32 expect=28 expectEqual=41 throwTF=4 TOTAL=73
+# new:      @Test=32 #expect=69 expectNoDifference=0 #require=0 Issue.record=4 TOTAL=73
+# delta:    0 (each legacy `throw TestFailure` inside a do/catch -> Issue.record + return;
+#            the typed catch arm's expectEqual on the error case -> #expect ==)
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/SnapshotTests.swift
   - decode valid AppInitFile JSON
   - decode failure on malformed JSON
   - loadValidatedInitFile rejects malformed JSON
