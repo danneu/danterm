@@ -865,8 +865,11 @@
   - appResignedActive clears jump mode
   - appResignedActive without jump mode still defocuses
 
-## UpdateLifecycleTests -- PENDING
-# tests=27  expect=21  expectEqual=34  throwTF=6  TOTAL=61
+## UpdateLifecycleTests -- MIGRATED (Wave C)
+# baseline: tests=27 expect=21 expectEqual=34 throwTF=6 TOTAL=61
+# new:      @Test=27 #expect=55 expectNoDifference=0 #require=0 Issue.record=6 TOTAL=61
+# delta:    0 (each `if case ... else { throw TestFailure }` on commands[0] -> Issue.record + return)
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/UpdateLifecycleTests.swift
   - testAppBecameActive
   - testAppResignedActive
   - testAppResignedActiveClearsActiveFlag
