@@ -983,8 +983,11 @@
   - testMovePaneToNewTabBeforeSourceIndex
   - testMovePaneToTabAlertsClearedOnMove
 
-## UpdatePreferencesTests -- PENDING
-# tests=46  expect=40  expectEqual=77  throwTF=8  TOTAL=125
+## UpdatePreferencesTests -- MIGRATED (Wave C)
+# baseline: tests=46 expect=40 expectEqual=77 throwTF=8 TOTAL=125
+# new:      @Test=46 #expect=117 expectNoDifference=0 #require=8 Issue.record=0 TOTAL=125
+# delta:    0 (each `guard let projection = desiredPreferencesPanel(in: model) else { throw }` -> #require)
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/UpdatePreferencesTests.swift
   - preferencesOpened initializes draft from current config
   - preferencesOpened when draft exists does not wipe it
   - preferencesClosed clears draft and committedGhosttyPrefs

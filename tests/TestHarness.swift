@@ -10,7 +10,6 @@ struct TestRunner {
         checkpointTests()
         remoteTests()
         danTermConfigTests()
-        preferencesTests()
         todoTests()
         updateTabTodoTests()
         todoShortcutCatalogTests()
