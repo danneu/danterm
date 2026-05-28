@@ -702,8 +702,11 @@
   - testClearAlertsForTabsNoUnreadIsNoop
   - testClearAlertsForTabsAllStaleIsNoop
 
-## UpdateGhosttyTests -- PENDING
-# tests=24  expect=25  expectEqual=49  throwTF=0  TOTAL=74
+## UpdateGhosttyTests -- MIGRATED (Wave C)
+# baseline: tests=24 expect=25 expectEqual=49 throwTF=0 TOTAL=74
+# new:      @Test=24 #expect=74 expectNoDifference=0 #require=0 Issue.record=0 TOTAL=74
+# delta:    0
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/UpdateGhosttyTests.swift
   - testBellOnFocusedPaneIsIgnored
   - testBellOnBackgroundPaneCreatesUnreadAlert
   - testBellOnFocusedPaneWhileInactiveCreatesAlertAndNotification
