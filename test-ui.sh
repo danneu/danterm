@@ -20,18 +20,18 @@ echo "Compiling UI tests..."
         -I "$PROTO_BUILD" \
         -L "$PROTO_BUILD" \
         -lDanTermProtocol \
-        "$SCRIPT_DIR/app/Model.swift" \
-        "$SCRIPT_DIR/app/ModelOperations.swift" \
-        "$SCRIPT_DIR/app/Projections.swift" \
-        "$SCRIPT_DIR/app/TabTodo.swift" \
-        "$SCRIPT_DIR/app/Persistence.swift" \
-        "$SCRIPT_DIR/app/Msg.swift" \
-        "$SCRIPT_DIR/app/Command.swift" \
-        "$SCRIPT_DIR/app/DanTermConfig.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Model.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/ModelOperations.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Projections.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/TabTodo.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Persistence.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Msg.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Command.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/DanTermConfig.swift" \
         "$SCRIPT_DIR/app/BadgeLabel.swift" \
         "$SCRIPT_DIR/app/PaneSplitView.swift" \
         "$SCRIPT_DIR/app/TodoInputView.swift" \
-        "$SCRIPT_DIR/app/SidebarItemStore.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/SidebarItemStore.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarViewTestShim.swift" \
         "$SCRIPT_DIR/app/SplitContainerView.swift" \
         "$SCRIPT_DIR/app/SidebarView.swift" \
