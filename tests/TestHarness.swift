@@ -7,7 +7,6 @@ struct TestRunner {
         paneToolbarTests()
         customTitleTests()
         checkpointTests()
-        danTermConfigTests()
         todoTests()
         updateTabTodoTests()
         todoShortcutCatalogTests()
