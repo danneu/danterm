@@ -856,8 +856,11 @@
   - pane.read unknown pane errors
   - pane.read invalid line limits error
 
-## UpdateJumpTests -- PENDING
-# tests=9  expect=17  expectEqual=6  throwTF=0  TOTAL=23
+## UpdateJumpTests -- MIGRATED (Wave C)
+# baseline: tests=9 expect=17 expectEqual=6 throwTF=0 TOTAL=23
+# new:      @Test=9 #expect=23 expectNoDifference=0 #require=0 Issue.record=0 TOTAL=23
+# delta:    0
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/UpdateJumpTests.swift
   - jumpModeActivated populates keyMap
   - jumpModeActivated clears an active MRU cycle
   - jumpModeKeyPressed selects mapped tab and clears mode
