@@ -33,10 +33,13 @@ permanent tax: every future model field the app reads would need annotating.
 The 22 pure files live in `lib/DanTermCore/Sources/DanTermCore/` and are
 compiled by **two independent SwiftPM builds**:
 
-1. **The root app build** (`./Package.swift`) compiles them into the app's own
-   module via `sources: ["app", "lib/DanTermCore/Sources/DanTermCore"]`. There is
-   no `import DanTermCore`; the core stays plain `internal` and the app reads
-   `model.groups` exactly as before, with zero access annotations.
+1. **The root app build** (`./Package.swift`) declares the `DanTerm`
+   executable target with `path: "app"` and reaches the core through the
+   tracked symlink `app/DanTermCore -> ../lib/DanTermCore/Sources/DanTermCore`.
+   SwiftPM walks the symlink and compiles those `.swift` files into the app's
+   own module. There is no `import DanTermCore`; the core stays plain
+   `internal` and the app reads `model.groups` exactly as before, with zero
+   access annotations.
 
 2. **The nested test package** (`lib/DanTermCore/Package.swift`) compiles the
    same files as a standalone `DanTermCore` library and runs Swift Testing suites
@@ -44,23 +47,27 @@ compiled by **two independent SwiftPM builds**:
    The nested package depends on `.package(path: "../DanTermProtocol")` and
    `swift-custom-dump`, but NOT on the `DanTerm` executable or GhosttyKit.
 
-Two implementation details matter:
+### Why `path: "app"` + symlink, not the rejected root-rooted target
 
-- **The `path: "."` root manifest needs a stable `exclude:` set.** With
-  `path: "."` SwiftPM scans the entire repo and warns on any non-source file or
-  directory it sees. The exclude list covers every non-source top-level dir and
-  loose file; gitignored build artifacts under `lib/` (like `lib/ghostty-themes`)
-  are appended conditionally with `FileManager.fileExists`. The acceptance bar is
-  warning-free in both checkout states: bare (no `ghostty-themes`) and
-  artifact-populated.
+An earlier iteration of the plan rooted the `DanTerm` target at the repo
+root and merged the two trees into one module via a multi-entry `sources:`
+list (one entry under `app/`, one under the core directory). That shape
+was abandoned in Phase 0 for two reasons:
 
-- **The pivot from the plan's original `sources: [...]` listing to the symlink
-  `app/DanTermCore -> ../lib/DanTermCore/Sources/DanTermCore`.** The plan called
-  for two directories in `sources:`, but practical implementation showed that
-  letting `sources:` be a single tree under `app/` (with the core in via a
-  symlink) keeps the exclude list flatter and makes the source layout look
-  unsurprising to readers who open `app/` looking for "everything compiled into
-  the executable."
+- It was incompatible with the project's `--build-path .spm-build` build
+  scripts: every incremental rebuild failed with `unknown build
+  description`. Pinning the target to `path: "app"` keeps `--build-path`
+  working.
+- A root-rooted target forces a sprawling `exclude:` set covering every
+  non-source top-level directory and loose file, plus conditional entries
+  for gitignored build artifacts under `lib/` (such as `lib/ghostty-themes`).
+  Pinning to `path: "app"` eliminates that surface -- the shipped manifest's
+  only exclude is `Info.plist`.
+
+The shipped target is therefore `path: "app"`, `exclude: ["Info.plist"]`,
+with the core merged into the app module through the symlink. The symlink
+is tracked in git (a single inode pointing at
+`../lib/DanTermCore/Sources/DanTermCore`) so every checkout picks it up.
 
 The same-module design pays nothing the module-split would have given:
 
@@ -93,9 +100,10 @@ retired. `tests/` is deleted; the core suite runs under
 - **Field-level diffs on big values.** `expectNoDifference` from
   `swift-custom-dump` (used in `TreeOwnsPanesTests` etc.) prints a structured diff
   on `AppModel` mismatch instead of `big != big`.
-- **The root manifest needs the `exclude:` list.** Top-level directory churn
-  (adding a non-source dir) requires extending the exclude list. The cost is
-  small and stable -- top-level entries change rarely.
+- **The `app/DanTermCore` symlink is tracked in git.** It is the only piece
+  of plumbing that ties the two builds together. If the core source directory
+  ever moves, re-point the symlink; the root manifest itself does not
+  reference the inner path.
 - **CI gating is a follow-up.** This migration kept GitHub Actions changes out of
   scope. The local gate (`just test`) now runs protocol + core + the purity lint;
   CI wiring follows in a separate pass.

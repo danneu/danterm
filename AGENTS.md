@@ -40,9 +40,9 @@ app/
 
 lib/DanTermCore/
 ├── Package.swift                       # Nested SwiftPM manifest: library + Swift Testing test target.
-├── Sources/DanTermCore/                # The 22 pure files compiled into the app's own module via the
-│                                       # root manifest's `sources:`, AND compiled standalone as a
-│                                       # `DanTermCore` library here. See docs/design/.
+├── Sources/DanTermCore/                # The 22 pure files; the root app target picks them up via
+│                                       # the tracked `app/DanTermCore` symlink, AND they are compiled
+│                                       # standalone as `DanTermCore` here. See docs/design/.
 └── Tests/DanTermCoreTests/             # Swift Testing suites (auto-discovered).
     ├── TestSupport.swift              # Shared fixtures (makeModel, createTab, hasEffect,
     │                                  # paneSnapshot helpers, makeMruModel).
@@ -204,12 +204,12 @@ func testTabNewParsesBackgroundFlag() throws {
 The 22 pure model/update files live in `lib/DanTermCore/Sources/DanTermCore/`.
 They are compiled twice by independent SwiftPM builds:
 
-- **The root app target** (`DanTerm` executable in `./Package.swift`) compiles
-  them into its own module via `sources: ["app", "lib/DanTermCore/Sources/DanTermCore"]`.
-  No `import DanTermCore` in the app; the core stays plain `internal`. The
-  nested `app/DanTermCore -> ../lib/DanTermCore/Sources/DanTermCore` symlink
-  keeps the SwiftPM `path: "."` exclude list to a stable per-source-directory
-  shape.
+- **The root app target** (`DanTerm` executable in `./Package.swift`) uses
+  `path: "app"` and reaches the core through the tracked symlink
+  `app/DanTermCore -> ../lib/DanTermCore/Sources/DanTermCore`. SwiftPM walks
+  the symlink and compiles the core files into the app's own module, so there
+  is no `import DanTermCore` in the app and the core stays plain `internal`
+  with zero access-control churn.
 - **The nested test package** (`lib/DanTermCore/Package.swift`) compiles them as
   a standalone `DanTermCore` library and runs the Swift Testing suites against
   `@testable import DanTermCore`. The package does NOT depend on the
@@ -225,7 +225,7 @@ can't catch system-framework imports), and its self-test
 
 See [docs/design/2026-05-28-core-module-via-symlink.md](docs/design/2026-05-28-core-module-via-symlink.md)
 for the design decision behind compiling core same-module into the app
-(`path: "."` + symlink) while a nested package tests it in isolation, and
+(`path: "app"` + symlink) while a nested package tests it in isolation, and
 why that beats a separate `DanTermCore` module.
 
 ## Build
