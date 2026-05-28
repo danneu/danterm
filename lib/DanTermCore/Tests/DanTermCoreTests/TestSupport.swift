@@ -50,3 +50,17 @@ func allPaneSnapshots(_ snapshot: AppModelSnapshot) -> [PaneSnapshot] {
 func paneSnapshot(_ id: String, in snapshot: AppModelSnapshot) -> PaneSnapshot? {
     allPaneSnapshots(snapshot).first { $0.id == id }
 }
+
+/// Build a model with N tabs in one group; returns the tab ids in display order.
+/// Used by MRU/cycle tests in ModelOperationsTests and UpdateMruTests.
+func makeMruModel(tabCount: Int) -> (model: AppModel, tabIds: [TabId]) {
+    var model = makeModel()
+    var ids: [TabId] = []
+    for _ in 0..<tabCount {
+        let paneId = PaneId()
+        let tabId = TabId()
+        ids.append(tabId)
+        model.groups[0].tabs.append(TabModel(id: tabId, focusedPaneId: paneId, rootNode: .leaf(PaneModel(id: paneId))))
+    }
+    return (model, ids)
+}
