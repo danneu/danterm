@@ -615,8 +615,13 @@
   - tab shortcut catalog includes tab-only bucket movement
   - shortcut catalog uses menu key glyphs
 
-## TreeOwnsPanesTests -- PENDING
-# tests=13  expect=26  expectEqual=43  throwTF=8  TOTAL=77
+## TreeOwnsPanesTests -- MIGRATED (Wave B)
+# baseline: tests=13 expect=26 expectEqual=43 throwTF=8 TOTAL=77
+# new:      @Test=13 #expect=63 expectNoDifference=6 #require=3 Issue.record=5 TOTAL=77
+# delta:    0 (expectNoDifference for PaneModel/AppModel comparisons; #require for
+#            single-value validateAndBuild guards; Issue.record + return for the
+#            compound `guard case .split(...)` guards that #require cannot express)
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/TreeOwnsPanesTests.swift
   - v2 snapshot decodes embedded panes into leaf-owned panes and re-encodes identically
   - updatePane mutates only the target leaf, leaving structure and siblings intact
   - closePane removes the pane and allPaneIds tracks the surviving leaves
