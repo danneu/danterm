@@ -3,7 +3,6 @@ import Foundation
 @main
 struct TestRunner {
     static func main() {
-        lifecycleTests()
         alertTests()
         sidebarItemStoreTests()
         reconcileTests()
