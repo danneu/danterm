@@ -584,8 +584,11 @@
   - bare f with jump active commits instead of activating
   - bare non-printing key with jump active returns cancel
 
-## TerminalLaunchEnvironmentTests -- PENDING
-# tests=1  expect=1  expectEqual=4  throwTF=0  TOTAL=5
+## TerminalLaunchEnvironmentTests -- MIGRATED (Wave D)
+# baseline: tests=1 expect=1 expectEqual=4 throwTF=0 TOTAL=5
+# new:      @Test=1 #expect=5 expectNoDifference=0 #require=0 Issue.record=0 TOTAL=5
+# delta:    0
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/TerminalLaunchEnvironmentTests.swift
   - terminal launch env includes pane context and omits tab context
 
 ## ThemeColorParserTests -- MIGRATED (Wave A)
