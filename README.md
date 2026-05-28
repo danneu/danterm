@@ -409,7 +409,7 @@ bash ~/world/scripts/tests/danterm-integration_test.sh
 | Toggle Pane Zoom               | ⌘Enter   |
 | Toggle Theme Browser           | ⇧⌘B      |
 | New Group                      | ⌘N       |
-| Go to Most Recent Unread Alert | ⇧⌘A      |
+| Next Unread Alert              | ⇧⌘A      |
 | Clear Tab Alerts               | ⌘.       |
 | Clear Pane Alerts              | ⇧⌘.      |
 | Toggle Tab To-do List          | ⌘'       |

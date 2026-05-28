@@ -360,7 +360,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
         paneMenu.addItem(NSMenuItem.separator())
 
-        let goToAlert = NSMenuItem(title: "Go to Most Recent Unread Alert", action: #selector(goToMostRecentAlertPane(_:)), keyEquivalent: "a")
+        let goToAlert = NSMenuItem(title: "Next Unread Alert", action: #selector(goToMostRecentAlertPane(_:)), keyEquivalent: "a")
         goToAlert.keyEquivalentModifierMask = [.command, .shift]
         paneMenu.addItem(goToAlert)
 

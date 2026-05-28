@@ -540,10 +540,11 @@ import Testing
 
     @Test("testGoToMostRecentAlertPaneIntraTabNavigatesToAlertPane")
     func testGoToMostRecentAlertPaneIntraTabNavigatesToAlertPane() {
-        // Intent: an intra-tab alert hops to the sibling pane and marks
-        //   its alert read.
-        // Why it exists: pins the per-tab focus hop path.
-        // Scenario: spec-first intra-tab hop.
+        // Intent: with no other alert-bearing tabs, an intra-tab alert
+        //   falls back to the sibling pane and clears current-tab alerts.
+        // Why it exists: pins same-tab navigation as the fallback, not
+        //   the primary shortcut loop.
+        // Scenario: spec-first intra-tab fallback.
         var model = makeModel()
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
@@ -569,16 +570,16 @@ import Testing
         #expect(model.groups[0].tabs[0].focusedPaneId == paneB,
             "tab's focusedPaneId should be paneB after navigation")
         #expect(model.alerts[0].isUnread == false,
-            "paneB's alert should be marked read after focus moves to it")
+            "paneB's alert should be marked read by the current-tab clear")
     }
 
-    @Test("testGoToMostRecentAlertPaneIntraTabDoesNotAckSiblingInManualMode")
-    func testGoToMostRecentAlertPaneIntraTabDoesNotAckSiblingInManualMode() {
-        // Intent: in manual mode, the intra-tab hop still focuses but
-        //   does NOT mark the sibling's alert read.
-        // Why it exists: pins the manual-mode preservation for the
-        //   intra-tab walk.
-        // Scenario: spec-first manual intra-tab.
+    @Test("testGoToMostRecentAlertPaneIntraTabClearsCurrentTabInManualMode")
+    func testGoToMostRecentAlertPaneIntraTabClearsCurrentTabInManualMode() {
+        // Intent: in manual mode, same-tab fallback focuses the latest
+        //   unread sibling and then clears every current-tab alert.
+        // Why it exists: pins the shortcut's explicit current-tab clear,
+        //   which ignores alertClearMode for the tab being finished.
+        // Scenario: spec-first manual same-tab fallback.
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
@@ -593,6 +594,10 @@ import Testing
             id: AlertId(), kind: .bell, paneId: paneB,
             title: "DanTerm", body: "intra-tab", createdAt: Date(), isUnread: true
         ), at: 0)
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "focused", createdAt: Date(), isUnread: true
+        ), at: 1)
 
         let commands = update(&model, .goToMostRecentAlertPane)
 
@@ -601,61 +606,59 @@ import Testing
             return false
         }, "should focus paneB")
 
-        #expect(model.alerts[0].isUnread == true,
-            "paneB's alert should remain unread")
+        #expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == false,
+            "focused pane alert should be cleared")
+        #expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false,
+            "sibling pane alert should be cleared")
     }
 
-    @Test("testGoToMostRecentAlertPaneRepeatedPressWalksPanesInTab")
-    func testGoToMostRecentAlertPaneRepeatedPressWalksPanesInTab() {
-        // Intent: in manual mode, repeated presses walk through
-        //   alert-bearing panes within the current tab in newest-first
-        //   order.
-        // Why it exists: pins the multi-press walk semantics.
-        // Scenario: spec-first repeated-press in tab.
+    @Test("testGoToMostRecentAlertPanePrefersOtherTabOverCurrentSibling")
+    func testGoToMostRecentAlertPanePrefersOtherTabOverCurrentSibling() {
+        // Intent: an unread sibling in the current tab does not beat an
+        //   unread alert in another tab, even when the sibling is newer.
+        // Why it exists: pins tab-first triage: finish the current tab,
+        //   then move to another tab that needs attention.
+        // Scenario: spec-first cross-tab priority over same-tab fallback.
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
         let paneA = model.groups[0].tabs[0].focusedPaneId
+        let tab1Id = model.groups[0].tabs[0].id
 
+        createTab(&model)
         update(&model, .splitPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
+        let paneC = model.groups[0].tabs[1].focusedPaneId
+        let tab2PaneIds = allPaneIds(model.groups[0].tabs[1].rootNode)
+        let paneB = tab2PaneIds.first(where: { $0 != paneC })!
 
-        update(&model, .splitPane(direction: .vertical))
-        let paneC = model.groups[0].tabs[0].focusedPaneId
-
-        update(&model, .paneBecameFirstResponder(paneId: paneA))
-        #expect(model.groups[0].tabs[0].focusedPaneId == paneA)
+        update(&model, .paneBecameFirstResponder(paneId: paneB))
+        #expect(model.groups[0].tabs[1].focusedPaneId == paneB)
 
         model.alerts.insert(AlertModel(
-            id: AlertId(), kind: .bell, paneId: paneC,
-            title: "DanTerm", body: "older", createdAt: Date(), isUnread: true
+            id: AlertId(), kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "other tab", createdAt: Date(), isUnread: true
         ), at: 0)
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneB,
-            title: "DanTerm", body: "newer", createdAt: Date(), isUnread: true
+            title: "DanTerm", body: "focused current", createdAt: Date(), isUnread: true
+        ), at: 0)
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneC,
+            title: "DanTerm", body: "newer current sibling", createdAt: Date(), isUnread: true
         ), at: 0)
 
-        update(&model, .goToMostRecentAlertPane)
-        #expect(model.groups[0].tabs[0].focusedPaneId == paneB,
-            "press 1 should land on paneB")
-        #expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == true,
-            "paneB unread after press 1")
-        #expect(model.alerts.first(where: { $0.paneId == paneC })?.isUnread == true,
-            "paneC unread after press 1")
-
-        update(&model, .goToMostRecentAlertPane)
-        #expect(model.groups[0].tabs[0].focusedPaneId == paneC,
-            "press 2 should land on paneC")
+        let commands = update(&model, .goToMostRecentAlertPane)
+        #expect(model.selectedTabId == tab1Id, "should jump to the other tab")
+        #expect(hasEffect(commands) {
+            if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
+            return false
+        }, "should focus paneA, not the newer current-tab sibling")
+        #expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == true,
+            "destination alert should remain unread in manual mode")
         #expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false,
-            "paneB acked on press 2")
-        #expect(model.alerts.first(where: { $0.paneId == paneC })?.isUnread == true,
-            "paneC unread until press 3")
-
-        update(&model, .goToMostRecentAlertPane)
+            "focused current-tab alert should be cleared")
         #expect(model.alerts.first(where: { $0.paneId == paneC })?.isUnread == false,
-            "paneC acked on press 3")
-        #expect(!model.alerts.contains(where: { $0.isUnread }),
-            "all alerts read after walking through siblings")
+            "newer current-tab sibling alert should be cleared")
     }
 
     @Test("testGoToMostRecentAlertPaneUsesCurrentTabAfterMove")
@@ -828,12 +831,13 @@ import Testing
         }, "third press should not navigate")
     }
 
-    @Test("testGoToMostRecentAlertPaneAcksOnlyFocusedPaneInSplit")
-    func testGoToMostRecentAlertPaneAcksOnlyFocusedPaneInSplit() {
-        // Intent: ack-current acks only the focused pane in a split, not
-        //   its siblings.
-        // Why it exists: pins the per-pane scope of the ack.
-        // Scenario: spec-first split ack scope.
+    @Test("testGoToMostRecentAlertPaneAcksAllPanesInSplit")
+    func testGoToMostRecentAlertPaneAcksAllPanesInSplit() {
+        // Intent: when another tab has an unread alert, the shortcut
+        //   clears every unread pane in the original current tab.
+        // Why it exists: pins the "finish current tab" scope for split
+        //   tabs before cross-tab navigation.
+        // Scenario: spec-first split tab clear.
         var model = makeModel()
         model.config.alertClearMode = .manual
         createTab(&model)
@@ -861,8 +865,8 @@ import Testing
         let commands = update(&model, .goToMostRecentAlertPane)
         #expect(model.alerts.first(where: { $0.paneId == paneC })?.isUnread == false,
             "focused pane's alert should be acked")
-        #expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == true,
-            "non-focused sibling alert should remain unread")
+        #expect(model.alerts.first(where: { $0.paneId == paneB })?.isUnread == false,
+            "non-focused sibling alert should also be acked")
         #expect(model.alerts.first(where: { $0.paneId == paneA })?.isUnread == true, "paneA alert should still be unread")
         #expect(hasEffect(commands) {
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }

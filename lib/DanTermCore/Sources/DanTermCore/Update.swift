@@ -875,17 +875,39 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         return commands
 
     case .goToMostRecentAlertPane:
-        // Ack only the focused pane before searching so repeated presses walk every
-        // unread pane, including sibling panes in the current split.
-        if let tab = selectedTab(in: model),
-           paneHasUnreadAlert(tab.focusedPaneId, alerts: model.alerts) {
-            markAlertsReadForPane(tab.focusedPaneId, in: &model)
+        // Cmd-Shift-A finishes the current tab before moving to the next tab
+        // that needs attention. Same-tab pane navigation is only the fallback
+        // when no other tab has a live unread alert.
+        guard let currentTab = selectedTab(in: model) else {
+            guard let alert = model.alerts.first(where: { $0.isUnread && tabForPane($0.paneId, in: model) != nil }) else {
+                return []
+            }
+            return navigateToPane(alert.paneId, in: &model, env: env)
         }
-        // Acked-pane bell badges reconcile via reconcileSidebar.
-        guard let alert = model.alerts.first(where: { $0.isUnread && model.pane($0.paneId) != nil }) else {
-            return []
+
+        let currentTabId = currentTab.id
+        let currentFocusedPaneId = currentTab.focusedPaneId
+        let currentPaneIds = Set(allPaneIds(currentTab.rootNode))
+        let liveUnreadAlerts = model.alerts.compactMap { alert -> (alert: AlertModel, tab: TabModel)? in
+            guard alert.isUnread, let tab = tabForPane(alert.paneId, in: model) else { return nil }
+            return (alert, tab)
         }
-        return navigateToPane(alert.paneId, in: &model, env: env)
+
+        if let target = liveUnreadAlerts.first(where: { $0.tab.id != currentTabId }) {
+            for paneId in currentPaneIds { markAlertsReadForPane(paneId, in: &model) }
+            return navigateToPane(target.alert.paneId, in: &model, env: env)
+        }
+
+        if let target = liveUnreadAlerts.first(where: {
+            currentPaneIds.contains($0.alert.paneId) && $0.alert.paneId != currentFocusedPaneId
+        }) {
+            let commands = navigateToPane(target.alert.paneId, in: &model, env: env)
+            for paneId in currentPaneIds { markAlertsReadForPane(paneId, in: &model) }
+            return commands
+        }
+
+        for paneId in currentPaneIds { markAlertsReadForPane(paneId, in: &model) }
+        return []
 
     case .setShowAllAlerts(let showAll):
         model.showAllAlerts = showAll
