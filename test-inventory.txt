@@ -647,8 +647,11 @@
   - restore chrome derives from the focused leaf's embedded PaneSnapshot, launch.cwd wins, sibling does not leak
   - graftScrollback embeds scrollback into the matching tree leaves only
 
-## UpdateAlertTests -- PENDING
-# tests=52  expect=55  expectEqual=67  throwTF=0  TOTAL=122
+## UpdateAlertTests -- MIGRATED (Wave C)
+# baseline: tests=52 expect=55 expectEqual=67 throwTF=0 TOTAL=122
+# new:      @Test=52 #expect=122 expectNoDifference=0 #require=0 Issue.record=0 TOTAL=122
+# delta:    0
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/UpdateAlertTests.swift
   - testMarkAlertRead
   - testMarkAlertReadForStalePaneSkipsSidebarUpdate
   - testMarkAllAlertsRead
