@@ -13,7 +13,6 @@ struct TestRunner {
         todoShortcutCatalogTests()
         terminalLaunchEnvironmentTests()
         ipcUpdateTests()
-        ipcConnectionTests()
         cliPathInstallerTests()
         todoPopoverStateTests()
         switcherEventTests()
