@@ -262,38 +262,41 @@ func mergeCheckpoints(light: ValidatedAppRestore, enriched: ValidatedAppRestore)
     )
 }
 
-func sessionLockURL() -> URL {
-    recoveryDirectoryURL().appendingPathComponent("session.json")
+func sessionLockURL(recoveryDir: URL = recoveryDirectoryURL()) -> URL {
+    recoveryDir.appendingPathComponent("session.json")
 }
 
 // MARK: - Session Lock I/O
 //
 // All session lock serialization goes through these three helpers so the
 // JSON encoder/decoder date strategy (.iso8601) is configured in one place.
+// The recoveryDir parameter exists for tests; production code always takes
+// the default (the real Application Support recovery dir). Pointing tests at
+// a per-test temp dir keeps the suite hermetic and parallel-safe -- the real
+// session.json at the production path is never touched.
 
 /// Write a session lock file at launch. Its presence at next launch means the
 /// previous exit was unclean — no PID liveness check needed.
-func writeSessionLockFile() {
+func writeSessionLockFile(recoveryDir: URL = recoveryDirectoryURL()) {
     let lock = SessionLock(pid: ProcessInfo.processInfo.processIdentifier, startedAt: Date())
     let encoder = JSONEncoder()
     encoder.dateEncodingStrategy = .iso8601
     guard let data = try? encoder.encode(lock) else { return }
-    let dir = recoveryDirectoryURL()
-    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    try? data.write(to: sessionLockURL(), options: .atomic)
+    try? FileManager.default.createDirectory(at: recoveryDir, withIntermediateDirectories: true)
+    try? data.write(to: sessionLockURL(recoveryDir: recoveryDir), options: .atomic)
 }
 
 /// Read the session lock if it exists (non-nil = previous exit was unclean).
-func readSessionLockFile() -> SessionLock? {
-    guard let data = try? Data(contentsOf: sessionLockURL()) else { return nil }
+func readSessionLockFile(recoveryDir: URL = recoveryDirectoryURL()) -> SessionLock? {
+    guard let data = try? Data(contentsOf: sessionLockURL(recoveryDir: recoveryDir)) else { return nil }
     let decoder = JSONDecoder()
     decoder.dateDecodingStrategy = .iso8601
     return try? decoder.decode(SessionLock.self, from: data)
 }
 
 /// Delete the session lock on clean termination.
-func deleteSessionLockFile() {
-    try? FileManager.default.removeItem(at: sessionLockURL())
+func deleteSessionLockFile(recoveryDir: URL = recoveryDirectoryURL()) {
+    try? FileManager.default.removeItem(at: sessionLockURL(recoveryDir: recoveryDir))
 }
 
 // MARK: - Scrollback Truncation

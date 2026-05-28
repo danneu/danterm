@@ -3,7 +3,6 @@ import Foundation
 @main
 struct TestRunner {
     static func main() {
-        checkpointTests()
         ipcUpdateTests()
         print("\n\(total - failures)/\(total) passed")
         if failures > 0 { exit(1) }
