@@ -14,10 +14,11 @@ If the new Ghostty version requires a different Zig version, also update:
 
 | File | What to change |
 |------|---------------|
-| `build-lib.sh` | `ZIG_PKG="nixpkgs#zig_0_15"` |
-| `.github/workflows/ci.yml` | `version: 0.15.2` in the `mlugg/setup-zig` step |
-| `.github/workflows/release-stable.yml` | Same `mlugg/setup-zig` step |
-| `.github/workflows/cache-ghosttykit.yml` | Same `mlugg/setup-zig` step |
+| `flake.nix` | The single Zig pin: the `zig_0_15` re-export (`zig-overlay`'s `brew."0.15.2"`) and the `zig-overlay` input |
+| `build-lib.sh` | `ZIG_PKG="$SCRIPT_DIR#zig_0_15"` (only if the flake attr is renamed) |
+| `.github/workflows/ci.yml` | nix-installer + `./build-lib.sh all` -- no per-workflow Zig pin to change |
+| `.github/workflows/release-stable.yml` | Same |
+| `.github/workflows/cache-ghosttykit.yml` | Same |
 | `docs/ci.md` | Pinned versions section |
 
 ## Steps
@@ -68,7 +69,7 @@ includes the validated tag, so upgrading the tag automatically invalidates the
 cache:
 
 ```
-ghosttykit-v2-{GHOSTTY_TAG}-{hash of build-lib.sh}-{runner.os}-{runner.arch}
+ghosttykit-v2-{GHOSTTY_TAG}-{hash of build-lib.sh, flake.nix, flake.lock}-{runner.os}-{runner.arch}
 ```
 
 The first CI run after a tag change will rebuild GhosttyKit (~5-10 min). All
@@ -84,6 +85,9 @@ scope allows it. After merging the upgrade PR,
 
 ### Cache invalidation
 
-The cache also busts when `build-lib.sh` changes (via `hashFiles`). This means
-build flag changes (e.g. adding `-Dxcframework-target=native`) also trigger a
-rebuild even if the tag stays the same.
+The cache also busts when `build-lib.sh`, `flake.nix`, or `flake.lock` changes
+(via `hashFiles`). This means build flag changes (e.g. adding
+`-Dxcframework-target=native`) and flake-side changes (e.g. bumping the
+`zig-overlay` input) both trigger a rebuild even if the tag stays the same --
+which is what stops a flake-only zig bump from silently reusing a GhosttyKit
+built with the old, unpatched zig.

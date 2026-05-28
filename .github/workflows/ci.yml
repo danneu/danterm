@@ -105,14 +105,6 @@ jobs:
           echo "GHOSTTY_TAG=$GHOSTTY_TAG" >> "$GITHUB_ENV"
           echo "tag=$GHOSTTY_TAG" >> "$GITHUB_OUTPUT"
 
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.15.2
-
-      - name: Clone Ghostty source
-        run: |
-          git clone --depth 1 --branch "$GHOSTTY_TAG" https://github.com/ghostty-org/ghostty.git .ghostty-src
-
       - name: Cache GhosttyKit
         id: cache-ghosttykit
         uses: actions/cache@v5
@@ -120,22 +112,14 @@ jobs:
           path: |
             lib/GhosttyKit.xcframework
             lib/ghostty-themes
-          key: ghosttykit-v2-${{ steps.ghostty-version.outputs.tag }}-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
+          key: ghosttykit-v2-${{ steps.ghostty-version.outputs.tag }}-${{ hashFiles('build-lib.sh', 'flake.nix', 'flake.lock') }}-${{ runner.os }}-${{ runner.arch }}
+
+      - uses: DeterminateSystems/nix-installer-action@v22
+        if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
 
       - name: Build GhosttyKit
         if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
-        run: |
-          cd .ghostty-src
-          zig build \
-            -Demit-xcframework \
-            -Dxcframework-target=native \
-            -Demit-macos-app=false \
-            -Dsentry=false \
-            -Doptimize=ReleaseFast
-          cd ..
-          mkdir -p lib
-          cp -R .ghostty-src/macos/GhosttyKit.xcframework lib/
-          cp -R .ghostty-src/zig-out/share/ghostty/themes lib/ghostty-themes
+        run: ./build-lib.sh all
 
       - name: Build app bundle
         run: ./build-app.sh
@@ -155,14 +139,6 @@ jobs:
           echo "GHOSTTY_TAG=$GHOSTTY_TAG" >> "$GITHUB_ENV"
           echo "tag=$GHOSTTY_TAG" >> "$GITHUB_OUTPUT"
 
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.15.2
-
-      - name: Clone Ghostty source
-        run: |
-          git clone --depth 1 --branch "$GHOSTTY_TAG" https://github.com/ghostty-org/ghostty.git .ghostty-src
-
       - name: Cache GhosttyKit
         id: cache-ghosttykit
         uses: actions/cache@v5
@@ -170,22 +146,14 @@ jobs:
           path: |
             lib/GhosttyKit.xcframework
             lib/ghostty-themes
-          key: ghosttykit-v2-${{ steps.ghostty-version.outputs.tag }}-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
+          key: ghosttykit-v2-${{ steps.ghostty-version.outputs.tag }}-${{ hashFiles('build-lib.sh', 'flake.nix', 'flake.lock') }}-${{ runner.os }}-${{ runner.arch }}
+
+      - uses: DeterminateSystems/nix-installer-action@v22
+        if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
 
       - name: Build GhosttyKit
         if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
-        run: |
-          cd .ghostty-src
-          zig build \
-            -Demit-xcframework \
-            -Dxcframework-target=native \
-            -Demit-macos-app=false \
-            -Dsentry=false \
-            -Doptimize=ReleaseFast
-          cd ..
-          mkdir -p lib
-          cp -R .ghostty-src/macos/GhosttyKit.xcframework lib/
-          cp -R .ghostty-src/zig-out/share/ghostty/themes lib/ghostty-themes
+        run: ./build-lib.sh all
 
       - name: Build app bundle (release validation)
         run: ./build-app.sh --version "0.0.0-test"
@@ -215,3 +183,6 @@ jobs:
 
       - name: build-lib stale-source guard self-test
         run: ./scripts/tests/build-lib-stale-guard_test.sh
+
+      - name: build-lib contract self-test
+        run: ./scripts/tests/build-lib-contract_test.sh

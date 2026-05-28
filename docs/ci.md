@@ -30,7 +30,7 @@ just version         # show current version
 ## Pinned versions
 
 - **Ghostty** -- pinned in `.ghostty-version` and loaded by each workflow through `scripts/load-ghostty-version.sh`
-- **Zig `0.15.2`** -- set in the `mlugg/setup-zig` action (Ghostty v1.3.x requires Zig 0.15)
+- **Zig `0.15.2`** -- pulled from DanTerm's flake (`flake.nix`'s `zig_0_15` re-exports mitchellh/zig-overlay's Homebrew-bottled patched 0.15.2, for macOS 26.4+ SDK compatibility); installed via nix-installer in every GhosttyKit job
 
 When upgrading Ghostty, edit `.ghostty-version` and potentially the Zig version
 if the new Ghostty requires it.
