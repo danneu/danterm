@@ -134,13 +134,17 @@ func lastLeafId(_ node: SplitNodeModel) -> PaneId {
 }
 
 func splitLeaf(
-  _ node: SplitNodeModel, paneId: PaneId, direction: SplitNodeModel.Direction, newPane: PaneModel
+  _ node: SplitNodeModel,
+  paneId: PaneId,
+  direction: SplitNodeModel.Direction,
+  newPane: PaneModel,
+  newSplitId: SplitId
 ) -> SplitNodeModel? {
   switch node {
   case .leaf(let pane):
     if pane.id == paneId {
       return .split(
-        id: SplitId(),
+        id: newSplitId,
         direction: direction,
         first: .leaf(pane),
         second: .leaf(newPane),
@@ -150,10 +154,13 @@ func splitLeaf(
     return nil
 
   case .split(let splitId, let dir, let first, let second, let ratio):
-    if let newFirst = splitLeaf(first, paneId: paneId, direction: direction, newPane: newPane) {
+    if let newFirst = splitLeaf(
+      first, paneId: paneId, direction: direction, newPane: newPane, newSplitId: newSplitId)
+    {
       return .split(id: splitId, direction: dir, first: newFirst, second: second, ratio: ratio)
     }
-    if let newSecond = splitLeaf(second, paneId: paneId, direction: direction, newPane: newPane)
+    if let newSecond = splitLeaf(
+      second, paneId: paneId, direction: direction, newPane: newPane, newSplitId: newSplitId)
     {
       return .split(id: splitId, direction: dir, first: first, second: newSecond, ratio: ratio)
     }
@@ -240,7 +247,8 @@ func moveLeaf(
   source: PaneId,
   target: PaneId,
   direction: SplitNodeModel.Direction,
-  insertFirst: Bool
+  insertFirst: Bool,
+  newSplitId: SplitId
 ) -> SplitNodeModel? {
   guard source != target else { return nil }
   let ids = Set(allPaneIds(node))
@@ -250,7 +258,8 @@ func moveLeaf(
   let (stripped, _, removed) = removeLeaf(node, paneId: source)
   guard let stripped = stripped, let removed = removed else { return nil }
   return insertAtLeaf(
-    stripped, at: target, inserting: removed, direction: direction, insertFirst: insertFirst)
+    stripped, at: target, inserting: removed, direction: direction, insertFirst: insertFirst,
+    newSplitId: newSplitId)
 }
 
 /// Replace a target leaf with a split containing both the moved `source` pane
@@ -260,24 +269,27 @@ private func insertAtLeaf(
   at targetId: PaneId,
   inserting source: PaneModel,
   direction: SplitNodeModel.Direction,
-  insertFirst: Bool
+  insertFirst: Bool,
+  newSplitId: SplitId
 ) -> SplitNodeModel? {
   switch node {
   case .leaf(let pane):
     if pane.id == targetId {
       let first: SplitNodeModel = insertFirst ? .leaf(source) : .leaf(pane)
       let second: SplitNodeModel = insertFirst ? .leaf(pane) : .leaf(source)
-      return .split(id: SplitId(), direction: direction, first: first, second: second, ratio: 0.5)
+      return .split(id: newSplitId, direction: direction, first: first, second: second, ratio: 0.5)
     }
     return nil
   case .split(let splitId, let dir, let first, let second, let ratio):
     if let newFirst = insertAtLeaf(
-      first, at: targetId, inserting: source, direction: direction, insertFirst: insertFirst)
+      first, at: targetId, inserting: source, direction: direction, insertFirst: insertFirst,
+      newSplitId: newSplitId)
     {
       return .split(id: splitId, direction: dir, first: newFirst, second: second, ratio: ratio)
     }
     if let newSecond = insertAtLeaf(
-      second, at: targetId, inserting: source, direction: direction, insertFirst: insertFirst)
+      second, at: targetId, inserting: source, direction: direction, insertFirst: insertFirst,
+      newSplitId: newSplitId)
     {
       return .split(id: splitId, direction: dir, first: first, second: newSecond, ratio: ratio)
     }
@@ -733,9 +745,14 @@ enum DantermEvent: Equatable {
 /// Token store for pane-to-token mapping. Used by AppRuntime; extracted here for testability.
 struct PaneTokenStore {
   private(set) var tokens: [PaneId: String] = [:]
+  private var idGenerator: () -> UUID
+
+  init(idGenerator: @escaping () -> UUID = UUID.init) {
+    self.idGenerator = idGenerator
+  }
 
   mutating func generate(for paneId: PaneId) -> String {
-    let token = UUID().uuidString
+    let token = idGenerator().uuidString
     tokens[paneId] = token
     return token
   }

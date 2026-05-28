@@ -1,0 +1,135 @@
+AppModel(
+  groups: [
+    [0]: GroupModel(
+      id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000000)),
+      name: "General",
+      isCollapsed: false,
+      tabs: [
+        [0]: TabModel(
+          id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000002)),
+          customTitle: nil,
+          focusedPaneId: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000001)),
+          rootNode: .split(
+            id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000004)),
+            direction: .horizontal,
+            first: .leaf(
+              PaneModel(
+                id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000001)),
+                title: "Terminal",
+                cwd: nil,
+                lastCommand: nil,
+                progress: nil,
+                theme: nil,
+                isRemote: false,
+                remoteSession: nil,
+                remoteThemeOverride: nil,
+                todos: []
+              )
+            ),
+            second: .leaf(
+              PaneModel(
+                id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000003)),
+                title: "Terminal",
+                cwd: nil,
+                lastCommand: nil,
+                progress: nil,
+                theme: nil,
+                isRemote: false,
+                remoteSession: nil,
+                remoteThemeOverride: nil,
+                todos: []
+              )
+            ),
+            ratio: 0.5
+          ),
+          isZoomed: false,
+          color: nil,
+          todos: []
+        )
+      ]
+    ),
+    [1]: GroupModel(
+      id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000005)),
+      name: "Golden",
+      isCollapsed: false,
+      tabs: [
+        [0]: TabModel(
+          id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000007)),
+          customTitle: nil,
+          focusedPaneId: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000008)),
+          rootNode: .split(
+            id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000009)),
+            direction: .vertical,
+            first: .leaf(
+              PaneModel(
+                id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000006)),
+                title: "Terminal",
+                cwd: nil,
+                lastCommand: nil,
+                progress: nil,
+                theme: nil,
+                isRemote: false,
+                remoteSession: nil,
+                remoteThemeOverride: nil,
+                todos: []
+              )
+            ),
+            second: .leaf(
+              PaneModel(
+                id: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000008)),
+                title: "Terminal",
+                cwd: nil,
+                lastCommand: nil,
+                progress: nil,
+                theme: nil,
+                isRemote: false,
+                remoteSession: nil,
+                remoteThemeOverride: nil,
+                todos: []
+              )
+            ),
+            ratio: 0.5
+          ),
+          isZoomed: false,
+          color: nil,
+          todos: []
+        )
+      ]
+    )
+  ],
+  selectedTabId: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000002)),
+  isAppActive: false,
+  alerts: [
+    [0]: AlertModel(
+      id: TypedId(rawValue: UUID(00000000-0000-0000-0000-00000000000A)),
+      kind: .bell,
+      paneId: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000001)),
+      title: "DanTerm",
+      body: "Terminal",
+      createdAt: Date(2023-11-14T22:13:20.000Z),
+      isUnread: true
+    )
+  ],
+  lastNotificationTime: [
+    TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000001)): [
+      .bell: Date(2023-11-14T22:13:20.000Z)
+    ]
+  ],
+  searchState: [:],
+  showAllAlerts: false,
+  config: DanTermConfig(
+    remoteTheme: "Purplepeter",
+    alertClearMode: .focus
+  ),
+  preferencesDraft: nil,
+  committedGhosttyPrefs: nil,
+  todoPopover: nil,
+  mruOrder: [
+    [0]: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000002)),
+    [1]: TypedId(rawValue: UUID(00000000-0000-0000-0000-000000000007))
+  ],
+  mruCycle: nil,
+  jumpMode: nil,
+  pendingConfirmation: nil,
+  ghosttyConfigGeneration: 0
+)

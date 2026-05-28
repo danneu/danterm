@@ -33,6 +33,7 @@ let package = Package(
         // root via `..`.
         .package(path: "../DanTermProtocol"),
         .package(url: "https://github.com/pointfreeco/swift-custom-dump", from: "1.3.0"),
+        .package(url: "https://github.com/pointfreeco/swift-snapshot-testing", from: "1.17.0"),
     ],
     targets: [
         .target(
@@ -46,8 +47,11 @@ let package = Package(
             dependencies: [
                 "DanTermCore",
                 .product(name: "CustomDump", package: "swift-custom-dump"),
+                .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
+                .product(name: "SnapshotTestingCustomDump", package: "swift-snapshot-testing"),
             ],
             path: "Tests/DanTermCoreTests",
+            exclude: ["__Snapshots__"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]

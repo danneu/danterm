@@ -10,6 +10,7 @@
 // replace them with framework-native diffs, source-location capture, and
 // parallel-safe reporting.
 import Foundation
+import Testing
 
 @testable import DanTermCore
 
@@ -17,6 +18,33 @@ func makeModel() -> AppModel {
     let generalId = GroupId()
     return AppModel(
         groups: [GroupModel(id: generalId, name: "General")]
+    )
+}
+
+func makeModel(env: CoreEnv) -> AppModel {
+    let generalId = GroupId(rawValue: env.newId())
+    return AppModel(
+        groups: [GroupModel(id: generalId, name: "General")]
+    )
+}
+
+func makeTestEnv(
+    recoveryDir: URL = FileManager.default.temporaryDirectory.appendingPathComponent("DanTermCoreTests", isDirectory: true),
+    now: Date = Date(timeIntervalSince1970: 1_700_000_000),
+    idSequence: [UUID] = []
+) -> CoreEnv {
+    var index = 0
+    return CoreEnv(
+        newId: {
+            defer { index += 1 }
+            guard index < idSequence.count else {
+                Issue.record("makeTestEnv idSequence exhausted at index \(index); add more ids")
+                return UUID(uuidString: "ffffffff-ffff-ffff-ffff-ffffffffffff")!
+            }
+            return idSequence[index]
+        },
+        now: { now },
+        recoveryDir: { recoveryDir }
     )
 }
 

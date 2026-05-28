@@ -4,15 +4,11 @@
 // isZoomed), the session-lock write/read/delete round-trip, recovery path
 // helpers, and the mergeCheckpoints rules (enriched scrollback grafted into
 // light's pane map; light structure wins; metadata from light; empty
-// enriched). The SessionLock round-trip test points the new injectable
-// `recoveryDir:` parameter on writeSessionLockFile / readSessionLockFile /
-// deleteSessionLockFile / sessionLockURL at a per-test temp dir, so the
-// suite never touches the real ~/Library/Application Support/<bundle>/
-// Recovery/ path -- it's parallel-safe by construction (no .serialized
-// needed). The test ALSO asserts on disk via FileManager.fileExists that
-// the temp session.json is created by write and gone after delete. That
-// intentional strengthening (+2 #expect calls) is logged in the inventory:
-// total grows from 49 to 51 sites.
+// enriched). The SessionLock round-trip test points CoreEnv.recoveryDir at a
+// per-test temp dir, so the suite never touches the real ~/Library/Application
+// Support/<bundle>/Recovery/ path -- it's parallel-safe by construction (no
+// .serialized needed). It also freezes CoreEnv.now and asserts the persisted
+// startedAt, proving both env seams are honored.
 import Foundation
 import Testing
 
@@ -330,32 +326,28 @@ private func makeTestRecoveryDir() -> URL {
         //   that readSessionLockFile parses back into a SessionLock;
         //   deleteSessionLockFile removes it.
         // Why it exists: pins the lock-file I/O contract end to end.
-        //   The injectable `recoveryDir:` parameter (production default
-        //   ~/Library/Application Support/<bundle>/Recovery) is pointed
-        //   at a per-test temp dir so the suite is hermetic + parallel-
-        //   safe. The on-disk fileExists assertions verify the seam is
-        //   honored: a no-op recoveryDir parameter that still wrote to
-        //   the real Recovery dir would let readSessionLockFile round-
-        //   trip but fail the temp-path check. This +2 assertions vs
-        //   the legacy round-trip is the intentional strengthening
-        //   from the migration plan's R2 (logged in inventory).
+        //   The injectable CoreEnv is pointed at a per-test temp dir and
+        //   frozen clock so the suite is hermetic + parallel-safe. The
+        //   on-disk fileExists assertions verify the recovery-dir seam;
+        //   the startedAt assertion verifies the now seam.
         // Scenario: spec-first session-lock I/O at a per-test temp dir.
         let recoveryDir = makeTestRecoveryDir()
+        let frozenNow = Date(timeIntervalSince1970: 1_700_000_000)
+        let testEnv = makeTestEnv(recoveryDir: recoveryDir, now: frozenNow)
         defer { try? FileManager.default.removeItem(at: recoveryDir) }
 
-        writeSessionLockFile(recoveryDir: recoveryDir)
+        writeSessionLockFile(env: testEnv)
         let sessionJSONPath = recoveryDir.appendingPathComponent("session.json").path
         #expect(FileManager.default.fileExists(atPath: sessionJSONPath),
             "writeSessionLockFile should create session.json under the temp dir")
-        let lock = try #require(readSessionLockFile(recoveryDir: recoveryDir),
+        let lock = try #require(readSessionLockFile(env: testEnv),
             "readSessionLockFile returned nil after write")
         #expect(lock.pid == ProcessInfo.processInfo.processIdentifier, "pid should match")
-        let age = Date().timeIntervalSince(lock.startedAt)
-        #expect(age >= 0 && age < 5, "startedAt should be recent, age was \(age)")
-        deleteSessionLockFile(recoveryDir: recoveryDir)
+        #expect(lock.startedAt == frozenNow, "startedAt should use env.now")
+        deleteSessionLockFile(env: testEnv)
         #expect(!FileManager.default.fileExists(atPath: sessionJSONPath),
             "deleteSessionLockFile should remove the temp session.json")
-        let deleted = readSessionLockFile(recoveryDir: recoveryDir)
+        let deleted = readSessionLockFile(env: testEnv)
         #expect(deleted == nil, "lock should be nil after delete")
     }
 

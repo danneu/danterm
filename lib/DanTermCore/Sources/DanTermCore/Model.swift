@@ -416,6 +416,12 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel,
     var parsedGroups: [GroupModel] = []
     var allTabIds: [TabId] = []
 
+    // MARK: Snapshot Decode Nondeterministic ID Mints
+    //
+    // Id-less init-file entries intentionally mint fresh IDs here. Hand-authored
+    // snapshots can omit ids as a user-facing convenience; deterministic replay
+    // should feed a fully-id'd snapshot through update(), not re-decode id-less
+    // entries through this builder.
     for gs in snapshot.groups {
         let groupId: GroupId
         if let idStr = gs.id {
