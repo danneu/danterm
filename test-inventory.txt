@@ -176,8 +176,11 @@
   - testDropZoneCursorOutside
   - testDropZoneCursorOutsideRight
 
-## ExportTests -- PENDING
-# tests=73  expect=35  expectEqual=73  throwTF=9  TOTAL=117
+## ExportTests -- MIGRATED (Wave B)
+# baseline: tests=73 expect=35 expectEqual=73 throwTF=9 TOTAL=117
+# new:      @Test=73 #expect=108 expectNoDifference=0 #require=0 Issue.record=9 TOTAL=117
+# delta:    0 (each `guard case ... else { throw TestFailure }` -> Issue.record + return)
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/ExportTests.swift
   - parseDantermEvent: valid CMD_START
   - parseDantermEvent: valid CMD_END
   - parseDantermEvent: wrong token rejected
