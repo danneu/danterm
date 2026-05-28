@@ -322,7 +322,13 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         //   that isn't in the tree.
         let a = PaneId()
         let node = SplitNodeModel.leaf(PaneModel(id: a))
-        let result = splitLeaf(node, paneId: PaneId(), direction: .horizontal, newPane: PaneModel(id: PaneId()))
+        let result = splitLeaf(
+            node,
+            paneId: PaneId(),
+            direction: .horizontal,
+            newPane: PaneModel(id: PaneId()),
+            newSplitId: SplitId()
+        )
         #expect(result == nil, "should return nil for unknown paneId")
     }
 
@@ -746,7 +752,8 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
             second: .leaf(PaneModel(id: b)),
             ratio: 0.5
         )
-        let result = moveLeaf(node, source: a, target: b, direction: .horizontal, insertFirst: true)
+        let result = moveLeaf(
+            node, source: a, target: b, direction: .horizontal, insertFirst: true, newSplitId: SplitId())
         #expect(result != nil, "should succeed")
         let ids = allPaneIds(result!)
         #expect(ids.count == 2)
@@ -770,7 +777,8 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
             second: .leaf(PaneModel(id: b)),
             ratio: 0.5
         )
-        let result = moveLeaf(node, source: a, target: b, direction: .horizontal, insertFirst: false)
+        let result = moveLeaf(
+            node, source: a, target: b, direction: .horizontal, insertFirst: false, newSplitId: SplitId())
         #expect(result != nil, "should succeed")
         #expect(lastLeafId(result!) == a, "A should be last")
     }
@@ -795,36 +803,45 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
             ),
             ratio: 0.5
         )
-        let result = moveLeaf(node, source: b, target: a, direction: .vertical, insertFirst: true)!
+        let result = moveLeaf(
+            node, source: b, target: a, direction: .vertical, insertFirst: true, newSplitId: SplitId())!
         let ids = allPaneIds(result)
         #expect(ids.count == 3, "all three panes preserved")
         #expect(firstLeafId(result) == b, "B should be first (top-left)")
     }
 
-    @Test("testMoveLeafCreatesNewSplitId")
-    func testMoveLeafCreatesNewSplitId() {
-        // Intent: moveLeaf forms a fresh split (new id) around the inserted
-        //   leaf with the default 0.5 ratio.
-        // Why it exists: pins the split-id minting so the resulting tree
-        //   doesn't reuse a stale outer split id (which would break view
-        //   identity caches downstream).
+    @Test("testMoveLeafUsesSuppliedSplitId")
+    func testMoveLeafUsesSuppliedSplitId() {
+        // Intent: moveLeaf forms a split around the inserted leaf using the
+        //   caller-supplied split id with the default 0.5 ratio.
+        // Why it exists: pins split-id ownership at the update() caller so the
+        //   pure tree helper stays deterministic and env-free.
         // Scenario: spec-first split-id check -- moving A across direction
-        //   yields a split with a fresh id and ratio 0.5.
+        //   yields a split with the supplied id and ratio 0.5.
         let a = PaneId(), b = PaneId()
         let origSplitId = SplitId()
+        let insertedSplitId = SplitId()
         let node = SplitNodeModel.split(
             id: origSplitId, direction: .horizontal,
             first: .leaf(PaneModel(id: a)),
             second: .leaf(PaneModel(id: b)),
             ratio: 0.5
         )
-        let result = moveLeaf(node, source: a, target: b, direction: .vertical, insertFirst: true)!
+        let result = moveLeaf(
+            node,
+            source: a,
+            target: b,
+            direction: .vertical,
+            insertFirst: true,
+            newSplitId: insertedSplitId
+        )!
         guard case .split(let newSplitId, .vertical, _, _, let ratio) = result else {
             Issue.record("should be a vertical split")
             return
         }
         #expect(ratio == 0.5, "new split has ratio 0.5")
-        #expect(newSplitId != origSplitId, "new split should have fresh ID")
+        #expect(newSplitId == insertedSplitId, "new split should use the supplied ID")
+        #expect(newSplitId != origSplitId, "new split should not reuse the stale outer ID")
     }
 
     @Test("testMoveLeafSameSourceTarget")
@@ -834,7 +851,12 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         // Scenario: spec-first no-op guard.
         let a = PaneId()
         let node = SplitNodeModel.leaf(PaneModel(id: a))
-        #expect(moveLeaf(node, source: a, target: a, direction: .horizontal, insertFirst: true) == nil, "same source/target returns nil")
+        #expect(
+            moveLeaf(
+                node, source: a, target: a, direction: .horizontal, insertFirst: true, newSplitId: SplitId()
+            ) == nil,
+            "same source/target returns nil"
+        )
     }
 
     @Test("testMoveLeafMissingSource")
@@ -849,7 +871,13 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
             second: .leaf(PaneModel(id: b)),
             ratio: 0.5
         )
-        #expect(moveLeaf(node, source: PaneId(), target: b, direction: .horizontal, insertFirst: true) == nil, "missing source returns nil")
+        #expect(
+            moveLeaf(
+                node, source: PaneId(), target: b, direction: .horizontal, insertFirst: true,
+                newSplitId: SplitId()
+            ) == nil,
+            "missing source returns nil"
+        )
     }
 
     @Test("testMoveLeafMissingTarget")
@@ -865,7 +893,13 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
             second: .leaf(PaneModel(id: b)),
             ratio: 0.5
         )
-        #expect(moveLeaf(node, source: a, target: PaneId(), direction: .horizontal, insertFirst: true) == nil, "missing target returns nil")
+        #expect(
+            moveLeaf(
+                node, source: a, target: PaneId(), direction: .horizontal, insertFirst: true,
+                newSplitId: SplitId()
+            ) == nil,
+            "missing target returns nil"
+        )
     }
 
     // MARK: - abbreviateHome
