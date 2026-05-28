@@ -1,10 +1,29 @@
-// Tests for sidebar backing-store cache identity across granular row ops.
+// Swift Testing migration of the legacy `tests/SidebarItemStoreTests.swift`
+// harness suite. Pins SidebarItemStore.apply structural-op preconditions
+// (missing/out-of-range ops return false and do NOT mutate the backing
+// store) and the cache-identity invariants the reconciler relies on: under
+// granular row-op transitions (cross-group move, inserted-group child
+// construction, group removal, intra-group reorder, plain close, topmost
+// close, multi->single mode flip), every displayed tab's cache item
+// remains pointer-identical to its displayed row, removed tabs are evicted
+// from the cache, and the selected survivor stays cached. The
+// assertSidebarStoreCacheInvariant helper's two `guard let ... else { throw }`
+// patterns convert to `try #require` (single-value optionals).
 import Foundation
+import Testing
 
-func sidebarItemStoreTests() {
-    print("SidebarItemStore Tests...")
+@testable import DanTermCore
 
-    test("apply contract: missing structural ops skip backing mutations") {
+@Suite struct SidebarItemStoreTests {
+    @Test("apply contract: missing structural ops skip backing mutations")
+    func applyContractMissingStructuralOpsSkipMutations() {
+        // Intent: structural ops referencing missing groups/tabs return
+        //   false and DO NOT mutate the backing store; non-structural
+        //   ops (reload* / setGroupCollapsed) return true even when the
+        //   id is unknown and still leave the backing structure
+        //   unchanged.
+        // Why it exists: pins the apply contract's precondition checks.
+        // Scenario: spec-first apply contract.
         let groupA = GroupId()
         let groupB = GroupId()
         let tabA = TabId()
@@ -16,40 +35,45 @@ func sidebarItemStoreTests() {
         var store = seedSidebarStore(model)
         let before = sidebarStoreSnapshot(store)
 
-        try expect(!store.apply(.insertGroup(id: GroupId(), index: 0), model: model, isSingleGroupMode: false),
-            "missing group insert should return false")
-        try expectEqual(sidebarStoreSnapshot(store), before, "missing group insert should not mutate")
+        let insertGroupResult = store.apply(.insertGroup(id: GroupId(), index: 0), model: model, isSingleGroupMode: false)
+        #expect(!insertGroupResult, "missing group insert should return false")
+        #expect(sidebarStoreSnapshot(store) == before, "missing group insert should not mutate")
 
-        try expect(!store.apply(.insertTab(id: TabId(), groupId: groupA, index: 0), model: model, isSingleGroupMode: false),
-            "missing tab insert should return false")
-        try expectEqual(sidebarStoreSnapshot(store), before, "missing tab insert should not mutate")
+        let insertTabResult = store.apply(.insertTab(id: TabId(), groupId: groupA, index: 0), model: model, isSingleGroupMode: false)
+        #expect(!insertTabResult, "missing tab insert should return false")
+        #expect(sidebarStoreSnapshot(store) == before, "missing tab insert should not mutate")
 
-        try expect(!store.apply(.insertTab(id: tabA, groupId: GroupId(), index: 0), model: model, isSingleGroupMode: false),
-            "missing parent tab insert should return false")
-        try expectEqual(sidebarStoreSnapshot(store), before, "missing parent insert should not mutate")
+        let insertTabMissingParent = store.apply(.insertTab(id: tabA, groupId: GroupId(), index: 0), model: model, isSingleGroupMode: false)
+        #expect(!insertTabMissingParent, "missing parent tab insert should return false")
+        #expect(sidebarStoreSnapshot(store) == before, "missing parent insert should not mutate")
 
-        try expect(!store.apply(.removeGroup(index: 99), model: model, isSingleGroupMode: false),
-            "out-of-range group remove should return false")
-        try expectEqual(sidebarStoreSnapshot(store), before, "out-of-range group remove should not mutate")
+        let removeGroupOOR = store.apply(.removeGroup(index: 99), model: model, isSingleGroupMode: false)
+        #expect(!removeGroupOOR, "out-of-range group remove should return false")
+        #expect(sidebarStoreSnapshot(store) == before, "out-of-range group remove should not mutate")
 
-        try expect(!store.apply(.removeTab(groupId: GroupId(), index: 0), model: model, isSingleGroupMode: false),
-            "missing parent tab remove should return false")
-        try expectEqual(sidebarStoreSnapshot(store), before, "missing parent remove should not mutate")
+        let removeTabMissingParent = store.apply(.removeTab(groupId: GroupId(), index: 0), model: model, isSingleGroupMode: false)
+        #expect(!removeTabMissingParent, "missing parent tab remove should return false")
+        #expect(sidebarStoreSnapshot(store) == before, "missing parent remove should not mutate")
 
-        try expect(!store.apply(.removeTab(groupId: groupA, index: 99), model: model, isSingleGroupMode: false),
-            "out-of-range tab remove should return false")
-        try expectEqual(sidebarStoreSnapshot(store), before, "out-of-range tab remove should not mutate")
+        let removeTabOOR = store.apply(.removeTab(groupId: groupA, index: 99), model: model, isSingleGroupMode: false)
+        #expect(!removeTabOOR, "out-of-range tab remove should return false")
+        #expect(sidebarStoreSnapshot(store) == before, "out-of-range tab remove should not mutate")
 
-        try expect(store.apply(.reloadGroup(id: GroupId()), model: model, isSingleGroupMode: false),
-            "reloadGroup should return true")
-        try expect(store.apply(.setGroupCollapsed(id: GroupId(), collapsed: true), model: model, isSingleGroupMode: false),
-            "setGroupCollapsed should return true")
-        try expect(store.apply(.reloadTab(id: TabId()), model: model, isSingleGroupMode: false),
-            "reloadTab should return true")
-        try expectEqual(sidebarStoreSnapshot(store), before, "non-structural ops should not mutate backing structure")
+        let reloadGroup = store.apply(.reloadGroup(id: GroupId()), model: model, isSingleGroupMode: false)
+        #expect(reloadGroup, "reloadGroup should return true")
+        let setCollapsed = store.apply(.setGroupCollapsed(id: GroupId(), collapsed: true), model: model, isSingleGroupMode: false)
+        #expect(setCollapsed, "setGroupCollapsed should return true")
+        let reloadTab = store.apply(.reloadTab(id: TabId()), model: model, isSingleGroupMode: false)
+        #expect(reloadTab, "reloadTab should return true")
+        #expect(sidebarStoreSnapshot(store) == before, "non-structural ops should not mutate backing structure")
     }
 
-    test("later group to earlier group move keeps moved tab cache pointed at displayed item") {
+    @Test("later group to earlier group move keeps moved tab cache pointed at displayed item")
+    func laterToEarlierGroupMoveKeepsCacheCurrent() throws {
+        // Intent: moving a tab from a later group to an earlier group
+        //   keeps the moved tab's cache pointed at its displayed row.
+        // Why it exists: pins the cross-group cache-identity invariant.
+        // Scenario: spec-first cross-group move.
         let groupA = GroupId()
         let groupB = GroupId()
         let groupC = GroupId()
@@ -72,11 +96,16 @@ func sidebarItemStoreTests() {
         applySidebarStoreTransition(&store, old: oldProjection, newModel: newModel)
 
         try assertSidebarStoreCacheInvariant(store, model: newModel)
-        try expect(store.tabItemCache[moved] === store.displayedTabItem(moved),
+        #expect(store.tabItemCache[moved] === store.displayedTabItem(moved),
             "moved tab cache should point at the displayed destination row")
     }
 
-    test("cross-group move into topmost visible position keeps selected tab cached") {
+    @Test("cross-group move into topmost visible position keeps selected tab cached")
+    func crossGroupMoveIntoTopmostKeepsSelectedCached() throws {
+        // Intent: moving the selected tab into the topmost position of
+        //   another group keeps it cached.
+        // Why it exists: pins the topmost-target cache invariant.
+        // Scenario: spec-first cross-group move to topmost.
         let groupA = GroupId()
         let groupB = GroupId()
         let first = TabId()
@@ -95,11 +124,16 @@ func sidebarItemStoreTests() {
         ], selected: moved)
         applySidebarStoreTransition(&store, old: oldProjection, newModel: newModel)
 
-        try expect(sidebarDisplayedTabIds(in: newModel).first == moved, "moved tab should be topmost")
+        #expect(sidebarDisplayedTabIds(in: newModel).first == moved, "moved tab should be topmost")
         try assertSidebarStoreCacheInvariant(store, model: newModel)
     }
 
-    test("inserted group child construction keeps moved tab cache current") {
+    @Test("inserted group child construction keeps moved tab cache current")
+    func insertedGroupChildConstructionKeepsCacheCurrent() throws {
+        // Intent: inserting a new group mounts a moved tab as its
+        //   cached displayed row.
+        // Why it exists: pins the new-group cache invariant.
+        // Scenario: spec-first new-group with moved tab.
         let groupA = GroupId()
         let groupB = GroupId()
         let newGroup = GroupId()
@@ -121,11 +155,16 @@ func sidebarItemStoreTests() {
         applySidebarStoreTransition(&store, old: oldProjection, newModel: newModel)
 
         try assertSidebarStoreCacheInvariant(store, model: newModel)
-        try expect(store.tabItemCache[moved] === store.displayedTabItem(moved),
+        #expect(store.tabItemCache[moved] === store.displayedTabItem(moved),
             "inserted group should mount the moved tab as the cached displayed row")
     }
 
-    test("group removal clears closed child without clearing moved-out survivor") {
+    @Test("group removal clears closed child without clearing moved-out survivor")
+    func groupRemovalClearsClosedChildKeepsSurvivor() throws {
+        // Intent: removing a group evicts its destroyed tabs from the
+        //   cache; a tab moved out before removal stays cached.
+        // Why it exists: pins the group-remove cleanup contract.
+        // Scenario: spec-first group remove with survivor.
         let groupA = GroupId()
         let groupB = GroupId()
         let removeMe = GroupId()
@@ -148,11 +187,15 @@ func sidebarItemStoreTests() {
         applySidebarStoreTransition(&store, old: oldProjection, newModel: newModel)
 
         try assertSidebarStoreCacheInvariant(store, model: newModel, removed: [closed])
-        try expect(store.tabItemCache[survivor] === store.displayedTabItem(survivor),
+        #expect(store.tabItemCache[survivor] === store.displayedTabItem(survivor),
             "survivor cache should point at its displayed row")
     }
 
-    test("same-group reorder keeps every live tab cache current") {
+    @Test("same-group reorder keeps every live tab cache current")
+    func sameGroupReorderKeepsCacheCurrent() throws {
+        // Intent: a same-group reorder keeps every live tab cached.
+        // Why it exists: pins the intra-group reorder cache invariant.
+        // Scenario: spec-first reorder.
         let group = GroupId()
         let first = TabId()
         let moved = TabId()
@@ -171,7 +214,12 @@ func sidebarItemStoreTests() {
         try assertSidebarStoreCacheInvariant(store, model: newModel)
     }
 
-    test("plain close evicts closed tab and keeps selected survivor cached") {
+    @Test("plain close evicts closed tab and keeps selected survivor cached")
+    func plainCloseEvictsClosedKeepsSurvivor() throws {
+        // Intent: closing a tab evicts it from the cache; the new
+        //   selected survivor stays cached.
+        // Why it exists: pins the per-tab close cleanup.
+        // Scenario: spec-first plain close.
         let group = GroupId()
         let first = TabId()
         let closed = TabId()
@@ -190,7 +238,12 @@ func sidebarItemStoreTests() {
         try assertSidebarStoreCacheInvariant(store, model: newModel, removed: [closed])
     }
 
-    test("topmost tab close evicts closed tab and keeps next tab cached") {
+    @Test("topmost tab close evicts closed tab and keeps next tab cached")
+    func topmostTabCloseEvictsClosedKeepsNextCached() throws {
+        // Intent: closing the topmost tab evicts it and the next tab
+        //   takes the cached displayed row.
+        // Why it exists: pins the topmost-close cleanup.
+        // Scenario: spec-first topmost close.
         let group = GroupId()
         let closed = TabId()
         let next = TabId()
@@ -206,11 +259,16 @@ func sidebarItemStoreTests() {
         applySidebarStoreTransition(&store, old: oldProjection, newModel: newModel)
 
         try assertSidebarStoreCacheInvariant(store, model: newModel, removed: [closed])
-        try expect(store.tabItemCache[next] === store.displayedTabItem(next),
+        #expect(store.tabItemCache[next] === store.displayedTabItem(next),
             "next tab cache should point at its displayed row")
     }
 
-    test("multi-group to single-group reloadAll prunes closed topmost tab") {
+    @Test("multi-group to single-group reloadAll prunes closed topmost tab")
+    func multiToSingleReloadAllPrunesClosedTopmost() throws {
+        // Intent: the multi-group to single-group flip (reloadAll path)
+        //   evicts closed tabs and keeps the survivor cache identity.
+        // Why it exists: pins the reloadAll cleanup contract.
+        // Scenario: spec-first reloadAll prune.
         let groupA = GroupId()
         let groupB = GroupId()
         let closed = TabId()
@@ -228,7 +286,7 @@ func sidebarItemStoreTests() {
         applySidebarStoreTransition(&store, old: oldProjection, newModel: newModel)
 
         try assertSidebarStoreCacheInvariant(store, model: newModel, removed: [closed])
-        try expect(store.tabItemCache[next] === store.displayedTabItem(next),
+        #expect(store.tabItemCache[next] === store.displayedTabItem(next),
             "reloadAll survivor cache should point at its displayed root row")
     }
 }
@@ -276,31 +334,26 @@ private func applySidebarStoreTransition(
 private func assertSidebarStoreCacheInvariant(
     _ store: SidebarItemStore,
     model: AppModel,
-    removed: Set<TabId> = [],
-    file: String = #file,
-    line: Int = #line
+    removed: Set<TabId> = []
 ) throws {
     for tabId in sidebarDisplayedTabIds(in: model) {
-        guard let displayed = store.displayedTabItem(tabId) else {
-            throw TestFailure(message: "missing displayed item for \(tabId) (\(file):\(line))")
-        }
-        guard let cached = store.tabItemCache[tabId] else {
-            throw TestFailure(message: "missing cache item for \(tabId) (\(file):\(line))")
-        }
-        try expect(cached === displayed, "cache item should be the displayed row for \(tabId)", file: file, line: line)
+        let displayed = try #require(store.displayedTabItem(tabId), "missing displayed item for \(tabId)")
+        let cached = try #require(store.tabItemCache[tabId], "missing cache item for \(tabId)")
+        #expect(cached === displayed, "cache item should be the displayed row for \(tabId)")
     }
 
     for tabId in removed {
-        try expect(store.tabItemCache[tabId] == nil, "removed tab should be absent from cache", file: file, line: line)
+        #expect(store.tabItemCache[tabId] == nil, "removed tab should be absent from cache")
     }
 
     if let selectedTabId = model.selectedTabId, tabById(selectedTabId, in: model) != nil {
         guard let displayed = store.displayedTabItem(selectedTabId),
               let cached = store.tabItemCache[selectedTabId]
         else {
-            throw TestFailure(message: "selected tab missing displayed/cache item (\(file):\(line))")
+            Issue.record("selected tab missing displayed/cache item")
+            return
         }
-        try expect(cached === displayed, "selected tab cache should be the displayed row", file: file, line: line)
+        #expect(cached === displayed, "selected tab cache should be the displayed row")
     }
 }
 

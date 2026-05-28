@@ -497,8 +497,13 @@
   - scrollbarRowFromPosition: at top of document returns max row
   - scrollbar round-trip: offset -> offsetY -> row produces original offset
 
-## SidebarItemStoreTests -- PENDING
-# tests=9  expect=18  expectEqual=7  throwTF=3  TOTAL=28
+## SidebarItemStoreTests -- MIGRATED (Wave D)
+# baseline: tests=9 expect=18 expectEqual=7 throwTF=3 TOTAL=28
+# new:      @Test=9 #expect=25 expectNoDifference=0 #require=2 Issue.record=1 TOTAL=28
+# delta:    0 (apply contract test stages mutating-method returns into `let`s so #expect captures
+#            them as immutable values; helper's two single-value unwraps -> #require; helper's
+#            compound `guard let ... else { throw }` -> Issue.record + return)
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/SidebarItemStoreTests.swift
   - apply contract: missing structural ops skip backing mutations
   - later group to earlier group move keeps moved tab cache pointed at displayed item
   - cross-group move into topmost visible position keeps selected tab cached
