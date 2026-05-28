@@ -1184,8 +1184,12 @@
   - requestClosePane on last pane with tab + pane uncompleted todos prefers close-tab confirmation
   - requestClosePane on last pane with only pane todos still routes through close-tab confirmation
 
-## UpdateThemeTests -- PENDING
-# tests=14  expect=8  expectEqual=14  throwTF=4  TOTAL=26
+## UpdateThemeTests -- MIGRATED (Wave C)
+# baseline: tests=14 expect=8 expectEqual=14 throwTF=4 TOTAL=26
+# new:      @Test=14 #expect=22 expectNoDifference=0 #require=3 Issue.record=1 TOTAL=26
+# delta:    0 (single-value `guard let restored = validateAndBuild(...) else { throw }` -> #require;
+#            the one .exportState destructure -> Issue.record + return)
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/UpdateThemeTests.swift
   - setPaneTheme updates model
   - setPaneTheme projects theme and schedules checkpoint
   - clearPaneTheme sets theme to nil
