@@ -58,8 +58,11 @@
   - mergeCheckpoints — light metadata wins over enriched
   - mergeCheckpoints — empty enriched panes returns light unchanged
 
-## CLIPathInstallerTests -- PENDING
-# tests=7  expect=0  expectEqual=9  throwTF=2  TOTAL=11
+## CLIPathInstallerTests -- MIGRATED (Wave D)
+# baseline: tests=7 expect=0 expectEqual=9 throwTF=2 TOTAL=11
+# new:      @Test=7 #expect=9 expectNoDifference=0 #require=0 Issue.record=2 TOTAL=11
+# delta:    0 (two "expected error" `throw TestFailure` lines -> Issue.record + return)
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/CLIPathInstallerTests.swift
   - install into writable temp target creates symlink
   - install replaces stale symlink
   - install refuses existing non-symlink destination
