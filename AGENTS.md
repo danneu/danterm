@@ -263,11 +263,29 @@ with the production `DanTerm.app` without conflicts.
 
 ### Tests
 
-Pure unit tests (no GhosttyKit or Cocoa needed):
+`just test` is the local gate. It runs four steps in order:
 
-```
-just test
-```
+- `swift test --package-path lib/DanTermProtocol --filter DanTermProtocolTests`
+  -- the protocol XCTest suite (CLI parser, IPC envelope).
+- `swift test --package-path lib/DanTermCore` -- the core Swift Testing suite
+  (pure model/update; no GhosttyKit or Cocoa needed).
+- `./scripts/core-purity-lint.sh` -- forbids `import Cocoa`/`AppKit`/`SwiftUI`
+  in `lib/DanTermCore/Sources/DanTermCore` (the nested package alone can't
+  catch system-framework imports).
+- `./scripts/tests/core-purity-lint_test.sh` -- self-test for the lint above.
+
+Targeted runs:
+
+- Full core suite: `swift test --package-path lib/DanTermCore`
+- One core suite or test: `swift test --package-path lib/DanTermCore --filter CheckpointTests`
+- Protocol suite: `swift test --package-path lib/DanTermProtocol --filter DanTermProtocolTests`
+- UI harness (AppKit, needs a display): `just test-ui` (runs `./test-ui.sh`)
+- App compile check: `just build`
+
+The legacy top-level `test.sh` hand-rolled harness was removed in the
+DanTermCore migration; the core suite now lives in the nested SwiftPM package
+at `lib/DanTermCore/` and is reached via `swift test --package-path
+lib/DanTermCore`.
 
 We practice TDD: when implementing a feature or fixing a bug, write the failing
 test first, verify it fails for the expected reason, then change the code and
