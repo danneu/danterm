@@ -255,8 +255,11 @@
   - launch has both command and cwd when both set
   - JSON round-trip preserves command metadata
 
-## IpcConnectionTests -- PENDING
-# tests=4  expect=1  expectEqual=6  throwTF=2  TOTAL=9
+## IpcConnectionTests -- MIGRATED (Wave D)
+# baseline: tests=4 expect=1 expectEqual=6 throwTF=2 TOTAL=9
+# new:      @Test=4 #expect=7 expectNoDifference=0 #require=0 Issue.record=2 TOTAL=9
+# delta:    0 (each `guard case .line(let line) = events[0]` -> Issue.record + return)
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/IpcConnectionTests.swift
   - one full line emits one frame
   - two full lines in one read emit two frames
   - split frame reassembles after second chunk
