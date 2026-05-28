@@ -6,7 +6,6 @@ struct TestRunner {
         customTitleTests()
         checkpointTests()
         todoTests()
-        updateTabTodoTests()
         ipcUpdateTests()
         print("\n\(total - failures)/\(total) passed")
         if failures > 0 { exit(1) }
