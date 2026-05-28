@@ -24,8 +24,20 @@
 #       echo "$(basename "$f" .swift)  expect=$e expectEqual=$eq throwTF=$tf TOTAL=$((e+eq+tf))"
 #   done
 
-## CheckpointTests -- PENDING
-# tests=31  expect=33  expectEqual=13  throwTF=3  TOTAL=49
+## CheckpointTests -- MIGRATED (Wave D, intentional strengthening +2)
+# baseline:    tests=31 expect=33 expectEqual=13 throwTF=3 TOTAL=49
+# new:         @Test=31 #expect=48 expectNoDifference=0 #require=2 Issue.record=1 TOTAL=51
+# delta:       +2 (intentional strengthening: SessionLock round-trip test now uses an injectable
+#              recoveryDir: parameter on writeSessionLockFile / readSessionLockFile /
+#              deleteSessionLockFile / sessionLockURL pointed at a per-test temp dir, and
+#              asserts on disk via FileManager.fileExists that the temp session.json is
+#              created by write (+1 #expect) and removed by delete (+1 #expect). The two
+#              single-value `guard let restored = validateAndBuild(...)` / `guard let lock`
+#              unwraps -> #require; the one `guard case .split` destructure -> Issue.record;
+#              all other throwTF sites accounted for by these conversions.)
+# Source seam: Persistence.swift session lock helpers gain a `recoveryDir: URL = recoveryDirectoryURL()`
+#              parameter; production callers take the default unchanged.
+# moved to:    lib/DanTermCore/Tests/DanTermCoreTests/CheckpointTests.swift
   - createTab emits scheduleCheckpoint
   - selectTab emits scheduleCheckpoint
   - closeTab emits scheduleCheckpoint
