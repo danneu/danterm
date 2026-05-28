@@ -437,8 +437,12 @@
   - formatToolbarLabel: cwd outside home not abbreviated
   - formatToolbarLabel: title equals cwd outside home
 
-## ReconcileTests -- PENDING
-# tests=25  expect=26  expectEqual=39  throwTF=0  TOTAL=65
+## ReconcileTests -- MIGRATED (Wave C)
+# baseline: tests=25 expect=26 expectEqual=39 throwTF=0 TOTAL=65
+# new:      @Test=25 #expect=65 expectNoDifference=0 #require=0 Issue.record=0 TOTAL=65
+# delta:    0 (model-apply helpers checkRowOps + checkContainerOps converted to non-throwing
+#            #expect-only forms; sb* / cShape / etc. helpers move to file-private scope)
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/ReconcileTests.swift
   - applyDiff applies only changed/new keys and skips unchanged ones
   - applyDiff invokes remove exactly once for a disappeared key, then prunes it
   - applyDiff with the default no-op remove still prunes disappeared keys

@@ -1,224 +1,288 @@
-// Tests for the view reconciler's pure primitives (Stage 3+): the generic
-// `applyDiff` diff/apply/prune helper. Reconcile *passes* themselves touch
-// AppKit and are manual-QA-only; this file covers the structure-insensitive
-// pure plumbing the passes are built on.
+// Swift Testing migration of the legacy `tests/ReconcileTests.swift` harness
+// suite. Pins the view-reconciler's pure primitives: the generic applyDiff
+// (apply / remove / prune semantics), Command.isPostReconcile classification,
+// the structure-insensitive model-apply gauntlet for computeSidebarRowOps
+// (single<->multi mode flip, tab insert/remove/reorder/cross-group move,
+// reload-on-changed-attrs, group churn, combined structural+attr churn),
+// guardSidebarRenameOps (suppress reload of edited row; structural ops clear
+// the sidecar; nil target is a pass-through), advanceSidebarCache attribute
+// retention, the eager desiredContainerShapes projection, the
+// computeContainerOps model-apply suite (remove / rebuild / visibility-only
+// switch / no-op), containerOpsStrandVisible classification, ContainerShape
+// equality (ratio + leaf metadata carveouts; structural change /
+// zoom-toggle / direction / moved-leaf detected), chromeInvalidation, and
+// surfacesToTearDown. The model-apply helpers (sbTab / sbGroup / sbProj /
+// applySidebarRowOps / cShape / cSplitShape / splitNode / applyContainerOps
+// / checkRowOps / checkContainerOps) move to file-private scope alongside
+// the suite.
 import Foundation
+import Testing
 
-func reconcileTests() {
-    print("Reconcile Tests...")
+@testable import DanTermCore
 
+@Suite struct ReconcileTests {
     // MARK: - applyDiff
 
-    test("applyDiff applies only changed/new keys and skips unchanged ones") {
+    @Test("applyDiff applies only changed/new keys and skips unchanged ones")
+    func applyDiffAppliesOnlyChangedOrNewKeys() {
+        // Intent: applyDiff invokes apply for changed and new keys but
+        //   not for unchanged ones; the cache equals the desired map
+        //   after.
+        // Why it exists: pins the diff-and-apply contract.
+        // Scenario: spec-first diff apply.
         var cache: [String: Int] = ["a": 1, "b": 2]
         var applied: [String] = []
         let desired: [String: Int] = ["a": 1, "b": 99, "c": 3]
         applyDiff(desired, &cache, apply: { k, _ in applied.append(k) })
 
-        try expectEqual(Set(applied), Set(["b", "c"]),
+        #expect(Set(applied) == Set(["b", "c"]),
             "only the changed key (b) and new key (c) apply")
-        try expect(!applied.contains("a"), "unchanged key (a) is skipped")
-        try expectEqual(cache, desired, "cache matches desired after the diff")
+        #expect(!applied.contains("a"), "unchanged key (a) is skipped")
+        #expect(cache == desired, "cache matches desired after the diff")
     }
 
-    test("applyDiff invokes remove exactly once for a disappeared key, then prunes it") {
+    @Test("applyDiff invokes remove exactly once for a disappeared key, then prunes it")
+    func applyDiffInvokesRemoveAndPrunes() {
+        // Intent: applyDiff invokes remove for each disappeared key and
+        //   prunes the cache.
+        // Why it exists: pins the remove + prune contract.
+        // Scenario: spec-first diff remove.
         var cache: [String: Int] = ["a": 1, "b": 2]
         var applied: [String] = []
         var removed: [String] = []
-        let desired: [String: Int] = ["a": 1]  // 'b' left the desired set
+        let desired: [String: Int] = ["a": 1]
         applyDiff(desired, &cache,
             apply: { k, _ in applied.append(k) },
             remove: { k in removed.append(k) })
 
-        try expect(applied.isEmpty, "no key changed, so nothing applies")
-        try expectEqual(removed, ["b"], "the disappeared key invokes remove exactly once")
-        try expectEqual(cache, ["a": 1], "the disappeared key is pruned from the cache")
+        #expect(applied.isEmpty, "no key changed, so nothing applies")
+        #expect(removed == ["b"], "the disappeared key invokes remove exactly once")
+        #expect(cache == ["a": 1], "the disappeared key is pruned from the cache")
     }
 
-    test("applyDiff with the default no-op remove still prunes disappeared keys") {
+    @Test("applyDiff with the default no-op remove still prunes disappeared keys")
+    func applyDiffDefaultNoOpRemoveStillPrunes() {
+        // Intent: even with the default no-op remove closure, the cache
+        //   is still pruned.
+        // Why it exists: pins the default-remove prune contract.
+        // Scenario: spec-first no-op remove.
         var cache: [String: Int] = ["a": 1, "b": 2]
         var applied: [String] = []
         let desired: [String: Int] = ["a": 1]
         applyDiff(desired, &cache, apply: { k, _ in applied.append(k) })
 
-        try expect(applied.isEmpty, "no changes apply")
-        try expectEqual(cache, ["a": 1],
+        #expect(applied.isEmpty, "no changes apply")
+        #expect(cache == ["a": 1],
             "the disappeared key is pruned even when remove is the default no-op")
     }
 
     // MARK: - Command.isPostReconcile (command-phase split, Stage 4)
 
-    test("Command.isPostReconcile: exactly makeFirstResponder + focusSearchField defer past reconcile") {
+    @Test("Command.isPostReconcile: exactly makeFirstResponder + focusSearchField defer past reconcile")
+    func commandIsPostReconcileExactlyMakeFirstResponderAndFocusSearchField() {
+        // Intent: only makeFirstResponder and focusSearchField are
+        //   classified post-reconcile; every other Command is
+        //   pre-reconcile.
+        // Why it exists: pins the post-reconcile set the runtime defers
+        //   past reconcile().
+        // Scenario: spec-first phase classification.
         let pane = PaneId()
-        // focusSearchField targets the search field reconcilePaneChrome creates, so
-        // it must run after reconcile().
-        try expect(Command.focusSearchField(paneId: pane).isPostReconcile,
+        #expect(Command.focusSearchField(paneId: pane).isPostReconcile,
             "focusSearchField is post-reconcile")
-        // makeFirstResponder is post-reconcile as of Stage 8: reconcileContainers now mounts
-        // the pane's TerminalView during reconcile, so first responder must be set after.
-        try expect(Command.makeFirstResponder(paneId: pane).isPostReconcile,
+        #expect(Command.makeFirstResponder(paneId: pane).isPostReconcile,
             "makeFirstResponder is post-reconcile (Stage 8)")
-        // focusSurface acts on an already-existing surface; deferring it is wrong.
-        try expect(!Command.focusSurface(paneId: pane, focused: true).isPostReconcile,
+        #expect(!Command.focusSurface(paneId: pane, focused: true).isPostReconcile,
             "focusSurface is pre-reconcile")
-        // A representative sample of other commands are pre-reconcile.
-        try expect(!Command.createSurface(paneId: pane, cwd: nil, command: nil).isPostReconcile,
+        #expect(!Command.createSurface(paneId: pane, cwd: nil, command: nil).isPostReconcile,
             "createSurface is pre-reconcile")
-        try expect(!Command.sendEndSearch(paneId: pane).isPostReconcile,
+        #expect(!Command.sendEndSearch(paneId: pane).isPostReconcile,
             "sendEndSearch is pre-reconcile")
-        try expect(!Command.scheduleCheckpoint.isPostReconcile,
+        #expect(!Command.scheduleCheckpoint.isPostReconcile,
             "scheduleCheckpoint is pre-reconcile")
-        try expect(!Command.terminate.isPostReconcile,
+        #expect(!Command.terminate.isPostReconcile,
             "terminate is pre-reconcile")
     }
 
     // MARK: - computeSidebarRowOps (model-apply, Stage 5)
-    //
-    // NOT an exact-sequence assertion: we apply the emitted ops in order to an in-memory
-    // model of the old projection and assert the result equals the new projection. This
-    // is structure-insensitive (a valid but differently-ordered diff still passes) and is
-    // the form that actually catches NSOutlineView-invalid index ordering -- an exact
-    // expectEqual on the op list would instead bless a crashing order.
 
-    /// old -> apply(computeSidebarRowOps(old,new)) must equal new.
-    func checkRowOps(_ old: SidebarProjection?, _ new: SidebarProjection, _ name: String) throws {
-        let ops = computeSidebarRowOps(old: old, new: new)
-        let result = applySidebarRowOps(ops, to: old ?? SidebarProjection(isSingleGroupMode: new.isSingleGroupMode, groups: []), new: new)
-        try expectEqual(result, new, name)
-    }
-
-    test("computeSidebarRowOps: first build inserts all rows") {
+    @Test("computeSidebarRowOps: first build inserts all rows")
+    func computeSidebarRowOpsFirstBuildInsertsAllRows() {
+        // Intent: with nil old, the diff returns [.reloadAll] so the
+        //   first build seeds every row.
+        // Why it exists: pins the cold-start contract.
+        // Scenario: spec-first first build.
         let g = GroupId()
         let new = sbProj(false, [sbGroup(g, "A", first: true, [sbTab("a"), sbTab("b")])])
-        try expectEqual(computeSidebarRowOps(old: nil, new: new), [.reloadAll],
+        #expect(computeSidebarRowOps(old: nil, new: new) == [.reloadAll],
             "nil old -> reloadAll")
-        try checkRowOps(nil, new, "first build reaches new")
+        checkRowOps(nil, new, "first build reaches new")
     }
 
-    test("computeSidebarRowOps: single<->multi group-mode flip rebuilds") {
+    @Test("computeSidebarRowOps: single<->multi group-mode flip rebuilds")
+    func computeSidebarRowOpsSingleMultiFlipRebuilds() {
+        // Intent: flipping between single-group and multi-group mode
+        //   emits [.reloadAll].
+        // Why it exists: pins the mode-flip rebuild rule.
+        // Scenario: spec-first mode flip.
         let g = GroupId()
         let single = sbProj(true, [sbGroup(g, "G", first: true, [sbTab("a")])])
         let multi = sbProj(false, [sbGroup(g, "G", first: true, [sbTab("a")]), sbGroup(GroupId(), "H", [sbTab("b")])])
-        try expectEqual(computeSidebarRowOps(old: single, new: multi), [.reloadAll],
+        #expect(computeSidebarRowOps(old: single, new: multi) == [.reloadAll],
             "mode flip -> reloadAll")
-        try checkRowOps(single, multi, "mode flip reaches new")
+        checkRowOps(single, multi, "mode flip reaches new")
     }
 
-    test("computeSidebarRowOps: tab insert / remove / reorder / cross-group move") {
+    @Test("computeSidebarRowOps: tab insert / remove / reorder / cross-group move")
+    func computeSidebarRowOpsTabChurnReachesNew() {
+        // Intent: a structure-insensitive diff covers tab insertion,
+        //   removal, reorder, and cross-group move.
+        // Why it exists: pins the model-apply gauntlet.
+        // Scenario: spec-first tab churn.
         let g1 = GroupId(); let g2 = GroupId()
         let a = TabId(); let b = TabId(); let c = TabId()
         func two(_ t1: [SidebarTabProjection], _ t2: [SidebarTabProjection]) -> SidebarProjection {
             sbProj(false, [sbGroup(g1, "L", first: true, t1), sbGroup(g2, "R", t2)])
         }
         let A = sbTab2(a); let B = sbTab2(b); let C = sbTab2(c)
-        try checkRowOps(two([A, B], [C]), two([A, B], [C]), "no-op")
-        try checkRowOps(two([A], [C]),    two([A, B], [C]), "insert B into L")
-        try checkRowOps(two([A, B], [C]), two([A], [C]),    "remove B from L")
-        try checkRowOps(two([A, B, C], []), two([C, A, B], []), "reorder within L")
-        try checkRowOps(two([A, B], [C]), two([A], [C, B]),  "move B from L to R")
-        try checkRowOps(two([A, B], [C]), two([C], [A, B]),  "swap-ish across groups")
+        checkRowOps(two([A, B], [C]), two([A, B], [C]), "no-op")
+        checkRowOps(two([A], [C]),    two([A, B], [C]), "insert B into L")
+        checkRowOps(two([A, B], [C]), two([A], [C]),    "remove B from L")
+        checkRowOps(two([A, B, C], []), two([C, A, B], []), "reorder within L")
+        checkRowOps(two([A, B], [C]), two([A], [C, B]),  "move B from L to R")
+        checkRowOps(two([A, B], [C]), two([C], [A, B]),  "swap-ish across groups")
     }
 
-    test("computeSidebarRowOps: reload fires on changed attrs (and tabCount badge)") {
+    @Test("computeSidebarRowOps: reload fires on changed attrs (and tabCount badge)")
+    func computeSidebarRowOpsReloadOnAttrChange() {
+        // Intent: attr changes trigger per-row reloads (and group reload
+        //   on bell roll-up).
+        // Why it exists: pins the attr-diff branch.
+        // Scenario: spec-first attr change.
         let g = GroupId(); let a = TabId(); let b = TabId()
         let old = sbProj(false, [sbGroup(g, "G", first: true, [sbTabFull(a, "x", bell: 0), sbTabFull(b, "y", bell: 0)])])
-        // a's title changed, b's bell changed -> both reload; group's bell rolls up.
         let new = sbProj(false, [sbGroup(g, "G", first: true, [sbTabFull(a, "X", bell: 0), sbTabFull(b, "y", bell: 3)])])
         let ops = computeSidebarRowOps(old: old, new: new)
-        try expect(ops.contains(.reloadTab(id: a)), "a's title change -> reloadTab(a)")
-        try expect(ops.contains(.reloadTab(id: b)), "b's bell change -> reloadTab(b)")
-        try expect(ops.contains(.reloadGroup(id: g)), "group bell roll-up change -> reloadGroup")
-        try checkRowOps(old, new, "attr changes reach new")
+        #expect(ops.contains(.reloadTab(id: a)), "a's title change -> reloadTab(a)")
+        #expect(ops.contains(.reloadTab(id: b)), "b's bell change -> reloadTab(b)")
+        #expect(ops.contains(.reloadGroup(id: g)), "group bell roll-up change -> reloadGroup")
+        checkRowOps(old, new, "attr changes reach new")
     }
 
-    test("computeSidebarRowOps: group insert / remove / reorder / collapse") {
+    @Test("computeSidebarRowOps: group insert / remove / reorder / collapse")
+    func computeSidebarRowOpsGroupChurnReachesNew() {
+        // Intent: a structure-insensitive diff covers group insertion,
+        //   removal, reorder, collapse flips, and insertion of an
+        //   already-collapsed group (must emit setGroupCollapsed).
+        // Why it exists: pins the group-level model-apply gauntlet.
+        // Scenario: spec-first group churn.
         let g1 = GroupId(); let g2 = GroupId(); let g3 = GroupId()
         func g(_ id: GroupId, _ name: String, first: Bool = false, collapsed: Bool = false) -> SidebarGroupProjection {
             sbGroup(id, name, collapsed: collapsed, first: first, [sbTab(name.lowercased())])
         }
         let base = sbProj(false, [g(g1, "A", first: true), g(g2, "B")])
-        try checkRowOps(base, sbProj(false, [g(g1, "A", first: true), g(g2, "B"), g(g3, "C")]), "insert group C")
-        try checkRowOps(sbProj(false, [g(g1, "A", first: true), g(g2, "B"), g(g3, "C")]), base, "remove group C")
-        try checkRowOps(base, sbProj(false, [g(g2, "B", first: true), g(g1, "A")]), "reorder groups (isFirst flips)")
-        try checkRowOps(base, sbProj(false, [g(g1, "A", first: true), g(g2, "B", collapsed: true)]), "collapse group B")
-        try checkRowOps(sbProj(false, [g(g1, "A", first: true), g(g2, "B", collapsed: true)]), base, "expand group B")
-        // Inserting an already-collapsed group must emit setGroupCollapsed (default is expanded).
+        checkRowOps(base, sbProj(false, [g(g1, "A", first: true), g(g2, "B"), g(g3, "C")]), "insert group C")
+        checkRowOps(sbProj(false, [g(g1, "A", first: true), g(g2, "B"), g(g3, "C")]), base, "remove group C")
+        checkRowOps(base, sbProj(false, [g(g2, "B", first: true), g(g1, "A")]), "reorder groups (isFirst flips)")
+        checkRowOps(base, sbProj(false, [g(g1, "A", first: true), g(g2, "B", collapsed: true)]), "collapse group B")
+        checkRowOps(sbProj(false, [g(g1, "A", first: true), g(g2, "B", collapsed: true)]), base, "expand group B")
         let ops = computeSidebarRowOps(old: base, new: sbProj(false, [g(g1, "A", first: true), g(g2, "B"), g(g3, "C", collapsed: true)]))
-        try expect(ops.contains(.setGroupCollapsed(id: g3, collapsed: true)), "inserted collapsed group flips collapse")
-        try checkRowOps(base, sbProj(false, [g(g1, "A", first: true), g(g2, "B"), g(g3, "C", collapsed: true)]), "insert collapsed group")
+        #expect(ops.contains(.setGroupCollapsed(id: g3, collapsed: true)), "inserted collapsed group flips collapse")
+        checkRowOps(base, sbProj(false, [g(g1, "A", first: true), g(g2, "B"), g(g3, "C", collapsed: true)]), "insert collapsed group")
     }
 
-    test("computeSidebarRowOps: combined structural + attr churn reaches new") {
+    @Test("computeSidebarRowOps: combined structural + attr churn reaches new")
+    func computeSidebarRowOpsCombinedChurnReachesNew() {
+        // Intent: a worst-case churn (close+move+insert+attr+collapse)
+        //   still produces ops that drive the cache to new.
+        // Why it exists: pins the full integration of the row-diff
+        //   primitives.
+        // Scenario: spec-first combined churn.
         let g1 = GroupId(); let g2 = GroupId()
         let a = TabId(); let b = TabId(); let c = TabId(); let d = TabId()
         let old = sbProj(false, [
             sbGroup(g1, "L", first: true, [sbTabFull(a, "a", bell: 0), sbTabFull(b, "b", bell: 0)]),
             sbGroup(g2, "R", [sbTabFull(c, "c", bell: 0)]),
         ])
-        // close a, move b to R, insert d into L, change c's bell, collapse R.
         let new = sbProj(false, [
             sbGroup(g1, "L", first: true, [sbTabFull(d, "d", bell: 0)]),
             sbGroup(g2, "R", collapsed: true, [sbTabFull(c, "c", bell: 5), sbTabFull(b, "b", bell: 0)]),
         ])
-        try checkRowOps(old, new, "combined churn reaches new")
+        checkRowOps(old, new, "combined churn reaches new")
     }
 
     // MARK: - guardSidebarRenameOps (rename-guard scope, Stage 5)
 
-    test("guardSidebarRenameOps: suppresses a reload of the edited row, keeps others") {
+    @Test("guardSidebarRenameOps: suppresses a reload of the edited row, keeps others")
+    func guardSidebarRenameOpsSuppressesReloadOfEditedRow() {
+        // Intent: while editing tab A, a reload of A is suppressed (field
+        //   editor owns the title) but a reload of B is preserved.
+        // Why it exists: pins the guard's per-row scope.
+        // Scenario: spec-first rename guard.
         let g = GroupId(); let a = TabId(); let b = TabId()
         let old = sbProj(false, [sbGroup(g, "G", first: true, [sbTabFull(a, "old", bell: 0), sbTabFull(b, "b", bell: 0)])])
         let new = sbProj(false, [sbGroup(g, "G", first: true, [sbTabFull(a, "TYPED", bell: 0), sbTabFull(b, "b", bell: 0)])])
-        let ops = computeSidebarRowOps(old: old, new: new)   // [.reloadTab(a)]
-        // Editing tab A: its reload is suppressed (the field editor owns the title).
+        let ops = computeSidebarRowOps(old: old, new: new)
         let editingA = guardSidebarRenameOps(ops: ops, renameTarget: .tab(a), new: new)
-        try expect(!editingA.ops.contains(.reloadTab(id: a)), "reload of the edited row suppressed")
-        try expect(!editingA.clearRename, "a reload does not end the edit")
-        // A reload of a DIFFERENT row is applied.
+        #expect(!editingA.ops.contains(.reloadTab(id: a)), "reload of the edited row suppressed")
+        #expect(!editingA.clearRename, "a reload does not end the edit")
         let editingB = guardSidebarRenameOps(ops: ops, renameTarget: .tab(b), new: new)
-        try expect(editingB.ops.contains(.reloadTab(id: a)), "reload of a different row applies")
+        #expect(editingB.ops.contains(.reloadTab(id: a)), "reload of a different row applies")
     }
 
-    test("guardSidebarRenameOps: structural ops on the edited row apply AND clear the sidecar") {
+    @Test("guardSidebarRenameOps: structural ops on the edited row apply AND clear the sidecar")
+    func guardSidebarRenameOpsStructuralOpsApplyAndClear() {
+        // Intent: structural ops (close, move) on the edited row apply
+        //   normally and clear the rename sidecar.
+        // Why it exists: pins the structural-ops-end-edit branch.
+        // Scenario: spec-first close-while-editing + move-while-editing.
         let g1 = GroupId(); let g2 = GroupId(); let a = TabId(); let b = TabId(); let c = TabId()
         let old = sbProj(false, [
             sbGroup(g1, "L", first: true, [sbTabFull(a, "a", bell: 0), sbTabFull(b, "b", bell: 0)]),
             sbGroup(g2, "R", [sbTabFull(c, "c", bell: 0)]),
         ])
-        // Close A (the edited row) -> it leaves the new projection: remove applies, edit ends.
         let closed = sbProj(false, [
             sbGroup(g1, "L", first: true, [sbTabFull(b, "b", bell: 0)]),
             sbGroup(g2, "R", [sbTabFull(c, "c", bell: 0)]),
         ])
         let closeGuarded = guardSidebarRenameOps(
             ops: computeSidebarRowOps(old: old, new: closed), renameTarget: .tab(a), new: closed)
-        try expect(closeGuarded.clearRename, "closing the edited row clears the sidecar")
-        try expectEqual(applySidebarRowOps(closeGuarded.ops, to: old, new: closed), closed,
+        #expect(closeGuarded.clearRename, "closing the edited row clears the sidecar")
+        #expect(applySidebarRowOps(closeGuarded.ops, to: old, new: closed) == closed,
             "the remove still applies")
-        // Move A to group R (the QA-13 "move from another path") -> A is re-inserted by id
-        // into R, so its cell is recreated: structural ops apply and the edit ends.
         let moved = sbProj(false, [
             sbGroup(g1, "L", first: true, [sbTabFull(b, "b", bell: 0)]),
             sbGroup(g2, "R", [sbTabFull(c, "c", bell: 0), sbTabFull(a, "a", bell: 0)]),
         ])
         let moveGuarded = guardSidebarRenameOps(
             ops: computeSidebarRowOps(old: old, new: moved), renameTarget: .tab(a), new: moved)
-        try expect(moveGuarded.clearRename, "moving the edited row to another group clears the sidecar")
-        try expectEqual(applySidebarRowOps(moveGuarded.ops, to: old, new: moved), moved,
+        #expect(moveGuarded.clearRename, "moving the edited row to another group clears the sidecar")
+        #expect(applySidebarRowOps(moveGuarded.ops, to: old, new: moved) == moved,
             "the move (remove + insert-by-id) still applies")
     }
 
-    test("guardSidebarRenameOps: nil rename target is a pass-through") {
+    @Test("guardSidebarRenameOps: nil rename target is a pass-through")
+    func guardSidebarRenameOpsNilRenameTargetPassThrough() {
+        // Intent: a nil rename target makes the guard a no-op.
+        // Why it exists: pins the nil-target branch.
+        // Scenario: spec-first nil-target.
         let g = GroupId(); let a = TabId()
         let old = sbProj(false, [sbGroup(g, "G", first: true, [sbTabFull(a, "a", bell: 0)])])
         let new = sbProj(false, [sbGroup(g, "G", first: true, [sbTabFull(a, "A", bell: 0)])])
         let ops = computeSidebarRowOps(old: old, new: new)
         let guarded = guardSidebarRenameOps(ops: ops, renameTarget: nil, new: new)
-        try expectEqual(guarded.ops, ops, "no edit -> ops unchanged")
-        try expect(!guarded.clearRename, "no edit -> nothing to clear")
+        #expect(guarded.ops == ops, "no edit -> ops unchanged")
+        #expect(!guarded.clearRename, "no edit -> nothing to clear")
     }
 
-    test("advanceSidebarCache retains suppressed row attrs while applying structure") {
+    @Test("advanceSidebarCache retains suppressed row attrs while applying structure")
+    func advanceSidebarCacheRetainsSuppressedAttrs() {
+        // Intent: advanceSidebarCache keeps the old attrs for the
+        //   suppressed target while applying the new structure
+        //   elsewhere.
+        // Why it exists: pins the cache-advance contract that lets the
+        //   reconciler keep a renamed row stable while everything else
+        //   updates.
+        // Scenario: spec-first cache-advance.
         let g1 = GroupId(); let g2 = GroupId()
         let a = TabId(); let b = TabId(); let c = TabId()
         let oldTabA = sbTabFull(a, "old-a", bell: 1)
@@ -233,39 +297,46 @@ func reconcileTests() {
         ])
 
         let tabSuppressed = advanceSidebarCache(old: old, new: new, suppressedRenameTarget: .tab(a))
-        try expectEqual(tabSuppressed.groups[0].tabs[0], oldTabA,
+        #expect(tabSuppressed.groups[0].tabs[0] == oldTabA,
             "suppressed tab keeps its old projection")
-        try expectEqual(tabSuppressed.groups[0].tabs[1], new.groups[0].tabs[1],
+        #expect(tabSuppressed.groups[0].tabs[1] == new.groups[0].tabs[1],
             "sibling tab takes the new projection")
 
         let groupSuppressed = advanceSidebarCache(old: old, new: new, suppressedRenameTarget: .group(g1))
         let mergedGroup = groupSuppressed.groups[0]
-        try expectEqual(mergedGroup.name, old.groups[0].name,
+        #expect(mergedGroup.name == old.groups[0].name,
             "suppressed group keeps its old name")
-        try expectEqual(mergedGroup.unreadAlertCount, old.groups[0].unreadAlertCount,
+        #expect(mergedGroup.unreadAlertCount == old.groups[0].unreadAlertCount,
             "suppressed group keeps its old unread badge")
-        try expectEqual(mergedGroup.tabCount, old.groups[0].tabCount,
+        #expect(mergedGroup.tabCount == old.groups[0].tabCount,
             "suppressed group keeps its old tab-count badge")
-        try expectEqual(mergedGroup.isFirst, old.groups[0].isFirst,
+        #expect(mergedGroup.isFirst == old.groups[0].isFirst,
             "suppressed group keeps its old first-row attrs")
-        try expectEqual(mergedGroup.isCollapsed, new.groups[0].isCollapsed,
+        #expect(mergedGroup.isCollapsed == new.groups[0].isCollapsed,
             "suppressed group applies the new collapse structure")
-        try expectEqual(mergedGroup.tabs, new.groups[0].tabs,
+        #expect(mergedGroup.tabs == new.groups[0].tabs,
             "suppressed group applies the new tab structure")
 
-        try expectEqual(advanceSidebarCache(old: old, new: new, suppressedRenameTarget: nil), new,
+        #expect(advanceSidebarCache(old: old, new: new, suppressedRenameTarget: nil) == new,
             "nil suppressed target leaves the cache at new")
         let removedA = sbProj(false, [
             sbGroup(g1, "New G1", collapsed: true, [sbTabFull(c, "new-c", bell: 4)]),
             sbGroup(g2, "New G2", first: true, [sbTabFull(b, "new-b", bell: 5)]),
         ])
-        try expectEqual(advanceSidebarCache(old: old, new: removedA, suppressedRenameTarget: .tab(a)), removedA,
+        #expect(advanceSidebarCache(old: old, new: removedA, suppressedRenameTarget: .tab(a)) == removedA,
             "absent suppressed target leaves the cache at new")
-        try expectEqual(advanceSidebarCache(old: nil, new: new, suppressedRenameTarget: .tab(a)), new,
+        #expect(advanceSidebarCache(old: nil, new: new, suppressedRenameTarget: .tab(a)) == new,
             "missing old cache leaves the cache at new")
     }
 
-    test("desiredContainerShapes: eager projection includes selected and background tabs") {
+    @Test("desiredContainerShapes: eager projection includes selected and background tabs")
+    func desiredContainerShapesEagerProjectionIncludesBackgroundTabs() {
+        // Intent: desiredContainerShapes covers every tab (selected,
+        //   same-group background, collapsed-group background) and is
+        //   independent of selectedTabId.
+        // Why it exists: pins the eager-projection coverage net the
+        //   container reconciler relies on for hidden-mounting.
+        // Scenario: spec-first eager projection.
         let selectedPaneId = PaneId(), siblingPaneId = PaneId(), otherPaneId = PaneId()
         let selectedTabId = TabId(), siblingTabId = TabId(), otherTabId = TabId()
         let selectedTab = TabModel(
@@ -299,120 +370,140 @@ func reconcileTests() {
 
         let initial = desiredContainerShapes(in: model)
 
-        try expectEqual(Set(initial.keys), expectedKeys,
+        #expect(Set(initial.keys) == expectedKeys,
             "projection includes selected, same-group background, and collapsed-group background tabs")
-        try expectEqual(initial, expectedShapes,
+        #expect(initial == expectedShapes,
             "each projected shape matches the tab's container shape")
 
         model.selectedTabId = otherTabId
         let afterSelectionChange = desiredContainerShapes(in: model)
 
-        try expectEqual(Set(afterSelectionChange.keys), expectedKeys,
+        #expect(Set(afterSelectionChange.keys) == expectedKeys,
             "selection changes do not change projected tab keys")
-        try expectEqual(afterSelectionChange, initial,
+        #expect(afterSelectionChange == initial,
             "selection changes do not change projected container shapes")
     }
 
     // MARK: - computeContainerOps (model-apply, Stage 8)
-    //
-    // Like the sidebar diff, this is a model-apply test, NOT an exact-sequence assert:
-    // apply the ops in order to a plain [TabId: Bool] presence+visibility map and assert
-    // it equals new's keys with (tabId == selectedTabId) visibility. This catches a
-    // dropped-hide regression (leaving two containers visible) that an exact-sequence
-    // assert would bless.
 
-    test("computeContainerOps: remove drops a gone tab's container") {
+    @Test("computeContainerOps: remove drops a gone tab's container")
+    func computeContainerOpsRemoveDropsGoneTab() {
+        // Intent: removing a tab drops its container; remaining tabs
+        //   keep their visibility states.
+        // Why it exists: pins the remove branch of the container diff.
+        // Scenario: spec-first remove.
         let a = TabId(), b = TabId(), pa = PaneId(), pb = PaneId()
-        try checkContainerOps(
+        checkContainerOps(
             old: [a: cShape(pa), b: cShape(pb)], oldVisible: [a: true, b: false],
             new: [a: cShape(pa)], newSelected: a,
             "removing tab B reaches new (A visible, B gone)")
     }
 
-    test("computeContainerOps: rebuild on a drifted shape keeps visibility") {
+    @Test("computeContainerOps: rebuild on a drifted shape keeps visibility")
+    func computeContainerOpsRebuildOnDriftedShapeKeepsVisibility() {
+        // Intent: a drifted shape triggers rebuild and the tab stays
+        //   visible.
+        // Why it exists: pins the rebuild branch.
+        // Scenario: spec-first drift rebuild.
         let a = TabId(), pa = PaneId(), pa2 = PaneId()
-        // A's shape drifts (single leaf -> split): the op list must rebuild A and keep it visible.
-        try checkContainerOps(
+        checkContainerOps(
             old: [a: cShape(pa)], oldVisible: [a: true],
             new: [a: cSplitShape(pa, pa2)], newSelected: a,
             "rebuilding A reaches new with A still visible")
     }
 
-    test("computeContainerOps: visibility-only selected-tab switch hides old, shows new") {
-        // The dropped-hide net: A visible + B mounted-hidden at IDENTICAL shapes, switch to B.
-        // The ops must hide A and show B (not leave both visible).
+    @Test("computeContainerOps: visibility-only selected-tab switch hides old, shows new")
+    func computeContainerOpsVisibilityOnlySwitchHidesOldShowsNew() {
+        // Intent: a tab switch at identical shapes flips visibility
+        //   only (no rebuild).
+        // Why it exists: pins the visibility-only fast path -- the
+        //   dropped-hide regression net.
+        // Scenario: spec-first visibility-only.
         let a = TabId(), b = TabId(), pa = PaneId(), pb = PaneId()
-        try checkContainerOps(
+        checkContainerOps(
             old: [a: cShape(pa), b: cShape(pb)], oldVisible: [a: true, b: false],
             new: [a: cShape(pa), b: cShape(pb)], newSelected: b,
             "switching A->B (identical shapes) hides A and shows B -- no rebuild")
     }
 
-    test("computeContainerOps: no-op when the selected tab is unchanged (common eager path)") {
+    @Test("computeContainerOps: no-op when the selected tab is unchanged (common eager path)")
+    func computeContainerOpsNoOpWhenSelectedUnchanged() {
+        // Intent: unchanged selection + shapes -> no ops.
+        // Why it exists: pins the common no-op fast path.
+        // Scenario: spec-first no-op.
         let a = TabId(), b = TabId(), pa = PaneId(), pb = PaneId()
-        try checkContainerOps(
+        checkContainerOps(
             old: [a: cShape(pa), b: cShape(pb)], oldVisible: [a: true, b: false],
             new: [a: cShape(pa), b: cShape(pb)], newSelected: a,
             "unchanged selection + shapes -> state unchanged (A visible, B hidden)")
     }
 
-    test("containerOpsStrandVisible flags only ops that strand the visible tab") {
+    @Test("containerOpsStrandVisible flags only ops that strand the visible tab")
+    func containerOpsStrandVisibleFlagsOnlyStrandingOps() {
+        // Intent: containerOpsStrandVisible flags rebuild/remove/hide of
+        //   the previously-visible tab, but not other ops or no-ops.
+        // Why it exists: pins the stranding classifier the reconciler
+        //   uses to decide whether to force-show a fallback.
+        // Scenario: spec-first stranding classifier.
         let visible = TabId(), background = TabId()
 
-        try expectEqual(
-            containerOpsStrandVisible(ops: [.rebuild(tabId: visible)], previouslyVisibleTabId: visible),
-            true,
+        #expect(
+            containerOpsStrandVisible(ops: [.rebuild(tabId: visible)], previouslyVisibleTabId: visible) == true,
             "visible rebuild strands the visible container")
-        try expectEqual(
-            containerOpsStrandVisible(ops: [.remove(tabId: visible)], previouslyVisibleTabId: visible),
-            true,
+        #expect(
+            containerOpsStrandVisible(ops: [.remove(tabId: visible)], previouslyVisibleTabId: visible) == true,
             "visible remove strands the visible container")
-        try expectEqual(
+        #expect(
             containerOpsStrandVisible(
                 ops: [.setVisible(tabId: visible, visible: false)],
-                previouslyVisibleTabId: visible),
-            true,
+                previouslyVisibleTabId: visible) == true,
             "hiding the visible container strands it")
-        try expectEqual(
+        #expect(
             containerOpsStrandVisible(
                 ops: [.rebuild(tabId: background)],
                 previouslyVisibleTabId: visible
-            ),
-            false,
+            ) == false,
             "background rebuild leaves the visible container mounted")
-        try expectEqual(
+        #expect(
             containerOpsStrandVisible(
                 ops: [.setVisible(tabId: visible, visible: true)],
-                previouslyVisibleTabId: visible),
-            false,
+                previouslyVisibleTabId: visible) == false,
             "showing the visible container is not a stranding op")
-        try expectEqual(
+        #expect(
             containerOpsStrandVisible(
                 ops: [.setVisible(tabId: background, visible: true)],
-                previouslyVisibleTabId: visible),
-            false,
+                previouslyVisibleTabId: visible) == false,
             "showing a background container is not a stranding op")
-        try expectEqual(
-            containerOpsStrandVisible(ops: [], previouslyVisibleTabId: visible),
-            false,
+        #expect(
+            containerOpsStrandVisible(ops: [], previouslyVisibleTabId: visible) == false,
             "no ops do not strand the visible container")
-        try expectEqual(
-            containerOpsStrandVisible(ops: [.remove(tabId: visible)], previouslyVisibleTabId: nil),
-            false,
+        #expect(
+            containerOpsStrandVisible(ops: [.remove(tabId: visible)], previouslyVisibleTabId: nil) == false,
             "without a previously-visible tab there is no stranded container")
     }
 
     // MARK: - ContainerShape (ratio carveout / payload excluded / structural change)
 
-    test("ContainerShape: same leaves+splits with different ratios compare equal") {
+    @Test("ContainerShape: same leaves+splits with different ratios compare equal")
+    func containerShapeIgnoresRatio() {
+        // Intent: split ratio is NOT part of the container shape.
+        // Why it exists: pins the ratio carveout so splitRatioChanged
+        //   never rebuilds the container.
+        // Scenario: spec-first ratio carveout.
         let p1 = PaneId(), p2 = PaneId(), sid = SplitId()
         let lo = TabModel(id: TabId(), focusedPaneId: p1, rootNode: splitNode(sid, p1, p2, ratio: 0.3))
         let hi = TabModel(id: TabId(), focusedPaneId: p1, rootNode: splitNode(sid, p1, p2, ratio: 0.8))
-        try expectEqual(containerShape(of: lo), containerShape(of: hi),
+        #expect(containerShape(of: lo) == containerShape(of: hi),
             "split ratio is excluded -- splitRatioChanged must not rebuild")
     }
 
-    test("ContainerShape: a leaf PaneModel metadata edit compares equal") {
+    @Test("ContainerShape: a leaf PaneModel metadata edit compares equal")
+    func containerShapeIgnoresLeafMetadata() {
+        // Intent: leaf metadata (title/cwd/progress/todos/theme) is NOT
+        //   part of the container shape.
+        // Why it exists: pins the leaf-payload carveout so metadata
+        //   edits don't rebuild the container.
+        // Scenario: spec-first leaf metadata carveout.
         let p1 = PaneId(), p2 = PaneId(), sid = SplitId()
         var leftA = PaneModel(id: p1); leftA.title = "alpha"; leftA.cwd = "/a"
         var leftB = PaneModel(id: p1); leftB.title = "beta"; leftB.cwd = "/b"
@@ -423,59 +514,71 @@ func reconcileTests() {
         let nodeB = SplitNodeModel.split(id: sid, direction: .horizontal, first: .leaf(leftB), second: .leaf(PaneModel(id: p2)), ratio: 0.5)
         let tabA = TabModel(id: TabId(), focusedPaneId: p1, rootNode: nodeA)
         let tabB = TabModel(id: TabId(), focusedPaneId: p1, rootNode: nodeB)
-        try expectEqual(containerShape(of: tabA), containerShape(of: tabB),
+        #expect(containerShape(of: tabA) == containerShape(of: tabB),
             "leaf payload (title/cwd/progress/todo/theme) is excluded -- a metadata edit must not rebuild")
     }
 
-    test("ContainerShape: structural change / zoom toggle compare unequal") {
+    @Test("ContainerShape: structural change / zoom toggle compare unequal")
+    func containerShapeStructuralChangeUnequal() {
+        // Intent: structural changes (single<->split, split direction,
+        //   leaf id change, zoom toggle) DO change the shape.
+        // Why it exists: pins the positive case of the shape equality
+        //   contract.
+        // Scenario: spec-first structural unequal.
         let p1 = PaneId(), p2 = PaneId(), p3 = PaneId(), sid = SplitId()
         let single = TabModel(id: TabId(), focusedPaneId: p1, rootNode: .leaf(PaneModel(id: p1)))
         let split = TabModel(id: TabId(), focusedPaneId: p1, rootNode: splitNode(sid, p1, p2, ratio: 0.5))
-        try expect(containerShape(of: single) != containerShape(of: split),
+        #expect(containerShape(of: single) != containerShape(of: split),
             "adding a leaf (single -> split) changes the shape")
-        // Change direction.
         let splitV = TabModel(id: TabId(), focusedPaneId: p1,
             rootNode: .split(id: sid, direction: .vertical, first: .leaf(PaneModel(id: p1)), second: .leaf(PaneModel(id: p2)), ratio: 0.5))
-        try expect(containerShape(of: split) != containerShape(of: splitV),
+        #expect(containerShape(of: split) != containerShape(of: splitV),
             "changing split direction changes the shape")
-        // Move a leaf (different leaf id).
         let splitMoved = TabModel(id: TabId(), focusedPaneId: p1, rootNode: splitNode(sid, p1, p3, ratio: 0.5))
-        try expect(containerShape(of: split) != containerShape(of: splitMoved),
+        #expect(containerShape(of: split) != containerShape(of: splitMoved),
             "swapping a leaf id changes the shape")
-        // Zoom toggle.
         var zoomed = split; zoomed.isZoomed = true
-        try expect(containerShape(of: split) != containerShape(of: zoomed),
+        #expect(containerShape(of: split) != containerShape(of: zoomed),
             "toggling zoom changes the shape")
     }
 
     // MARK: - chromeInvalidation
 
-    test("chromeInvalidation: rebuild contributes its leaves, setVisible-only is empty") {
+    @Test("chromeInvalidation: rebuild contributes its leaves, setVisible-only is empty")
+    func chromeInvalidationRebuildContributesLeavesSetVisibleEmpty() {
+        // Intent: a rebuild op invalidates every leaf in the rebuilt
+        //   container; setVisible-only ops invalidate nothing.
+        // Why it exists: pins the chrome-invalidation contract used to
+        //   redraw pane chrome only when the wrappers actually change.
+        // Scenario: spec-first chrome invalidation.
         let a = TabId(), b = TabId(), pa = PaneId(), pa2 = PaneId(), pb = PaneId()
         let newShapes: [TabId: ContainerShape] = [a: cSplitShape(pa, pa2), b: cShape(pb)]
-        // Rebuild A + show both: only A's two leaves are invalidated.
         let ops: [ContainerOp] = [.rebuild(tabId: a), .setVisible(tabId: a, visible: true), .setVisible(tabId: b, visible: false)]
-        try expectEqual(chromeInvalidation(ops: ops, newShapes: newShapes), Set([pa, pa2]),
+        #expect(chromeInvalidation(ops: ops, newShapes: newShapes) == Set([pa, pa2]),
             "a rebuilt container invalidates every one of its leaf panes")
-        // Visibility-only (a tab switch with no rebuild): nothing invalidated.
         let visOnly: [ContainerOp] = [.setVisible(tabId: a, visible: false), .setVisible(tabId: b, visible: true)]
-        try expect(chromeInvalidation(ops: visOnly, newShapes: newShapes).isEmpty,
+        #expect(chromeInvalidation(ops: visOnly, newShapes: newShapes).isEmpty,
             "a visibility-only switch invalidates no chrome (wrappers survive)")
     }
 
     // MARK: - surfacesToTearDown (migrated surfaceCreationFailed net)
 
-    test("surfacesToTearDown selects exactly the panes gone from the model") {
+    @Test("surfacesToTearDown selects exactly the panes gone from the model")
+    func surfacesToTearDownSelectsOnlyGonePanes() {
+        // Intent: surfacesToTearDown returns only live surfaces whose
+        //   pane is no longer in the model.
+        // Why it exists: pins the teardown net the reconciler uses to
+        //   destroy orphaned surfaces.
+        // Scenario: spec-first teardown net.
         var model = makeModel()
         createTab(&model)
         update(&model, .splitPane(direction: .horizontal))
         let live = Set(model.allPaneIds)
         let dead1 = PaneId(), dead2 = PaneId()
-        // Live surfaces = the model's panes plus two whose panes no longer exist.
         let teardown = surfacesToTearDown(liveSurfaceIds: live.union([dead1, dead2]), model: model)
-        try expectEqual(teardown, Set([dead1, dead2]),
+        #expect(teardown == Set([dead1, dead2]),
             "only the surfaces whose pane left the model are selected")
-        try expect(teardown.isDisjoint(with: live),
+        #expect(teardown.isDisjoint(with: live),
             "surviving panes are never selected for teardown")
     }
 }
@@ -516,7 +619,7 @@ private func applySidebarRowOps(_ ops: [SidebarRowOp], to old: SidebarProjection
             work = new
         case .insertGroup(let id, let index):
             var g = newGroup(id)
-            g.isCollapsed = false   // inserts default expanded; a collapse op flips it
+            g.isCollapsed = false
             work.groups.insert(g, at: index)
         case .removeGroup(let index):
             work.groups.remove(at: index)
@@ -544,26 +647,25 @@ private func applySidebarRowOps(_ ops: [SidebarRowOp], to old: SidebarProjection
     return work
 }
 
+/// old -> apply(computeSidebarRowOps(old,new)) must equal new.
+private func checkRowOps(_ old: SidebarProjection?, _ new: SidebarProjection, _ name: String) {
+    let ops = computeSidebarRowOps(old: old, new: new)
+    let result = applySidebarRowOps(ops, to: old ?? SidebarProjection(isSingleGroupMode: new.isSingleGroupMode, groups: []), new: new)
+    #expect(result == new, "\(name)")
+}
+
 // MARK: - Container shape + op model-apply (Stage 8)
 
-/// A single-leaf container shape (deterministic: no random split id, so two calls
-/// with the same pane id compare equal -- needed for the visibility-only test).
 private func cShape(_ p: PaneId) -> ContainerShape {
     ContainerShape(tree: .leaf(p), isZoomed: false, zoomedLeaf: nil)
 }
-/// A two-leaf split container shape (carries a fresh split id, so it never equals a
-/// single-leaf shape -- used as the "drifted" shape in the rebuild test).
 private func cSplitShape(_ a: PaneId, _ b: PaneId) -> ContainerShape {
     ContainerShape(tree: .split(id: SplitId(), direction: .horizontal, first: .leaf(a), second: .leaf(b)), isZoomed: false, zoomedLeaf: nil)
 }
-/// A horizontal split SplitNodeModel of two single-pane leaves.
 private func splitNode(_ sid: SplitId, _ a: PaneId, _ b: PaneId, ratio: CGFloat) -> SplitNodeModel {
     .split(id: sid, direction: .horizontal, first: .leaf(PaneModel(id: a)), second: .leaf(PaneModel(id: b)), ratio: ratio)
 }
 
-/// Apply a ContainerOp script to a [TabId: Bool] presence+visibility map (key present
-/// == container mounted; value == isVisible). Mirrors the executor: rebuild mounts a
-/// fresh (hidden-by-default) container, setVisible toggles, remove detaches.
 private func applyContainerOps(_ ops: [ContainerOp], to old: [TabId: Bool]) -> [TabId: Bool] {
     var state = old
     for op in ops {
@@ -576,15 +678,13 @@ private func applyContainerOps(_ ops: [ContainerOp], to old: [TabId: Bool]) -> [
     return state
 }
 
-/// old(+visibility) -> apply(computeContainerOps(old,new,selected)) must equal new's
-/// keys, each visible iff it is the selected tab.
 private func checkContainerOps(
     old: [TabId: ContainerShape], oldVisible: [TabId: Bool],
     new: [TabId: ContainerShape], newSelected: TabId?, _ name: String
-) throws {
+) {
     let ops = computeContainerOps(old: old, new: new, selectedTabId: newSelected)
     let result = applyContainerOps(ops, to: oldVisible)
     var expected: [TabId: Bool] = [:]
     for t in new.keys { expected[t] = (t == newSelected) }
-    try expectEqual(result, expected, name)
+    #expect(result == expected, "\(name)")
 }
