@@ -50,6 +50,18 @@ class GhosttyApp {
             : String(v)
     }
 
+    /// Read a bool config value from the retained app config.
+    /// Only valid for keys whose C export type is bool (e.g. progress-style).
+    func readConfigBool(key: String, default def: Bool) -> Bool {
+        guard let config = config else { return def }
+        var v = def
+        guard ghostty_config_get(config, &v, key, UInt(key.utf8.count)) else { return def }
+        return v
+    }
+
+    /// Whether progress reports (ConEmu OSC 9;4) should surface, per `progress-style`.
+    var progressStyleEnabled: Bool { readConfigBool(key: "progress-style", default: true) }
+
     /// Create a fresh config by loading default files, then layering the DanTerm overlay.
     private static func loadConfig() -> ghostty_config_t? {
         guard let config = ghostty_config_new() else { return nil }
@@ -155,13 +167,18 @@ class GhosttyApp {
                 return ghosttyApp.handleAction(target: target, action: action)
             },
             read_clipboard_cb: { userdata, location, state in
-                guard let userdata = userdata else { return }
+                // ghostty_runtime_read_clipboard_cb returns bool as of Ghostty v1.3.1.
+                // true: we completed the request (below), so libghostty leaves `state`.
+                // false: we did NOT complete it, so libghostty frees `state` -- returning
+                // false here also avoids leaking `state` on the guard-failure paths.
+                guard let userdata = userdata else { return false }
                 let bridge = Unmanaged<SurfaceBridge>.fromOpaque(userdata).takeUnretainedValue()
-                guard let view = bridge.view, let surface = view.surface else { return }
+                guard let view = bridge.view, let surface = view.surface else { return false }
                 let str = NSPasteboard.general.string(forType: .string) ?? ""
                 str.withCString { ptr in
                     ghostty_surface_complete_clipboard_request(surface, ptr, state, false)
                 }
+                return true
             },
             confirm_read_clipboard_cb: { userdata, str, state, request in
                 guard let userdata = userdata else { return }
@@ -412,6 +429,14 @@ class GhosttyApp {
             if let surface = Self.targetSurface(target),
                let bridge = Self.surfaceBridge(from: surface),
                let paneId = bridge.paneId {
+                guard progressStyleEnabled else {
+                    // progress-style = false: libghostty still fires this action, so we
+                    // suppress it here and clear any progress already shown for the pane.
+                    DispatchQueue.main.async { [weak self] in
+                        self?.runtime?.send(.surfaceProgress(paneId: paneId, state: nil))
+                    }
+                    return true
+                }
                 let raw = action.action.progress_report
                 let progress: UInt8? = raw.progress >= 0 ? UInt8(raw.progress) : nil
                 let state: ProgressState?
