@@ -21,7 +21,8 @@ build-icons:
 test:
     swift test --package-path lib/DanTermProtocol --filter DanTermProtocolTests
     swift test --package-path lib/DanTermCore
-    ./test.sh
+    ./scripts/core-purity-lint.sh
+    ./scripts/tests/core-purity-lint_test.sh
 
 # Run UI tests (AppKit, requires display)
 test-ui:

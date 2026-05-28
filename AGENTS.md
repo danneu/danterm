@@ -38,12 +38,23 @@ app/
 ├── ...                     # Pane views, drag/drop, search, themes, preferences, window chrome
 └── Info.plist              # App bundle metadata
 
-tests/
-├── TestHarness.swift          # Test runner, assertions, helpers
-├── Update*Tests.swift         # Tests for each Msg domain (tab, pane, ghostty, group, lifecycle, search, theme, alert, preferences, remote)
-├── ModelOperationsTests.swift # Split tree operation tests
-├── SnapshotTests.swift        # Init file decode/validate tests
-└── ...                        # Config, scrollbar math, drag/drop, theme parsing, export tests
+lib/DanTermCore/
+├── Package.swift                       # Nested SwiftPM manifest: library + Swift Testing test target.
+├── Sources/DanTermCore/                # The 22 pure files compiled into the app's own module via the
+│                                       # root manifest's `sources:`, AND compiled standalone as a
+│                                       # `DanTermCore` library here. See docs/design/.
+└── Tests/DanTermCoreTests/             # Swift Testing suites (auto-discovered).
+    ├── TestSupport.swift              # Shared fixtures (makeModel, createTab, hasEffect,
+    │                                  # paneSnapshot helpers, makeMruModel).
+    ├── Update*Tests.swift             # Tests for each Msg domain (tab, pane, ghostty, group,
+    │                                  # lifecycle, search, theme, alert, preferences, remote,
+    │                                  # mru, jump, ipc, todo, tab-todo).
+    ├── ModelOperationsTests.swift     # Split tree + every desired* projection.
+    ├── SnapshotTests.swift            # Init file decode/validate.
+    └── ...                            # Config, scrollbar math, drag/drop, theme parsing, export,
+                                       # checkpoint (recovery-path seam), sidebar, switcher events,
+                                       # todo popover state, custom title, IPC connection,
+                                       # CLI path installer, pane toolbar, etc.
 
 docs/
 ├── ci.md                   # CI/CD pipeline, code signing, notarization
@@ -146,9 +157,10 @@ struct ViewLocalState { var sidebarRenameTarget: RenameTarget? }
 ### Test preambles
 
 Every individual test opens with a `//` preamble of three labeled sections. This
-applies to both test idioms: a `test("...") { ... }` closure in the app harness
-(`tests/`, preamble at the top of the closure) and an XCTest `func testX()` in
-`lib/` (preamble at the top of the method body).
+applies to both test idioms: a Swift Testing `@Test("...") func ...` in the
+core package (`lib/DanTermCore/Tests/DanTermCoreTests/`, preamble at the top of
+the method body) and an XCTest `func testX()` in the protocol package
+(`lib/DanTermProtocol/Tests/`, preamble at the top of the method body too).
 
 1. **Intent** — the behavior this test verifies.
 2. **Why it exists** — the risk it guards: a regression for a bug-fix test, or
@@ -159,8 +171,10 @@ applies to both test idioms: a `test("...") { ... }` closure in the app harness
    TDD-first, so most tests are spec-first and legitimately have none.
 
 ```swift
-// App harness (tests/) -- a bug-fix test, so the Scenario names the real incident:
-test("movePane(.splitRight) threads the moved pane's payload through insertAtLeaf") {
+// Core Swift Testing (lib/DanTermCore/Tests/) -- a bug-fix test, so the
+// Scenario names the real incident:
+@Test("movePane(.splitRight) threads the moved pane's payload through insertAtLeaf")
+func movePaneSplitRightThreadsPayload() {
     // Intent: moving a pane via .splitRight preserves the moved pane's full
     //   payload (cwd, theme, todos) at its new split position.
     // Why it exists: locks down the moveLeaf -> insertAtLeaf path, the only route
@@ -172,7 +186,8 @@ test("movePane(.splitRight) threads the moved pane's payload through insertAtLea
     // ...
 }
 
-// XCTest (lib/) -- a spec-first test, so the Scenario is the behavior, no incident:
+// XCTest (lib/DanTermProtocol/Tests/) -- a spec-first test, so the Scenario is
+// the behavior, no incident:
 func testTabNewParsesBackgroundFlag() throws {
     // Intent: `--background` parses into params["background"] == .bool(true).
     // Why it exists: pins the CLI -> JSON contract the app's IPC handler reads.
@@ -183,6 +198,35 @@ func testTabNewParsesBackgroundFlag() throws {
     // ...
 }
 ```
+
+### Test architecture
+
+The 22 pure model/update files live in `lib/DanTermCore/Sources/DanTermCore/`.
+They are compiled twice by independent SwiftPM builds:
+
+- **The root app target** (`DanTerm` executable in `./Package.swift`) compiles
+  them into its own module via `sources: ["app", "lib/DanTermCore/Sources/DanTermCore"]`.
+  No `import DanTermCore` in the app; the core stays plain `internal`. The
+  nested `app/DanTermCore -> ../lib/DanTermCore/Sources/DanTermCore` symlink
+  keeps the SwiftPM `path: "."` exclude list to a stable per-source-directory
+  shape.
+- **The nested test package** (`lib/DanTermCore/Package.swift`) compiles them as
+  a standalone `DanTermCore` library and runs the Swift Testing suites against
+  `@testable import DanTermCore`. The package does NOT depend on the
+  `DanTerm` executable or GhosttyKit, so a core file that adds an app-only
+  symbol or `import GhosttyKit` fails to compile under `swift test`.
+
+`just test` runs the protocol XCTest suite, the core Swift Testing suite, and
+the local **core-purity lint** (`scripts/core-purity-lint.sh`) that forbids
+`import Cocoa`/`AppKit`/`SwiftUI` in `lib/DanTermCore/Sources/DanTermCore`.
+The lint is R1's only guard against Cocoa creep (the nested package alone
+can't catch system-framework imports), and its self-test
+(`scripts/tests/core-purity-lint_test.sh`) pins the regex's edge cases.
+
+See [docs/design/2026-05-28-core-module-via-symlink.md](docs/design/2026-05-28-core-module-via-symlink.md)
+for the design decision behind compiling core same-module into the app
+(`path: "."` + symlink) while a nested package tests it in isolation, and
+why that beats a separate `DanTermCore` module.
 
 ## Build
 
@@ -300,6 +344,7 @@ See [docs/ci.md](docs/ci.md) for details on secrets, signing, and troubleshootin
 
 - [docs/design/index.md](docs/design/index.md) -- ADR-style design-decision index.
 - [docs/design/2026-03-05-display-scaling.md](docs/design/2026-03-05-display-scaling.md) -- Display scaling (HiDPI/Retina), content scale invariants, zero-frame guards.
+- [docs/design/2026-05-28-core-module-via-symlink.md](docs/design/2026-05-28-core-module-via-symlink.md) -- Pure core compiled same-module via symlink, tested via nested SwiftPM package.
 
 ## Operational Docs
 
