@@ -4,22 +4,20 @@ How to update the pinned Ghostty version used by DanTerm.
 
 ## Places to update
 
-There are four files that reference the Ghostty tag:
+The Ghostty tag has one source of truth:
 
 | File | What to change |
 |------|---------------|
-| `build-lib.sh` | `GHOSTTY_TAG="v1.3.0"` (line 22) |
-| `.github/workflows/ci.yml` | `GHOSTTY_TAG: v1.3.0` in the `env:` block |
-| `.github/workflows/release-stable.yml` | `GHOSTTY_TAG: v1.3.0` in the `env:` block |
-| `docs/ci.md` | Pinned versions section |
+| `.ghostty-version` | Replace the single `vX.Y.Z` line |
 
 If the new Ghostty version requires a different Zig version, also update:
 
 | File | What to change |
 |------|---------------|
-| `build-lib.sh` | `ZIG_PKG="nixpkgs#zig_0_15"` (line 23) |
+| `build-lib.sh` | `ZIG_PKG="nixpkgs#zig_0_15"` |
 | `.github/workflows/ci.yml` | `version: 0.15.2` in the `mlugg/setup-zig` step |
 | `.github/workflows/release-stable.yml` | Same `mlugg/setup-zig` step |
+| `.github/workflows/cache-ghosttykit.yml` | Same `mlugg/setup-zig` step |
 | `docs/ci.md` | Pinned versions section |
 
 ## Steps
@@ -33,21 +31,25 @@ If the new Ghostty version requires a different Zig version, also update:
    the app mailbox, so no push path should enqueue an early-returning
    `App.Message` such as `.quit`.
 
-2. **Update all four tag references** listed above.
-
-3. **Rebuild locally:**
+2. **Update `.ghostty-version`** to the new tag:
 
    ```bash
-   ./build-lib.sh
-   just build
+   echo v1.4.0 > .ghostty-version
    ```
 
-   This clones the new tag into `.ghostty-src/`, builds GhosttyKit, and compiles
-   the Swift app against it. Fix any build errors from API changes.
-
-4. **Run tests:**
+3. **Rebuild GhosttyKit locally:**
 
    ```bash
+   just build-lib
+   ```
+
+   This clones the new tag into `.ghostty-src/` and builds GhosttyKit. Fix any
+   build errors from upstream API changes.
+
+4. **Build the app and run tests:**
+
+   ```bash
+   just build
    just test
    ```
 
@@ -59,9 +61,11 @@ If the new Ghostty version requires a different Zig version, also update:
 
 ## CI cache
 
-Both workflows cache `lib/GhosttyKit.xcframework` and `lib/ghostty-themes`
-using `actions/cache@v5`. The cache key includes the Ghostty tag, so upgrading
-the tag automatically invalidates the cache:
+The CI, release, and cache-warmer workflows cache `lib/GhosttyKit.xcframework`
+and `lib/ghostty-themes` using `actions/cache@v5`. Each workflow loads the tag
+from `.ghostty-version` through `scripts/load-ghostty-version.sh`. The cache key
+includes the validated tag, so upgrading the tag automatically invalidates the
+cache:
 
 ```
 ghosttykit-v2-{GHOSTTY_TAG}-{hash of build-lib.sh}-{runner.os}-{runner.arch}
@@ -72,10 +76,11 @@ subsequent runs on the same tag hit the cache and skip the build.
 
 ### Warming the cache
 
-The CI and release workflows share the same cache key format, so a cache
-populated by a CI run is reused by the release workflow (and vice versa). After
-merging the upgrade PR, the cache is already warm from the PR's CI run. No extra
-steps needed.
+The CI, release, and cache-warmer workflows share the same cache key format, so
+a cache populated by one workflow is reused by the others where GitHub's cache
+scope allows it. After merging the upgrade PR,
+`.github/workflows/cache-ghosttykit.yml` also runs on master because
+`.ghostty-version` is part of its path trigger. No extra steps are needed.
 
 ### Cache invalidation
 

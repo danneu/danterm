@@ -185,11 +185,12 @@ They are compiled twice by independent SwiftPM builds:
   `DanTerm` executable or GhosttyKit, so a core file that adds an app-only
   symbol or `import GhosttyKit` fails to compile under `swift test`.
 
-`just test` runs the protocol XCTest suite, the core Swift Testing suite, and
-the local **core-purity lint** (`scripts/core-purity-lint.sh`) that forbids
-`import Cocoa`/`AppKit`/`SwiftUI` in `lib/DanTermCore/Sources/DanTermCore`.
-The lint is R1's only guard against Cocoa creep (the nested package alone
-can't catch system-framework imports), and its self-test
+`just test` runs the protocol XCTest suite, the core Swift Testing suite, the
+local **core-purity lint** (`scripts/core-purity-lint.sh`) that forbids
+`import Cocoa`/`AppKit`/`SwiftUI` in `lib/DanTermCore/Sources/DanTermCore`, and
+the shell self-tests for the lint, Ghostty version validator, and build-lib
+stale-source guard. The lint is R1's only guard against Cocoa creep (the nested
+package alone can't catch system-framework imports), and its self-test
 (`scripts/tests/core-purity-lint_test.sh`) pins the regex's edge cases.
 
 See [docs/design/2026-05-28-core-module-via-symlink.md](docs/design/2026-05-28-core-module-via-symlink.md)
@@ -232,7 +233,7 @@ with the production `DanTerm.app` without conflicts.
 
 ### Tests
 
-`just test` is the local gate. It runs four steps in order:
+`just test` is the local gate. It runs six steps in order:
 
 - `swift test --package-path lib/DanTermProtocol --filter DanTermProtocolTests`
   -- the protocol XCTest suite (CLI parser, IPC envelope).
@@ -242,6 +243,10 @@ with the production `DanTerm.app` without conflicts.
   in `lib/DanTermCore/Sources/DanTermCore` (the nested package alone can't
   catch system-framework imports).
 - `./scripts/tests/core-purity-lint_test.sh` -- self-test for the lint above.
+- `./scripts/tests/load-ghostty-version_test.sh` -- self-test for the single
+  Ghostty version validator.
+- `./scripts/tests/build-lib-stale-guard_test.sh` -- self-test for the
+  build-lib stale-source guard.
 
 Targeted runs:
 
@@ -264,7 +269,7 @@ verify the test passes.
 
 ### build-lib.sh
 
-- Clones Ghostty at a pinned tag (currently v1.3.0)
+- Clones Ghostty at the tag pinned via `.ghostty-version`
 - Builds with: `nix shell nixpkgs#zig_0_15 nixpkgs#gettext --command zig build`
 - Flags: `-Demit-xcframework -Demit-macos-app=false -Dsentry=false -Doptimize=ReleaseFast`
 - XCFramework output path is `lib/GhosttyKit.xcframework/` (NOT `zig-out/`)

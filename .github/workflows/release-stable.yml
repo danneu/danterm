@@ -9,7 +9,6 @@ env:
   APP_NAME: DanTerm
   BUNDLE_ID: com.danneu.danterm
   EXECUTABLE: DanTerm
-  GHOSTTY_TAG: v1.3.0
 
 jobs:
   release:
@@ -21,6 +20,13 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      - name: Load Ghostty version
+        id: ghostty-version
+        run: |
+          GHOSTTY_TAG=$(./scripts/load-ghostty-version.sh)
+          echo "GHOSTTY_TAG=$GHOSTTY_TAG" >> "$GITHUB_ENV"
+          echo "tag=$GHOSTTY_TAG" >> "$GITHUB_OUTPUT"
 
       - uses: DeterminateSystems/nix-installer-action@v22
 
@@ -37,7 +43,7 @@ jobs:
 
       - name: Clone Ghostty source
         run: |
-          git clone --depth 1 --branch ${{ env.GHOSTTY_TAG }} https://github.com/ghostty-org/ghostty.git .ghostty-src
+          git clone --depth 1 --branch "$GHOSTTY_TAG" https://github.com/ghostty-org/ghostty.git .ghostty-src
 
       - name: Cache GhosttyKit
         id: cache-ghosttykit
@@ -46,7 +52,7 @@ jobs:
           path: |
             lib/GhosttyKit.xcframework
             lib/ghostty-themes
-          key: ghosttykit-v2-${{ env.GHOSTTY_TAG }}-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
+          key: ghosttykit-v2-${{ steps.ghostty-version.outputs.tag }}-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
 
       - name: Build GhosttyKit
         if: steps.cache-ghosttykit.outputs.cache-hit != 'true'

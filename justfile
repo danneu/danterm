@@ -8,6 +8,14 @@ default:
 clean:
     rm -rf .spm-build .build
 
+# Clone/fetch Ghostty source for reference (no xcframework build).
+fetch-ghostty:
+    ./build-lib.sh fetch
+
+# Fetch Ghostty source and build the GhosttyKit xcframework.
+build-lib:
+    ./build-lib.sh
+
 # Compile Icon Composer .icon files into Assets.car
 build-icons:
     ./icon/gen-dev-icon.sh
@@ -23,6 +31,8 @@ test:
     swift test --package-path lib/DanTermCore
     ./scripts/core-purity-lint.sh
     ./scripts/tests/core-purity-lint_test.sh
+    ./scripts/tests/load-ghostty-version_test.sh
+    ./scripts/tests/build-lib-stale-guard_test.sh
 
 # Run UI tests (AppKit, requires display)
 test-ui:

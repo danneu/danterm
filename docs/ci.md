@@ -29,10 +29,11 @@ just version         # show current version
 
 ## Pinned versions
 
-- **Ghostty `v1.3.0`** — set via `GHOSTTY_TAG` env var in each workflow
-- **Zig `0.15.2`** — set in the `mlugg/setup-zig` action (Ghostty v1.3.x requires Zig 0.15)
+- **Ghostty** -- pinned in `.ghostty-version` and loaded by each workflow through `scripts/load-ghostty-version.sh`
+- **Zig `0.15.2`** -- set in the `mlugg/setup-zig` action (Ghostty v1.3.x requires Zig 0.15)
 
-When upgrading Ghostty, update both `GHOSTTY_TAG` in the workflows and potentially the Zig version if the new Ghostty requires it.
+When upgrading Ghostty, edit `.ghostty-version` and potentially the Zig version
+if the new Ghostty requires it.
 
 ## Runner requirements
 

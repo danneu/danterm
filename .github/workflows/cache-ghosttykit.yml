@@ -8,6 +8,7 @@ on:
   push:
     branches: [master]
     paths:
+      - '.ghostty-version'
       - 'build-lib.sh'
       - '.github/workflows/cache-ghosttykit.yml'
       - '.github/workflows/ci.yml'
@@ -16,14 +17,18 @@ on:
   # Allow manual trigger to seed the cache
   workflow_dispatch:
 
-env:
-  GHOSTTY_TAG: v1.3.0
-
 jobs:
   cache:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
+
+      - name: Load Ghostty version
+        id: ghostty-version
+        run: |
+          GHOSTTY_TAG=$(./scripts/load-ghostty-version.sh)
+          echo "GHOSTTY_TAG=$GHOSTTY_TAG" >> "$GITHUB_ENV"
+          echo "tag=$GHOSTTY_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Cache GhosttyKit
         id: cache-ghosttykit
@@ -32,7 +37,7 @@ jobs:
           path: |
             lib/GhosttyKit.xcframework
             lib/ghostty-themes
-          key: ghosttykit-v2-${{ env.GHOSTTY_TAG }}-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
+          key: ghosttykit-v2-${{ steps.ghostty-version.outputs.tag }}-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
 
       - uses: mlugg/setup-zig@v2
         if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
@@ -42,7 +47,7 @@ jobs:
       - name: Clone Ghostty source
         if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
         run: |
-          git clone --depth 1 --branch ${{ env.GHOSTTY_TAG }} https://github.com/ghostty-org/ghostty.git .ghostty-src
+          git clone --depth 1 --branch "$GHOSTTY_TAG" https://github.com/ghostty-org/ghostty.git .ghostty-src
 
       - name: Build GhosttyKit
         if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
