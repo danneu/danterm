@@ -18,50 +18,24 @@ Model and update logic are pure and fully unit-testable without Cocoa or
 GhosttyKit.
 
 ```
-app/
-├── main.swift              # Entry point: ghostty_init, NSApp setup
-├── AppDelegate.swift       # Window creation, menu bar, notification delegate
-├── AppRuntime.swift        # Holds model + surfaces, dispatches Msg, performs Commands
-├── Model.swift             # AppModel, TypedId<Tag>, model structs, snapshot validation
-├── Msg.swift               # All messages (user actions, ghostty callbacks, lifecycle)
-├── Command.swift           # Commands (side effects) update() returns; AppRuntime.perform runs them
-├── Update.swift            # Pure update function: (inout AppModel, Msg) -> [Command]
-├── ModelOperations.swift   # Pure model core: split-tree ops, AppModel queries, MRU/jump/event-protocol, tab color
-├── Projections.swift        # Pure view projections + diff (AppKit-free peer to Reconcile.swift)
-├── TabTodo.swift            # Pure tab-todo popover model: rows, drag/drop, reorder
-├── Persistence.swift        # Model <-> disk: snapshot/export, restore, checkpoints, session-lock, scrollback trunc
-├── DanTermConfig.swift     # User-facing config (init file, preferences)
-├── GhosttyApp.swift        # Wraps ghostty_app_t, runtime callbacks → Msg
-├── TerminalView.swift      # NSView subclass hosting ghostty_surface_t
-├── SplitContainerView.swift # Renders split tree as nested NSSplitViews
-├── SidebarView.swift       # NSOutlineView sidebar: tabs, groups, drag/drop
-├── ...                     # Pane views, drag/drop, search, themes, preferences, window chrome
-└── Info.plist              # App bundle metadata
+app/                              # App target (root Package.swift, path: "app").
+├── main.swift, AppDelegate.swift, AppRuntime.swift, GhosttyApp.swift, TerminalView.swift,
+│   SplitContainerView.swift, SidebarView.swift, Reconcile.swift, ...   # AppKit + GhosttyKit
+├── DanTermCore -> ../lib/DanTermCore/Sources/DanTermCore   # tracked symlink; the pure core
+│                                                          # is compiled same-module into the app
+│                                                          # target (no `import DanTermCore`).
+└── Info.plist
 
-lib/DanTermCore/
-├── Package.swift                       # Nested SwiftPM manifest: library + Swift Testing test target.
-├── Sources/DanTermCore/                # The 22 pure files; the root app target picks them up via
-│                                       # the tracked `app/DanTermCore` symlink, AND they are compiled
-│                                       # standalone as `DanTermCore` here. See docs/design/.
-└── Tests/DanTermCoreTests/             # Swift Testing suites (auto-discovered).
-    ├── TestSupport.swift              # Shared fixtures (makeModel, createTab, hasEffect,
-    │                                  # paneSnapshot helpers, makeMruModel).
-    ├── Update*Tests.swift             # Tests for each Msg domain (tab, pane, ghostty, group,
-    │                                  # lifecycle, search, theme, alert, preferences, remote,
-    │                                  # mru, jump, ipc, todo, tab-todo).
-    ├── ModelOperationsTests.swift     # Split tree + every desired* projection.
-    ├── SnapshotTests.swift            # Init file decode/validate.
-    └── ...                            # Config, scrollbar math, drag/drop, theme parsing, export,
-                                       # checkpoint (recovery-path seam), sidebar, switcher events,
-                                       # todo popover state, custom title, IPC connection,
-                                       # CLI path installer, pane toolbar, etc.
+lib/
+├── DanTermCore/                  # Pure model/update, no AppKit/GhosttyKit. Same files as the
+│   ├── Sources/DanTermCore/      # symlink above; compiled standalone here for tests:
+│   │                             #   Model.swift, Msg.swift, Command.swift, Update.swift,
+│   │                             #   ModelOperations.swift, Projections.swift, Persistence.swift,
+│   │                             #   TabTodo.swift, DanTermConfig.swift, ...
+│   └── Tests/DanTermCoreTests/   # Swift Testing suites (auto-discovered).
+└── DanTermProtocol/              # CLI parser + IPC envelope, shared by app/ and cli/.
 
-docs/
-├── ci.md                   # CI/CD pipeline, code signing, notarization
-├── design/
-│   ├── index.md            # Design-decision index
-│   └── ...                 # ADR-style design notes
-└── upgrading-ghostty.md    # Upgrading Ghostty version, CI cache
+docs/design/                      # ADR-style design notes; index at docs/design/index.md.
 ```
 
 ### Data flow
@@ -88,9 +62,14 @@ typealias SplitId = TypedId<SplitTag>
 
 ## Code Style
 
-Every non-trivial method should have a comment explaining intent, not mechanics.
-For AppKit delegate/protocol methods, identify which protocol is being targeted
-so it's clear the method isn't just a custom addition.
+Comments explain intent -- purpose, invariants, ownership, call-site coupling --
+or non-obvious mechanics where the code itself isn't enough (a workaround, a
+subtle ordering, a tricky calculation). The default is no comment unless one
+justifies itself. Per-context gates -- file headers, declarations, tests -- are
+in the subsections below.
+
+For AppKit delegate/protocol methods, name the protocol being targeted so it's
+clear the method isn't just a custom addition:
 
 ```swift
 // NSSplitViewDelegate: called on divider double-click. We reset to 50/50 instead of collapsing.
@@ -108,7 +87,11 @@ fine for a small, focused file; for anything larger the block should convey:
 - what belongs in it — and, by implication, what does not
 - why it earns its own file
 
-Use `//`, not `///`: the header describes the file, not a declaration.
+Use `//`, not `///`: Swift has no file-level doc comment. A `///` block at the
+top of a file silently attaches to the next declaration below it (or to nothing
+if the file has none), so it would either misattribute the header or vanish
+from DocC and Quick Help entirely. The header describes the file, so it lives
+in `//`.
 
 ```swift
 // Before -- accurate, but undersells a hub file:
@@ -156,11 +139,10 @@ struct ViewLocalState { var sidebarRenameTarget: RenameTarget? }
 
 ### Test preambles
 
-Every individual test opens with a `//` preamble of three labeled sections. This
-applies to both test idioms: a Swift Testing `@Test("...") func ...` in the
-core package (`lib/DanTermCore/Tests/DanTermCoreTests/`, preamble at the top of
-the method body) and an XCTest `func testX()` in the protocol package
-(`lib/DanTermProtocol/Tests/`, preamble at the top of the method body too).
+Every individual test opens with a `//` preamble of three labeled sections at
+the top of the method body. Applies to both idioms: Swift Testing
+`@Test("...") func ...` in `lib/DanTermCore/Tests/` and XCTest `func testX()`
+in `lib/DanTermProtocol/Tests/` -- same shape in both.
 
 1. **Intent** — the behavior this test verifies.
 2. **Why it exists** — the risk it guards: a regression for a bug-fix test, or
@@ -171,8 +153,7 @@ the method body) and an XCTest `func testX()` in the protocol package
    TDD-first, so most tests are spec-first and legitimately have none.
 
 ```swift
-// Core Swift Testing (lib/DanTermCore/Tests/) -- a bug-fix test, so the
-// Scenario names the real incident:
+// A bug-fix test, so the Scenario names the real incident:
 @Test("movePane(.splitRight) threads the moved pane's payload through insertAtLeaf")
 func movePaneSplitRightThreadsPayload() {
     // Intent: moving a pane via .splitRight preserves the moved pane's full
@@ -183,18 +164,6 @@ func movePaneSplitRightThreadsPayload() {
     //   so dragging a pane to split-right wiped its cwd/theme/todos; this is the
     //   regression that fix is pinned against.
     var model = makeModel()
-    // ...
-}
-
-// XCTest (lib/DanTermProtocol/Tests/) -- a spec-first test, so the Scenario is
-// the behavior, no incident:
-func testTabNewParsesBackgroundFlag() throws {
-    // Intent: `--background` parses into params["background"] == .bool(true).
-    // Why it exists: pins the CLI -> JSON contract the app's IPC handler reads.
-    // Scenario: `danterm tab new --background` issued by an agent; the flag must
-    //   survive parsing so the new tab opens in the background. Spec-first -- no
-    //   incident to cite, and none should be invented.
-    let command = try parseCLI(["tab", "new", "--background"])
     // ...
 }
 ```
@@ -380,30 +349,6 @@ semantics, or parser error usage, update `integrations/danterm/SKILL.md` in the
 same change. Keep the skill's CLI API section and recipes synced with
 `cli/main.swift` and `lib/DanTermProtocol/Sources/DanTermProtocol/CLIParser.swift`
 so agent users see the current command contract.
-
-## Plan Review Protocol
-
-When reviewing a plan:
-
-- List findings ordered by severity.
-- For each finding: state issue, impact, and include one recommended fix.
-- Prescriptions must be singular: do not present multiple options in the report.
-- After listing findings, assess the overall plan viability.
-- If you think there's an even better + simpler + more robust solution, tell the
-  user so that they can consider pivoting to a new, better plan.
-
-Decision rule:
-
-- For each finding, consider the best resolutions and their trade-offs internally, then choose the best solution.
-- If multiple open-ended solutions exist, brainstorm with the user until one
-  solution is agreed.
-- After alignment, report only that agreed solution.
-
-Example (single finding):
-
-- High: Plan stores tab state in both `Model.tabs` and each `TerminalView`.
-  Impact: Dual source of truth causes state drift — closing a pane may leave stale entries in the tab list, leading to crashes on focus.
-  Recommended fix: Keep `Model.tabs` as the single source of truth; `TerminalView` should read tab state from the model, never cache it locally.
 
 ## Git commits
 
