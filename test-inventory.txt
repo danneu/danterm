@@ -1261,8 +1261,12 @@
   - unknown theme name preserved in snapshot round-trip
   - nil theme round-trips through snapshot
 
-## UpdateTodoTests -- PENDING
-# tests=57  expect=16  expectEqual=90  throwTF=0  TOTAL=106
+## UpdateTodoTests -- MIGRATED (Wave D)
+# baseline: tests=57 expect=16 expectEqual=90 throwTF=0 TOTAL=106
+# new:      @Test=57 #expect=106 expectNoDifference=0 #require=0 Issue.record=0 TOTAL=106
+# delta:    0 (two reconcileTodoPopover tests retain nested check() helpers with two
+#            label invocations -- non-throwing in Swift Testing since #expect doesn't throw)
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/UpdateTodoTests.swift
   - addTodo creates item with correct text and isDone false
   - addTodo trims whitespace
   - addTodo rejects empty and whitespace-only text
