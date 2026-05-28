@@ -596,3 +596,39 @@ follow-up.
   https://forums.swift.org/t/unit-testing-executable-targets-with-swift-package-manager/44860
 - `swift-custom-dump` `expectNoDifference` (works with XCTest and Swift Testing):
   https://github.com/pointfreeco/swift-custom-dump
+
+## Implementation notes
+
+Implemented through Phase 3 on `refactor-tests`; Phase 4 CI / optional
+consolidation work was deliberately left out of scope.
+
+Notable divergences from the plan:
+
+- The planned root-manifest `path: "."` design was rejected during Phase 0. With
+  the project's `--build-path .spm-build`, no-op incremental app rebuilds failed
+  with SwiftPM's `unknown build description`. The shipped design keeps the root
+  app target at `path: "app"` and tracks `app/DanTermCore` as a symlink to
+  `../lib/DanTermCore/Sources/DanTermCore`. This preserves the same-module app
+  integration and zero access-control churn without the `path: "."` exclude-list
+  problem.
+- The moved pure source set includes `Debouncer.swift` and the migrated suite
+  includes `DebouncerTests.swift`. The plan said 22 pure files, but the legacy
+  `test.sh` compile closure also included Debouncer; omitting it would have
+  orphaned that suite at cutover.
+- `.gitignore` was narrowed from ignoring all of `lib/` to ignoring `lib/*` with
+  explicit negations for `lib/DanTermProtocol/` and `lib/DanTermCore/`. This keeps
+  `lib/GhosttyKit.xcframework/` and `lib/ghostty-themes/` ignored while allowing
+  normal `git add` behavior for the source packages.
+- `CheckpointTests` added the planned defaulted `recoveryDir:` seam on the
+  session-lock helpers and logged the only intentional assertion strengthening:
+  on-disk checks that the temp `session.json` is created and then deleted.
+
+Final local verification reported green:
+
+- `swift test --package-path lib/DanTermCore` -- 1068 Swift Testing cases.
+- `swift test --package-path lib/DanTermProtocol --filter DanTermProtocolTests`.
+- `./scripts/core-purity-lint.sh`.
+- `./scripts/tests/core-purity-lint_test.sh`.
+- `just test`.
+- `just build`.
+- `./test-ui.sh`.
