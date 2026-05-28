@@ -1,0 +1,1437 @@
+// Swift Testing migration of the legacy `tests/UpdateTabTests.swift` harness
+// suite. Pins the tab-domain Msg paths: createTab (including inGroupId /
+// background / .afterTab / .atGroupEnd positions and cwd inheritance),
+// selectTab (selection + bell/alert-clear semantics in focus vs manual modes,
+// plus collapsed-group handling), selectAdjacentTab wrap rules,
+// requestCloseTab / closeTab / cancelCloseTab confirmation gating, the
+// batch requestCloseTabs / confirmCloseTabs / cancelCloseTabs paths (dedup,
+// stale filtering, isQuit, checkpoint + terminate sequencing), and the
+// setTabColor / setTabColors batch behavior. The dispatcher `closeTabs`
+// confirmation helpers and the `effectCount`/`isTerminateEffect` shape probes
+// move beside the suite as private file-scope helpers.
+import Foundation
+import Testing
+
+@testable import DanTermCore
+
+@Suite struct UpdateTabTests {
+    @Test("testCreateTabAddsToDefaultGroup")
+    func testCreateTabAddsToDefaultGroup() {
+        // Intent: createTab adds a tab to the default group, picks a single
+        //   pane id, selects it, and emits exactly the createSurface command
+        //   for that pane.
+        // Why it exists: pins the happy path the foreground tab UI relies on
+        //   end to end (model selection + downstream surface creation).
+        // Scenario: spec-first first-tab check.
+        var model = makeModel()
+        let commands = createTab(&model)
+
+        #expect(model.groups[0].tabs.count == 1)
+        #expect(model.allPaneIds.count == 1)
+        #expect(model.selectedTabId == model.groups[0].tabs[0].id)
+        #expect(hasEffect(commands) {
+            if case .createSurface = $0 { return true }
+            return false
+        }, "should emit createSurface")
+    }
+
+    @Test("testCreateTabBackgroundDoesNotChangeSelection")
+    func testCreateTabBackgroundDoesNotChangeSelection() {
+        // Intent: a background createTab grows the tab list and emits a
+        //   createSurface for the new pane while leaving selection and the
+        //   prior pane's focus alone.
+        // Why it exists: pins the background-tab invariant against
+        //   accidental selection-steal regressions.
+        // Scenario: spec-first background create -- start with one tab,
+        //   create a second in background.
+        var model = makeModel()
+        createTab(&model)
+        let selectedTabId = model.groups[0].tabs[0].id
+        let selectedPaneId = model.groups[0].tabs[0].focusedPaneId
+        let beforePaneIds = Set(model.allPaneIds)
+
+        let commands = createTab(&model, background: true)
+        let newPaneIds = Set(model.allPaneIds).subtracting(beforePaneIds)
+
+        #expect(model.groups[0].tabs.count == 2)
+        #expect(model.selectedTabId == selectedTabId, "background tab should not steal selection")
+        #expect(newPaneIds.count == 1, "background tab should create one pane")
+        #expect(hasEffect(commands) {
+            if case .createSurface(let paneId, _, _, _, _) = $0 {
+                return newPaneIds.contains(paneId)
+            }
+            return false
+        }, "should emit createSurface for new pane")
+        #expect(!hasEffect(commands) {
+            if case .focusSurface(let paneId, false) = $0, paneId == selectedPaneId { return true }
+            return false
+        }, "should not defocus selected pane")
+    }
+
+    @Test("testCreateTabInheritsWorkingDirectory")
+    func testCreateTabInheritsWorkingDirectory() {
+        // Intent: a new tab's surface inherits the cwd from the currently
+        //   focused pane.
+        // Why it exists: pins the cwd-propagation rule that keeps new tabs
+        //   anchored to the user's current directory.
+        // Scenario: spec-first cwd inherit -- first pane has cwd "/tmp/test";
+        //   second createTab's surface command carries the same cwd.
+        var model = makeModel()
+        createTab(&model)
+        let firstPaneId = model.groups[0].tabs[0].focusedPaneId
+        model.updatePane(firstPaneId) { $0.cwd = "/tmp/test" }
+        let commands = createTab(&model)
+        let createEffect = commands.first(where: {
+            if case .createSurface = $0 { return true }
+            return false
+        })
+        #expect(createEffect != nil, "should have createSurface command")
+        if case .createSurface(_, let cwd, _, _, _) = createEffect! {
+            #expect(cwd == "/tmp/test", "cwd should inherit")
+        }
+    }
+
+    @Test("testSelectTabDefocusesOldPanes")
+    func testSelectTabDefocusesOldPanes() {
+        // Intent: selectTab emits a focusSurface(_:false) for the
+        //   previously-selected tab's pane.
+        // Why it exists: pins the defocus side effect the runtime relies on
+        //   to keep the prior pane's caret from racing the new selection.
+        // Scenario: spec-first defocus -- select first tab from second
+        //   defocuses second tab's pane.
+        var model = makeModel()
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+
+        createTab(&model)
+
+        let commands = update(&model, .selectTab(id: firstTabId))
+
+        let secondPaneId = model.groups[0].tabs[1].focusedPaneId
+        #expect(hasEffect(commands) {
+            if case .focusSurface(let pid, false) = $0, pid == secondPaneId { return true }
+            return false
+        }, "should defocus second tab's pane")
+        #expect(model.selectedTabId == firstTabId)
+    }
+
+    @Test("testSelectTabSwitchesSelection")
+    func testSelectTabSwitchesSelection() {
+        // Intent: selectTab updates model.selectedTabId.
+        // Why it exists: pins the model mutation that drives downstream
+        //   structural rebuilds (reconcileContainers).
+        // Scenario: spec-first selection swap.
+        var model = makeModel()
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        createTab(&model)
+
+        update(&model, .selectTab(id: firstTabId))
+
+        #expect(model.selectedTabId == firstTabId, "model selection should change")
+    }
+
+    @Test("testSelectTabClearsBell")
+    func testSelectTabClearsBell() {
+        // Intent: selecting a tab with an unread bell alert on its focused
+        //   pane marks that alert read (default clear mode).
+        // Why it exists: pins the "selecting clears the bell" rule the
+        //   default settings expose.
+        // Scenario: spec-first default-clear -- tab B's pane has an unread
+        //   bell; selecting tab B marks it read.
+        var model = makeModel()
+        createTab(&model)
+        let tabAId = model.groups[0].tabs[0].id
+        createTab(&model)
+        let tabBId = model.groups[0].tabs[1].id
+        let tabBPaneId = model.groups[0].tabs[1].focusedPaneId
+
+        update(&model, .selectTab(id: tabAId))
+
+        update(&model, .surfaceBell(paneId: tabBPaneId))
+        #expect(model.alerts.contains { $0.paneId == tabBPaneId && $0.isUnread }, "should have unread alert on background pane")
+
+        update(&model, .selectTab(id: tabBId))
+        #expect(!model.alerts.contains { $0.paneId == tabBPaneId && $0.isUnread }, "selecting tab should mark alerts read")
+    }
+
+    @Test("testSelectTabFocusModeMarksFocusedPaneAlertsRead")
+    func testSelectTabFocusModeMarksFocusedPaneAlertsRead() {
+        // Intent: in focus clear mode, selecting a tab marks only the
+        //   focused pane's alerts read.
+        // Why it exists: pins the per-pane scope of focus mode against the
+        //   tab-wide scope of the default mode.
+        // Scenario: spec-first focus mode -- pre-insert an unread alert on
+        //   tab B's focused pane; selecting tab B marks it read.
+        var model = makeModel()
+        model.config.alertClearMode = .focus
+        createTab(&model)
+        let tabAId = model.groups[0].tabs[0].id
+        createTab(&model)
+        let tabBId = model.groups[0].tabs[1].id
+        let tabBPaneId = model.groups[0].tabs[1].focusedPaneId
+
+        update(&model, .selectTab(id: tabAId))
+
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: tabBPaneId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        update(&model, .selectTab(id: tabBId))
+
+        #expect(model.alerts[0].isUnread == false,
+            "focus-mode selection should mark focused pane alerts read")
+        #expect(model.selectedTabId == tabBId)
+    }
+
+    @Test("testSelectTabFocusModeMarksAlertReadInCollapsedGroup")
+    func testSelectTabFocusModeMarksAlertReadInCollapsedGroup() {
+        // Intent: focus-mode selection still marks the focused pane's
+        //   alerts read when the destination tab lives in a collapsed
+        //   group.
+        // Why it exists: pins the cross-group focus-mode rule (collapse
+        //   is a view concern; clear logic operates on the model).
+        // Scenario: spec-first collapse + focus -- collapse a Work group
+        //   with one tab + alert; select that tab; alert clears.
+        var model = makeModel()
+        model.config.alertClearMode = .focus
+        createTab(&model)
+        let generalTabId = model.groups[0].tabs[0].id
+        update(&model, .createGroup(name: "Work"))
+        let workGroupId = model.groups[1].id
+        let workTabId = model.groups[1].tabs[0].id
+        let workPaneId = model.groups[1].tabs[0].focusedPaneId
+        update(&model, .selectTab(id: generalTabId))
+        update(&model, .toggleGroupCollapse(groupId: workGroupId))
+
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: workPaneId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        update(&model, .selectTab(id: workTabId))
+
+        #expect(!model.alerts.contains { $0.paneId == workPaneId && $0.isUnread },
+            "focus-mode selection should mark the focused pane's alert read")
+        #expect(model.selectedTabId == workTabId)
+    }
+
+    @Test("testCloseLastPaneShowsConfirmation")
+    func testCloseLastPaneShowsConfirmation() {
+        // Intent: closing the only pane in the only tab flips
+        //   pendingConfirmation to .terminate and leaves the model
+        //   unchanged.
+        // Why it exists: pins the last-pane confirmation gate the runtime
+        //   reads to display the quit panel.
+        // Scenario: spec-first last-pane close.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+
+        let commands = update(&model, .closePane(paneId: paneId))
+        #expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
+        #expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
+        #expect(model.groups[0].tabs.count == 1, "model should be unchanged")
+        #expect(model.pane(paneId) != nil, "pane should still exist")
+    }
+
+    @Test("testCloseLastTabShowsConfirmation")
+    func testCloseLastTabShowsConfirmation() {
+        // Intent: closeTab on the only tab flips pendingConfirmation to
+        //   .terminate without mutating the model.
+        // Why it exists: pins the symmetric tab-level last-confirmation
+        //   gate.
+        // Scenario: spec-first last-tab close.
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+
+        let commands = update(&model, .closeTab(id: tabId))
+        #expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
+        #expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
+        #expect(model.groups[0].tabs.count == 1, "model should be unchanged")
+    }
+
+    @Test("testCreateTabInSpecificGroup")
+    func testCreateTabInSpecificGroup() {
+        // Intent: createTab honors an explicit inGroupId, placing the new
+        //   tab in the requested group.
+        // Why it exists: pins the IPC / context-menu routing that lets
+        //   callers target a specific group.
+        // Scenario: spec-first targeted create -- create Work group, then
+        //   add a tab into Work.
+        var model = makeModel()
+        let _ = update(&model, .createGroup(name: "Work"))
+        let workGroupId = model.groups[1].id
+
+        createTab(&model, inGroupId: workGroupId)
+
+        #expect(model.groups[0].tabs.count == 0, "General should have no tabs")
+        #expect(model.groups[1].tabs.count == 2, "Work should have auto-created tab + explicit tab")
+    }
+
+    @Test("testCreateTabBackgroundIntoSpecificGroup")
+    func testCreateTabBackgroundIntoSpecificGroup() {
+        // Intent: an inGroupId + background create lands in the requested
+        //   group without taking selection.
+        // Why it exists: pins the cross-cutting routing + background combo.
+        // Scenario: spec-first background-into-group.
+        var model = makeModel()
+        createTab(&model)
+        let selectedTabId = model.selectedTabId!
+        let _ = update(&model, .createGroup(name: "Work"))
+        let workGroupId = model.groups[1].id
+        let workCountBefore = model.groups[1].tabs.count
+        _ = update(&model, .selectTab(id: selectedTabId))
+
+        createTab(&model, inGroupId: workGroupId, background: true)
+
+        #expect(model.groups[1].tabs.count == workCountBefore + 1, "background tab should land in requested group")
+        #expect(model.selectedTabId == selectedTabId, "background tab should not change selection")
+    }
+
+    @Test("testCreateTabInsertsAfterCurrentTab")
+    func testCreateTabInsertsAfterCurrentTab() {
+        // Intent: createTab inserts the new tab immediately after the
+        //   currently-selected tab.
+        // Why it exists: pins the "insert after current" rule the tab bar
+        //   reorders depend on.
+        // Scenario: spec-first insert -- 3 tabs, select A, create D ->
+        //   [A, D, B, C].
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        createTab(&model)
+        let tabAId = model.groups[0].tabs[0].id
+        let tabBId = model.groups[0].tabs[1].id
+        let tabCId = model.groups[0].tabs[2].id
+
+        update(&model, .selectTab(id: tabAId))
+        createTab(&model)
+        let tabDId = model.groups[0].tabs[1].id
+
+        #expect(model.groups[0].tabs.count == 4)
+        #expect(model.groups[0].tabs[0].id == tabAId, "tab A should be first")
+        #expect(model.groups[0].tabs[1].id == tabDId, "new tab D should be after A")
+        #expect(model.groups[0].tabs[2].id == tabBId, "tab B should shift right")
+        #expect(model.groups[0].tabs[3].id == tabCId, "tab C should shift right")
+    }
+
+    @Test("testCreateTabAtGroupEndAppendsRegardlessOfSelection")
+    func testCreateTabAtGroupEndAppendsRegardlessOfSelection() {
+        // Intent: position: .atGroupEnd appends to the end of the group
+        //   regardless of which tab is selected.
+        // Why it exists: pins the explicit-append position override.
+        // Scenario: spec-first append-override -- 3 tabs A/B/C, select B,
+        //   atGroupEnd lands tab D at index 3.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        createTab(&model)
+        let tabAId = model.groups[0].tabs[0].id
+        let tabBId = model.groups[0].tabs[1].id
+        let tabCId = model.groups[0].tabs[2].id
+
+        update(&model, .selectTab(id: tabBId))
+        update(&model, .createTab(inGroupId: nil, position: .atGroupEnd))
+        let tabDId = model.groups[0].tabs[3].id
+
+        #expect(model.groups[0].tabs.count == 4)
+        #expect(model.groups[0].tabs[0].id == tabAId, "tab A stays first")
+        #expect(model.groups[0].tabs[1].id == tabBId, "tab B keeps its slot")
+        #expect(model.groups[0].tabs[2].id == tabCId, "tab C keeps its slot")
+        #expect(model.groups[0].tabs[3].id == tabDId, "new tab lands at end")
+        #expect(model.selectedTabId == tabDId, "newly created tab is selected")
+    }
+
+    @Test("testCreateTabAtGroupEndUsesSelectedTabsGroupWhenNoneSpecified")
+    func testCreateTabAtGroupEndUsesSelectedTabsGroupWhenNoneSpecified() {
+        // Intent: atGroupEnd with inGroupId nil resolves to the selected
+        //   tab's group and appends there.
+        // Why it exists: pins the implicit-group-resolution rule.
+        // Scenario: spec-first implicit-group -- Work group with three
+        //   tabs, select middle, atGroupEnd appends to Work.
+        var model = makeModel()
+        update(&model, .createGroup(name: "Work"))
+        let workGroupId = model.groups[1].id
+        update(&model, .createTab(inGroupId: workGroupId))
+        update(&model, .createTab(inGroupId: workGroupId))
+        let workTab1 = model.groups[1].tabs[0].id
+        let workTab2 = model.groups[1].tabs[1].id
+
+        update(&model, .selectTab(id: workTab2))
+        update(&model, .createTab(inGroupId: nil, position: .atGroupEnd))
+
+        #expect(model.groups[0].tabs.count == 0, "default group untouched")
+        #expect(model.groups[1].tabs.count == 4, "work group grows by one")
+        #expect(model.groups[1].tabs[0].id == workTab1, "first work tab unchanged")
+        #expect(model.groups[1].tabs[1].id == workTab2, "selected work tab unchanged")
+        #expect(model.groups[1].tabs.last?.id == model.selectedTabId, "new tab is last and selected")
+    }
+
+    @Test("testCreateTabAfterTabInTargetGroupInsertsAfterReference")
+    func testCreateTabAfterTabInTargetGroupInsertsAfterReference() {
+        // Intent: position: .afterTab(ref) places the new tab right
+        //   after the referenced tab.
+        // Why it exists: pins the explicit-reference insertion the IPC
+        //   surfaces.
+        // Scenario: spec-first afterTab -- A/B/C, create after A ->
+        //   [A, D, B, C].
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        createTab(&model)
+        let tabAId = model.groups[0].tabs[0].id
+        let tabBId = model.groups[0].tabs[1].id
+        let tabCId = model.groups[0].tabs[2].id
+
+        update(&model, .createTab(inGroupId: nil, position: .afterTab(tabAId)))
+        let tabDId = model.groups[0].tabs[1].id
+
+        #expect(model.groups[0].tabs.map(\.id) == [tabAId, tabDId, tabBId, tabCId])
+        #expect(model.selectedTabId == tabDId, "newly created tab is selected")
+    }
+
+    @Test("testCreateTabAfterTabFromDifferentGroupAppendsToTargetGroup")
+    func testCreateTabAfterTabFromDifferentGroupAppendsToTargetGroup() {
+        // Intent: when afterTab refers to a tab in a different group than
+        //   the requested inGroupId, the new tab appends to the requested
+        //   group.
+        // Why it exists: pins the inGroupId-wins fallback so a stale or
+        //   cross-group reference doesn't escape the target group.
+        // Scenario: spec-first cross-group afterTab.
+        var model = makeModel()
+        createTab(&model)
+        let otherGroupRef = model.groups[0].tabs[0].id
+        _ = update(&model, .createGroup(name: "Work"))
+        let workGroupId = model.groups[1].id
+        update(&model, .createTab(inGroupId: workGroupId))
+        let workBefore = model.groups[1].tabs.map(\.id)
+
+        update(&model, .createTab(inGroupId: workGroupId, position: .afterTab(otherGroupRef)))
+        let newTabId = model.groups[1].tabs.last!.id
+
+        #expect(model.groups[1].tabs.map(\.id) == workBefore + [newTabId])
+        #expect(model.selectedTabId == newTabId, "newly created tab is selected")
+    }
+
+    @Test("testCreateTabAfterUnknownTabAppendsToTargetGroup")
+    func testCreateTabAfterUnknownTabAppendsToTargetGroup() {
+        // Intent: afterTab with an unknown reference appends to the
+        //   target group.
+        // Why it exists: pins the fail-open behavior so stale ids don't
+        //   raise errors or place the tab in the wrong group.
+        // Scenario: spec-first unknown-ref afterTab.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let before = model.groups[0].tabs.map(\.id)
+
+        update(&model, .createTab(inGroupId: nil, position: .afterTab(TabId())))
+        let newTabId = model.groups[0].tabs.last!.id
+
+        #expect(model.groups[0].tabs.map(\.id) == before + [newTabId])
+        #expect(model.selectedTabId == newTabId, "newly created tab is selected")
+    }
+
+    @Test("testSelectTabAlreadySelected")
+    func testSelectTabAlreadySelected() {
+        // Intent: selectTab on the already-selected tab returns no
+        //   commands.
+        // Why it exists: pins the idempotence guard.
+        // Scenario: spec-first idempotent select.
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+
+        let commands = update(&model, .selectTab(id: tabId))
+        #expect(commands.count == 0, "selecting already-selected tab should return no commands")
+    }
+
+    // MARK: - Adjacent Tab Navigation
+
+    @Test("testNextTabWithinSameGroup")
+    func testNextTabWithinSameGroup() {
+        // Intent: selectAdjacentTab(.next) moves selection to the next tab
+        //   in the same group.
+        // Why it exists: pins intra-group forward navigation.
+        // Scenario: spec-first next within group.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let secondTabId = model.groups[0].tabs[1].id
+        update(&model, .selectTab(id: firstTabId))
+
+        let commands = update(&model, .selectAdjacentTab(direction: .next))
+        #expect(model.selectedTabId == secondTabId)
+        #expect(commands.count > 0, "should have commands")
+    }
+
+    @Test("testPrevTabWithinSameGroup")
+    func testPrevTabWithinSameGroup() {
+        // Intent: selectAdjacentTab(.prev) moves selection to the previous
+        //   tab in the same group.
+        // Why it exists: pins intra-group backward navigation.
+        // Scenario: spec-first prev within group.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let secondTabId = model.groups[0].tabs[1].id
+        update(&model, .selectTab(id: secondTabId))
+
+        let commands = update(&model, .selectAdjacentTab(direction: .prev))
+        #expect(model.selectedTabId == firstTabId)
+        #expect(commands.count > 0, "should have commands")
+    }
+
+    @Test("testNextTabAcrossGroups")
+    func testNextTabAcrossGroups() {
+        // Intent: .next crosses group boundaries when no more tabs in the
+        //   current group.
+        // Why it exists: pins cross-group forward navigation.
+        // Scenario: spec-first next across groups.
+        var model = makeModel()
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .createGroup(name: "Work"))
+        let secondTabId = model.groups[1].tabs[0].id
+        update(&model, .selectTab(id: firstTabId))
+
+        let commands = update(&model, .selectAdjacentTab(direction: .next))
+        #expect(model.selectedTabId == secondTabId)
+        #expect(commands.count > 0, "should have commands")
+    }
+
+    @Test("testPrevTabAcrossGroups")
+    func testPrevTabAcrossGroups() {
+        // Intent: .prev crosses group boundaries when no more tabs in the
+        //   current group.
+        // Why it exists: pins cross-group backward navigation.
+        // Scenario: spec-first prev across groups.
+        var model = makeModel()
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .createGroup(name: "Work"))
+        let secondTabId = model.groups[1].tabs[0].id
+        update(&model, .selectTab(id: secondTabId))
+
+        let commands = update(&model, .selectAdjacentTab(direction: .prev))
+        #expect(model.selectedTabId == firstTabId)
+        #expect(commands.count > 0, "should have commands")
+    }
+
+    @Test("testNextTabNoOpWithSingleTab")
+    func testNextTabNoOpWithSingleTab() {
+        // Intent: with one tab, .next is a no-op (no wrap-to-self).
+        // Why it exists: pins the single-tab guard.
+        // Scenario: spec-first single-tab next.
+        var model = makeModel()
+        createTab(&model)
+        let lastTabId = model.groups[0].tabs[0].id
+
+        let commands = update(&model, .selectAdjacentTab(direction: .next))
+        #expect(commands.count == 0, "wrap to self should be no-op")
+        #expect(model.selectedTabId == lastTabId)
+    }
+
+    @Test("testPrevTabNoOpWithSingleTab")
+    func testPrevTabNoOpWithSingleTab() {
+        // Intent: with one tab, .prev is a no-op (no wrap-to-self).
+        // Why it exists: pins the single-tab guard for prev.
+        // Scenario: spec-first single-tab prev.
+        var model = makeModel()
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+
+        let commands = update(&model, .selectAdjacentTab(direction: .prev))
+        #expect(commands.count == 0, "wrap to self should be no-op")
+        #expect(model.selectedTabId == firstTabId)
+    }
+
+    @Test("testNextTabWrapsFromLastToFirst")
+    func testNextTabWrapsFromLastToFirst() {
+        // Intent: .next from the last tab wraps to the first.
+        // Why it exists: pins the wrap-around rule for next.
+        // Scenario: spec-first wrap next.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let lastTabId  = model.groups[0].tabs[1].id
+        update(&model, .selectTab(id: lastTabId))
+
+        let commands = update(&model, .selectAdjacentTab(direction: .next))
+        #expect(model.selectedTabId == firstTabId)
+        #expect(commands.count > 0, "should have commands")
+    }
+
+    @Test("testPrevTabWrapsFromFirstToLast")
+    func testPrevTabWrapsFromFirstToLast() {
+        // Intent: .prev from the first tab wraps to the last.
+        // Why it exists: pins the wrap-around rule for prev.
+        // Scenario: spec-first wrap prev.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let lastTabId  = model.groups[0].tabs[1].id
+        update(&model, .selectTab(id: firstTabId))
+
+        let commands = update(&model, .selectAdjacentTab(direction: .prev))
+        #expect(model.selectedTabId == lastTabId)
+        #expect(commands.count > 0, "should have commands")
+    }
+
+    @Test("testNextTabWrapsAcrossGroups")
+    func testNextTabWrapsAcrossGroups() {
+        // Intent: .next wrap reaches into the first tab of the first group.
+        // Why it exists: pins the global-wrap rule that bridges groups.
+        // Scenario: spec-first cross-group wrap next.
+        var model = makeModel()
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .createGroup(name: "Work"))
+        let lastTabId = model.groups[1].tabs[0].id
+        update(&model, .selectTab(id: lastTabId))
+
+        update(&model, .selectAdjacentTab(direction: .next))
+        #expect(model.selectedTabId == firstTabId)
+    }
+
+    @Test("testPrevTabWrapsAcrossGroups")
+    func testPrevTabWrapsAcrossGroups() {
+        // Intent: .prev wrap reaches into the last tab of the last group.
+        // Why it exists: pins the global-wrap rule that bridges groups.
+        // Scenario: spec-first cross-group wrap prev.
+        var model = makeModel()
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .createGroup(name: "Work"))
+        let lastTabId = model.groups[1].tabs[0].id
+        update(&model, .selectTab(id: firstTabId))
+
+        update(&model, .selectAdjacentTab(direction: .prev))
+        #expect(model.selectedTabId == lastTabId)
+    }
+
+    @Test("testPrevTabWrapsIntoCollapsedGroup")
+    func testPrevTabWrapsIntoCollapsedGroup() {
+        // Intent: wrap navigation reaches into collapsed groups (collapse
+        //   is a view concern; the wrap rule operates over the model).
+        // Why it exists: pins the "do not skip collapsed groups" non-goal
+        //   of the wrap change.
+        // Scenario: spec-first collapse + wrap -- prev wraps into a
+        //   collapsed Work group.
+        var model = makeModel()
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .createGroup(name: "Work"))
+        let collapsedGroupId = model.groups[1].id
+        let lastTabId = model.groups[1].tabs[0].id
+        update(&model, .toggleGroupCollapse(groupId: collapsedGroupId))
+        update(&model, .selectTab(id: firstTabId))
+
+        update(&model, .selectAdjacentTab(direction: .prev))
+        #expect(model.selectedTabId == lastTabId,
+            "wrap should reach tabs in collapsed groups")
+    }
+
+    @Test("testNextTabNoOpWithNoTabs")
+    func testNextTabNoOpWithNoTabs() {
+        // Intent: with no tabs, .next emits no commands.
+        // Why it exists: pins the empty-model guard.
+        // Scenario: spec-first empty next.
+        var model = makeModel()
+        let commands = update(&model, .selectAdjacentTab(direction: .next))
+        #expect(commands.count == 0)
+    }
+
+    @Test("testPrevTabNoOpWithNoTabs")
+    func testPrevTabNoOpWithNoTabs() {
+        // Intent: with no tabs, .prev emits no commands.
+        // Why it exists: pins the empty-model guard for prev.
+        // Scenario: spec-first empty prev.
+        var model = makeModel()
+        let commands = update(&model, .selectAdjacentTab(direction: .prev))
+        #expect(commands.count == 0)
+    }
+
+    // MARK: - requestCloseTab
+
+    @Test("testRequestCloseTabSinglePaneClosesDirectly")
+    func testRequestCloseTabSinglePaneClosesDirectly() {
+        // Intent: requestCloseTab on a single-pane tab closes immediately
+        //   (no confirmation panel).
+        // Why it exists: pins the fast-path rule for the common case.
+        // Scenario: spec-first direct close -- two-tab model, close the
+        //   non-selected first single-pane tab.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let firstPaneId = model.groups[0].tabs[0].focusedPaneId
+        let liveBefore = Set(model.allPaneIds)
+
+        let commands = update(&model, .requestCloseTab(id: firstTabId))
+        #expect(model.groups[0].tabs.count == 1, "tab should be removed")
+        #expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model) == Set([firstPaneId]),
+            "closed tab's pane surface is torn down")
+        #expect(!hasEffect(commands) {
+            if case .showCloseTabConfirmation = $0 { return true }
+            return false
+        }, "should not show confirmation for single-pane tab")
+    }
+
+    @Test("testRequestCloseTabMultiPaneShowsConfirmation")
+    func testRequestCloseTabMultiPaneShowsConfirmation() {
+        // Intent: requestCloseTab on a multi-pane tab emits a
+        //   showCloseTabConfirmation and leaves the tab in place.
+        // Why it exists: pins the confirmation gating for tabs with more
+        //   than one pane.
+        // Scenario: spec-first multi-pane confirm.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .selectTab(id: firstTabId))
+
+        update(&model, .splitPane(direction: .horizontal))
+
+        let commands = update(&model, .requestCloseTab(id: firstTabId))
+        #expect(model.groups[0].tabs.count == 2, "tab should NOT be removed yet")
+        #expect(hasEffect(commands) {
+            if case .showCloseTabConfirmation(let tid, _, let count, let last, _) = $0 {
+                return tid == firstTabId && count == 2 && !last
+            }
+            return false
+        }, "should show confirmation with correct args")
+        #expect(model.pendingConfirmation == .closeTab, "close-tab confirmation should be pending")
+    }
+
+    @Test("testRequestCloseTabMultiPaneSetsPending")
+    func testRequestCloseTabMultiPaneSetsPending() {
+        // Intent: requestCloseTab on a multi-pane tab sets
+        //   pendingConfirmation = .closeTab.
+        // Why it exists: pins the pending-state mutation alongside the
+        //   confirmation command.
+        // Scenario: spec-first multi-pane pending.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .selectTab(id: firstTabId))
+        update(&model, .splitPane(direction: .horizontal))
+
+        let commands = update(&model, .requestCloseTab(id: firstTabId))
+
+        #expect(commands.count == 1)
+        if case .showCloseTabConfirmation = commands[0] {
+            // good
+        } else {
+            Issue.record("expected showCloseTabConfirmation")
+            return
+        }
+        #expect(model.pendingConfirmation == .closeTab, "close-tab confirmation should be pending")
+    }
+
+    @Test("testRequestCloseTabWhileCloseTabPendingIsNoOp")
+    func testRequestCloseTabWhileCloseTabPendingIsNoOp() {
+        // Intent: a pending closeTab confirmation blocks further
+        //   requestCloseTab.
+        // Why it exists: pins the no-overlap guard so two confirmations
+        //   can't race.
+        // Scenario: spec-first overlap guard (closeTab pending).
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .selectTab(id: firstTabId))
+        update(&model, .splitPane(direction: .horizontal))
+        model.pendingConfirmation = .closeTab
+
+        let commands = update(&model, .requestCloseTab(id: firstTabId))
+
+        #expect(commands.count == 0, "requestCloseTab should be blocked by pending close-tab confirmation")
+    }
+
+    @Test("testRequestCloseTabWhileQuitPendingIsNoOp")
+    func testRequestCloseTabWhileQuitPendingIsNoOp() {
+        // Intent: a pending terminate confirmation blocks
+        //   requestCloseTab.
+        // Why it exists: pins the no-overlap guard against the quit panel.
+        // Scenario: spec-first overlap guard (terminate pending).
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .selectTab(id: firstTabId))
+        update(&model, .splitPane(direction: .horizontal))
+        model.pendingConfirmation = .terminate
+
+        let commands = update(&model, .requestCloseTab(id: firstTabId))
+
+        #expect(commands.count == 0, "requestCloseTab should be blocked by pending quit confirmation")
+        #expect(!hasEffect(commands) {
+            if case .showCloseTabConfirmation = $0 { return true }
+            return false
+        }, "should not emit close-tab confirmation")
+    }
+
+    @Test("testConfirmCloseTabClearsPendingAndDispatches")
+    func testConfirmCloseTabClearsPendingAndDispatches() {
+        // Intent: confirmCloseTab clears pendingConfirmation, removes the
+        //   tab, and the surface-existence reconciler tears down every
+        //   pane in the closed tab.
+        // Why it exists: pins the confirm-side commitment (mirror of the
+        //   request-side gate).
+        // Scenario: spec-first confirm-multi -- two-pane first tab; confirm
+        //   closes and tears down both surfaces.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .selectTab(id: firstTabId))
+        update(&model, .splitPane(direction: .horizontal))
+        let paneIds = paneIdsForTab(firstTabId, in: model)
+        model.pendingConfirmation = .closeTab
+        let liveBefore = Set(model.allPaneIds)
+
+        update(&model, .confirmCloseTab(id: firstTabId))
+
+        #expect(model.pendingConfirmation == nil, "confirm should clear pending confirmation")
+        #expect(!model.groups[0].tabs.contains { $0.id == firstTabId }, "tab should be removed")
+        #expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model) == Set(paneIds),
+            "each pane in the closed tab is torn down")
+    }
+
+    @Test("testConfirmCloseTabLastMultiPaneRoutesToTerminate")
+    func testConfirmCloseTabLastMultiPaneRoutesToTerminate() {
+        // Intent: confirming the last multi-pane tab routes through a
+        //   terminate confirmation rather than closing immediately.
+        // Why it exists: pins the "last-tab terminate path" the close
+        //   panel uses to chain into the quit confirmation.
+        // Scenario: spec-first last-tab-multi-pane.
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        update(&model, .splitPane(direction: .horizontal))
+        let paneIds = paneIdsForTab(tabId, in: model)
+        model.pendingConfirmation = .closeTab
+        let liveBefore = Set(model.allPaneIds)
+
+        let commands = update(&model, .confirmCloseTab(id: tabId))
+
+        #expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
+        for paneId in paneIds {
+            #expect(model.pane(paneId) != nil, "pane should still exist")
+        }
+        #expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model).isEmpty,
+            "no surface is torn down before the quit confirmation")
+        #expect(model.groups[0].tabs.contains { $0.id == tabId }, "tab should still exist")
+        #expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
+    }
+
+    @Test("testCancelCloseTabClearsPending")
+    func testCancelCloseTabClearsPending() {
+        // Intent: cancelCloseTab clears pendingConfirmation and emits no
+        //   commands.
+        // Why it exists: pins the cancel-side wiring.
+        // Scenario: spec-first cancel.
+        var model = makeModel()
+        createTab(&model)
+        model.pendingConfirmation = .closeTab
+
+        let commands = update(&model, .cancelCloseTab)
+
+        #expect(commands.count == 0, "cancel should produce no commands")
+        #expect(model.pendingConfirmation == nil, "cancel should clear pending confirmation")
+    }
+
+    @Test("testRequestCloseTabSinglePaneLastTabShowsTerminateConfirmation")
+    func testRequestCloseTabSinglePaneLastTabShowsTerminateConfirmation() {
+        // Intent: requestCloseTab on the last single-pane tab flips
+        //   pendingConfirmation to .terminate (no immediate close).
+        // Why it exists: pins the terminate-path for the last tab.
+        // Scenario: spec-first last-tab-single-pane.
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+
+        let commands = update(&model, .requestCloseTab(id: tabId))
+        #expect(model.groups[0].tabs.count == 1, "tab should NOT be removed")
+        #expect(commands.isEmpty, "no command; reconcileQuitConfirmation drives the panel")
+        #expect(model.pendingConfirmation == .terminate, "quit confirmation should be pending")
+    }
+
+    @Test("testRequestCloseTabsMixedBatchShowsSingleConfirmationAndKeepsTabsUntilConfirm")
+    func testRequestCloseTabsMixedBatchShowsSingleConfirmationAndKeepsTabsUntilConfirm() {
+        // Intent: a batch with multi-pane + todo-bearing tabs shows
+        //   exactly one batch confirmation, carries the requested ids,
+        //   reports a tabCount of 3, and leaves the tabs in place + no
+        //   panes torn down.
+        // Why it exists: pins the batch-confirm rollup so a multi-tab
+        //   close goes through a single panel.
+        // Scenario: spec-first batch confirm.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let secondTabId = model.groups[0].tabs[1].id
+        let thirdTabId = model.groups[0].tabs[2].id
+        update(&model, .selectTab(id: firstTabId))
+        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .addTabTodo(tabId: secondTabId, text: "finish this"))
+        let tabIdsBefore = model.groups.flatMap(\.tabs).map(\.id)
+        let liveBefore = Set(model.allPaneIds)
+
+        let commands = update(&model, .requestCloseTabs(ids: [firstTabId, secondTabId, thirdTabId]))
+
+        guard let confirmation = closeTabsConfirmationArgs(in: commands) else {
+            Issue.record("expected showCloseTabsConfirmation")
+            return
+        }
+        #expect(closeTabsConfirmationEffectCount(commands) == 1, "should emit one batch confirmation")
+        #expect(confirmation.tabIds == [firstTabId, secondTabId, thirdTabId])
+        #expect(confirmation.tabCount == 3)
+        #expect(model.groups.flatMap(\.tabs).map(\.id) == tabIdsBefore, "tabs should remain until confirm")
+        #expect(model.pendingConfirmation == .closeTab, "close-tab confirmation should be pending")
+        #expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model).isEmpty,
+            "request should not tear down panes")
+    }
+
+    @Test("testRequestCloseTabsRollsUpPaneAndTodoCounts")
+    func testRequestCloseTabsRollsUpPaneAndTodoCounts() {
+        // Intent: the confirmation carries totalPaneCount and
+        //   totalUncompletedTodos rolled up across the batch.
+        // Why it exists: pins the per-tab rollup the dialog renders.
+        // Scenario: spec-first rollup -- four panes total (one split),
+        //   two uncompleted todos (one tab, one pane).
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let secondTabId = model.groups[0].tabs[1].id
+        let thirdTab = model.groups[0].tabs[2]
+        update(&model, .selectTab(id: firstTabId))
+        update(&model, .splitPane(direction: .horizontal))
+        update(&model, .addTabTodo(tabId: secondTabId, text: "tab task"))
+        update(&model, .addTodo(paneId: thirdTab.focusedPaneId, text: "pane task"))
+
+        let commands = update(&model, .requestCloseTabs(ids: [firstTabId, secondTabId, thirdTab.id]))
+
+        guard let confirmation = closeTabsConfirmationArgs(in: commands) else {
+            Issue.record("expected showCloseTabsConfirmation")
+            return
+        }
+        #expect(confirmation.totalPaneCount == 4, "should roll up every pane in the batch")
+        #expect(confirmation.totalUncompletedTodos == 2, "should roll up tab and pane todos")
+    }
+
+    @Test("testRequestCloseTabsSetsIsQuitWhenBatchCoversEveryLiveTab")
+    func testRequestCloseTabsSetsIsQuitWhenBatchCoversEveryLiveTab() {
+        // Intent: when the batch covers every live tab, the confirmation
+        //   reports isQuit=true.
+        // Why it exists: pins the quit-routing condition the dialog uses
+        //   to switch its copy.
+        // Scenario: spec-first batch covers all.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let ids = model.groups[0].tabs.map(\.id)
+
+        let commands = update(&model, .requestCloseTabs(ids: ids))
+
+        guard let confirmation = closeTabsConfirmationArgs(in: commands) else {
+            Issue.record("expected showCloseTabsConfirmation")
+            return
+        }
+        #expect(confirmation.isQuit, "closing every live tab should set isQuit")
+    }
+
+    @Test("testRequestCloseTabsSingleIdDelegatesToRequestCloseTab")
+    func testRequestCloseTabsSingleIdDelegatesToRequestCloseTab() {
+        // Intent: a single-id batch produces the same model + surface
+        //   teardown + checkpoint emissions as a direct
+        //   requestCloseTab.
+        // Why it exists: pins the dispatcher's single-id delegation
+        //   contract (no behavior drift).
+        // Scenario: spec-first delegation parity.
+        var base = makeModel()
+        createTab(&base)
+        createTab(&base)
+        let firstTabId = base.groups[0].tabs[0].id
+        var direct = base
+        var batch = base
+
+        let liveBefore = Set(base.allPaneIds)
+        let directEffects = update(&direct, .requestCloseTab(id: firstTabId))
+        let batchEffects = update(&batch, .requestCloseTabs(ids: [firstTabId]))
+
+        #expect(batch == direct, "single-id batch should match direct request model mutation")
+        #expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: batch) ==
+                        surfacesToTearDown(liveSurfaceIds: liveBefore, model: direct))
+        #expect(effectCount(batchEffects) { if case .scheduleCheckpoint = $0 { return true }; return false } ==
+                        effectCount(directEffects) { if case .scheduleCheckpoint = $0 { return true }; return false })
+    }
+
+    @Test("testRequestCloseTabsEmptyIdsIsNoOp")
+    func testRequestCloseTabsEmptyIdsIsNoOp() {
+        // Intent: an empty-batch requestCloseTabs is a no-op (no commands,
+        //   no model change).
+        // Why it exists: pins the empty-input guard.
+        // Scenario: spec-first empty batch.
+        var model = makeModel()
+        let snapshot = model
+
+        let commands = update(&model, .requestCloseTabs(ids: []))
+
+        #expect(commands.count == 0)
+        #expect(model == snapshot, "empty batch should not mutate model")
+    }
+
+    @Test("testRequestCloseTabsFiltersStaleIdsBeforeSingletonDelegation")
+    func testRequestCloseTabsFiltersStaleIdsBeforeSingletonDelegation() {
+        // Intent: stale ids are filtered before the batch decides to
+        //   delegate to the single-id close path.
+        // Why it exists: pins the dispatcher prune so a stale id does not
+        //   confuse the singleton-vs-batch decision.
+        // Scenario: spec-first stale-prune -- batch {stale, live} closes
+        //   the live tab.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let liveTabId = model.groups[0].tabs[0].id
+        let liveTabPaneId = model.groups[0].tabs[0].focusedPaneId
+        let staleTabId = TabId()
+        let liveBefore = Set(model.allPaneIds)
+
+        update(&model, .requestCloseTabs(ids: [staleTabId, liveTabId]))
+
+        #expect(!model.groups[0].tabs.contains { $0.id == liveTabId }, "live tab should be closed")
+        #expect(model.groups[0].tabs.count == 1, "stale id should be ignored")
+        #expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model).contains(liveTabPaneId),
+            "delegated close tears down the live tab pane")
+    }
+
+    @Test("testRequestCloseTabsDeduplicatesIdsForConfirmation")
+    func testRequestCloseTabsDeduplicatesIdsForConfirmation() {
+        // Intent: duplicate ids in the batch dedup before the
+        //   confirmation, and the dedup'd id count drives isQuit.
+        // Why it exists: pins the dedup contract that prevents
+        //   double-counting from inflating the confirmation copy or
+        //   misfiring quit routing.
+        // Scenario: spec-first dedup.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let secondTabId = model.groups[0].tabs[1].id
+        update(&model, .selectTab(id: firstTabId))
+        update(&model, .splitPane(direction: .horizontal))
+
+        let commands = update(&model, .requestCloseTabs(ids: [firstTabId, secondTabId, firstTabId, secondTabId]))
+
+        guard let confirmation = closeTabsConfirmationArgs(in: commands) else {
+            Issue.record("expected showCloseTabsConfirmation")
+            return
+        }
+        #expect(confirmation.tabIds == [firstTabId, secondTabId])
+        #expect(confirmation.tabCount == 2)
+        #expect(confirmation.totalPaneCount == 3)
+        #expect(confirmation.isQuit, "unique-id coverage should drive isQuit")
+    }
+
+    @Test("testRequestCloseTabsBatchNoOpsWhenConfirmationPending")
+    func testRequestCloseTabsBatchNoOpsWhenConfirmationPending() {
+        // Intent: a pending closeTab confirmation blocks the batch sheet.
+        // Why it exists: pins the same no-overlap rule for the batch
+        //   variant.
+        // Scenario: spec-first blocked batch.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let ids = model.groups[0].tabs.map(\.id)
+        model.pendingConfirmation = .closeTab
+
+        let commands = update(&model, .requestCloseTabs(ids: ids))
+
+        #expect(commands.count == 0, "pending confirmation should block batch sheet")
+        #expect(model.groups[0].tabs.map(\.id) == ids, "blocked batch should not close simple tabs")
+    }
+
+    @Test("testConfirmCloseTabsRemovesEveryRequestedTabAndClearsPending")
+    func testConfirmCloseTabsRemovesEveryRequestedTabAndClearsPending() {
+        // Intent: confirmCloseTabs removes every requested tab, clears
+        //   pendingConfirmation, and the surface-existence reconciler
+        //   tears down every pane in the closed tabs.
+        // Why it exists: pins the batch confirm commit.
+        // Scenario: spec-first commit -- close first + second of three
+        //   tabs.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let secondTabId = model.groups[0].tabs[1].id
+        let thirdTabId = model.groups[0].tabs[2].id
+        update(&model, .selectTab(id: firstTabId))
+        update(&model, .splitPane(direction: .horizontal))
+        let expectedDestroyed = Set(paneIdsForTab(firstTabId, in: model) + paneIdsForTab(secondTabId, in: model))
+        model.pendingConfirmation = .closeTab
+        let liveBefore = Set(model.allPaneIds)
+
+        update(&model, .confirmCloseTabs(ids: [firstTabId, secondTabId]))
+
+        #expect(model.pendingConfirmation == nil, "confirm should clear pending confirmation")
+        #expect(Set(model.groups.flatMap(\.tabs).map(\.id)) == Set([thirdTabId]))
+        #expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model) == expectedDestroyed)
+        for paneId in expectedDestroyed {
+            #expect(model.pane(paneId) == nil, "closed tab pane should be removed")
+        }
+    }
+
+    @Test("testConfirmCloseTabsEmptyingBatchTerminatesWithoutReloadOrCheckpoint")
+    func testConfirmCloseTabsEmptyingBatchTerminatesWithoutReloadOrCheckpoint() {
+        // Intent: when a batch closes every live tab, the dispatcher
+        //   emits exactly one terminate (as the last command) and no
+        //   scheduleCheckpoint.
+        // Why it exists: pins the terminate-only commit so a closing-app
+        //   batch doesn't waste a checkpoint write.
+        // Scenario: spec-first close-all-and-terminate.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let ids = model.groups[0].tabs.map(\.id)
+        model.pendingConfirmation = .closeTab
+
+        let commands = update(&model, .confirmCloseTabs(ids: ids))
+
+        #expect(effectCount(commands) { if case .terminate = $0 { return true }; return false } ==
+                        1, "emptying batch should emit exactly one terminate")
+        #expect(isTerminateEffect(commands.last), "terminate should be the final command")
+        #expect(effectCount(commands) { if case .scheduleCheckpoint = $0 { return true }; return false } ==
+                        0, "emptying batch should not schedule a checkpoint after terminate")
+    }
+
+    @Test("testConfirmCloseTabsNonEmptyingBatchReloadsAndCheckpointsOnce")
+    func testConfirmCloseTabsNonEmptyingBatchReloadsAndCheckpointsOnce() {
+        // Intent: a non-emptying batch checkpoints exactly once and does
+        //   NOT terminate.
+        // Why it exists: pins the partial-close commit so the surviving
+        //   set persists via a single checkpoint, not zero or many.
+        // Scenario: spec-first partial-close.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let secondTabId = model.groups[0].tabs[1].id
+        let thirdTabId = model.groups[0].tabs[2].id
+        update(&model, .selectTab(id: secondTabId))
+        model.pendingConfirmation = .closeTab
+
+        let commands = update(&model, .confirmCloseTabs(ids: [secondTabId, thirdTabId]))
+
+        #expect(Set(model.groups.flatMap(\.tabs).map(\.id)) == Set([firstTabId]))
+        #expect(model.selectedTabId == firstTabId, "selection should move to a remaining tab")
+        #expect(effectCount(commands) { if case .scheduleCheckpoint = $0 { return true }; return false } ==
+                        1, "non-emptying batch should checkpoint once")
+        #expect(effectCount(commands) { if case .terminate = $0 { return true }; return false } ==
+                        0, "non-emptying batch should not terminate")
+    }
+
+    @Test("testCancelCloseTabsClearsPendingAndRemovesNothing")
+    func testCancelCloseTabsClearsPendingAndRemovesNothing() {
+        // Intent: cancelCloseTabs clears pendingConfirmation and leaves
+        //   every tab in place.
+        // Why it exists: pins the batch cancel wiring.
+        // Scenario: spec-first batch cancel.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let ids = model.groups[0].tabs.map(\.id)
+        model.pendingConfirmation = .closeTab
+
+        let commands = update(&model, .cancelCloseTabs)
+
+        #expect(commands.count == 0, "cancel should produce no commands")
+        #expect(model.pendingConfirmation == nil, "cancel should clear pending confirmation")
+        #expect(model.groups[0].tabs.map(\.id) == ids)
+    }
+
+    // MARK: - Tab Color
+
+    @Test("testSetTabColor")
+    func testSetTabColor() {
+        // Intent: setTabColors on a single tab id sets the color and
+        //   emits scheduleCheckpoint (color reconciles via
+        //   reconcileSidebar).
+        // Why it exists: pins the color persistence path.
+        // Scenario: spec-first set color.
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+
+        let commands = update(&model, .setTabColors(tabIds: [tabId], color: .red))
+        #expect(model.groups[0].tabs[0].color == .red)
+        #expect(hasEffect(commands) {
+            if case .scheduleCheckpoint = $0 { return true }
+            return false
+        }, "should persist via scheduleCheckpoint (color reconciles via reconcileSidebar)")
+    }
+
+    @Test("testSetTabColorClear")
+    func testSetTabColorClear() {
+        // Intent: setTabColors with nil clears the color and emits
+        //   scheduleCheckpoint.
+        // Why it exists: pins the explicit-clear branch.
+        // Scenario: spec-first clear color.
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        update(&model, .setTabColors(tabIds: [tabId], color: .blue))
+
+        let commands = update(&model, .setTabColors(tabIds: [tabId], color: nil))
+        #expect(model.groups[0].tabs[0].color == nil, "color should be nil")
+        #expect(hasEffect(commands) {
+            if case .scheduleCheckpoint = $0 { return true }
+            return false
+        }, "should persist via scheduleCheckpoint (color reconciles via reconcileSidebar)")
+    }
+
+    @Test("testSetTabColorReplaceDifferent")
+    func testSetTabColorReplaceDifferent() {
+        // Intent: setting a different color replaces the existing one
+        //   (Msg layer always replaces; toggle-off is dispatcher-side).
+        // Why it exists: pins the always-replace semantics against the
+        //   removed Msg-layer toggle.
+        // Scenario: spec-first replace different.
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        update(&model, .setTabColors(tabIds: [tabId], color: .red))
+
+        update(&model, .setTabColors(tabIds: [tabId], color: .blue))
+        #expect(model.groups[0].tabs[0].color == .blue)
+    }
+
+    @Test("testCloseTabNonSelected")
+    func testCloseTabNonSelected() {
+        // Intent: closing a non-selected tab does not change selection;
+        //   the closed tab's pane surface is torn down.
+        // Why it exists: pins the selection invariant for background-tab
+        //   closes alongside the surface-existence net.
+        // Scenario: spec-first close-non-selected.
+        var model = makeModel()
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        let firstPaneId = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model)
+        let secondTabId = model.groups[0].tabs[1].id
+        let liveBefore = Set(model.allPaneIds)
+
+        update(&model, .closeTab(id: firstTabId))
+        #expect(model.selectedTabId == secondTabId, "selection should remain on second tab")
+        #expect(model.groups[0].tabs.count == 1)
+        #expect(surfacesToTearDown(liveSurfaceIds: liveBefore, model: model) == Set([firstPaneId]),
+            "closed non-selected tab's pane surface is torn down")
+    }
+
+    // MARK: - Close Tab Selects Previous
+
+    @Test("testCloseMiddleTabSelectsPrevious")
+    func testCloseMiddleTabSelectsPrevious() {
+        // Intent: closing the middle selected tab selects the previous
+        //   tab.
+        // Why it exists: pins the "select predecessor" rule.
+        // Scenario: spec-first middle close.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        createTab(&model)
+        let tabAId = model.groups[0].tabs[0].id
+        let tabBId = model.groups[0].tabs[1].id
+
+        update(&model, .selectTab(id: tabBId))
+        update(&model, .closeTab(id: tabBId))
+
+        #expect(model.selectedTabId == tabAId, "closing middle tab should select predecessor")
+        #expect(model.groups[0].tabs.count == 2)
+    }
+
+    @Test("testCloseFirstTabSelectsNext")
+    func testCloseFirstTabSelectsNext() {
+        // Intent: closing the first tab selects the successor (no
+        //   predecessor to fall back to).
+        // Why it exists: pins the fallback to .next when at index 0.
+        // Scenario: spec-first first close.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let tabAId = model.groups[0].tabs[0].id
+        let tabBId = model.groups[0].tabs[1].id
+
+        update(&model, .selectTab(id: tabAId))
+        update(&model, .closeTab(id: tabAId))
+
+        #expect(model.selectedTabId == tabBId, "closing first tab should select successor")
+        #expect(model.groups[0].tabs.count == 1)
+    }
+
+    @Test("testCloseTabCrossGroupSelectsPrevious")
+    func testCloseTabCrossGroupSelectsPrevious() {
+        // Intent: closing the only tab in its group prunes that group and
+        //   selects the cross-group predecessor.
+        // Why it exists: pins the auto-prune + cross-group selection path.
+        // Scenario: spec-first cross-group close.
+        var model = makeModel()
+        createTab(&model)
+        let tabAId = model.groups[0].tabs[0].id
+
+        update(&model, .createGroup(name: "Work"))
+        let tabBId = model.groups[1].tabs[0].id
+
+        update(&model, .selectTab(id: tabBId))
+        update(&model, .closeTab(id: tabBId))
+
+        #expect(model.groups.count == 1, "Work group should be pruned")
+        #expect(model.selectedTabId == tabAId, "should select predecessor across group boundary")
+    }
+
+    // MARK: - setTabColors (batch from multi-select context menu)
+
+    @Test("testSetTabColorsAppliesToAll")
+    func testSetTabColorsAppliesToAll() {
+        // Intent: batch setTabColors applies the color to every id.
+        // Why it exists: pins the batch path the multi-select context menu
+        //   uses.
+        // Scenario: spec-first batch set.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        createTab(&model)
+        let ids = model.groups[0].tabs.map(\.id)
+
+        update(&model, .setTabColors(tabIds: ids, color: .blue))
+
+        #expect(model.groups[0].tabs.allSatisfy { $0.color == .blue },
+            "every selected tab gets the new color")
+    }
+
+    @Test("testSetTabColorsAlwaysReplaces")
+    func testSetTabColorsAlwaysReplaces() {
+        // Intent: re-applying the same color via the batch replaces
+        //   (never toggles off at the Msg layer).
+        // Why it exists: pins the always-replace contract against the
+        //   dispatcher-side toggle override.
+        // Scenario: spec-first re-apply replace.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let id1 = model.groups[0].tabs[0].id
+        let id2 = model.groups[0].tabs[1].id
+        update(&model, .setTabColors(tabIds: [id1], color: .red))
+        #expect(model.groups[0].tabs[0].color == .red)
+
+        update(&model, .setTabColors(tabIds: [id1, id2], color: .red))
+        #expect(model.groups[0].tabs[0].color == .red)
+        #expect(model.groups[0].tabs[1].color == .red)
+    }
+
+    @Test("testSetTabColorsClearsWithNil")
+    func testSetTabColorsClearsWithNil() {
+        // Intent: batch setTabColors with nil clears every id.
+        // Why it exists: pins the explicit clear branch in the batch.
+        // Scenario: spec-first batch clear.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let ids = model.groups[0].tabs.map(\.id)
+        update(&model, .setTabColors(tabIds: ids, color: .green))
+
+        update(&model, .setTabColors(tabIds: ids, color: nil))
+        #expect(model.groups[0].tabs.allSatisfy { $0.color == nil },
+            "nil color clears all selected")
+    }
+
+    @Test("testSetTabColorsDedupesAndIgnoresStale")
+    func testSetTabColorsDedupesAndIgnoresStale() {
+        // Intent: batch setTabColors dedupes ids and ignores stale ids;
+        //   the result emits exactly one scheduleCheckpoint command.
+        // Why it exists: pins the dedup + stale-filter guard for the
+        //   batch path.
+        // Scenario: spec-first batch dedup + stale.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let id1 = model.groups[0].tabs[0].id
+        let id2 = model.groups[0].tabs[1].id
+        let stale = TabId()
+
+        let commands = update(&model, .setTabColors(
+            tabIds: [id1, id1, stale, id2], color: .purple))
+
+        #expect(model.groups[0].tabs[0].color == .purple)
+        #expect(model.groups[0].tabs[1].color == .purple)
+        #expect(commands.count == 1,
+            "no double-dispatch for duplicates; stale dropped")
+    }
+
+    @Test("testSetTabColorsAllStaleIsNoop")
+    func testSetTabColorsAllStaleIsNoop() {
+        // Intent: a batch composed entirely of stale ids is a no-op.
+        // Why it exists: pins the empty-batch guard after stale filter.
+        // Scenario: spec-first all-stale.
+        var model = makeModel()
+        createTab(&model)
+        let snapshot = model.groups
+        let stale1 = TabId()
+        let stale2 = TabId()
+
+        let commands = update(&model, .setTabColors(
+            tabIds: [stale1, stale2], color: .red))
+
+        #expect(model.groups == snapshot)
+        #expect(commands.count == 0)
+    }
+}
+
+private func closeTabsConfirmationArgs(
+    in commands: [Command]
+) -> (tabIds: [TabId], tabCount: Int, totalPaneCount: Int, totalUncompletedTodos: Int, isQuit: Bool)? {
+    for command in commands {
+        if case .showCloseTabsConfirmation(
+            let tabIds,
+            let tabCount,
+            let totalPaneCount,
+            let totalUncompletedTodos,
+            let isQuit
+        ) = command {
+            return (tabIds, tabCount, totalPaneCount, totalUncompletedTodos, isQuit)
+        }
+    }
+    return nil
+}
+
+private func closeTabsConfirmationEffectCount(_ commands: [Command]) -> Int {
+    effectCount(commands) {
+        if case .showCloseTabsConfirmation = $0 { return true }
+        return false
+    }
+}
+
+private func effectCount(_ commands: [Command], matching predicate: (Command) -> Bool) -> Int {
+    commands.filter(predicate).count
+}
+
+private func isTerminateEffect(_ command: Command?) -> Bool {
+    guard let command else { return false }
+    if case .terminate = command { return true }
+    return false
+}
