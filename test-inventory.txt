@@ -630,8 +630,13 @@
   - TickCoalescer: clean tick releases the slot
   - TickCoalescer: concurrent wakeups schedule exactly one tick
 
-## TodoPopoverStateTests -- PENDING
-# tests=14  expect=0  expectEqual=35  throwTF=0  TOTAL=35
+## TodoPopoverStateTests -- MIGRATED (Wave D)
+# baseline: tests=14 expect=0 expectEqual=35 throwTF=0 TOTAL=35
+# new:      @Test=14 #expect=35 expectNoDifference=0 #require=0 Issue.record=0 TOTAL=35
+# delta:    0 (10 parametric source names preserve `\(label):` literally via `"\\(label):"`;
+#            each parametric @Test calls a small private generic helper twice -- once per
+#            target type -- so source-level #expect lines match the legacy 26-assertion helper)
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/TodoPopoverStateTests.swift
   - retargeting edit mode preserves compose draft
   - missing edit target exits edit mode and preserves compose draft
   - tab todo retarget keeps edit mode across cross-bucket movement
