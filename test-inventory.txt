@@ -901,8 +901,13 @@
   - testCloseTabConfirmationResponseConfirm
   - testCloseTabConfirmationResponseCancel
 
-## UpdateMruTests -- PENDING
-# tests=21  expect=41  expectEqual=26  throwTF=3  TOTAL=70
+## UpdateMruTests -- MIGRATED (Wave C)
+# baseline: tests=21 expect=41 expectEqual=26 throwTF=3 TOTAL=70
+# new:      @Test=21 #expect=67 expectNoDifference=0 #require=0 Issue.record=3 TOTAL=70
+# delta:    0 (three compound `guard let ... else { throw }` patterns -> Issue.record + return;
+#            `#require` can't express the chained `.dropFirst().first` / cycle-state guards)
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/UpdateMruTests.swift
+# makeMruModel helper now lives in TestSupport.swift only -- removed from TestHarness.swift
   - createTab populates mruOrder with the new tab
   - selectTab moves selected to mruOrder index 0 when not cycling
   - selectTab does NOT reorder mruOrder when cycling
