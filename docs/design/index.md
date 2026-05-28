@@ -33,3 +33,4 @@ Default statuses are:
 - [2026-03-05: Display Scaling](2026-03-05-display-scaling.md)
 - [2026-05-27: Terminal Focus and Display Link Recovery](2026-05-27-terminal-focus-display-link.md)
 - [2026-05-27: Model-Driven View Reconciliation](2026-05-27-model-driven-view-reconciliation.md)
+- [2026-05-28: Pure Core Compiled Same-Module via Symlink, Tested via Nested Package](2026-05-28-core-module-via-symlink.md)
