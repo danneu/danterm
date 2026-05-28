@@ -1,0 +1,52 @@
+// Shared fixtures for the Swift Testing suites that exercise DanTermCore. The
+// model builders (makeModel, createTab), command-effect probe (hasEffect), and
+// snapshot readers (paneSnapshots / allPaneSnapshots / paneSnapshot) move here
+// verbatim from the legacy `tests/TestHarness.swift` so each migrated suite
+// stays behaviorally 1:1 with what it replaced.
+//
+// The harness PRIMITIVES (`test`/`expect`/`expectEqual`/`TestFailure` and the
+// `failures`/`total` globals) intentionally do NOT move -- Swift Testing's
+// `#expect` / `#require` / `expectNoDifference` (from swift-custom-dump)
+// replace them with framework-native diffs, source-location capture, and
+// parallel-safe reporting.
+import Foundation
+
+@testable import DanTermCore
+
+func makeModel() -> AppModel {
+    let generalId = GroupId()
+    return AppModel(
+        groups: [GroupModel(id: generalId, name: "General")]
+    )
+}
+
+/// Create a tab and return the commands (for inspection or ignoring).
+@discardableResult
+func createTab(_ model: inout AppModel, inGroupId: GroupId? = nil, background: Bool = false) -> [Command] {
+    return update(&model, .createTab(inGroupId: inGroupId, background: background))
+}
+
+func hasEffect(_ commands: [Command], _ check: (Command) -> Bool) -> Bool {
+    commands.contains(where: check)
+}
+
+// MARK: - Snapshot (v2 leaf-embedded) test helpers
+
+/// Collect every leaf's embedded PaneSnapshot from a snapshot split tree.
+func paneSnapshots(in node: SplitNodeSnapshot) -> [PaneSnapshot] {
+    switch node {
+    case .leaf(let ps): return [ps]
+    case .split(_, _, let first, let second, _):
+        return paneSnapshots(in: first) + paneSnapshots(in: second)
+    }
+}
+
+/// Every PaneSnapshot embedded across all of a snapshot's tab trees.
+func allPaneSnapshots(_ snapshot: AppModelSnapshot) -> [PaneSnapshot] {
+    snapshot.groups.flatMap(\.tabs).flatMap { paneSnapshots(in: $0.rootNode) }
+}
+
+/// Find an embedded PaneSnapshot by its id string.
+func paneSnapshot(_ id: String, in snapshot: AppModelSnapshot) -> PaneSnapshot? {
+    allPaneSnapshots(snapshot).first { $0.id == id }
+}
