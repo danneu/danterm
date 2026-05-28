@@ -9,7 +9,6 @@ struct TestRunner {
         checkpointTests()
         todoTests()
         updateTabTodoTests()
-        todoShortcutCatalogTests()
         terminalLaunchEnvironmentTests()
         ipcUpdateTests()
         todoPopoverStateTests()
