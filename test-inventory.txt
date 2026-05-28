@@ -262,8 +262,12 @@
   - split frame reassembles after second chunk
   - oversized line emits rejection event
 
-## ModelOperationsTests -- PENDING
-# tests=156  expect=85  expectEqual=231  throwTF=18  TOTAL=334
+## ModelOperationsTests -- MIGRATED (Wave B)
+# baseline: tests=156 expect=85 expectEqual=231 throwTF=18 TOTAL=334
+# new:      @Test=156 #expect=316 expectNoDifference=0 #require=0 Issue.record=18 TOTAL=334
+# delta:    0 (each `guard case ... else { throw TestFailure }` -> Issue.record + return)
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/ModelOperationsTests.swift
+# makeMruModel helper moved to TestSupport.swift (lib) + TestHarness.swift (legacy, for UpdateMruTests until its migration)
   - testAllPaneIdsFlatLeaf
   - testAllPaneIdsNestedTree
   - effectiveSurfaceVisibility marks every reachable pane hidden when window is hidden
