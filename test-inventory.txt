@@ -434,8 +434,11 @@
   - desiredWindowChrome: window title omits the subtitle when absent or equal to the display title
   - desiredWindowChrome: reflects the selected tab, not background tabs
 
-## PaneToolbarTests -- PENDING
-# tests=9  expect=2  expectEqual=10  throwTF=0  TOTAL=12
+## PaneToolbarTests -- MIGRATED (Wave D)
+# baseline: tests=9 expect=2 expectEqual=10 throwTF=0 TOTAL=12
+# new:      @Test=9 #expect=12 expectNoDifference=0 #require=0 Issue.record=0 TOTAL=12
+# delta:    0
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/PaneToolbarTests.swift
   - paneToolbarText: title only when cwd is nil
   - paneToolbarText: title and cwd
   - paneToolbarText: default title for unknown pane

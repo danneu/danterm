@@ -4,7 +4,6 @@ import Foundation
 struct TestRunner {
     static func main() {
         sidebarItemStoreTests()
-        paneToolbarTests()
         customTitleTests()
         checkpointTests()
         todoTests()
