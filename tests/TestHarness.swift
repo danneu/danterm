@@ -11,8 +11,6 @@ struct TestRunner {
         updateTabTodoTests()
         ipcUpdateTests()
         todoPopoverStateTests()
-        switcherEventTests()
-        jumpEventTests()
         print("\n\(total - failures)/\(total) passed")
         if failures > 0 { exit(1) }
     }

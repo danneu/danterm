@@ -558,8 +558,12 @@
   - surfaceGeometry: zero backing size returns nil
   - surfaceGeometry: single zero dimension returns nil
 
-## SwitcherEventTests -- PENDING
-# tests=23  expect=0  expectEqual=23  throwTF=0  TOTAL=23
+## SwitcherEventTests -- MIGRATED (Wave D)
+# baseline: tests=23 expect=0 expectEqual=23 throwTF=0 TOTAL=23
+# new:      @Test=23 #expect=23 expectNoDifference=0 #require=0 Issue.record=0 TOTAL=23
+# delta:    0 (both classifier groups -- switcher + jump -- under one @Suite, matching the
+#            legacy inventory grouping)
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/SwitcherEventTests.swift
   - cmd-shift-o with cycle inactive → stepOlder
   - cmd-shift-o with cycle active → stepOlder
   - cmd-shift-i → stepNewer
