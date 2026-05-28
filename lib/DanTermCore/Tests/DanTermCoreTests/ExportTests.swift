@@ -1,0 +1,1117 @@
+// Swift Testing migration of the legacy `tests/ExportTests.swift` harness
+// suite. Pins the export helpers + title-channel event translation that link
+// the running terminal to the model: parseDantermEvent / translateMsg (the
+// title-channel parser and the runtime interception path), PaneTokenStore
+// lifecycle, restore-command behavior and prefill/execute input synthesis,
+// commandStarted Msg side effects, truncateScrollback's char/line/whitespace
+// rules, exportState's snapshot payload, the toSnapshot/validateAndBuild
+// round-trip + launch field projection, and the JSON encode/decode contract.
+// `guard case` patterns that the legacy suite asserted via `throw
+// TestFailure` migrate to `Issue.record + return` (1:1 with the throw).
+import Foundation
+import Testing
+
+@testable import DanTermCore
+
+@Suite struct ExportTests {
+    // MARK: - parseDantermEvent
+
+    @Test("parseDantermEvent: valid CMD_START")
+    func parseDantermEventValidCMDStart() {
+        // Intent: a well-formed CMD_START title with the expected token
+        //   parses into .commandStarted with the base64-decoded command.
+        // Why it exists: pins the happy path of the title-channel parser
+        //   that wraps a Ghostty surface's `__DANTERM_EVT__` titles.
+        // Scenario: spec-first parse -- `vim` base64-encoded inside a
+        //   well-formed event title parses to .commandStarted("vim").
+        let cmd = "vim"
+        let b64 = Data(cmd.utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:CMD_START:\(b64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        #expect(result == .commandStarted(command: "vim"))
+    }
+
+    @Test("parseDantermEvent: valid CMD_END")
+    func parseDantermEventValidCMDEnd() {
+        // Intent: a CMD_END title (no payload) parses into .commandEnded.
+        // Why it exists: pins the end-of-command sentinel parse.
+        // Scenario: spec-first parse -- the terminal emits the CMD_END
+        //   event title and the parser reports .commandEnded.
+        let raw = "__DANTERM_EVT__:tok123:CMD_END"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        #expect(result == .commandEnded)
+    }
+
+    @Test("parseDantermEvent: wrong token rejected")
+    func parseDantermEventWrongTokenRejected() {
+        // Intent: an event with a token that does not match the expected
+        //   pane token is rejected (returns nil).
+        // Why it exists: pins the token-scoping that prevents events from
+        //   one pane bleeding into another's interpretation.
+        // Scenario: spec-first auth check -- a CMD_START with a stale
+        //   token returns nil.
+        let cmd = "vim"
+        let b64 = Data(cmd.utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:wrong:CMD_START:\(b64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        #expect(result == nil, "wrong token should be rejected")
+    }
+
+    @Test("parseDantermEvent: missing token segment rejected")
+    func parseDantermEventMissingTokenSegmentRejected() {
+        // Intent: a title that lacks the token segment entirely is rejected.
+        // Why it exists: pins the parser's strict frame requirement.
+        // Scenario: spec-first guard -- a bare `__DANTERM_EVT__:` prefix
+        //   returns nil.
+        let raw = "__DANTERM_EVT__:"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        #expect(result == nil, "missing token should be rejected")
+    }
+
+    @Test("parseDantermEvent: malformed base64 rejected")
+    func parseDantermEventMalformedBase64Rejected() {
+        // Intent: a CMD_START whose payload is not valid base64 is rejected.
+        // Why it exists: pins the decode-failure path so a corrupted title
+        //   does not surface as a bogus command string.
+        // Scenario: spec-first decode guard -- garbage payload returns nil.
+        let raw = "__DANTERM_EVT__:tok123:CMD_START:!!!invalid!!!"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        #expect(result == nil, "malformed base64 should be rejected")
+    }
+
+    @Test("parseDantermEvent: empty command after decode rejected")
+    func parseDantermEventEmptyCommandAfterDecodeRejected() {
+        // Intent: a CMD_START whose base64 payload decodes to "" is rejected.
+        // Why it exists: pins the non-empty-command precondition so a stray
+        //   blank event does not seed an empty lastCommand.
+        // Scenario: spec-first guard -- base64 of "" returns nil.
+        let b64 = Data("".utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:CMD_START:\(b64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        #expect(result == nil, "empty command should be rejected")
+    }
+
+    @Test("parseDantermEvent: no prefix returns nil")
+    func parseDantermEventNoPrefixReturnsNil() {
+        // Intent: a title without the __DANTERM_EVT__ prefix returns nil.
+        // Why it exists: pins the boundary between event-channel titles and
+        //   ordinary surface titles so the parser is a pure pass-through.
+        // Scenario: spec-first guard -- the title "just a normal title"
+        //   is not an event.
+        let result = parseDantermEvent("just a normal title", expectedToken: "tok123")
+        #expect(result == nil, "non-event title should return nil")
+    }
+
+    @Test("parseDantermEvent: valid REMOTE_START")
+    func parseDantermEventValidRemoteStart() {
+        // Intent: a REMOTE_START title (no payload) parses into .remoteStart.
+        // Why it exists: pins the remote-session start sentinel.
+        // Scenario: spec-first parse -- a REMOTE_START event title parses
+        //   into the remote-start case.
+        let raw = "__DANTERM_EVT__:tok123:REMOTE_START"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        #expect(result == .remoteStart)
+    }
+
+    @Test("parseDantermEvent: valid REMOTE_HOST")
+    func parseDantermEventValidRemoteHost() {
+        // Intent: a REMOTE_HOST title with valid user+host base64 segments
+        //   parses into .remoteSession(value:) with the decoded fields.
+        // Why it exists: pins the two-field payload parse.
+        // Scenario: spec-first parse -- user=dan, host=caja decodes into
+        //   .remoteSession with both fields surfaced.
+        let userB64 = Data("dan".utf8).base64EncodedString()
+        let hostB64 = Data("caja".utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST:\(userB64):\(hostB64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        #expect(result == .remoteSession(value: RemoteSession(user: "dan", host: "caja")))
+    }
+
+    @Test("parseDantermEvent: REMOTE_HOST with missing user field rejected")
+    func parseDantermEventRemoteHostMissingUserRejected() {
+        // Intent: REMOTE_HOST with an empty user segment is rejected.
+        // Why it exists: pins the required-fields guard for the two-field
+        //   payload.
+        // Scenario: spec-first guard -- empty user segment returns nil.
+        let hostB64 = Data("caja".utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST::\(hostB64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        #expect(result == nil, "missing user field should be rejected")
+    }
+
+    @Test("parseDantermEvent: REMOTE_HOST with missing host field rejected")
+    func parseDantermEventRemoteHostMissingHostRejected() {
+        // Intent: REMOTE_HOST with an empty host segment is rejected.
+        // Why it exists: pins the symmetric required-host guard.
+        // Scenario: spec-first guard -- empty host segment returns nil.
+        let userB64 = Data("dan".utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST:\(userB64):"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        #expect(result == nil, "missing host field should be rejected")
+    }
+
+    @Test("parseDantermEvent: REMOTE_HOST with no separator rejected")
+    func parseDantermEventRemoteHostNoSeparatorRejected() {
+        // Intent: REMOTE_HOST with a single payload (no `:` separator
+        //   between user and host) is rejected.
+        // Why it exists: pins the wire-shape guard so a mis-framed payload
+        //   does not yield a partial parse.
+        // Scenario: spec-first guard -- no separator returns nil.
+        let userB64 = Data("dan".utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST:\(userB64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        #expect(result == nil, "missing separator should be rejected")
+    }
+
+    @Test("parseDantermEvent: REMOTE_HOST with invalid base64 user rejected")
+    func parseDantermEventRemoteHostInvalidBase64UserRejected() {
+        // Intent: REMOTE_HOST with non-base64 in the user slot is rejected.
+        // Why it exists: pins the decode guard on the user slot.
+        // Scenario: spec-first guard -- garbage in user slot returns nil.
+        let hostB64 = Data("caja".utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST:!!!invalid!!!:\(hostB64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        #expect(result == nil, "invalid user base64 should be rejected")
+    }
+
+    @Test("parseDantermEvent: REMOTE_HOST with invalid base64 host rejected")
+    func parseDantermEventRemoteHostInvalidBase64HostRejected() {
+        // Intent: REMOTE_HOST with non-base64 in the host slot is rejected.
+        // Why it exists: pins the symmetric decode guard on the host slot.
+        // Scenario: spec-first guard -- garbage in host slot returns nil.
+        let userB64 = Data("dan".utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST:\(userB64):!!!invalid!!!"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        #expect(result == nil, "invalid host base64 should be rejected")
+    }
+
+    @Test("parseDantermEvent: REMOTE_HOST with empty decoded user rejected")
+    func parseDantermEventRemoteHostEmptyDecodedUserRejected() {
+        // Intent: REMOTE_HOST whose user base64 decodes to "" is rejected.
+        // Why it exists: pins the post-decode non-empty guard on user.
+        // Scenario: spec-first guard -- base64-of-"" user returns nil.
+        let userB64 = Data("".utf8).base64EncodedString()
+        let hostB64 = Data("caja".utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST:\(userB64):\(hostB64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        #expect(result == nil, "empty decoded user should be rejected")
+    }
+
+    @Test("parseDantermEvent: REMOTE_HOST with empty decoded host rejected")
+    func parseDantermEventRemoteHostEmptyDecodedHostRejected() {
+        // Intent: REMOTE_HOST whose host base64 decodes to "" is rejected.
+        // Why it exists: pins the post-decode non-empty guard on host.
+        // Scenario: spec-first guard -- base64-of-"" host returns nil.
+        let userB64 = Data("dan".utf8).base64EncodedString()
+        let hostB64 = Data("".utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:REMOTE_HOST:\(userB64):\(hostB64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        #expect(result == nil, "empty decoded host should be rejected")
+    }
+
+    @Test("parseDantermEvent: REMOTE_HOST wrong token rejected")
+    func parseDantermEventRemoteHostWrongTokenRejected() {
+        // Intent: REMOTE_HOST with a wrong token is rejected.
+        // Why it exists: pins the token-scoping for the REMOTE_HOST branch
+        //   (symmetric to CMD_START).
+        // Scenario: spec-first auth check -- valid payload but stale token
+        //   returns nil.
+        let userB64 = Data("dan".utf8).base64EncodedString()
+        let hostB64 = Data("caja".utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:wrong-token:REMOTE_HOST:\(userB64):\(hostB64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        #expect(result == nil, "wrong token should be rejected")
+    }
+
+    @Test("parseDantermEvent: unknown event type returns nil")
+    func parseDantermEventUnknownEventTypeReturnsNil() {
+        // Intent: an event with an unrecognized type returns nil.
+        // Why it exists: pins forward-compat behavior -- a future event
+        //   type cannot be silently mis-interpreted as a known one.
+        // Scenario: spec-first forward-compat -- CMD_UNKNOWN returns nil.
+        let raw = "__DANTERM_EVT__:tok123:CMD_UNKNOWN"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        #expect(result == nil, "unknown event type should return nil")
+    }
+
+    @Test("parseDantermEvent: command with special characters")
+    func parseDantermEventCommandWithSpecialCharacters() {
+        // Intent: a command containing spaces and `@`/`-` symbols
+        //   round-trips through base64 to the expected .commandStarted.
+        // Why it exists: pins the payload neutrality of base64 against the
+        //   colon-delimited frame around it.
+        // Scenario: spec-first parse -- `ssh user@host -p 2222` parses
+        //   verbatim as the command string.
+        let cmd = "ssh user@host -p 2222"
+        let b64 = Data(cmd.utf8).base64EncodedString()
+        let raw = "__DANTERM_EVT__:tok123:CMD_START:\(b64)"
+        let result = parseDantermEvent(raw, expectedToken: "tok123")
+        #expect(result == .commandStarted(command: cmd))
+    }
+
+    // MARK: - translateMsg (runtime interception path)
+
+    @Test("translateMsg: valid CMD_START translates to commandStarted")
+    func translateMsgValidCMDStartTranslatesToCommandStarted() {
+        // Intent: a surfaceTitle whose payload is a valid CMD_START event
+        //   translates to a .commandStarted(paneId:, command:) Msg.
+        // Why it exists: pins the runtime interception path that turns
+        //   title-channel events into model-level Msgs.
+        // Scenario: spec-first translation -- a per-pane token plus a
+        //   CMD_START title yields a .commandStarted Msg with the same
+        //   paneId and decoded command.
+        let paneId = PaneId()
+        let token = "my-token"
+        let b64 = Data("vim".utf8).base64EncodedString()
+        let title = "__DANTERM_EVT__:\(token):CMD_START:\(b64)"
+        let result = translateMsg(.surfaceTitle(paneId: paneId, title: title)) { id in
+            id == paneId ? token : nil
+        }
+        guard case .commandStarted(let pid, let cmd) = result else {
+            Issue.record("expected .commandStarted, got \(String(describing: result))")
+            return
+        }
+        #expect(pid == paneId)
+        #expect(cmd == "vim")
+    }
+
+    @Test("translateMsg: CMD_END translates to commandEnded")
+    func translateMsgCMDEndTranslatesToCommandEnded() {
+        // Intent: a surfaceTitle CMD_END translates to a .commandEnded Msg
+        //   carrying the originating paneId.
+        // Why it exists: pins the end-of-command Msg translation symmetric
+        //   to CMD_START.
+        // Scenario: spec-first translation -- a CMD_END title yields
+        //   .commandEnded(paneId:) with the originating pane.
+        let paneId = PaneId()
+        let token = "my-token"
+        let title = "__DANTERM_EVT__:\(token):CMD_END"
+        let result = translateMsg(.surfaceTitle(paneId: paneId, title: title)) { id in
+            id == paneId ? token : nil
+        }
+        guard case .commandEnded(let pid) = result else {
+            Issue.record("expected .commandEnded, got \(String(describing: result))")
+            return
+        }
+        #expect(pid == paneId)
+    }
+
+    @Test("translateMsg: REMOTE_START translates to remoteSessionStarted")
+    func translateMsgRemoteStartTranslatesToRemoteSessionStarted() {
+        // Intent: a surfaceTitle REMOTE_START translates to
+        //   .remoteSessionStarted carrying the paneId.
+        // Why it exists: pins the remote-start Msg translation.
+        // Scenario: spec-first translation -- REMOTE_START yields
+        //   .remoteSessionStarted(paneId:).
+        let paneId = PaneId()
+        let token = "my-token"
+        let title = "__DANTERM_EVT__:\(token):REMOTE_START"
+        let result = translateMsg(.surfaceTitle(paneId: paneId, title: title)) { id in
+            id == paneId ? token : nil
+        }
+        guard case .remoteSessionStarted(let pid) = result else {
+            Issue.record("expected .remoteSessionStarted, got \(String(describing: result))")
+            return
+        }
+        #expect(pid == paneId)
+    }
+
+    @Test("translateMsg: REMOTE_HOST translates to remoteSessionReported")
+    func translateMsgRemoteHostTranslatesToRemoteSessionReported() {
+        // Intent: a REMOTE_HOST surfaceTitle translates to
+        //   .remoteSessionReported with the paneId AND the decoded session.
+        // Why it exists: pins the two-field remote-session translation.
+        // Scenario: spec-first translation -- REMOTE_HOST yields
+        //   .remoteSessionReported with RemoteSession(user, host).
+        let paneId = PaneId()
+        let token = "my-token"
+        let userB64 = Data("dan".utf8).base64EncodedString()
+        let hostB64 = Data("caja".utf8).base64EncodedString()
+        let title = "__DANTERM_EVT__:\(token):REMOTE_HOST:\(userB64):\(hostB64)"
+        let result = translateMsg(.surfaceTitle(paneId: paneId, title: title)) { id in
+            id == paneId ? token : nil
+        }
+        guard case .remoteSessionReported(let pid, let session) = result else {
+            Issue.record("expected .remoteSessionReported, got \(String(describing: result))")
+            return
+        }
+        #expect(pid == paneId)
+        #expect(session == RemoteSession(user: "dan", host: "caja"))
+    }
+
+    @Test("translateMsg: wrong token drops message")
+    func translateMsgWrongTokenDropsMessage() {
+        // Intent: a surfaceTitle with a wrong token returns nil from
+        //   translateMsg (message dropped, not surfaced as a Msg).
+        // Why it exists: pins the token-scoping at the Msg layer (parser
+        //   layer is covered separately).
+        // Scenario: spec-first drop -- wrong-token title returns nil.
+        let paneId = PaneId()
+        let b64 = Data("vim".utf8).base64EncodedString()
+        let title = "__DANTERM_EVT__:wrong-token:CMD_START:\(b64)"
+        let result = translateMsg(.surfaceTitle(paneId: paneId, title: title)) { id in
+            id == paneId ? "correct-token" : nil
+        }
+        #expect(result == nil, "wrong token should drop message")
+    }
+
+    @Test("translateMsg: no token for pane drops message")
+    func translateMsgNoTokenForPaneDropsMessage() {
+        // Intent: when the resolver returns nil (no token registered for
+        //   the pane), translateMsg drops the event.
+        // Why it exists: pins the unauthorized-pane guard.
+        // Scenario: spec-first drop -- resolver returns nil; result is nil.
+        let paneId = PaneId()
+        let b64 = Data("vim".utf8).base64EncodedString()
+        let title = "__DANTERM_EVT__:any-token:CMD_START:\(b64)"
+        let result = translateMsg(.surfaceTitle(paneId: paneId, title: title)) { _ in nil }
+        #expect(result == nil, "no token for pane should drop message")
+    }
+
+    @Test("translateMsg: normal title passes through")
+    func translateMsgNormalTitlePassesThrough() {
+        // Intent: a surfaceTitle that is NOT an event title passes through
+        //   verbatim as a .surfaceTitle Msg.
+        // Why it exists: pins the non-event pass-through so ordinary
+        //   terminal titles continue to update the chrome.
+        // Scenario: spec-first pass-through -- "vim - file.txt" returns
+        //   .surfaceTitle with the same payload.
+        let paneId = PaneId()
+        let msg = Msg.surfaceTitle(paneId: paneId, title: "vim - file.txt")
+        let result = translateMsg(msg) { _ in "some-token" }
+        guard case .surfaceTitle(let pid, let t) = result else {
+            Issue.record("expected .surfaceTitle, got \(String(describing: result))")
+            return
+        }
+        #expect(pid == paneId)
+        #expect(t == "vim - file.txt")
+    }
+
+    @Test("translateMsg: non-surfaceTitle msg passes through")
+    func translateMsgNonSurfaceTitleMsgPassesThrough() {
+        // Intent: a Msg that is not a surfaceTitle passes through verbatim.
+        // Why it exists: pins the scope of translation -- only surfaceTitle
+        //   may be reinterpreted, everything else is untouched.
+        // Scenario: spec-first pass-through -- .surfaceCwd returns unchanged.
+        let paneId = PaneId()
+        let msg = Msg.surfaceCwd(paneId: paneId, cwd: "/home")
+        let result = translateMsg(msg) { _ in nil }
+        guard case .surfaceCwd(let pid, let cwd) = result else {
+            Issue.record("expected .surfaceCwd, got \(String(describing: result))")
+            return
+        }
+        #expect(pid == paneId)
+        #expect(cwd == "/home")
+    }
+
+    // MARK: - PaneTokenStore (token lifecycle)
+
+    @Test("PaneTokenStore: generate creates token")
+    func paneTokenStoreGenerateCreatesToken() {
+        // Intent: generate(for:) creates a non-empty token and stashes it
+        //   so token(for:) returns the same value.
+        // Why it exists: pins the basic lifecycle of the per-pane token
+        //   used to scope title-channel events.
+        // Scenario: spec-first happy path -- generate then read returns
+        //   the same non-empty token.
+        var store = PaneTokenStore()
+        let paneId = PaneId()
+        let token = store.generate(for: paneId)
+        #expect(!token.isEmpty, "token should not be empty")
+        #expect(store.token(for: paneId) == token)
+    }
+
+    @Test("PaneTokenStore: remove cleans up token")
+    func paneTokenStoreRemoveCleansUpToken() {
+        // Intent: remove(_:) clears the stored token; subsequent token(for:)
+        //   returns nil.
+        // Why it exists: pins the teardown path callers run when closing a
+        //   pane so stale tokens don't linger.
+        // Scenario: spec-first teardown -- generate, remove, read returns nil.
+        var store = PaneTokenStore()
+        let paneId = PaneId()
+        _ = store.generate(for: paneId)
+        store.remove(paneId)
+        #expect(store.token(for: paneId) == nil, "token should be removed")
+    }
+
+    @Test("PaneTokenStore: each pane gets unique token")
+    func paneTokenStoreEachPaneGetsUniqueToken() {
+        // Intent: distinct panes get distinct tokens from the same store.
+        // Why it exists: pins the per-pane uniqueness so a cross-pane
+        //   replay cannot pass the token-check.
+        // Scenario: spec-first uniqueness -- two generates for two panes
+        //   produce different tokens.
+        var store = PaneTokenStore()
+        let p1 = PaneId()
+        let p2 = PaneId()
+        let t1 = store.generate(for: p1)
+        let t2 = store.generate(for: p2)
+        #expect(t1 != t2, "tokens should be unique")
+    }
+
+    @Test("PaneTokenStore: generate replaces existing token")
+    func paneTokenStoreGenerateReplacesExistingToken() {
+        // Intent: a second generate(for:) on the same pane replaces the
+        //   previous token (rotation), and token(for:) returns the new one.
+        // Why it exists: pins the rotation semantics so a re-launched
+        //   pane's tokens don't pile up.
+        // Scenario: spec-first rotation -- generate twice -> distinct
+        //   tokens; reading surfaces the second.
+        var store = PaneTokenStore()
+        let paneId = PaneId()
+        let t1 = store.generate(for: paneId)
+        let t2 = store.generate(for: paneId)
+        #expect(t1 != t2, "regenerated token should differ")
+        #expect(store.token(for: paneId) == t2)
+    }
+
+    @Test("PaneTokenStore: unknown pane returns nil")
+    func paneTokenStoreUnknownPaneReturnsNil() {
+        // Intent: token(for:) on an unknown pane returns nil.
+        // Why it exists: pins the absent-key contract; callers branch on it.
+        // Scenario: spec-first lookup miss -- fresh store + unknown pane.
+        let store = PaneTokenStore()
+        #expect(store.token(for: PaneId()) == nil, "unknown pane should return nil")
+    }
+
+    // MARK: - restore command behavior
+
+    @Test("restoreCommandBehavior defaults to prefill")
+    func restoreCommandBehaviorDefaultsToPrefill() {
+        // Intent: with no --restore-commands flag, behavior defaults to
+        //   .prefill (the safe option that doesn't auto-execute).
+        // Why it exists: pins the conservative default so a fresh install
+        //   doesn't auto-run prior session commands.
+        // Scenario: spec-first default -- argv without the flag yields
+        //   .prefill.
+        let behavior = restoreCommandBehavior(from: ["DanTerm", "--init", "/tmp/state.json"])
+        #expect(behavior == .prefill)
+    }
+
+    @Test("restoreCommandBehavior parses execute flag")
+    func restoreCommandBehaviorParsesExecuteFlag() {
+        // Intent: `--restore-commands execute` resolves to .execute.
+        // Why it exists: pins the opt-in execute mode.
+        // Scenario: spec-first opt-in -- argv with `--restore-commands
+        //   execute` yields .execute.
+        let behavior = restoreCommandBehavior(from: ["DanTerm", "--init", "/tmp/state.json", "--restore-commands", "execute"])
+        #expect(behavior == .execute)
+    }
+
+    @Test("restoreCommandBehavior falls back to prefill for unknown value")
+    func restoreCommandBehaviorFallsBackToPrefillForUnknownValue() {
+        // Intent: `--restore-commands bogus` falls back to .prefill (the
+        //   safe default) rather than throwing or erroring.
+        // Why it exists: pins forward-compat -- unknown values do not
+        //   crash startup.
+        // Scenario: spec-first robust fallback -- argv with "bogus"
+        //   yields .prefill.
+        let behavior = restoreCommandBehavior(from: ["DanTerm", "--restore-commands", "bogus"])
+        #expect(behavior == .prefill)
+    }
+
+    @Test("restoreInitialInput prefills without newline by default")
+    func restoreInitialInputPrefillsWithoutNewlineByDefault() {
+        // Intent: in .prefill mode, the command is returned verbatim with
+        //   no trailing newline appended.
+        // Why it exists: pins the prefill-only semantics so the user must
+        //   press Enter to actually run the prior command.
+        // Scenario: spec-first prefill -- input == command, no newline.
+        let input = restoreInitialInput(for: "node server.js", behavior: .prefill)
+        #expect(input == "node server.js")
+    }
+
+    @Test("restoreInitialInput execute appends trailing newline")
+    func restoreInitialInputExecuteAppendsTrailingNewline() {
+        // Intent: in .execute mode, the command is suffixed with a single
+        //   trailing newline so the shell runs it immediately.
+        // Why it exists: pins the execute-mode side effect explicitly.
+        // Scenario: spec-first execute -- input ends in "\n".
+        let input = restoreInitialInput(for: "node server.js", behavior: .execute)
+        #expect(input == "node server.js\n")
+    }
+
+    @Test("restoreInitialInput execute preserves existing trailing newline")
+    func restoreInitialInputExecutePreservesExistingTrailingNewline() {
+        // Intent: in .execute mode, a command already ending in "\n" is
+        //   not double-suffixed.
+        // Why it exists: pins idempotency of the newline append so two
+        //   restore paths producing the same effective input.
+        // Scenario: spec-first idempotent -- a command already ending in
+        //   "\n" stays a single-newline string.
+        let input = restoreInitialInput(for: "node server.js\n", behavior: .execute)
+        #expect(input == "node server.js\n")
+    }
+
+    @Test("restoreInitialInput returns nil for empty command")
+    func restoreInitialInputReturnsNilForEmptyCommand() {
+        // Intent: an empty command surfaces no input (nil), in either mode.
+        // Why it exists: pins the no-op behavior for missing commands so
+        //   the pane does not see a phantom empty line.
+        // Scenario: spec-first no-op -- empty command -> nil.
+        let input = restoreInitialInput(for: "", behavior: .prefill)
+        #expect(input == nil, "empty command should not produce input")
+    }
+
+    // MARK: - commandStarted Msg
+
+    @Test("commandStarted sets lastCommand")
+    func commandStartedSetsLastCommand() {
+        // Intent: dispatching .commandStarted updates the pane's
+        //   lastCommand to the supplied command string.
+        // Why it exists: pins the model update for the .commandStarted Msg
+        //   that the title-channel translation feeds.
+        // Scenario: spec-first update -- pane gets lastCommand = "vim".
+        var model = makeModel()
+        createTab(&model)
+        let tab = model.groups[0].tabs[0]
+        let paneId = tab.focusedPaneId
+        update(&model, .commandStarted(paneId: paneId, command: "vim"))
+        #expect(model.pane(paneId)?.lastCommand == "vim")
+    }
+
+    @Test("commandStarted overwrites previous command")
+    func commandStartedOverwritesPreviousCommand() {
+        // Intent: a second .commandStarted overwrites the prior
+        //   lastCommand (no history list).
+        // Why it exists: pins the latest-only semantics; the field tracks
+        //   the most recent command, not a history.
+        // Scenario: spec-first overwrite -- vim then ssh -> lastCommand
+        //   is "ssh".
+        var model = makeModel()
+        createTab(&model)
+        let tab = model.groups[0].tabs[0]
+        let paneId = tab.focusedPaneId
+        update(&model, .commandStarted(paneId: paneId, command: "vim"))
+        update(&model, .commandStarted(paneId: paneId, command: "ssh"))
+        #expect(model.pane(paneId)?.lastCommand == "ssh")
+    }
+
+    @Test("commandStarted does not affect title")
+    func commandStartedDoesNotAffectTitle() {
+        // Intent: .commandStarted updates lastCommand but never the pane
+        //   title (those are separate channels).
+        // Why it exists: pins the channel separation so a command-event
+        //   does not rename the pane.
+        // Scenario: spec-first separation -- title is unchanged after
+        //   .commandStarted.
+        var model = makeModel()
+        createTab(&model)
+        let tab = model.groups[0].tabs[0]
+        let paneId = tab.focusedPaneId
+        let titleBefore = model.pane(paneId)?.title
+        update(&model, .commandStarted(paneId: paneId, command: "vim"))
+        #expect(model.pane(paneId)?.title == titleBefore)
+    }
+
+    @Test("surfaceTitle does not affect lastCommand")
+    func surfaceTitleDoesNotAffectLastCommand() {
+        // Intent: a subsequent .surfaceTitle does NOT clear or change
+        //   lastCommand (only .commandStarted/.commandEnded do).
+        // Why it exists: pins the inverse of the previous test --
+        //   ordinary title updates do not regress the command field.
+        // Scenario: spec-first preservation -- after a title change,
+        //   lastCommand still equals the previously started command.
+        var model = makeModel()
+        createTab(&model)
+        let tab = model.groups[0].tabs[0]
+        let paneId = tab.focusedPaneId
+        update(&model, .commandStarted(paneId: paneId, command: "vim"))
+        update(&model, .surfaceTitle(paneId: paneId, title: "new title"))
+        #expect(model.pane(paneId)?.lastCommand == "vim")
+    }
+
+    // MARK: - truncateScrollback
+
+    @Test("truncateScrollback: empty string returns nil")
+    func truncateScrollbackEmptyStringReturnsNil() {
+        // Intent: an empty input string returns nil (not "").
+        // Why it exists: pins the no-content guard so the snapshot stays
+        //   absent rather than carrying a useless empty string.
+        // Scenario: spec-first guard -- "" returns nil.
+        #expect(truncateScrollback("") == nil, "empty should be nil")
+    }
+
+    @Test("truncateScrollback: whitespace-only returns nil")
+    func truncateScrollbackWhitespaceOnlyReturnsNil() {
+        // Intent: a whitespace-only input (spaces + newlines) returns nil.
+        // Why it exists: pins the "no real content" guard; an idle terminal
+        //   that scrolls only whitespace should produce no scrollback.
+        // Scenario: spec-first guard -- "  \n  \n  " returns nil.
+        #expect(truncateScrollback("  \n  \n  ") == nil, "whitespace should be nil")
+    }
+
+    @Test("truncateScrollback: text under limits gets trailing newline")
+    func truncateScrollbackTextUnderLimitsGetsTrailingNewline() {
+        // Intent: a multi-line input without a trailing newline acquires
+        //   one in the output.
+        // Why it exists: pins the canonical line-terminated form so
+        //   downstream concatenation is predictable.
+        // Scenario: spec-first canonicalization -- 3 lines without
+        //   trailing newline become 3 lines + "\n".
+        #expect(truncateScrollback("line1\nline2\nline3") == "line1\nline2\nline3\n")
+    }
+
+    @Test("truncateScrollback: text already ending in newline preserved")
+    func truncateScrollbackTextAlreadyEndingInNewlinePreserved() {
+        // Intent: a multi-line input ALREADY ending in newline survives
+        //   unchanged.
+        // Why it exists: idempotency of the trailing-newline normalization.
+        // Scenario: spec-first idempotent -- a line-terminated input
+        //   passes through.
+        #expect(truncateScrollback("line1\nline2\n") == "line1\nline2\n")
+    }
+
+    @Test("truncateScrollback: keeps last maxLines lines")
+    func truncateScrollbackKeepsLastMaxLinesLines() {
+        // Intent: with input lines exceeding maxLines, the last maxLines
+        //   are retained (the older lines drop).
+        // Why it exists: pins the "tail" retention strategy so checkpoint
+        //   storage is bounded.
+        // Scenario: spec-first tail -- 5000 lines truncated to 4000
+        //   surfaces lines 1001..5000.
+        let lines = (1...5000).map { "line \($0)" }
+        let text = lines.joined(separator: "\n")
+        let result = truncateScrollback(text, maxLines: 4000)!
+        let resultLines = result.split(separator: "\n")
+        #expect(resultLines.count == 4000)
+        #expect(String(resultLines.first!) == "line 1001")
+        #expect(String(resultLines.last!) == "line 5000")
+    }
+
+    @Test("truncateScrollback: over maxChars truncates at newline")
+    func truncateScrollbackOverMaxCharsTruncatesAtNewline() {
+        // Intent: a text exceeding maxChars (but under maxLines) is
+        //   truncated to <= maxChars, breaking at a newline boundary.
+        // Why it exists: pins the byte-bound; ensures the truncation
+        //   point is a newline (no torn line).
+        // Scenario: spec-first cap -- 100 lines of 100-char text capped
+        //   at 500 chars and starting on a clean line.
+        // Build text that's under line limit but over char limit
+        let longLine = String(repeating: "x", count: 100)
+        let lines = (1...100).map { _ in longLine }
+        let text = lines.joined(separator: "\n")
+        // maxChars=500 with 100-char lines + newlines
+        let result = truncateScrollback(text, maxLines: 10000, maxChars: 500)!
+        #expect(result.count <= 500, "result should be at most maxChars")
+        // Should break at a newline boundary
+        #expect(!result.hasPrefix("\n"), "should not start with newline")
+    }
+
+    @Test("truncateScrollback: exactly at limit")
+    func truncateScrollbackExactlyAtLimit() {
+        // Intent: an input exactly at maxLines retains everything and
+        //   appends the trailing newline.
+        // Why it exists: pins the boundary case so off-by-one drops don't
+        //   sneak in.
+        // Scenario: spec-first boundary -- 2 lines at maxLines=2 keeps
+        //   both.
+        let result = truncateScrollback("a\nb", maxLines: 2)!
+        #expect(result == "a\nb\n")
+    }
+
+    @Test("truncateScrollback: one over limit")
+    func truncateScrollbackOneOverLimit() {
+        // Intent: an input one line over maxLines drops the OLDEST line
+        //   (the first), retaining the last maxLines.
+        // Why it exists: pins the tail-keep direction at the boundary.
+        // Scenario: spec-first boundary -- 3 lines at maxLines=2 keeps
+        //   the latter two.
+        let result = truncateScrollback("a\nb\nc", maxLines: 2)!
+        #expect(result == "b\nc\n")
+    }
+
+    @Test("truncateScrollback: consecutive newlines count as empty lines")
+    func truncateScrollbackConsecutiveNewlinesCountAsEmptyLines() {
+        // Intent: consecutive \n sequences count as empty lines for the
+        //   maxLines tail-keep -- a "\n\n\n" prefix produces three empty
+        //   lines.
+        // Why it exists: pins the line-counting semantics so blank lines
+        //   in the middle aren't silently coalesced.
+        // Scenario: spec-first count -- "a\n\n\nb" at maxLines=2 keeps
+        //   one empty line and "b".
+        let result = truncateScrollback("a\n\n\nb", maxLines: 2)!
+        #expect(result == "\nb\n")
+    }
+
+    @Test("truncateScrollback: trailing whitespace-only lines are stripped")
+    func truncateScrollbackTrailingWhitespaceOnlyLinesAreStripped() {
+        // Intent: lines at the tail that contain only whitespace are
+        //   removed before the trailing newline is added.
+        // Why it exists: pins the ghostty-padding behavior -- ghostty
+        //   pads the visible buffer with whitespace lines that should
+        //   not pollute the saved scrollback.
+        // Scenario: spec-first stripping -- "hello\nworld\n   \n   \n
+        //   \n" becomes "hello\nworld\n".
+        let result = truncateScrollback("hello\nworld\n   \n   \n   \n")!
+        #expect(result == "hello\nworld\n")
+    }
+
+    @Test("truncateScrollback: trailing empty lines are stripped")
+    func truncateScrollbackTrailingEmptyLinesAreStripped() {
+        // Intent: trailing entirely-empty lines (just \n\n\n) are stripped.
+        // Why it exists: pins the no-trailing-blanks rule for the saved
+        //   form.
+        // Scenario: spec-first stripping -- "hello\nworld\n\n\n\n"
+        //   becomes "hello\nworld\n".
+        let result = truncateScrollback("hello\nworld\n\n\n\n")!
+        #expect(result == "hello\nworld\n")
+    }
+
+    @Test("truncateScrollback: trailing whitespace-only lines without final newline")
+    func truncateScrollbackTrailingWhitespaceOnlyLinesWithoutFinalNewline() {
+        // Intent: stripping also applies when the input lacks a final
+        //   newline; the result still ends in a single "\n".
+        // Why it exists: pins the canonicalization symmetric to the
+        //   newline-terminated case.
+        // Scenario: spec-first stripping -- "hello\nworld\n   \n   "
+        //   becomes "hello\nworld\n".
+        let result = truncateScrollback("hello\nworld\n   \n   ")!
+        #expect(result == "hello\nworld\n")
+    }
+
+    @Test("truncateScrollback: trailing empty lines without final newline")
+    func truncateScrollbackTrailingEmptyLinesWithoutFinalNewline() {
+        // Intent: symmetric stripping for empty (not whitespace) trailing
+        //   lines without a final newline.
+        // Why it exists: pins the empty-vs-whitespace symmetry.
+        // Scenario: spec-first stripping -- "hello\nworld\n\n" becomes
+        //   "hello\nworld\n".
+        let result = truncateScrollback("hello\nworld\n\n")!
+        #expect(result == "hello\nworld\n")
+    }
+
+    @Test("truncateScrollback: all-whitespace without final newline returns nil")
+    func truncateScrollbackAllWhitespaceWithoutFinalNewlineReturnsNil() {
+        // Intent: an input that is whitespace-only and lacks a final
+        //   newline still surfaces as nil.
+        // Why it exists: pins the no-content guard in the unterminated
+        //   variant.
+        // Scenario: spec-first guard -- "   \n   " returns nil.
+        #expect(truncateScrollback("   \n   ") == nil, "only whitespace lines should be nil")
+    }
+
+    @Test("truncateScrollback: all-whitespace trailing lines returns nil")
+    func truncateScrollbackAllWhitespaceTrailingLinesReturnsNil() {
+        // Intent: an input that is whitespace-only AND ends in newline
+        //   still surfaces as nil.
+        // Why it exists: pins the no-content guard in the terminated
+        //   variant.
+        // Scenario: spec-first guard -- "   \n   \n" returns nil.
+        #expect(truncateScrollback("   \n   \n") == nil, "only whitespace lines should be nil")
+    }
+
+    @Test("truncateScrollback: real scrollback without final newline (ghostty format)")
+    func truncateScrollbackRealScrollbackWithoutFinalNewlineGhosttyFormat() {
+        // Intent: a real ghostty scrollback sample (padded trailing
+        //   blanks, no final newline) round-trips through truncation
+        //   into the cleanly trimmed visible content.
+        // Why it exists: pins the regression net for the actual ghostty
+        //   payload shape -- a unit test that mirrors production input.
+        // Scenario: spec-first regression -- a known ghostty paste-out
+        //   trims to its first two lines.
+        let input = "╭ repo:danterm                                                                         k8s:orbstack\n╰ $                                                                                                \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   "
+        let result = truncateScrollback(input)!
+        #expect(result == "╭ repo:danterm                                                                         k8s:orbstack\n╰ $\n")
+    }
+
+    @Test("truncateScrollback: real scrollback with padded trailing blank lines")
+    func truncateScrollbackRealScrollbackWithPaddedTrailingBlankLines() {
+        // Intent: the previous sample with a final newline also trims to
+        //   the same first-two-lines result.
+        // Why it exists: pins the equivalence between terminated and
+        //   unterminated ghostty payloads.
+        // Scenario: spec-first equivalence -- same ghostty sample, with
+        //   trailing newline this time, yields the same trimmed result.
+        let input = "╭ repo:danterm                                                                         k8s:orbstack\n╰ $                                                                                                \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n                                                                                                   \n"
+        let result = truncateScrollback(input)!
+        #expect(result == "╭ repo:danterm                                                                         k8s:orbstack\n╰ $\n")
+    }
+
+    // MARK: - exportState Msg/Command
+
+    @Test("exportState command contains AppModelSnapshot")
+    func exportStateCommandContainsAppModelSnapshot() {
+        // Intent: dispatching .exportState produces exactly one
+        //   .exportState Command whose snapshot agrees with what
+        //   toSnapshot(model) would have produced (groups, panes,
+        //   selectedTabId, IDs, launch.command, launch.cwd) AND whose
+        //   focused pane's leaf embeds the pane.
+        // Why it exists: pins the export wire payload, including the
+        //   leaf-embedded pane shape and the pure-snapshot scrollback
+        //   contract (nil here -- enrichment happens at runtime).
+        // Scenario: spec-first export -- a tab with a vim-running pane at
+        //   ~/projects exports a snapshot whose launch surfaces the cwd
+        //   abbreviated to "~/projects" and the command "vim".
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        model.updatePane(paneId) { $0.lastCommand = "vim" }
+        model.updatePane(paneId) { $0.cwd = NSHomeDirectory() + "/projects" }
+        let expected = toSnapshot(model)
+        let commands = update(&model, .exportState)
+        #expect(commands.count == 1)
+        guard case .exportState(let snapshot) = commands[0] else {
+            Issue.record("expected .exportState command")
+            return
+        }
+        #expect(snapshot.groups.count == expected.groups.count)
+        #expect(allPaneSnapshots(snapshot).count == allPaneSnapshots(expected).count)
+        #expect(snapshot.selectedTabId == expected.selectedTabId)
+        // Verify IDs match
+        #expect(snapshot.groups[0].id == expected.groups[0].id)
+        #expect(snapshot.groups[0].tabs[0].id == expected.groups[0].tabs[0].id)
+        #expect(snapshot.groups[0].tabs[0].focusedPaneId == expected.groups[0].tabs[0].focusedPaneId)
+        // Verify launch fields (panes now live embedded in the tree leaves)
+        let snapPane = allPaneSnapshots(snapshot)[0]
+        #expect(snapPane.id == allPaneSnapshots(expected)[0].id)
+        #expect(snapPane.launch?.command == "vim")
+        #expect(snapPane.launch?.cwd == "~/projects")
+        // Pure snapshot has nil scrollback (enrichment happens in runtime)
+        #expect(snapPane.scrollback == nil, "pure snapshot should have nil scrollback")
+        // Verify rootNode type -- the leaf embeds the focused pane.
+        if case .leaf(let leafPane) = snapshot.groups[0].tabs[0].rootNode {
+            #expect(leafPane.id == paneId.rawValue.uuidString)
+        } else {
+            Issue.record("expected leaf rootNode")
+            return
+        }
+    }
+
+    // MARK: - toSnapshot round-trip
+
+    @Test("toSnapshot round-trips through validateAndBuild")
+    func toSnapshotRoundTripsThroughValidateAndBuild() {
+        // Intent: toSnapshot then validateAndBuild reconstructs a model
+        //   that agrees on group count and pane count.
+        // Why it exists: pins the encode/decode round-trip; deeper field
+        //   parity is covered by sibling tests.
+        // Scenario: spec-first round-trip -- one tab survives the round
+        //   trip with matching counts.
+        var model = makeModel()
+        createTab(&model)
+        let snapshot = toSnapshot(model)
+        let rebuilt = validateAndBuild(snapshot)
+        #expect(rebuilt != nil, "round-trip should produce valid model")
+        #expect(rebuilt!.groups.count == model.groups.count)
+        #expect(rebuilt!.allPaneIds.count == model.allPaneIds.count)
+    }
+
+    @Test("toSnapshot preserves UUIDs through round-trip")
+    func toSnapshotPreservesUUIDsThroughRoundTrip() {
+        // Intent: group/tab/pane/selectedTab UUIDs survive the round trip
+        //   verbatim.
+        // Why it exists: pins identity preservation so external bookmarks
+        //   and references survive a restart.
+        // Scenario: spec-first preservation -- every typed-id field
+        //   on the rebuilt model equals the originating model.
+        var model = makeModel()
+        createTab(&model)
+        let snapshot = toSnapshot(model)
+        let rebuilt = validateAndBuild(snapshot)!
+        #expect(rebuilt.groups[0].id == model.groups[0].id)
+        #expect(rebuilt.groups[0].tabs[0].id == model.groups[0].tabs[0].id)
+        #expect(rebuilt.selectedTabId == model.selectedTabId)
+        let origPaneId = model.groups[0].tabs[0].focusedPaneId
+        #expect(rebuilt.pane(origPaneId) != nil, "pane ID should survive round-trip")
+    }
+
+    @Test("toSnapshot preserves selectedTabId")
+    func toSnapshotPreservesSelectedTabId() {
+        // Intent: selectedTabId reflects the currently-selected tab AFTER
+        //   a .selectTab Msg, not a stale value.
+        // Why it exists: pins the round-trip of explicit tab selection
+        //   independent of insertion order.
+        // Scenario: spec-first preservation -- create two tabs, select
+        //   the first, snapshot's selectedTabId matches.
+        var model = makeModel()
+        createTab(&model)
+        createTab(&model)
+        let firstTabId = model.groups[0].tabs[0].id
+        update(&model, .selectTab(id: firstTabId))
+        let snapshot = toSnapshot(model)
+        #expect(snapshot.selectedTabId == firstTabId.rawValue.uuidString)
+    }
+
+    @Test("toSnapshot preserves split tree structure")
+    func toSnapshotPreservesSplitTreeStructure() {
+        // Intent: a horizontal split with ratio 0.5 survives the round-
+        //   trip with direction and ratio intact AND with two pane leaves.
+        // Why it exists: pins the split branch of the snapshot encoder/
+        //   decoder; the leaf branch is covered by the round-trip test.
+        // Scenario: spec-first split round-trip -- the rebuilt rootNode
+        //   is .split with the same direction/ratio.
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .splitPane(direction: .horizontal))
+        let snapshot = toSnapshot(model)
+        let rebuilt = validateAndBuild(snapshot)!
+        let tab = rebuilt.groups[0].tabs[0]
+        if case .split(_, let dir, _, _, let ratio) = tab.rootNode {
+            #expect(dir == .horizontal)
+            #expect(ratio == 0.5)
+        } else {
+            Issue.record("expected split node")
+            return
+        }
+        #expect(allPaneIds(tab.rootNode).count == 2)
+    }
+
+    @Test("toSnapshot preserves multiple groups")
+    func toSnapshotPreservesMultipleGroups() {
+        // Intent: two groups in declared order survive the round-trip
+        //   with their names.
+        // Why it exists: pins the group-level preservation.
+        // Scenario: spec-first round-trip -- General + Work names survive.
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .createGroup(name: "Work"))
+        let snapshot = toSnapshot(model)
+        let rebuilt = validateAndBuild(snapshot)!
+        #expect(rebuilt.groups.count == 2)
+        #expect(rebuilt.groups[0].name == "General")
+        #expect(rebuilt.groups[1].name == "Work")
+    }
+
+    @Test("toSnapshot preserves group collapsed state")
+    func toSnapshotPreservesGroupCollapsedState() {
+        // Intent: a group's isCollapsed flag (true) survives encoding to
+        //   the snapshot.
+        // Why it exists: pins the collapse state's serialization so the
+        //   sidebar restores in the same shape.
+        // Scenario: spec-first round-trip -- a collapsed group surfaces
+        //   isCollapsed == true on its snapshot.
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .createGroup(name: "Work"))
+        update(&model, .toggleGroupCollapse(groupId: model.groups[1].id))
+        let snapshot = toSnapshot(model)
+        #expect(snapshot.groups[1].isCollapsed == true)
+    }
+
+    // MARK: - Launch field
+
+    @Test("lastCommand maps to launch.command in snapshot")
+    func lastCommandMapsToLaunchCommandInSnapshot() {
+        // Intent: a pane's lastCommand surfaces in its snapshot
+        //   pane.launch.command.
+        // Why it exists: pins the lastCommand -> launch.command projection
+        //   that the encoder uses.
+        // Scenario: spec-first projection -- set lastCommand="vim",
+        //   snapshot.launch.command == "vim".
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        model.updatePane(paneId) { $0.lastCommand = "vim" }
+        let snapshot = toSnapshot(model)
+        #expect(allPaneSnapshots(snapshot)[0].launch?.command == "vim")
+    }
+
+    @Test("launch omitted when no command and no cwd")
+    func launchOmittedWhenNoCommandAndNoCwd() {
+        // Intent: a pane with neither cwd nor lastCommand has a nil launch
+        //   field on its snapshot (no spurious empty launch object).
+        // Why it exists: pins the snapshot's optional-empty convention.
+        // Scenario: spec-first projection -- clear both fields, snapshot
+        //   launch is nil.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        model.updatePane(paneId) { $0.cwd = nil }
+        model.updatePane(paneId) { $0.lastCommand = nil }
+        let snapshot = toSnapshot(model)
+        #expect(allPaneSnapshots(snapshot)[0].launch == nil, "launch should be nil when no command and no cwd")
+    }
+
+    @Test("cwd abbreviated with ~ in export")
+    func cwdAbbreviatedWithTildeInExport() {
+        // Intent: a pane's cwd containing the user's home expands BACK to
+        //   ~/relative in the exported snapshot.
+        // Why it exists: pins the inverse of expandTilde so exports stay
+        //   portable across users.
+        // Scenario: spec-first abbreviation -- cwd = $HOME/projects
+        //   exports as ~/projects.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let home = NSHomeDirectory()
+        model.updatePane(paneId) { $0.cwd = home + "/projects" }
+        let snapshot = toSnapshot(model)
+        #expect(allPaneSnapshots(snapshot)[0].cwd == "~/projects")
+    }
+
+    @Test("launch.cwd present when cwd is set")
+    func launchCwdPresentWhenCwdIsSet() {
+        // Intent: with a cwd set (and no command), launch is present and
+        //   carries the abbreviated cwd.
+        // Why it exists: pins the "cwd alone implies a launch" projection.
+        // Scenario: spec-first projection -- cwd = ~/work, snapshot
+        //   launch.cwd = "~/work".
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let home = NSHomeDirectory()
+        model.updatePane(paneId) { $0.cwd = home + "/work" }
+        let snapshot = toSnapshot(model)
+        #expect(allPaneSnapshots(snapshot)[0].launch?.cwd == "~/work")
+    }
+
+    @Test("launch has both command and cwd when both set")
+    func launchHasBothCommandAndCwdWhenBothSet() {
+        // Intent: with both lastCommand and cwd set, launch is present
+        //   and carries both fields.
+        // Why it exists: pins the combined projection from the model into
+        //   the snapshot.launch object.
+        // Scenario: spec-first projection -- cwd + command -> snapshot
+        //   launch has both.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let home = NSHomeDirectory()
+        model.updatePane(paneId) { $0.cwd = home + "/code" }
+        model.updatePane(paneId) { $0.lastCommand = "claude" }
+        let snapshot = toSnapshot(model)
+        let launch = allPaneSnapshots(snapshot)[0].launch
+        #expect(launch != nil, "launch should be present")
+        #expect(launch?.command == "claude")
+        #expect(launch?.cwd == "~/code")
+    }
+
+    // MARK: - JSON round-trip
+
+    @Test("JSON round-trip preserves command metadata")
+    func jsonRoundTripPreservesCommandMetadata() throws {
+        // Intent: a model with a split tab and a vim-running pane at
+        //   ~/work survives encode (with sorted-keys + pretty-print) and
+        //   decode + validateAndBuild, with the launch fields intact and
+        //   both panes reachable.
+        // Why it exists: pins the JSON-side round-trip distinct from the
+        //   in-memory snapshot round-trip (different code paths).
+        // Scenario: spec-first JSON round-trip -- the decoded pane's
+        //   launch.command/cwd match what was set; the rebuilt model has
+        //   the expected pane count.
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .splitPane(direction: .horizontal))
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        model.updatePane(paneId) { $0.lastCommand = "claude" }
+        model.updatePane(paneId) { $0.cwd = NSHomeDirectory() + "/work" }
+        let initFile = toInitFile(model)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(initFile)
+        let decoded = try JSONDecoder().decode(AppInitFile.self, from: data)
+
+        // Verify snapshot-level launch fields survive encoding (panes embedded in leaves)
+        let exportedPane = paneSnapshot(paneId.rawValue.uuidString, in: decoded.model)
+        #expect(exportedPane != nil, "pane should exist in decoded snapshot")
+        #expect(exportedPane?.launch?.command == "claude")
+        #expect(exportedPane?.launch?.cwd == "~/work")
+
+        // Verify full rebuild succeeds
+        let rebuilt = validateAndBuild(decoded.model)
+        #expect(rebuilt != nil, "JSON round-trip should produce valid model")
+        #expect(rebuilt!.allPaneIds.count == 2)
+    }
+}

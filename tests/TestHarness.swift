@@ -13,7 +13,6 @@ struct TestRunner {
         sidebarItemStoreTests()
         reconcileTests()
         paneToolbarTests()
-        exportTests()
         customTitleTests()
         checkpointTests()
         searchTests()
