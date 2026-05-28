@@ -729,8 +729,11 @@
   - testProgressStateSurvivesCwdUpdate
   - testSurfaceClosed
 
-## UpdateGroupTests -- PENDING
-# tests=39  expect=18  expectEqual=113  throwTF=0  TOTAL=131
+## UpdateGroupTests -- MIGRATED (Wave C)
+# baseline: tests=39 expect=18 expectEqual=113 throwTF=0 TOTAL=131
+# new:      @Test=39 #expect=131 expectNoDifference=0 #require=0 Issue.record=0 TOTAL=131
+# delta:    0
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/UpdateGroupTests.swift
   - testCreateGroupAndMoveTab
   - testDeleteGroupMovesTabs
   - testDeleteFirstGroupMovesTabsToNext
