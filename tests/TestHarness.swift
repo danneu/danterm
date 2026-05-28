@@ -3,7 +3,6 @@ import Foundation
 @main
 struct TestRunner {
     static func main() {
-        customTitleTests()
         checkpointTests()
         ipcUpdateTests()
         print("\n\(total - failures)/\(total) passed")

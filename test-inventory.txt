@@ -71,8 +71,12 @@
   - uninstall is idempotent
   - isInstalled returns false for mismatched symlink
 
-## CustomTitleTests -- PENDING
-# tests=33  expect=32  expectEqual=39  throwTF=0  TOTAL=71
+## CustomTitleTests -- MIGRATED (Wave D)
+# baseline: tests=33 expect=32 expectEqual=39 throwTF=0 TOTAL=71
+# new:      @Test=33 #expect=62 expectNoDifference=0 #require=0 Issue.record=9 TOTAL=71
+# delta:    0 (each `return try expect(false, "msg")` pattern inside rename-completion
+#            case destructures -> Issue.record + return)
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/CustomTitleTests.swift
   - testDisplayTitlePrefersCustom
   - testDisplayTitleFallback
   - testRenameTab
