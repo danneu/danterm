@@ -107,8 +107,11 @@
   - testClearCustomTitlesAllStaleIsNoop
   - testClearCustomTitlesRevertsSelectedTabDisplayTitle
 
-## DanTermConfigTests -- PENDING
-# tests=23  expect=0  expectEqual=25  throwTF=0  TOTAL=25
+## DanTermConfigTests -- MIGRATED (Wave D)
+# baseline: tests=23 expect=0 expectEqual=25 throwTF=0 TOTAL=25
+# new:      @Test=23 #expect=25 expectNoDifference=0 #require=0 Issue.record=0 TOTAL=25
+# delta:    0
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/DanTermConfigTests.swift
   - parse valid remote-theme
   - parse empty file returns defaults
   - parse file with only Ghostty keys returns defaults
