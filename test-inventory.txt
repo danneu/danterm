@@ -913,8 +913,11 @@
   - tab removed during active cycle: commit selects a live tab
   - restore-time reconciliation: empty mruOrder fills on next update()
 
-## UpdatePaneTests -- PENDING
-# tests=52  expect=41  expectEqual=115  throwTF=19  TOTAL=175
+## UpdatePaneTests -- MIGRATED (Wave C)
+# baseline: tests=52 expect=41 expectEqual=115 throwTF=19 TOTAL=175
+# new:      @Test=52 #expect=156 expectNoDifference=0 #require=0 Issue.record=19 TOTAL=175
+# delta:    0 (each `guard case ... else { throw TestFailure }` -> Issue.record + return)
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/UpdatePaneTests.swift
   - testSplitPaneProducesCorrectTree
   - testClosePanePromotesSibling
   - testFocusDirectionRequestsFirstResponder
