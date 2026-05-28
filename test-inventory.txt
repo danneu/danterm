@@ -130,15 +130,21 @@
   - removeKey on absent key returns content unchanged
   - removeKey does not remove commented-out keys
 
-## DebouncerTests -- PENDING
-# tests=4  expect=9  expectEqual=1  throwTF=1  TOTAL=11
+## DebouncerTests -- MIGRATED (Wave A)
+# baseline: tests=4 expect=9 expectEqual=1 throwTF=1 TOTAL=11
+# new:      @Test=4 #expect=10 expectNoDifference=0 #require=0 Issue.record=1 TOTAL=11
+# delta:    0 (legacy compound guard's `throw TestFailure` -> Issue.record + return)
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/DebouncerTests.swift
   - Debouncer: cancel before schedule is a no-op
   - Debouncer: cancel disarms and stays reusable
   - Debouncer: rapid reschedule stays cancellable
   - Debouncer: reschedule moves deadline and keeps newest action
 
-## DragDropInputTests -- PENDING
-# tests=10  expect=3  expectEqual=9  throwTF=0  TOTAL=12
+## DragDropInputTests -- MIGRATED (Wave A)
+# baseline: tests=10 expect=3 expectEqual=9 throwTF=0 TOTAL=12
+# new:      @Test=10 #expect=12 expectNoDifference=0 #require=0 Issue.record=0 TOTAL=12
+# delta:    0
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/DragDropInputTests.swift
   - shellQuote: simple path
   - shellQuote: path with spaces
   - shellQuote: path with embedded single quote
@@ -150,8 +156,11 @@
   - buildContent: all inputs empty/nil returns nil
   - buildContent: empty-string file paths filtered out
 
-## DropZoneTests -- PENDING
-# tests=14  expect=4  expectEqual=10  throwTF=0  TOTAL=14
+## DropZoneTests -- MIGRATED (Wave A)
+# baseline: tests=14 expect=4 expectEqual=10 throwTF=0 TOTAL=14
+# new:      @Test=14 #expect=14 expectNoDifference=0 #require=0 Issue.record=0 TOTAL=14
+# delta:    0
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/DropZoneTests.swift
   - testDropZoneLeft
   - testDropZoneRight
   - testDropZoneBottom
@@ -512,8 +521,11 @@
   - snapshot without tab todos field decodes with empty list
   - snapshot without todos field decodes with empty array
 
-## SurfaceGeometryTests -- PENDING
-# tests=7  expect=6  expectEqual=2  throwTF=0  TOTAL=8
+## SurfaceGeometryTests -- MIGRATED (Wave A)
+# baseline: tests=7 expect=6 expectEqual=2 throwTF=0 TOTAL=8
+# new:      @Test=7 #expect=8 expectNoDifference=0 #require=0 Issue.record=0 TOTAL=8
+# delta:    0
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/SurfaceGeometryTests.swift
   - surfaceGeometry: Retina 2x derives scale and backing pixels
   - surfaceGeometry: non-Retina 1x derives scale 1
   - surfaceGeometry: derives x and y scale independently
@@ -552,8 +564,11 @@
 # tests=1  expect=1  expectEqual=4  throwTF=0  TOTAL=5
   - terminal launch env includes pane context and omits tab context
 
-## ThemeColorParserTests -- PENDING
-# tests=10  expect=10  expectEqual=18  throwTF=0  TOTAL=28
+## ThemeColorParserTests -- MIGRATED (Wave A)
+# baseline: tests=10 expect=10 expectEqual=18 throwTF=0 TOTAL=28
+# new:      @Test=10 #expect=28 expectNoDifference=0 #require=0 Issue.record=0 TOTAL=28
+# delta:    0
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/ThemeColorParserTests.swift
   - parses valid theme content
   - returns nil when background is missing
   - returns nil when foreground is missing
@@ -565,8 +580,11 @@
   - normalizes uppercase hex to lowercase
   - palette colors are ordered 1 through 6
 
-## TickCoalescerTests -- PENDING
-# tests=5  expect=8  expectEqual=1  throwTF=0  TOTAL=9
+## TickCoalescerTests -- MIGRATED (Wave A)
+# baseline: tests=5 expect=8 expectEqual=1 throwTF=0 TOTAL=9
+# new:      @Test=5 #expect=9 expectNoDifference=0 #require=0 Issue.record=0 TOTAL=9
+# delta:    0
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/TickCoalescerTests.swift
   - TickCoalescer: first wakeup schedules
   - TickCoalescer: extra wakeups coalesce while scheduled
   - TickCoalescer: runTick clears before draining
