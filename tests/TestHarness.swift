@@ -3,7 +3,6 @@ import Foundation
 @main
 struct TestRunner {
     static func main() {
-        tabTests()
         paneTests()
         ghosttyTests()
         groupTests()

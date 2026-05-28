@@ -1063,8 +1063,11 @@
   - surfaceCreationFailed cleans up search state
   - deleteGroup cleans up search state
 
-## UpdateTabTests -- PENDING
-# tests=65  expect=50  expectEqual=110  throwTF=5  TOTAL=165
+## UpdateTabTests -- MIGRATED (Wave C)
+# baseline: tests=65 expect=50 expectEqual=110 throwTF=5 TOTAL=165
+# new:      @Test=65 #expect=160 expectNoDifference=0 #require=0 Issue.record=5 TOTAL=165
+# delta:    0 (each `throw TestFailure` inside a confirmation-arg guard -> Issue.record + return)
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/UpdateTabTests.swift
   - testCreateTabAddsToDefaultGroup
   - testCreateTabBackgroundDoesNotChangeSelection
   - testCreateTabInheritsWorkingDirectory
