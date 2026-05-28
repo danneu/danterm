@@ -9,10 +9,10 @@ that's covered by the `## Boundaries` rule in `AGENTS.md`.
 ## build-lib.sh
 
 - Clones Ghostty at a pinned tag (currently v1.3.0).
-- Builds with `nix shell nixpkgs#zig_0_15 nixpkgs#gettext --command zig
+- Builds with `nix shell "$SCRIPT_DIR#zig_0_15" nixpkgs#gettext --command zig
   build`.
-- Flags: `-Demit-xcframework -Demit-macos-app=false -Dsentry=false
-  -Doptimize=ReleaseFast`.
+- Flags: `-Demit-xcframework -Dxcframework-target=native -Demit-macos-app=false
+  -Dsentry=false -Doptimize=ReleaseFast`.
 - xcframework output path is `lib/GhosttyKit.xcframework/` (NOT `zig-out/`).
 - As of v1.3.0, dependency URLs use a CDN (`deps.files.ghostty.org`); the old
   iTerm2-Color-Schemes URL staleness issue is resolved.
@@ -39,7 +39,9 @@ a module map, NOT a `.framework` bundle. `Package.swift` declares
 
 ## Requirements
 
-- nix (for `zig_0_15` and `gettext`).
+- nix: `zig_0_15` comes from this repo's flake (zig-overlay's Homebrew-bottled
+  patched 0.15.2, for macOS 26.4+ SDK compatibility); `gettext` stays on system
+  nixpkgs.
 - Xcode with Metal toolchain: `xcodebuild -downloadComponent
   MetalToolchain`.
 - The GhosttyKit xcframework must be built before compiling the Swift app.

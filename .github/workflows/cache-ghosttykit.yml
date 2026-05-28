@@ -10,6 +10,8 @@ on:
     paths:
       - '.ghostty-version'
       - 'build-lib.sh'
+      - 'flake.nix'
+      - 'flake.lock'
       - '.github/workflows/cache-ghosttykit.yml'
       - '.github/workflows/ci.yml'
       - '.github/workflows/release-stable.yml'
@@ -37,29 +39,11 @@ jobs:
           path: |
             lib/GhosttyKit.xcframework
             lib/ghostty-themes
-          key: ghosttykit-v2-${{ steps.ghostty-version.outputs.tag }}-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
+          key: ghosttykit-v2-${{ steps.ghostty-version.outputs.tag }}-${{ hashFiles('build-lib.sh', 'flake.nix', 'flake.lock') }}-${{ runner.os }}-${{ runner.arch }}
 
-      - uses: mlugg/setup-zig@v2
+      - uses: DeterminateSystems/nix-installer-action@v22
         if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
-        with:
-          version: 0.15.2
-
-      - name: Clone Ghostty source
-        if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 --branch "$GHOSTTY_TAG" https://github.com/ghostty-org/ghostty.git .ghostty-src
 
       - name: Build GhosttyKit
         if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
-        run: |
-          cd .ghostty-src
-          zig build \
-            -Demit-xcframework \
-            -Dxcframework-target=native \
-            -Demit-macos-app=false \
-            -Dsentry=false \
-            -Doptimize=ReleaseFast
-          cd ..
-          mkdir -p lib
-          cp -R .ghostty-src/macos/GhosttyKit.xcframework lib/
-          cp -R .ghostty-src/zig-out/share/ghostty/themes lib/ghostty-themes
+        run: ./build-lib.sh all

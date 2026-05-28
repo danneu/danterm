@@ -37,14 +37,6 @@ jobs:
           echo "DMG_NAME=DanTerm-${VERSION}.dmg" >> "$GITHUB_ENV"
           echo "ZIP_NAME=DanTerm-${VERSION}.zip" >> "$GITHUB_ENV"
 
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.15.2
-
-      - name: Clone Ghostty source
-        run: |
-          git clone --depth 1 --branch "$GHOSTTY_TAG" https://github.com/ghostty-org/ghostty.git .ghostty-src
-
       - name: Cache GhosttyKit
         id: cache-ghosttykit
         uses: actions/cache@v5
@@ -52,22 +44,11 @@ jobs:
           path: |
             lib/GhosttyKit.xcframework
             lib/ghostty-themes
-          key: ghosttykit-v2-${{ steps.ghostty-version.outputs.tag }}-${{ hashFiles('build-lib.sh') }}-${{ runner.os }}-${{ runner.arch }}
+          key: ghosttykit-v2-${{ steps.ghostty-version.outputs.tag }}-${{ hashFiles('build-lib.sh', 'flake.nix', 'flake.lock') }}-${{ runner.os }}-${{ runner.arch }}
 
       - name: Build GhosttyKit
         if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
-        run: |
-          cd .ghostty-src
-          zig build \
-            -Demit-xcframework \
-            -Dxcframework-target=native \
-            -Demit-macos-app=false \
-            -Dsentry=false \
-            -Doptimize=ReleaseFast
-          cd ..
-          mkdir -p lib
-          cp -R .ghostty-src/macos/GhosttyKit.xcframework lib/
-          cp -R .ghostty-src/zig-out/share/ghostty/themes lib/ghostty-themes
+        run: ./build-lib.sh all
 
       - name: Build app bundle
         run: ./build-app.sh --version "${{ env.VERSION }}"
