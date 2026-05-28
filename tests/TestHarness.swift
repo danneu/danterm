@@ -9,7 +9,6 @@ struct TestRunner {
         paneToolbarTests()
         customTitleTests()
         checkpointTests()
-        searchTests()
         themeTests()
         remoteTests()
         danTermConfigTests()

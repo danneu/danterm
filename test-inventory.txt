@@ -1058,8 +1058,11 @@
   - pref save remoteTheme updates model and saves
   - pref save remoteTheme updates remote panes
 
-## UpdateSearchTests -- PENDING
-# tests=14  expect=20  expectEqual=6  throwTF=0  TOTAL=26
+## UpdateSearchTests -- MIGRATED (Wave C)
+# baseline: tests=14 expect=20 expectEqual=6 throwTF=0 TOTAL=26
+# new:      @Test=14 #expect=26 expectNoDifference=0 #require=0 Issue.record=0 TOTAL=26
+# delta:    0
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/UpdateSearchTests.swift
   - startSearch emits sendStartSearch for focused pane
   - ghosttyStartSearch creates SearchModel and emits focus
   - ghosttyStartSearch with needle sets needle in model
