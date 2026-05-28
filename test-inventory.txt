@@ -632,8 +632,11 @@
   - \(label): edit cmd n success saves before clear
   - \(label): edit cmd n rejected preserves draft
 
-## TodoShortcutCatalogTests -- PENDING
-# tests=4  expect=21  expectEqual=0  throwTF=1  TOTAL=22
+## TodoShortcutCatalogTests -- MIGRATED (Wave D)
+# baseline: tests=4 expect=21 expectEqual=0 throwTF=1 TOTAL=22
+# new:      @Test=4 #expect=21 expectNoDifference=0 #require=1 Issue.record=0 TOTAL=22
+# delta:    0 (the `shortcutSection` helper's `throw TestFailure` -> `try #require`)
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/TodoShortcutCatalogTests.swift
   - pane shortcut catalog includes pane list compose and edit shortcuts
   - pane shortcut catalog omits tab bucket movement
   - tab shortcut catalog includes tab-only bucket movement
