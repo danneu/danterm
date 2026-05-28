@@ -832,8 +832,14 @@
   - testMoveTabsAllStaleIdsIsNoop
   - testMoveTabsClampedAtIndex
 
-## UpdateIpcTests -- PENDING
-# tests=73  expect=33  expectEqual=166  throwTF=16  TOTAL=215
+## UpdateIpcTests -- MIGRATED (Wave D)
+# baseline: tests=73 expect=33 expectEqual=166 throwTF=16 TOTAL=215
+# new:      @Test=73 #expect=199 expectNoDifference=0 #require=8 Issue.record=8 TOTAL=215
+# delta:    0 (8 helper `throw TestFailure` single-value unwraps -> #require; 8 compound
+#            `guard case` destructures in tests -> Issue.record + return. Test-suite-internal
+#            requireString/Pane/TabId helpers thread a String message via Comment(rawValue:)
+#            into #require -- Comment is not ExpressibleByStringLiteral from a `String` variable.)
+# moved to: lib/DanTermCore/Tests/DanTermCoreTests/UpdateIpcTests.swift
   - unknown method returns method-not-found error
   - malformed context returns invalid params
   - ls returns full snapshot

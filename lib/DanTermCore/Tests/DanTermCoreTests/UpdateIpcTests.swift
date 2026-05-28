@@ -1,42 +1,80 @@
-// Tests for pure update() handling of DanTerm IPC requests.
+// Swift Testing migration of the legacy `tests/UpdateIpcTests.swift` harness
+// suite. Pins the pure `update()` handling of DanTerm IPC requests across
+// the protocol surface: ls (full snapshot), pane.info (explicit + implicit
+// pane context, missing/invalid target), tab.rename (set/clear, live-tab
+// derivation from pane context, explicit-vs-context precedence, malformed
+// inputs), pane.split (context-pane targeting, explicit-pane overrides,
+// malformed/unknown/non-string/orphan failures, background and launch
+// flows), pane.focus (selection + first responder + popover preservation +
+// alert clear), tab.new (explicit group, group context, background, launch,
+// afterTab matching, malformed groups, cwd inheritance), theme.set
+// (explicit-vs-context precedence), the todo command family (list/add/edit/
+// done/open/delete/clear-completed across context + explicit-pane), and
+// pane.input (text/input array/empty mods/non-array mods/ctrl mod/both-or-
+// neither/unknown key/non-string key/unknown mod/shift mod/missing pane/
+// non-string pane), plus pane.read (viewport + scrollback line limit).
+// The 16 legacy `throw TestFailure` sites split: 9 convert to `try #require`
+// (single-value unwraps + helper fall-throughs), 7 to `Issue.record + return`
+// (compound case-pattern destructures); the failure-site total stays exact.
 import Foundation
+import Testing
 import DanTermProtocol
 
-func ipcUpdateTests() {
-    print("IPC update tests:")
+@testable import DanTermCore
 
-    test("unknown method returns method-not-found error") {
+@Suite struct UpdateIpcTests {
+    @Test("unknown method returns method-not-found error")
+    func unknownMethodReturnsMethodNotFoundError() throws {
+        // Intent: an unknown method returns the standard JSON-RPC
+        //   "method not found" code (-32601).
+        // Why it exists: pins the unknown-method error path.
+        // Scenario: spec-first unknown method.
         var model = makeModel()
         createTab(&model)
         let commands = sendIpc(&model, method: "missing")
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32601)
+        #expect(error.code == -32601)
     }
 
-    test("malformed context returns invalid params") {
+    @Test("malformed context returns invalid params")
+    func malformedContextReturnsInvalidParams() throws {
+        // Intent: an IPC context with a malformed pane id returns
+        //   invalid-params (-32602) before any mutation.
+        // Why it exists: pins the context-validation guard.
+        // Scenario: spec-first malformed context.
         var model = makeModel()
         createTab(&model)
         let commands = sendIpc(&model, method: Methods.tabRename, context: IpcRequestContext(paneId: "not-a-uuid"))
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
+        #expect(error.code == -32602)
     }
 
-    test("ls returns full snapshot") {
+    @Test("ls returns full snapshot")
+    func lsReturnsFullSnapshot() throws {
+        // Intent: ls returns an object snapshot with groups; panes are
+        //   embedded in tree leaves, not a top-level array.
+        // Why it exists: pins the snapshot shape.
+        // Scenario: spec-first ls.
         var model = makeModel()
         createTab(&model)
         let commands = sendIpc(&model, method: Methods.ls)
         let reply = try requireIpcReply(commands)
         guard case .object(let object) = reply else {
-            throw TestFailure(message: "expected object snapshot")
+            Issue.record("expected object snapshot")
+            return
         }
-        try expect(object["groups"] != nil, "snapshot should include groups")
-        // Panes are embedded in the tree leaves now, not a top-level array.
-        try expect(object["panes"] == nil, "snapshot should not include a top-level panes array")
+        #expect(object["groups"] != nil, "snapshot should include groups")
+        #expect(object["panes"] == nil, "snapshot should not include a top-level panes array")
         let leaf = object["groups"]?.asArray?.first?["tabs"]?.asArray?.first?["rootNode"]
-        try expect(leaf?["pane"]?["id"] != nil, "leaf rootNode should embed its pane")
+        #expect(leaf?["pane"]?["id"] != nil, "leaf rootNode should embed its pane")
     }
 
-    test("pane.info explicit pane returns containing pane tab and group") {
+    @Test("pane.info explicit pane returns containing pane tab and group")
+    func paneInfoExplicitPaneReturnsContainingTabAndGroup() throws {
+        // Intent: pane.info with an explicit pane returns the pane's
+        //   containing tab and group (ignoring the IPC context pane).
+        // Why it exists: pins the explicit-target wins rule.
+        // Scenario: spec-first explicit pane.
         var model = makeModel()
         createTab(&model)
         let backgroundGroupId = model.groups[0].id
@@ -55,14 +93,19 @@ func ipcUpdateTests() {
         )
 
         let reply = try requireIpcReply(commands)
-        try expectEqual(reply["pane"]?["id"]?.asString, backgroundPaneId.rawValue.uuidString)
-        try expectEqual(reply["tab"]?["id"]?.asString, backgroundTabId.rawValue.uuidString)
-        try expectEqual(reply["tab"]?["groupId"]?.asString, backgroundGroupId.rawValue.uuidString)
-        try expectEqual(reply["group"]?["id"]?.asString, backgroundGroupId.rawValue.uuidString)
-        try expectEqual(reply["group"]?["name"]?.asString, "General")
+        #expect(reply["pane"]?["id"]?.asString == backgroundPaneId.rawValue.uuidString)
+        #expect(reply["tab"]?["id"]?.asString == backgroundTabId.rawValue.uuidString)
+        #expect(reply["tab"]?["groupId"]?.asString == backgroundGroupId.rawValue.uuidString)
+        #expect(reply["group"]?["id"]?.asString == backgroundGroupId.rawValue.uuidString)
+        #expect(reply["group"]?["name"]?.asString == "General")
     }
 
-    test("pane.info implicit pane uses pane context") {
+    @Test("pane.info implicit pane uses pane context")
+    func paneInfoImplicitPaneUsesContext() throws {
+        // Intent: pane.info without an explicit pane uses the IPC
+        //   context pane.
+        // Why it exists: pins the implicit-context branch.
+        // Scenario: spec-first implicit pane.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -75,17 +118,22 @@ func ipcUpdateTests() {
         )
 
         let reply = try requireIpcReply(commands)
-        try expectEqual(reply["pane"]?["id"]?.asString, paneId.rawValue.uuidString)
-        try expectEqual(reply["tab"]?["id"]?.asString, tabId.rawValue.uuidString)
+        #expect(reply["pane"]?["id"]?.asString == paneId.rawValue.uuidString)
+        #expect(reply["tab"]?["id"]?.asString == tabId.rawValue.uuidString)
     }
 
-    test("pane.info missing or invalid target fails without falling back") {
+    @Test("pane.info missing or invalid target fails without falling back")
+    func paneInfoMissingOrInvalidTargetFails() throws {
+        // Intent: pane.info with missing / non-UUID / unknown pane
+        //   returns -32602 (no fallback to context).
+        // Why it exists: pins the no-fallback rule.
+        // Scenario: spec-first missing/invalid/unknown.
         var model = makeModel()
         createTab(&model)
         let contextPaneId = selectedTab(in: model)!.focusedPaneId
 
         let missing = sendIpc(&model, method: Methods.paneInfo, context: IpcRequestContext())
-        try expectEqual(try requireIpcError(missing).code, -32602)
+        #expect(try requireIpcError(missing).code == -32602)
 
         let invalid = sendIpc(
             &model,
@@ -93,7 +141,7 @@ func ipcUpdateTests() {
             params: .object(["pane": .string("not-a-uuid")]),
             context: IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
         )
-        try expectEqual(try requireIpcError(invalid).code, -32602)
+        #expect(try requireIpcError(invalid).code == -32602)
 
         let unknown = sendIpc(
             &model,
@@ -101,10 +149,15 @@ func ipcUpdateTests() {
             params: .object(["pane": .string(UUID().uuidString)]),
             context: IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
         )
-        try expectEqual(try requireIpcError(unknown).code, -32602)
+        #expect(try requireIpcError(unknown).code == -32602)
     }
 
-    test("tab.rename sets and clears custom title") {
+    @Test("tab.rename sets and clears custom title")
+    func tabRenameSetsAndClearsCustomTitle() throws {
+        // Intent: tab.rename sets customTitle (and returns it in reply)
+        //   then clears it via null.
+        // Why it exists: pins the set/clear round-trip.
+        // Scenario: spec-first set + clear.
         var model = makeModel()
         createTab(&model)
         let ctx = contextForSelectedPane(in: model)
@@ -112,17 +165,22 @@ func ipcUpdateTests() {
 
         let setEffects = sendIpc(&model, method: Methods.tabRename, params: .object(["title": .string("hello")]), context: ctx)
         let setReply = try requireIpcReply(setEffects)
-        try expectEqual(setReply["tab"]?["id"]?.asString, tabId.rawValue.uuidString)
-        try expectEqual(setReply["tab"]?["customTitle"]?.asString, "hello")
-        try expectEqual(tabById(tabId, in: model)?.customTitle, "hello")
+        #expect(setReply["tab"]?["id"]?.asString == tabId.rawValue.uuidString)
+        #expect(setReply["tab"]?["customTitle"]?.asString == "hello")
+        #expect(tabById(tabId, in: model)?.customTitle == "hello")
 
         let clearEffects = sendIpc(&model, method: Methods.tabRename, params: .object(["title": .null]), context: ctx)
         let clearReply = try requireIpcReply(clearEffects)
-        try expectEqual(clearReply["tab"]?["customTitle"], .null)
-        try expectEqual(tabById(tabId, in: model)?.customTitle, nil)
+        #expect(clearReply["tab"]?["customTitle"] == .null)
+        #expect(tabById(tabId, in: model)?.customTitle == nil)
     }
 
-    test("tab.rename derives live tab from pane context when pane moved") {
+    @Test("tab.rename derives live tab from pane context when pane moved")
+    func tabRenameDerivesLiveTabFromPaneContext() {
+        // Intent: tab.rename uses the live tab of the pane in context;
+        //   after movePaneToTab, the new live tab is targeted.
+        // Why it exists: pins the live-derivation rule.
+        // Scenario: spec-first live tab via pane.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -139,11 +197,16 @@ func ipcUpdateTests() {
         )
 
         let currentTab = tabForPane(paneId, in: model)
-        try expectEqual(currentTab?.id, targetTabId)
-        try expectEqual(currentTab?.customTitle, "current")
+        #expect(currentTab?.id == targetTabId)
+        #expect(currentTab?.customTitle == "current")
     }
 
-    test("tab.rename explicit tab targets that tab regardless of selection and context") {
+    @Test("tab.rename explicit tab targets that tab regardless of selection and context")
+    func tabRenameExplicitTabTargetsRegardlessOfContext() throws {
+        // Intent: an explicit tab param targets that tab regardless of
+        //   selection + pane context.
+        // Why it exists: pins the explicit-wins rule.
+        // Scenario: spec-first explicit tab.
         var model = makeModel()
         createTab(&model)
         let backgroundTabId = selectedTab(in: model)!.id
@@ -163,13 +226,18 @@ func ipcUpdateTests() {
         )
 
         let reply = try requireIpcReply(commands)
-        try expectEqual(reply["tab"]?["id"]?.asString, backgroundTabId.rawValue.uuidString)
-        try expectEqual(tabById(backgroundTabId, in: model)?.customTitle, "build")
-        try expectEqual(tabById(foregroundTabId, in: model)?.customTitle, nil)
-        try expectEqual(tabForPane(backgroundPaneId, in: model)?.id, backgroundTabId)
+        #expect(reply["tab"]?["id"]?.asString == backgroundTabId.rawValue.uuidString)
+        #expect(tabById(backgroundTabId, in: model)?.customTitle == "build")
+        #expect(tabById(foregroundTabId, in: model)?.customTitle == nil)
+        #expect(tabForPane(backgroundPaneId, in: model)?.id == backgroundTabId)
     }
 
-    test("tab.rename malformed or unknown explicit tab does not fall back to context") {
+    @Test("tab.rename malformed or unknown explicit tab does not fall back to context")
+    func tabRenameMalformedOrUnknownExplicitTabNoFallback() throws {
+        // Intent: explicit tab values that are malformed/unknown/non-
+        //   string return -32602; the context tab is not affected.
+        // Why it exists: pins the no-fallback guard for explicit tab.
+        // Scenario: spec-first malformed/unknown/non-string explicit.
         for tabValue in [JSONValue.string("not-a-uuid"), .string(UUID().uuidString), .number(7)] {
             var model = makeModel()
             createTab(&model)
@@ -187,12 +255,17 @@ func ipcUpdateTests() {
             )
 
             let error = try requireIpcError(commands)
-            try expectEqual(error.code, -32602)
-            try expectEqual(tabById(contextTabId, in: model)?.customTitle, nil)
+            #expect(error.code == -32602)
+            #expect(tabById(contextTabId, in: model)?.customTitle == nil)
         }
     }
 
-    test("tab.rename without explicit tab and without pane context fails before mutation") {
+    @Test("tab.rename without explicit tab and without pane context fails before mutation")
+    func tabRenameWithoutTabAndWithoutContextFails() throws {
+        // Intent: with neither an explicit tab nor a pane context,
+        //   tab.rename errors out before any mutation.
+        // Why it exists: pins the "need a target" rule.
+        // Scenario: spec-first no-target.
         var model = makeModel()
         createTab(&model)
         let tabId = selectedTab(in: model)!.id
@@ -204,11 +277,16 @@ func ipcUpdateTests() {
         )
 
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
-        try expectEqual(tabById(tabId, in: model)?.customTitle, nil)
+        #expect(error.code == -32602)
+        #expect(tabById(tabId, in: model)?.customTitle == nil)
     }
 
-    test("pane.split targets context pane even when another tab is selected") {
+    @Test("pane.split targets context pane even when another tab is selected")
+    func paneSplitTargetsContextPaneEvenWhenAnotherTabSelected() throws {
+        // Intent: pane.split using the pane context targets that pane
+        //   even when a different tab is selected.
+        // Why it exists: pins the context-pane override.
+        // Scenario: spec-first context-pane split.
         var model = makeModel()
         createTab(&model)
         let backgroundTabId = selectedTab(in: model)!.id
@@ -224,15 +302,19 @@ func ipcUpdateTests() {
             context: IpcRequestContext(paneId: backgroundPaneId.rawValue.uuidString)
         )
 
-        try expectEqual(model.selectedTabId, foregroundTabId)
-        try expectEqual(allPaneIds(tabById(backgroundTabId, in: model)!.rootNode).count, 2)
+        #expect(model.selectedTabId == foregroundTabId)
+        #expect(allPaneIds(tabById(backgroundTabId, in: model)!.rootNode).count == 2)
         let reply = try requireIpcReply(commands)
         let returnedPaneId = try requirePaneId(reply["pane"]?["id"], "pane.split should return the new pane id")
-        try expect(!beforePaneIds.contains(returnedPaneId), "returned pane id should be new")
-        try expectEqual(Set(model.allPaneIds).subtracting(beforePaneIds), Set([returnedPaneId]))
+        #expect(!beforePaneIds.contains(returnedPaneId), "returned pane id should be new")
+        #expect(Set(model.allPaneIds).subtracting(beforePaneIds) == Set([returnedPaneId]))
     }
 
-    test("pane.split explicit pane targets sibling instead of caller context") {
+    @Test("pane.split explicit pane targets sibling instead of caller context")
+    func paneSplitExplicitPaneTargetsSibling() throws {
+        // Intent: an explicit pane param wins over the caller context.
+        // Why it exists: pins the explicit-wins for pane.split.
+        // Scenario: spec-first explicit pane.
         var model = makeModel()
         createTab(&model)
         let tabId = selectedTab(in: model)!.id
@@ -253,19 +335,25 @@ func ipcUpdateTests() {
 
         let reply = try requireIpcReply(commands)
         let returnedPaneId = try requirePaneId(reply["pane"]?["id"], "pane.split should return the sibling split pane id")
-        try expect(!beforePaneIds.contains(returnedPaneId), "returned pane id should be new")
-        try expectEqual(Set(model.allPaneIds).subtracting(beforePaneIds), Set([returnedPaneId]))
+        #expect(!beforePaneIds.contains(returnedPaneId), "returned pane id should be new")
+        #expect(Set(model.allPaneIds).subtracting(beforePaneIds) == Set([returnedPaneId]))
         guard case .split(_, .horizontal, .leaf(let first), .split(_, .vertical, .leaf(let second), .leaf(let third), _), _) =
             tabById(tabId, in: model)!.rootNode
         else {
-            throw TestFailure(message: "expected explicit sibling pane to be split")
+            Issue.record("expected explicit sibling pane to be split")
+            return
         }
-        try expectEqual(first.id, callerPaneId)
-        try expectEqual(second.id, siblingPaneId)
-        try expectEqual(third.id, returnedPaneId)
+        #expect(first.id == callerPaneId)
+        #expect(second.id == siblingPaneId)
+        #expect(third.id == returnedPaneId)
     }
 
-    test("pane.split malformed explicit pane does not fall back to context") {
+    @Test("pane.split malformed explicit pane does not fall back to context")
+    func paneSplitMalformedExplicitPaneNoFallback() throws {
+        // Intent: a malformed explicit pane returns -32602; the model
+        //   is unchanged.
+        // Why it exists: pins the no-fallback rule.
+        // Scenario: spec-first malformed explicit.
         var model = makeModel()
         createTab(&model)
         let callerPaneId = selectedTab(in: model)!.focusedPaneId
@@ -282,11 +370,16 @@ func ipcUpdateTests() {
         )
 
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
-        try expectEqual(Set(model.allPaneIds), beforePaneIds)
+        #expect(error.code == -32602)
+        #expect(Set(model.allPaneIds) == beforePaneIds)
     }
 
-    test("pane.split non-string explicit pane does not fall back to context") {
+    @Test("pane.split non-string explicit pane does not fall back to context")
+    func paneSplitNonStringExplicitPaneNoFallback() throws {
+        // Intent: a non-string explicit pane returns -32602 with a
+        //   "pane must be a string" message.
+        // Why it exists: pins the type-check message.
+        // Scenario: spec-first non-string explicit.
         var model = makeModel()
         createTab(&model)
         let callerPaneId = selectedTab(in: model)!.focusedPaneId
@@ -303,13 +396,18 @@ func ipcUpdateTests() {
         )
 
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
-        try expect(error.message.contains("pane must be a string"),
-                   "message should describe non-string pane, got: \(error.message)")
-        try expectEqual(Set(model.allPaneIds), beforePaneIds)
+        #expect(error.code == -32602)
+        #expect(error.message.contains("pane must be a string"),
+            "message should describe non-string pane, got: \(error.message)")
+        #expect(Set(model.allPaneIds) == beforePaneIds)
     }
 
-    test("pane.split unknown explicit pane does not fall back to context") {
+    @Test("pane.split unknown explicit pane does not fall back to context")
+    func paneSplitUnknownExplicitPaneNoFallback() throws {
+        // Intent: an unknown UUID explicit pane returns -32602; the
+        //   model is unchanged.
+        // Why it exists: pins the unknown-id no-fallback rule.
+        // Scenario: spec-first unknown explicit.
         var model = makeModel()
         createTab(&model)
         let callerPaneId = selectedTab(in: model)!.focusedPaneId
@@ -326,11 +424,16 @@ func ipcUpdateTests() {
         )
 
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
-        try expectEqual(Set(model.allPaneIds), beforePaneIds)
+        #expect(error.code == -32602)
+        #expect(Set(model.allPaneIds) == beforePaneIds)
     }
 
-    test("pane.split without explicit pane and without pane context fails before mutation") {
+    @Test("pane.split without explicit pane and without pane context fails before mutation")
+    func paneSplitNoExplicitAndNoContextFails() throws {
+        // Intent: with no explicit pane and no pane context,
+        //   pane.split errors out.
+        // Why it exists: pins the "need a target" rule.
+        // Scenario: spec-first no-target.
         var model = makeModel()
         createTab(&model)
         let beforePaneIds = Set(model.allPaneIds)
@@ -343,18 +446,19 @@ func ipcUpdateTests() {
         )
 
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
-        try expectEqual(Set(model.allPaneIds), beforePaneIds)
+        #expect(error.code == -32602)
+        #expect(Set(model.allPaneIds) == beforePaneIds)
     }
 
-    test("pane.split on a pane id absent from every tree is rejected without mutation") {
+    @Test("pane.split on a pane id absent from every tree is rejected without mutation")
+    func paneSplitOnPaneAbsentFromAllTreesRejected() throws {
+        // Intent: a context pane id absent from every tree is rejected;
+        //   no mutation.
+        // Why it exists: pins the orphan-pane fail-closed (with tree-
+        //   owns-panes, the drift hole is structurally closed).
+        // Scenario: spec-first orphan pane.
         var model = makeModel()
         createTab(&model)
-        // With tree-owns-panes a pane exists iff a leaf owns it, so the old
-        // "orphan in the dict, referenced by no tree" state is structurally
-        // impossible. A context pane id absent from every tree is simply unknown
-        // and cannot resolve, so the split is rejected and panes are unchanged --
-        // the clean demonstration that the drift hole is closed.
         let unknownPaneId = PaneId()
         let beforePaneIds = Set(model.allPaneIds)
 
@@ -366,11 +470,16 @@ func ipcUpdateTests() {
         )
 
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
-        try expectEqual(Set(model.allPaneIds), beforePaneIds)
+        #expect(error.code == -32602)
+        #expect(Set(model.allPaneIds) == beforePaneIds)
     }
 
-    test("pane.focus selects target tab and requests first responder") {
+    @Test("pane.focus selects target tab and requests first responder")
+    func paneFocusSelectsTabAndRequestsFirstResponder() throws {
+        // Intent: pane.focus selects the target's tab and emits
+        //   makeFirstResponder for the pane.
+        // Why it exists: pins the focus-cross-tab path.
+        // Scenario: spec-first cross-tab focus.
         var model = makeModel()
         createTab(&model)
         let targetTabId = selectedTab(in: model)!.id
@@ -383,17 +492,22 @@ func ipcUpdateTests() {
             params: .object(["paneId": .string(targetPaneId.rawValue.uuidString)])
         )
 
-        try expectEqual(model.selectedTabId, targetTabId)
+        #expect(model.selectedTabId == targetTabId)
         let reply = try requireIpcReply(commands)
-        try expectEqual(reply["tab"]?["id"]?.asString, targetTabId.rawValue.uuidString)
-        try expectEqual(reply["tab"]?["focusedPaneId"]?.asString, targetPaneId.rawValue.uuidString)
-        try expect(hasEffect(commands) {
+        #expect(reply["tab"]?["id"]?.asString == targetTabId.rawValue.uuidString)
+        #expect(reply["tab"]?["focusedPaneId"]?.asString == targetPaneId.rawValue.uuidString)
+        #expect(hasEffect(commands) {
             if case .makeFirstResponder(let paneId) = $0 { return paneId == targetPaneId }
             return false
         }, "expected focus command")
     }
 
-    test("pane.focus replies with same-tab focusedPaneId synchronously") {
+    @Test("pane.focus replies with same-tab focusedPaneId synchronously")
+    func paneFocusRepliesWithSameTabFocusedSync() throws {
+        // Intent: a same-tab focus change reflects in the reply's
+        //   focusedPaneId and the live tab's focusedPaneId.
+        // Why it exists: pins the synchronous-update rule.
+        // Scenario: spec-first same-tab focus.
         var model = makeModel()
         createTab(&model)
         let tabId = selectedTab(in: model)!.id
@@ -409,11 +523,17 @@ func ipcUpdateTests() {
         )
 
         let reply = try requireIpcReply(commands)
-        try expectEqual(reply["tab"]?["focusedPaneId"]?.asString, secondPaneId.rawValue.uuidString)
-        try expectEqual(tabById(tabId, in: model)?.focusedPaneId, secondPaneId)
+        #expect(reply["tab"]?["focusedPaneId"]?.asString == secondPaneId.rawValue.uuidString)
+        #expect(tabById(tabId, in: model)?.focusedPaneId == secondPaneId)
     }
 
-    test("pane.focus preserves popover on same-tab focus in unzoomed tab") {
+    @Test("pane.focus preserves popover on same-tab focus in unzoomed tab")
+    func paneFocusPreservesPopoverOnSameTabFocus() {
+        // Intent: same-tab focus change does NOT clear an open todo
+        //   popover.
+        // Why it exists: pins the popover-preserve rule for same-tab
+        //   focus.
+        // Scenario: spec-first popover preserve.
         var model = makeModel()
         createTab(&model)
         let tabId = selectedTab(in: model)!.id
@@ -430,11 +550,16 @@ func ipcUpdateTests() {
             context: contextForSelectedPane(in: model)
         )
 
-        try expectEqual(model.todoPopover, .pane(firstPaneId))
-        try expectEqual(tabById(tabId, in: model)?.focusedPaneId, secondPaneId)
+        #expect(model.todoPopover == .pane(firstPaneId))
+        #expect(tabById(tabId, in: model)?.focusedPaneId == secondPaneId)
     }
 
-    test("pane.focus clears target pane alerts in focus mode") {
+    @Test("pane.focus clears target pane alerts in focus mode")
+    func paneFocusClearsTargetPaneAlertsInFocusMode() {
+        // Intent: pane.focus in focus alert-clear mode marks the
+        //   target's alerts read.
+        // Why it exists: pins the alert-clear semantics for IPC focus.
+        // Scenario: spec-first IPC focus mode clear.
         var model = makeModel()
         model.config.alertClearMode = .focus
         createTab(&model)
@@ -459,10 +584,15 @@ func ipcUpdateTests() {
             params: .object(["paneId": .string(secondPaneId.rawValue.uuidString)])
         )
 
-        try expectEqual(model.alerts[0].isUnread, false, "focusing pane should mark its alerts read")
+        #expect(model.alerts[0].isUnread == false, "focusing pane should mark its alerts read")
     }
 
-    test("tab.new explicit group id creates tab in that group") {
+    @Test("tab.new explicit group id creates tab in that group")
+    func tabNewExplicitGroupIdCreatesTab() throws {
+        // Intent: tab.new with an explicit group id creates a tab
+        //   there; the reply includes tab + group + panes.
+        // Why it exists: pins the explicit-group path.
+        // Scenario: spec-first explicit group.
         var model = makeModel()
         createTab(&model)
         _ = update(&model, .createGroup(name: "Builds"))
@@ -474,15 +604,20 @@ func ipcUpdateTests() {
             params: .object(["group": .string(groupId.rawValue.uuidString)])
         )
         let group = model.groups.first(where: { $0.id == groupId })
-        try expectEqual(group?.tabs.count, countBefore + 1)
+        #expect(group?.tabs.count == countBefore + 1)
         let reply = try requireIpcReply(commands)
-        try expect(reply["tab"]?["id"]?.asString != nil, "reply should include tab id")
-        try expectEqual(reply["group"]?["id"]?.asString, groupId.rawValue.uuidString)
-        try expectEqual(reply["group"]?["name"]?.asString, "Builds")
-        try expectEqual(reply["panes"]?.asArray?.count, 1)
+        #expect(reply["tab"]?["id"]?.asString != nil, "reply should include tab id")
+        #expect(reply["group"]?["id"]?.asString == groupId.rawValue.uuidString)
+        #expect(reply["group"]?["name"]?.asString == "Builds")
+        #expect(reply["panes"]?.asArray?.count == 1)
     }
 
-    test("tab.new explicit group id wins over pane context group") {
+    @Test("tab.new explicit group id wins over pane context group")
+    func tabNewExplicitGroupWinsOverPaneContextGroup() throws {
+        // Intent: an explicit group id wins over the implicit pane-
+        //   context group.
+        // Why it exists: pins explicit-wins.
+        // Scenario: spec-first explicit vs context group.
         var model = makeModel()
         createTab(&model)
         let callerGroupId = model.groups[0].id
@@ -499,12 +634,17 @@ func ipcUpdateTests() {
             context: IpcRequestContext(paneId: callerPaneId.rawValue.uuidString)
         )
 
-        try expectEqual(model.groups.first(where: { $0.id == callerGroupId })?.tabs.count, callerCountBefore)
-        try expectEqual(model.groups.first(where: { $0.id == explicitGroupId })?.tabs.count, explicitCountBefore + 1)
-        try expectEqual(try requireIpcReply(commands)["group"]?["id"]?.asString, explicitGroupId.rawValue.uuidString)
+        #expect(model.groups.first(where: { $0.id == callerGroupId })?.tabs.count == callerCountBefore)
+        #expect(model.groups.first(where: { $0.id == explicitGroupId })?.tabs.count == explicitCountBefore + 1)
+        #expect(try requireIpcReply(commands)["group"]?["id"]?.asString == explicitGroupId.rawValue.uuidString)
     }
 
-    test("tab.new malformed or unknown explicit group does not fall back or create") {
+    @Test("tab.new malformed or unknown explicit group does not fall back or create")
+    func tabNewMalformedOrUnknownExplicitGroupNoFallback() throws {
+        // Intent: malformed/unknown/non-string explicit group returns
+        //   -32602; no group or tab is created.
+        // Why it exists: pins the no-fallback rule for explicit group.
+        // Scenario: spec-first malformed/unknown/non-string explicit.
         for groupValue in [JSONValue.string("not-a-uuid"), .string(UUID().uuidString), .number(7)] {
             var model = makeModel()
             createTab(&model)
@@ -520,13 +660,18 @@ func ipcUpdateTests() {
             )
 
             let error = try requireIpcError(commands)
-            try expectEqual(error.code, -32602)
-            try expectEqual(model.groups.count, groupsBefore)
-            try expectEqual(model.groups.flatMap(\.tabs).count, tabsBefore)
+            #expect(error.code == -32602)
+            #expect(model.groups.count == groupsBefore)
+            #expect(model.groups.flatMap(\.tabs).count == tabsBefore)
         }
     }
 
-    test("tab.new without explicit group uses pane context group") {
+    @Test("tab.new without explicit group uses pane context group")
+    func tabNewWithoutExplicitGroupUsesContextGroup() throws {
+        // Intent: without an explicit group, tab.new uses the pane
+        //   context's group.
+        // Why it exists: pins the implicit-group derivation.
+        // Scenario: spec-first implicit group.
         var model = makeModel()
         createTab(&model)
         let callerGroupId = model.groups[0].id
@@ -540,21 +685,31 @@ func ipcUpdateTests() {
             context: IpcRequestContext(paneId: callerPaneId.rawValue.uuidString)
         )
 
-        try expectEqual(model.groups.first(where: { $0.id == callerGroupId })?.tabs.count, 2)
-        try expectEqual(try requireIpcReply(commands)["group"]?["id"]?.asString, callerGroupId.rawValue.uuidString)
+        #expect(model.groups.first(where: { $0.id == callerGroupId })?.tabs.count == 2)
+        #expect(try requireIpcReply(commands)["group"]?["id"]?.asString == callerGroupId.rawValue.uuidString)
     }
 
-    test("tab.new without explicit group and without pane context fails before mutation") {
+    @Test("tab.new without explicit group and without pane context fails before mutation")
+    func tabNewWithoutGroupAndContextFails() throws {
+        // Intent: tab.new with neither explicit group nor pane context
+        //   errors out.
+        // Why it exists: pins the "need a group" rule.
+        // Scenario: spec-first no group.
         var model = makeModel()
         createTab(&model)
         let tabsBefore = model.groups.flatMap(\.tabs).count
         let commands = sendIpc(&model, method: Methods.tabNew, params: .object([:]), context: IpcRequestContext())
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
-        try expectEqual(model.groups.flatMap(\.tabs).count, tabsBefore)
+        #expect(error.code == -32602)
+        #expect(model.groups.flatMap(\.tabs).count == tabsBefore)
     }
 
-    test("tab.new background does not steal selection") {
+    @Test("tab.new background does not steal selection")
+    func tabNewBackgroundDoesNotStealSelection() throws {
+        // Intent: a background tab.new returns the new tab id but does
+        //   NOT change selection.
+        // Why it exists: pins the background invariant.
+        // Scenario: spec-first background tab.new.
         var model = makeModel()
         createTab(&model)
         let selectedTabId = selectedTab(in: model)!.id
@@ -569,13 +724,18 @@ func ipcUpdateTests() {
             ])
         )
 
-        try expectEqual(model.selectedTabId, selectedTabId, "background tab.new should not change selected tab")
+        #expect(model.selectedTabId == selectedTabId, "background tab.new should not change selected tab")
         let reply = try requireIpcReply(commands)
-        try expect(reply["tab"]?["id"]?.asString != nil, "reply should include new tab id")
-        try expectEqual(reply["group"]?["id"]?.asString, groupId.rawValue.uuidString)
+        #expect(reply["tab"]?["id"]?.asString != nil, "reply should include new tab id")
+        #expect(reply["group"]?["id"]?.asString == groupId.rawValue.uuidString)
     }
 
-    test("tab.new with malformed background fails before mutation") {
+    @Test("tab.new with malformed background fails before mutation")
+    func tabNewWithMalformedBackgroundFails() throws {
+        // Intent: a non-bool background parameter returns -32602; no
+        //   mutation.
+        // Why it exists: pins the type check.
+        // Scenario: spec-first malformed background.
         var model = makeModel()
         createTab(&model)
         let groupId = model.groups[0].id
@@ -592,12 +752,18 @@ func ipcUpdateTests() {
         )
 
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
-        try expectEqual(Set(model.allPaneIds), paneIdsBefore)
-        try expectEqual(model.groups.flatMap(\.tabs).map(\.id), tabsBefore)
+        #expect(error.code == -32602)
+        #expect(Set(model.allPaneIds) == paneIdsBefore)
+        #expect(model.groups.flatMap(\.tabs).map(\.id) == tabsBefore)
     }
 
-    test("tab.new inherits cwd from caller pane, not selected tab") {
+    @Test("tab.new inherits cwd from caller pane, not selected tab")
+    func tabNewInheritsCwdFromCallerPane() throws {
+        // Intent: tab.new inherits cwd from the caller pane (per
+        //   IPC context), not from the selected tab's pane.
+        // Why it exists: pins the caller-pane scope of cwd.
+        // Scenario: spec-first cwd inherit (both foreground +
+        //   background).
         for background in [true, false] {
             var model = makeModel()
             createTab(&model)
@@ -618,7 +784,7 @@ func ipcUpdateTests() {
 
             let reply = try requireIpcReply(commands)
             let paneId = try requirePaneId(reply["panes"]?.asArray?.first?["id"], "tab.new should return pane id")
-            try expect(hasEffect(commands) {
+            #expect(hasEffect(commands) {
                 if case .createSurface(let effectPaneId, let cwd, _, _, _) = $0 {
                     return effectPaneId == paneId && cwd == "/caller"
                 }
@@ -627,7 +793,13 @@ func ipcUpdateTests() {
         }
     }
 
-    test("tab.new with launch seeds shell input and custom tab title") {
+    @Test("tab.new with launch seeds shell input and custom tab title")
+    func tabNewWithLaunchSeedsShellInputAndCustomTitle() throws {
+        // Intent: tab.new with a launch object seeds shell input, sets
+        //   custom title, and emits createSurface with the documented
+        //   shape (command + waitAfterCommand=true).
+        // Why it exists: pins the launch wiring.
+        // Scenario: spec-first launch shell input.
         var model = makeModel()
         createTab(&model)
         let paneIdInContext = selectedTab(in: model)!.focusedPaneId
@@ -647,13 +819,13 @@ func ipcUpdateTests() {
         let reply = try requireIpcReply(commands)
         let tabId = try requireTabId(reply["tab"]?["id"], "tab.new should return tab id")
         let paneId = try requirePaneId(reply["panes"]?.asArray?.first?["id"], "tab.new should return pane id")
-        try expectEqual(reply["tab"]?["focusedPaneId"]?.asString, paneId.rawValue.uuidString)
-        try expectEqual(reply["tab"]?["rootNode"]?["pane"]?["id"]?.asString, paneId.rawValue.uuidString)
-        try expectEqual(reply["panes"]?.asArray?.first?.asObject?.keys.count, 1)
-        try expectEqual(tabById(tabId, in: model)?.customTitle, "clock")
-        try expectEqual(tabById(tabId, in: model)?.displayTitle, "clock")
-        try expectEqual(model.pane(paneId)?.title, "clock")
-        try expect(hasEffect(commands) {
+        #expect(reply["tab"]?["focusedPaneId"]?.asString == paneId.rawValue.uuidString)
+        #expect(reply["tab"]?["rootNode"]?["pane"]?["id"]?.asString == paneId.rawValue.uuidString)
+        #expect(reply["panes"]?.asArray?.first?.asObject?.keys.count == 1)
+        #expect(tabById(tabId, in: model)?.customTitle == "clock")
+        #expect(tabById(tabId, in: model)?.displayTitle == "clock")
+        #expect(model.pane(paneId)?.title == "clock")
+        #expect(hasEffect(commands) {
             if case .createSurface(let effectPaneId, let cwd, let command, let launchCommand, let waitAfterCommand) = $0 {
                 return effectPaneId == paneId
                     && cwd == "/tmp"
@@ -665,7 +837,12 @@ func ipcUpdateTests() {
         }, "expected createSurface with shell input command")
     }
 
-    test("tab.new with explicit group id forwards launch to created tab") {
+    @Test("tab.new with explicit group id forwards launch to created tab")
+    func tabNewWithExplicitGroupForwardsLaunch() {
+        // Intent: launch payload reaches the created tab even when an
+        //   explicit group is supplied.
+        // Why it exists: pins the explicit-group + launch combo.
+        // Scenario: spec-first launch with group.
         var model = makeModel()
         createTab(&model)
         _ = update(&model, .createGroup(name: "Builds"))
@@ -682,8 +859,8 @@ func ipcUpdateTests() {
 
         let group = model.groups.first(where: { $0.id == groupId })
         let paneId = group?.tabs.last?.focusedPaneId
-        try expect(paneId != nil, "target group should have a new tab")
-        try expect(hasEffect(commands) {
+        #expect(paneId != nil, "target group should have a new tab")
+        #expect(hasEffect(commands) {
             if case .createSurface(let effectPaneId, _, let command, let launchCommand, _) = $0 {
                 return effectPaneId == paneId && command == "make test" && launchCommand == nil
             }
@@ -691,7 +868,12 @@ func ipcUpdateTests() {
         }, "expected shell input command to reach group-created tab")
     }
 
-    test("tab.new afterTab without group uses referenced tab group without pane context") {
+    @Test("tab.new afterTab without group uses referenced tab group without pane context")
+    func tabNewAfterTabWithoutGroupUsesReferencedTabGroup() throws {
+        // Intent: tab.new with afterTab and no group uses the
+        //   referenced tab's group (no pane context needed).
+        // Why it exists: pins the afterTab-implies-group rule.
+        // Scenario: spec-first afterTab no group.
         var model = makeModel()
         createTab(&model)
         createTab(&model)
@@ -721,7 +903,12 @@ func ipcUpdateTests() {
         )
     }
 
-    test("tab.new afterTab with matching group succeeds") {
+    @Test("tab.new afterTab with matching group succeeds")
+    func tabNewAfterTabWithMatchingGroupSucceeds() throws {
+        // Intent: afterTab with a group id that matches the reference
+        //   tab's group succeeds.
+        // Why it exists: pins the matching-group OK branch.
+        // Scenario: spec-first afterTab matching group.
         var model = makeModel()
         createTab(&model)
         createTab(&model)
@@ -751,7 +938,12 @@ func ipcUpdateTests() {
         )
     }
 
-    test("tab.new afterTab with different explicit group fails before mutation") {
+    @Test("tab.new afterTab with different explicit group fails before mutation")
+    func tabNewAfterTabWithDifferentExplicitGroupFails() throws {
+        // Intent: afterTab + a different explicit group fails before
+        //   mutation.
+        // Why it exists: pins the conflict-rejected rule.
+        // Scenario: spec-first afterTab vs explicit group conflict.
         var model = makeModel()
         createTab(&model)
         let refTabId = model.groups[0].tabs[0].id
@@ -770,11 +962,17 @@ func ipcUpdateTests() {
         )
 
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
-        try expectEqual(model, before)
+        #expect(error.code == -32602)
+        #expect(model == before)
     }
 
-    test("tab.new afterTab invalid params fail before mutation") {
+    @Test("tab.new afterTab invalid params fail before mutation")
+    func tabNewAfterTabInvalidParamsFail() throws {
+        // Intent: a variety of invalid afterTab parameter shapes all
+        //   fail before mutation.
+        // Why it exists: pins the comprehensive invalid-input fail-
+        //   closed rules.
+        // Scenario: spec-first afterTab invalid params (8 cases).
         let invalidCases: [[String: JSONValue]] = [
             [
                 "position": .string("afterTab"),
@@ -814,12 +1012,17 @@ func ipcUpdateTests() {
             let commands = sendIpc(&model, method: Methods.tabNew, params: .object(params))
 
             let error = try requireIpcError(commands)
-            try expectEqual(error.code, -32602)
-            try expectEqual(model, before)
+            #expect(error.code == -32602)
+            #expect(model == before)
         }
     }
 
-    test("pane.split with launch title sets pane title without tab custom title") {
+    @Test("pane.split with launch title sets pane title without tab custom title")
+    func paneSplitWithLaunchTitleSetsPaneTitleNoTabCustom() throws {
+        // Intent: pane.split with a launch.title sets the new pane's
+        //   title; tab.customTitle stays nil.
+        // Why it exists: pins the per-pane title scope of launch.title.
+        // Scenario: spec-first split launch title.
         var model = makeModel()
         createTab(&model)
         let tabId = selectedTab(in: model)!.id
@@ -840,9 +1043,9 @@ func ipcUpdateTests() {
         )
 
         let newPaneId = try requirePaneId(try requireIpcReply(commands)["pane"]?["id"], "pane.split should return pane id")
-        try expectEqual(model.pane(newPaneId)?.title, "cargo")
-        try expectEqual(tabById(tabId, in: model)?.customTitle, nil)
-        try expect(hasEffect(commands) {
+        #expect(model.pane(newPaneId)?.title == "cargo")
+        #expect(tabById(tabId, in: model)?.customTitle == nil)
+        #expect(hasEffect(commands) {
             if case .createSurface(let effectPaneId, let cwd, let command, let launchCommand, _) = $0 {
                 return effectPaneId == newPaneId
                     && cwd == "/tmp"
@@ -853,7 +1056,13 @@ func ipcUpdateTests() {
         }, "expected split createSurface to seed shell input")
     }
 
-    test("pane.split background on selected tab preserves focused pane") {
+    @Test("pane.split background on selected tab preserves focused pane")
+    func paneSplitBackgroundOnSelectedTabPreservesFocus() throws {
+        // Intent: a background pane.split on the selected tab adds a
+        //   pane but does NOT change focus.
+        // Why it exists: pins the background-focus invariant for
+        //   pane.split on the selected tab.
+        // Scenario: spec-first background split selected.
         var model = makeModel()
         createTab(&model)
         let tabId = selectedTab(in: model)!.id
@@ -872,15 +1081,17 @@ func ipcUpdateTests() {
         let reply = try requireIpcReply(commands)
         let newPaneId = try requirePaneId(reply["pane"]?["id"], "pane.split should return pane id")
         let tab = tabById(tabId, in: model)!
-        try expect(allPaneIds(tab.rootNode).contains(newPaneId), "target tab should contain new pane")
-        try expectEqual(tab.focusedPaneId, focusedPaneId, "background split should preserve focused pane")
-        try expectEqual(model.selectedTabId, tabId, "background split should not change selected tab")
-        // The container rebuild is structural now (the selected tab's ContainerShape
-        // drifted), scoped by reconcileContainers to exactly this tab -- the new pane
-        // landing in this tab's tree (asserted above) is the net.
+        #expect(allPaneIds(tab.rootNode).contains(newPaneId), "target tab should contain new pane")
+        #expect(tab.focusedPaneId == focusedPaneId, "background split should preserve focused pane")
+        #expect(model.selectedTabId == tabId, "background split should not change selected tab")
     }
 
-    test("pane.split background on unselected tab emits scoped rebuild") {
+    @Test("pane.split background on unselected tab emits scoped rebuild")
+    func paneSplitBackgroundOnUnselectedTabEmitsScopedRebuild() throws {
+        // Intent: background split on a non-selected tab adds a pane
+        //   there; selection and target focus stay intact.
+        // Why it exists: pins the per-tab scoped rebuild contract.
+        // Scenario: spec-first background split unselected.
         var model = makeModel()
         createTab(&model)
         let selectedTabId = selectedTab(in: model)!.id
@@ -902,15 +1113,17 @@ func ipcUpdateTests() {
         let reply = try requireIpcReply(commands)
         let newPaneId = try requirePaneId(reply["pane"]?["id"], "pane.split should return pane id")
         let backgroundTab = tabById(backgroundTabId, in: model)!
-        try expect(allPaneIds(backgroundTab.rootNode).contains(newPaneId), "background tab should contain new pane")
-        try expectEqual(backgroundTab.focusedPaneId, backgroundPaneId, "background split should preserve target focus")
-        try expectEqual(model.selectedTabId, selectedTabId, "background split should not change selected tab")
-        // The rebuild is scoped structurally now: only the *background* tab's ContainerShape
-        // drifted (its tree gained a leaf), so reconcileContainers rebuilds only it. The new
-        // pane landing in the background tab's tree (asserted above) is the net.
+        #expect(allPaneIds(backgroundTab.rootNode).contains(newPaneId), "background tab should contain new pane")
+        #expect(backgroundTab.focusedPaneId == backgroundPaneId, "background split should preserve target focus")
+        #expect(model.selectedTabId == selectedTabId, "background split should not change selected tab")
     }
 
-    test("pane.split with malformed background fails before mutation") {
+    @Test("pane.split with malformed background fails before mutation")
+    func paneSplitWithMalformedBackgroundFails() throws {
+        // Intent: a non-bool background parameter returns -32602; no
+        //   mutation.
+        // Why it exists: pins the type check.
+        // Scenario: spec-first malformed background.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -927,11 +1140,17 @@ func ipcUpdateTests() {
         )
 
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
-        try expectEqual(Set(model.allPaneIds), paneIdsBefore)
+        #expect(error.code == -32602)
+        #expect(Set(model.allPaneIds) == paneIdsBefore)
     }
 
-    test("malformed launch returns invalid params without mutation commands") {
+    @Test("malformed launch returns invalid params without mutation commands")
+    func malformedLaunchReturnsInvalidParamsWithoutMutation() throws {
+        // Intent: a malformed launch param fails both tab.new and
+        //   pane.split paths before any mutation; no createSurface
+        //   command leaks.
+        // Why it exists: pins fail-closed for malformed launch.
+        // Scenario: spec-first malformed launch.
         let launchValues: [JSONValue] = [
             .string("bad"),
             .object(["cmd": .number(42)]),
@@ -946,9 +1165,9 @@ func ipcUpdateTests() {
                 method: Methods.tabNew,
                 params: .object(["launch": launchValue])
             )
-            try expectEqual(try requireIpcError(tabEffects).code, -32602)
-            try expectEqual(Set(model.allPaneIds), paneIdsBefore)
-            try expect(!hasEffect(tabEffects) {
+            #expect(try requireIpcError(tabEffects).code == -32602)
+            #expect(Set(model.allPaneIds) == paneIdsBefore)
+            #expect(!hasEffect(tabEffects) {
                 if case .createSurface = $0 { return true }
                 return false
             }, "malformed tab.new launch should not create a surface")
@@ -962,31 +1181,39 @@ func ipcUpdateTests() {
                 ]),
                 context: IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
             )
-            try expectEqual(try requireIpcError(splitEffects).code, -32602)
-            try expectEqual(Set(model.allPaneIds), paneIdsBefore)
-            try expect(!hasEffect(splitEffects) {
+            #expect(try requireIpcError(splitEffects).code == -32602)
+            #expect(Set(model.allPaneIds) == paneIdsBefore)
+            #expect(!hasEffect(splitEffects) {
                 if case .createSurface = $0 { return true }
                 return false
             }, "malformed pane.split launch should not create a surface")
         }
     }
 
-    test("theme.set updates pane override and clears with null") {
+    @Test("theme.set updates pane override and clears with null")
+    func themeSetUpdatesPaneOverrideClearsWithNull() throws {
+        // Intent: theme.set sets pane.theme; null clears it.
+        // Why it exists: pins the theme.set round-trip.
+        // Scenario: spec-first theme set + clear.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         let ctx = IpcRequestContext(paneId: paneId.rawValue.uuidString)
 
         let setEffects = sendIpc(&model, method: Methods.themeSet, params: .object(["themeName": .string("Tokyo Night")]), context: ctx)
-        try expectEqual(model.pane(paneId)?.theme, "Tokyo Night")
-        try expectEqual(try requireIpcReply(setEffects)["pane"]?["theme"]?.asString, "Tokyo Night")
+        #expect(model.pane(paneId)?.theme == "Tokyo Night")
+        #expect(try requireIpcReply(setEffects)["pane"]?["theme"]?.asString == "Tokyo Night")
 
         let clearEffects = sendIpc(&model, method: Methods.themeSet, params: .object(["themeName": .null]), context: ctx)
-        try expectEqual(model.pane(paneId)?.theme, nil)
-        try expectEqual(try requireIpcReply(clearEffects)["pane"]?["theme"], .null)
+        #expect(model.pane(paneId)?.theme == nil)
+        #expect(try requireIpcReply(clearEffects)["pane"]?["theme"] == .null)
     }
 
-    test("theme.set explicit pane targets that pane regardless of context") {
+    @Test("theme.set explicit pane targets that pane regardless of context")
+    func themeSetExplicitPaneTargetsRegardlessOfContext() throws {
+        // Intent: an explicit pane param overrides the IPC context.
+        // Why it exists: pins explicit-wins for theme.set.
+        // Scenario: spec-first theme explicit pane.
         var model = makeModel()
         createTab(&model)
         let targetPaneId = selectedTab(in: model)!.focusedPaneId
@@ -1003,12 +1230,17 @@ func ipcUpdateTests() {
             context: IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
         )
 
-        try expectEqual(model.pane(targetPaneId)?.theme, "Tokyo Night")
-        try expectEqual(model.pane(contextPaneId)?.theme, nil)
-        try expectEqual(try requireIpcReply(commands)["pane"]?["id"]?.asString, targetPaneId.rawValue.uuidString)
+        #expect(model.pane(targetPaneId)?.theme == "Tokyo Night")
+        #expect(model.pane(contextPaneId)?.theme == nil)
+        #expect(try requireIpcReply(commands)["pane"]?["id"]?.asString == targetPaneId.rawValue.uuidString)
     }
 
-    test("theme.set malformed or unknown explicit pane does not fall back to context") {
+    @Test("theme.set malformed or unknown explicit pane does not fall back to context")
+    func themeSetMalformedOrUnknownExplicitPaneNoFallback() throws {
+        // Intent: malformed/unknown/non-string explicit pane returns
+        //   -32602; context pane is not affected.
+        // Why it exists: pins no-fallback for theme.set.
+        // Scenario: spec-first malformed/unknown explicit.
         for paneValue in [JSONValue.string("not-a-uuid"), .string(UUID().uuidString), .number(7)] {
             var model = makeModel()
             createTab(&model)
@@ -1025,12 +1257,17 @@ func ipcUpdateTests() {
             )
 
             let error = try requireIpcError(commands)
-            try expectEqual(error.code, -32602)
-            try expectEqual(model.pane(contextPaneId)?.theme, nil)
+            #expect(error.code == -32602)
+            #expect(model.pane(contextPaneId)?.theme == nil)
         }
     }
 
-    test("theme.set without explicit pane and without pane context fails before mutation") {
+    @Test("theme.set without explicit pane and without pane context fails before mutation")
+    func themeSetWithoutPaneAndContextFails() throws {
+        // Intent: theme.set without an explicit pane and no context
+        //   errors before mutation.
+        // Why it exists: pins the "need a pane" rule.
+        // Scenario: spec-first no-pane.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -1042,11 +1279,18 @@ func ipcUpdateTests() {
         )
 
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
-        try expectEqual(model.pane(paneId)?.theme, nil)
+        #expect(error.code == -32602)
+        #expect(model.pane(paneId)?.theme == nil)
     }
 
-    test("todo list add edit done open delete clear-completed use context pane") {
+    @Test("todo list add edit done open delete clear-completed use context pane")
+    func todoCommandFamilyUsesContextPane() throws {
+        // Intent: the full todo command surface (list/add/edit/done/
+        //   open/delete/clear-completed) operates on the context pane
+        //   when no explicit pane is supplied.
+        // Why it exists: pins the implicit-context branch for all todo
+        //   methods.
+        // Scenario: spec-first todo lifecycle on context pane.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -1060,25 +1304,25 @@ func ipcUpdateTests() {
         )
         let added = try requireIpcReply(addEffects)
         let todoId = try requireString(added["todo"]?["id"], "todo add should return id")
-        try expectEqual(model.pane(paneId)?.todos.first?.text, "ship cli")
+        #expect(model.pane(paneId)?.todos.first?.text == "ship cli")
 
         let editReply = try requireIpcReply(sendIpc(&model, method: Methods.todoEdit, params: .object(["todoId": .string(todoId), "text": .string("ship cli v2")]), context: ctx))
-        try expectEqual(model.pane(paneId)?.todos.first?.text, "ship cli v2")
-        try expectEqual(editReply["todo"]?["text"]?.asString, "ship cli v2")
+        #expect(model.pane(paneId)?.todos.first?.text == "ship cli v2")
+        #expect(editReply["todo"]?["text"]?.asString == "ship cli v2")
 
         let doneReply = try requireIpcReply(sendIpc(&model, method: Methods.todoDone, params: .object(["todoId": .string(todoId)]), context: ctx))
-        try expectEqual(model.pane(paneId)?.todos.first?.isDone, true)
-        try expectEqual(doneReply["todo"]?["isDone"]?.asBool, true)
+        #expect(model.pane(paneId)?.todos.first?.isDone == true)
+        #expect(doneReply["todo"]?["isDone"]?.asBool == true)
 
         let openReply = try requireIpcReply(sendIpc(&model, method: Methods.todoOpen, params: .object(["todoId": .string(todoId)]), context: ctx))
-        try expectEqual(model.pane(paneId)?.todos.first?.isDone, false)
-        try expectEqual(openReply["todo"]?["isDone"]?.asBool, false)
+        #expect(model.pane(paneId)?.todos.first?.isDone == false)
+        #expect(openReply["todo"]?["isDone"]?.asBool == false)
 
         let list = try requireIpcReply(sendIpc(&model, method: Methods.todoList, context: ctx))
-        try expectEqual(list["todos"]?.asArray?.count, 1)
+        #expect(list["todos"]?.asArray?.count == 1)
 
         _ = sendIpc(&model, method: Methods.todoDelete, params: .object(["todoId": .string(todoId)]), context: ctx)
-        try expectEqual(model.pane(paneId)?.todos.count, 0)
+        #expect(model.pane(paneId)?.todos.count == 0)
 
         let secondAdd = try requireIpcReply(sendIpc(
             &model,
@@ -1090,10 +1334,15 @@ func ipcUpdateTests() {
         _ = sendIpc(&model, method: Methods.todoDone, params: .object(["todoId": .string(secondTodoId)]), context: ctx)
         _ = sendIpc(&model, method: Methods.todoDone, params: .object(["todoId": .string(todoId)]), context: ctx)
         _ = sendIpc(&model, method: Methods.todoClearCompleted, context: ctx)
-        try expectEqual(model.pane(paneId)?.todos.count, 0)
+        #expect(model.pane(paneId)?.todos.count == 0)
     }
 
-    test("todo commands with explicit pane target that pane regardless of context") {
+    @Test("todo commands with explicit pane target that pane regardless of context")
+    func todoCommandsWithExplicitPaneTargetThatPaneRegardless() throws {
+        // Intent: explicit pane param wins over the context pane on
+        //   every todo command.
+        // Why it exists: pins the explicit-wins rule for todos.
+        // Scenario: spec-first explicit pane lifecycle.
         var model = makeModel()
         createTab(&model)
         let targetPaneId = selectedTab(in: model)!.focusedPaneId
@@ -1111,8 +1360,8 @@ func ipcUpdateTests() {
             context: ctx
         ))
         let todoId = try requireString(addReply["todo"]?["id"], "todo add should return id")
-        try expectEqual(model.pane(targetPaneId)?.todos.first?.text, "ship cli")
-        try expectEqual(model.pane(contextPaneId)?.todos.count, 0)
+        #expect(model.pane(targetPaneId)?.todos.first?.text == "ship cli")
+        #expect(model.pane(contextPaneId)?.todos.count == 0)
 
         let listReply = try requireIpcReply(sendIpc(
             &model,
@@ -1120,7 +1369,7 @@ func ipcUpdateTests() {
             params: .object(["pane": .string(targetPaneId.rawValue.uuidString)]),
             context: ctx
         ))
-        try expectEqual(listReply["todos"]?.asArray?.count, 1)
+        #expect(listReply["todos"]?.asArray?.count == 1)
 
         _ = sendIpc(
             &model,
@@ -1132,7 +1381,7 @@ func ipcUpdateTests() {
             ]),
             context: ctx
         )
-        try expectEqual(model.pane(targetPaneId)?.todos.first?.text, "ship cli v2")
+        #expect(model.pane(targetPaneId)?.todos.first?.text == "ship cli v2")
 
         _ = sendIpc(
             &model,
@@ -1143,7 +1392,7 @@ func ipcUpdateTests() {
             ]),
             context: ctx
         )
-        try expectEqual(model.pane(targetPaneId)?.todos.first?.isDone, true)
+        #expect(model.pane(targetPaneId)?.todos.first?.isDone == true)
 
         _ = sendIpc(
             &model,
@@ -1154,7 +1403,7 @@ func ipcUpdateTests() {
             ]),
             context: ctx
         )
-        try expectEqual(model.pane(targetPaneId)?.todos.first?.isDone, false)
+        #expect(model.pane(targetPaneId)?.todos.first?.isDone == false)
 
         _ = sendIpc(
             &model,
@@ -1171,7 +1420,7 @@ func ipcUpdateTests() {
             params: .object(["pane": .string(targetPaneId.rawValue.uuidString)]),
             context: ctx
         )
-        try expectEqual(model.pane(targetPaneId)?.todos.count, 0)
+        #expect(model.pane(targetPaneId)?.todos.count == 0)
 
         let deleteReply = try requireIpcReply(sendIpc(
             &model,
@@ -1192,10 +1441,16 @@ func ipcUpdateTests() {
             ]),
             context: ctx
         )
-        try expectEqual(model.pane(targetPaneId)?.todos.count, 0)
+        #expect(model.pane(targetPaneId)?.todos.count == 0)
     }
 
-    test("todo commands malformed or unknown explicit pane do not fall back to context") {
+    @Test("todo commands malformed or unknown explicit pane do not fall back to context")
+    func todoCommandsMalformedOrUnknownExplicitPaneNoFallback() throws {
+        // Intent: malformed / unknown / non-string explicit pane on
+        //   every todo method returns -32602; context pane stays
+        //   untouched.
+        // Why it exists: pins no-fallback for every todo command.
+        // Scenario: spec-first todo no-fallback sweep.
         for paneValue in [JSONValue.string("not-a-uuid"), .string(UUID().uuidString), .number(7)] {
             let commands: [(String, [String: JSONValue])] = [
                 (Methods.todoList, [:]),
@@ -1222,22 +1477,28 @@ func ipcUpdateTests() {
                     params["todoId"] = .string(item.id.uuidString)
                 }
 
-                let commands = sendIpc(
+                let sent = sendIpc(
                     &model,
                     method: method,
                     params: .object(params),
                     context: IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
                 )
 
-                let error = try requireIpcError(commands)
-                try expectEqual(error.code, -32602)
-                try expectEqual(model.pane(contextPaneId)?.todos.count, 1)
-                try expectEqual(model.pane(contextPaneId)?.todos[0].text, "context")
+                let error = try requireIpcError(sent)
+                #expect(error.code == -32602)
+                #expect(model.pane(contextPaneId)?.todos.count == 1)
+                #expect(model.pane(contextPaneId)?.todos[0].text == "context")
             }
         }
     }
 
-    test("todo commands without explicit pane and without pane context fail before mutation") {
+    @Test("todo commands without explicit pane and without pane context fail before mutation")
+    func todoCommandsWithoutPaneAndContextFail() throws {
+        // Intent: every todo command requires a pane (explicit or
+        //   context); without either it returns -32602.
+        // Why it exists: pins the "need a pane" rule for the full
+        //   command surface.
+        // Scenario: spec-first todo no-pane sweep.
         let commands: [(String, [String: JSONValue])] = [
             (Methods.todoList, [:]),
             (Methods.todoAdd, ["text": .string("should-not-apply")]),
@@ -1254,20 +1515,24 @@ func ipcUpdateTests() {
             let paneId = selectedTab(in: model)!.focusedPaneId
             _ = appendTodoForTest(&model, paneId: paneId, text: "context")
 
-            let commands = sendIpc(
+            let sent = sendIpc(
                 &model,
                 method: method,
                 params: .object(params),
                 context: IpcRequestContext()
             )
 
-            let error = try requireIpcError(commands)
-            try expectEqual(error.code, -32602)
-            try expectEqual(model.pane(paneId)?.todos.count, 1)
+            let error = try requireIpcError(sent)
+            #expect(error.code == -32602)
+            #expect(model.pane(paneId)?.todos.count == 1)
         }
     }
 
-    test("todo delete rejects unknown id") {
+    @Test("todo delete rejects unknown id")
+    func todoDeleteRejectsUnknownId() throws {
+        // Intent: todoDelete with an unknown id returns -32602.
+        // Why it exists: pins fail-closed for stale todo ids.
+        // Scenario: spec-first stale todo delete.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -1278,10 +1543,15 @@ func ipcUpdateTests() {
             context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
         )
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
+        #expect(error.code == -32602)
     }
 
-    test("pane.input emits text command for context pane") {
+    @Test("pane.input emits text command for context pane")
+    func paneInputEmitsTextCommandForContextPane() {
+        // Intent: pane.input { text } emits sendText addressed to the
+        //   context pane.
+        // Why it exists: pins the text branch of pane.input.
+        // Scenario: spec-first text input.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -1291,13 +1561,19 @@ func ipcUpdateTests() {
             params: .object(["text": .string("echo hi")]),
             context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
         )
-        try expect(hasEffect(commands) {
+        #expect(hasEffect(commands) {
             if case .sendText(let pid, let text) = $0 { return pid == paneId && text == "echo hi" }
             return false
         }, "expected sendText command")
     }
 
-    test("pane.input input array emits ordered Effects via the key path") {
+    @Test("pane.input input array emits ordered Effects via the key path")
+    func paneInputInputArrayEmitsOrderedEffects() {
+        // Intent: pane.input { input: [...] } emits sendInputText +
+        //   sendInputKey in order, then ipcReply; no sendText leaks.
+        // Why it exists: pins the input-array path against text-path
+        //   fallback.
+        // Scenario: spec-first input array.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -1312,29 +1588,35 @@ func ipcUpdateTests() {
             ]),
             context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
         )
-        // Three commands in order: sendInputText, sendInputKey, ipcReply.
-        try expectEqual(commands.count, 3)
+        #expect(commands.count == 3)
         guard case .sendInputText(let p0, let t0) = commands[0] else {
-            throw TestFailure(message: "expected first command = sendInputText")
+            Issue.record("expected first command = sendInputText")
+            return
         }
-        try expectEqual(p0, paneId)
-        try expectEqual(t0, "ls")
+        #expect(p0 == paneId)
+        #expect(t0 == "ls")
         guard case .sendInputKey(let p1, let key1, let mods1) = commands[1] else {
-            throw TestFailure(message: "expected second command = sendInputKey")
+            Issue.record("expected second command = sendInputKey")
+            return
         }
-        try expectEqual(p1, paneId)
-        try expectEqual(key1, KeyName.named(.enter))
-        try expectEqual(mods1, KeyMods())
+        #expect(p1 == paneId)
+        #expect(key1 == KeyName.named(.enter))
+        #expect(mods1 == KeyMods())
         guard case .ipcReply = commands[2] else {
-            throw TestFailure(message: "expected third command = ipcReply")
+            Issue.record("expected third command = ipcReply")
+            return
         }
-        try expect(!hasEffect(commands) {
+        #expect(!hasEffect(commands) {
             if case .sendText = $0 { return true }
             return false
         }, "input path must not emit .sendText")
     }
 
-    test("pane.input explicit empty mods equals omitted mods") {
+    @Test("pane.input explicit empty mods equals omitted mods")
+    func paneInputExplicitEmptyModsEqualsOmittedMods() {
+        // Intent: an explicit empty mods array equals omitted mods.
+        // Why it exists: pins the equality of two representations.
+        // Scenario: spec-first empty mods.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -1351,7 +1633,7 @@ func ipcUpdateTests() {
             ]),
             context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
         )
-        try expect(hasEffect(commands) {
+        #expect(hasEffect(commands) {
             if case .sendInputKey(let p, let k, let m) = $0 {
                 return p == paneId && k == .named(.enter) && m == KeyMods()
             }
@@ -1359,7 +1641,12 @@ func ipcUpdateTests() {
         }, "expected sendInputKey with empty mods")
     }
 
-    test("pane.input non-array mods is invalid params") {
+    @Test("pane.input non-array mods is invalid params")
+    func paneInputNonArrayModsIsInvalidParams() throws {
+        // Intent: a non-array mods value returns -32602 with the
+        //   documented message.
+        // Why it exists: pins the type-check message.
+        // Scenario: spec-first non-array mods.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -1377,12 +1664,16 @@ func ipcUpdateTests() {
             context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
         )
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
-        try expect(error.message.contains("mods must be an array"),
-                   "message should describe non-array mods, got: \(error.message)")
+        #expect(error.code == -32602)
+        #expect(error.message.contains("mods must be an array"),
+            "message should describe non-array mods, got: \(error.message)")
     }
 
-    test("pane.input key with ctrl mod emits sendInputKey") {
+    @Test("pane.input key with ctrl mod emits sendInputKey")
+    func paneInputKeyWithCtrlModEmitsSendInputKey() {
+        // Intent: ctrl-c emits sendInputKey(.letter("c"), .ctrl).
+        // Why it exists: pins the ctrl modifier mapping.
+        // Scenario: spec-first ctrl-c.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -1399,7 +1690,7 @@ func ipcUpdateTests() {
             ]),
             context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
         )
-        try expect(hasEffect(commands) {
+        #expect(hasEffect(commands) {
             if case .sendInputKey(let p, let k, let m) = $0 {
                 return p == paneId && k == .letter("c") && m == [.ctrl]
             }
@@ -1407,7 +1698,12 @@ func ipcUpdateTests() {
         }, "expected sendInputKey for C-c")
     }
 
-    test("pane.input with both text and input is invalid params") {
+    @Test("pane.input with both text and input is invalid params")
+    func paneInputBothTextAndInputIsInvalidParams() throws {
+        // Intent: both `text` and `input` fail (one or the other,
+        //   never both).
+        // Why it exists: pins the mutual-exclusion rule.
+        // Scenario: spec-first both-fields.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -1421,10 +1717,14 @@ func ipcUpdateTests() {
             context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
         )
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
+        #expect(error.code == -32602)
     }
 
-    test("pane.input with neither text nor input is invalid params") {
+    @Test("pane.input with neither text nor input is invalid params")
+    func paneInputNeitherTextNorInputIsInvalidParams() throws {
+        // Intent: neither `text` nor `input` fails.
+        // Why it exists: pins the one-required rule.
+        // Scenario: spec-first no-field.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -1435,10 +1735,14 @@ func ipcUpdateTests() {
             context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
         )
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
+        #expect(error.code == -32602)
     }
 
-    test("pane.input input event missing both text and key is invalid params") {
+    @Test("pane.input input event missing both text and key is invalid params")
+    func paneInputInputEventMissingBothFails() throws {
+        // Intent: an input event with neither text nor key fails.
+        // Why it exists: pins the inner one-required rule.
+        // Scenario: spec-first inner no-field.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -1451,10 +1755,14 @@ func ipcUpdateTests() {
             context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
         )
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
+        #expect(error.code == -32602)
     }
 
-    test("pane.input input event with both text and key is invalid params") {
+    @Test("pane.input input event with both text and key is invalid params")
+    func paneInputInputEventBothTextAndKeyFails() throws {
+        // Intent: an input event with both text and key fails.
+        // Why it exists: pins the inner mutual-exclusion.
+        // Scenario: spec-first inner both-fields.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -1472,12 +1780,16 @@ func ipcUpdateTests() {
             context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
         )
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
+        #expect(error.code == -32602)
     }
 
-    // Load-bearing assertion: a wire-level "Bogus" key never makes it past the
-    // IPC handler. No .sendInputKey is emitted; the response is an error.
-    test("pane.input unknown key name is rejected before any Command") {
+    @Test("pane.input unknown key name is rejected before any Command")
+    func paneInputUnknownKeyRejectedBeforeAnyCommand() throws {
+        // Intent: a wire-level unknown key name returns -32602 BEFORE
+        //   any sendInputKey is emitted.
+        // Why it exists: pins the load-bearing assertion that unknown
+        //   keys never make it past the IPC handler.
+        // Scenario: spec-first unknown key.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -1492,16 +1804,20 @@ func ipcUpdateTests() {
             context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
         )
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
-        try expect(error.message.contains("unknown key Bogus"),
-                   "message should mention unknown key Bogus, got: \(error.message)")
-        try expect(!hasEffect(commands) {
+        #expect(error.code == -32602)
+        #expect(error.message.contains("unknown key Bogus"),
+            "message should mention unknown key Bogus, got: \(error.message)")
+        #expect(!hasEffect(commands) {
             if case .sendInputKey = $0 { return true }
             return false
         }, "no .sendInputKey should be emitted")
     }
 
-    test("pane.input non-string key value is invalid params") {
+    @Test("pane.input non-string key value is invalid params")
+    func paneInputNonStringKeyIsInvalidParams() throws {
+        // Intent: a non-string key value returns -32602.
+        // Why it exists: pins the type check on key.
+        // Scenario: spec-first non-string key.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -1516,10 +1832,15 @@ func ipcUpdateTests() {
             context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
         )
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
+        #expect(error.code == -32602)
     }
 
-    test("pane.input unknown mod name is invalid params") {
+    @Test("pane.input unknown mod name is invalid params")
+    func paneInputUnknownModNameIsInvalidParams() throws {
+        // Intent: an unknown mod name returns -32602 with a "unknown
+        //   mod" message.
+        // Why it exists: pins the named-mod validation.
+        // Scenario: spec-first unknown mod.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -1537,12 +1858,17 @@ func ipcUpdateTests() {
             context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
         )
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
-        try expect(error.message.contains("unknown mod bogus"),
-                   "message should mention unknown mod bogus, got: \(error.message)")
+        #expect(error.code == -32602)
+        #expect(error.message.contains("unknown mod bogus"),
+            "message should mention unknown mod bogus, got: \(error.message)")
     }
 
-    test("pane.input shift mod is rejected") {
+    @Test("pane.input shift mod is rejected")
+    func paneInputShiftModIsRejected() throws {
+        // Intent: shift as a modifier is rejected (use the bare key
+        //   instead).
+        // Why it exists: pins the named-mod exclusion of shift.
+        // Scenario: spec-first shift mod rejected.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -1560,18 +1886,21 @@ func ipcUpdateTests() {
             context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
         )
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
-        try expect(error.message.contains("shift"),
-                   "message should mention shift, got: \(error.message)")
+        #expect(error.code == -32602)
+        #expect(error.message.contains("shift"),
+            "message should mention shift, got: \(error.message)")
     }
 
-    test("pane.input explicit pane targets that pane regardless of context") {
+    @Test("pane.input explicit pane targets that pane regardless of context")
+    func paneInputExplicitPaneTargetsRegardlessOfContext() {
+        // Intent: explicit pane param wins over the IPC context.
+        // Why it exists: pins the explicit-wins rule for pane.input.
+        // Scenario: spec-first explicit pane.
         var model = makeModel()
         createTab(&model)
         let backgroundPaneId = selectedTab(in: model)!.focusedPaneId
         createTab(&model)
         let foregroundPaneId = selectedTab(in: model)!.focusedPaneId
-        // Context says foreground; explicit pane param overrides to background.
         let commands = sendIpc(
             &model,
             method: Methods.paneInput,
@@ -1581,7 +1910,7 @@ func ipcUpdateTests() {
             ]),
             context: IpcRequestContext(paneId: foregroundPaneId.rawValue.uuidString)
         )
-        try expect(hasEffect(commands) {
+        #expect(hasEffect(commands) {
             if case .sendInputText(let p, let t) = $0 {
                 return p == backgroundPaneId && t == "hi"
             }
@@ -1589,7 +1918,12 @@ func ipcUpdateTests() {
         }, "expected command targeting explicit pane")
     }
 
-    test("pane.input explicit pane that doesn't exist returns pane not found") {
+    @Test("pane.input explicit pane that doesn't exist returns pane not found")
+    func paneInputExplicitPaneNotFoundError() throws {
+        // Intent: an unknown explicit pane returns "pane not found"
+        //   (no fallback to context).
+        // Why it exists: pins the no-fallback rule and the message.
+        // Scenario: spec-first unknown explicit pane.
         var model = makeModel()
         createTab(&model)
         let realPaneId = selectedTab(in: model)!.focusedPaneId
@@ -1600,20 +1934,24 @@ func ipcUpdateTests() {
                 "pane": .string(UUID().uuidString),
                 "input": .array([.object(["text": .string("hi")])]),
             ]),
-            // Context pane exists, but explicit pane shouldn't fall back.
             context: IpcRequestContext(paneId: realPaneId.rawValue.uuidString)
         )
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
-        try expect(error.message.contains("pane not found"),
-                   "expected 'pane not found', got: \(error.message)")
-        try expect(!hasEffect(commands) {
+        #expect(error.code == -32602)
+        #expect(error.message.contains("pane not found"),
+            "expected 'pane not found', got: \(error.message)")
+        #expect(!hasEffect(commands) {
             if case .sendInputText = $0 { return true }
             return false
         }, "no input command should be emitted")
     }
 
-    test("pane.input non-string pane is invalid params and does not fall back") {
+    @Test("pane.input non-string pane is invalid params and does not fall back")
+    func paneInputNonStringPaneIsInvalidParams() throws {
+        // Intent: non-string pane returns -32602 with a "pane must be
+        //   a string" message.
+        // Why it exists: pins the type-check message.
+        // Scenario: spec-first non-string pane.
         var model = makeModel()
         createTab(&model)
         let realPaneId = selectedTab(in: model)!.focusedPaneId
@@ -1627,12 +1965,17 @@ func ipcUpdateTests() {
             context: IpcRequestContext(paneId: realPaneId.rawValue.uuidString)
         )
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
-        try expect(error.message.contains("pane must be a string"),
-                   "expected 'pane must be a string', got: \(error.message)")
+        #expect(error.code == -32602)
+        #expect(error.message.contains("pane must be a string"),
+            "expected 'pane must be a string', got: \(error.message)")
     }
 
-    test("pane.input with no pane in context and no explicit pane errors") {
+    @Test("pane.input with no pane in context and no explicit pane errors")
+    func paneInputNoPaneInContextOrExplicitErrors() throws {
+        // Intent: no pane context and no explicit pane returns -32602
+        //   with a "no pane in context" message.
+        // Why it exists: pins the no-pane error message.
+        // Scenario: spec-first no pane.
         var model = makeModel()
         createTab(&model)
         let commands = sendIpc(
@@ -1642,12 +1985,17 @@ func ipcUpdateTests() {
             context: IpcRequestContext()
         )
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
-        try expect(error.message.contains("no pane in context"),
-                   "expected 'no pane in context', got: \(error.message)")
+        #expect(error.code == -32602)
+        #expect(error.message.contains("no pane in context"),
+            "expected 'no pane in context', got: \(error.message)")
     }
 
-    test("pane.read emits viewport read command without immediate reply") {
+    @Test("pane.read emits viewport read command without immediate reply")
+    func paneReadEmitsViewportReadNoImmediateReply() {
+        // Intent: pane.read emits a single readPaneText command and no
+        //   immediate ipcReply (the async response carries the data).
+        // Why it exists: pins the async-read shape.
+        // Scenario: spec-first viewport read.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -1657,19 +2005,25 @@ func ipcUpdateTests() {
             params: .object(["pane": .string(paneId.rawValue.uuidString)])
         )
 
-        try expectEqual(commands.count, 1)
+        #expect(commands.count == 1)
         guard case .readPaneText(_, let effectPaneId, let lineLimit) = commands[0] else {
-            throw TestFailure(message: "expected readPaneText command")
+            Issue.record("expected readPaneText command")
+            return
         }
-        try expectEqual(effectPaneId, paneId)
-        try expectEqual(lineLimit, nil)
-        try expect(!hasEffect(commands) {
+        #expect(effectPaneId == paneId)
+        #expect(lineLimit == nil)
+        #expect(!hasEffect(commands) {
             if case .ipcReply = $0 { return true }
             return false
         }, "pane.read success should not emit an immediate ipcReply")
     }
 
-    test("pane.read emits scrollback tail read command with line limit") {
+    @Test("pane.read emits scrollback tail read command with line limit")
+    func paneReadEmitsScrollbackTailReadWithLineLimit() {
+        // Intent: pane.read with `lines` emits readPaneText carrying
+        //   that line limit.
+        // Why it exists: pins the lines-param wiring.
+        // Scenario: spec-first lines limit.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -1682,24 +2036,35 @@ func ipcUpdateTests() {
             ])
         )
 
-        try expectEqual(commands.count, 1)
+        #expect(commands.count == 1)
         guard case .readPaneText(_, let effectPaneId, let lineLimit) = commands[0] else {
-            throw TestFailure(message: "expected readPaneText command")
+            Issue.record("expected readPaneText command")
+            return
         }
-        try expectEqual(effectPaneId, paneId)
-        try expectEqual(lineLimit, 200)
+        #expect(effectPaneId == paneId)
+        #expect(lineLimit == 200)
     }
 
-    test("pane.read missing pane param errors") {
+    @Test("pane.read missing pane param errors")
+    func paneReadMissingPaneParamErrors() throws {
+        // Intent: missing pane param returns -32602 with "pane
+        //   required".
+        // Why it exists: pins the missing-pane error message.
+        // Scenario: spec-first missing pane.
         var model = makeModel()
         createTab(&model)
         let commands = sendIpc(&model, method: Methods.paneRead, params: .object([:]))
         let error = try requireIpcError(commands)
-        try expectEqual(error.code, -32602)
-        try expectEqual(error.message, "pane required")
+        #expect(error.code == -32602)
+        #expect(error.message == "pane required")
     }
 
-    test("pane.read non-string pane param errors") {
+    @Test("pane.read non-string pane param errors")
+    func paneReadNonStringPaneParamErrors() throws {
+        // Intent: non-string pane param returns -32602 with "pane
+        //   required".
+        // Why it exists: pins the type check.
+        // Scenario: spec-first non-string pane.
         for paneValue in [JSONValue.number(5), .array([]), .object([:])] {
             var model = makeModel()
             createTab(&model)
@@ -1709,12 +2074,16 @@ func ipcUpdateTests() {
                 params: .object(["pane": paneValue])
             )
             let error = try requireIpcError(commands)
-            try expectEqual(error.code, -32602)
-            try expectEqual(error.message, "pane required")
+            #expect(error.code == -32602)
+            #expect(error.message == "pane required")
         }
     }
 
-    test("pane.read unknown pane errors") {
+    @Test("pane.read unknown pane errors")
+    func paneReadUnknownPaneErrors() throws {
+        // Intent: unknown pane id returns -32602 with "pane not found".
+        // Why it exists: pins the unknown-pane error message.
+        // Scenario: spec-first unknown pane.
         for rawPane in ["bogus", UUID().uuidString] {
             var model = makeModel()
             createTab(&model)
@@ -1724,12 +2093,18 @@ func ipcUpdateTests() {
                 params: .object(["pane": .string(rawPane)])
             )
             let error = try requireIpcError(commands)
-            try expectEqual(error.code, -32602)
-            try expectEqual(error.message, "pane not found")
+            #expect(error.code == -32602)
+            #expect(error.message == "pane not found")
         }
     }
 
-    test("pane.read invalid line limits error") {
+    @Test("pane.read invalid line limits error")
+    func paneReadInvalidLineLimitsError() throws {
+        // Intent: invalid `lines` values (zero, negative, string,
+        //   fractional) return -32602 with "lines must be a positive
+        //   integer".
+        // Why it exists: pins the lines validation.
+        // Scenario: spec-first invalid lines.
         let invalidValues: [JSONValue] = [.number(0), .number(-5), .string("5"), .number(1.5)]
         for linesValue in invalidValues {
             var model = makeModel()
@@ -1744,11 +2119,13 @@ func ipcUpdateTests() {
                 ])
             )
             let error = try requireIpcError(commands)
-            try expectEqual(error.code, -32602)
-            try expectEqual(error.message, "lines must be a positive integer")
+            #expect(error.code == -32602)
+            #expect(error.message == "lines must be a positive integer")
         }
     }
 }
+
+// MARK: - Private helpers
 
 private struct IpcErrorResult: Equatable {
     let code: Int
@@ -1781,12 +2158,14 @@ private func expectAfterTabInserted(
     beforeGroupTabs: [[TabId]],
     panesBefore: Set<PaneId>
 ) throws {
-    guard let targetGroupIndex = model.groups.firstIndex(where: { $0.id == targetGroupId }) else {
-        throw TestFailure(message: "target group should exist")
-    }
-    guard let refIndex = beforeGroupTabs[targetGroupIndex].firstIndex(of: refTabId) else {
-        throw TestFailure(message: "reference tab should be in target group snapshot")
-    }
+    let targetGroupIndex = try #require(
+        model.groups.firstIndex(where: { $0.id == targetGroupId }),
+        "target group should exist"
+    )
+    let refIndex = try #require(
+        beforeGroupTabs[targetGroupIndex].firstIndex(of: refTabId),
+        "reference tab should be in target group snapshot"
+    )
     let tabId = try requireTabId(reply["tab"]?["id"], "tab.new should return tab id")
     let paneId = try requirePaneId(reply["panes"]?.asArray?.first?["id"], "tab.new should return pane id")
     var expectedTarget = beforeGroupTabs[targetGroupIndex]
@@ -1794,64 +2173,56 @@ private func expectAfterTabInserted(
 
     for groupIndex in model.groups.indices {
         if groupIndex == targetGroupIndex {
-            try expectEqual(model.groups[groupIndex].tabs.map(\.id), expectedTarget)
+            #expect(model.groups[groupIndex].tabs.map(\.id) == expectedTarget)
         } else {
-            try expectEqual(model.groups[groupIndex].tabs.map(\.id), beforeGroupTabs[groupIndex])
+            #expect(model.groups[groupIndex].tabs.map(\.id) == beforeGroupTabs[groupIndex])
         }
     }
 
     let newPaneIds = Set(model.allPaneIds).subtracting(panesBefore)
-    try expectEqual(newPaneIds, [paneId])
-    guard let tab = tabById(tabId, in: model) else {
-        throw TestFailure(message: "new tab should exist")
-    }
-    try expectEqual(tab.focusedPaneId, paneId)
+    #expect(newPaneIds == [paneId])
+    let tab = try #require(tabById(tabId, in: model), "new tab should exist")
+    #expect(tab.focusedPaneId == paneId)
     if case .leaf(let rootPane) = tab.rootNode {
-        try expectEqual(rootPane.id, paneId)
+        #expect(rootPane.id == paneId)
     } else {
-        throw TestFailure(message: "new tab should have a root leaf")
+        Issue.record("new tab should have a root leaf")
+        return
     }
-    try expectEqual(model.selectedTabId, tabId)
+    #expect(model.selectedTabId == tabId)
 }
 
 private func requireIpcReply(_ commands: [Command]) throws -> JSONValue {
-    for command in commands {
-        if case .ipcReply(_, let result) = command {
-            return result
-        }
-    }
-    throw TestFailure(message: "expected ipcReply")
+    let reply = commands.compactMap { command -> JSONValue? in
+        if case .ipcReply(_, let result) = command { return result }
+        return nil
+    }.first
+    return try #require(reply, "expected ipcReply")
 }
 
 private func requireIpcError(_ commands: [Command]) throws -> IpcErrorResult {
-    for command in commands {
+    let result = commands.compactMap { command -> IpcErrorResult? in
         if case .ipcError(_, let code, let message) = command {
             return IpcErrorResult(code: code, message: message)
         }
-    }
-    throw TestFailure(message: "expected ipcError")
+        return nil
+    }.first
+    return try #require(result, "expected ipcError")
 }
 
 private func requireString(_ value: JSONValue?, _ message: String) throws -> String {
-    guard let string = value?.asString else {
-        throw TestFailure(message: message)
-    }
-    return string
+    try #require(value?.asString, Comment(rawValue: message))
 }
 
 private func requirePaneId(_ value: JSONValue?, _ message: String) throws -> PaneId {
     let raw = try requireString(value, message)
-    guard let uuid = UUID(uuidString: raw) else {
-        throw TestFailure(message: message)
-    }
+    let uuid = try #require(UUID(uuidString: raw), Comment(rawValue: message))
     return PaneId(rawValue: uuid)
 }
 
 private func requireTabId(_ value: JSONValue?, _ message: String) throws -> TabId {
     let raw = try requireString(value, message)
-    guard let uuid = UUID(uuidString: raw) else {
-        throw TestFailure(message: message)
-    }
+    let uuid = try #require(UUID(uuidString: raw), Comment(rawValue: message))
     return TabId(rawValue: uuid)
 }
 
