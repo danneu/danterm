@@ -764,6 +764,36 @@ keep the symlink and the zero-tax `internal` surface.
 
 ## Implementaion notes:
 
-Phase 1:
+Phase 1: done 2026-05-29. Scaffolded the empty `DanTermSupport` sibling exactly as
+specified -- nested `Package.swift` (kept the `../DanTermProtocol` path dep + product
+dep per the manifest spec / hand-off recommendation, so Phase 3's `IpcConnection` needs
+no manifest churn), placeholder source (`DanTermSupport.swift`,
+`enum DanTermSupportModulePlaceholder {}`), placeholder Swift Testing suite
+(`PlaceholderTests`), the tracked relative symlink
+`app/DanTermSupport -> ../lib/DanTermSupport/Sources/DanTermSupport`, and the
+`swift test --package-path lib/DanTermSupport` line in `just test` (after core, before
+the lint). No code moved; root `Package.swift` and `lib/DanTermCore/Package.swift` both
+untouched.
 
-TODO
+- **Divergence (one, necessary): `.gitignore`.** It ignores all of `lib/` via `lib/*`
+  and un-ignores only the tracked sibling packages by name (`!lib/DanTermProtocol/`,
+  `!lib/DanTermCore/`), so the new `lib/DanTermSupport/` tree was ignored and could not
+  be staged. Added `!lib/DanTermSupport/` (and updated the adjacent comment), mirroring
+  the existing pattern; committed alongside the scaffold. Outside the hand-off's literal
+  file list but required for the scaffolding to be trackable -- and it pre-clears the
+  same footgun for Phases 2-4 when real source/test files land under the tree.
+- **Deferred per hand-off:** the `lib/DanTermCore/Package.swift` header retitle ("purity
+  (no IO) is enforced by a local lint") is NOT done -- the lint only bans Cocoa until
+  Phase 6, so that claim isn't true yet. Defer to Phase 6/7.
+- **Placeholder fates (reminder):** delete `DanTermSupport.swift` when the first real
+  support source lands (Phase 3); delete `PlaceholderTests.swift` when the first real
+  suite lands (Phase 3).
+- **Verification (all green):** `swift test --package-path lib/DanTermSupport` builds +
+  passes in isolation (resolves only the local `../DanTermProtocol` path dep, no
+  GhosttyKit/AppKit, no `DanTermCore` dep -- the sibling-independence proof). `just test`
+  green end to end (core 1069 tests / 39 suites; the new support line; purity lint + all
+  five shell self-tests). `just build` green -- the app target compiled
+  `DanTermSupport.swift` through the symlink (`[3/9] Compiling DanTerm DanTermSupport.swift`),
+  proving the placeholder globs cleanly into `DanTerm` same-module. Symlink verified
+  relative and pointing at `Sources/DanTermSupport` (no `Package.swift` exposed to the
+  app glob).
