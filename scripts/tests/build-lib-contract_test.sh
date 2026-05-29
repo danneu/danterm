@@ -61,6 +61,11 @@ printf 'fixture\n' > "$CACHE_DIR/README.md"
 git -C "$CACHE_DIR" add README.md
 git -C "$CACHE_DIR" commit -q -m "initial"
 git -C "$CACHE_DIR" tag "$GHOSTTY_TAG"
+# Regression: a rolling `tip` tag colliding with the pinned commit must not fool
+# the cache-state check. `tip` is annotated, so it outranks the lightweight
+# pinned tag under `git describe --tags`; the old describe-based guard would
+# report HEAD as `tip` and wrongly reject this correct checkout as stale.
+git -C "$CACHE_DIR" tag -a -m tip tip
 
 # PATH-shimmed nix + xcodebuild that never invoke the real toolchains. The build
 # subshell cd's into .ghostty-src before calling nix, so the nix shim emits the

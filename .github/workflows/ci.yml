@@ -184,5 +184,8 @@ jobs:
       - name: build-lib stale-source guard self-test
         run: ./scripts/tests/build-lib-stale-guard_test.sh
 
+      - name: build-lib tip-tag fetch self-test
+        run: ./scripts/tests/build-lib-fetch_test.sh
+
       - name: build-lib contract self-test
         run: ./scripts/tests/build-lib-contract_test.sh

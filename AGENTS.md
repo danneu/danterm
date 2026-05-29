@@ -202,7 +202,7 @@ the first Swift build. Re-run only when the pinned Ghostty version changes.
 
 - `just build` -- compile to `.build/DanTerm Dev.app` and install to `~/Applications/DanTerm Dev.app`. Dev bundle ID `com.danneu.danterm-dev` runs side-by-side with production `DanTerm.app`.
 - `just build-run` -- same as `just build`, then launch the installed app.
-- `just test` -- local gate: protocol XCTest + core Swift Testing + core-purity lint + three shell self-tests (`core-purity-lint_test.sh`, `load-ghostty-version_test.sh`, `build-lib-stale-guard_test.sh`).
+- `just test` -- local gate: protocol XCTest + core Swift Testing + core-purity lint + five shell self-tests (`core-purity-lint_test.sh`, `load-ghostty-version_test.sh`, `build-lib-stale-guard_test.sh`, `build-lib-fetch_test.sh`, `build-lib-contract_test.sh`).
 - `just test-ui` -- AppKit UI harness (needs a display).
 
 Targeted core runs: `swift test --package-path lib/DanTermCore`, optionally with `--filter CheckpointTests`. Protocol-only: `swift test --package-path lib/DanTermProtocol --filter DanTermProtocolTests`.

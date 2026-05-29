@@ -33,6 +33,7 @@ test:
     ./scripts/tests/core-purity-lint_test.sh
     ./scripts/tests/load-ghostty-version_test.sh
     ./scripts/tests/build-lib-stale-guard_test.sh
+    ./scripts/tests/build-lib-fetch_test.sh
     ./scripts/tests/build-lib-contract_test.sh
 
 # Run UI tests (AppKit, requires display)

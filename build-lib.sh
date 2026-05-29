@@ -39,13 +39,31 @@ ghostty_tag_at_cache() {
     git -C "$CACHE_DIR" describe --tags --exact-match 2>/dev/null || printf 'unknown'
 }
 
+# True when the cache checkout's HEAD is exactly the commit $GHOSTTY_TAG names.
+# Compares resolved commit OIDs rather than `git describe --exact-match`, which
+# can report a *different* tag sharing the commit (e.g. Ghostty's rolling `tip`)
+# and so mis-detect a correct checkout as stale. `^{commit}` peels annotated
+# tags; returns non-zero (treated as "not current") if HEAD or the tag is absent.
+cache_at_pinned_tag() {
+    local head pinned
+    head="$(git -C "$CACHE_DIR" rev-parse --verify --quiet HEAD)" || return 1
+    pinned="$(git -C "$CACHE_DIR" rev-parse --verify --quiet "refs/tags/$GHOSTTY_TAG^{commit}")" || return 1
+    [ "$head" = "$pinned" ]
+}
+
 fetch_ghostty() {
     if [ -d "$CACHE_DIR/.git" ]; then
         echo "Ghostty source exists at $CACHE_DIR"
-        current_tag="$(ghostty_tag_at_cache)"
-        if [ "$current_tag" != "$GHOSTTY_TAG" ]; then
+        if ! cache_at_pinned_tag; then
             echo "Fetching $GHOSTTY_TAG..."
-            git -C "$CACHE_DIR" fetch --tags --depth 1 origin "$GHOSTTY_TAG"
+            # Fetch only the pinned tag. Plain `--tags` pulls every remote
+            # tag, including Ghostty's rolling `tip`; a stale local `tip` then
+            # can't be updated ("would clobber existing tag") and aborts the
+            # bump under `set -e`. Targeting refs/tags/<tag> writes the local
+            # tag ref (checkout below needs it) and leaves every other tag,
+            # including `tip`, untouched.
+            git -C "$CACHE_DIR" fetch --depth 1 origin \
+                "refs/tags/$GHOSTTY_TAG:refs/tags/$GHOSTTY_TAG"
             git -C "$CACHE_DIR" checkout "$GHOSTTY_TAG"
         fi
     elif [ -e "$CACHE_DIR" ]; then
@@ -55,7 +73,7 @@ fetch_ghostty() {
         echo "Cloning Ghostty source (shallow)..."
         git clone --depth 1 --branch "$GHOSTTY_TAG" "$GHOSTTY_REPO" "$CACHE_DIR"
     fi
-    echo "Ghostty $(ghostty_tag_at_cache)"
+    echo "Ghostty $GHOSTTY_TAG"
 }
 
 stale_source_error() {
@@ -70,13 +88,12 @@ build_xcframework() {
         exit 1
     fi
 
-    current_tag="$(ghostty_tag_at_cache)"
-    if [ "$current_tag" != "$GHOSTTY_TAG" ]; then
-        stale_source_error "$current_tag"
+    if ! cache_at_pinned_tag; then
+        stale_source_error "$(ghostty_tag_at_cache)"
         exit 1
     fi
 
-    echo "Ghostty $current_tag"
+    echo "Ghostty $GHOSTTY_TAG"
 
     # Ensure Metal toolchain is available (idempotent; no-op if already installed).
     echo "Ensuring Metal toolchain is installed..."
