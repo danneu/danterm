@@ -76,7 +76,7 @@ class GhosttyApp {
 
     /// Load the DanTerm config overlay file into an existing ghostty config.
     private static func loadDanTermOverlay(into config: ghostty_config_t) {
-        let path = DanTermConfigParser.configFilePath()
+        let path = DanTermConfigPaths.configFilePath()
         guard FileManager.default.fileExists(atPath: path) else { return }
         path.withCString { ghostty_config_load_file(config, $0) }
     }

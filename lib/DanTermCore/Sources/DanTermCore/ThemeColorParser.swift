@@ -1,6 +1,7 @@
 // Pure Foundation parser for extracting preview colors from Ghostty theme files.
-// Returns validated, normalized hex strings — no NSColor or Cocoa dependency,
-// so this file can be compiled in the test target.
+// Returns validated, normalized hex strings. No NSColor/Cocoa and (since the
+// file-read wrapper moved to app/) no FileManager -- pure string transforms, which
+// keeps it in the unit-testable pure core.
 import Foundation
 
 /// Hex color strings extracted from a Ghostty theme file for preview rendering.
@@ -60,13 +61,6 @@ enum ThemeColorParser {
             palette.append(hex)
         }
         return ThemeColorHex(background: b, foreground: f, accent: a, palette: palette)
-    }
-
-    /// Read a theme file from disk and parse it.
-    static func parse(themeFileAt path: String) -> ThemeColorHex? {
-        guard let data = FileManager.default.contents(atPath: path),
-              let content = String(data: data, encoding: .utf8) else { return nil }
-        return parse(themeContent: content)
     }
 
     /// Parse a palette entry value like "4=#aabbcc" or "4#aabbcc" into index + validated hex.
