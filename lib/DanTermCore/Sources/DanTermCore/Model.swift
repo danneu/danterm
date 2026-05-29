@@ -540,7 +540,7 @@ func resolveLaunch(_ paneSnapshot: PaneSnapshot, home: String? = nil) -> (cwd: S
 /// home so production restore expands against the user's *current* home (the whole
 /// point of storing `~/`); the injectable `home` lets a test assert machine-
 /// independent expansion against a fixed home.
-func expandTilde(_ path: String, home: String = NSHomeDirectory()) -> String {
+func expandTilde(_ path: String, home: String = NSHomeDirectory()) -> String {  // core-purity: ambient-seam
     guard path.hasPrefix("~") else { return path }
     return home + path.dropFirst(1)
 }
