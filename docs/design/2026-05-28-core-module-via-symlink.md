@@ -2,6 +2,7 @@
 
 `Status`: Accepted
 `Date`: 2026-05-28
+`Extended by`: [Pure Core / Portable Support / Platform Runtime: a Purity-Enforced Three-Layer Split](2026-05-28-pure-core-support-split.md)
 
 ## Context
 
@@ -83,7 +84,11 @@ The same-module design pays nothing the module-split would have given:
   enforces Cocoa-freeness in no design. We close this gap with a local lint
   (`scripts/core-purity-lint.sh`) wired into `just test`. The lint has a self-test
   (`scripts/tests/core-purity-lint_test.sh`) so a silent regex regression is
-  caught.
+  caught. (Extended later: the same lint grew from Cocoa-freeness to full
+  IO/ambient-nondeterminism purity, and the symlink + nested-package mechanism was
+  reused for a sibling `DanTermSupport` module that holds the portable side effects
+  the core shed -- see
+  [2026-05-28-pure-core-support-split.md](2026-05-28-pure-core-support-split.md).)
 
 The hand-rolled harness, both manual lists, and the throwaway-compile loop are
 retired. `tests/` is deleted; the core suite runs under

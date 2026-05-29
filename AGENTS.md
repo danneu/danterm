@@ -42,6 +42,10 @@ app/                              # App target (root Package.swift, path: "app")
 ├── DanTermCore -> ../lib/DanTermCore/Sources/DanTermCore   # tracked symlink; the pure core
 │                                                          # is compiled same-module into the app
 │                                                          # target (no `import DanTermCore`).
+├── DanTermSupport -> ../lib/DanTermSupport/Sources/DanTermSupport   # tracked symlink; portable
+│                                                          # side effects (IpcConnection, Debouncer,
+│                                                          # CLIPathInstaller, RecoveryStore),
+│                                                          # compiled same-module like the core.
 └── Info.plist
 
 lib/
@@ -51,7 +55,12 @@ lib/
 │   │                             #   ModelOperations.swift, Projections.swift, Persistence.swift,
 │   │                             #   TabTodo.swift, DanTermConfig.swift, ...
 │   └── Tests/DanTermCoreTests/   # Swift Testing suites (auto-discovered).
-└── DanTermProtocol/              # CLI parser + IPC envelope, shared by app/ and cli/.
+├── DanTermProtocol/              # CLI parser + IPC envelope + line framer, shared by app/ and cli/.
+└── DanTermSupport/                 # Portable side effects (no AppKit/GhosttyKit); same symlink +
+    ├── Sources/DanTermSupport/     #   nested-package pattern as core. Depends on DanTermProtocol +
+    │                               #   Foundation, NOT on DanTermCore: IpcConnection.swift,
+    │                               #   Debouncer.swift, CLIPathInstaller.swift, RecoveryStore.swift.
+    └── Tests/DanTermSupportTests/  # Swift Testing suites (auto-discovered).
 
 docs/design/                      # ADR-style design notes; index at docs/design/index.md.
 ```
@@ -61,10 +70,42 @@ docs/design/                      # ADR-style design notes; index at docs/design
 ```
 User/Ghostty action
     → Msg
-    → update(&model, msg) -> [Command]   (pure)
-    → AppRuntime.perform(command)         (side effects)
+    → update(&model, msg, env:) -> [Command]   (pure)
+    → AppRuntime.perform(command)               (side effects)
     → view rebuild / surface creation / etc.
 ```
+
+### Module layers and the determinism seam
+
+The model/update layer is split across two symlinked modules plus the runtime,
+all reached same-module (so no `import`/`package` tax):
+
+- `DanTermCore` -- pure, deterministic domain logic; no IO, AppKit, or GhosttyKit.
+- `DanTermSupport` -- portable side effects (sockets, timers, the CLI-path
+  installer, the recovery store); depends on `DanTermProtocol` + Foundation,
+  never on `DanTermCore`.
+- `app/` -- the AppKit + GhosttyKit runtime, the `Command` interpreter, and the
+  trivial file-IO wrappers.
+
+IPC and persistence are layered across these. IPC: method semantics in core
+`update()`, envelope + line framing in `DanTermProtocol`, per-connection socket
+lifecycle in `DanTermSupport.IpcConnection`, accept loop in `app/IpcServer`.
+Persistence: pure snapshot/restore codec in core, path resolution + file IO +
+session lock in `DanTermSupport.RecoveryStore`, checkpoint scheduling + on-disk
+write in `app`.
+
+**Inject vs. ambient.** The core seams its three ambient inputs -- home
+directory, fresh ids, wall-clock time -- behind `CoreEnv` (`env.homeDirectory()`,
+`env.newId()`, `env.now()`). The rule: inject an explicit value when the result
+is SAVED (to disk), SENT (over IPC), or ASSERTED (in a test) -- anything a second
+execution compares against; leave it AMBIENT (read the real value via a default)
+when it is only SHOWN live and discarded (tab/toolbar chrome, alert text). That
+is why ids/time are injected and the save/send/restore home is threaded, while
+render text reads ambient HOME. When threading a new home/id/time value, follow
+that rule; the full statement and worked example are the "When to inject an
+ambient input: save/send/assert vs. show" subsection of
+[docs/design/2026-05-28-pure-core-support-split.md](docs/design/2026-05-28-pure-core-support-split.md),
+and `scripts/core-purity-lint.sh` enforces it.
 
 ### Typed IDs
 
@@ -202,7 +243,7 @@ the first Swift build. Re-run only when the pinned Ghostty version changes.
 
 - `just build` -- compile to `.build/DanTerm Dev.app` and install to `~/Applications/DanTerm Dev.app`. Dev bundle ID `com.danneu.danterm-dev` runs side-by-side with production `DanTerm.app`.
 - `just build-run` -- same as `just build`, then launch the installed app.
-- `just test` -- local gate: protocol XCTest + core Swift Testing + core-purity lint + five shell self-tests (`core-purity-lint_test.sh`, `load-ghostty-version_test.sh`, `build-lib-stale-guard_test.sh`, `build-lib-fetch_test.sh`, `build-lib-contract_test.sh`).
+- `just test` -- local gate: protocol XCTest + core Swift Testing + DanTermSupport Swift Testing + core-purity lint (pure + portable profiles) + five shell self-tests (`core-purity-lint_test.sh`, `load-ghostty-version_test.sh`, `build-lib-stale-guard_test.sh`, `build-lib-fetch_test.sh`, `build-lib-contract_test.sh`).
 - `just test-ui` -- AppKit UI harness (needs a display).
 
 Targeted core runs: `swift test --package-path lib/DanTermCore`, optionally with `--filter CheckpointTests`. Protocol-only: `swift test --package-path lib/DanTermProtocol --filter DanTermProtocolTests`.
@@ -230,6 +271,7 @@ Topic docs. Read the linked file before editing if your task touches the topic.
 
 - [docs/design/index.md](docs/design/index.md) -- ADR-style design-decision index.
 - [docs/design/2026-05-28-core-module-via-symlink.md](docs/design/2026-05-28-core-module-via-symlink.md) -- pure core compiled same-module via symlink, tested via nested SwiftPM package. Read when touching the test architecture, the `app/DanTermCore` symlink, or `lib/DanTermCore/Package.swift`.
+- [docs/design/2026-05-28-pure-core-support-split.md](docs/design/2026-05-28-pure-core-support-split.md) -- the pure-core / portable-support / runtime three-layer split, the "core depends on nothing impure; support depends on nothing in core" invariant, and the inject-vs-ambient determinism rule. Read when adding a side-effecting utility, deciding which layer code belongs in, threading a new home/id/time value, or touching `scripts/core-purity-lint.sh` or `lib/DanTermSupport/`.
 - [docs/design/2026-03-05-display-scaling.md](docs/design/2026-03-05-display-scaling.md) -- HiDPI/Retina scaling, content scale invariants, zero-frame guards.
 - [agent-docs/build-details.md](agent-docs/build-details.md) -- `build-lib.sh`, Swift compilation modes, xcframework + linker details. Read when touching build scripts or upgrading Ghostty.
 - [agent-docs/reference-sources.md](agent-docs/reference-sources.md) -- `.ghostty-src/` layout, key files for the libghostty C API, other terminal references. Read when implementing against libghostty.

@@ -34,3 +34,4 @@ Default statuses are:
 - [2026-05-27: Terminal Focus and Display Link Recovery](2026-05-27-terminal-focus-display-link.md)
 - [2026-05-27: Model-Driven View Reconciliation](2026-05-27-model-driven-view-reconciliation.md)
 - [2026-05-28: Pure Core Compiled Same-Module via Symlink, Tested via Nested Package](2026-05-28-core-module-via-symlink.md)
+- [2026-05-28: Pure Core / Portable Support / Platform Runtime: a Purity-Enforced Three-Layer Split](2026-05-28-pure-core-support-split.md)

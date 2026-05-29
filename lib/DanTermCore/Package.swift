@@ -19,8 +19,12 @@
 //
 // Isolation enforced by this package: a core file that gains an app-only symbol
 // or `import GhosttyKit` fails to resolve here (neither is a dependency).
-// Cocoa-freeness is enforced separately by a local lint -- system frameworks
-// link by default in any macOS SwiftPM target.
+// Purity (no IO, no ambient nondeterminism) is enforced separately by a local
+// lint (scripts/core-purity-lint.sh, pure profile) -- the compiler enforces none
+// of it, since system frameworks link by default in any macOS SwiftPM target and
+// Foundation/Darwin IO compiles anywhere. The sibling DanTermSupport package
+// mirrors this symlink + nested-package pattern for the portable side effects the
+// core sheds (its lint runs the portable profile).
 import PackageDescription
 
 let package = Package(
