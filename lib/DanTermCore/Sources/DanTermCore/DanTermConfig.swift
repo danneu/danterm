@@ -21,23 +21,6 @@ struct DanTermConfig: Equatable {
 /// Parses DanTerm-specific keys from the config file.
 /// Unknown keys (including Ghostty keys) are silently ignored.
 enum DanTermConfigParser {
-    /// Standard config file path: ~/.config/danterm/config
-    static func configFilePath() -> String {
-        let home = NSHomeDirectory()
-        return "\(home)/.config/danterm/config"
-    }
-
-    /// Read and parse the config file from disk.
-    /// Returns .default if the file doesn't exist or can't be read.
-    static func loadFromDisk() -> DanTermConfig {
-        let path = configFilePath()
-        guard let data = FileManager.default.contents(atPath: path),
-              let content = String(data: data, encoding: .utf8) else {
-            return .default
-        }
-        return parse(content: content)
-    }
-
     /// Parse DanTerm-specific keys from raw config file content.
     /// Format: key = value, # comments, blank lines ignored.
     static func parse(content: String) -> DanTermConfig {

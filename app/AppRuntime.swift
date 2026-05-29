@@ -550,7 +550,7 @@ class AppRuntime {
             }
 
         case .saveDanTermConfigKey(let key, let value):
-            let path = DanTermConfigParser.configFilePath()
+            let path = DanTermConfigPaths.configFilePath()
             let url = URL(fileURLWithPath: path)
             let fm = FileManager.default
             let dir = url.deletingLastPathComponent().path
@@ -566,7 +566,7 @@ class AppRuntime {
             try? updated.write(to: url, atomically: true, encoding: .utf8)
 
         case .removeDanTermConfigKey(let key):
-            let path = DanTermConfigParser.configFilePath()
+            let path = DanTermConfigPaths.configFilePath()
             let url = URL(fileURLWithPath: path)
             guard let existing = try? String(contentsOfFile: path, encoding: .utf8) else { break }
             let updated = DanTermConfigWriter.removeKey(key, from: existing)

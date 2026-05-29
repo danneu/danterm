@@ -344,7 +344,7 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
     }
 
     @objc private func openConfigFile(_ sender: Any?) {
-        let path = DanTermConfigParser.configFilePath()
+        let path = DanTermConfigPaths.configFilePath()
         let url = URL(fileURLWithPath: path)
         let fm = FileManager.default
         let dir = url.deletingLastPathComponent().path

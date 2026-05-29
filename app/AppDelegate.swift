@@ -497,7 +497,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     }
 
     @objc func openDanTermConfig(_ sender: Any?) {
-        let path = DanTermConfigParser.configFilePath()
+        let path = DanTermConfigPaths.configFilePath()
         let url = URL(fileURLWithPath: path)
         // Create file + parent dirs if needed so the editor opens something
         let fm = FileManager.default
