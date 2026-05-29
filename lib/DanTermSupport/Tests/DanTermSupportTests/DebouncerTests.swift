@@ -5,7 +5,7 @@
 import Foundation
 import Testing
 
-@testable import DanTermCore
+@testable import DanTermSupport
 
 @Suite struct DebouncerTests {
     @Test("Debouncer: cancel before schedule is a no-op")
