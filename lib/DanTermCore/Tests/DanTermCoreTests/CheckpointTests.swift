@@ -1,14 +1,12 @@
 // Swift Testing migration of the legacy `tests/CheckpointTests.swift` harness
 // suite. Pins .scheduleCheckpoint emission across mutating handlers,
 // non-mutating-no-emission cases, snapshot fidelity (toSnapshot drops
-// isZoomed), the session-lock write/read/delete round-trip, recovery path
-// helpers, and the mergeCheckpoints rules (enriched scrollback grafted into
-// light's pane map; light structure wins; metadata from light; empty
-// enriched). The SessionLock round-trip test points CoreEnv.recoveryDir at a
-// per-test temp dir, so the suite never touches the real ~/Library/Application
-// Support/<bundle>/Recovery/ path -- it's parallel-safe by construction (no
-// .serialized needed). It also freezes CoreEnv.now and asserts the persisted
-// startedAt, proving both env seams are honored.
+// isZoomed), and the mergeCheckpoints rules (enriched scrollback grafted into
+// light's pane map; light structure wins; metadata from light; empty enriched).
+// All pure update()/codec assertions -- no disk I/O. The session-lock round-trip
+// and recovery-path-helper tests moved to DanTermSupport's RecoveryStoreTests in
+// the Phase 4 persistence split, taking the FileManager/temp-dir machinery with
+// them; what stays here touches no filesystem and needs no env seams.
 import Foundation
 import Testing
 
@@ -20,13 +18,6 @@ private func makeRestore(_ paneSnapshots: [PaneId: PaneSnapshot], model: AppMode
 
 private func paneSnap(_ id: PaneId, title: String, cwd: String? = nil, scrollback: String? = nil, theme: String? = nil) -> PaneSnapshot {
     PaneSnapshot(id: id.rawValue.uuidString, title: title, cwd: cwd, launch: nil, scrollback: scrollback, theme: theme)
-}
-
-/// Build a unique-per-test recovery directory under the OS temp dir. The
-/// caller's defer removes it, so the suite remains hermetic.
-private func makeTestRecoveryDir() -> URL {
-    FileManager.default.temporaryDirectory
-        .appendingPathComponent("danterm-checkpoint-\(UUID().uuidString)", isDirectory: true)
 }
 
 @Suite struct CheckpointTests {
@@ -316,84 +307,6 @@ private func makeTestRecoveryDir() -> URL {
         let restored = try #require(validateAndBuild(snapshot), "snapshot round-trip failed")
         let restoredTab = selectedTab(in: restored)!
         #expect(!restoredTab.isZoomed, "restored tab should not be zoomed")
-    }
-
-    // MARK: - Session Lock round-trip
-
-    @Test("SessionLock round-trips through write/read helpers")
-    func sessionLockRoundTripsThroughWriteReadHelpers() throws {
-        // Intent: writeSessionLockFile creates a session.json on disk
-        //   that readSessionLockFile parses back into a SessionLock;
-        //   deleteSessionLockFile removes it.
-        // Why it exists: pins the lock-file I/O contract end to end.
-        //   The injectable CoreEnv is pointed at a per-test temp dir and
-        //   frozen clock so the suite is hermetic + parallel-safe. The
-        //   on-disk fileExists assertions verify the recovery-dir seam;
-        //   the startedAt assertion verifies the now seam.
-        // Scenario: spec-first session-lock I/O at a per-test temp dir.
-        let recoveryDir = makeTestRecoveryDir()
-        let frozenNow = Date(timeIntervalSince1970: 1_700_000_000)
-        let testEnv = makeTestEnv(recoveryDir: recoveryDir, now: frozenNow)
-        defer { try? FileManager.default.removeItem(at: recoveryDir) }
-
-        writeSessionLockFile(env: testEnv)
-        let sessionJSONPath = recoveryDir.appendingPathComponent("session.json").path
-        #expect(FileManager.default.fileExists(atPath: sessionJSONPath),
-            "writeSessionLockFile should create session.json under the temp dir")
-        let lock = try #require(readSessionLockFile(env: testEnv),
-            "readSessionLockFile returned nil after write")
-        #expect(lock.pid == ProcessInfo.processInfo.processIdentifier, "pid should match")
-        #expect(lock.startedAt == frozenNow, "startedAt should use env.now")
-        deleteSessionLockFile(env: testEnv)
-        #expect(!FileManager.default.fileExists(atPath: sessionJSONPath),
-            "deleteSessionLockFile should remove the temp session.json")
-        let deleted = readSessionLockFile(env: testEnv)
-        #expect(deleted == nil, "lock should be nil after delete")
-    }
-
-    // MARK: - Recovery path helpers
-
-    @Test("recoveryDirectoryURL is namespaced by bundle identifier")
-    func recoveryDirectoryURLIsNamespacedByBundleId() {
-        // Intent: distinct bundleIds (prod / dev) produce distinct
-        //   recovery directories.
-        // Why it exists: pins the namespacing rule that keeps dev runs
-        //   from sharing prod recovery files.
-        // Scenario: spec-first prod-vs-dev namespacing.
-        let prodURL = recoveryDirectoryURL(bundleId: "com.danneu.danterm")
-        let devURL  = recoveryDirectoryURL(bundleId: "com.danneu.danterm-dev")
-        #expect(prodURL != devURL, "prod and dev paths must differ, both were \(prodURL.path)")
-        #expect(prodURL.path.hasSuffix("/Library/Application Support/com.danneu.danterm/Recovery"),
-            "prod path wrong: \(prodURL.path)")
-        #expect(devURL.path.hasSuffix("/Library/Application Support/com.danneu.danterm-dev/Recovery"),
-            "dev path wrong: \(devURL.path)")
-    }
-
-    @Test("lightCheckpointURL ends with last-light.json")
-    func lightCheckpointURLEndsWithLastLightJson() {
-        // Intent: lightCheckpointURL ends with last-light.json.
-        // Why it exists: pins the file name contract.
-        // Scenario: spec-first light file name.
-        let url = lightCheckpointURL()
-        #expect(url.lastPathComponent == "last-light.json", "expected last-light.json, got \(url.lastPathComponent)")
-    }
-
-    @Test("enrichedCheckpointURL ends with last-enriched.json")
-    func enrichedCheckpointURLEndsWithLastEnrichedJson() {
-        // Intent: enrichedCheckpointURL ends with last-enriched.json.
-        // Why it exists: pins the enriched file name contract.
-        // Scenario: spec-first enriched file name.
-        let url = enrichedCheckpointURL()
-        #expect(url.lastPathComponent == "last-enriched.json", "expected last-enriched.json, got \(url.lastPathComponent)")
-    }
-
-    @Test("sessionLockURL ends with session.json")
-    func sessionLockURLEndsWithSessionJson() {
-        // Intent: sessionLockURL ends with session.json.
-        // Why it exists: pins the session lock file name.
-        // Scenario: spec-first session lock file name.
-        let url = sessionLockURL()
-        #expect(url.lastPathComponent == "session.json", "expected session.json, got \(url.lastPathComponent)")
     }
 
     // MARK: - mergeCheckpoints (single-format, on the validated pair)
