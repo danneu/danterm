@@ -1123,3 +1123,101 @@ entered core.
     additions. The abbreviate-boundary test lives in `DanTermCoreTests`, not the
     harness, so test-ui stayed at 12/12 (the hand-off's "+1" was a core-count
     note).
+
+Phase 6: done 2026-05-29. Moved the pure core's last three file-IO wrappers
+into `app/` and turned the purity lint into an active enforcer of the
+"core has no IO / no ambient nondeterminism" invariant -- previously only
+Cocoa imports were banned and IO-freeness was a structural fact the lint did
+not police. With the wrappers gone, the pure profile's new token bans pass,
+closing the determinism boundary the Phase-5 seam opened.
+
+- **The three movers (all core -> app/), zero `public`/`package`** (the helpers
+  are app-internal, reached same-module via the `app/DanTermCore` symlink):
+  - `DanTermConfigParser.configFilePath()` (the `NSHomeDirectory()`-based path,
+    core's *only* remaining unmarked `NSHomeDirectory`) -> new
+    `app/DanTermConfigPaths.swift` as `enum DanTermConfigPaths`. **Repoint, not
+    keep-by-name** (the type changed): its **five** app callers move from
+    `DanTermConfigParser.configFilePath()` to `DanTermConfigPaths.configFilePath()`
+    -- `AppRuntime.swift` x2 (saveDanTermConfigKey / removeDanTermConfigKey),
+    `AppDelegate.swift` (openDanTermConfig), `PreferencesPanel.swift`
+    (openConfigFile), `GhosttyApp.swift` (loadDanTermOverlay). `GhosttyApp`'s own
+    `configFilePath()` -- the *Ghostty* overlay path, a different symbol called at
+    `AppDelegate.swift:517` -- and that caller were left untouched.
+  - `DanTermConfigParser.loadFromDisk()` (FileManager read) -> **keep-by-name**
+    app-side `extension DanTermConfigParser` in the same `DanTermConfigPaths.swift`;
+    its body calls the new `DanTermConfigPaths.configFilePath()`. Its two
+    `AppRuntime.swift` callers (init load + `reloadDanTermConfig`) are byte-for-byte
+    unchanged.
+  - `ThemeColorParser.parse(themeFileAt:)` (FileManager read) -> **keep-by-name**
+    app-side `extension ThemeColorParser` in new `app/ThemeColorFileLoader.swift`;
+    its one `ThemeCatalog.swift` caller is unchanged.
+- **Core is now IO-free.** `DanTermConfig.swift` and `ThemeColorParser.swift` are
+  pure string transforms (`parse(content:)` + `DanTermConfigWriter`;
+  `parse(themeContent:)` + `ThemeColorHex`), `import Foundation` only, no
+  `FileManager`/`NSHomeDirectory`. The *only* IO/ambient tokens left in core source
+  are the **five** allowlisted Phase-5 seam sites, each now carrying a trailing
+  `// core-purity: ambient-seam`: `CoreEnv.live`'s three bindings
+  (`newId: { UUID() }`, `now: { Date() }`, `homeDirectory: { NSHomeDirectory() }`,
+  CoreEnvironment.swift) and the two leaf-default signatures
+  (`abbreviateHome(...home: String = NSHomeDirectory())` ModelOperations.swift,
+  `expandTilde(...home: String = NSHomeDirectory())` Model.swift).
+- **Lint: two profiles + the comment-strip/marker mechanism.**
+  `core-purity-lint.sh` now takes `--profile pure|portable` (default `pure`; the
+  positional target arg still works, so the self-test interface is unchanged).
+  - *pure* (core dir): the existing Cocoa/AppKit/SwiftUI import rule, plus a token
+    denylist run over **comment/string-stripped** lines. Tier-1 hard bans (no
+    allowlist): `import Darwin`/`Network`, `FileManager`, `Process(`,
+    `DispatchSource`, `DispatchQueue(`, `.asyncAfter`, `Timer(`, `URLSession`,
+    `NSWorkspace`, `setsockopt`, `Data(contentsOf:`, `.write(to:`, `ProcessInfo`.
+    Tier-2 banned-with-allowlist: `NSHomeDirectory`, **empty-parens** `UUID()` /
+    `Date()` (never `UUID(uuidString:)` / `Date(timeIntervalSince1970:)`),
+    permitted only on a marked line.
+  - *portable* (DanTermSupport dir): Cocoa + `GhosttyKit` import rules and
+    **nothing else** -- support legitimately uses `FileManager`/`Process`/
+    `DispatchSource`/`ProcessInfo`, so the IO hard-bans do not apply there.
+  - **The landmine, handled:** tokens are detected on the comment-stripped line,
+    but the marker is tested on the **raw** line -- the marker is itself a `//`
+    comment, so stripping-then-checking would erase it and trip every seam.
+    Implemented in `awk`: per line, strip `"..."` strings, inline and multi-line
+    `/* */` blocks, and the `//` comment for tokenization, but keep `$0` (raw) for
+    the marker test. The marker relaxes only the three Tier-2 tokens -- a hard-ban
+    on a marked line still fails.
+  - **Teaching failure message** restates the inject-vs-ambient rule (inject when
+    SAVED/SENT/ASSERTED; ambient when SHOWN) and forward-references the ADR
+    subsection "When to inject an ambient input: save/send/assert vs. show"
+    (Phase 7 writes that ADR).
+- **Self-test: 12 -> 50 assertions.** `core-purity-lint_test.sh` was restructured
+  around an `assert_lint <profile> <trip|pass> <desc> <line>` harness (was binary
+  pass/fail). Keeps the 5 Cocoa-positive + 7 Cocoa-negative fixtures; adds the full
+  hard-ban tier (each trips pure), unmarked `NSHomeDirectory`/`UUID()`/`Date()`
+  (trip), **marked** seam tokens (pass -- pins the marker-on-raw direction), a
+  **marked** `FileManager` (still trips -- pins that the marker never exempts a
+  hard-ban), `UUID(uuidString:)`/`Date(timeIntervalSince1970:)` and tokens in
+  `//`/`///`/`/* */` comments and in a string literal (all pass -- pins stripping +
+  empty-parens specificity), and the portable cases (IO passes, `GhosttyKit`/
+  `AppKit` trip). Added the portable run to `just test`
+  (`./scripts/core-purity-lint.sh --profile portable
+  lib/DanTermSupport/Sources/DanTermSupport`).
+- **`test-ui.sh` needed NO edit (verified by running it).** The harness
+  hand-compiles `DanTermConfig.swift` (which keeps `parse(content:)` +
+  `DanTermConfigWriter`) but not `ThemeColorParser.swift`, no harness-compiled file
+  calls any of the three movers, and the five seam markers are pure comments.
+  Confirmed by `just test-ui` (12/12) -- the only gate that sees the harness subset,
+  since `just build`/`just test` compile the whole module via the symlink.
+- **CLI/docs:** IPC/CLI semantics unchanged (only *where* the file-IO wrappers live
+  moved), so per AGENTS.md's CLI-doc rule **no `integrations/danterm/SKILL.md`
+  edit**. No `AGENTS.md`/ADR edits -- the architecture-doc updates (incl. the new
+  ADR the lint message forward-references, the AGENTS.md `just test` prose, and the
+  symlink-ADR "Extended by" note) are Phase 7.
+- **Verification (all gates green):**
+  - Core: **1055 tests / 37 suites** (unchanged -- no core test touched the movers;
+    the lint fixtures live in the shell self-test, not the Swift suite).
+  - Support: **16 / 3**, Protocol: **121** -- both unchanged.
+  - `./scripts/core-purity-lint.sh` (pure) exits 0 on core after the move + markers;
+    the portable profile exits 0 on DanTermSupport.
+  - `core-purity-lint_test.sh`: **50 assertions** across pure + portable.
+  - `just test`: green end to end (three package suites + both lint profiles + the
+    lint self-test + the four other shell self-tests).
+  - `just build`: green -- the five repointed `configFilePath` callers and the
+    app-hosted `loadFromDisk`/`parse(themeFileAt:)` extensions link cleanly.
+  - `just test-ui`: **12/12** (a display was available).
