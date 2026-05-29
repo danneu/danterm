@@ -930,3 +930,93 @@ could outlive the first real source/suite.
     `[36/63] Debouncer.swift`, `[37/63] IpcConnection.swift`) and linked cleanly,
     proving the same-module move keeps the app's references intact with no source
     edits.
+
+Phase 4: done 2026-05-29. Split the persistence layer -- the pure
+snapshot/restore/merge/validation codec STAYS in `DanTermCore`, while the
+recovery-path helpers (`recoveryDirectoryURL`/`lightCheckpointURL`/
+`enrichedCheckpointURL`/`sessionLockURL`), the session-lock IO
+(`write`/`read`/`deleteSessionLockFile`), and the `SessionLock` type moved out to
+a new `DanTermSupport/RecoveryStore.swift`. This was an **extraction, not a
+`git mv`**: every touched file survives the split (Persistence.swift keeps
+loadValidatedInitFile/toSnapshot/toInitFile/graft.../mergeCheckpoints/
+truncateScrollback; Model.swift keeps everything but SessionLock; CheckpointTests
+keeps its 26 pure tests), so git shows additions in support + deletions in core,
+not renames. 7 funcs + 1 type + 5 tests crossed; the pure remainder stayed.
+
+- **Zero public annotations (same as Phase 3, unlike Phase 2).** The moved funcs
+  + `SessionLock` stay `internal`: the app reaches them same-module via the
+  `app/DanTermSupport` symlink (the zero-arg production calls), and
+  `RecoveryStoreTests` reaches them via `@testable import DanTermSupport`. No
+  symbol crosses a real module boundary, so nothing needed promoting.
+  `RecoveryStore` is the FILE name, not a namespace type -- the 7 helpers stay
+  top-level free functions, which is what keeps the app's bare
+  `writeSessionLockFile()` / `lightCheckpointURL()` / etc. call sites
+  byte-for-byte.
+- **Dropped the `CoreEnv` dependency, by design.** The 4 lock/url helpers used to
+  take `env: CoreEnv = .live` and read `env.recoveryDir()`/`env.now()`. The move
+  DROPS the `CoreEnv` param and instead takes defaulted
+  `recoveryDir: URL = recoveryDirectoryURL()`, `now: Date = Date()`,
+  `pid: Int32 = ProcessInfo.processInfo.processIdentifier` seams computed
+  internally -- a `CoreEnv` dependency would be exactly the forbidden
+  `support -> core` edge. The zero-arg production signatures are preserved because
+  each new param defaults to the same real dir/clock/pid the `.live` env computed
+  before, so app code is unchanged and the store imports only Foundation.
+  **Sibling-independence proof:** `swift test --package-path lib/DanTermSupport`
+  is green with the support manifest depending on no core -- structural proof none
+  of the moved code secretly needed a core type.
+- **Forced ripples (the only non-byte-for-byte edits).** Dropping `recoveryDir`
+  from `CoreEnv` (CoreEnvironment.swift: field + `.live` binding + header comment)
+  forced removing the `recoveryDir:` param and its `recoveryDir: { recoveryDir }`
+  binding from `makeTestEnv` (TestSupport.swift) -- it would not compile
+  otherwise. Confirmed safe before editing: `update()` never consumed
+  `recoveryDir` (re-grepped Update.swift -> none), and the only two `CoreEnv(...)`
+  construction sites were `.live` and `makeTestEnv`. The round-trip test was
+  reworked off `makeTestEnv`/`CoreEnv` (neither is available in
+  `DanTermSupportTests`) to drive the explicit `recoveryDir`/`now`/`pid` seams
+  directly; the new `pid` seam lets it pin a fixed pid (424242) and assert it
+  round-trips through the `.iso8601` codec -- stronger than the old
+  `== ProcessInfo...pid` check it replaced. Its private `makeTestRecoveryDir()`
+  helper traveled with it into `RecoveryStoreTests`.
+- **`CheckpointTests` split.** 5 path/lock tests (the session-lock round-trip + 4
+  url-name tests) moved to `RecoveryStoreTests`; the 26 pure tests (20
+  scheduleCheckpoint emission/no-emission, toSnapshot-drops-isZoomed, 5
+  mergeCheckpoints) stayed, so the suite remains (core suites 36 -> 36). Headers
+  on both `CheckpointTests.swift` and `Persistence.swift` were retitled to drop
+  the now-inaccurate IO/lock/recovery-path descriptions (Persistence.swift is now
+  fully pure value-mapping -- no FileManager/Data/ProcessInfo left); `Model.swift`
+  lost its `// MARK: - Session Lock` block with the struct.
+- **Zero app / manifest / `.gitignore` / `test-ui.sh` churn, confirmed.** App call
+  sites are all zero-arg (`AppDelegate`:129/720, `main.swift`:83/89/90,
+  `AppRuntime`:900/924/930) and resolved unchanged same-module via the symlink; no
+  app code names `CoreEnv.recoveryDir` or `SessionLock`. Both nested manifests
+  glob by directory (RecoveryStore.swift / RecoveryStoreTests.swift picked up
+  automatically); the support target already depended on DanTermProtocol +
+  Foundation; `.gitignore` already un-ignores the support tree (Phase 1).
+  **`test-ui.sh` needed NO path edit:** its compile set lists the surviving
+  `Persistence.swift` + `Model.swift` (paths still resolve) and no
+  harness-compiled file references a moved symbol OR `CoreEnv` (grepped both) --
+  it stayed green unedited.
+- **CLI/docs:** IPC/persistence semantics are unchanged (only where the recovery
+  code lives moved), so per AGENTS.md's CLI-doc rule **no
+  `integrations/danterm/SKILL.md` edit** -- stated in the commit body. No
+  `AGENTS.md`/ADR edits (architecture-doc updates are batched into Phase 7). No
+  lint changes: the IO-token bans land in Phase 6 and `DanTermSupport` has no lint
+  profile yet, so `FileManager`/`Date()`/`ProcessInfo` in the store are fine.
+- **Verification (all green):**
+  - Support: **16 tests / 3 suites** (was 11/2) -- +5 `RecoveryStoreTests` (the
+    reworked round-trip + 4 path tests), which ran naturally under the no-`--filter`
+    support gate (confirmed by eye). Green with the support manifest depending on
+    **no** core.
+  - Core: **1049 tests / 36 suites** (was 1054/36) -- down exactly the 5 path/lock
+    tests; CheckpointTests keeps its 26 pure tests so the suite count holds. A
+    green core run is the structural proof core has nothing dangling after the
+    recovery code and the `recoveryDir` env field leave.
+  - Protocol: **121 tests**, unchanged.
+  - `just test`: green end to end (three package suites + purity lint + lint
+    self-test + all five shell self-tests).
+  - `just build`: green -- the app compiled the recovery funcs via the
+    `app/DanTermSupport` symlink and linked `AppDelegate`/`main.swift`/`AppRuntime`
+    cleanly with no source edits.
+  - `just test-ui`: **12/12 passed** (a display was available) -- the harness
+    compiled with no path edit, confirming no compiled UI view references a moved
+    symbol.
