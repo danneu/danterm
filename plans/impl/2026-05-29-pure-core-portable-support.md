@@ -761,3 +761,9 @@ keep the symlink and the zero-tax `internal` surface.
    `danterm` CLI, a checkpoint write, a clean quit (session lock removed), and that cwd/title render as
    `~/...` (the ambient home flows correctly through the render path and the `.live` default). Behavior
    identical to today.
+
+## Implementaion notes:
+
+Phase 1:
+
+TODO
