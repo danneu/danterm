@@ -81,7 +81,7 @@ class AppRuntime {
         self.ghosttyApp = ghosttyApp
         // Empty launch: one group, no tabs/leaves yet (panes live in leaves).
         self.model = AppModel(
-            groups: [GroupModel(id: GroupId(), name: "General")]
+            groups: [GroupModel(id: GroupId(rawValue: CoreEnv.live.newId()), name: "General")]
         )
         // Load DanTerm config before any tabs are created
         self.model.config = DanTermConfigParser.loadFromDisk()

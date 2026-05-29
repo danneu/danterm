@@ -24,8 +24,10 @@ enum AppInitFileLoadError: Error, Equatable {
   case invalidSnapshot
 }
 
-/// Decode a saved init file and validate that its snapshot can be rebuilt.
-func loadValidatedInitFile(from data: Data) throws -> ValidatedAppRestore {
+/// Decode a saved init file and validate that its snapshot can be rebuilt. Takes
+/// `env` (defaulting to `.live`) so id-less entries mint reproducible ids and
+/// `~`-cwds expand against an injectable home; app restore omits it (live ambient).
+func loadValidatedInitFile(from data: Data, env: CoreEnv = .live) throws -> ValidatedAppRestore {
   let initFile: AppInitFile
   do {
     initFile = try JSONDecoder().decode(AppInitFile.self, from: data)
@@ -40,7 +42,7 @@ func loadValidatedInitFile(from data: Data) throws -> ValidatedAppRestore {
     throw AppInitFileLoadError.unsupportedVersion(initFile.version)
   }
 
-  guard let built = validateAndBuildDetailed(initFile.model) else {
+  guard let built = validateAndBuildDetailed(initFile.model, env: env) else {
     throw AppInitFileLoadError.invalidSnapshot
   }
 
@@ -84,8 +86,8 @@ func restoreInitialInput(for command: String?, behavior: RestoreCommandBehavior)
 
 // MARK: - Export
 
-func toInitFile(_ model: AppModel) -> AppInitFile {
-  toInitFile(snapshot: toSnapshot(model))
+func toInitFile(_ model: AppModel, home: String? = nil) -> AppInitFile {
+  toInitFile(snapshot: toSnapshot(model, home: home))
 }
 
 /// Wrap an already-built snapshot (e.g. a scrollback-grafted one) in the current
@@ -94,7 +96,12 @@ func toInitFile(snapshot: AppModelSnapshot) -> AppInitFile {
   AppInitFile(version: appInitFileVersion, model: snapshot)
 }
 
-func toSnapshot(_ model: AppModel) -> AppModelSnapshot {
+/// Serialize the model to a snapshot. `home` (the cwd-abbreviation base) defaults
+/// to the real ambient home (nil); the three `update()`-internal callers pass
+/// `env.homeDirectory()` so the SAVED/SENT payload reproduces, and a test injects a
+/// fixed home. The app's checkpoint writers omit it (live ambient).
+func toSnapshot(_ model: AppModel, home: String? = nil) -> AppModelSnapshot {
+  let h = home ?? CoreEnv.live.homeDirectory()
   let groupSnapshots: [GroupSnapshot] = model.groups.map { group in
     let tabSnapshots: [TabSnapshot] = group.tabs.map { tab in
       let tabTodoSnapshots: [TodoSnapshot]? = tab.todos.isEmpty ? nil : tab.todos.map {
@@ -104,7 +111,7 @@ func toSnapshot(_ model: AppModel) -> AppModelSnapshot {
         id: tab.id.rawValue.uuidString,
         customTitle: tab.customTitle,
         focusedPaneId: tab.focusedPaneId.rawValue.uuidString,
-        rootNode: toSplitNodeSnapshot(tab.rootNode),
+        rootNode: toSplitNodeSnapshot(tab.rootNode, home: h),
         color: tab.color
       )
       tabSnapshot.todos = tabTodoSnapshots
@@ -127,8 +134,8 @@ func toSnapshot(_ model: AppModel) -> AppModelSnapshot {
 /// Build the PaneSnapshot embedded in a leaf, reading the leaf's PaneModel
 /// directly. Always emits `scrollback: nil`; scrollback is grafted separately
 /// (graftScrollback) from a live-surface read so this stays pure.
-private func toPaneSnapshot(_ pane: PaneModel) -> PaneSnapshot {
-  let abbrevCwd = pane.cwd.map { abbreviateHome($0) }
+private func toPaneSnapshot(_ pane: PaneModel, home: String) -> PaneSnapshot {
+  let abbrevCwd = pane.cwd.map { abbreviateHome($0, home: home) }
   let launch: PaneLaunchSnapshot?
   if pane.lastCommand != nil || abbrevCwd != nil {
     launch = PaneLaunchSnapshot(command: pane.lastCommand, cwd: abbrevCwd)
@@ -150,10 +157,10 @@ private func toPaneSnapshot(_ pane: PaneModel) -> PaneSnapshot {
   return snapshot
 }
 
-private func toSplitNodeSnapshot(_ node: SplitNodeModel) -> SplitNodeSnapshot {
+private func toSplitNodeSnapshot(_ node: SplitNodeModel, home: String) -> SplitNodeSnapshot {
   switch node {
   case .leaf(let pane):
-    return .leaf(toPaneSnapshot(pane))
+    return .leaf(toPaneSnapshot(pane, home: home))
   case .split(let id, let direction, let first, let second, let ratio):
     let dirStr: String
     switch direction {
@@ -163,8 +170,8 @@ private func toSplitNodeSnapshot(_ node: SplitNodeModel) -> SplitNodeSnapshot {
     return .split(
       id: id.rawValue.uuidString,
       direction: dirStr,
-      first: toSplitNodeSnapshot(first),
-      second: toSplitNodeSnapshot(second),
+      first: toSplitNodeSnapshot(first, home: home),
+      second: toSplitNodeSnapshot(second, home: home),
       ratio: Double(ratio)
     )
   }

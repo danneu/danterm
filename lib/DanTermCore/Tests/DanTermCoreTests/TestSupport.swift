@@ -30,7 +30,8 @@ func makeModel(env: CoreEnv) -> AppModel {
 
 func makeTestEnv(
     now: Date = Date(timeIntervalSince1970: 1_700_000_000),
-    idSequence: [UUID] = []
+    idSequence: [UUID] = [],
+    homeDirectory: String = "/Users/testhome"
 ) -> CoreEnv {
     var index = 0
     return CoreEnv(
@@ -42,7 +43,8 @@ func makeTestEnv(
             }
             return idSequence[index]
         },
-        now: { now }
+        now: { now },
+        homeDirectory: { homeDirectory }
     )
 }
 

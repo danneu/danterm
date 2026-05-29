@@ -21,6 +21,7 @@ echo "Compiling UI tests..."
         -L "$PROTO_BUILD" \
         -lDanTermProtocol \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Model.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/CoreEnvironment.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/ModelOperations.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Projections.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/TabTodo.swift" \
@@ -32,6 +33,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/PaneSplitView.swift" \
         "$SCRIPT_DIR/app/TodoInputView.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/SidebarItemStore.swift" \
+        "$SCRIPT_DIR/tests-ui/TypedIdTestInit.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarViewTestShim.swift" \
         "$SCRIPT_DIR/app/SplitContainerView.swift" \
         "$SCRIPT_DIR/app/SidebarView.swift" \

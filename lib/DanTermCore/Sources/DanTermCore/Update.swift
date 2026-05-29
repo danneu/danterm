@@ -698,7 +698,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
     // MARK: - Export
 
     case .exportState:
-        return [.exportState(toSnapshot(model))]
+        return [.exportState(toSnapshot(model, home: env.homeDirectory()))]
 
     // MARK: - Ghostty Callbacks
 
@@ -1472,7 +1472,7 @@ private func handleIpcRequest(
     switch method {
     case Methods.ls:
         do {
-            let snapshot = toSnapshot(model)
+            let snapshot = toSnapshot(model, home: env.homeDirectory())
             let data = try JSONEncoder().encode(snapshot)
             let value = try JSONDecoder().decode(JSONValue.self, from: data)
             return [.ipcReply(reqId: reqId, result: value)]
@@ -1590,7 +1590,7 @@ private func handleIpcRequest(
         }
         let commands = update(&model, createTabMsg, env: env)
         let tabId = newestTabId(excluding: before, in: model)
-        return commands + [.ipcReply(reqId: reqId, result: tabNewResult(tabId: tabId, groupId: groupId, in: model))]
+        return commands + [.ipcReply(reqId: reqId, result: tabNewResult(tabId: tabId, groupId: groupId, in: model, home: env.homeDirectory()))]
 
     case Methods.paneFocus:
         guard case .object(let object) = params,
@@ -2107,13 +2107,13 @@ private func newestTabId(excluding before: Set<TabId>, in model: AppModel) -> Ta
     model.groups.flatMap(\.tabs).first(where: { !before.contains($0.id) })?.id
 }
 
-private func tabNewResult(tabId: TabId?, groupId: GroupId?, in model: AppModel) -> JSONValue {
+private func tabNewResult(tabId: TabId?, groupId: GroupId?, in model: AppModel, home: String) -> JSONValue {
     var object: [String: JSONValue] = [
         "tab": .null,
         "panes": .array([]),
     ]
     if let tabId {
-        object["tab"] = tabSnapshotJSON(tabId, in: model) ?? .object(["id": .string(tabId.rawValue.uuidString)])
+        object["tab"] = tabSnapshotJSON(tabId, in: model, home: home) ?? .object(["id": .string(tabId.rawValue.uuidString)])
         object["panes"] = .array(paneIdsForTab(tabId, in: model).map { paneId in
             .object(["id": .string(paneId.rawValue.uuidString)])
         })
@@ -2205,8 +2205,8 @@ private func okResult() -> JSONValue {
     .object(["ok": .bool(true)])
 }
 
-private func tabSnapshotJSON(_ tabId: TabId, in model: AppModel) -> JSONValue? {
-    let snapshot = toSnapshot(model)
+private func tabSnapshotJSON(_ tabId: TabId, in model: AppModel, home: String) -> JSONValue? {
+    let snapshot = toSnapshot(model, home: home)
     guard let tab = snapshot.groups.flatMap(\.tabs).first(where: { $0.id == tabId.rawValue.uuidString }) else {
         return nil
     }
