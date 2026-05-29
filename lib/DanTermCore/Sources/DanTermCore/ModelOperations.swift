@@ -473,7 +473,7 @@ func paneIdsForTab(_ tabId: TabId, in model: AppModel) -> [PaneId] {
 /// inject an explicit home so the output reproduces across machines. The prefix
 /// test is boundary-aware (`== home` or `home + "/"`) so `/Users/dan` does not
 /// mis-abbreviate `/Users/danielle/foo`.
-func abbreviateHome(_ path: String, home: String = NSHomeDirectory()) -> String {
+func abbreviateHome(_ path: String, home: String = NSHomeDirectory()) -> String {  // core-purity: ambient-seam
   guard path == home || path.hasPrefix(home + "/") else { return path }
   return "~" + path.dropFirst(home.count)
 }

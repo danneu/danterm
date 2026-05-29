@@ -19,8 +19,8 @@ struct CoreEnv {
     var homeDirectory: () -> String
 
     static let live = CoreEnv(
-        newId: { UUID() },
-        now: { Date() },
-        homeDirectory: { NSHomeDirectory() }
+        newId: { UUID() },  // core-purity: ambient-seam
+        now: { Date() },  // core-purity: ambient-seam
+        homeDirectory: { NSHomeDirectory() }  // core-purity: ambient-seam
     )
 }
