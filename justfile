@@ -29,6 +29,7 @@ build-icons:
 test:
     swift test --package-path lib/DanTermProtocol --filter DanTermProtocolTests
     swift test --package-path lib/DanTermCore
+    swift test --package-path lib/DanTermSupport
     ./scripts/core-purity-lint.sh
     ./scripts/tests/core-purity-lint_test.sh
     ./scripts/tests/load-ghostty-version_test.sh
