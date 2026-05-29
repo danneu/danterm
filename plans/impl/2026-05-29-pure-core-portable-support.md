@@ -864,3 +864,69 @@ its sources/tests by directory; core already depends on protocol).
     warning surfaced immediately after the edit -- the prebuilt `DanTermProtocol.swiftmodule`
     predated the new public type; the real compile resolves it, as the green core package and
     app build both confirm.)
+
+Phase 3: done 2026-05-29. Moved the three portable side-effecting utilities
+(`Debouncer` timer, `CLIPathInstaller` Process/FileManager, and the post-Phase-2
+`IpcConnection` socket class) out of `DanTermCore` into `DanTermSupport`, and
+relocated their two Swift Testing suites (`DebouncerTests`, `CLIPathInstallerTests`)
+into `DanTermSupportTests`. Every move was a byte-for-byte `git mv` except the two
+test files, whose only edit was the `@testable import DanTermCore` ->
+`@testable import DanTermSupport` target line (R099 in the diff; the three sources
+are R100). Deleted both Phase-1 placeholders (`DanTermSupport.swift`,
+`PlaceholderTests.swift`) in the same move commit -- an empty target fails
+`swift build`, and the placeholder test references the now-gone enum, so neither
+could outlive the first real source/suite.
+
+- **Zero public annotations added (the key contrast with Phase 2).** The moved
+  types stay `internal`: the app reaches them same-module through the
+  `app/DanTermSupport` symlink, and `DanTermSupportTests` reaches them via
+  `@testable import DanTermSupport`, so no symbol crosses a real module boundary.
+  Confirmed `grep -c public` == 0 on all three moved sources; no access level
+  changed. (Phase 2 had to make the framer `public` precisely because it moved
+  into the real `DanTermProtocol` import target; Phase 3 crosses no such boundary,
+  so it adds nothing -- this is the annotation-free payoff the split was designed
+  for.)
+- **No framework conversion needed.** Both suites are already Swift Testing
+  (`@Suite`/`@Test`/`#expect`), matching `DanTermSupport`'s convention (the deleted
+  placeholder suite was Swift Testing too), so unlike Phase 2's XCTest conversion
+  the only change was the `@testable import` line -- headers, preambles, bodies,
+  and the private `InstallerFixture`/`makeInstallerFixture` helper traveled
+  byte-for-byte. The headers' "Swift Testing migration of the legacy harness" note
+  is a historical fact about a prior migration and stays true; left untouched.
+- **No silent-skip hazard (Phase 2's concern does not apply here).** `just test`
+  runs the support suite as `swift test --package-path lib/DanTermSupport` with
+  **no `--filter`**, so the moved Swift Testing suites run naturally. Confirmed by
+  eye that both `DebouncerTests` (4) and `CLIPathInstallerTests` (7) executed.
+- **Zero app / manifest / `.gitignore` / `test-ui` churn, confirmed.** The three
+  symbols are referenced by `app/AppRuntime.swift`, `app/IpcServer.swift`, and
+  `app/AppDelegate.swift`, all same-module -- moving the files from the
+  `app/DanTermCore` symlinked dir to the `app/DanTermSupport` symlinked dir keeps
+  them in the same `DanTerm` module, so those references resolved unchanged with no
+  edits. Both nested manifests glob by directory (files leaving/entering are picked
+  up automatically); the support target already depended on the `DanTermProtocol`
+  product (so `IpcConnection`'s `import DanTermProtocol` resolves); `.gitignore`
+  already un-ignores the support tree (Phase 1). No script and no `test-ui.sh`
+  references any of the three, so `just test-ui` is unaffected and needed no path
+  edits.
+- **CLI/docs:** IPC method semantics are unchanged (only where the socket class
+  lives moved), so per AGENTS.md's CLI-doc rule **no `integrations/danterm/SKILL.md`
+  edit** -- stated in the commit body. No `AGENTS.md`/ADR edits (architecture-doc
+  updates are batched into Phase 7). No lint changes: the portable profile + the
+  IO-token bans land in Phase 6, and core losing `import Darwin` (with
+  `IpcConnection` gone) keeps the current Cocoa-only pure-profile lint green.
+- **Verification (all green):**
+  - Support: **11 tests / 2 suites** (was 1/1) -- the placeholder's 1/1 removed,
+    +4 `DebouncerTests`, +7 `CLIPathInstallerTests`. Green in isolation with the
+    support manifest depending on **no** core -- the structural proof that none of
+    the moved files secretly referenced a core type.
+  - Core: **1054 tests / 36 suites** (was 1065/38) -- down exactly the 11-test,
+    2-suite utilities. A green core run at 1054/36 is the structural proof core has
+    nothing dangling after the utilities leave.
+  - Protocol: **121 tests** (incl. the 4 framer tests), unchanged.
+  - `just test`: green end to end (the three package suites + purity lint + all
+    five shell self-tests).
+  - `just build`: green. The app target compiled the three files through the
+    `app/DanTermSupport` symlink (`[35/63] CLIPathInstaller.swift`,
+    `[36/63] Debouncer.swift`, `[37/63] IpcConnection.swift`) and linked cleanly,
+    proving the same-module move keeps the app's references intact with no source
+    edits.
