@@ -797,3 +797,70 @@ untouched.
   proving the placeholder globs cleanly into `DanTerm` same-module. Symlink verified
   relative and pointing at `Sources/DanTermSupport` (no `Package.swift` exposed to the
   app glob).
+
+Phase 2: done 2026-05-29. Moved the two pure IPC line-framing types
+(`IpcLineFramer`, `IpcFrameEvent`) out of `DanTermCore`'s `IpcConnection.swift` into a
+new `DanTermProtocol` source (`Sources/DanTermProtocol/IpcLineFramer.swift`), promoted to
+the public surface pinned in the API policy. The `IpcConnection` socket class **stays in
+core** (it moves to support in Phase 3) and now resolves the framer through the
+`import DanTermProtocol` it already had -- no new import. Relocated the framer-only test
+suite to `DanTermProtocolTests`. No app, manifest, or `.gitignore` changes (protocol globs
+its sources/tests by directory; core already depends on protocol).
+
+- **Public-surface delta (the only `public` the whole split adds):** `public enum
+  IpcFrameEvent` (its `.line(Data)`/`.oversized` cases are public via the enum, and the
+  `Data`-payload enum still synthesizes `Equatable` -- needed by the `events.contains(.oversized)`
+  assertion), `public struct IpcLineFramer`, `public static let maxLineBytes`,
+  `public mutating func append(_:)`, and an **explicit `public init() {}`**. The explicit
+  init is load-bearing: with `buffer`/`isOversized` `private`, the synthesized default init
+  is `private`, so `IpcLineFramer()` would not construct cross-module (both the tests and
+  `IpcConnection` build it with no args). The two stored properties stay `private`.
+- **Test framework decision -- converted to XCTest (the one judgment call).** Took the
+  hand-off's recommended option over byte-for-byte relocation, for two reasons: (1)
+  `DanTermProtocolTests` is 100% XCTest, so XCTest is "per that package's convention"; (2)
+  the silent-skip hazard -- `just test` runs the suite as
+  `swift test --package-path lib/DanTermProtocol --filter DanTermProtocolTests`, and a
+  Swift Testing suite's IDs may not carry the `DanTermProtocolTests` prefix the filter keys
+  on, so it could pass in isolation yet be silently skipped under the gate. Confirmed the 4
+  tests actually execute under that exact filter (see verification). Mechanical, behavior-
+  preserving mapping: `@Suite struct` -> `final class: XCTestCase`; `@Test("...") func foo`
+  -> `func testFoo` (display strings dropped); `#expect(a == b)` -> `XCTAssertEqual`;
+  `#expect(cond, msg)` -> `XCTAssertTrue`; `Issue.record` -> `XCTFail`; imports become
+  `Foundation`/`XCTest`/`@testable import DanTermProtocol`. The `// Intent / Why it exists
+  / Scenario` preambles and the private `ipcLine(_:)` helper are kept verbatim.
+- **Renamed the moved test `IpcConnectionTests.swift` -> `IpcLineFramerTests.swift`** (via
+  `git mv`): the suite tests the framer, not the connection, and the new name matches
+  protocol's `<Type>Tests.swift` convention. Rewrote its top-of-file header (the old one
+  described a "Swift Testing migration" that no longer holds).
+- **Tightened the core `IpcConnection.swift` line-1 header** -- framing has left the file,
+  so it now reads "Unix-socket connection lifecycle and JSON-RPC response writing ...; line
+  framing lives in DanTermProtocol (IpcLineFramer)".
+- **Zero app churn, confirmed.** Re-grepped `app` + `lib` (excluding `.build`): the framer
+  types had exactly two referencers -- the core source and the moved test. `app/IpcServer.swift`
+  uses the `IpcConnection` class, never the framer types. So `app/` needed no edits.
+- **CLI/docs:** IPC method semantics are unchanged (only where the framer type lives moved),
+  so per AGENTS.md's CLI-doc rule **no `integrations/danterm/SKILL.md` edit** -- stated in the
+  commit body. No `AGENTS.md`/ADR edits either (architecture-doc updates are batched into
+  Phase 7).
+- **Verification (all green):**
+  - Protocol: 121 XCTest tests, 0 failures. The 4 framer tests
+    (`testOneFullLineEmitsOneFrame`, `testTwoFullLinesInOneReadEmitTwoFrames`,
+    `testSplitFrameReassemblesAfterSecondChunk`, `testOversizedLineEmitsRejectionEvent`)
+    confirmed executed by name under the exact `--filter DanTermProtocolTests` gate. The
+    Swift Testing runner reported "0 tests in 0 suites" for the package -- i.e. there are no
+    Swift Testing tests here, so the silent-skip hazard is moot, exactly as the XCTest choice
+    intends.
+  - Core: **1065 tests / 38 suites** -- down exactly the 4-test framer suite from the
+    pre-Phase-2 1069/39. This green run is the structural proof core has no dangling framer
+    reference (its only referencer, `IpcConnection.swift`, now resolves the type via
+    `import DanTermProtocol`).
+  - Support: 1 test / 1 suite, untouched and green.
+  - `just test`: green end to end (the three package suites + purity lint + all five shell
+    self-tests). The purity lint passes with `IpcConnection`'s `import Darwin`/sockets still
+    in core -- expected, since the IO-token bans don't land until Phase 6.
+  - `just build`: green. The app target compiled the core `IpcConnection.swift` through the
+    symlink against the framer's new home (`[20/36] Compiling DanTerm IpcConnection.swift`)
+    and linked cleanly. (A transient SourceKit "Cannot find 'IpcLineFramer' in scope"
+    warning surfaced immediately after the edit -- the prebuilt `DanTermProtocol.swiftmodule`
+    predated the new public type; the real compile resolves it, as the green core package and
+    app build both confirm.)
