@@ -166,7 +166,8 @@ Moves to `DanTermSupport` (portable side effects, fast-testable):
 - `CLIPathInstaller` (already DI-factored; Process + FileManager).
 - `RecoveryStore`: recovery-path helpers (`recoveryDirectoryURL`, `lightCheckpointURL`,
   `enrichedCheckpointURL`, `sessionLockURL`) + session-lock IO (`writeSessionLockFile`,
-  `readSessionLockFile`, `deleteSessionLockFile`) + the `SessionLock` type. API: keep the production entry
+  `readSessionLockFile`, `deleteSessionLockFile`) + the `SessionLock` type (currently defined in `Model.swift:278`, not `Persistence.swift` -- extract it from
+  there on the move; its only core consumers are the IO helpers and `CheckpointTests`, which also move). API: keep the production entry
   points zero-arg (`writeSessionLockFile()`, `readSessionLockFile() -> SessionLock?`,
   `deleteSessionLockFile()`), computing `recoveryDir` (FileManager), `now` (Date), and `pid` (ProcessInfo)
   internally -- all allowed in support. Add _defaulted_ test seams on those same functions
@@ -182,13 +183,17 @@ parser or seam they wrap is already tested in core):
 
 - `DanTermConfigParser.loadFromDisk()` (5-line FileManager read around the pure parser) and the path helper
   `configFilePath()` (`NSHomeDirectory`-based). `configFilePath()` has **six** callers total: five direct
-  app callers (PreferencesPanel.swift:347, AppRuntime.swift:558/574, AppDelegate.swift:500, GhosttyApp.swift:79
+  app callers (PreferencesPanel.swift:347, AppRuntime.swift:553/569, AppDelegate.swift:500, GhosttyApp.swift:79
   `loadDanTermOverlay`) plus the internal call inside `loadFromDisk` (DanTermConfig.swift:33), which travels
   to `app/` with the loader. Move `configFilePath()` as an internal _app-level_ helper (e.g.
   `DanTermConfigPaths.configFilePath()`) visible to all five app callers, not a loader-private function.
   Repointing those five app call sites is the one bit of real config-path app churn here. (GhosttyApp.swift
-  has its own separate `configFilePath()` for the Ghostty overlay path -- a different symbol, not moved.)
-- `ThemeColorParser.parse(themeFileAt:)` (file read around the pure content parser).
+  has its own separate `configFilePath()` for the Ghostty overlay path -- a different symbol, not moved; it is
+  called at AppDelegate.swift:517, which must **not** be repointed.) `loadFromDisk()` itself also has two app
+  callers that travel with it -- AppRuntime.swift:87 and 1036 -- byte-for-byte unchanged if it keeps the name
+  `DanTermConfigParser.loadFromDisk()` via an app-side extension, otherwise repoint both.
+- `ThemeColorParser.parse(themeFileAt:)` (file read around the pure content parser). One app caller,
+  ThemeCatalog.swift:36 (same keep-the-name-or-repoint caveat as `loadFromDisk`).
 
 `CoreEnv.live` does **not** move (the earlier draft moved it to `app/`): because `update()` keeps its
 `= .live` default, `.live` stays in core as the designated ambient seam, lint-allowlisted. See "Determinism
@@ -259,7 +264,7 @@ doc comments, and the lint failure message (see "Documentation updates").
 - Thread an explicit home **only** through the save/send/restore paths -- the values a second run compares:
   - Snapshot/checkpoint (SAVED) + IPC (SENT): `toSnapshot`, `toInitFile(_ model:)`, and the snapshot-embedding
     IPC builders. The three update()-internal `toSnapshot` sites (Update.swift:701 `.exportState`, 1475 `ls`
-    reply, and `tabSnapshotJSON` at 2116/2208) pass `env.homeDirectory()`; `tabSnapshotJSON` gains a `home`
+    reply, and the `toSnapshot` inside `tabSnapshotJSON` -- the literal call is at 2209, reached via the `tabSnapshotJSON` call at 2116 whose def is at 2208) pass `env.homeDirectory()`; `tabSnapshotJSON` gains a `home`
     param threaded from its IPC handler's in-scope `env`. (No other Update.swift code abbreviates home --
     verified: all home-embedding in `update()` output flows through `toSnapshot` -> `toPaneSnapshot` ->
     `abbreviateHome`; `paneInfoResult` embeds the raw shell cwd, which is input data, not synthesized.)
@@ -305,14 +310,16 @@ Consistency check (the finding asked us to confirm the actual site count and app
 home -- lint allowlist vs. wide removal). Verified counts of bare no-arg `XxxId()` mints:
 
 - **Core source: 4** -- exactly the restore sites above; all become `rawValue: newId()`. (Genuine leaks.)
-- **App: 1** -- `GroupId()` at AppRuntime.swift:88 (initial group), rewritten to `GroupId(rawValue: <app newId>)`.
-- **Core tests: 410**, **`tests-ui` harness: 19** (PaneSplitViewTests/SidebarSelectionCacheTests/
-  SplitContainerViewTests) -- impure fixtures; nondeterministic ids are fine there.
+- **App: 1** -- `GroupId()` at AppRuntime.swift:84 (initial group), rewritten to `GroupId(rawValue: <app newId>)`.
+- **Core tests: 536** (GroupId 52, TabId 155, PaneId 188, SplitId 53, AlertId 88), **`tests-ui` harness: 19**
+  (PaneSplitViewTests 2/SidebarSelectionCacheTests 12/SplitContainerViewTests 5) -- impure fixtures;
+  nondeterministic ids are fine there. (`AlertId` is a 5th `TypedId` tag, Model.swift:22, beyond the four
+  named above; the generic shim below covers it too.)
 
 Decision: **keep the removal** (do not mirror the home allowlist). The home allowlist exists only because
 the two leaf helpers _legitimately_ need `NSHomeDirectory()` in core; by contrast, once restore is fixed,
 **no core code legitimately needs a no-arg id mint**, so removal is strictly cleaner and compiler-enforced
-with no offsetting cost. The 429 test sites are absorbed by re-adding a test-only
+with no offsetting cost. The 555 test sites (536 core + 19 tests-ui) are absorbed by re-adding a test-only
 `extension TypedId { init() { self.init(rawValue: UUID()) } }` in _both_ test compilation units
 (`DanTermCoreTests` and the `tests-ui` harness -- they share no module), so no fixture call site changes.
 And the planned bare-`UUID()` core ban already catches the only other fresh-id path (`XxxId(rawValue: UUID())`),
@@ -632,9 +639,9 @@ class is currently untested and now lives in a display-free, GhosttyKit-free pac
   `update()`'s `= .live` default; the narrow design keeps it, so that half of this risk is gone -- no
   `TestSupport` 2-arg `update` wrapper, no `AppRuntime.send` change.) The `TypedId.init()` removal is the
   remaining load-bearing edit: it turns off-seam id minting into a compile error. It touches core (4 restore
-  sites -> `rawValue: newId()`), app (rewrite `GroupId()` at AppRuntime.swift:88 to `rawValue: <app newId>`),
+  sites -> `rawValue: newId()`), app (rewrite `GroupId()` at AppRuntime.swift:84 to `rawValue: <app newId>`),
   and _both_ test units -- re-add a no-arg `extension TypedId` in `DanTermCoreTests` and in the `tests-ui`
-  harness (they share no module, one extension each), keeping all 410 + 19 fixture sites compiling unchanged.
+  harness (they share no module, one extension each), keeping all 536 + 19 fixture sites compiling unchanged.
 - **Restore id seam.** `validateAndBuildDetailed`/`loadValidatedInitFile` gain a non-defaulted `newId` (4
   bare `XxxId()` sites: Model.swift:434/451/564/596). Mitigation: bounded and compiler-forced; the id-less
   restore test pins reproducibility.
@@ -654,10 +661,16 @@ class is currently untested and now lives in a display-free, GhosttyKit-free pac
 
 ## Migration sequence (each phase keeps `just test` green)
 
-- **Phase 0 -- verify (no moves).** Confirm `update()` consumes only `newId`/`now`/(soon)`homeDirectory`,
-  not `recoveryDir`. Enumerate the exact pure/impure boundary in `Persistence.swift`, `DanTermConfig.swift`,
-  `ThemeColorParser.swift`, and every `abbreviateHome`/`expandTilde` call site. Re-grep `app/` and
-  `lib/DanTermCore/Tests` for every moving symbol. Record findings; adjust later phases if a surprise appears.
+- **Phase 0 -- verify (no moves). DONE 2026-05-29 -- findings in
+  `impl-notes/2026-05-29-phase0-findings.md`.** Confirmed `update()` consumes only `newId`/`now` (never
+  `recoveryDir`); enumerated the pure/impure boundary in `Persistence.swift`, `DanTermConfig.swift`,
+  `ThemeColorParser.swift`, and every `abbreviateHome`/`expandTilde` call site; re-grepped `app/` and
+  `lib/DanTermCore/Tests` for every moving symbol. Line/count drifts it found are patched into this plan
+  (App `GroupId()` 88->84; `configFilePath` AppRuntime 558/574->553/569; core-test mints ~410->536; literal
+  `toSnapshot` in `tabSnapshotJSON` at 2209; `SessionLock` in `Model.swift:278`; `loadFromDisk` has 2 app
+  callers + `parse(themeFileAt:)` 1). **Re-grep caveat:** every `file:line` ref in this plan was captured on a
+  snapshot and drifts as files change -- re-grep by symbol name and re-confirm the line before editing in any
+  later phase. No surprise blocks Phase 1.
 - **Phase 1 -- scaffold support.** Add `lib/DanTermSupport/Package.swift` plus a minimal placeholder source
   (`Sources/DanTermSupport/DanTermSupport.swift`, e.g. an internal no-op decl) and a placeholder test
   (`Tests/DanTermSupportTests/PlaceholderTests.swift`, one trivial passing test) -- an empty target fails
@@ -672,7 +685,7 @@ class is currently untested and now lives in a display-free, GhosttyKit-free pac
   `CLIPathInstallerTests` to `DanTermSupportTests` (delete the Phase-1 placeholder test once real tests
   land). App compiles unchanged (same-module via symlink). Green.
 - **Phase 4 -- split persistence.** Keep the pure codec/merge/validation in core (rename to
-  `SnapshotCodec.swift` if it clarifies). Move recovery-path helpers + session-lock IO + `SessionLock` to
+  `SnapshotCodec.swift` if it clarifies). Move recovery-path helpers + session-lock IO + `SessionLock` (currently in `Model.swift:278`, not `Persistence.swift`) to
   `RecoveryStore.swift` in support, with zero-arg production entry points + defaulted test seams (no
   `CoreEnv`). Drop `recoveryDir` from `CoreEnv`. Split `CheckpointTests`: pure parts stay; path/lock parts
   become `RecoveryStoreTests`. App call sites keep identical (zero-arg) names, so no edits. Green.
@@ -690,7 +703,7 @@ class is currently untested and now lives in a display-free, GhosttyKit-free pac
   - _IDS + TIME (compiler-forced; three compilation units)._ Thread a non-defaulted `newId: () -> UUID` into
     `validateAndBuildDetailed`/`loadValidatedInitFile` (the 4 bare `XxxId()` restore sites: Model.swift
     434/451/564/596 -> `rawValue: newId()`). Remove the no-arg `TypedId.init()`; rewrite the app's `GroupId()`
-    (AppRuntime.swift:88) to `rawValue: <app newId>`; re-add a no-arg `extension TypedId` in both
+    (AppRuntime.swift:84) to `rawValue: <app newId>`; re-add a no-arg `extension TypedId` in both
     `DanTermCoreTests` and the `tests-ui` harness. Time already routes through `env.now()`.
   - _Env wiring (simplifications vs. the wide draft)._ `update()` **keeps** its `= .live` default; `.live`
     stays in core; `AppRuntime.send` is unchanged; **no** `TestSupport` 2-arg `update` wrapper. Update
@@ -703,8 +716,10 @@ class is currently untested and now lives in a display-free, GhosttyKit-free pac
 - **Phase 6 -- move trivial wrappers + enforce.** Move `loadFromDisk()` (with its internal `configFilePath()`
   call, DanTermConfig.swift:33), `parse(themeFileAt:)`, and the config path helper into `app/`.
   `configFilePath()` becomes an app-level helper (e.g. `DanTermConfigPaths`); repoint its five direct app
-  callers (PreferencesPanel.swift:347, AppRuntime.swift:558/574, AppDelegate.swift:500, GhosttyApp.swift:79
-  `loadDanTermOverlay`). With `configFilePath()` gone, core's only remaining `NSHomeDirectory()` is the
+  callers (PreferencesPanel.swift:347, AppRuntime.swift:553/569, AppDelegate.swift:500, GhosttyApp.swift:79
+  `loadDanTermOverlay`). Also repoint (or keep-by-name) `loadFromDisk()`'s two app callers
+  (AppRuntime.swift:87, 1036) and `parse(themeFileAt:)`'s one (ThemeCatalog.swift:36). With `configFilePath()`
+  gone, core's only remaining `NSHomeDirectory()` is the
   allowlisted `.live` + leaf-helper defaults. Extend `core-purity-lint.sh` (pure + portable profiles,
   comment/string stripping, the hard-ban IO tokens, and the **banned-with-allowlist**
   `NSHomeDirectory`/`UUID()`/`Date()` tokens via the per-line marker + teaching failure message) and
