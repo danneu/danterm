@@ -11,7 +11,6 @@ enum AlertTag {}
 
 struct TypedId<Tag>: Hashable, RawRepresentable, Codable {
     let rawValue: UUID
-    init() { self.rawValue = UUID() }
     init(rawValue: UUID) { self.rawValue = rawValue }
 }
 
@@ -383,11 +382,16 @@ struct SnapshotValidationError: Error {
     let message: String
 }
 
-func validateAndBuild(_ snapshot: AppModelSnapshot) -> AppModel? {
-    validateAndBuildDetailed(snapshot)?.model
+func validateAndBuild(_ snapshot: AppModelSnapshot, env: CoreEnv = .live) -> AppModel? {
+    validateAndBuildDetailed(snapshot, env: env)?.model
 }
 
-func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel, paneSnapshots: [PaneId: PaneSnapshot])? {
+/// Validate a snapshot and rebuild the live model. Takes `env` (defaulting to
+/// `.live`) the same way `update()` does: id-less snapshot entries mint fresh ids
+/// through `env.newId()`, and tilde-expanded cwds resolve against
+/// `env.homeDirectory()`. App restore omits `env` (live ambient); a test passes a
+/// `makeTestEnv` with a fixed id sequence / home to make restore reproducible.
+func validateAndBuildDetailed(_ snapshot: AppModelSnapshot, env: CoreEnv = .live) -> (model: AppModel, paneSnapshots: [PaneId: PaneSnapshot])? {
     // Panes, groups, tabs, and splits share one UUID namespace. A leaf pane id
     // colliding with any other domain's id is rejected -- surfaces / searchState /
     // lastNotificationTime / updatePane are all id-keyed, so a dup would
@@ -421,7 +425,7 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel,
             }
             groupId = GroupId(rawValue: parsed)
         } else {
-            groupId = GroupId()
+            groupId = GroupId(rawValue: env.newId())
         }
         guard allIds.insert(groupId.rawValue).inserted else {
             print("[init] Duplicate ID: \(groupId)")
@@ -438,7 +442,7 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel,
                 }
                 tabId = TabId(rawValue: parsed)
             } else {
-                tabId = TabId()
+                tabId = TabId(rawValue: env.newId())
             }
             guard allIds.insert(tabId.rawValue).inserted else {
                 print("[init] Duplicate ID: \(tabId)")
@@ -452,7 +456,8 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel,
                 ts.rootNode,
                 allIds: &allIds,
                 seenPaneIds: &seenPaneIds,
-                paneSnapshotById: &paneSnapshotById
+                paneSnapshotById: &paneSnapshotById,
+                env: env
             ) else {
                 return nil
             }
@@ -513,13 +518,17 @@ func validateAndBuildDetailed(_ snapshot: AppModelSnapshot) -> (model: AppModel,
     )
 }
 
-/// Resolve launch metadata for a pane snapshot: returns (cwd, command) for surface creation.
-func resolveLaunch(_ paneSnapshot: PaneSnapshot) -> (cwd: String?, command: String?) {
+/// Resolve launch metadata for a pane snapshot: returns (cwd, command) for surface
+/// creation. `home` is the tilde-expansion base; it defaults to the real ambient
+/// home (nil), so the app's surface-creation caller and the restore builder both
+/// expand against the live home unless a test pins one.
+func resolveLaunch(_ paneSnapshot: PaneSnapshot, home: String? = nil) -> (cwd: String?, command: String?) {
+    let h = home ?? CoreEnv.live.homeDirectory()
     let cwd: String?
     if let launchCwd = paneSnapshot.launch?.cwd {
-        cwd = expandTilde(launchCwd)
+        cwd = expandTilde(launchCwd, home: h)
     } else if let paneCwd = paneSnapshot.cwd {
-        cwd = expandTilde(paneCwd)
+        cwd = expandTilde(paneCwd, home: h)
     } else {
         cwd = nil
     }
@@ -527,16 +536,21 @@ func resolveLaunch(_ paneSnapshot: PaneSnapshot) -> (cwd: String?, command: Stri
     return (cwd, command)
 }
 
-func expandTilde(_ path: String) -> String {
+/// Expand a leading `~` to an absolute path. `home` defaults to the real ambient
+/// home so production restore expands against the user's *current* home (the whole
+/// point of storing `~/`); the injectable `home` lets a test assert machine-
+/// independent expansion against a fixed home.
+func expandTilde(_ path: String, home: String = NSHomeDirectory()) -> String {
     guard path.hasPrefix("~") else { return path }
-    return NSHomeDirectory() + path.dropFirst(1)
+    return home + path.dropFirst(1)
 }
 
 private func parseSplitNode(
     _ snapshot: SplitNodeSnapshot,
     allIds: inout Set<UUID>,
     seenPaneIds: inout Set<PaneId>,
-    paneSnapshotById: inout [PaneId: PaneSnapshot]
+    paneSnapshotById: inout [PaneId: PaneSnapshot],
+    env: CoreEnv
 ) -> SplitNodeModel? {
     switch snapshot {
     case .leaf(let ps):
@@ -551,7 +565,7 @@ private func parseSplitNode(
             }
             paneId = PaneId(rawValue: parsed)
         } else {
-            paneId = PaneId()
+            paneId = PaneId(rawValue: env.newId())
         }
         // Leaf-id uniqueness, then cross-domain id-collision guard.
         guard seenPaneIds.insert(paneId).inserted else {
@@ -564,7 +578,7 @@ private func parseSplitNode(
         }
         // Build the PaneModel from the embedded snapshot; record the snapshot for
         // the returned paneSnapshots map (the restore replay/scrollback source).
-        let expandedCwd = resolveLaunch(ps).cwd
+        let expandedCwd = resolveLaunch(ps, home: env.homeDirectory()).cwd
         var paneModel = PaneModel(id: paneId, title: ps.title ?? "Terminal", cwd: expandedCwd, theme: ps.theme)
         if let todoSnaps = ps.todos {
             paneModel.todos = todoSnaps.compactMap { ts in
@@ -583,7 +597,7 @@ private func parseSplitNode(
             }
             splitId = SplitId(rawValue: parsed)
         } else {
-            splitId = SplitId()
+            splitId = SplitId(rawValue: env.newId())
         }
         guard allIds.insert(splitId.rawValue).inserted else {
             print("[init] Duplicate ID: \(splitId)")
@@ -601,13 +615,15 @@ private func parseSplitNode(
             first,
             allIds: &allIds,
             seenPaneIds: &seenPaneIds,
-            paneSnapshotById: &paneSnapshotById
+            paneSnapshotById: &paneSnapshotById,
+            env: env
         ),
               let secondNode = parseSplitNode(
                   second,
                   allIds: &allIds,
                   seenPaneIds: &seenPaneIds,
-                  paneSnapshotById: &paneSnapshotById
+                  paneSnapshotById: &paneSnapshotById,
+                  env: env
               ) else {
             return nil
         }

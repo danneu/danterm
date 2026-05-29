@@ -467,9 +467,14 @@ func paneIdsForTab(_ tabId: TabId, in model: AppModel) -> [PaneId] {
   return []
 }
 
-func abbreviateHome(_ path: String) -> String {
-  let home = NSHomeDirectory()
-  guard path.hasPrefix(home) else { return path }
+/// Collapse a home-prefixed absolute path to `~/...` for display or for a saved
+/// snapshot. `home` defaults to the real ambient home so SHOWN callers (tab/
+/// toolbar chrome) need pass nothing; SAVED/SENT callers (the snapshot codec)
+/// inject an explicit home so the output reproduces across machines. The prefix
+/// test is boundary-aware (`== home` or `home + "/"`) so `/Users/dan` does not
+/// mis-abbreviate `/Users/danielle/foo`.
+func abbreviateHome(_ path: String, home: String = NSHomeDirectory()) -> String {
+  guard path == home || path.hasPrefix(home + "/") else { return path }
   return "~" + path.dropFirst(home.count)
 }
 
