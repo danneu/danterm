@@ -1020,3 +1020,106 @@ not renames. 7 funcs + 1 type + 5 tests crossed; the pure remainder stayed.
   - `just test-ui`: **12/12 passed** (a display was available) -- the harness
     compiled with no path edit, confirming no compiled UI view references a moved
     symbol.
+
+Phase 5: done 2026-05-29. Seamed the pure core's three ambient inputs --
+home directory, fresh ids, wall-clock time -- so saved/sent/asserted output
+reproduces, without touching the SHOWN render path. `CoreEnv` gained
+`homeDirectory: () -> String` (`.live` binds `NSHomeDirectory()`) beside
+`newId`/`now`. Time already routed through `env.now()`; no new bare `Date()`
+entered core.
+
+- **Design deviation from the plan's literal text (approved by the human
+  before implementing):** the plan prescribed a **non-defaulted**
+  `newId: () -> UUID` plus a separate `home: String? = nil` threaded through
+  the restore builders, and said the app restore sites "still change for the
+  id seam." Implemented instead a single **`env: CoreEnv = .live`** threaded
+  through the restore builders (`loadValidatedInitFile`,
+  `validateAndBuild`/`validateAndBuildDetailed`, private `parseSplitNode`),
+  mirroring how `update(_:_:env:)` already takes the ambient seam. Rationale:
+  `update()` -- the central pure function -- already defaults its determinism
+  seam to `.live`, so defaulting the restore builders the same way is the
+  *consistent* choice, not a compromise; it collapses the home seam and the id
+  seam into one thread (the builder mints via `env.newId()` and passes
+  `env.homeDirectory()` down to the path resolvers); and it keeps the app +
+  every existing test caller unchanged (they get `.live`). Purity is
+  identical -- the load-bearing enforcement is **removing the no-arg
+  `TypedId.init()`**, which is unchanged -- and it is lint-clean (the only
+  ambient bindings are `.live` + the two leaf defaults). The plan author
+  should note this departs from "Migration sequence -> Phase 5 -> IDS+TIME"
+  and the Phase-5 risk bullets, which still describe the two-param /
+  non-defaulted / app-restore-sites-change shape.
+- **HOME (path-only helpers + save path take `home`; restore path gets home
+  from `env`).** `abbreviateHome`/`expandTilde` gained a defaulted
+  `home: String = NSHomeDirectory()` (the two allowlisted leaf seams for
+  Phase 6); `resolveLaunch` and the save chain
+  (`toSnapshot`/`toInitFile(_ model:)`/`toPaneSnapshot`/`toSplitNodeSnapshot`)
+  take `home: String? = nil`, resolving `home ?? CoreEnv.live.homeDirectory()`
+  once at entry (no banned token spelled; routes through the allowlisted
+  `.live`). The three `update()`-internal `toSnapshot` sites pass
+  `env.homeDirectory()` (`.exportState`, the `ls` reply, and `tabSnapshotJSON`
+  via `tabNewResult`, both of which gained a `home` param threaded from the IPC
+  handler's in-scope `env`). Folded in the boundary-aware `abbreviateHome` fix
+  (`path == home || path.hasPrefix(home + "/")`) so `/Users/dan` no longer
+  mis-renders `/Users/danielle/foo`. `TabModel` chrome / `deriveTabChrome` /
+  `formatToolbarLabel` / the close-tab confirmation title are SHOWN-only and
+  stayed ambient -- untouched.
+- **IDS (compiler-forced via the init removal).** Removed
+  `TypedId.init()` (Model.swift); the four bare restore mints became
+  `GroupId(rawValue: env.newId())` etc. **The removal's three-compilation-unit
+  reach:** core (4 sites, done via the env thread), the app (1 site --
+  `AppRuntime.swift:84`'s initial group, rewritten to
+  `GroupId(rawValue: CoreEnv.live.newId())`; this is the *only* app edit, and
+  it introduced the first `CoreEnv` reference in app code, resolved same-module
+  via the symlink), and both test units -- a test-only
+  `extension TypedId { init() { self.init(rawValue: UUID()) } }` re-added in
+  `DanTermCoreTests` (new `TypedIdTestInit.swift`) **and** in the tests-ui
+  harness (new `tests-ui/TypedIdTestInit.swift`), since they share no module.
+  No fixture call site changed.
+- **Zero `public`/`package` annotations.** Every seam is `internal`, consumed
+  same-module (app via the symlink, tests via `@testable import`). Confirms the
+  annotation-free payoff again.
+- **`makeTestEnv`** gained a `homeDirectory: String = "/Users/testhome"`
+  parameter (bound as `{ homeDirectory }`); its existing `now`/`idSequence`
+  seams are unchanged, so the determinism tests pin home + ids through the same
+  helper every `update()` test already uses.
+- **`test-ui.sh` is a distinct gate (`just build`/`just test` cannot cover
+  it).** Both `just build` and `just test` compile the *whole* core module
+  (CoreEnvironment.swift included) via the symlink/nested package, so they stay
+  green even if the hand-compiled harness subset is broken. Phase 5 re-armed
+  the exact landmine Phase 4 incidentally cleared: the
+  `home ?? CoreEnv.live.homeDirectory()` resolves land inside `Persistence.swift`
+  and `Model.swift` (both harness-compiled) while `CoreEnvironment.swift` was
+  not in the harness. **Two compile-list additions:** `CoreEnvironment.swift`
+  (so `CoreEnv` is in scope -- it is `import Foundation` only, compiles
+  standalone) and the new `tests-ui/TypedIdTestInit.swift` shim. Only
+  `just test-ui` catches these; it was run explicitly.
+- **No snapshot fixture needed re-recording.** Re-confirmed `GoldenMasterTests`
+  is the only core suite using `assertSnapshot`/SnapshotTesting, and it asserts
+  on the home-clean **model** -- so it passed unchanged with no home injection
+  and no re-record. The new **model-stays-home-clean** test now pins that very
+  premise (env home = real ambient, cwd/title placed under it, model stores the
+  raw path). `ExportTests`/`SnapshotTests` assert structurally via `#expect`,
+  not recorded fixtures.
+- **CLI/docs:** IPC method semantics are unchanged (only *where* home/ids are
+  injected moved), so per AGENTS.md's CLI-doc rule **no
+  `integrations/danterm/SKILL.md` edit**. No `AGENTS.md`/ADR edits
+  (architecture-doc updates are batched into Phase 7). No
+  `scripts/core-purity-lint.sh` edit -- the IO/home/`UUID()`/`Date()` token
+  bans + allowlist land in Phase 6.
+- **Verification (all six gates green):**
+  - Core: **1055 tests / 37 suites** (was 1049/36) -- up exactly the 6 new
+    `DeterminismSeamTests` (resolveLaunch-expand, full-chain restore-expand,
+    snapshot-abbreviate, id-less-restore, model-stays-home-clean,
+    abbreviate-boundary) in 1 new suite. `GoldenMasterTests` green, no
+    re-record.
+  - Support: **16 / 3**, Protocol: **121** -- both unchanged.
+  - `just test`: green end to end (three package suites + purity lint + lint
+    self-test (5 positive, 7 negative, unchanged) + all five shell self-tests).
+  - `just build`: green -- the app compiled `CoreEnv.live.newId()` at
+    `AppRuntime.swift:84` and linked `main.swift`/`AppRuntime` unchanged for
+    restore (the `.live` default carries ambient).
+  - `just test-ui`: **12/12 passed** (a display was available) -- defused the
+    `CoreEnv`-scope + `TypedId.init`-removal landmine via the two compile-list
+    additions. The abbreviate-boundary test lives in `DanTermCoreTests`, not the
+    harness, so test-ui stayed at 12/12 (the hand-off's "+1" was a core-count
+    note).
