@@ -270,16 +270,6 @@ struct ViewLocalState {
     var sidebarRenameTarget: RenameTarget?
 }
 
-// MARK: - Session Lock
-
-/// Written to ~/Library/Application Support/<bundle-id>/Recovery/session.json at launch
-/// and deleted on clean exit. If this file exists at next launch, the previous exit
-/// was unclean (crash or kill -9) and we prompt before restoring.
-struct SessionLock: Codable {
-    let pid: Int32
-    let startedAt: Date
-}
-
 enum RestoreCommandBehavior: String, Equatable {
     case prefill
     case execute

@@ -29,7 +29,6 @@ func makeModel(env: CoreEnv) -> AppModel {
 }
 
 func makeTestEnv(
-    recoveryDir: URL = FileManager.default.temporaryDirectory.appendingPathComponent("DanTermCoreTests", isDirectory: true),
     now: Date = Date(timeIntervalSince1970: 1_700_000_000),
     idSequence: [UUID] = []
 ) -> CoreEnv {
@@ -43,8 +42,7 @@ func makeTestEnv(
             }
             return idSequence[index]
         },
-        now: { now },
-        recoveryDir: { recoveryDir }
+        now: { now }
     )
 }
 

@@ -1,12 +1,13 @@
-// Model <-> disk: the pure serialization layer plus the thin FileManager I/O around
-// it. Restore (decode + validate an init file, restore-command behavior), Export
-// (AppModel -> snapshot -> init file, plus scrollback grafting), the recovery
-// checkpoint paths (light/enriched/lock URLs and the checkpoint merge), session-lock
-// read/write, and scrollback truncation. Everything is pure value-mapping except the
-// few `try? FileManager` / `Data(contentsOf:)` calls in the lock and URL helpers,
-// kept deliberately thin so the interesting logic stays unit-testable. Split out of
-// ModelOperations.swift because snapshot/restore/recovery is a large cohesive concern
-// distinct from the live-model helpers; `import Foundation` only -- no AppKit.
+// Model <-> disk: the pure serialization/restore policy, no file I/O. Restore
+// (decode + validate an init file from in-memory Data, restore-command behavior),
+// Export (AppModel -> snapshot -> init file, plus scrollback grafting), the
+// checkpoint merge (enriched scrollback grafted into a light restore), and
+// scrollback truncation. Everything is pure value-mapping: the FileManager/Data
+// recovery-path and session-lock I/O that used to tail this file now lives in
+// DanTermSupport's RecoveryStore -- the codec stays here, the disk touch moved out.
+// Split out of ModelOperations.swift because snapshot/restore/recovery is a large
+// cohesive concern distinct from the live-model helpers; `import Foundation` only --
+// no AppKit.
 import Foundation
 
 // MARK: - Restore
@@ -214,34 +215,7 @@ private func graftScrollbackIntoNode(_ node: SplitNodeSnapshot, _ scrollbackByPa
   }
 }
 
-// MARK: - Recovery Paths
-//
-// Session persistence lives in
-// ~/Library/Application Support/<bundle-id>/Recovery/:
-//   last-light.json    — frequent structural checkpoint (no scrollback, 2s debounce)
-//   last-enriched.json — periodic full checkpoint (structure + scrollback, 60s timer)
-//   session.json       — lock file, written at launch and deleted on clean exit
-//
-// Namespacing by bundle ID isolates DanTerm.app (com.danneu.danterm) from
-// DanTerm Dev.app (com.danneu.danterm-dev) so the dev build never restores
-// from a prod session and vice versa. The bundleId parameter exists for
-// tests; production code always takes the default.
-
-func recoveryDirectoryURL(
-    bundleId: String = Bundle.main.bundleIdentifier ?? "com.danneu.danterm"
-) -> URL {
-    FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        .appendingPathComponent(bundleId, isDirectory: true)
-        .appendingPathComponent("Recovery", isDirectory: true)
-}
-
-func lightCheckpointURL() -> URL {
-    recoveryDirectoryURL().appendingPathComponent("last-light.json")
-}
-
-func enrichedCheckpointURL() -> URL {
-    recoveryDirectoryURL().appendingPathComponent("last-enriched.json")
-}
+// MARK: - Checkpoint Merge
 
 /// Merge an enriched restore's scrollback into a light restore's pane map.
 /// Both inputs are already validated, so this skips re-validation and never
@@ -260,44 +234,6 @@ func mergeCheckpoints(light: ValidatedAppRestore, enriched: ValidatedAppRestore)
         model: light.model,
         paneSnapshots: mergedPaneSnapshots
     )
-}
-
-func sessionLockURL(env: CoreEnv = .live) -> URL {
-    env.recoveryDir().appendingPathComponent("session.json")
-}
-
-// MARK: - Session Lock I/O
-//
-// All session lock serialization goes through these three helpers so the
-// JSON encoder/decoder date strategy (.iso8601) is configured in one place.
-// The env parameter lets tests point at a per-test temp dir and frozen clock;
-// production code always takes `.live` (the real Application Support recovery
-// dir and wall-clock time).
-
-/// Write a session lock file at launch. Its presence at next launch means the
-/// previous exit was unclean — no PID liveness check needed.
-func writeSessionLockFile(env: CoreEnv = .live) {
-    let lock = SessionLock(pid: ProcessInfo.processInfo.processIdentifier, startedAt: env.now())
-    let encoder = JSONEncoder()
-    encoder.dateEncodingStrategy = .iso8601
-    guard let data = try? encoder.encode(lock) else { return }
-    let lockURL = sessionLockURL(env: env)
-    let recoveryDir = lockURL.deletingLastPathComponent()
-    try? FileManager.default.createDirectory(at: recoveryDir, withIntermediateDirectories: true)
-    try? data.write(to: lockURL, options: .atomic)
-}
-
-/// Read the session lock if it exists (non-nil = previous exit was unclean).
-func readSessionLockFile(env: CoreEnv = .live) -> SessionLock? {
-    guard let data = try? Data(contentsOf: sessionLockURL(env: env)) else { return nil }
-    let decoder = JSONDecoder()
-    decoder.dateDecodingStrategy = .iso8601
-    return try? decoder.decode(SessionLock.self, from: data)
-}
-
-/// Delete the session lock on clean termination.
-func deleteSessionLockFile(env: CoreEnv = .live) {
-    try? FileManager.default.removeItem(at: sessionLockURL(env: env))
 }
 
 // MARK: - Scrollback Truncation
