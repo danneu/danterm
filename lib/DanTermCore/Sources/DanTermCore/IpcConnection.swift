@@ -1,42 +1,8 @@
-// Unix-socket connection framing and JSON-RPC response writing for DanTerm IPC.
+// Unix-socket connection lifecycle and JSON-RPC response writing for DanTerm IPC; line framing
+// lives in DanTermProtocol (IpcLineFramer).
 import Foundation
 import DanTermProtocol
 import Darwin
-
-enum IpcFrameEvent: Equatable {
-    case line(Data)
-    case oversized
-}
-
-struct IpcLineFramer {
-    static let maxLineBytes = 16 * 1024 * 1024
-
-    private var buffer = Data()
-    private var isOversized = false
-
-    mutating func append(_ data: Data) -> [IpcFrameEvent] {
-        var events: [IpcFrameEvent] = []
-        for byte in data {
-            if isOversized {
-                if byte == 0x0A { isOversized = false }
-                continue
-            }
-            if byte == 0x0A {
-                events.append(.line(buffer))
-                buffer.removeAll(keepingCapacity: true)
-                continue
-            }
-            if buffer.count == Self.maxLineBytes {
-                buffer.removeAll(keepingCapacity: false)
-                isOversized = true
-                events.append(.oversized)
-                continue
-            }
-            buffer.append(byte)
-        }
-        return events
-    }
-}
 
 final class IpcConnection: @unchecked Sendable {
     let id: UUID
