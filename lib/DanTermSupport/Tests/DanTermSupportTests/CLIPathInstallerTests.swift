@@ -11,7 +11,7 @@ import Foundation
 import Darwin
 import Testing
 
-@testable import DanTermCore
+@testable import DanTermSupport
 
 @Suite struct CLIPathInstallerTests {
     @Test("install into writable temp target creates symlink")
