@@ -1,7 +1,7 @@
 ---
 name: danterm
 description: >-
-  Drive the DanTerm terminal from the shell. Use when the user asks to rename this tab, open or split panes, launch commands in new tabs or panes, read output from another pane, send keys into another pane, switch the theme, or work with DanTerm todos. DanTerm is a macOS-only terminal; only applies when the `danterm` command is on PATH.
+  Drive the DanTerm terminal from the shell. Use when the user asks to rename or close this tab, open or split panes, launch commands in new tabs or panes, read output from another pane, send keys into another pane, switch the theme, or work with DanTerm todos. DanTerm is a macOS-only terminal; only applies when the `danterm` command is on PATH.
 allowed-tools: Bash(danterm *)
 ---
 
@@ -19,6 +19,7 @@ Keep this section synced with `danterm help` and the parser in
     danterm ls
     danterm tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground] [--after-selected | --at-group-end | --after-tab <tab-id>]
     danterm tab rename [--tab <tab-id>] <name>|--clear
+    danterm tab close [--tab <tab-id>]
     danterm pane focus <pane-id>
     danterm pane info [--pane <pane-id>]
     danterm pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]
@@ -75,6 +76,7 @@ For agent commands:
   the new tab. Pass `--after-tab <tab-id>` or `--after-selected` only when the
   user gave that placement anchor.
 - `tab rename`: always pass `--tab <tab-id>`.
+- `tab close`: always pass `--tab <tab-id>`.
 - `pane split`: always pass `--pane <pane-id>`. The default opens in the
   background. Pass `--foreground` only when the user asked to focus the new pane
   within its tab.
@@ -116,6 +118,7 @@ exactly one matching pane, tab, or group before running any mutation command.
 | User says | Command |
 |---|---|
 | "rename this tab to X" / "label this tab" | `tab rename --tab <tab-id>` |
+| "close this tab" / "close tab X" | `tab close --tab <tab-id>` |
 | "open a new tab" / "...and run X in it" | `tab new --group <group-id>` with optional `--cmd` / position flags |
 | "split the pane" / "...and run X in it" | `pane split --pane <pane-id>` with optional `--cmd` |
 | "what's the build doing in the other pane?" | `pane read --pane <pane-id>` |
@@ -131,6 +134,13 @@ exactly one matching pane, tab, or group before running any mutation command.
 
     danterm tab rename --tab "$TAB_ID" "fix scrollbar math"
     danterm tab rename --tab "$TAB_ID" --clear
+
+### Close a tab
+
+    danterm tab close --tab "$TAB_ID"
+
+Closing the only remaining tab is refused so the CLI does not quit DanTerm as a
+side effect.
 
 ### Open a new tab and optionally run a command in it
 

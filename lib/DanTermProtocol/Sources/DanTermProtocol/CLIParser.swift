@@ -39,12 +39,14 @@ public func parseCLI(_ args: [String]) throws -> CLICommand {
         return CLICommand(method: Methods.ls, params: [:], outputMode: .json)
 
     case "tab":
-        guard args.count >= 2 else { throw CLIParseError("usage: danterm tab <new|rename>") }
+        guard args.count >= 2 else { throw CLIParseError("usage: danterm tab <new|rename|close>") }
         switch args[1] {
         case "new":
             return try parseTabNewCommand(Array(args.dropFirst(2)))
         case "rename":
             return try parseTabRenameCommand(Array(args.dropFirst(2)))
+        case "close":
+            return try parseTabCloseCommand(Array(args.dropFirst(2)))
         default:
             throw CLIParseError("unknown tab command")
         }
@@ -152,6 +154,22 @@ private func parseTabRenameCommand(_ args: [String]) throws -> CLICommand {
     }
     params["title"] = .string(name)
     return CLICommand(method: Methods.tabRename, params: params, outputMode: .none)
+}
+
+private func parseTabCloseCommand(_ args: [String]) throws -> CLICommand {
+    let usage = "usage: danterm tab close [--tab <tab-id>]"
+    var remaining = args
+    var params: [String: JSONValue] = [:]
+    if remaining.first == "--tab" {
+        guard remaining.count >= 2 else { throw CLIParseError(usage) }
+        params["tab"] = .string(remaining[1])
+        remaining.removeFirst(2)
+    }
+    guard remaining.isEmpty else {
+        if remaining[0].hasPrefix("--") { throw CLIParseError("unknown flag: \(remaining[0])") }
+        throw CLIParseError("unexpected argument: \(remaining[0])")
+    }
+    return CLICommand(method: Methods.tabClose, params: params, outputMode: .none)
 }
 
 private func parsePaneInfoCommand(_ args: [String]) throws -> CLICommand {

@@ -32,6 +32,8 @@ struct DanTermCLI {
                                       Open a new tab, optionally launching a command
           tab rename [--tab <tab-id>] <name>|--clear
                                       Rename a tab or clear its custom title
+          tab close [--tab <tab-id>]
+                                      Close a tab
           pane focus <pane-id>        Focus a pane by id
           pane info [--pane <pane-id>]
                                       Print pane, tab, and group metadata as JSON

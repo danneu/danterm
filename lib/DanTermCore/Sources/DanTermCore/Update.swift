@@ -1520,6 +1520,26 @@ private func handleIpcRequest(
         let commands = update(&model, .renameTab(id: tabId, name: title), env: env)
         return commands + [.ipcReply(reqId: reqId, result: tabRenameResult(tabById(tabId, in: model)))]
 
+    case Methods.tabClose:
+        let tabId: TabId
+        do {
+            tabId = try resolveIpcTabId(params: params, context: context, in: model)
+        } catch let error as IpcParamsError {
+            return ipcInvalidParams(reqId, error.message)
+        } catch {
+            return ipcInvalidParams(reqId, "invalid tab")
+        }
+        // Refuse the last tab: routing it through .closeTab would set a terminate
+        // confirmation, leave the tab open, and strand pendingConfirmation. The CLI
+        // never quits the app as a side effect of closing a tab.
+        if wouldQuitFromClose(model) {
+            return ipcInvalidParams(reqId, "cannot close the last tab")
+        }
+        let commands = update(&model, .closeTab(id: tabId), env: env)
+        return commands + [.ipcReply(reqId: reqId, result: .object([
+            "tab": .object(["id": .string(tabId.rawValue.uuidString)])
+        ]))]
+
     case Methods.paneSplit:
         do {
             guard case .object(let object) = params,

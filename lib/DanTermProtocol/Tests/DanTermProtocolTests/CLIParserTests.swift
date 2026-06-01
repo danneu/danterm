@@ -113,6 +113,20 @@ final class CLIParserTests: XCTestCase {
         XCTAssertEqual(clear.params["title"], .null)
     }
 
+    func testTabCloseParsesExplicitTab() throws {
+        let command = try parseCLI(["tab", "close", "--tab", "T1"])
+        XCTAssertEqual(command.method, Methods.tabClose)
+        XCTAssertEqual(command.params["tab"], .string("T1"))
+        XCTAssertEqual(command.outputMode, .none)
+    }
+
+    func testTabCloseWithoutTabHasNoTabParam() throws {
+        let command = try parseCLI(["tab", "close"])
+        XCTAssertEqual(command.method, Methods.tabClose)
+        XCTAssertEqual(command.params["tab"], nil)
+        XCTAssertEqual(command.outputMode, .none)
+    }
+
     func testImplicitHumanMutationFormsStillParseWithoutExplicitTargets() throws {
         // Intent: implicit target commands still parse while tab/split defaults
         //   are made agent-safe.
@@ -288,6 +302,9 @@ final class CLIParserTests: XCTestCase {
             (["tab", "new", "--group"], tabNewUsageWithPositionFlags),
             (["tab", "rename", "--tab"], "usage: danterm tab rename [--tab <tab-id>] <name>|--clear"),
             (["tab", "rename", "--tab", "T1", "--clear", "extra"], "usage: danterm tab rename [--tab <tab-id>] --clear"),
+            (["tab", "close", "--tab"], "usage: danterm tab close [--tab <tab-id>]"),
+            (["tab", "close", "bogus"], "unexpected argument: bogus"),
+            (["tab", "close", "--nope"], "unknown flag: --nope"),
             (["pane", "split", "--pane"], paneSplitUsageWithFocusFlags),
             (["pane", "input", "--pane"], "usage: danterm pane input --pane <pane-id> ..."),
             (["theme", "set", "--pane"], "usage: danterm theme set [--pane <pane-id>] <name>|--clear"),

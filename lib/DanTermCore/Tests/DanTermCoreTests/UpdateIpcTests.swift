@@ -281,6 +281,178 @@ import DanTermProtocol
         #expect(tabById(tabId, in: model)?.customTitle == nil)
     }
 
+    @Test("tab.close removes explicit tab")
+    func tabCloseRemovesExplicitTab() throws {
+        // Intent: tab.close closes the explicit tab and replies with the
+        //   closed tab id.
+        // Why it exists: pins the CLI close path to the existing tab-close
+        //   mutation instead of adding another removal branch.
+        // Scenario: spec-first explicit close of a background tab.
+        var model = makeModel()
+        createTab(&model)
+        let closedTabId = selectedTab(in: model)!.id
+        createTab(&model)
+        let countBefore = totalTabCount(model)
+
+        let commands = sendIpc(
+            &model,
+            method: Methods.tabClose,
+            params: .object(["tab": .string(closedTabId.rawValue.uuidString)])
+        )
+
+        let reply = try requireIpcReply(commands)
+        #expect(reply["tab"]?["id"]?.asString == closedTabId.rawValue.uuidString)
+        #expect(tabById(closedTabId, in: model) == nil)
+        #expect(totalTabCount(model) == countBefore - 1)
+    }
+
+    @Test("tab.close derives tab from pane context")
+    func tabCloseDerivesTabFromPaneContext() {
+        // Intent: tab.close without an explicit tab closes the tab that
+        //   currently owns the IPC context pane.
+        // Why it exists: pins the same live pane-to-tab targeting rule as
+        //   tab.rename.
+        // Scenario: spec-first implicit close from a DanTerm pane context.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        _ = update(&model, .splitPane(direction: .horizontal))
+        createTab(&model)
+        let targetTabId = selectedTab(in: model)!.id
+        _ = update(&model, .movePaneToTab(paneId: paneId, targetTabId: targetTabId))
+
+        _ = sendIpc(
+            &model,
+            method: Methods.tabClose,
+            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        )
+
+        #expect(tabForPane(paneId, in: model) == nil)
+        #expect(tabById(targetTabId, in: model) == nil)
+    }
+
+    @Test("tab.close selects fallback when closing selected tab")
+    func tabCloseSelectsFallbackWhenClosingSelected() throws {
+        // Intent: closing the selected tab through IPC moves selection to
+        //   the same fallback sibling as the UI close path.
+        // Why it exists: pins reuse of closeTabBody's fallback-selection
+        //   behavior.
+        // Scenario: spec-first CLI close of the foreground tab.
+        var model = makeModel()
+        createTab(&model)
+        let fallbackTabId = selectedTab(in: model)!.id
+        createTab(&model)
+        let closedTabId = selectedTab(in: model)!.id
+
+        let commands = sendIpc(
+            &model,
+            method: Methods.tabClose,
+            params: .object(["tab": .string(closedTabId.rawValue.uuidString)])
+        )
+
+        _ = try requireIpcReply(commands)
+        #expect(tabById(closedTabId, in: model) == nil)
+        #expect(model.selectedTabId == fallbackTabId)
+    }
+
+    @Test("tab.close bypasses confirmation for multi-pane tab")
+    func tabCloseBypassesConfirmationForMultiPaneTab() throws {
+        // Intent: tab.close closes a non-last multi-pane tab immediately
+        //   without a GUI confirmation command.
+        // Why it exists: pins routing through .closeTab instead of
+        //   .requestCloseTab, whose confirmation sheet cannot be driven by
+        //   CLI callers.
+        // Scenario: spec-first CLI close of a build tab with two panes.
+        var model = makeModel()
+        createTab(&model)
+        let closedTabId = selectedTab(in: model)!.id
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        _ = update(&model, .splitPane(paneId: paneId, direction: .horizontal))
+        createTab(&model)
+
+        let commands = sendIpc(
+            &model,
+            method: Methods.tabClose,
+            params: .object(["tab": .string(closedTabId.rawValue.uuidString)])
+        )
+
+        _ = try requireIpcReply(commands)
+        #expect(tabById(closedTabId, in: model) == nil)
+        #expect(model.pendingConfirmation == nil)
+        #expect(!hasEffect(commands) {
+            if case .showCloseTabConfirmation = $0 { return true }
+            return false
+        }, "CLI tab.close should not show a close-tab confirmation")
+    }
+
+    @Test("tab.close refuses last tab without pending confirmation")
+    func tabCloseRefusesLastTab() throws {
+        // Intent: tab.close refuses to close the only remaining tab.
+        // Why it exists: routing the last tab through .closeTab would set a
+        //   terminate confirmation, leave the tab open, and strand
+        //   pendingConfirmation for future close/quit dialogs.
+        // Scenario: regression-style CLI close of the last app tab.
+        var model = makeModel()
+        createTab(&model)
+        let tabId = selectedTab(in: model)!.id
+
+        let commands = sendIpc(
+            &model,
+            method: Methods.tabClose,
+            params: .object(["tab": .string(tabId.rawValue.uuidString)])
+        )
+
+        let error = try requireIpcError(commands)
+        #expect(error.code == -32602)
+        #expect(error.message == "cannot close the last tab")
+        #expect(tabById(tabId, in: model) != nil)
+        #expect(model.pendingConfirmation == nil)
+    }
+
+    @Test("tab.close malformed or unknown explicit tab does not fall back to context")
+    func tabCloseMalformedOrUnknownExplicitTab() throws {
+        // Intent: explicit tab values that are malformed/unknown/non-
+        //   string return -32602; the context tab is not closed.
+        // Why it exists: pins the no-fallback guard for explicit tab.
+        // Scenario: spec-first malformed/unknown/non-string explicit.
+        for tabValue in [JSONValue.string("not-a-uuid"), .string(UUID().uuidString), .number(7)] {
+            var model = makeModel()
+            createTab(&model)
+            let contextTabId = selectedTab(in: model)!.id
+            let contextPaneId = selectedTab(in: model)!.focusedPaneId
+            let countBefore = totalTabCount(model)
+
+            let commands = sendIpc(
+                &model,
+                method: Methods.tabClose,
+                params: .object(["tab": tabValue]),
+                context: IpcRequestContext(paneId: contextPaneId.rawValue.uuidString)
+            )
+
+            let error = try requireIpcError(commands)
+            #expect(error.code == -32602)
+            #expect(tabById(contextTabId, in: model) != nil)
+            #expect(totalTabCount(model) == countBefore)
+        }
+    }
+
+    @Test("tab.close without explicit tab and without pane context fails before mutation")
+    func tabCloseWithoutTabAndWithoutContextFails() throws {
+        // Intent: with neither an explicit tab nor a pane context,
+        //   tab.close errors out before any mutation.
+        // Why it exists: pins the "need a target" rule.
+        // Scenario: spec-first no-target.
+        var model = makeModel()
+        createTab(&model)
+        let tabId = selectedTab(in: model)!.id
+
+        let commands = sendIpc(&model, method: Methods.tabClose, context: IpcRequestContext())
+
+        let error = try requireIpcError(commands)
+        #expect(error.code == -32602)
+        #expect(tabById(tabId, in: model) != nil)
+    }
+
     @Test("pane.split targets context pane even when another tab is selected")
     func paneSplitTargetsContextPaneEvenWhenAnotherTabSelected() throws {
         // Intent: pane.split using the pane context targets that pane

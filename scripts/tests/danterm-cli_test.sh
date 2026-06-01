@@ -43,6 +43,7 @@ grep -qF 'Usage:' "$err"
 grep -qF 'ls' "$err"
 grep -qF 'pane info [--pane <pane-id>]' "$err"
 grep -qF 'tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]' "$err"
+grep -qF 'tab close [--tab <tab-id>]' "$err"
 grep -qF 'pane split [--pane <pane-id>] -h|-v' "$err"
 grep -qF 'pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]' "$err"
 grep -qF 'todo clear-completed [--pane <pane-id>]' "$err"
@@ -62,6 +63,7 @@ for help_arg in help --help -h; do
     grep -qF 'ls' "$out"
     grep -qF 'pane info [--pane <pane-id>]' "$out"
     grep -qF 'tab new [--group <group-id>] [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]' "$out"
+    grep -qF 'tab close [--tab <tab-id>]' "$out"
     grep -qF 'pane split [--pane <pane-id>] -h|-v' "$out"
     grep -qF 'pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]' "$out"
     grep -qF 'todo clear-completed [--pane <pane-id>]' "$out"
@@ -126,6 +128,9 @@ printf '%s\n' "$info" | jq -e \
 
 "$CLI_PATH" tab new --group "$group_id" --title smoke-tab | jq -e '.tab.id and .panes[0].id' >/dev/null
 "$CLI_PATH" tab new --group "$group_id" --at-group-end --title smoke-tab-end | jq -e '.tab.id and .panes[0].id' >/dev/null
+close_id="$("$CLI_PATH" tab new --group "$group_id" --title close-test | jq -r '.tab.id')"
+"$CLI_PATH" tab close --tab "$close_id"
+"$CLI_PATH" ls | jq -e --arg t "$close_id" '[.groups[].tabs[] | select(.id == $t)] | length == 0' >/dev/null
 split_pane_id="$("$CLI_PATH" pane split --pane "$pane_id" -h --title smoke-split | jq -r '.pane.id')"
 [[ -n "$split_pane_id" && "$split_pane_id" != "null" ]]
 
