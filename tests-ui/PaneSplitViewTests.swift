@@ -1,3 +1,4 @@
+// UI-test runner entry point plus shared harness assertions and pane split tests.
 import Cocoa
 
 @main
@@ -11,6 +12,7 @@ struct UITestRunner {
         sidebarBadgeTests()
         todoInputViewTests()
         sidebarSelectionCacheTests()
+        sidebarScrollRevealTests()
 
         print("\n\(uiTotal - uiFailures)/\(uiTotal) passed")
         if uiFailures > 0 { exit(1) }

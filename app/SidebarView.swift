@@ -240,6 +240,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     func applySidebarOps(_ ops: [SidebarRowOp], model: AppModel, clearActiveRename: Bool) {
         isReloading = true
         defer { isReloading = false }
+        let priorFocusedTabId = currentModel?.selectedTabId
         currentModel = model
 
         // End an orphaned inline edit before its row is removed/moved (the guard already
@@ -261,8 +262,10 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         applyRestoreSelection(restoreSet, selectedTabId: model.selectedTabId)
         refreshRowEmphasis(focusedTabId: model.selectedTabId)
 
-        // Scroll the model's currently-selected tab into view.
+        // Reveal only on real focus changes; cosmetic reconcile sweeps must not
+        // fight a user who has manually scrolled the focused row off-screen.
         if let selectedTabId = model.selectedTabId,
+           selectedTabId != priorFocusedTabId,
            let item = tabItemCache[selectedTabId] {
             let row = outlineView.row(forItem: item)
             if row >= 0 { outlineView.scrollRowToVisible(row) }
