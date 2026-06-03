@@ -541,7 +541,7 @@ func resolveLaunch(_ paneSnapshot: PaneSnapshot, home: String? = nil) -> (cwd: S
 /// point of storing `~/`); the injectable `home` lets a test assert machine-
 /// independent expansion against a fixed home.
 func expandTilde(_ path: String, home: String = NSHomeDirectory()) -> String {  // core-purity: ambient-seam
-    guard path.hasPrefix("~") else { return path }
+    guard path == "~" || path.hasPrefix("~/") else { return path }
     return home + path.dropFirst(1)
 }
 

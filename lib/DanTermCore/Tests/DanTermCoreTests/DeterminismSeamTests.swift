@@ -151,7 +151,7 @@ import Testing
         #expect(model.pane(paneId)?.title == h + "/sentinel", "title stored raw, not abbreviated into the model")
     }
 
-    // MARK: - abbreviate-boundary (travels with the boundary-aware abbreviateHome fix)
+    // MARK: - path-helper boundary (travels with the boundary-aware abbreviateHome / expandTilde fixes)
 
     @Test("abbreviateHome is boundary-aware: a sibling-home prefix is left intact")
     func abbreviateHomeBoundaryAware() {
@@ -163,6 +163,21 @@ import Testing
         #expect(abbreviateHome("/Users/dan/foo", home: "/Users/dan") == "~/foo")
         #expect(abbreviateHome("/Users/dan", home: "/Users/dan") == "~")
         #expect(abbreviateHome("/Users/danielle/foo", home: "/Users/dan") == "/Users/danielle/foo")
+    }
+
+    @Test("expandTilde is boundary-aware: a ~user prefix is left intact")
+    func expandTildeBoundaryAware() {
+        // Intent: expandTilde only expands a bare "~" or a "~/"-rooted path;
+        //   a "~user/..." form is left intact (DanTerm does not resolve other
+        //   users' homes).
+        // Why it exists: guards a later "simplification" back to the bare
+        //   hasPrefix("~") from reintroducing the /Users/dandanielle/foo
+        //   concat-corruption -- the inverse twin of the abbreviateHome
+        //   boundary bug pinned just above.
+        // Scenario: spec-first boundary check.
+        #expect(expandTilde("~/foo", home: "/Users/dan") == "/Users/dan/foo")
+        #expect(expandTilde("~", home: "/Users/dan") == "/Users/dan")
+        #expect(expandTilde("~danielle/foo", home: "/Users/dan") == "~danielle/foo")
     }
 
     // Five distinct fixed ids -- enough to cover an id-less group/tab/leaf (3 mints)
