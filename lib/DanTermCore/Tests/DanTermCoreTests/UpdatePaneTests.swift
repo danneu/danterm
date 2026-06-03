@@ -194,6 +194,86 @@ import Testing
         #expect(commands.count == 0, "no commands when no neighbor exists")
     }
 
+    @Test("testQuadrantFocusRightPreservesTopRowDespiteLastFocused")
+    func testQuadrantFocusRightPreservesTopRowDespiteLastFocused() {
+        // Intent: in a 2x2 grid, focus-right from the top-left pane lands on
+        //   the top-right pane (same row), even when the bottom-right pane was
+        //   the most recently focused pane in the right column.
+        // Why it exists: locks in the "directional move preserves the
+        //   perpendicular position" invariant ahead of a planned last-focused
+        //   tie-breaker. That tie-breaker must only fire when the source pane
+        //   spans the whole perpendicular extent (no row hint); in a full grid
+        //   the row hint must always win, so this guards against the new
+        //   behavior leaking into the grid case.
+        // Scenario: spec-first grid-navigation guard. Build TL/BL | TR/BR so BR
+        //   is the last-focused pane in the right column, then focus-right from
+        //   TL must still pick TR, not BR.
+        var model = makeModel()
+        createTab(&model)
+        let tl = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .splitPane(direction: .horizontal))
+        let tr = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .paneBecameFirstResponder(paneId: tl))
+        update(&model, .splitPane(direction: .vertical))  // TL -> TL/BL, focus BL
+        update(&model, .paneBecameFirstResponder(paneId: tr))
+        update(&model, .splitPane(direction: .vertical))  // TR -> TR/BR, focus BR
+        let br = model.groups[0].tabs[0].focusedPaneId
+        // BR is now the most-recently focused pane in the right column.
+
+        update(&model, .paneBecameFirstResponder(paneId: tl))
+        let effects = update(&model, .focusDirection(direction: .horizontal, side: .second))
+
+        #expect(
+            hasEffect(effects) {
+                if case .makeFirstResponder(let p) = $0 { return p == tr }
+                return false
+            }, "focus-right from TL must preserve the top row (-> TR), not jump to last-focused BR")
+        #expect(
+            !hasEffect(effects) {
+                if case .makeFirstResponder(let p) = $0 { return p == br }
+                return false
+            }, "focus-right from TL must NOT land on BR")
+    }
+
+    @Test("testQuadrantFocusRightPreservesBottomRowDespiteLastFocused")
+    func testQuadrantFocusRightPreservesBottomRowDespiteLastFocused() {
+        // Intent: in a 2x2 grid, focus-right from the bottom-left pane lands on
+        //   the bottom-right pane (same row), even when the top-right pane was
+        //   the most recently focused pane in the right column.
+        // Why it exists: the mirror of the top-row guard -- ensures the planned
+        //   last-focused tie-breaker never overrides the row hint for either
+        //   row of the grid.
+        // Scenario: spec-first grid-navigation guard. Make TR the last-focused
+        //   pane in the right column, move to BL, then focus-right must pick
+        //   BR, not TR.
+        var model = makeModel()
+        createTab(&model)
+        let tl = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .splitPane(direction: .horizontal))
+        let tr = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .paneBecameFirstResponder(paneId: tl))
+        update(&model, .splitPane(direction: .vertical))  // TL -> TL/BL, focus BL
+        let bl = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .paneBecameFirstResponder(paneId: tr))
+        update(&model, .splitPane(direction: .vertical))  // TR -> TR/BR, focus BR
+        let br = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .paneBecameFirstResponder(paneId: tr))  // TR last-focused in right column
+        update(&model, .paneBecameFirstResponder(paneId: bl))
+        let effects = update(&model, .focusDirection(direction: .horizontal, side: .second))
+
+        #expect(
+            hasEffect(effects) {
+                if case .makeFirstResponder(let p) = $0 { return p == br }
+                return false
+            }, "focus-right from BL must preserve the bottom row (-> BR), not jump to last-focused TR")
+        #expect(
+            !hasEffect(effects) {
+                if case .makeFirstResponder(let p) = $0 { return p == tr }
+                return false
+            }, "focus-right from BL must NOT land on TR")
+    }
+
     @Test("testPaneBecameFirstResponder")
     func testPaneBecameFirstResponder() {
         // Intent: paneBecameFirstResponder updates focusedPaneId, marks the
