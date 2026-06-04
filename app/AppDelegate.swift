@@ -5,7 +5,7 @@ import GhosttyKit
 @preconcurrency import UserNotifications
 
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitViewDelegate, @preconcurrency UNUserNotificationCenterDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitViewDelegate, @preconcurrency UNUserNotificationCenterDelegate, WindowIndependentMenuActions {
     static let minWindowWidth: CGFloat = 600
     static let minWindowHeight: CGFloat = 300
     static let minSidebarWidth: CGFloat = 200
@@ -756,5 +756,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
     func applicationDidResignActive(_ notification: Notification) {
         runtime?.send(.appResignedActive)
+    }
+}
+
+extension AppDelegate: NSMenuItemValidation {
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        MenuCommandPolicy.isEnabled(action: item.action, windowIsLive: window != nil && window.isVisible)
     }
 }

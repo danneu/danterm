@@ -30,6 +30,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Command.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/DanTermConfig.swift" \
         "$SCRIPT_DIR/app/BadgeLabel.swift" \
+        "$SCRIPT_DIR/app/MenuCommandPolicy.swift" \
         "$SCRIPT_DIR/app/PaneSplitView.swift" \
         "$SCRIPT_DIR/app/TodoInputView.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/SidebarItemStore.swift" \
@@ -38,6 +39,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/SplitContainerView.swift" \
         "$SCRIPT_DIR/app/SidebarView.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarBadgeTests.swift" \
+        "$SCRIPT_DIR/tests-ui/MenuCommandPolicyTests.swift" \
         "$SCRIPT_DIR/tests-ui/TodoInputViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarSelectionCacheTests.swift" \
         "$SCRIPT_DIR/tests-ui/SplitContainerViewTests.swift" \

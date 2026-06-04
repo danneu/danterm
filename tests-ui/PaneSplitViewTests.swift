@@ -10,6 +10,7 @@ struct UITestRunner {
         paneSplitViewTests()
         splitContainerViewTests()
         sidebarBadgeTests()
+        menuCommandPolicyTests()
         todoInputViewTests()
         sidebarSelectionCacheTests()
         sidebarScrollRevealTests()
