@@ -44,6 +44,7 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
         title = "Preferences"
         isReleasedWhenClosed = false
         level = .normal  // don't float above modal dialogs
+        isExcludedFromWindowsMenu = true  // keep out of the Window menu's auto window list
         delegate = self
         buildUI()
         center()
@@ -326,6 +327,7 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
         }
         let sheetWindow = NSWindow(contentViewController: picker)
         sheetWindow.styleMask = [.titled]
+        sheetWindow.isExcludedFromWindowsMenu = true  // host window for the picker; keep out of the Window menu
         beginSheet(sheetWindow) { _ in }
     }
 
@@ -340,6 +342,7 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
         }
         let sheetWindow = NSWindow(contentViewController: picker)
         sheetWindow.styleMask = [.titled]
+        sheetWindow.isExcludedFromWindowsMenu = true  // host window for the picker; keep out of the Window menu
         beginSheet(sheetWindow) { _ in }
     }
 

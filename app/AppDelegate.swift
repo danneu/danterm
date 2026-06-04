@@ -227,6 +227,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         appMenu.addItem(reloadConfigItem)
         appMenu.addItem(withTitle: "Install danterm Command in PATH", action: #selector(installDantermInPath(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
+        // Standard App-menu Hide triad. Dispatched through the responder chain
+        // (target nil) to AppKit built-ins, so no handler methods are needed.
+        appMenu.addItem(withTitle: "Hide DanTerm", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthersItem = NSMenuItem(title: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthersItem.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(hideOthersItem)
+        // Show All auto-disables until something is hidden.
+        appMenu.addItem(withTitle: "Show All", action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "Quit DanTerm", action: #selector(quitApp(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)
@@ -380,6 +389,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
         paneMenuItem.submenu = paneMenu
         mainMenu.addItem(paneMenuItem)
+
+        // Window menu. Per Apple HIG, app-specific menus (Tab/Pane) precede Window.
+        // All three actions are AppKit built-ins dispatched through the responder
+        // chain (target nil) to the key window / NSApp.
+        let windowMenuItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(NSMenuItem.separator())
+        windowMenu.addItem(withTitle: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+        windowMenuItem.submenu = windowMenu
+        mainMenu.addItem(windowMenuItem)
+        // Registering windowsMenu makes AppKit auto-append the live window list
+        // (below a separator it inserts) and enables cmd-` window cycling. Only
+        // windows with isExcludedFromWindowsMenu == false are listed, so auxiliary
+        // panels opt out at their construction sites to keep the list to one entry.
+        NSApp.windowsMenu = windowMenu
 
         NSApp.mainMenu = mainMenu
     }

@@ -23,6 +23,9 @@ final class SwitcherPanel: NSPanel {
         isMovable = false
         hidesOnDeactivate = false
         ignoresMouseEvents = false
+        // Belt-and-suspenders: this panel is non-activating (never key/main), so
+        // AppKit almost certainly never lists it; the flag documents the intent.
+        isExcludedFromWindowsMenu = true
         contentView = SwitcherContentView()
     }
 

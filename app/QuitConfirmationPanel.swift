@@ -16,6 +16,7 @@ final class QuitConfirmationPanel: NSPanel, NSWindowDelegate {
         title = "Quit DanTerm?"
         isReleasedWhenClosed = false
         level = .floating
+        isExcludedFromWindowsMenu = true  // keep out of the Window menu's auto window list
         hidesOnDeactivate = false
         delegate = self
         buildUI()
