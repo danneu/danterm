@@ -323,6 +323,44 @@ import Testing
         #expect(commands.count == 0, "same pane should return no commands")
     }
 
+    @Test("testPaneBecameFirstResponderIgnoresPaneFromAnotherTab")
+    func testPaneBecameFirstResponderIgnoresPaneFromAnotherTab() {
+        // Intent: a paneBecameFirstResponder callback carrying a pane id that
+        //   belongs to a different tab must not touch the selected tab's
+        //   focusedPaneId, must not clear that background pane's alerts, and
+        //   must emit no commands.
+        // Why it exists: guards the invariant that the handler only adopts a
+        //   pane that actually lives in the selected tab. A stray
+        //   becomeFirstResponder from a hidden/background TerminalView would
+        //   otherwise corrupt the selected tab's focusedPaneId and let later
+        //   notification logic misclassify a background pane as focused.
+        // Scenario: spec-first cross-tab callback -- tab A is selected, an
+        //   unread alert sits on a pane in tab B, and tab B's pane fires the
+        //   callback while hidden.
+        var model = makeModel()
+        createTab(&model)
+        let tabAId = model.groups[0].tabs[0].id
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        createTab(&model)
+        let tabBPane = model.groups[0].tabs[1].focusedPaneId
+
+        _ = update(&model, .selectTab(id: tabAId))
+
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: tabBPane,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        let commands = update(&model, .paneBecameFirstResponder(paneId: tabBPane))
+
+        let tabA = tabById(tabAId, in: model)!
+        #expect(model.selectedTabId == tabAId, "selection should be unchanged")
+        #expect(tabA.focusedPaneId == paneA, "selected tab focus must not adopt a foreign pane")
+        #expect(model.alerts[0].isUnread == true, "background tab's alert must stay unread")
+        #expect(commands.isEmpty, "cross-tab callback should emit no commands")
+    }
+
     @Test("testPaneBecameFirstResponderLeavesAlertUnreadInManualMode")
     func testPaneBecameFirstResponderLeavesAlertUnreadInManualMode() {
         // Intent: in manual alert-clear mode, focus does not clear alerts.

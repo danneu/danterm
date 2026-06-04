@@ -486,6 +486,10 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
 
     case .paneBecameFirstResponder(let paneId):
         guard let tab = selectedTab(in: model) else { return [] }
+        // Only adopt a pane that actually lives in the selected tab. A stray
+        // becomeFirstResponder from a hidden/background surface must not
+        // corrupt this tab's focusedPaneId or clear the foreign pane's alerts.
+        guard allPaneIds(tab.rootNode).contains(paneId) else { return [] }
         let oldFocusedId = tab.focusedPaneId
         guard paneId != oldFocusedId else { return [] }
 
