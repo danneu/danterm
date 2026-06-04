@@ -71,6 +71,10 @@ check_case "stop: fallback" \
   '{"hook_event_name":"Stop"}' \
   "$(expected_seq 'Claude finished responding')"
 
+check_case "stop: agent_type without agent_id not subagent" \
+  '{"hook_event_name":"Stop","agent_type":"planner","last_assistant_message":"still main"}' \
+  "$(expected_seq 'still main')"
+
 # Sanitization: jq encodes raw control bytes as \u00XX; the script must strip
 # them after JSON decoding.
 sanitize_msg=$(printf 'hi\033]9;evil\007there')
@@ -85,6 +89,10 @@ check_case "stop: subagent ignored" \
   '{"hook_event_name":"Stop","agent_id":"agent-1","last_assistant_message":"x"}' \
   ""
 
+check_case "subagentstop: subagent ignored" \
+  '{"hook_event_name":"SubagentStop","agent_id":"agent-1","last_assistant_message":"x"}' \
+  ""
+
 # --- PreToolUse event ---
 
 check_case "pretooluse: AskUserQuestion" \
@@ -95,9 +103,9 @@ check_case "pretooluse: other tool is silent" \
   '{"hook_event_name":"PreToolUse","tool_name":"Bash"}' \
   ""
 
-check_case "pretooluse: subagent ignored" \
+check_case "pretooluse: subagent AskUserQuestion alerts" \
   '{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","agent_id":"a1"}' \
-  ""
+  "$(expected_seq 'Claude has a question')"
 
 # --- PermissionRequest event ---
 
@@ -126,9 +134,29 @@ check_case "permission: sanitization" \
   "$permission_sanitize_input" \
   "$(expected_seq 'Claude wants to use Evil')"
 
-check_case "permission: subagent ignored" \
+check_case "permission: subagent Bash alerts" \
   '{"hook_event_name":"PermissionRequest","tool_name":"Bash","agent_id":"a1"}' \
+  "$(expected_seq 'Claude wants to use Bash')"
+
+check_case "permission: subagent AskUserQuestion suppressed" \
+  '{"hook_event_name":"PermissionRequest","tool_name":"AskUserQuestion","agent_id":"a1"}' \
   ""
+
+# --- Elicitation event ---
+
+elicitation_sanitize_input=$(jq -c -n --arg m "$(printf 'Need\033 input\007 now')" \
+  '{hook_event_name:"Elicitation", message:$m}')
+check_case "elicitation: sanitization" \
+  "$elicitation_sanitize_input" \
+  "$(expected_seq 'Need input now')"
+
+check_case "elicitation: subagent alerts" \
+  '{"hook_event_name":"Elicitation","agent_id":"a1","message":"Need input"}' \
+  "$(expected_seq 'Need input')"
+
+check_case "elicitation: fallback" \
+  '{"hook_event_name":"Elicitation"}' \
+  "$(expected_seq 'Claude needs your input')"
 
 # --- Unknown event ---
 

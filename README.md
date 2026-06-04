@@ -107,6 +107,10 @@ timer before emitting terminal notifications. DanTerm ships Claude Code hooks
 that bypass that delay and emit immediate per-pane OSC 777 notifications when
 Claude finishes a turn or needs user input.
 
+The hook notifies for final top-level turns, suppresses subagent completion
+noise, and still alerts when any agent is blocked on user input, including MCP
+elicitation dialogs.
+
 ### Requirements
 
 Claude Code v2.1.141 or newer is required for hook
@@ -167,6 +171,17 @@ command:
       }
     ],
     "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/absolute/path/to/danterm-claude-notify-osc777",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Elicitation": [
       {
         "hooks": [
           {
