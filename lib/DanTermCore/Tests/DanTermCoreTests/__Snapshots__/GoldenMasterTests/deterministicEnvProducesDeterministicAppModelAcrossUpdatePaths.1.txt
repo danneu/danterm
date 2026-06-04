@@ -23,6 +23,7 @@ AppModel(
                 isRemote: false,
                 remoteSession: nil,
                 remoteThemeOverride: nil,
+                agentSession: nil,
                 todos: []
               )
             ),
@@ -37,6 +38,7 @@ AppModel(
                 isRemote: false,
                 remoteSession: nil,
                 remoteThemeOverride: nil,
+                agentSession: nil,
                 todos: []
               )
             ),
@@ -71,6 +73,7 @@ AppModel(
                 isRemote: false,
                 remoteSession: nil,
                 remoteThemeOverride: nil,
+                agentSession: nil,
                 todos: []
               )
             ),
@@ -85,6 +88,7 @@ AppModel(
                 isRemote: false,
                 remoteSession: nil,
                 remoteThemeOverride: nil,
+                agentSession: nil,
                 todos: []
               )
             ),

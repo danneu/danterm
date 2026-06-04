@@ -49,6 +49,9 @@ struct DanTermCLI {
                                       n lines of scrollback when --lines is set.
           theme set [--pane <pane-id>] <name>|--clear
                                       Set or clear a pane theme
+          agent attach --kind <kind> --id <session-id>
+                                      Report an active coding-agent session for
+                                      the caller's pane
           todo list [--pane <pane-id>]
                                       List todos as JSON
           todo add [--pane <pane-id>] <text>

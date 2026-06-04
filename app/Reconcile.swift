@@ -223,6 +223,7 @@ extension AppRuntime {
                 progress: render.progress,
                 isRemote: render.isRemote,
                 remoteSession: render.remoteSession,
+                agentSession: render.agentSession,
                 unreadAlertCount: render.unreadAlertCount,
                 totalTodoCount: render.totalTodoCount,
                 uncompletedTodoCount: render.uncompletedTodoCount

@@ -26,6 +26,7 @@ Keep this section synced with `danterm help` and the parser in
     danterm pane input [--pane <pane-id>] [--literal] -- <token>...
     danterm pane read --pane <pane-id> [--lines <n>]
     danterm theme set [--pane <pane-id>] <name>|--clear
+    danterm agent attach --kind <kind> --id <session-id>
     danterm todo list [--pane <pane-id>]
     danterm todo add [--pane <pane-id>] <text>
     danterm todo edit [--pane <pane-id>] <todo-id> <text>
@@ -81,6 +82,8 @@ For agent commands:
   background. Pass `--foreground` only when the user asked to focus the new pane
   within its tab.
 - `pane input`, `theme set`, and todos: always pass `--pane <pane-id>`.
+- `agent attach`: hooks may use the implicit `$DANTERM_PANE` context; ordinary
+  agent recipes should not call it.
 - `pane focus` and `pane read` already require explicit pane ids; keep them
   explicit.
 
@@ -243,9 +246,11 @@ For broader discovery:
 
 `ls` returns `{groups, selectedTabId}`. Each pane lives inline at a split-tree
 leaf: `groups[].tabs[].rootNode` is the per-tab tree, and every
-`{ "type": "leaf" }` node carries its pane under `.pane` (`{id, title, cwd, ...}`).
-The `jq` above recurses the tree to list every pane. Treat `selectedTabId` as
-display state, not as a targeting source.
+`{ "type": "leaf" }` node carries its pane under `.pane` (`{id, title, cwd,
+agentSession?, ...}`). `agentSession`, when present, is `{kind, sessionId}` for
+the agent currently reported in that pane. The `jq` above recurses the tree to
+list every pane. Treat `selectedTabId` as display state, not as a targeting
+source.
 
 ### Todos
 
@@ -293,13 +298,16 @@ else prints nothing on success and exits 0.
 
 | Command | Stdout |
 |---|---|
-| `ls` | JSON: `{groups, selectedTabId}` (each pane embedded at its `rootNode` leaf under `.pane`) |
+| `ls` | JSON: `{groups, selectedTabId}` (each pane embedded at its `rootNode` leaf under `.pane`, optionally with `agentSession: {kind, sessionId}`) |
 | `pane info --pane <pane-id>` | JSON: `{pane: {id, title, cwd}, tab: {id, title, groupId}, group: {id, name}}` |
 | `tab new ...` | JSON: `{tab: {...}, panes: [{id}], group?: {id, name}}` |
 | `pane split --pane <pane-id>` | JSON: `{pane: {id}}` |
 | `todo list --pane <pane-id>` | JSON: `{todos: [{id, text, isDone}, ...]}` |
 | `todo add --pane <pane-id>` | JSON: `{todo: {id, text, isDone}}` |
 | `pane read --pane <pane-id>` | Raw text from the requested pane, not JSON |
+
+`agent attach --kind <kind> --id <session-id>` is a silent mutation: no stdout
+on success.
 
 ## Rules for agents
 

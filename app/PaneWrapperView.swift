@@ -17,7 +17,7 @@ class PaneWrapperView: NSView {
     // Search overlay
     private(set) var searchOverlay: SearchOverlayView?
 
-    // Leading accessories stack: [alertBadge?, remoteAccessory?, progressIndicator?, toolbarLabel]
+    // Leading accessories stack: [alertBadge?, remoteAccessory?, agentAccessory?, progressIndicator?, toolbarLabel]
     private let leadingStack: NSStackView
     private let alertBadge: NSTextField
     private let remoteAccessory: NSView
@@ -25,9 +25,15 @@ class PaneWrapperView: NSView {
     private let remoteSessionLabel: NonHitTestingLabel
     private var compactRemoteConstraints: [NSLayoutConstraint] = []
     private var expandedRemoteConstraints: [NSLayoutConstraint] = []
+    private let agentAccessory: NSView
+    private let agentIcon: NSImageView
+    private let agentSessionLabel: NonHitTestingLabel
+    private var compactAgentConstraints: [NSLayoutConstraint] = []
+    private var expandedAgentConstraints: [NSLayoutConstraint] = []
     // Tracks which remote constraint set is active so toolbar text churn does not
     // re-toggle layout constraints unless the compact/expanded mode changes.
     private var remoteExpanded = false
+    private var agentExpanded = false
     private let progressIndicator: ProgressIndicatorView
     private var currentProgress: ProgressState?
 
@@ -44,6 +50,9 @@ class PaneWrapperView: NSView {
         self.remoteAccessory = NSView()
         self.remoteIcon = NSImageView()
         self.remoteSessionLabel = NonHitTestingLabel(labelWithString: "")
+        self.agentAccessory = NSView()
+        self.agentIcon = NSImageView()
+        self.agentSessionLabel = NonHitTestingLabel(labelWithString: "")
         self.leadingStack = NSStackView()
 
         // Menu button (always visible)
@@ -139,6 +148,47 @@ class PaneWrapperView: NSView {
         ]
         NSLayoutConstraint.activate(compactRemoteConstraints)
 
+        // Agent accessory: teal background with CPU icon, hidden by default
+        agentAccessory.translatesAutoresizingMaskIntoConstraints = false
+        agentAccessory.wantsLayer = true
+        agentAccessory.layer?.backgroundColor = NSColor.systemTeal.cgColor
+        agentAccessory.isHidden = true
+        agentAccessory.setContentHuggingPriority(.required, for: .horizontal)
+
+        agentIcon.translatesAutoresizingMaskIntoConstraints = false
+        agentIcon.image = NSImage(systemSymbolName: "cpu", accessibilityDescription: "Agent session")
+        agentIcon.contentTintColor = .white
+        agentIcon.imageScaling = .scaleProportionallyDown
+        agentAccessory.addSubview(agentIcon)
+
+        agentSessionLabel.translatesAutoresizingMaskIntoConstraints = false
+        agentSessionLabel.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        agentSessionLabel.textColor = .white
+        agentSessionLabel.lineBreakMode = .byTruncatingTail
+        agentSessionLabel.usesSingleLineMode = true
+        agentSessionLabel.isHidden = true
+        agentSessionLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        agentAccessory.addSubview(agentSessionLabel)
+
+        NSLayoutConstraint.activate([
+            agentIcon.centerYAnchor.constraint(equalTo: agentAccessory.centerYAnchor),
+            agentIcon.widthAnchor.constraint(equalToConstant: 14),
+            agentIcon.heightAnchor.constraint(equalToConstant: 14),
+        ])
+        compactAgentConstraints = [
+            agentIcon.centerXAnchor.constraint(equalTo: agentAccessory.centerXAnchor),
+            agentAccessory.widthAnchor.constraint(equalToConstant: 22),
+        ]
+        expandedAgentConstraints = [
+            agentIcon.leadingAnchor.constraint(equalTo: agentAccessory.leadingAnchor, constant: 4),
+            agentSessionLabel.leadingAnchor.constraint(equalTo: agentIcon.trailingAnchor, constant: 4),
+            agentSessionLabel.trailingAnchor.constraint(equalTo: agentAccessory.trailingAnchor, constant: -6),
+            agentSessionLabel.centerYAnchor.constraint(equalTo: agentAccessory.centerYAnchor),
+            agentSessionLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 240),
+            agentAccessory.widthAnchor.constraint(greaterThanOrEqualToConstant: 22),
+        ]
+        NSLayoutConstraint.activate(compactAgentConstraints)
+
         // Progress indicator, hidden by default
         progressIndicator.translatesAutoresizingMaskIntoConstraints = false
         progressIndicator.isHidden = true
@@ -161,6 +211,7 @@ class PaneWrapperView: NSView {
         leadingStack.alignment = .centerY
         leadingStack.addArrangedSubview(alertBadge)
         leadingStack.addArrangedSubview(remoteAccessory)
+        leadingStack.addArrangedSubview(agentAccessory)
         leadingStack.addArrangedSubview(progressIndicator)
         leadingStack.addArrangedSubview(toolbarLabel)
         toolbar.addSubview(leadingStack)
@@ -203,6 +254,10 @@ class PaneWrapperView: NSView {
             // Remote accessory fills toolbar height
             remoteAccessory.topAnchor.constraint(equalTo: toolbar.topAnchor),
             remoteAccessory.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor),
+
+            // Agent accessory fills toolbar height
+            agentAccessory.topAnchor.constraint(equalTo: toolbar.topAnchor),
+            agentAccessory.bottomAnchor.constraint(equalTo: toolbar.bottomAnchor),
 
             // Drag handle fills toolbar
             dragHandle.topAnchor.constraint(equalTo: toolbar.topAnchor),
@@ -250,7 +305,7 @@ class PaneWrapperView: NSView {
         fatalError("init(coder:) not implemented")
     }
 
-    func updateToolbar(title: String, cwd: String?, progress: ProgressState? = nil, isRemote: Bool = false, remoteSession: RemoteSession? = nil, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0) {
+    func updateToolbar(title: String, cwd: String?, progress: ProgressState? = nil, isRemote: Bool = false, remoteSession: RemoteSession? = nil, agentSession: AgentSession? = nil, unreadAlertCount: Int = 0, totalTodoCount: Int = 0, uncompletedTodoCount: Int = 0) {
         toolbarLabel.stringValue = formatToolbarLabel(title: title, cwd: cwd)
         applyProgressState(progress)
         remoteAccessory.isHidden = !isRemote
@@ -265,6 +320,21 @@ class PaneWrapperView: NSView {
             } else {
                 NSLayoutConstraint.deactivate(expandedRemoteConstraints)
                 NSLayoutConstraint.activate(compactRemoteConstraints)
+            }
+        }
+        agentAccessory.isHidden = agentSession == nil
+        agentSessionLabel.stringValue = agentSession?.toolbarLabel ?? ""
+        agentSessionLabel.isHidden = agentSession == nil
+        agentAccessory.toolTip = agentSession.map { "\(AgentCatalog.displayName(for: $0.kind)) session \($0.sessionId)" }
+        let agentExpanded = agentSession != nil
+        if agentExpanded != self.agentExpanded {
+            self.agentExpanded = agentExpanded
+            if agentExpanded {
+                NSLayoutConstraint.deactivate(compactAgentConstraints)
+                NSLayoutConstraint.activate(expandedAgentConstraints)
+            } else {
+                NSLayoutConstraint.deactivate(expandedAgentConstraints)
+                NSLayoutConstraint.activate(compactAgentConstraints)
             }
         }
         alertBadge.updateBadge(count: unreadAlertCount)

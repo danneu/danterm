@@ -81,6 +81,7 @@ struct PaneModel: Equatable {
     var isRemote: Bool = false              // detected via shell wrapper; not persisted
     var remoteSession: RemoteSession? = nil  // reported by remote shell; not persisted
     var remoteThemeOverride: String? = nil   // ephemeral theme while remote; not persisted
+    var agentSession: AgentSession? = nil    // reported by agent hook; persisted only as raw recovery hint
     var todos: [TodoItem] = []
 }
 
@@ -361,6 +362,28 @@ struct TodoSnapshot: Codable {
     let isDone: Bool
 }
 
+/// Raw checkpoint DTO for an agent session; validate through `AgentSession`
+/// before printing or showing any of these strings.
+struct AgentSessionSnapshot: Codable {
+    let kind: String
+    let sessionId: String
+
+    init(kind: String, sessionId: String) {
+        self.kind = kind
+        self.sessionId = sessionId
+    }
+
+    init(from decoder: Decoder) throws {
+        guard let container = try? decoder.container(keyedBy: CodingKeys.self) else {
+            kind = ""
+            sessionId = ""
+            return
+        }
+        kind = (try? container.decode(String.self, forKey: .kind)) ?? ""
+        sessionId = (try? container.decode(String.self, forKey: .sessionId)) ?? ""
+    }
+}
+
 struct PaneSnapshot: Codable {
     let id: String?
     let title: String?
@@ -369,6 +392,7 @@ struct PaneSnapshot: Codable {
     var scrollback: String?  // optional for backward compat; var so scrollback grafting can set it
     let theme: String?       // raw ghostty theme name; nil = default
     var todos: [TodoSnapshot]? = nil  // nil for backward compat
+    var agentSession: AgentSessionSnapshot? = nil  // nil for backward compat; raw recovery-only DTO
 }
 
 struct PaneLaunchSnapshot: Codable {

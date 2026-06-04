@@ -192,6 +192,26 @@ import Testing
         #expect(commands.count == 0, "no theme command when no override was set")
     }
 
+    @Test("commandEnded clears agentSession and checkpoints local pane")
+    func commandEndedClearsAgentSessionAndCheckpointsLocalPane() throws {
+        // Intent: commandEnded clears a live agentSession even for the
+        //   common local-pane case with no remoteThemeOverride.
+        // Why it exists: prevents a stale crash-recovery hint from being
+        //   persisted after the agent returns control to the prompt.
+        // Scenario: Claude exits in a local pane, so CMD_END is the detach
+        //   signal and must checkpoint the cleared agent session.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let session = try #require(AgentSession(kind: "claude", sessionId: "4f3a2b1c"))
+        model.updatePane(paneId) { $0.agentSession = session }
+
+        let commands = update(&model, .commandEnded(paneId: paneId))
+
+        #expect(model.pane(paneId)?.agentSession == nil)
+        #expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false })
+    }
+
     @Test("commandEnded on non-remote pane is no-op")
     func commandEndedOnNonRemotePaneIsNoOp() {
         // Intent: commandEnded on a pane not marked remote is a no-op.

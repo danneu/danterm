@@ -75,6 +75,12 @@ public func parseCLI(_ args: [String]) throws -> CLICommand {
         }
         return try parseThemeSetCommand(Array(args.dropFirst(2)))
 
+    case "agent":
+        guard args.count >= 2, args[1] == "attach" else {
+            throw CLIParseError("usage: danterm agent attach --kind <kind> --id <session-id>")
+        }
+        return try parseAgentAttachCommand(Array(args.dropFirst(2)))
+
     case "todo":
         return try parseTodo(Array(args.dropFirst()))
 
@@ -291,6 +297,41 @@ private func parsePaneReadCommand(_ args: [String]) throws -> CLICommand {
         params["lines"] = .number(Double(lineLimit))
     }
     return CLICommand(method: Methods.paneRead, params: params, outputMode: .text)
+}
+
+private func parseAgentAttachCommand(_ args: [String]) throws -> CLICommand {
+    let usage = "usage: danterm agent attach --kind <kind> --id <session-id>"
+    var remaining = args
+    var kind: String?
+    var sessionId: String?
+
+    while !remaining.isEmpty {
+        let flag = remaining.removeFirst()
+        switch flag {
+        case "--kind":
+            guard let value = remaining.first else { throw CLIParseError(usage) }
+            kind = value
+            remaining.removeFirst()
+        case "--id":
+            guard let value = remaining.first else { throw CLIParseError(usage) }
+            sessionId = value
+            remaining.removeFirst()
+        default:
+            if flag.hasPrefix("--") {
+                throw CLIParseError("unknown flag: \(flag)")
+            }
+            throw CLIParseError("unexpected argument: \(flag)")
+        }
+    }
+
+    guard let kind, let sessionId else {
+        throw CLIParseError(usage)
+    }
+    return CLICommand(
+        method: Methods.agentAttach,
+        params: ["kind": .string(kind), "id": .string(sessionId)],
+        outputMode: .none
+    )
 }
 
 private func parseTodo(_ args: [String]) throws -> CLICommand {

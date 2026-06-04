@@ -9,6 +9,7 @@
 // arm) so the per-file failure-site count stays exact.
 import Foundation
 import Testing
+import DanTermProtocol
 
 @testable import DanTermCore
 
@@ -782,6 +783,107 @@ import Testing
         #expect(todos[0].isDone == true)
         #expect(todos[1].text == "task two")
         #expect(todos[1].isDone == false)
+    }
+
+    @Test("snapshot persists agentSession but validateAndBuild does not rehydrate it live")
+    func snapshotPersistsAgentSessionButRestoreDoesNotRehydrateLive() throws {
+        // Intent: a live agentSession is serialized for recovery hints,
+        //   but restored panes do not rehydrate it as live toolbar state.
+        // Why it exists: pins the live-vs-persisted distinction: a
+        //   restored process is dead until an agent hook reports again.
+        // Scenario: DanTerm checkpoints while Claude is running, then
+        //   restores after a crash.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        let session = try #require(AgentSession(kind: "claude", sessionId: "4f3a2b1c"))
+        model.updatePane(paneId) { $0.agentSession = session }
+
+        let snapshot = toSnapshot(model)
+        let pane = try #require(paneSnapshot(paneId.rawValue.uuidString, in: snapshot))
+        #expect(pane.agentSession?.kind == "claude")
+        #expect(pane.agentSession?.sessionId == "4f3a2b1c")
+
+        let rebuilt = try #require(validateAndBuild(snapshot), "snapshot should rebuild")
+        #expect(rebuilt.pane(paneId)?.agentSession == nil)
+    }
+
+    @Test("agentSession snapshot validates only at recovery-message consumption")
+    func agentSessionSnapshotValidatesAtRecoveryConsumption() throws {
+        // Intent: raw on-disk AgentSessionSnapshot data must pass through
+        //   AgentSession validation before it can become a recovery env var.
+        // Why it exists: one corrupted or malicious saved hint must not
+        //   print terminal escapes or shell-shaped text into a restored pane.
+        // Scenario: a valid stored Claude id yields a recovery var; an
+        //   invalid stored id is silently dropped.
+        let valid = AgentSessionSnapshot(kind: "claude", sessionId: "4f3a2b1c")
+        let validMessage = try #require(AgentSession(kind: valid.kind, sessionId: valid.sessionId)?.recoveryMessage)
+        let validEnv = Dictionary(uniqueKeysWithValues: restoreLaunchEnvironment(
+            ipcSocketPath: "/tmp/danterm/control.sock",
+            paneId: PaneId(),
+            token: "secret-token",
+            scrollbackFilePath: nil,
+            agentRecoveryMessage: validMessage
+        ))
+        #expect(validEnv[EnvVars.agentRecovery] == "[DanTerm] You were inside Claude session 4f3a2b1c -- resume with: claude -r 4f3a2b1c")
+
+        let invalid = AgentSessionSnapshot(kind: "claude", sessionId: "bad;id")
+        let invalidMessage = AgentSession(kind: invalid.kind, sessionId: invalid.sessionId)?.recoveryMessage
+        let invalidEnv = Dictionary(uniqueKeysWithValues: restoreLaunchEnvironment(
+            ipcSocketPath: "/tmp/danterm/control.sock",
+            paneId: PaneId(),
+            token: "secret-token",
+            scrollbackFilePath: nil,
+            agentRecoveryMessage: invalidMessage
+        ))
+        #expect(invalidEnv[EnvVars.agentRecovery] == nil)
+    }
+
+    @Test("malformed agentSession snapshot does not reject restore")
+    func malformedAgentSessionSnapshotDoesNotRejectRestore() throws {
+        // Intent: malformed optional agentSession data is treated as a bad
+        //   recovery hint, not as a reason to reject the whole checkpoint.
+        // Why it exists: one corrupted on-disk hint must not prevent the pane
+        //   tree from restoring.
+        // Scenario: an imported or hand-edited checkpoint has an agentSession
+        //   object with a non-string kind and no sessionId.
+        let json = """
+        {
+          "version": 2,
+          "model": {
+            "groups": [{
+              "id": "E53A57E9-1B39-4E15-B2AD-CA6B8700F17A",
+              "name": "General",
+              "isDefault": true,
+              "tabs": [{
+                "id": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2",
+                "focusedPaneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
+                "rootNode": { "type": "leaf", "pane": {
+                  "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
+                  "title": "Terminal",
+                  "agentSession": { "kind": 42 }
+                } }
+              }]
+            }],
+            "selectedTabId": "89B4C232-C840-42A8-8CA6-C133C8EBBFF2"
+          }
+        }
+        """
+        let loaded = try loadValidatedInitFile(from: json.data(using: .utf8)!)
+        let pane = try #require(allPaneSnapshots(loaded.snapshot).first)
+        let message = pane.agentSession.flatMap {
+            AgentSession(kind: $0.kind, sessionId: $0.sessionId)
+        }?.recoveryMessage
+        let env = Dictionary(uniqueKeysWithValues: restoreLaunchEnvironment(
+            ipcSocketPath: "/tmp/danterm/control.sock",
+            paneId: PaneId(),
+            token: "secret-token",
+            scrollbackFilePath: nil,
+            agentRecoveryMessage: message
+        ))
+
+        #expect(loaded.model.allPaneIds.count == 1)
+        #expect(env[EnvVars.agentRecovery] == nil)
     }
 
     @Test("snapshot round-trip preserves tab todos")

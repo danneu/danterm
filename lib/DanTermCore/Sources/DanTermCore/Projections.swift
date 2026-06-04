@@ -210,6 +210,7 @@ struct PaneToolbarRender: Equatable {
   let progress: ProgressState?
   let isRemote: Bool
   let remoteSession: RemoteSession?
+  let agentSession: AgentSession?
   let unreadAlertCount: Int
   let totalTodoCount: Int
   let uncompletedTodoCount: Int
@@ -229,6 +230,7 @@ func desiredPaneToolbar(in model: AppModel) -> [PaneId: PaneToolbarRender] {
       progress: pane.progress,
       isRemote: pane.isRemote,
       remoteSession: pane.remoteSession,
+      agentSession: pane.agentSession,
       unreadAlertCount: model.alerts.count { $0.paneId == pane.id && $0.isUnread },
       totalTodoCount: pane.todos.count,
       uncompletedTodoCount: pane.todos.count { !$0.isDone }

@@ -2932,13 +2932,13 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
 
     // MARK: - desiredPaneToolbar (pane-toolbar projection, Stage 4)
 
-    @Test("desiredPaneToolbar: derives all eight toolbar fields from the model + pane")
+    @Test("desiredPaneToolbar: derives all toolbar fields from the model + pane")
     func desiredPaneToolbarDerivesAllFields() {
         // Intent: the projection derives title, cwd, progress, isRemote,
-        //   remoteSession, unreadAlertCount, totalTodoCount, and
-        //   uncompletedTodoCount from the pane + model.alerts.
-        // Why it exists: pins the eight-field render contract so a UI
-        //   refactor cannot silently drop a field.
+        //   remoteSession, agentSession, unreadAlertCount, totalTodoCount,
+        //   and uncompletedTodoCount from the pane + model.alerts.
+        // Why it exists: pins the toolbar render contract so a UI refactor
+        //   cannot silently drop a field.
         // Scenario: spec-first full-field check -- a populated pane with
         //   two unread + one read alert renders the documented
         //   PaneToolbarRender.
@@ -2951,6 +2951,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
             $0.progress = .set(percent: 42)
             $0.isRemote = true
             $0.remoteSession = RemoteSession(user: "dan", host: "caja")
+            $0.agentSession = AgentSession(kind: "claude", sessionId: "4f3a2b1c")
             $0.todos = [
                 TodoItem(id: UUID(), text: "a", isDone: false),
                 TodoItem(id: UUID(), text: "b", isDone: true),
@@ -2970,10 +2971,11 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
                 progress: .set(percent: 42),
                 isRemote: true,
                 remoteSession: RemoteSession(user: "dan", host: "caja"),
+                agentSession: AgentSession(kind: "claude", sessionId: "4f3a2b1c"),
                 unreadAlertCount: 2,
                 totalTodoCount: 3,
                 uncompletedTodoCount: 2),
-            "all eight toolbar fields derive from the pane + model.alerts")
+            "all toolbar fields derive from the pane + model.alerts")
     }
 
     @Test("desiredPaneToolbar: keyed over every live pane")
