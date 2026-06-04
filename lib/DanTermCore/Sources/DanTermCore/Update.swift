@@ -510,13 +510,16 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
 
     case .commandEnded(let paneId):
         guard let pane = model.pane(paneId) else { return [] }
+        let hadAgentSession = pane.agentSession != nil
         model.updatePane(paneId) { p in
             p.isRemote = false
             p.remoteSession = nil
+            p.agentSession = nil
         }
-        guard pane.remoteThemeOverride != nil else { return [] }
-        model.updatePane(paneId) { $0.remoteThemeOverride = nil }
-        return []
+        if pane.remoteThemeOverride != nil {
+            model.updatePane(paneId) { $0.remoteThemeOverride = nil }
+        }
+        return hadAgentSession ? [.scheduleCheckpoint] : []
 
     // MARK: - Remote Detection
 
@@ -1496,6 +1499,28 @@ private func handleIpcRequest(
         } catch {
             return ipcInvalidParams(reqId, "invalid pane info params")
         }
+
+    case Methods.agentAttach:
+        guard case .object(let object) = params,
+              case .string(let kind)? = object["kind"],
+              case .string(let sessionId)? = object["id"],
+              let session = AgentSession(kind: kind, sessionId: sessionId)
+        else {
+            return ipcInvalidParams(reqId, "invalid agent session")
+        }
+        let paneId: PaneId
+        do {
+            paneId = try resolveTargetPane(params: params, context: context, in: model)
+        } catch let error as IpcParamsError {
+            return ipcInvalidParams(reqId, error.message)
+        } catch {
+            return ipcInvalidParams(reqId, "invalid agent session")
+        }
+        model.updatePane(paneId) { $0.agentSession = session }
+        return [
+            .scheduleCheckpoint,
+            .ipcReply(reqId: reqId, result: .object(["ok": .bool(true)])),
+        ]
 
     case Methods.tabRename:
         guard case .object(let object) = params else {

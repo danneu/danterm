@@ -13,6 +13,7 @@ public enum Methods {
     public static let paneInput = "pane.input"
     public static let paneRead = "pane.read"
     public static let themeSet = "theme.set"
+    public static let agentAttach = "agent.attach"
     public static let todoList = "todo.list"
     public static let todoAdd = "todo.add"
     public static let todoEdit = "todo.edit"

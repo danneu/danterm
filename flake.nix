@@ -47,6 +47,12 @@
             bashOptions = [ ];
             text = builtins.readFile ./integrations/claude-code/claude-notify-osc777.sh;
           };
+          danterm-claude-agent-session = final.writeShellApplication {
+            name = "danterm-claude-agent-session";
+            runtimeInputs = [ final.jq ];
+            bashOptions = [ ];
+            text = builtins.readFile ./integrations/claude-code/danterm-agent-session.sh;
+          };
           danterm-agent-skill = final.stdenvNoCC.mkDerivation {
             pname = "danterm-agent-skill";
             version = "0.0.0";
@@ -70,6 +76,7 @@
         {
           danterm-agent-skill = pkgs.danterm-agent-skill;
           claude-notify-osc777 = pkgs.danterm-claude-notify-osc777;
+          claude-agent-session = pkgs.danterm-claude-agent-session;
         }
         // nixpkgs.lib.optionalAttrs (builtins.elem system appSystems) {
           default = pkgs.danterm;
@@ -124,6 +131,22 @@
                 chmod -R u+w integrations
                 HOOK_UNDER_TEST=${self.packages.${system}.claude-notify-osc777}/bin/danterm-claude-notify-osc777 \
                   ${pkgs.bash}/bin/bash integrations/claude-code/claude-notify-osc777.test.sh
+                touch $out
+              '';
+          claude-agent-session =
+            pkgs.runCommand "danterm-claude-agent-session-test"
+              {
+                nativeBuildInputs = with pkgs; [
+                  bash
+                  jq
+                ];
+              }
+              ''
+                mkdir -p integrations
+                cp -R ${./integrations/claude-code} integrations/claude-code
+                chmod -R u+w integrations
+                HOOK_UNDER_TEST=${self.packages.${system}.claude-agent-session}/bin/danterm-claude-agent-session \
+                  ${pkgs.bash}/bin/bash integrations/claude-code/danterm-agent-session.test.sh
                 touch $out
               '';
         }

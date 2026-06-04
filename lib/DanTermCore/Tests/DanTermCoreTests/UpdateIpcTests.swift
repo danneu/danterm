@@ -69,6 +69,61 @@ import DanTermProtocol
         #expect(leaf?["pane"]?["id"] != nil, "leaf rootNode should embed its pane")
     }
 
+    @Test("agent.attach stores session on context pane and schedules checkpoint")
+    func agentAttachStoresSessionOnContextPane() throws {
+        // Intent: agent.attach validates the reported agent session and
+        //   stores it on the pane named by IPC context.
+        // Why it exists: pins the hook -> CLI -> IPC path that drives the
+        //   live toolbar chip and crash-recovery checkpoint.
+        // Scenario: a Claude SessionStart hook reports its session id from
+        //   inside a DanTerm pane.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+
+        let commands = sendIpc(
+            &model,
+            method: Methods.agentAttach,
+            params: .object([
+                "kind": .string("Claude"),
+                "id": .string("4f3a2b1c-0000-4000-9000-abcdef123456"),
+            ]),
+            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        )
+
+        let reply = try requireIpcReply(commands)
+        #expect(reply["ok"]?.asBool == true)
+        #expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false })
+        #expect(model.pane(paneId)?.agentSession == AgentSession(kind: "claude", sessionId: "4f3a2b1c-0000-4000-9000-abcdef123456"))
+    }
+
+    @Test("agent.attach rejects invalid params without changing pane")
+    func agentAttachRejectsInvalidParams() throws {
+        // Intent: unsafe kind/session id input returns invalid-params and
+        //   leaves the pane's live agent session nil.
+        // Why it exists: guards the toolbar and recovery-line paths against
+        //   terminal escape, shell metacharacter, and CLI flag injection.
+        // Scenario: a malicious pane process tries to report a flag-shaped id.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+
+        let commands = sendIpc(
+            &model,
+            method: Methods.agentAttach,
+            params: .object([
+                "kind": .string("claude"),
+                "id": .string("--dangerously-skip-permissions"),
+            ]),
+            context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
+        )
+
+        let error = try requireIpcError(commands)
+        #expect(error.code == -32602)
+        #expect(model.pane(paneId)?.agentSession == nil)
+        #expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false } == false)
+    }
+
     @Test("pane.info explicit pane returns containing pane tab and group")
     func paneInfoExplicitPaneReturnsContainingTabAndGroup() throws {
         // Intent: pane.info with an explicit pane returns the pane's

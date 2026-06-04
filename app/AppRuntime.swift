@@ -1132,12 +1132,22 @@ class AppRuntime {
                         let ps = loaded.paneSnapshots[paneId]
                         let resolved = ps.map { resolveLaunch($0) }
                         let token = stagedTokenStore.generate(for: paneId)
-                        var envVars: [(String, String)] = [("DANTERM_TOKEN", token)]
+                        var scrollbackFilePath: String?
                         if let scrollback = ps?.scrollback,
                            let replayURL = writeReplayFile(scrollback: scrollback) {
                             stagedReplayFiles[paneId] = replayURL
-                            envVars.append(("DANTERM_RESTORE_SCROLLBACK_FILE", replayURL.path))
+                            scrollbackFilePath = replayURL.path
                         }
+                        let recoveryMessage = ps?.agentSession.flatMap {
+                            AgentSession(kind: $0.kind, sessionId: $0.sessionId)
+                        }?.recoveryMessage
+                        let envVars = restoreLaunchEnvironment(
+                            ipcSocketPath: ipcSocketPath.path,
+                            paneId: paneId,
+                            token: token,
+                            scrollbackFilePath: scrollbackFilePath,
+                            agentRecoveryMessage: recoveryMessage
+                        )
                         let view = makeTerminalView(
                             paneId: paneId,
                             workingDirectory: resolved?.cwd,

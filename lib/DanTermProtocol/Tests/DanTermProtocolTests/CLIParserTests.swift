@@ -76,6 +76,28 @@ final class CLIParserTests: XCTestCase {
         XCTAssertEqual(implicit.params["pane"], nil)
     }
 
+    func testAgentAttachParsesToSilentMutation() throws {
+        let command = try parseCLI(["agent", "attach", "--kind", "claude", "--id", "4f3a2b1c"])
+
+        XCTAssertEqual(command.method, Methods.agentAttach)
+        XCTAssertEqual(command.outputMode, .none)
+        XCTAssertEqual(command.params["kind"], .string("claude"))
+        XCTAssertEqual(command.params["id"], .string("4f3a2b1c"))
+    }
+
+    func testAgentAttachMissingFlagsThrowUsage() {
+        for args in [
+            ["agent", "attach", "--kind", "claude"],
+            ["agent", "attach", "--id", "4f3a2b1c"],
+            ["agent", "attach", "--kind"],
+            ["agent", "attach", "--id"],
+        ] {
+            XCTAssertThrowsError(try parseCLI(args)) { err in
+                XCTAssertEqual((err as? CLIParseError)?.message, "usage: danterm agent attach --kind <kind> --id <session-id>")
+            }
+        }
+    }
+
     func testExplicitTargetFlagsParse() throws {
         let newTab = try parseCLI(["tab", "new", "--group", "G1"])
         XCTAssertEqual(newTab.method, Methods.tabNew)

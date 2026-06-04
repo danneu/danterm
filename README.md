@@ -204,6 +204,42 @@ executable and ensure `jq` is installed on PATH.
 DanTerm turns OSC 777 and OSC 9 messages into a macOS notification that, when
 clicked, will take you to the originating pane.
 
+### Claude session recovery hook
+
+DanTerm can also show a per-pane Claude session indicator and persist a crash
+recovery hint. Wire Claude Code's `SessionStart` hook to the packaged script:
+
+```nix
+command = "${pkgs.danterm-claude-agent-session}/bin/danterm-claude-agent-session";
+timeout = 6;
+```
+
+For raw Claude Code JSON settings, point `SessionStart` at the resolved package
+binary path:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/absolute/path/to/danterm-claude-agent-session",
+            "timeout": 6
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Without Nix, copy
+[`integrations/claude-code/danterm-agent-session.sh`](integrations/claude-code/danterm-agent-session.sh)
+somewhere on your machine and use that path as the command. Make the script
+executable and ensure `jq` and `danterm` are installed on PATH.
+
 ## Agent Skill
 
 DanTerm ships an [Agent Skill](https://code.claude.com/docs/en/skills) under
@@ -281,6 +317,12 @@ if [[ -n "$DANTERM_RESTORE_SCROLLBACK_FILE" ]]; then
   unset _danterm_sbf
 fi
 
+# One-time agent-session recovery hint from a previous DanTerm session
+if [[ -n "$DANTERM_AGENT_RECOVERY" ]]; then
+  printf '%s\n' "$DANTERM_AGENT_RECOVERY"
+  unset DANTERM_AGENT_RECOVERY
+fi
+
 # Report current command to DanTerm.app
 if [[ -n "$DANTERM_TOKEN" ]]; then
   typeset -g _danterm_tok="$DANTERM_TOKEN"
@@ -337,6 +379,12 @@ if set -q DANTERM_RESTORE_SCROLLBACK_FILE
     /bin/cat -- "$f" 2>/dev/null; or true
     /bin/rm -f -- "$f" >/dev/null 2>&1; or true
   end
+end
+
+# One-time agent-session recovery hint from a previous DanTerm session
+if set -q DANTERM_AGENT_RECOVERY
+  printf '%s\n' "$DANTERM_AGENT_RECOVERY"
+  set -e DANTERM_AGENT_RECOVERY
 end
 
 # Report current command to DanTerm.app

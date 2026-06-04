@@ -154,6 +154,9 @@ private func toPaneSnapshot(_ pane: PaneModel, home: String) -> PaneSnapshot {
     theme: pane.theme
   )
   snapshot.todos = todoSnapshots
+  snapshot.agentSession = pane.agentSession.map {
+    AgentSessionSnapshot(kind: $0.kind, sessionId: $0.sessionId)
+  }
   return snapshot
 }
 
