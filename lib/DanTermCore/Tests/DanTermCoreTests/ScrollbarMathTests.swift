@@ -135,7 +135,7 @@ import Testing
         //   must map back to the same scrollback row that drove the layout.
         //   Replaces the legacy in-test `for`-loop with `@Test(arguments:)`
         //   for per-case reporting; the 4 arguments mirror the original loop's
-        //   4 iterations (see test-inventory.txt note).
+        //   4 iterations.
         let total: UInt64 = 1000
         let len: UInt64 = 40
         let cellHeight: CGFloat = 15

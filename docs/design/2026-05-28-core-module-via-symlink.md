@@ -120,9 +120,10 @@ retired. `tests/` is deleted; the core suite runs under
   same-module-via-symlink decision and its access-control rationale), R2 (the
   injectable recovery-path seam in `Persistence.swift` that lets
   `CheckpointTests` use a per-test temp dir), and R3 (UI tests stay local).
-- The parity inventory (`test-inventory.txt`) records baseline + new
-  failure-site counts per file plus the two intentional deltas allowed under the
-  Phase 2 gate (`CheckpointTests`' on-disk strengthening, `ScrollbarMathTests`'
-  parameterized `@Test(arguments:)` collapse).
+- The migration was gated against a parity inventory (`test-inventory.txt`,
+  since removed as scaffolding once the migration completed) that recorded
+  baseline + new failure-site counts per file plus the two intentional deltas
+  allowed under the Phase 2 gate (`CheckpointTests`' on-disk strengthening,
+  `ScrollbarMathTests`' parameterized `@Test(arguments:)` collapse).
 - The local core-purity lint is at `scripts/core-purity-lint.sh`; its self-test
   is at `scripts/tests/core-purity-lint_test.sh`.
