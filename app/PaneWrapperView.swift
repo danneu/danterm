@@ -148,7 +148,7 @@ class PaneWrapperView: NSView {
         ]
         NSLayoutConstraint.activate(compactRemoteConstraints)
 
-        // Agent accessory: teal background with CPU icon, hidden by default
+        // Agent accessory: teal background with sparkles icon, hidden by default
         agentAccessory.translatesAutoresizingMaskIntoConstraints = false
         agentAccessory.wantsLayer = true
         agentAccessory.layer?.backgroundColor = NSColor.systemTeal.cgColor
@@ -156,7 +156,7 @@ class PaneWrapperView: NSView {
         agentAccessory.setContentHuggingPriority(.required, for: .horizontal)
 
         agentIcon.translatesAutoresizingMaskIntoConstraints = false
-        agentIcon.image = NSImage(systemSymbolName: "cpu", accessibilityDescription: "Agent session")
+        agentIcon.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "Agent session")
         agentIcon.contentTintColor = .white
         agentIcon.imageScaling = .scaleProportionallyDown
         agentAccessory.addSubview(agentIcon)
