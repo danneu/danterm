@@ -171,6 +171,7 @@ class PaneWrapperView: NSView {
         dragHandle.runtime = runtime
         dragHandle.paneId = paneId
         dragHandle.alertBadge = alertBadge
+        dragHandle.paneMenuProvider = { [weak self] in self?.makePaneMenu() }
         toolbar.addSubview(dragHandle)
 
         // Add buttons to toolbar (on top of drag handle)
@@ -330,7 +331,8 @@ class PaneWrapperView: NSView {
         searchOverlay = nil
     }
 
-    @objc private func showPaneMenu() {
+    /// Builds the pane context menu fresh so dynamic item state reflects the current model.
+    func makePaneMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
@@ -363,6 +365,11 @@ class PaneWrapperView: NSView {
         close.target = self
         menu.addItem(close)
 
+        return menu
+    }
+
+    @objc private func showPaneMenu() {
+        let menu = makePaneMenu()
         let point = NSPoint(x: 0, y: menuButton.bounds.height + 2)
         menu.popUp(positioning: nil, at: point, in: menuButton)
     }
@@ -406,10 +413,17 @@ class ToolbarDragHandleView: NSView, NSDraggingSource {
     weak var runtime: AppRuntime?
     var paneId: PaneId?
     weak var alertBadge: NSView?
+    /// Supplies the pane context menu without coupling this drag handle to its owner.
+    var paneMenuProvider: (() -> NSMenu?)?
     private var mouseDownEvent: NSEvent?
     private var dragOrigin: NSPoint?
     private var isDragging = false
     private var badgeClickCandidate = false
+
+    // NSView: AppKit calls this on right-click / control-click and pops up the returned menu.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        paneMenuProvider?()
+    }
 
     // Show open hand on hover to indicate draggability.
     override func resetCursorRects() {
