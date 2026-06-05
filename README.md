@@ -240,6 +240,49 @@ Without Nix, copy
 somewhere on your machine and use that path as the command. Make the script
 executable and ensure `jq` and `danterm` are installed on PATH.
 
+### Codex session recovery hook
+
+DanTerm can show the same per-pane session indicator and crash recovery hint for
+Codex. Wire Codex's `SessionStart` hook to the packaged script:
+
+```nix
+command = "${pkgs.danterm-codex-agent-session}/bin/danterm-codex-agent-session";
+timeout = 10;
+```
+
+For raw Codex JSON settings, point `SessionStart` at the resolved package binary
+path:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/absolute/path/to/danterm-codex-agent-session",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Without Nix, copy
+[`integrations/codex/danterm-agent-session.sh`](integrations/codex/danterm-agent-session.sh)
+somewhere on your machine and use that path as the command. Make the script
+executable and ensure `jq` and `danterm` are installed on PATH.
+
+Codex fires `SessionStart` lazily on the first prompt submission, so the chip
+appears after the first message rather than at launch. Codex has no session-end
+hook; DanTerm clears the chip through its shell-integration process-end signal.
+The hook is intentionally stdout-silent because Codex adds `SessionStart` stdout
+as extra developer context. Codex may ask you to trust the hook once before it
+runs.
+
 ## Agent Skill
 
 DanTerm ships an [Agent Skill](https://code.claude.com/docs/en/skills) under
