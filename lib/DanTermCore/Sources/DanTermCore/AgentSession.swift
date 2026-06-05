@@ -26,8 +26,10 @@ struct AgentSession: Equatable {
         self.sessionId = sessionId
     }
 
+    /// Text for the pane toolbar's agent chip: the agent display name only. The
+    /// full session id lives in the chip tooltip so the visible chip stays compact.
     var toolbarLabel: String {
-        "\(AgentCatalog.displayName(for: kind)) \(sessionId.prefix(8))"
+        AgentCatalog.displayName(for: kind)
     }
 
     var recoveryMessage: String {

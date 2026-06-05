@@ -17,7 +17,7 @@ struct AgentSessionTests {
 
         #expect(session.kind == "claude")
         #expect(session.sessionId == "4f3a2b1c-0000-4000-9000-abcdef123456")
-        #expect(session.toolbarLabel == "Claude 4f3a2b1c")
+        #expect(session.toolbarLabel == "Claude")
         #expect(AgentCatalog.resumeCommand(for: session) == "claude -r 4f3a2b1c-0000-4000-9000-abcdef123456")
         #expect(session.recoveryMessage == "[DanTerm] You were inside Claude session 4f3a2b1c-0000-4000-9000-abcdef123456 -- resume with: claude -r 4f3a2b1c-0000-4000-9000-abcdef123456")
     }
@@ -26,7 +26,7 @@ struct AgentSessionTests {
     func supportsCodexResumeCommand() throws {
         let session = try #require(AgentSession(kind: "codex", sessionId: "thread_1234abcd"))
 
-        #expect(session.toolbarLabel == "Codex thread_1")
+        #expect(session.toolbarLabel == "Codex")
         #expect(AgentCatalog.resumeCommand(for: session) == "codex resume thread_1234abcd")
         #expect(session.recoveryMessage == "[DanTerm] You were inside Codex session thread_1234abcd -- resume with: codex resume thread_1234abcd")
     }
@@ -37,7 +37,7 @@ struct AgentSessionTests {
 
         #expect(AgentCatalog.displayName(for: session.kind) == "Future_Agent")
         #expect(AgentCatalog.resumeCommand(for: session) == nil)
-        #expect(session.toolbarLabel == "Future_Agent abc123")
+        #expect(session.toolbarLabel == "Future_Agent")
         #expect(session.recoveryMessage == "[DanTerm] You were inside a Future_Agent session abc123")
     }
 
