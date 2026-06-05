@@ -211,7 +211,7 @@ recovery hint. Wire Claude Code's `SessionStart` hook to the packaged script:
 
 ```nix
 command = "${pkgs.danterm-claude-agent-session}/bin/danterm-claude-agent-session";
-timeout = 6;
+timeout = 2;
 ```
 
 For raw Claude Code JSON settings, point `SessionStart` at the resolved package
@@ -226,7 +226,7 @@ binary path:
           {
             "type": "command",
             "command": "/absolute/path/to/danterm-claude-agent-session",
-            "timeout": 6
+            "timeout": 2
           }
         ]
       }
@@ -247,7 +247,7 @@ Codex. Wire Codex's `SessionStart` hook to the packaged script:
 
 ```nix
 command = "${pkgs.danterm-codex-agent-session}/bin/danterm-codex-agent-session";
-timeout = 10;
+timeout = 2;
 ```
 
 For raw Codex JSON settings, point `SessionStart` at the resolved package binary
@@ -262,7 +262,7 @@ path:
           {
             "type": "command",
             "command": "/absolute/path/to/danterm-codex-agent-session",
-            "timeout": 10
+            "timeout": 2
           }
         ]
       }
