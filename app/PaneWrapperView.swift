@@ -30,6 +30,7 @@ class PaneWrapperView: NSView {
     private let agentSessionLabel: NonHitTestingLabel
     private var compactAgentConstraints: [NSLayoutConstraint] = []
     private var expandedAgentConstraints: [NSLayoutConstraint] = []
+    private var expandedAgentWidthConstraint: NSLayoutConstraint?
     // Tracks which remote constraint set is active so toolbar text churn does not
     // re-toggle layout constraints unless the compact/expanded mode changes.
     private var remoteExpanded = false
@@ -148,10 +149,10 @@ class PaneWrapperView: NSView {
         ]
         NSLayoutConstraint.activate(compactRemoteConstraints)
 
-        // Agent accessory: teal background with sparkles icon, hidden by default
+        // Agent accessory: indigo background with sparkles icon, hidden by default
         agentAccessory.translatesAutoresizingMaskIntoConstraints = false
         agentAccessory.wantsLayer = true
-        agentAccessory.layer?.backgroundColor = NSColor.systemTeal.cgColor
+        agentAccessory.layer?.backgroundColor = NSColor.systemIndigo.cgColor
         agentAccessory.isHidden = true
         agentAccessory.setContentHuggingPriority(.required, for: .horizontal)
 
@@ -179,13 +180,15 @@ class PaneWrapperView: NSView {
             agentIcon.centerXAnchor.constraint(equalTo: agentAccessory.centerXAnchor),
             agentAccessory.widthAnchor.constraint(equalToConstant: 22),
         ]
+        let expandedAgentWidthConstraint = agentAccessory.widthAnchor.constraint(greaterThanOrEqualToConstant: 22)
+        self.expandedAgentWidthConstraint = expandedAgentWidthConstraint
         expandedAgentConstraints = [
             agentIcon.leadingAnchor.constraint(equalTo: agentAccessory.leadingAnchor, constant: 4),
             agentSessionLabel.leadingAnchor.constraint(equalTo: agentIcon.trailingAnchor, constant: 4),
             agentSessionLabel.trailingAnchor.constraint(equalTo: agentAccessory.trailingAnchor, constant: -6),
             agentSessionLabel.centerYAnchor.constraint(equalTo: agentAccessory.centerYAnchor),
             agentSessionLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 240),
-            agentAccessory.widthAnchor.constraint(greaterThanOrEqualToConstant: 22),
+            expandedAgentWidthConstraint,
         ]
         NSLayoutConstraint.activate(compactAgentConstraints)
 
@@ -325,7 +328,8 @@ class PaneWrapperView: NSView {
         agentAccessory.isHidden = agentSession == nil
         agentSessionLabel.stringValue = agentSession?.toolbarLabel ?? ""
         agentSessionLabel.isHidden = agentSession == nil
-        agentAccessory.toolTip = agentSession.map { "\(AgentCatalog.displayName(for: $0.kind)) session \($0.sessionId)" }
+        agentAccessory.toolTip = agentSession.map { "\($0.kind) session \($0.sessionId)" }
+        updateExpandedAgentWidth()
         let agentExpanded = agentSession != nil
         if agentExpanded != self.agentExpanded {
             self.agentExpanded = agentExpanded
@@ -339,6 +343,17 @@ class PaneWrapperView: NSView {
         }
         alertBadge.updateBadge(count: unreadAlertCount)
         todoButton.update(totalCount: totalTodoCount, uncompletedCount: uncompletedTodoCount)
+    }
+
+    private func updateExpandedAgentWidth() {
+        guard let expandedAgentWidthConstraint else { return }
+        guard !agentSessionLabel.isHidden else {
+            expandedAgentWidthConstraint.constant = 22
+            return
+        }
+
+        let labelWidth = min(ceil(agentSessionLabel.intrinsicContentSize.width), 240)
+        expandedAgentWidthConstraint.constant = 4 + 14 + 4 + labelWidth + 6
     }
 
     /// Anchor view for the TODO popover.

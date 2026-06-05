@@ -9,6 +9,8 @@ import Foundation
 /// The live value is intentionally not Codable: checkpoints persist the raw
 /// `AgentSessionSnapshot` DTO, then validate again at recovery-message consumption.
 struct AgentSession: Equatable {
+    private static let toolbarLabelPrefixLength = 6
+
     var kind: String
     var sessionId: String
 
@@ -26,10 +28,10 @@ struct AgentSession: Equatable {
         self.sessionId = sessionId
     }
 
-    /// Text for the pane toolbar's agent chip: the agent display name only. The
-    /// full session id lives in the chip tooltip so the visible chip stays compact.
+    /// Text for the pane toolbar's agent chip: a compact, lowercase kind only.
+    /// The full session id lives in the chip tooltip so the chip stays compact.
     var toolbarLabel: String {
-        AgentCatalog.displayName(for: kind)
+        Self.truncatedToolbarLabel(kind)
     }
 
     var recoveryMessage: String {
@@ -78,6 +80,11 @@ struct AgentSession: Equatable {
         (97...122).contains(Int(scalar.value))
             || (65...90).contains(Int(scalar.value))
             || (48...57).contains(Int(scalar.value))
+    }
+
+    private static func truncatedToolbarLabel(_ value: String) -> String {
+        guard value.count > toolbarLabelPrefixLength else { return value }
+        return "\(value.prefix(toolbarLabelPrefixLength))…"
     }
 }
 
