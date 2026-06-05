@@ -408,15 +408,20 @@ All behavioral and structure-insensitive:
    the recovery session lock). Relaunch -> the restored pane prints
    `[DanTerm] You were inside Claude session <id> -- resume with: claude -r <id>`
    exactly once. Run that command -> the conversation resumes.
-6. Repeat (4)-(5) for Codex once its hook event is confirmed.
+6. Repeat (4)-(5) for Codex by wiring the Codex `SessionStart` hook to
+   `integrations/codex/danterm-agent-session.sh`; the chip appears after the
+   first prompt because Codex fires `SessionStart` lazily.
 
 ## Out of scope / follow-ups / risks
 
-- **Codex hook is deferred** until its session-start hook event + payload schema
-  are confirmed (and that `$CODEX_THREAD_ID` is in the hook env). The model, CLI
-  verb, and catalog already support `codex` (incl. `codex resume <id>`), so
-  enabling Codex later is purely additive: a hook script + wiring, no core
-  change. Shipping Claude end-to-end first removes the schema uncertainty.
+- **Codex 0.137 hook shape is confirmed:** interactive TUI `SessionStart`
+  receives the same stdin JSON schema as Claude, including `session_id`; the id
+  is not taken from `$CODEX_THREAD_ID` or another environment variable. Codex
+  fires `SessionStart` lazily on first prompt submission, has no `SessionEnd`
+  hook, and detach remains agent-agnostic through `CMD_END` / process exit. The
+  hook intentionally ignores `source`: Codex docs list
+  `startup`/`resume`/`clear`/`compact`, but 0.137 was observed sending
+  `startup` even for resume/fork.
 - **Nix hook wiring** (Claude `SessionStart` -> packaged script) lives in the
   world repo (`common/claude-code.nix`); documented here, applied separately.
 - **Nested agents** (agent A spawns a shell that runs agent B in the same pane)
@@ -444,5 +449,5 @@ All behavioral and structure-insensitive:
 - `~/world/scripts/tests/danterm-integration_test.sh`: exercise the README
   `DANTERM_AGENT_RECOVERY` shell snippet so the one-time recovery hint print is
   covered outside this repo.
-- Confirm the Codex hook event and payload schema, then add a Codex hook script
-  and wiring that calls `danterm agent attach --kind codex --id <thread-id>`.
+- `~/world/common/codex.nix`: wire Codex `SessionStart` to the packaged
+  `danterm-codex-agent-session` hook and set the native hook `timeout = 10`.
