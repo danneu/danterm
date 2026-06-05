@@ -1145,6 +1145,39 @@ import Testing
         #expect(targetTab.isZoomed == false, "target zoom should be cleared after move")
     }
 
+    @Test("testMovePaneToTabZoomedSourceUnzooms")
+    func testMovePaneToTabZoomedSourceUnzooms() {
+        // Intent: moving a pane out of a zoomed source tab via movePaneToTab
+        //   unzooms the source and repoints its focus onto the surviving pane,
+        //   while the moved pane lands in the target.
+        // Why it exists: locks down the pure-core contract that the AppKit
+        //   "drag a zoomed pane to another tab" capability rides on, so a future
+        //   refactor of the move handlers can't silently re-break zoomed-pane drags.
+        // Scenario: spec-first -- a tab is split into two panes and zoomed (the
+        //   zoomed/focused pane is the one dragged); dropping it onto another tab
+        //   row merges it there and the source tab unzooms to show its survivor.
+        var model = makeModel()
+        createTab(&model)
+        let srcTabId = model.groups[0].tabs[0].id
+        let survivor = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .splitPane(direction: .horizontal))
+        let zoomedPane = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .toggleZoomPane)
+        #expect(model.groups[0].tabs[0].isZoomed == true)
+
+        createTab(&model)
+        let targetTabId = model.groups[0].tabs[1].id
+
+        update(&model, .movePaneToTab(paneId: zoomedPane, targetTabId: targetTabId))
+
+        let srcTab = tabById(srcTabId, in: model)!
+        #expect(srcTab.isZoomed == false, "source zoom should be cleared after move")
+        #expect(srcTab.focusedPaneId == survivor, "source focus should repoint to the survivor")
+
+        let targetTab = tabById(targetTabId, in: model)!
+        #expect(allPaneIds(targetTab.rootNode).contains(zoomedPane), "moved pane should land in the target")
+    }
+
     // MARK: - movePaneToNewTab Tests
 
     @Test("testMovePaneToNewTabPathB_SplitTabCreatesNewTab")
@@ -1189,6 +1222,42 @@ import Testing
             if case .makeFirstResponder(let pid) = $0, pid == paneA { return true }
             return false
         }, "should emit makeFirstResponder for moved pane")
+    }
+
+    @Test("testMovePaneToNewTabPathB_ZoomedSourceUnzooms")
+    func testMovePaneToNewTabPathBZoomedSourceUnzooms() {
+        // Intent: extracting a pane out of a zoomed source tab via
+        //   movePaneToNewTab (path B) unzooms the source and repoints its focus
+        //   onto the survivor, and the freshly built tab holding the moved pane
+        //   is itself unzoomed.
+        // Why it exists: locks down the pure-core contract that the AppKit
+        //   "drag a zoomed pane into a sidebar gap" capability rides on, so a
+        //   future refactor of path B can't silently re-break zoomed-pane drags.
+        // Scenario: spec-first -- a tab is split into two panes and zoomed (the
+        //   zoomed/focused pane is the one dragged); dropping it into a gap
+        //   between sidebar tabs extracts it into a new unzoomed tab and the
+        //   source tab unzooms to show its survivor.
+        var model = makeModel()
+        createTab(&model)
+        let srcTabId = model.groups[0].tabs[0].id
+        let survivor = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .splitPane(direction: .horizontal))
+        let zoomedPane = model.groups[0].tabs[0].focusedPaneId
+        let groupId = model.groups[0].id
+        update(&model, .toggleZoomPane)
+        #expect(model.groups[0].tabs[0].isZoomed == true)
+
+        update(&model, .movePaneToNewTab(paneId: zoomedPane, inGroupId: groupId, atIndex: 1))
+
+        #expect(model.groups[0].tabs.count == 2, "should have 2 tabs")
+        let srcTab = tabById(srcTabId, in: model)!
+        #expect(srcTab.isZoomed == false, "source zoom should be cleared after move")
+        #expect(srcTab.focusedPaneId == survivor, "source focus should repoint to the survivor")
+
+        let newTab = model.groups[0].tabs.first(where: { $0.id != srcTabId })!
+        #expect(allPaneIds(newTab.rootNode).contains(zoomedPane), "moved pane should land in the new tab")
+        #expect(newTab.focusedPaneId == zoomedPane, "new tab should focus the moved pane")
+        #expect(newTab.isZoomed == false, "new tab should start unzoomed")
     }
 
     @Test("testMovePaneToNewTabPathA_SinglePaneMoveTab")

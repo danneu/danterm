@@ -581,9 +581,11 @@ class ToolbarDragHandleView: NSView, NSDraggingSource {
             let distance = sqrt(dx * dx + dy * dy)
             guard distance > 5 else { return }
 
-            // Don't start drag if tab is zoomed, or single-pane with no other tabs
+            // Allow the drag unless there's nowhere to drop: a single pane in the only tab.
+            // A zoomed pane always has splits, so hasSplits is true and the drag starts; the
+            // sidebar can then move it to another tab. In-tab split/swap targets aren't mounted
+            // while zoomed, so those drops stay inert (PaneDragCoordinator skips nil frames).
             guard let tab = selectedTab(in: runtime.model) else { return }
-            guard !tab.isZoomed else { return }
             let hasSplits: Bool
             if case .split = tab.rootNode { hasSplits = true } else { hasSplits = false }
             guard hasSplits || totalTabCount(runtime.model) > 1 else { return }
