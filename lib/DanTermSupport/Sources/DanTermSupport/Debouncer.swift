@@ -2,8 +2,10 @@
 // once, reschedule many: each schedule(after:) re-arms the same timer to fire
 // after the last call, coalescing a burst into one trailing fire. The
 // reschedule-instead-of-recreate shape eliminates per-call timer-object churn
-// while preserving trailing-edge timing exactly. No AppKit/GhosttyKit dependency
-// so it can be compiled in both the app build and the unit test build.
+// while preserving the trailing deadline by default; callers that tolerate
+// delayed delivery can pass a leeway window so the OS can coalesce wakeups. No
+// AppKit/GhosttyKit dependency so it can be compiled in both the app build and
+// the unit test build.
 
 import Foundation
 
@@ -29,17 +31,24 @@ final class Debouncer {
     var isPending: Bool { pending }
 
     /// Re-arm the trailing fire, keeping only the newest action.
-    func schedule(after delay: TimeInterval, perform action: @escaping () -> Void) {
+    ///
+    /// `leeway` is a DispatchSourceTimer coalescing hint: keep latency-sensitive
+    /// callers at the default zero, and give slow checkpoint debounces a window.
+    func schedule(
+        after delay: TimeInterval,
+        leeway: DispatchTimeInterval = .nanoseconds(0),
+        perform action: @escaping () -> Void
+    ) {
         pendingAction = action
         pending = true
 
         if let timer {
-            timer.schedule(deadline: .now() + delay)
+            timer.schedule(deadline: .now() + delay, leeway: leeway)
             return
         }
 
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + delay)
+        timer.schedule(deadline: .now() + delay, leeway: leeway)
         timer.setEventHandler { [weak self] in
             guard let self else { return }
             self.pending = false

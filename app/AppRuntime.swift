@@ -841,7 +841,10 @@ class AppRuntime {
     /// into a single disk write.
     private func scheduleDebouncedCheckpoint() {
         checkpointPending = true
-        checkpointDebouncer.schedule(after: Self.checkpointDebounceInterval) { [weak self] in
+        checkpointDebouncer.schedule(
+            after: Self.checkpointDebounceInterval,
+            leeway: .milliseconds(200)
+        ) { [weak self] in
             self?.performLightCheckpoint(async: true)
         }
     }
@@ -884,7 +887,11 @@ class AppRuntime {
     func startEnrichedCheckpointTimer() {
         enrichedCheckpointTimer?.cancel()
         let timer = DispatchSource.makeTimerSource(queue: .main)
-        timer.schedule(deadline: .now() + Self.enrichedCheckpointInterval, repeating: Self.enrichedCheckpointInterval)
+        timer.schedule(
+            deadline: .now() + Self.enrichedCheckpointInterval,
+            repeating: Self.enrichedCheckpointInterval,
+            leeway: .seconds(30)
+        )
         timer.setEventHandler { [weak self] in
             self?.performEnrichedCheckpoint(async: true)
         }

@@ -114,4 +114,49 @@ import Testing
         #expect(snapshot.0 == ["B"])
         #expect(!snapshot.2)
     }
+
+    @Test("Debouncer: schedule with a leeway still fires the trailing action")
+    func scheduleWithLeewayStillFiresTrailingAction() {
+        // Intent: a nonzero timer leeway still preserves the trailing debounce
+        //   contract: the action fires, not before the deadline, and pending clears.
+        // Why it exists: covers the new schedule API path used by checkpoint
+        //   timers without asserting the OS's nondeterministic coalescing choice.
+        // Scenario: spec-first behavior check for the light checkpoint debounce,
+        //   which can tolerate delayed delivery but must still write after settling.
+        let queue = DispatchQueue(label: "danterm.tests.debouncer.leeway")
+        let debouncer = Debouncer(queue: queue)
+        defer { queue.sync { debouncer.cancel() } }
+
+        let delay: TimeInterval = 0.2
+        let semaphore = DispatchSemaphore(value: 0)
+        var scheduledAt: DispatchTime?
+        var fired = false
+        var firedAt: DispatchTime?
+
+        queue.sync {
+            scheduledAt = .now()
+            debouncer.schedule(after: delay, leeway: .milliseconds(200)) {
+                fired = true
+                firedAt = .now()
+                semaphore.signal()
+            }
+        }
+
+        let result = semaphore.wait(timeout: .now() + 3)
+        #expect(result == .success, "debounced action should fire")
+
+        let snapshot = queue.sync { (fired, firedAt, debouncer.isPending) }
+        guard let scheduledAt, let firedAt = snapshot.1 else {
+            Issue.record("missing timing sample")
+            return
+        }
+        let elapsed = Double(firedAt.uptimeNanoseconds - scheduledAt.uptimeNanoseconds) / 1_000_000_000
+
+        #expect(snapshot.0)
+        #expect(snapshot.2 == false)
+        #expect(
+            elapsed >= delay * 0.75,
+            "fire should not precede the trailing deadline, elapsed \(elapsed)"
+        )
+    }
 }
