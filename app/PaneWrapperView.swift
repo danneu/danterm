@@ -438,6 +438,19 @@ class PaneWrapperView: NSView {
         copyCwd.isEnabled = runtime?.model.pane(paneId)?.cwd != nil
         menu.addItem(copyCwd)
 
+        // Only shown when the pane reported an agent session. The toolbar chip renders
+        // the compact kind label, so this menu item is the full-id copy affordance.
+        if runtime?.model.pane(paneId)?.agentSession != nil {
+            let copySessionId = NSMenuItem(
+                title: "Copy Agent Session ID",
+                action: #selector(copyAgentSessionIdAction),
+                keyEquivalent: ""
+            )
+            copySessionId.target = self
+            copySessionId.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "Agent session")
+            menu.addItem(copySessionId)
+        }
+
         menu.addItem(.separator())
 
         let zoomTitle = isZoomed ? "Unzoom Pane" : "Zoom Pane"
@@ -479,6 +492,12 @@ class PaneWrapperView: NSView {
         guard let cwd = runtime?.model.pane(paneId)?.cwd else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(cwd, forType: .string)
+    }
+
+    @objc private func copyAgentSessionIdAction() {
+        guard let sessionId = runtime?.model.pane(paneId)?.agentSession?.sessionId else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(sessionId, forType: .string)
     }
 
     @objc private func zoomPaneAction() {
