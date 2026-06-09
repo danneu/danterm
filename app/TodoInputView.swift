@@ -1,9 +1,17 @@
-/// Fixed-height text input for the todo popover.
-/// Wraps an NSTextView inside an NSScrollView with a placeholder label.
-/// The visible line count is configurable; scrolls when content overflows.
-/// Self-observes text changes via notification to keep placeholder in sync.
+// Fixed-height text input for the todo popover.
+// Wraps an NSTextView inside an NSScrollView with a placeholder label.
+// The visible line count is configurable; scrolls when content overflows.
+// Self-observes text changes via notification to keep placeholder in sync.
 
 import Cocoa
+
+/// Text view whose typing undo stack dies with the transient todo input instead
+/// of being retained by the window's shared undo manager after popover dismissal.
+private final class ScopedUndoTextView: NSTextView {
+    private let scopedUndoManager = UndoManager()
+
+    override var undoManager: UndoManager? { scopedUndoManager }
+}
 
 /// NSScrollView subclass that draws the system focus ring when its
 /// document view (NSTextView) is the first responder. Standard NSScrollView
@@ -58,7 +66,7 @@ class TodoInputView: NSView {
 
     init(placeholder: String = "Add a task…", visibleLineCount: Int = defaultVisibleLineCount) {
         // Must use NSTextView(frame:) to get a text container/layout manager.
-        textView = NSTextView(frame: .zero)
+        textView = ScopedUndoTextView(frame: .zero)
         scrollView = FocusRingScrollView()
         placeholderLabel = NSTextField(labelWithString: placeholder)
         self.visibleLineCount = visibleLineCount
