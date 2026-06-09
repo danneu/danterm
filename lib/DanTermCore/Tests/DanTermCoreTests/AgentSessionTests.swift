@@ -18,8 +18,8 @@ struct AgentSessionTests {
         #expect(session.kind == "claude")
         #expect(session.sessionId == "4f3a2b1c-0000-4000-9000-abcdef123456")
         #expect(session.toolbarLabel == "claude")
-        #expect(AgentCatalog.resumeCommand(for: session) == "claude -r 4f3a2b1c-0000-4000-9000-abcdef123456")
-        #expect(session.recoveryMessage == "[DanTerm] You were inside Claude session 4f3a2b1c-0000-4000-9000-abcdef123456 -- resume with: claude -r 4f3a2b1c-0000-4000-9000-abcdef123456")
+        #expect(AgentCatalog.resumeCommand(for: session) == "claude --resume 4f3a2b1c-0000-4000-9000-abcdef123456")
+        #expect(session.recoveryMessage == "[DanTerm] Restored Claude session. Resume with:\n  claude --resume 4f3a2b1c-0000-4000-9000-abcdef123456")
     }
 
     @Test("agent catalog supports Codex resume command")
@@ -28,7 +28,7 @@ struct AgentSessionTests {
 
         #expect(session.toolbarLabel == "codex")
         #expect(AgentCatalog.resumeCommand(for: session) == "codex resume thread_1234abcd")
-        #expect(session.recoveryMessage == "[DanTerm] You were inside Codex session thread_1234abcd -- resume with: codex resume thread_1234abcd")
+        #expect(session.recoveryMessage == "[DanTerm] Restored Codex session. Resume with:\n  codex resume thread_1234abcd")
     }
 
     @Test("unknown agent kind has display text but no resume command")
@@ -38,7 +38,7 @@ struct AgentSessionTests {
         #expect(AgentCatalog.displayName(for: session.kind) == "Future_Agent")
         #expect(AgentCatalog.resumeCommand(for: session) == nil)
         #expect(session.toolbarLabel == "future…")
-        #expect(session.recoveryMessage == "[DanTerm] You were inside a Future_Agent session abc123")
+        #expect(session.recoveryMessage == "[DanTerm] Restored a Future_Agent session: abc123")
     }
 
     @Test("toolbar label truncates long agent kinds")
@@ -84,5 +84,73 @@ struct AgentSessionTests {
 
         #expect(session.kind == "codex_cli")
         #expect(session.sessionId == "A.z:_@+-0123456789")
+    }
+
+    @Test("recovery replay appends valid agent hint after scrollback")
+    func recoveryReplayAppendsValidAgentHintAfterScrollback() {
+        // Intent: restored scrollback carries the agent recovery hint as its
+        //   final text, separated by exactly one blank line.
+        // Why it exists: pins the working shell-integration path so the hint no
+        //   longer depends on a separate env-var snippet that can drift.
+        // Scenario: a restored Claude pane has newline-terminated scrollback
+        //   from a checkpoint plus a valid persisted session id.
+        let snapshot = AgentSessionSnapshot(kind: "claude", sessionId: "abc123")
+
+        #expect(recoveryReplayText(scrollback: "old output\n", agentSession: snapshot) == """
+        old output
+
+        [DanTerm] Restored Claude session. Resume with:
+          claude --resume abc123
+
+        """)
+    }
+
+    @Test("recovery replay normalizes non-terminated scrollback separator")
+    func recoveryReplayNormalizesNonTerminatedScrollbackSeparator() {
+        let snapshot = AgentSessionSnapshot(kind: "claude", sessionId: "abc123")
+
+        #expect(recoveryReplayText(scrollback: "no newline", agentSession: snapshot) == """
+        no newline
+
+        [DanTerm] Restored Claude session. Resume with:
+          claude --resume abc123
+
+        """)
+    }
+
+    @Test("recovery replay drops invalid agent hint but preserves scrollback")
+    func recoveryReplayDropsInvalidAgentHintButPreservesScrollback() {
+        // Intent: an unsafe persisted session id is rejected at the terminal-text
+        //   boundary without throwing away valid captured history.
+        // Why it exists: locks the security seam that keeps malicious saved ids
+        //   from being printed into the restored pane.
+        // Scenario: a hand-edited checkpoint includes shell-shaped text in the
+        //   saved agent session id while the pane also has scrollback.
+        let snapshot = AgentSessionSnapshot(kind: "claude", sessionId: "bad;id")
+
+        #expect(recoveryReplayText(scrollback: "old output\n", agentSession: snapshot) == "old output\n")
+    }
+
+    @Test("recovery replay preserves hint when scrollback is missing")
+    func recoveryReplayPreservesHintWhenScrollbackIsMissing() {
+        // Intent: a restored pane can still show the agent recovery hint when no
+        //   enriched checkpoint has captured scrollback for that pane yet.
+        // Why it exists: light checkpoints can contain agent session metadata
+        //   before the first enriched scrollback snapshot runs.
+        // Scenario: DanTerm crashes soon after Claude starts, before the
+        //   10-minute enriched checkpoint interval has elapsed.
+        let snapshot = AgentSessionSnapshot(kind: "claude", sessionId: "abc123")
+
+        #expect(recoveryReplayText(scrollback: nil, agentSession: snapshot) == """
+        [DanTerm] Restored Claude session. Resume with:
+          claude --resume abc123
+
+        """)
+    }
+
+    @Test("recovery replay returns nil when no replay text exists")
+    func recoveryReplayReturnsNilWhenNoReplayTextExists() {
+        #expect(recoveryReplayText(scrollback: nil, agentSession: nil) == nil)
+        #expect(recoveryReplayText(scrollback: "", agentSession: nil) == nil)
     }
 }

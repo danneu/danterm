@@ -361,7 +361,7 @@ Add the snippet for your shell to opt in. It's zero-cost when not running inside
 <summary>Zsh (~/.zshrc)</summary>
 
 ```zsh
-# Restore scrollback from previous DanTerm session
+# Restore scrollback and agent-session recovery hints from previous DanTerm session
 if [[ -n "$DANTERM_RESTORE_SCROLLBACK_FILE" ]]; then
   _danterm_sbf="$DANTERM_RESTORE_SCROLLBACK_FILE"
   unset DANTERM_RESTORE_SCROLLBACK_FILE
@@ -370,12 +370,6 @@ if [[ -n "$DANTERM_RESTORE_SCROLLBACK_FILE" ]]; then
     /bin/rm -f -- "$_danterm_sbf" >/dev/null 2>&1 || true
   fi
   unset _danterm_sbf
-fi
-
-# One-time agent-session recovery hint from a previous DanTerm session
-if [[ -n "$DANTERM_AGENT_RECOVERY" ]]; then
-  printf '%s\n' "$DANTERM_AGENT_RECOVERY"
-  unset DANTERM_AGENT_RECOVERY
 fi
 
 # Report current command to DanTerm.app
@@ -426,7 +420,7 @@ fi
 <summary>Fish (~/.config/fish/config.fish)</summary>
 
 ```fish
-# Restore scrollback from previous DanTerm session
+# Restore scrollback and agent-session recovery hints from previous DanTerm session
 if set -q DANTERM_RESTORE_SCROLLBACK_FILE
   set -l f $DANTERM_RESTORE_SCROLLBACK_FILE
   set -e DANTERM_RESTORE_SCROLLBACK_FILE
@@ -434,12 +428,6 @@ if set -q DANTERM_RESTORE_SCROLLBACK_FILE
     /bin/cat -- "$f" 2>/dev/null; or true
     /bin/rm -f -- "$f" >/dev/null 2>&1; or true
   end
-end
-
-# One-time agent-session recovery hint from a previous DanTerm session
-if set -q DANTERM_AGENT_RECOVERY
-  printf '%s\n' "$DANTERM_AGENT_RECOVERY"
-  set -e DANTERM_AGENT_RECOVERY
 end
 
 # Report current command to DanTerm.app

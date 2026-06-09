@@ -1133,20 +1133,16 @@ class AppRuntime {
                         let resolved = ps.map { resolveLaunch($0) }
                         let token = stagedTokenStore.generate(for: paneId)
                         var scrollbackFilePath: String?
-                        if let scrollback = ps?.scrollback,
-                           let replayURL = writeReplayFile(scrollback: scrollback) {
+                        if let replayText = recoveryReplayText(scrollback: ps?.scrollback, agentSession: ps?.agentSession),
+                           let replayURL = writeReplayFile(scrollback: replayText) {
                             stagedReplayFiles[paneId] = replayURL
                             scrollbackFilePath = replayURL.path
                         }
-                        let recoveryMessage = ps?.agentSession.flatMap {
-                            AgentSession(kind: $0.kind, sessionId: $0.sessionId)
-                        }?.recoveryMessage
                         let envVars = restoreLaunchEnvironment(
                             ipcSocketPath: ipcSocketPath.path,
                             paneId: paneId,
                             token: token,
-                            scrollbackFilePath: scrollbackFilePath,
-                            agentRecoveryMessage: recoveryMessage
+                            scrollbackFilePath: scrollbackFilePath
                         )
                         let view = makeTerminalView(
                             paneId: paneId,

@@ -811,32 +811,20 @@ import DanTermProtocol
     @Test("agentSession snapshot validates only at recovery-message consumption")
     func agentSessionSnapshotValidatesAtRecoveryConsumption() throws {
         // Intent: raw on-disk AgentSessionSnapshot data must pass through
-        //   AgentSession validation before it can become a recovery env var.
+        //   AgentSession validation before it can become replayed terminal text.
         // Why it exists: one corrupted or malicious saved hint must not
         //   print terminal escapes or shell-shaped text into a restored pane.
-        // Scenario: a valid stored Claude id yields a recovery var; an
-        //   invalid stored id is silently dropped.
+        // Scenario: a valid stored Claude id yields replay text; an invalid
+        //   stored id is silently dropped while history remains.
         let valid = AgentSessionSnapshot(kind: "claude", sessionId: "4f3a2b1c")
-        let validMessage = try #require(AgentSession(kind: valid.kind, sessionId: valid.sessionId)?.recoveryMessage)
-        let validEnv = Dictionary(uniqueKeysWithValues: restoreLaunchEnvironment(
-            ipcSocketPath: "/tmp/danterm/control.sock",
-            paneId: PaneId(),
-            token: "secret-token",
-            scrollbackFilePath: nil,
-            agentRecoveryMessage: validMessage
-        ))
-        #expect(validEnv[EnvVars.agentRecovery] == "[DanTerm] You were inside Claude session 4f3a2b1c -- resume with: claude -r 4f3a2b1c")
+        #expect(recoveryReplayText(scrollback: nil, agentSession: valid) == """
+        [DanTerm] Restored Claude session. Resume with:
+          claude --resume 4f3a2b1c
+
+        """)
 
         let invalid = AgentSessionSnapshot(kind: "claude", sessionId: "bad;id")
-        let invalidMessage = AgentSession(kind: invalid.kind, sessionId: invalid.sessionId)?.recoveryMessage
-        let invalidEnv = Dictionary(uniqueKeysWithValues: restoreLaunchEnvironment(
-            ipcSocketPath: "/tmp/danterm/control.sock",
-            paneId: PaneId(),
-            token: "secret-token",
-            scrollbackFilePath: nil,
-            agentRecoveryMessage: invalidMessage
-        ))
-        #expect(invalidEnv[EnvVars.agentRecovery] == nil)
+        #expect(recoveryReplayText(scrollback: "old output\n", agentSession: invalid) == "old output\n")
     }
 
     @Test("malformed agentSession snapshot does not reject restore")
@@ -871,19 +859,10 @@ import DanTermProtocol
         """
         let loaded = try loadValidatedInitFile(from: json.data(using: .utf8)!)
         let pane = try #require(allPaneSnapshots(loaded.snapshot).first)
-        let message = pane.agentSession.flatMap {
-            AgentSession(kind: $0.kind, sessionId: $0.sessionId)
-        }?.recoveryMessage
-        let env = Dictionary(uniqueKeysWithValues: restoreLaunchEnvironment(
-            ipcSocketPath: "/tmp/danterm/control.sock",
-            paneId: PaneId(),
-            token: "secret-token",
-            scrollbackFilePath: nil,
-            agentRecoveryMessage: message
-        ))
 
         #expect(loaded.model.allPaneIds.count == 1)
-        #expect(env[EnvVars.agentRecovery] == nil)
+        #expect(pane.agentSession != nil)
+        #expect(recoveryReplayText(scrollback: pane.scrollback, agentSession: pane.agentSession) == nil)
     }
 
     @Test("snapshot round-trip preserves tab todos")

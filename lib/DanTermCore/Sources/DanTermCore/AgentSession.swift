@@ -37,9 +37,9 @@ struct AgentSession: Equatable {
     var recoveryMessage: String {
         let displayName = AgentCatalog.displayName(for: kind)
         if let command = AgentCatalog.resumeCommand(for: self) {
-            return "[DanTerm] You were inside \(displayName) session \(sessionId) -- resume with: \(command)"
+            return "[DanTerm] Restored \(displayName) session. Resume with:\n  \(command)"
         }
-        return "[DanTerm] You were inside a \(displayName) session \(sessionId)"
+        return "[DanTerm] Restored a \(displayName) session: \(sessionId)"
     }
 
     private static func isValidKind(_ value: String) -> Bool {
@@ -88,6 +88,26 @@ struct AgentSession: Equatable {
     }
 }
 
+/// Compose restored terminal text so the captured scrollback and one-time agent
+/// recovery hint travel through the same shell replay path.
+func recoveryReplayText(scrollback: String?, agentSession: AgentSessionSnapshot?) -> String? {
+    let hint = agentSession
+        .flatMap { AgentSession(kind: $0.kind, sessionId: $0.sessionId) }?
+        .recoveryMessage
+    let history = (scrollback?.isEmpty == false) ? scrollback : nil
+    switch (history, hint) {
+    case let (history?, hint?):
+        let separator = history.hasSuffix("\n") ? "\n" : "\n\n"
+        return "\(history)\(separator)\(hint)\n"
+    case let (history?, nil):
+        return history
+    case let (nil, hint?):
+        return "\(hint)\n"
+    case (nil, nil):
+        return nil
+    }
+}
+
 /// Display and resume-command metadata for agent kinds DanTerm knows by name.
 enum AgentCatalog {
     static func displayName(for kind: String) -> String {
@@ -104,7 +124,7 @@ enum AgentCatalog {
     static func resumeCommand(for session: AgentSession) -> String? {
         switch session.kind {
         case "claude":
-            return "claude -r \(session.sessionId)"
+            return "claude --resume \(session.sessionId)"
         case "codex":
             return "codex resume \(session.sessionId)"
         default:
