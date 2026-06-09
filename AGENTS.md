@@ -127,6 +127,17 @@ subtle ordering, a tricky calculation). The default is no comment unless one
 justifies itself. Per-context gates -- file headers, declarations, tests -- are
 in the subsections below.
 
+### Object lifetime (no use-after-free)
+
+Never let a longer-lived owner message a shorter-lived AppKit object after
+teardown. Concretely: a standalone `NSTextView` with `allowsUndo` owns its
+`UndoManager` (not the window's shared one); NotificationCenter observers and
+NSEvent monitors remove their tokens in `deinit`; timers, stored escaping
+closures, and async hops use `[weak self]` or a documented owner-bound lifetime;
+`Unmanaged`/C `userdata` is app-lifetime or stays retained until after the
+matching `free`. See
+[docs/design/2026-06-09-appkit-lifetime-safety.md](docs/design/2026-06-09-appkit-lifetime-safety.md).
+
 For AppKit delegate/protocol methods, name the protocol being targeted so it's
 clear the method isn't just a custom addition:
 
@@ -272,6 +283,7 @@ Topic docs. Read the linked file before editing if your task touches the topic.
 - [docs/design/index.md](docs/design/index.md) -- ADR-style design-decision index.
 - [docs/design/2026-05-28-core-module-via-symlink.md](docs/design/2026-05-28-core-module-via-symlink.md) -- pure core compiled same-module via symlink, tested via nested SwiftPM package. Read when touching the test architecture, the `app/DanTermCore` symlink, or `lib/DanTermCore/Package.swift`.
 - [docs/design/2026-05-28-pure-core-support-split.md](docs/design/2026-05-28-pure-core-support-split.md) -- the pure-core / portable-support / runtime three-layer split, the "core depends on nothing impure; support depends on nothing in core" invariant, and the inject-vs-ambient determinism rule. Read when adding a side-effecting utility, deciding which layer code belongs in, threading a new home/id/time value, or touching `scripts/core-purity-lint.sh` or `lib/DanTermSupport/`.
+- [docs/design/2026-06-09-appkit-lifetime-safety.md](docs/design/2026-06-09-appkit-lifetime-safety.md) -- AppKit/Ghostty lifetime invariants that prevent cross-lifetime use-after-free (the 2026-06-09 Cmd-Z SIGSEGV). Read before adding an `allowsUndo` text view, a NotificationCenter observer, an NSEvent monitor, a timer, a popover/sheet/view-controller, a stored escaping closure, an AppKit target/delegate that can outlive its referent, or any `Unmanaged`/C `userdata` callback.
 - [docs/design/2026-03-05-display-scaling.md](docs/design/2026-03-05-display-scaling.md) -- HiDPI/Retina scaling, content scale invariants, zero-frame guards.
 - [agent-docs/build-details.md](agent-docs/build-details.md) -- `build-lib.sh`, Swift compilation modes, xcframework + linker details. Read when touching build scripts or upgrading Ghostty.
 - [agent-docs/reference-sources.md](agent-docs/reference-sources.md) -- `.ghostty-src/` layout, key files for the libghostty C API, other terminal references. Read when implementing against libghostty.

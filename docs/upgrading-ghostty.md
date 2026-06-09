@@ -32,6 +32,17 @@ If the new Ghostty version requires a different Zig version, also update:
    the app mailbox, so no push path should enqueue an early-returning
    `App.Message` such as `.quit`.
 
+   Also re-check the embedded-view lifetime assumption that the AppKit/Ghostty
+   lifetime-safety ADR
+   ([design/2026-06-09-appkit-lifetime-safety.md](design/2026-06-09-appkit-lifetime-safety.md))
+   relies on: DanTerm frees surfaces with a deferred `ghostty_surface_free`
+   while the surface's `nsview` is `passUnretained` and may already be gone.
+   That is safe only while the renderer's teardown never touches the view --
+   confirm the new tag's `src/renderer/Metal.zig` `deinit` still stores no
+   `view` field and releases only its own GPU objects, and that no other free
+   path messages the `nsview`. If upstream now touches the view during free,
+   switch to `passRetained` (or otherwise keep the view alive across the free).
+
 2. **Update `.ghostty-version`** to the new tag:
 
    ```bash
