@@ -48,6 +48,7 @@ grep -qF 'pane split [--pane <pane-id>] -h|-v' "$err"
 grep -qF 'pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]' "$err"
 grep -qF 'agent attach --kind <kind> --id <session-id>' "$err"
 grep -qF 'todo clear-completed [--pane <pane-id>]' "$err"
+grep -qF 'doctor [--all|-v]' "$err"
 grep -qF 'tab new opens in the background at the target group end' "$err"
 grep -qF 'DANTERM_SOCK' "$err"
 grep -qF 'DANTERM_PANE' "$err"
@@ -69,11 +70,42 @@ for help_arg in help --help -h; do
     grep -qF 'pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]' "$out"
     grep -qF 'agent attach --kind <kind> --id <session-id>' "$out"
     grep -qF 'todo clear-completed [--pane <pane-id>]' "$out"
+    grep -qF 'doctor [--all|-v]' "$out"
     grep -qF 'tab new opens in the background at the target group end' "$out"
     grep -qF 'DANTERM_SOCK' "$out"
     grep -qF 'DANTERM_PANE' "$out"
     ! grep -qF 'DANTERM_TAB' "$out"
 done
+
+# `doctor` is local-only like help: it must work before the app launches and
+# must not surface the socket error text.
+doctor_home=$(mktemp -d)
+run_doctor_with_temp_home() {
+    : >"$out"
+    : >"$err"
+    if HOME="$doctor_home" CODEX_HOME="$doctor_home/.codex" "$CLI_PATH" "$@" >"$out" 2>"$err"; then
+        status=0
+    else
+        status=$?
+    fi
+}
+run_doctor_with_temp_home doctor
+[[ $status -eq 0 ]]
+[[ -s "$out" ]]
+[[ ! -s "$err" ]]
+! grep -qF 'DanTerm is not running' "$out" "$err"
+run_doctor_with_temp_home doctor --all
+[[ $status -eq 0 ]]
+[[ -s "$out" ]]
+[[ ! -s "$err" ]]
+grep -qF 'OK ' "$out"
+! grep -qF 'DanTerm is not running' "$out" "$err"
+run_doctor_with_temp_home doctor --bogus
+[[ $status -ne 0 ]]
+[[ ! -s "$out" ]]
+grep -qx 'danterm: unknown flag: --bogus' "$err"
+! grep -qF 'DanTerm is not running' "$out" "$err"
+rm -rf "$doctor_home"
 
 pkill -x "$APP_NAME" 2>/dev/null || true
 open -a "$APP_PATH"

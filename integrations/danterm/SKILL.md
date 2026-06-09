@@ -27,6 +27,7 @@ Keep this section synced with `danterm help` and the parser in
     danterm pane read --pane <pane-id> [--lines <n>]
     danterm theme set [--pane <pane-id>] <name>|--clear
     danterm agent attach --kind <kind> --id <session-id>
+    danterm doctor [--all|-v]
     danterm todo list [--pane <pane-id>]
     danterm todo add [--pane <pane-id>] <text>
     danterm todo edit [--pane <pane-id>] <todo-id> <text>
@@ -130,6 +131,7 @@ exactly one matching pane, tab, or group before running any mutation command.
 | "which tab/group contains this pane?" | `pane info --pane <pane-id>` |
 | "switch the theme to X" | `theme set --pane <pane-id>` |
 | "add/check off/edit a todo" | `todo ... --pane <pane-id>` |
+| "check DanTerm integration health" | `doctor` |
 
 ## Recipes
 
@@ -251,6 +253,19 @@ agentSession?, ...}`). `agentSession`, when present, is `{kind, sessionId}` for
 the agent currently reported in that pane. The `jq` above recurses the tree to
 list every pane. Treat `selectedTabId` as display state, not as a targeting
 source.
+
+### Check integration health
+
+`doctor` is local-only and does not require the app to be running. Use it when
+the user asks whether DanTerm's shell command, agent hooks, agent skill, or `jq`
+setup is healthy:
+
+    danterm doctor
+    danterm doctor --all
+
+The default output reports only INFO/SKIP/WARN/ERROR rows plus a summary footer.
+`--all` (or `-v`) also prints OK rows. Exit status is 1 only when a check is an
+ERROR; WARN/INFO/SKIP still exit 0.
 
 ### Todos
 

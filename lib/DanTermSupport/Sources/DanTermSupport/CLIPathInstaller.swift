@@ -1,5 +1,6 @@
 // Installs or removes the bundled danterm CLI symlink in the user's PATH.
 import Foundation
+import DanTermProtocol
 
 final class CLIPathInstaller {
     struct InstallOutcome {
@@ -148,6 +149,23 @@ final class CLIPathInstaller {
         return installedTargetURL == deps.sourceURL().standardizedFileURL
     }
 
+    /// Reuses the installer's injected path/translocation seams for diagnostics
+    /// without performing install or uninstall side effects.
+    func installDiagnostics() -> (entry: SymlinkEntry, sourceMatches: Bool, translocated: Bool) {
+        let entry = destinationSymlinkEntry()
+        let sourceMatches: Bool
+        if case .symlink(let target, targetExists: _) = entry {
+            sourceMatches = URL(fileURLWithPath: target).standardizedFileURL == deps.sourceURL().standardizedFileURL
+        } else {
+            sourceMatches = false
+        }
+        return (
+            entry: entry,
+            sourceMatches: sourceMatches,
+            translocated: deps.bundleURL().path.contains("/AppTranslocation/")
+        )
+    }
+
     private func resolveSourceURL() throws -> URL {
         let sourceURL = deps.sourceURL().standardizedFileURL
         var isDirectory: ObjCBool = false
@@ -230,6 +248,19 @@ final class CLIPathInstaller {
             fileURLWithPath: destinationPath,
             relativeTo: deps.destinationURL.deletingLastPathComponent()
         ).standardizedFileURL
+    }
+
+    private func destinationSymlinkEntry() -> SymlinkEntry {
+        if let targetURL = symlinkDestinationURL() {
+            return .symlink(
+                target: targetURL.path,
+                targetExists: deps.fileManager.fileExists(atPath: targetURL.path)
+            )
+        }
+        guard destinationEntryExists() else {
+            return .missing
+        }
+        return .nonSymlink
     }
 
     private func resourceValuesIfFileExists(

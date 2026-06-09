@@ -52,6 +52,7 @@ struct DanTermCLI {
           agent attach --kind <kind> --id <session-id>
                                       Report an active coding-agent session for
                                       the caller's pane
+          doctor [--all|-v]           Check DanTerm integration health
           todo list [--pane <pane-id>]
                                       List todos as JSON
           todo add [--pane <pane-id>] <text>
@@ -92,6 +93,10 @@ struct DanTermCLI {
             if rawArgs == ["help"] || rawArgs == ["--help"] || rawArgs == ["-h"] {
                 print(usageText, terminator: "")
                 exit(0)
+            }
+            if rawArgs.first == "doctor" {
+                try runDoctor(Array(rawArgs.dropFirst()))
+                return
             }
             let command = try parseCLI(rawArgs)
             let environment = ProcessInfo.processInfo.environment
@@ -148,6 +153,25 @@ struct DanTermCLI {
             }
         }
         throw CLIError("DanTerm closed the connection")
+    }
+
+    private static func runDoctor(_ args: [String]) throws {
+        var showOK = false
+        for arg in args {
+            switch arg {
+            case "--all", "-v":
+                showOK = true
+            default:
+                if arg.hasPrefix("-") {
+                    throw CLIParseError("unknown flag: \(arg)")
+                }
+                throw CLIParseError("unexpected argument: \(arg)")
+            }
+        }
+
+        let checks = evaluateDoctor(gatherDoctorFacts())
+        print(renderDoctorReport(checks, showOK: showOK), terminator: "")
+        exit(doctorExitCode(for: checks))
     }
 
     private static func validateHello(_ line: String) throws {

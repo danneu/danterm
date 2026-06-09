@@ -102,6 +102,12 @@ Set `alert-clear-mode = manual` to make alerts persist until you explicitly dism
 
 ## Claude Code Integration
 
+Run `danterm doctor` to check the integration pieces DanTerm can validate from
+the CLI: agent hook paths, agent skill discovery, the `danterm` executable on
+PATH, the manual `.app` `/usr/local/bin/danterm` link when relevant, app
+translocation, and `jq` on PATH. The command is local-only, so it works even
+when the app is not running; `danterm doctor --all` also prints OK rows.
+
 Claude Code's default notification path waits on a roughly 60-second idle
 timer before emitting terminal notifications. DanTerm ships Claude Code hooks
 that bypass that delay and emit immediate per-pane OSC 777 notifications when
