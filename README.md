@@ -140,8 +140,7 @@ Claude Code at the packaged hook:
 command = "${pkgs.danterm-claude-notify-osc777}/bin/danterm-claude-notify-osc777";
 ```
 
-For raw Claude Code JSON settings, use the resolved package binary path as the
-command:
+For raw Claude Code JSON settings, use the bundled app hook path as the command:
 
 ```json
 {
@@ -152,7 +151,7 @@ command:
         "hooks": [
           {
             "type": "command",
-            "command": "/absolute/path/to/danterm-claude-notify-osc777",
+            "command": "/Applications/DanTerm.app/Contents/Resources/danterm-hooks/danterm-claude-notify-osc777",
             "timeout": 10
           }
         ]
@@ -164,7 +163,7 @@ command:
         "hooks": [
           {
             "type": "command",
-            "command": "/absolute/path/to/danterm-claude-notify-osc777",
+            "command": "/Applications/DanTerm.app/Contents/Resources/danterm-hooks/danterm-claude-notify-osc777",
             "timeout": 10
           }
         ]
@@ -175,7 +174,7 @@ command:
         "hooks": [
           {
             "type": "command",
-            "command": "/absolute/path/to/danterm-claude-notify-osc777",
+            "command": "/Applications/DanTerm.app/Contents/Resources/danterm-hooks/danterm-claude-notify-osc777",
             "timeout": 10
           }
         ]
@@ -186,7 +185,7 @@ command:
         "hooks": [
           {
             "type": "command",
-            "command": "/absolute/path/to/danterm-claude-notify-osc777",
+            "command": "/Applications/DanTerm.app/Contents/Resources/danterm-hooks/danterm-claude-notify-osc777",
             "timeout": 10
           }
         ]
@@ -196,10 +195,14 @@ command:
 }
 ```
 
-Without Nix, copy
+For non-Nix installs, DanTerm ships the script inside the app at
+`/Applications/DanTerm.app/Contents/Resources/danterm-hooks/danterm-claude-notify-osc777`
+once DanTerm is installed in `/Applications`. That location matches the bundled
+`danterm` CLI requirement: a translocated app cannot provide stable hook paths.
+Ensure `jq` is installed on the PATH Claude Code uses for hooks. As a source or
+dev-build fallback, copy
 [`integrations/claude-code/claude-notify-osc777.sh`](integrations/claude-code/claude-notify-osc777.sh)
-somewhere on your machine and use that path as the command. Make the script
-executable and ensure `jq` is installed on PATH.
+somewhere on your machine and point the command at that file.
 
 DanTerm turns OSC 777 and OSC 9 messages into a macOS notification that, when
 clicked, will take you to the originating pane.
@@ -214,8 +217,8 @@ command = "${pkgs.danterm-claude-agent-session}/bin/danterm-claude-agent-session
 timeout = 2;
 ```
 
-For raw Claude Code JSON settings, point `SessionStart` at the resolved package
-binary path:
+For raw Claude Code JSON settings, point `SessionStart` at the bundled app hook
+path:
 
 ```json
 {
@@ -225,7 +228,7 @@ binary path:
         "hooks": [
           {
             "type": "command",
-            "command": "/absolute/path/to/danterm-claude-agent-session",
+            "command": "/Applications/DanTerm.app/Contents/Resources/danterm-hooks/danterm-claude-agent-session",
             "timeout": 2
           }
         ]
@@ -235,10 +238,12 @@ binary path:
 }
 ```
 
-Without Nix, copy
+For non-Nix installs, use the script shipped inside the app at
+`/Applications/DanTerm.app/Contents/Resources/danterm-hooks/danterm-claude-agent-session`.
+Ensure `jq` and `danterm` are installed on the PATH Claude Code uses for hooks.
+As a source or dev-build fallback, copy
 [`integrations/claude-code/danterm-agent-session.sh`](integrations/claude-code/danterm-agent-session.sh)
-somewhere on your machine and use that path as the command. Make the script
-executable and ensure `jq` and `danterm` are installed on PATH.
+somewhere on your machine and point the command at that file.
 
 ### Codex session recovery hook
 
@@ -250,8 +255,7 @@ command = "${pkgs.danterm-codex-agent-session}/bin/danterm-codex-agent-session";
 timeout = 2;
 ```
 
-For raw Codex JSON settings, point `SessionStart` at the resolved package binary
-path:
+For raw Codex JSON settings, point `SessionStart` at the bundled app hook path:
 
 ```json
 {
@@ -261,7 +265,7 @@ path:
         "hooks": [
           {
             "type": "command",
-            "command": "/absolute/path/to/danterm-codex-agent-session",
+            "command": "/Applications/DanTerm.app/Contents/Resources/danterm-hooks/danterm-codex-agent-session",
             "timeout": 2
           }
         ]
@@ -271,10 +275,12 @@ path:
 }
 ```
 
-Without Nix, copy
+For non-Nix installs, use the script shipped inside the app at
+`/Applications/DanTerm.app/Contents/Resources/danterm-hooks/danterm-codex-agent-session`.
+Ensure `jq` and `danterm` are installed on the PATH Codex uses for hooks. As a
+source or dev-build fallback, copy
 [`integrations/codex/danterm-agent-session.sh`](integrations/codex/danterm-agent-session.sh)
-somewhere on your machine and use that path as the command. Make the script
-executable and ensure `jq` and `danterm` are installed on PATH.
+somewhere on your machine and point the command at that file.
 
 Codex fires `SessionStart` lazily on the first prompt submission, so the chip
 appears after the first message rather than at launch. Codex has no session-end

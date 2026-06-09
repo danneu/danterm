@@ -163,6 +163,9 @@ jobs:
           APP_PATH="build/DanTerm.app"
           test -x "$APP_PATH/Contents/MacOS/DanTerm"
           test -x "$APP_PATH/Contents/Helpers/danterm"
+          for h in danterm-claude-notify-osc777 danterm-claude-agent-session danterm-codex-agent-session; do
+            test -x "$APP_PATH/Contents/Resources/danterm-hooks/$h"
+          done
           if cmp -s "$APP_PATH/Contents/MacOS/DanTerm" "$APP_PATH/Contents/Helpers/danterm"; then
             echo "Error: GUI and CLI bundle binaries have identical content" >&2
             exit 1
@@ -171,6 +174,15 @@ jobs:
           [ "$VERSION" = "0.0.0-test" ] || { echo "Version mismatch: $VERSION"; exit 1; }
           codesign --force --deep --sign - "$APP_PATH"
           codesign -v "$APP_PATH"
+          ZIP_WORK="$RUNNER_TEMP/release-build-ziptest"
+          rm -rf "$ZIP_WORK"
+          mkdir -p "$ZIP_WORK"
+          ( cd build && zip -qr DanTerm-test.zip DanTerm.app )
+          unzip -q build/DanTerm-test.zip -d "$ZIP_WORK"
+          codesign --verify --deep --strict --verbose=2 "$ZIP_WORK/DanTerm.app"
+          for h in danterm-claude-notify-osc777 danterm-claude-agent-session danterm-codex-agent-session; do
+            test -x "$ZIP_WORK/DanTerm.app/Contents/Resources/danterm-hooks/$h"
+          done
           echo "Release build validation passed"
 
   validator-self-test:

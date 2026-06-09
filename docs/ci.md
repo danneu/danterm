@@ -46,6 +46,13 @@ The release bundle ships the `danterm` helper at `DanTerm.app/Contents/Helpers/d
 CI signs that nested executable before signing the outer `.app`, then verifies
 the full bundle with `codesign --verify --deep --strict --verbose=2`.
 
+The agent hook scripts live at `DanTerm.app/Contents/Resources/danterm-hooks/`,
+not `Contents/Helpers/`. They are executable shell scripts, not Mach-O nested
+code, so placing them in Helpers would make their seal depend on an extended
+attribute that is stripped by the published ZIP round-trip. Resources are sealed
+by content in `CodeResources`, and CI verifies the published shape by unzipping
+the signed app and running `codesign --verify --deep --strict`.
+
 ## Troubleshooting
 
 ### Dependency URL staleness

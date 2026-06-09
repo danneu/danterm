@@ -64,6 +64,23 @@ fi
 mkdir -p "$APP_PATH/Contents/Resources"
 cp "$SCRIPT_DIR/icon/AppIcon/Assets.car" "$APP_PATH/Contents/Resources/"
 
+# Bundle the agent hook scripts as plain resources so users can point Claude Code
+# and Codex hooks at a stable in-bundle path. These must live under Resources,
+# not Helpers: executable non-Mach-O files in nested-code locations lose their
+# signature across the published ZIP round-trip, while Resources are sealed by
+# content. The basenames match the Nix packages, but these are the raw scripts
+# and still need jq, plus danterm for the session hooks, on PATH at runtime.
+mkdir -p "$APP_PATH/Contents/Resources/danterm-hooks"
+for pair in \
+    "integrations/claude-code/claude-notify-osc777.sh danterm-claude-notify-osc777" \
+    "integrations/claude-code/danterm-agent-session.sh danterm-claude-agent-session" \
+    "integrations/codex/danterm-agent-session.sh danterm-codex-agent-session"; do
+    set -- $pair
+    cp "$SCRIPT_DIR/$1" "$APP_PATH/Contents/Resources/danterm-hooks/$2"
+    chmod +x "$APP_PATH/Contents/Resources/danterm-hooks/$2"
+    test -x "$APP_PATH/Contents/Resources/danterm-hooks/$2" || { echo "Error: hook script $2 not bundled" >&2; exit 1; }
+done
+
 # Bundle ghostty themes (CI caches to lib/ghostty-themes; local builds have .ghostty-src)
 THEMES_SRC="$SCRIPT_DIR/lib/ghostty-themes"
 if [ ! -d "$THEMES_SRC" ]; then

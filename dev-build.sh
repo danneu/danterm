@@ -35,6 +35,19 @@ cp "$SRC_DIR/Info.plist" "$APP_PATH/Contents/"
 mkdir -p "$APP_PATH/Contents/Resources"
 cp "$SCRIPT_DIR/icon/AppIcon-dev/Assets.car" "$APP_PATH/Contents/Resources/"
 
+# Bundle agent hook scripts under Resources, matching release builds. These are
+# raw scripts, so jq and, for session hooks, danterm must be on PATH at runtime.
+mkdir -p "$APP_PATH/Contents/Resources/danterm-hooks"
+for pair in \
+    "integrations/claude-code/claude-notify-osc777.sh danterm-claude-notify-osc777" \
+    "integrations/claude-code/danterm-agent-session.sh danterm-claude-agent-session" \
+    "integrations/codex/danterm-agent-session.sh danterm-codex-agent-session"; do
+    set -- $pair
+    cp "$SCRIPT_DIR/$1" "$APP_PATH/Contents/Resources/danterm-hooks/$2"
+    chmod +x "$APP_PATH/Contents/Resources/danterm-hooks/$2"
+    test -x "$APP_PATH/Contents/Resources/danterm-hooks/$2" || { echo "Error: hook script $2 not bundled" >&2; exit 1; }
+done
+
 # Bundle all ghostty themes for per-pane theme switching and browsing.
 THEMES_SRC="$SCRIPT_DIR/.ghostty-src/zig-out/share/ghostty/themes"
 THEMES_DST="$APP_PATH/Contents/Resources/ghostty/themes"
