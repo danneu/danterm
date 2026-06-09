@@ -13,6 +13,11 @@ env:
 jobs:
   release:
     runs-on: macos-26
+    # Backstop against a hung step (notably an Apple Notary stall). Normal runs
+    # finish in 3-8 min; this caps a runaway at 15 min instead of GitHub's 6-hour
+    # default. The per-step `notarytool --timeout 10m` flags usually fire first
+    # with a cleaner error; this hard-stops the whole job regardless.
+    timeout-minutes: 15
     permissions:
       contents: write
       pull-requests: write
@@ -136,7 +141,8 @@ jobs:
             --key ~/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8 \
             --key-id "$APPLE_API_KEY_ID" \
             --issuer "$APPLE_API_ISSUER_ID" \
-            --wait
+            --wait \
+            --timeout 10m
 
           xcrun stapler staple "build/${{ env.DMG_NAME }}"
 
@@ -149,7 +155,8 @@ jobs:
             --key ~/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8 \
             --key-id "$APPLE_API_KEY_ID" \
             --issuer "$APPLE_API_ISSUER_ID" \
-            --wait
+            --wait \
+            --timeout 10m
 
       - name: Cleanup keychain
         if: always()
