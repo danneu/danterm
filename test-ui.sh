@@ -37,6 +37,9 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/SidebarItemStore.swift" \
         "$SCRIPT_DIR/tests-ui/TypedIdTestInit.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarViewTestShim.swift" \
+        "$SCRIPT_DIR/app/TodoToolbarButton.swift" \
+        "$SCRIPT_DIR/app/SearchOverlayView.swift" \
+        "$SCRIPT_DIR/app/PaneWrapperView.swift" \
         "$SCRIPT_DIR/app/SplitContainerView.swift" \
         "$SCRIPT_DIR/app/SidebarView.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarBadgeTests.swift" \
@@ -44,6 +47,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/tests-ui/TodoInputViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarSelectionCacheTests.swift" \
         "$SCRIPT_DIR/tests-ui/SplitContainerViewTests.swift" \
+        "$SCRIPT_DIR/tests-ui/PaneWrapperViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/PaneSplitViewTests.swift" \
         -framework Cocoa
 )

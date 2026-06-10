@@ -8,6 +8,7 @@ struct UITestRunner {
         let _ = NSApplication.shared
 
         paneSplitViewTests()
+        paneWrapperViewTests()
         splitContainerViewTests()
         sidebarBadgeTests()
         menuCommandPolicyTests()

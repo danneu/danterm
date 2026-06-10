@@ -31,6 +31,12 @@ class TerminalView: NSView, NSTextInputClient {
     // Back-pointer to the wrapper currently hosting this terminal. Weak: the wrapper owns us.
     weak var paneWrapper: PaneWrapperView?
 
+    /// Whether the surface has a text selection; drives the context menu's Copy item.
+    var hasSelection: Bool {
+        guard let surface else { return false }
+        return ghostty_surface_has_selection(surface)
+    }
+
     var cellSize: NSSize = .zero {
         didSet { scrollDelegate?.scrollbarStateDidChange() }
     }
@@ -280,8 +286,10 @@ class TerminalView: NSView, NSTextInputClient {
         if !consumed { super.rightMouseUp(with: event) }
     }
 
-    // NSView: builds the right-click context menu. Called by AppKit from
+    // NSView: returns the right-click context menu. Called by AppKit from
     // super.rightMouseDown (normal right-click) or before mouseDown (ctrl+click).
+    // This handles the ghostty event handshake; the menu itself comes from the
+    // hosting wrapper's unified builder.
     override func menu(for event: NSEvent) -> NSMenu? {
         guard let surface = surface else { return nil }
 
@@ -303,33 +311,13 @@ class TerminalView: NSView, NSTextInputClient {
             return nil
         }
 
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-
-        // Explicit target = self on every item so AppKit routes to this
-        // TerminalView, not up the responder chain to a different pane.
-        func item(_ title: String, _ action: Selector) -> NSMenuItem {
-            let mi = NSMenuItem(title: title, action: action, keyEquivalent: "")
-            mi.target = self
-            return mi
-        }
-
-        if ghostty_surface_has_selection(surface) {
-            menu.addItem(item("Copy", #selector(copySelection(_:))))
-        }
-        menu.addItem(item("Paste", #selector(pasteClipboard(_:))))
-
-        menu.addItem(.separator())
-        menu.addItem(item("Split Right", #selector(contextSplitRight(_:))))
-        menu.addItem(item("Split Down", #selector(contextSplitDown(_:))))
-
-        menu.addItem(.separator())
-        menu.addItem(item("Close Pane", #selector(contextClosePane(_:))))
-
-        return menu
+        // Unified pane context menu: one builder (PaneWrapperView.makePaneMenu)
+        // serves surface right-click, the "..." toolbar button, and the
+        // drag-handle right-click. Only this entry point includes clipboard items.
+        return paneWrapper?.makePaneMenu(includeClipboard: true)
     }
 
-    // MARK: - Context Menu Actions
+    // MARK: - Clipboard Actions (targets of makePaneMenu's clipboard items)
 
     /// Copy the current selection to the clipboard via ghostty's binding action.
     @objc func copySelection(_ sender: Any?) {
@@ -345,22 +333,6 @@ class TerminalView: NSView, NSTextInputClient {
         "paste_from_clipboard".withCString { ptr in
             _ = ghostty_surface_binding_action(surface, ptr, UInt(strlen(ptr)))
         }
-    }
-
-    /// Split right, targeting this pane specifically (not the focused pane).
-    @objc func contextSplitRight(_ sender: Any?) {
-        runtime?.send(.splitPane(paneId: bridge.paneId, direction: .horizontal))
-    }
-
-    /// Split down, targeting this pane specifically (not the focused pane).
-    @objc func contextSplitDown(_ sender: Any?) {
-        runtime?.send(.splitPane(paneId: bridge.paneId, direction: .vertical))
-    }
-
-    /// Close this pane, routing through requestClosePane for TODO confirmation.
-    @objc func contextClosePane(_ sender: Any?) {
-        guard let paneId = bridge.paneId else { return }
-        runtime?.send(.requestClosePane(paneId: paneId))
     }
 
     override func mouseMoved(with event: NSEvent) {

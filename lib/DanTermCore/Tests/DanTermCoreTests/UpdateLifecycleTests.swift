@@ -245,7 +245,7 @@ import Testing
 
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .toggleZoomPane)
+        update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[0].isZoomed == true)
 
         let alertId = AlertId()
@@ -275,7 +275,7 @@ import Testing
 
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .toggleZoomPane)
+        update(&model, .toggleZoomPane(paneId: nil))
 
         let alertId = AlertId()
         model.alerts.insert(AlertModel(

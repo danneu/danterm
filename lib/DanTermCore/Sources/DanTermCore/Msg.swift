@@ -59,7 +59,9 @@ enum Msg {
     case toggleGroupCollapse(groupId: GroupId)
     case selectAdjacentTab(direction: TabDirection)
     case paneBecameFirstResponder(paneId: PaneId)
-    case toggleZoomPane
+    // nil paneId = act on the selected tab (menubar path); non-nil = act on the
+    // pane's own tab, so a stale context menu still targets the pane it was built for.
+    case toggleZoomPane(paneId: PaneId?)
     case movePane(source: PaneId, target: PaneId, intent: PaneDropIntent)
     case movePaneToTab(paneId: PaneId, targetTabId: TabId)
     case movePaneToNewTab(paneId: PaneId, inGroupId: GroupId, atIndex: Int)

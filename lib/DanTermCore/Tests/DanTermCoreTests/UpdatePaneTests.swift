@@ -489,7 +489,7 @@ import Testing
         createTab(&model)
         update(&model, .splitPane(direction: .horizontal))
 
-        update(&model, .toggleZoomPane)
+        update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[0].isZoomed == true)
     }
 
@@ -501,9 +501,9 @@ import Testing
         var model = makeModel()
         createTab(&model)
         update(&model, .splitPane(direction: .horizontal))
-        update(&model, .toggleZoomPane)
+        update(&model, .toggleZoomPane(paneId: nil))
 
-        update(&model, .toggleZoomPane)
+        update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[0].isZoomed == false)
     }
 
@@ -516,7 +516,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
 
-        let commands = update(&model, .toggleZoomPane)
+        let commands = update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[0].isZoomed == false)
         #expect(commands.count == 0, "no commands on single pane")
     }
@@ -533,7 +533,7 @@ import Testing
 
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .toggleZoomPane)
+        update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[0].isZoomed == true)
 
         update(&model, .closePane(paneId: paneB))
@@ -555,7 +555,7 @@ import Testing
         update(&model, .splitPane(direction: .vertical))
         let paneC = model.groups[0].tabs[0].focusedPaneId
 
-        update(&model, .toggleZoomPane)
+        update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[0].isZoomed == true)
 
         update(&model, .closePane(paneId: paneC))
@@ -571,7 +571,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         update(&model, .splitPane(direction: .horizontal))
-        update(&model, .toggleZoomPane)
+        update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[0].isZoomed == true)
 
         update(&model, .splitPane(direction: .vertical))
@@ -587,11 +587,159 @@ import Testing
         var model = makeModel()
         createTab(&model)
         update(&model, .splitPane(direction: .horizontal))
-        update(&model, .toggleZoomPane)
+        update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[0].isZoomed == true)
 
         update(&model, .focusDirection(direction: .horizontal, side: .first))
         #expect(model.groups[0].tabs[0].isZoomed == false, "focus direction should clear zoom")
+    }
+
+    // MARK: - Pane-Scoped Tab Resolution Tests
+
+    @Test("closePane removes a background-tab pane from its own tab")
+    func closePaneBackgroundTabRemovesFromOwnTab() {
+        // Intent: .closePane for a pane living in a non-selected tab removes
+        //   the leaf from THAT tab's tree and leaves the selected tab (tree,
+        //   isZoomed) untouched.
+        // Why it exists: pins closePane's tab resolution to the pane's own
+        //   tab (mirroring .splitPane) so a pane-scoped close can never act
+        //   on whatever tab happens to be selected. Spec-first.
+        var fx = makeTwoTabFixture()
+        let selectedBefore = fx.model.groups[0].tabs.first { $0.id == fx.tabB }!
+
+        update(&fx.model, .closePane(paneId: fx.a1))
+
+        let tabA = fx.model.groups[0].tabs.first { $0.id == fx.tabA }!
+        if case .leaf(let survivor) = tabA.rootNode {
+            #expect(survivor.id == fx.a2, "tab A should collapse to its surviving sibling")
+        } else {
+            Issue.record("tab A's root should be a leaf after the background close")
+            return
+        }
+        let tabB = fx.model.groups[0].tabs.first { $0.id == fx.tabB }!
+        #expect(tabB == selectedBefore, "selected tab must be untouched by a background-tab close")
+    }
+
+    @Test("closePane on a background tab's last pane closes that tab, not the selected one")
+    func closePaneBackgroundLastPaneClosesOwnTab() {
+        // Intent: when the closed pane was its tab's last pane, the close
+        //   cascades to .closeTab of the pane's OWN tab; the selected tab
+        //   survives and stays selected.
+        // Why it exists: pins the last-pane cascade against resolving the
+        //   selected tab's id, which would close the wrong tab. Spec-first.
+        var fx = makeTwoTabFixture(tabAIsSplit: false)
+        let selectedBefore = fx.model.groups[0].tabs.first { $0.id == fx.tabB }!
+
+        update(&fx.model, .closePane(paneId: fx.a1))
+
+        #expect(fx.model.groups[0].tabs.map(\.id) == [fx.tabB], "only the pane's own tab should close")
+        #expect(fx.model.selectedTabId == fx.tabB, "selection must stay on the surviving tab")
+        #expect(fx.model.groups[0].tabs[0] == selectedBefore, "selected tab must be untouched")
+    }
+
+    @Test("surfaceClosed for a background-tab pane removes it and preserves the selected tab's zoom")
+    func surfaceClosedBackgroundTabPaneIsRemoved() {
+        // Intent: .surfaceClosed for a pane in a non-selected tab removes the
+        //   pane from its own tab's tree and does not clear the selected
+        //   tab's isZoomed.
+        // Why it exists: regression test for the ghost-pane bug. .surfaceClosed
+        //   routes into .closePane, which resolved selectedTab(in:); for a
+        //   background-tab pane removeLeaf missed, so the dead pane stayed in
+        //   its real tab as a ghost and the selected tab's isZoomed was
+        //   clobbered to false.
+        // Scenario: a shell in a split background tab exits (e.g. the user ran
+        //   `exit` and switched tabs before it fired); switching back showed
+        //   the dead pane still in the layout, and the selected tab lost its
+        //   zoom state.
+        var fx = makeTwoTabFixture()
+
+        update(&fx.model, .surfaceClosed(paneId: fx.a1))
+
+        #expect(fx.model.pane(fx.a1) == nil, "the dead pane must leave its tab's tree, not linger as a ghost")
+        let tabB = fx.model.groups[0].tabs.first { $0.id == fx.tabB }!
+        #expect(tabB.isZoomed == true, "selected tab's zoom must survive a background-tab surface close")
+    }
+
+    @Test("toggleZoomPane(paneId:) toggles the pane's own tab; nil keeps selected-tab behavior")
+    func toggleZoomPanePaneScoped() {
+        // Intent: a non-nil paneId toggles isZoomed on the tab owning that
+        //   pane, leaving the selected tab alone; paneId: nil keeps acting on
+        //   the selected tab (the menubar path).
+        // Why it exists: pins the pane-scoped zoom so a stale context menu
+        //   acts on the pane it was built for, while the menubar's
+        //   selected-tab semantics stay intact. Spec-first.
+        var fx = makeTwoTabFixture()
+
+        update(&fx.model, .toggleZoomPane(paneId: fx.a1))
+
+        let tabA = fx.model.groups[0].tabs.first { $0.id == fx.tabA }!
+        let tabB = fx.model.groups[0].tabs.first { $0.id == fx.tabB }!
+        #expect(tabA.isZoomed == true, "pane-scoped zoom should toggle the pane's own tab")
+        #expect(tabB.isZoomed == true, "selected tab's zoom must be untouched by a pane-scoped toggle")
+
+        update(&fx.model, .toggleZoomPane(paneId: nil))
+        let tabBAfterNil = fx.model.groups[0].tabs.first { $0.id == fx.tabB }!
+        #expect(tabBAfterNil.isZoomed == false, "nil paneId should keep toggling the selected tab")
+    }
+
+    @Test("closing a background-tab pane preserves the successor's unread alert")
+    func closePaneBackgroundTabPreservesSuccessorAlert() {
+        // Intent: in focus alert-clear mode, closing a pane in a non-selected
+        //   tab removes the pane but leaves the successor pane's unread alert
+        //   unread; the same close on the selected tab still marks the
+        //   successor's alerts read.
+        // Why it exists: the focus-mode markAlertsReadForPane(nextFocus) call
+        //   must be gated on the close happening in the selected tab -- a
+        //   background survivor never actually gains user-visible focus, so
+        //   its alerts must survive until the user views the tab. The
+        //   pane-removal assertion is what makes this red pre-fix (the
+        //   background close used to no-op against the wrong tree, so the
+        //   alert leg alone would pass trivially). Spec-first.
+        var fx = makeTwoTabFixture()
+        #expect(fx.model.config.alertClearMode == .focus)
+        fx.model.alerts = [AlertModel(
+            id: AlertId(), kind: .bell, paneId: fx.a2!,
+            title: "DanTerm", body: "bell", createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            isUnread: true
+        )]
+
+        update(&fx.model, .closePane(paneId: fx.a1))
+
+        #expect(fx.model.pane(fx.a1) == nil, "the closed pane must actually leave its tab's tree")
+        #expect(fx.model.alerts[0].isUnread == true,
+                "background successor's alert must stay unread until the user views the tab")
+
+        // Selected-tab leg: same close with tab A selected marks the successor read.
+        var selected = makeTwoTabFixture()
+        selected.model.selectedTabId = selected.tabA
+        selected.model.alerts = [AlertModel(
+            id: AlertId(), kind: .bell, paneId: selected.a2!,
+            title: "DanTerm", body: "bell", createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+            isUnread: true
+        )]
+
+        update(&selected.model, .closePane(paneId: selected.a1))
+
+        #expect(selected.model.alerts[0].isUnread == false,
+                "selected-tab successor gains focus, so its alert is marked read")
+    }
+
+    @Test("closePane for a vanished pane is a pure no-op")
+    func closePaneVanishedPaneIsNoOp() {
+        // Intent: .closePane for a paneId present in no tab returns [] and
+        //   leaves the model unchanged -- no zoom clobber, no
+        //   scheduleCheckpoint.
+        // Why it exists: pins the guard-return branch for the fully-stale
+        //   case (e.g. a retained context menu firing after its pane was
+        //   already closed). Pre-fix this input clobbered the selected tab's
+        //   zoom and emitted a checkpoint. Spec-first.
+        var fx = makeTwoTabFixture()
+        let before = fx.model
+
+        let commands = update(&fx.model, .closePane(paneId: PaneId()))
+
+        #expect(commands.isEmpty, "vanished pane should produce no commands")
+        #expect(fx.model == before, "vanished pane must not mutate the model")
     }
 
     // MARK: - movePane Tests
@@ -673,7 +821,7 @@ import Testing
         createTab(&model)
         update(&model, .splitPane(direction: .horizontal))
         let paneA = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .toggleZoomPane)
+        update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[0].isZoomed == true)
 
         let paneB = allPaneIds(model.groups[0].tabs[0].rootNode).first(where: { $0 != paneA })!
@@ -1136,7 +1284,7 @@ import Testing
         createTab(&model)
         let tab2Id = model.groups[0].tabs[1].id
         update(&model, .splitPane(direction: .horizontal))
-        update(&model, .toggleZoomPane)
+        update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[1].isZoomed == true)
 
         update(&model, .movePaneToTab(paneId: paneA, targetTabId: tab2Id))
@@ -1162,7 +1310,7 @@ import Testing
         let survivor = model.groups[0].tabs[0].focusedPaneId
         update(&model, .splitPane(direction: .horizontal))
         let zoomedPane = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .toggleZoomPane)
+        update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[0].isZoomed == true)
 
         createTab(&model)
@@ -1244,7 +1392,7 @@ import Testing
         update(&model, .splitPane(direction: .horizontal))
         let zoomedPane = model.groups[0].tabs[0].focusedPaneId
         let groupId = model.groups[0].id
-        update(&model, .toggleZoomPane)
+        update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[0].isZoomed == true)
 
         update(&model, .movePaneToNewTab(paneId: zoomedPane, inGroupId: groupId, atIndex: 1))
@@ -1505,4 +1653,56 @@ import Testing
         let otherAlert = model.alerts.first(where: { $0.paneId == paneB })!
         #expect(otherAlert.isUnread == true, "unrelated alert should remain unread")
     }
+}
+
+// MARK: - Pane-scoped fixture
+
+private struct TwoTabFixture {
+    var model: AppModel
+    let tabA: TabId
+    let a1: PaneId
+    let a2: PaneId?  // nil when tab A is a single leaf
+    let tabB: TabId
+    let b1: PaneId
+}
+
+/// Two tabs in one group for the pane-scoped resolution tests: tab A holds the
+/// pane under test (split a1|a2, or a lone a1 leaf), tab B is a zoomed split
+/// and SELECTED -- so any handler that wrongly resolves the selected tab
+/// mutates B's tree or zoom where the assertions will catch it.
+private func makeTwoTabFixture(tabAIsSplit: Bool = true) -> TwoTabFixture {
+    var model = makeModel()
+    let a1 = PaneId()
+    let b1 = PaneId()
+    let tabAId = TabId()
+    let tabBId = TabId()
+
+    var a2: PaneId?
+    let rootA: SplitNodeModel
+    if tabAIsSplit {
+        let sibling = PaneId()
+        a2 = sibling
+        rootA = .split(
+            id: SplitId(), direction: .horizontal,
+            first: .leaf(PaneModel(id: a1)), second: .leaf(PaneModel(id: sibling)), ratio: 0.5)
+    } else {
+        rootA = .leaf(PaneModel(id: a1))
+    }
+    let tabA = TabModel(id: tabAId, focusedPaneId: a1, rootNode: rootA)
+
+    var tabB = TabModel(
+        id: tabBId, focusedPaneId: b1,
+        rootNode: .split(
+            id: SplitId(), direction: .horizontal,
+            first: .leaf(PaneModel(id: b1)), second: .leaf(PaneModel(id: PaneId())), ratio: 0.5))
+    tabB.isZoomed = true
+
+    model.groups[0].tabs = [tabA, tabB]
+    model.selectedTabId = tabBId
+    // Hand-built models start MRU-unreconciled, but update() canonicalizes
+    // mruOrder in a defer on EVERY message -- pre-seed the canonical order
+    // (selected first, then display order) so the vanished-pane no-op test can
+    // compare whole models without tripping on that bookkeeping.
+    model.mruOrder = [tabBId, tabAId]
+    return TwoTabFixture(model: model, tabA: tabAId, a1: a1, a2: a2, tabB: tabBId, b1: b1)
 }

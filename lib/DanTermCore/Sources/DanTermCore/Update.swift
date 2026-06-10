@@ -203,8 +203,11 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         return commands
 
     case .closePane(let paneId):
-        guard let tabId = model.selectedTabId,
-              let tab = selectedTab(in: model) else { return [] }
+        // Resolve the pane's own tab (mirrors .splitPane): .surfaceClosed routes
+        // background-tab shell exits here, and a stale context menu may fire after
+        // the selection changed -- both must act on the tab that owns the pane.
+        // A pane in no tab (already closed) is a pure no-op.
+        guard let tab = tabForPane(paneId, in: model) else { return [] }
 
         // removeLeaf drops the leaf (and its pane payload) atomically; the close
         // path discards the removed pane. Side-table cleanup stays here.
@@ -226,14 +229,19 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         }
 
         guard let newRoot = newTree else {
-            // Last pane — close tab
-            return update(&model, .closeTab(id: tabId), env: env)
+            // Last pane — close the pane's own tab
+            return update(&model, .closeTab(id: tab.id), env: env)
         }
 
-        if model.config.alertClearMode == .focus, let next = nextFocus {
+        // Focus-mode alert clearing only applies when the close happens in the
+        // selected tab: a background tab's survivor never actually gains
+        // user-visible focus, so its unread alerts must survive until the user
+        // views the tab (they clear through the tab-selection path).
+        if model.config.alertClearMode == .focus, let next = nextFocus,
+           tab.id == model.selectedTabId {
             markAlertsReadForPane(next, in: &model)
         }
-        updateSelectedTab(&model) { tab in
+        updateTab(tab.id, in: &model) { tab in
             tab.rootNode = newRoot
             tab.isZoomed = false
             if let next = nextFocus {
@@ -1130,14 +1138,24 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         // Persist collapse state so sidebar groups restore expanded/collapsed.
         return [.scheduleCheckpoint]
 
-    case .toggleZoomPane:
-        guard let tab = selectedTab(in: model) else { return [] }
+    case .toggleZoomPane(let paneId):
+        // nil = selected tab (menubar path); non-nil = the pane's own tab
+        // (mirrors .splitPane), so a stale context menu still zooms the tab
+        // it was built for after a selection change.
+        let tab: TabModel
+        if let paneId {
+            guard let found = tabForPane(paneId, in: model) else { return [] }
+            tab = found
+        } else {
+            guard let found = selectedTab(in: model) else { return [] }
+            tab = found
+        }
         if tab.isZoomed {
-            updateSelectedTab(&model) { t in t.isZoomed = false }
+            updateTab(tab.id, in: &model) { t in t.isZoomed = false }
             return []
         }
         if case .split = tab.rootNode {
-            updateSelectedTab(&model) { t in t.isZoomed = true }
+            updateTab(tab.id, in: &model) { t in t.isZoomed = true }
             return []
         }
         return []

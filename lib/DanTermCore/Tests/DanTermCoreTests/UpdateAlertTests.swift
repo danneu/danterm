@@ -154,7 +154,7 @@ import Testing
         let paneA = model.groups[0].tabs[0].focusedPaneId
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .toggleZoomPane)
+        update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[0].focusedPaneId == paneB, "paneB should be focused before navigation")
         #expect(model.groups[0].tabs[0].isZoomed == true, "tab should be zoomed before navigation")
 
@@ -319,7 +319,7 @@ import Testing
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
         update(&model, .paneBecameFirstResponder(paneId: paneA))
-        update(&model, .toggleZoomPane)
+        update(&model, .toggleZoomPane(paneId: nil))
 
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneB,
@@ -1010,7 +1010,7 @@ import Testing
         let paneB = model.groups[0].tabs[0].focusedPaneId
 
         update(&model, .paneBecameFirstResponder(paneId: paneA))
-        update(&model, .toggleZoomPane)
+        update(&model, .toggleZoomPane(paneId: nil))
 
         model.alerts.insert(AlertModel(
             id: AlertId(), kind: .bell, paneId: paneB,
@@ -1260,7 +1260,7 @@ import Testing
 
         update(&model, .splitPane(direction: .horizontal))
         let paneB = model.groups[0].tabs[0].focusedPaneId
-        update(&model, .toggleZoomPane)
+        update(&model, .toggleZoomPane(paneId: nil))
         #expect(model.groups[0].tabs[0].isZoomed == true)
 
         createTab(&model)

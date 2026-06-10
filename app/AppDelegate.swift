@@ -464,7 +464,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     }
 
     @objc func toggleZoom(_ sender: Any?) {
-        runtime.send(.toggleZoomPane)
+        runtime.send(.toggleZoomPane(paneId: nil))
     }
 
     @objc func renameTab(_ sender: Any?) {

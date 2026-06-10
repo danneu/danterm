@@ -1,7 +1,5 @@
-// Minimal test-only symbols needed to compile SidebarView in the UI harness.
+// Minimal test-only symbols needed to compile SidebarView and PaneWrapperView in the UI harness.
 import Cocoa
-
-let paneDragType = NSPasteboard.PasteboardType("com.danterm.pane")
 
 final class AppRuntime {
     var model: AppModel
@@ -15,12 +13,31 @@ final class AppRuntime {
     func send(_ msg: Msg) {
         sentMessages.append(msg)
     }
+
+    // Pane drag API that ToolbarDragHandleView compiles against. The harness
+    // never starts a real drag session, so these are inert.
+    func startPaneDrag(paneId: PaneId) {}
+    func updatePaneDrag(screenPoint: NSPoint) {}
+    func endPaneDrag() {}
+    func currentPaneDrop() -> (source: PaneId, target: PaneId, intent: PaneDropIntent)? { nil }
 }
 
-class TerminalView: NSView {}
+class TerminalView: NSView {
+    weak var paneWrapper: PaneWrapperView?
+    var hasSelection = false
+    var performedActions: [String] = []
 
-class PaneWrapperView: NSView {
-    init(paneId: PaneId, terminalView: TerminalView, isZoomed: Bool, hasSplits: Bool, runtime: AppRuntime?) {
+    @objc func copySelection(_ sender: Any?) {
+        performedActions.append("copySelection")
+    }
+
+    @objc func pasteClipboard(_ sender: Any?) {
+        performedActions.append("pasteClipboard")
+    }
+}
+
+class ScrollableTerminalView: NSView {
+    init(terminalView: TerminalView) {
         super.init(frame: .zero)
     }
 

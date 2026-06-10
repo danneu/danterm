@@ -1,6 +1,7 @@
-// Pane container view that owns the toolbar, drag handling, search overlay, and terminal view.
+// Pane container view that owns the toolbar, drag handling, search overlay, the
+// terminal view, and the single pane context-menu builder (makePaneMenu) behind
+// the surface right-click, the "..." toolbar button, and the drag-handle menu.
 import Cocoa
-import GhosttyKit
 
 class PaneWrapperView: NSView {
     let paneId: PaneId
@@ -416,52 +417,69 @@ class PaneWrapperView: NSView {
         searchOverlay = nil
     }
 
-    /// Builds the pane context menu fresh so dynamic item state reflects the current model.
-    func makePaneMenu() -> NSMenu {
+    /// Builds the pane context menu fresh so dynamic item state reflects the current
+    /// model. Single builder for all three entry points -- the surface right-click
+    /// (`TerminalView.menu(for:)`), the "..." toolbar button, and the drag-handle
+    /// right-click -- so their compositions can't drift apart. Only the surface entry
+    /// point passes `includeClipboard: true` to prepend the Copy/Paste section.
+    func makePaneMenu(includeClipboard: Bool = false) -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
-        let splitRight = NSMenuItem(title: "Split Right", action: #selector(splitRightAction), keyEquivalent: "")
-        splitRight.target = self
+        // NSMenuItem.target is weak; representedObject is strong. Anchor this
+        // ephemeral wrapper to each item so a reconcile mid-track can't nil the
+        // targets (lifetime-safety doc, "AppKit target that can outlive its referent").
+        func wrapperItem(_ title: String, _ action: Selector) -> NSMenuItem {
+            let mi = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            mi.target = self
+            mi.representedObject = self
+            return mi
+        }
+
+        if includeClipboard {
+            // Copy/Paste act on the terminal surface, so they target the terminal
+            // view directly (it persists across reconciles -- no anchor needed).
+            // Copy is disabled rather than hidden so the surface menu's shape is
+            // stable with and without a selection.
+            let copy = NSMenuItem(title: "Copy", action: #selector(TerminalView.copySelection(_:)), keyEquivalent: "")
+            copy.target = terminalView
+            copy.isEnabled = terminalView.hasSelection
+            menu.addItem(copy)
+            let paste = NSMenuItem(title: "Paste", action: #selector(TerminalView.pasteClipboard(_:)), keyEquivalent: "")
+            paste.target = terminalView
+            menu.addItem(paste)
+            menu.addItem(.separator())
+        }
+
+        let splitRight = wrapperItem("Split Right", #selector(splitRightAction))
         splitRight.image = NSImage(systemSymbolName: "rectangle.split.2x1", accessibilityDescription: "Split Right")
         menu.addItem(splitRight)
 
-        let splitDown = NSMenuItem(title: "Split Down", action: #selector(splitDownAction), keyEquivalent: "")
-        splitDown.target = self
+        let splitDown = wrapperItem("Split Down", #selector(splitDownAction))
         splitDown.image = NSImage(systemSymbolName: "rectangle.split.1x2", accessibilityDescription: "Split Down")
         menu.addItem(splitDown)
 
         menu.addItem(.separator())
 
-        let copyCwd = NSMenuItem(title: "Copy cwd", action: #selector(copyCwdAction), keyEquivalent: "")
-        copyCwd.target = self
+        let copyCwd = wrapperItem("Copy cwd", #selector(copyCwdAction))
         copyCwd.isEnabled = runtime?.model.pane(paneId)?.cwd != nil
         menu.addItem(copyCwd)
 
         // Only shown when the pane reported an agent session. The toolbar chip renders
         // the compact kind label, so this menu item is the full-id copy affordance.
         if runtime?.model.pane(paneId)?.agentSession != nil {
-            let copySessionId = NSMenuItem(
-                title: "Copy Agent Session ID",
-                action: #selector(copyAgentSessionIdAction),
-                keyEquivalent: ""
-            )
-            copySessionId.target = self
+            let copySessionId = wrapperItem("Copy Agent Session ID", #selector(copyAgentSessionIdAction))
             copySessionId.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "Agent session")
             menu.addItem(copySessionId)
         }
 
         menu.addItem(.separator())
 
-        let zoomTitle = isZoomed ? "Unzoom Pane" : "Zoom Pane"
-        let zoom = NSMenuItem(title: zoomTitle, action: #selector(zoomPaneAction), keyEquivalent: "")
-        zoom.target = self
+        let zoom = wrapperItem(isZoomed ? "Unzoom Pane" : "Zoom Pane", #selector(zoomPaneAction))
         zoom.isEnabled = hasSplits || isZoomed
         menu.addItem(zoom)
 
-        let close = NSMenuItem(title: "Close Pane", action: #selector(closePaneAction), keyEquivalent: "")
-        close.target = self
-        menu.addItem(close)
+        menu.addItem(wrapperItem("Close Pane", #selector(closePaneAction)))
 
         return menu
     }
@@ -501,7 +519,9 @@ class PaneWrapperView: NSView {
     }
 
     @objc private func zoomPaneAction() {
-        runtime?.send(.toggleZoomPane)
+        // Pane-scoped (unlike the menubar's nil form) so a retained stale menu
+        // zooms this pane's tab even if the selection changed while tracking.
+        runtime?.send(.toggleZoomPane(paneId: paneId))
     }
 
 }

@@ -187,7 +187,7 @@ private func paneSnap(_ id: PaneId, title: String, cwd: String? = nil, scrollbac
         var model = makeModel()
         createTab(&model)
         update(&model, .splitPane(direction: .horizontal))
-        let commands = update(&model, .toggleZoomPane)
+        let commands = update(&model, .toggleZoomPane(paneId: nil))
         #expect(!hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false },
             "toggleZoomPane should not emit scheduleCheckpoint")
     }
@@ -299,7 +299,7 @@ private func paneSnap(_ id: PaneId, title: String, cwd: String? = nil, scrollbac
         var model = makeModel()
         createTab(&model)
         update(&model, .splitPane(direction: .horizontal))
-        update(&model, .toggleZoomPane)
+        update(&model, .toggleZoomPane(paneId: nil))
         let tab = selectedTab(in: model)!
         #expect(tab.isZoomed, "tab should be zoomed before snapshot")
 
