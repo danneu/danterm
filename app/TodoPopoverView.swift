@@ -1,8 +1,8 @@
-/// Popover view controller for a pane's TODO list.
-/// Shows a scrollable list of tasks with checkboxes, delete buttons,
-/// drag-to-reorder, a "Clear completed" button, and explicit list/edit modes.
-/// List mode keeps the bottom input for new tasks only; edit mode swaps the
-/// list for a larger editor with Save and Cancel buttons.
+// Popover view controller for a pane's TODO list.
+// Shows a scrollable list of tasks with checkboxes, delete buttons,
+// drag-to-reorder, a "Clear completed" button, and explicit list/edit modes.
+// List mode keeps the bottom input for new tasks only; edit mode swaps the
+// list for a larger editor with Save and Cancel buttons.
 
 import Cocoa
 
