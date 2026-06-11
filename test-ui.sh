@@ -42,6 +42,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/TodoShortcutHelpView.swift" \
         "$SCRIPT_DIR/app/TabTodoPopoverView.swift" \
         "$SCRIPT_DIR/app/TodoPopoverView.swift" \
+        "$SCRIPT_DIR/app/AlertsPopoverView.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/SidebarItemStore.swift" \
         "$SCRIPT_DIR/tests-ui/TypedIdTestInit.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarViewTestShim.swift" \
@@ -66,6 +67,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/tests-ui/TodoPopoverViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/ThemeBrowserViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/PaneSplitViewTests.swift" \
+        "$SCRIPT_DIR/tests-ui/AlertsPopoverViewTests.swift" \
         -framework Cocoa
 )
 echo "Running UI tests..."

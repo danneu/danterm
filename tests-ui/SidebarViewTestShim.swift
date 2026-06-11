@@ -1,5 +1,5 @@
-// Minimal test-only symbols needed to compile SidebarView, PaneWrapperView,
-// ThemeBrowserView, TodoPopoverView, and TabTodoPopoverView in the UI harness.
+// Minimal test-only symbols needed to compile the real app/ views in the UI
+// harness. See the app-file section of test-ui.sh's compile list.
 import Cocoa
 
 final class AppRuntime {
