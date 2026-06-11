@@ -9,7 +9,7 @@
 // alertsEmptyText helpers, setShowAllAlerts, and the manual-mode preservation
 // rules on selectTab / paneBecameFirstResponder / closeZoomedPane /
 // movePaneToTab / movePaneToNewTab, plus the explicit clearAlertsForPane /
-// ackTabAlerts / clearAlertsForTab / clearAlertsForTabs paths.
+// clearAlertsForTab / clearAlertsForTabs paths.
 import Foundation
 import Testing
 
@@ -1128,80 +1128,6 @@ import Testing
         #expect(model.alerts[0].isUnread == false, "clearAlertsForPane should clear non-focused pane's alerts")
     }
 
-    // MARK: - ackTabAlerts
-
-    @Test("testAckTabAlertsClearsAllPaneAlertsInTab")
-    func testAckTabAlertsClearsAllPaneAlertsInTab() {
-        // Intent: ackTabAlerts marks every pane's alerts in the selected
-        //   tab as read.
-        // Why it exists: pins the tab-wide ack scope.
-        // Scenario: spec-first ack-tab.
-        var model = makeModel()
-        model.config.alertClearMode = .manual
-        createTab(&model)
-        let paneA = model.groups[0].tabs[0].focusedPaneId
-
-        update(&model, .splitPane(direction: .horizontal))
-        let paneB = model.groups[0].tabs[0].focusedPaneId
-        #expect(paneA != paneB, "split should create a new pane")
-
-        model.alerts.insert(AlertModel(
-            id: AlertId(), kind: .bell, paneId: paneA,
-            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
-        ), at: 0)
-        model.alerts.insert(AlertModel(
-            id: AlertId(), kind: .bell, paneId: paneB,
-            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
-        ), at: 0)
-
-        update(&model, .ackTabAlerts)
-        #expect(model.alerts.filter { $0.isUnread }.count == 0, "all tab alerts should be marked read")
-    }
-
-    @Test("testAckTabAlertsDoesNotAffectOtherTabs")
-    func testAckTabAlertsDoesNotAffectOtherTabs() {
-        // Intent: ackTabAlerts scope is the selected tab; other tabs
-        //   stay unread.
-        // Why it exists: pins the per-tab scope.
-        // Scenario: spec-first ack-tab scope.
-        var model = makeModel()
-        model.config.alertClearMode = .manual
-        createTab(&model)
-        let tab1PaneId = model.groups[0].tabs[0].focusedPaneId
-
-        createTab(&model)
-        let tab2PaneId = model.groups[0].tabs[1].focusedPaneId
-
-        model.alerts.insert(AlertModel(
-            id: AlertId(), kind: .bell, paneId: tab1PaneId,
-            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
-        ), at: 0)
-        model.alerts.insert(AlertModel(
-            id: AlertId(), kind: .bell, paneId: tab2PaneId,
-            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
-        ), at: 0)
-
-        update(&model, .selectTab(id: model.groups[0].tabs[1].id))
-        update(&model, .ackTabAlerts)
-
-        let tab1Alert = model.alerts.first { $0.paneId == tab1PaneId }!
-        let tab2Alert = model.alerts.first { $0.paneId == tab2PaneId }!
-        #expect(tab1Alert.isUnread == true, "other tab's alerts should remain unread")
-        #expect(tab2Alert.isUnread == false, "selected tab's alerts should be cleared")
-    }
-
-    @Test("testAckTabAlertsNoopsWhenNoUnreadAlerts")
-    func testAckTabAlertsNoopsWhenNoUnreadAlerts() {
-        // Intent: ackTabAlerts is a no-op when no unread alerts exist.
-        // Why it exists: pins the empty-state guard.
-        // Scenario: spec-first ack-empty.
-        var model = makeModel()
-        createTab(&model)
-
-        let commands = update(&model, .ackTabAlerts)
-        #expect(commands.count == 0, "ackTabAlerts with no unread alerts should be a no-op")
-    }
-
     // MARK: - clearAlertsForTab
 
     @Test("testClearAlertsForTabClearsSpecificTab")
@@ -1245,6 +1171,39 @@ import Testing
 
         let commands = update(&model, .clearAlertsForTabs(tabIds: [tabId]))
         #expect(commands.count == 0, "clearAlertsForTabs with no unread alerts should be a no-op")
+    }
+
+    @Test("testClearAlertsForTabsClearsAllPaneAlertsInTab")
+    func testClearAlertsForTabsClearsAllPaneAlertsInTab() {
+        // Intent: clearAlertsForTabs marks every pane's alerts in the target
+        //   tab as read.
+        // Why it exists: ports the only split-tab coverage from the retired
+        //   selected-tab alert path.
+        // Scenario: spec-first explicit tab clear -- a split tab has unread
+        //   alerts on both panes, and clearing the tab reads both.
+        var model = makeModel()
+        model.config.alertClearMode = .manual
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        let paneA = model.groups[0].tabs[0].focusedPaneId
+
+        update(&model, .splitPane(direction: .horizontal))
+        let paneB = model.groups[0].tabs[0].focusedPaneId
+        #expect(paneA != paneB, "split should create a new pane")
+
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneA,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneB,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+
+        update(&model, .clearAlertsForTabs(tabIds: [tabId]))
+
+        #expect(model.alerts.filter(\.isUnread).count == 0,
+            "all tab alerts should be marked read")
     }
 
     @Test("testGoToMostRecentAlertPaneUnzoomsIfNeeded")

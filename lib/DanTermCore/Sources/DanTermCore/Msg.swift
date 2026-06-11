@@ -109,7 +109,6 @@ enum Msg {
     case goToMostRecentAlertPane
     case setShowAllAlerts(Bool)
     case clearAlertsForPane(paneId: PaneId)
-    case ackTabAlerts
 
     // Config (external reload)
     case configLoaded(DanTermConfig)

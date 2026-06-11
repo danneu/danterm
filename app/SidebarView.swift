@@ -786,6 +786,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     func contextMenu(for group: GroupModel) -> NSMenu? {
         let menu = NSMenu()
+        menu.autoenablesItems = false
 
         let newTabItem = NSMenuItem(title: "New Tab", action: #selector(contextNewTab(_:)), keyEquivalent: "")
         newTabItem.target = self
@@ -814,8 +815,8 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// already prevents group rows from entering the selection, so the
     /// filter mirrors the reload-snapshot pattern at line ~285 for
     /// consistency rather than covering a real steady-state case.
-    /// Used by AppDelegate's tab-color shortcuts to act on the user's
-    /// real selection instead of just the focused tab.
+    /// Feeds AppDelegate's menubar batch router so Tab menu actions act on the
+    /// user's real selection instead of just the focused tab.
     func selectedTabIds() -> [TabId] {
         return outlineView.selectedRowIndexes.compactMap { row in
             guard let item = outlineView.item(atRow: row) as? SidebarItem,
@@ -882,6 +883,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let suffix = count > 1 ? " (\(count) tabs)" : ""
 
         let menu = NSMenu()
+        menu.autoenablesItems = false
 
         // Rename Tab — singular-only, always targets the clicked row.
         let renameItem = NSMenuItem(
@@ -917,6 +919,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             colorItem.image = s.swatchImage
         }
         let colorSubmenu = NSMenu()
+        colorSubmenu.autoenablesItems = false
         if anyHasColor {
             let clearItem = NSMenuItem(
                 title: "Clear Color",

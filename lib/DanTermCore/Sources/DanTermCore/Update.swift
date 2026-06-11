@@ -934,14 +934,6 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         markAlertsReadForPane(paneId, in: &model)
         return []   // bell badge reconciles via reconcileSidebar
 
-    case .ackTabAlerts:
-        guard let tabId = model.selectedTabId else { return [] }
-        let paneIds = paneIdsForTab(tabId, in: model)
-        let affectedPaneIds = unreadAlertPaneIds(for: paneIds, in: model)
-        guard !affectedPaneIds.isEmpty else { return [] }
-        for paneId in affectedPaneIds { markAlertsReadForPane(paneId, in: &model) }
-        return []   // bell badges reconcile via reconcileSidebar
-
     case .confirmTerminate:
         model.pendingConfirmation = nil
         return [.terminate]

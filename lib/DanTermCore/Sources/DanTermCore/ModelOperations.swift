@@ -1179,3 +1179,38 @@ func resolveColorForBatch(
     }
     return allShareRequested ? nil : req
 }
+
+/// Batch-capable menubar tab actions that share one target rule and message
+/// construction path.
+enum MenubarTabAction {
+    case setColor(TabColor)
+    case clearColor
+    case clearCustomTitles
+    case clearAlerts
+}
+
+/// Build the Msg for a menubar tab action by preferring the sidebar's
+/// multi-selection and falling back to the selected tab.
+func menubarTabActionMsg(
+    _ action: MenubarTabAction,
+    sidebarSelection: [TabId],
+    in model: AppModel
+) -> Msg? {
+    let tabIds = !sidebarSelection.isEmpty
+        ? sidebarSelection
+        : model.selectedTabId.map { [$0] } ?? []
+    guard !tabIds.isEmpty else { return nil }
+
+    switch action {
+    case .setColor(let color):
+        return .setTabColors(
+            tabIds: tabIds,
+            color: resolveColorForBatch(tabIds: tabIds, requested: color, in: model))
+    case .clearColor:
+        return .setTabColors(tabIds: tabIds, color: nil)
+    case .clearCustomTitles:
+        return .clearCustomTitles(tabIds: tabIds)
+    case .clearAlerts:
+        return .clearAlertsForTabs(tabIds: tabIds)
+    }
+}

@@ -281,6 +281,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         let renameTabItem = NSMenuItem(title: "Rename Tab", action: #selector(renameTab(_:)), keyEquivalent: "R")
         renameTabItem.keyEquivalentModifierMask = [.command, .shift]
         tabMenu.addItem(renameTabItem)
+        tabMenu.addItem(withTitle: "Clear Custom Title", action: #selector(clearCustomTitle(_:)), keyEquivalent: "")
 
         let nextTabItem = NSMenuItem(title: "Next Tab", action: #selector(nextTab(_:)), keyEquivalent: "N")
         nextTabItem.keyEquivalentModifierMask = [.command, .shift]
@@ -321,6 +322,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         colorSubmenu.addItem(withTitle: "Clear Color", action: #selector(clearTabColor(_:)), keyEquivalent: "0")
         colorItem.submenu = colorSubmenu
         tabMenu.addItem(colorItem)
+
+        let clearTabAlertsItem = NSMenuItem(title: "Clear Tab Alerts", action: #selector(clearTabAlerts(_:)), keyEquivalent: ".")
+        tabMenu.addItem(clearTabAlertsItem)
 
         let tabTodoItem = NSMenuItem(title: "Toggle To-do List", action: #selector(toggleTabTodoPopover(_:)), keyEquivalent: "'")
         tabTodoItem.keyEquivalentModifierMask = [.command]
@@ -372,9 +376,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         let goToAlert = NSMenuItem(title: "Next Unread Alert", action: #selector(goToMostRecentAlertPane(_:)), keyEquivalent: "a")
         goToAlert.keyEquivalentModifierMask = [.command, .shift]
         paneMenu.addItem(goToAlert)
-
-        let ackTabAlertsItem = NSMenuItem(title: "Clear Tab Alerts", action: #selector(ackTabAlerts(_:)), keyEquivalent: ".")
-        paneMenu.addItem(ackTabAlertsItem)
 
         let ackAlertItem = NSMenuItem(title: "Clear Pane Alerts", action: #selector(ackPaneAlerts(_:)), keyEquivalent: ".")
         ackAlertItem.keyEquivalentModifierMask = [.command, .shift]
@@ -472,42 +473,43 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         sidebarView.beginRenamingTab(tabId)
     }
 
+    @objc func clearCustomTitle(_ sender: Any?) {
+        if let msg = menubarTabActionMsg(
+            .clearCustomTitles,
+            sidebarSelection: sidebarView?.selectedTabIds() ?? [],
+            in: runtime.model
+        ) {
+            runtime.send(msg)
+        }
+    }
+
     @objc func closeTab(_ sender: Any?) {
         guard let tabId = runtime.model.selectedTabId else { return }
         runtime.send(.requestCloseTab(id: tabId))
     }
 
-    // Tab > Color submenu actions. The action target is the sidebar's full
-    // multi-selection (mirrors right-click context menu); the toggle-off
-    // policy ("re-apply clears when every targeted tab already shares the
-    // requested color") is delegated to resolveColorForBatch in
-    // ModelOperations.swift, which is shared with SidebarView's context menu.
+    // Tab > Color submenu actions share the menubar batch router with
+    // clear-custom-title and clear-tab-alert actions.
     @objc func setTabColorFromMenu(_ sender: NSMenuItem) {
         let colors = TabColor.allCases
         guard sender.tag >= 0, sender.tag < colors.count else { return }
-        let tabIds = currentColorTargetTabIds()
-        guard !tabIds.isEmpty else { return }
-        let resolved = resolveColorForBatch(
-            tabIds: tabIds, requested: colors[sender.tag], in: runtime.model)
-        runtime.send(.setTabColors(tabIds: tabIds, color: resolved))
+        if let msg = menubarTabActionMsg(
+            .setColor(colors[sender.tag]),
+            sidebarSelection: sidebarView?.selectedTabIds() ?? [],
+            in: runtime.model
+        ) {
+            runtime.send(msg)
+        }
     }
 
     @objc func clearTabColor(_ sender: Any?) {
-        let tabIds = currentColorTargetTabIds()
-        guard !tabIds.isEmpty else { return }
-        runtime.send(.setTabColors(tabIds: tabIds, color: nil))
-    }
-
-    // Action target for tab-color shortcuts. Prefers the sidebar's actual
-    // multi-selection; falls back to the focused tab if the sidebar isn't
-    // reachable (transient teardown only -- IUOs are set in
-    // applicationDidFinishLaunching before any menu can dispatch).
-    private func currentColorTargetTabIds() -> [TabId] {
-        if let sidebar = sidebarView {
-            let ids = sidebar.selectedTabIds()
-            if !ids.isEmpty { return ids }
+        if let msg = menubarTabActionMsg(
+            .clearColor,
+            sidebarSelection: sidebarView?.selectedTabIds() ?? [],
+            in: runtime.model
+        ) {
+            runtime.send(msg)
         }
-        return runtime.model.selectedTabId.map { [$0] } ?? []
     }
 
     @objc func exportState(_ sender: Any?) {
@@ -625,8 +627,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         runtime.send(.clearAlertsForPane(paneId: tab.focusedPaneId))
     }
 
-    @objc func ackTabAlerts(_ sender: Any?) {
-        runtime.send(.ackTabAlerts)
+    @objc func clearTabAlerts(_ sender: Any?) {
+        if let msg = menubarTabActionMsg(
+            .clearAlerts,
+            sidebarSelection: sidebarView?.selectedTabIds() ?? [],
+            in: runtime.model
+        ) {
+            runtime.send(msg)
+        }
     }
 
     @objc func quitApp(_ sender: Any?) {
