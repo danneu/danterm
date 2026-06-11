@@ -1,10 +1,13 @@
-// Minimal test-only symbols needed to compile SidebarView and PaneWrapperView in the UI harness.
+// Minimal test-only symbols needed to compile SidebarView, PaneWrapperView, and
+// TabTodoPopoverView in the UI harness.
 import Cocoa
 
 final class AppRuntime {
     var model: AppModel
     var viewLocalState = ViewLocalState()
     var sentMessages: [Msg] = []
+    var tabTodoPopover: NSPopover?
+    var focusedPaneSurfaces: [PaneId] = []
 
     init(model: AppModel = AppModel(groups: [])) {
         self.model = model
@@ -20,6 +23,10 @@ final class AppRuntime {
     func updatePaneDrag(screenPoint: NSPoint) {}
     func endPaneDrag() {}
     func currentPaneDrop() -> (source: PaneId, target: PaneId, intent: PaneDropIntent)? { nil }
+
+    func focusPaneSurface(_ paneId: PaneId) {
+        focusedPaneSurfaces.append(paneId)
+    }
 }
 
 class TerminalView: NSView {
