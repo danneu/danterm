@@ -27,6 +27,27 @@ func themeBrowserViewTests() {
         try uiExpect(try cellText(row: 1, in: fx) == "Gruvbox Light", "second filtered row mismatch")
     }
 
+    uiTest("theme cell wires a swatch view") {
+        // Intent: the row cell built by viewFor carries a ColorSwatchView
+        //   installed in the cell with the swatchView back-reference set.
+        // Why it exists: cellText() only reads textField, so before this pin the
+        //   swatch subtree could be dropped entirely without failing the suite;
+        //   this guards the cell-factory extraction.
+        // Scenario: spec-first; pins existing rendering ahead of refactoring the
+        //   duplicated viewFor bodies into ThemeBrowserCellView.themeCell.
+        let fx = makeThemeBrowserFixture()
+        defer { fx.window.close() }
+        settleThemeBrowserFixture(fx)
+
+        guard let cell = fx.view.tableView.view(atColumn: 0, row: 0, makeIfNecessary: true) as? ThemeBrowserCellView else {
+            throw UITestFailure(message: "missing theme cell at row 0")
+        }
+        guard let swatch = cell.swatchView else {
+            throw UITestFailure(message: "cell should carry a swatch view")
+        }
+        try uiExpect(swatch.superview === cell, "swatch should be installed in the cell")
+    }
+
     uiTest("clearing the filter restores all rows") {
         let fx = makeThemeBrowserFixture()
         defer { fx.window.close() }
