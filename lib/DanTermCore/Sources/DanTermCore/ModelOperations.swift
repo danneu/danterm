@@ -54,6 +54,16 @@ func allPaneIds(_ node: SplitNodeModel) -> [PaneId] {
   }
 }
 
+/// Whether `splitId` names an interior split node of this tree.
+func containsSplit(_ node: SplitNodeModel, _ splitId: SplitId) -> Bool {
+  switch node {
+  case .leaf:
+    return false
+  case .split(let id, _, let first, let second, _):
+    return id == splitId || containsSplit(first, splitId) || containsSplit(second, splitId)
+  }
+}
+
 /// All PaneModels in a node, in left-to-right tree order.
 func panesInNode(_ node: SplitNodeModel) -> [PaneModel] {
   switch node {
@@ -434,6 +444,17 @@ func tabForPane(_ paneId: PaneId, in model: AppModel) -> TabModel? {
   for group in model.groups {
     for tab in group.tabs {
       if allPaneIds(tab.rootNode).contains(paneId) { return tab }
+    }
+  }
+  return nil
+}
+
+/// The tab whose split tree contains `splitId`, or nil. Id-carrying split
+/// messages resolve their own tab because hidden background containers stay mounted.
+func tabForSplit(_ splitId: SplitId, in model: AppModel) -> TabModel? {
+  for group in model.groups {
+    for tab in group.tabs {
+      if containsSplit(tab.rootNode, splitId) { return tab }
     }
   }
   return nil

@@ -1163,7 +1163,11 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
     // MARK: - View
 
     case .splitRatioChanged(let splitId, let ratio):
-        updateSelectedTab(&model) { tab in
+        // Hidden background containers stay mounted and can fire
+        // splitViewDidResizeSubviews during window resize, so resolve the
+        // split's own tab instead of assuming the selected tab owns it.
+        guard let tab = tabForSplit(splitId, in: model) else { return [] }
+        updateTab(tab.id, in: &model) { tab in
             tab.rootNode = setRatio(tab.rootNode, splitId: splitId, ratio: ratio)
         }
         // Persist split ratio so pane proportions are restored accurately.

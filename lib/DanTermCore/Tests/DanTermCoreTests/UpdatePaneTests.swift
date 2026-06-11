@@ -140,6 +140,71 @@ import Testing
         #expect(ratio == 0.3, "ratio should be updated")
     }
 
+    @Test("splitRatioChanged mutates the split's own tab")
+    func splitRatioChangedMutatesSplitOwnTab() {
+        // Intent: splitRatioChanged resolves the tab that owns the split id,
+        //   even when that tab is not selected.
+        // Why it exists: hidden but mounted split containers can report ratio
+        //   changes for background tabs during window resize, and those changes
+        //   need to persist to the tab that actually owns the split.
+        // Scenario: spec-first background resize -- tab A has a horizontal split,
+        //   tab B is selected, and a resize callback arrives for tab A's split.
+        var model = makeModel()
+        createTab(&model)
+        let tabAId = model.groups[0].tabs[0].id
+        update(&model, .splitPane(direction: .horizontal))
+
+        guard case .split(let tabASplitId, _, _, _, _) = model.groups[0].tabs[0].rootNode else {
+            Issue.record("tab A should have a split")
+            return
+        }
+
+        createTab(&model)
+        let tabBId = model.selectedTabId
+        let commands = update(&model, .splitRatioChanged(splitId: tabASplitId, ratio: 0.3))
+
+        #expect(commands.count == 1, "mutating a split should only produce scheduleCheckpoint")
+        #expect(hasEffect(commands) { if case .scheduleCheckpoint = $0 { return true }; return false })
+
+        guard let tabA = tabById(tabAId, in: model) else {
+            Issue.record("tab A should still exist")
+            return
+        }
+        guard case .split(_, _, _, _, let ratio) = tabA.rootNode else {
+            Issue.record("tab A should still have a split")
+            return
+        }
+        #expect(ratio == 0.3, "tab A's split ratio should be updated")
+
+        guard let tabBId, let tabB = tabById(tabBId, in: model) else {
+            Issue.record("tab B should still be selected")
+            return
+        }
+        if case .leaf = tabB.rootNode {
+            // expected
+        } else {
+            Issue.record("selected tab B should remain a leaf")
+        }
+    }
+
+    @Test("splitRatioChanged with an unknown split id is a no-op")
+    func splitRatioChangedUnknownSplitIdNoOp() {
+        // Intent: splitRatioChanged ignores ids that no live tab owns.
+        // Why it exists: resize and reconcile paths can race with teardown, and
+        //   unknown split ids must not dirty the model or schedule persistence.
+        // Scenario: spec-first stale callback -- a split tree exists, but the
+        //   callback carries an id that is not present in that tree.
+        var model = makeModel()
+        createTab(&model)
+        update(&model, .splitPane(direction: .horizontal))
+        let snapshot = model
+
+        let commands = update(&model, .splitRatioChanged(splitId: SplitId(), ratio: 0.25))
+
+        #expect(commands.isEmpty, "unknown split ids should not schedule persistence")
+        #expect(model == snapshot, "unknown split ids should leave the model unchanged")
+    }
+
     @Test("testClosePaneDeepTree")
     func testClosePaneDeepTree() {
         // Intent: closing an inner leaf in a nested tree (here B in
