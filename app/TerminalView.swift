@@ -94,6 +94,11 @@ class TerminalView: NSView, NSTextInputClient {
         // Direct Ghostty commands use `launchCommand` and must not also seed
         // shell input. Without `launchCommand`, `command` becomes initial shell
         // input for restore and IPC --cmd launches.
+        // Hazard: Ghostty exec's `launchCommand` via bash in the pane's
+        // exec-time environment, which is the bare launchd env (the app no
+        // longer snapshots a login env). A bare command name resolves against
+        // that minimal PATH, so any future non-nil caller must pass an absolute
+        // path, not a bare name. Today every caller passes nil.
         let initialInput = launchCommand == nil
             ? restoreInitialInput(for: command, behavior: restoreCommandBehavior)
             : nil
