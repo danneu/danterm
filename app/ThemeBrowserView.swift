@@ -8,22 +8,48 @@ enum ThemeBrowserFocusTarget {
     case table
 }
 
+/// Minimal clipboard surface ThemeBrowserView needs, split out so lifetime
+/// tests can observe Copy Name without touching AppKit pasteboard services.
+protocol ThemeNamePasteboard: AnyObject {
+    @discardableResult func clearContents() -> Int
+    @discardableResult func setString(_ string: String, forType dataType: NSPasteboard.PasteboardType) -> Bool
+}
+
+extension NSPasteboard: ThemeNamePasteboard {}
+
 class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSMenuDelegate {
     weak var runtime: AppRuntime?
 
     private let backgroundView: NSVisualEffectView
     private let headerLabel: NSTextField
-    private let resetButton: NSButton
-    private let closeButton: NSButton
-    private let searchField: NSSearchField
+    let resetButton: NSButton
+    let closeButton: NSButton
+    let searchField: NSSearchField
     private let scrollView: NSScrollView
-    private let tableView: NSTableView
+    let tableView: NSTableView
 
     private var allNames: [String] = []
     private var filteredNames: [String] = []
     private var currentThemeName: String?
+    /// Pasteboard seam for Copy Name. Production uses the general pasteboard;
+    /// tests inject a recorder so assertions never touch clipboard services.
+    var pasteboard: ThemeNamePasteboard = NSPasteboard.general
 
-    override init(frame: NSRect) {
+    /// Strong context-menu payload that keeps this ephemeral browser alive for
+    /// the menu item's lifetime while carrying the stable copied theme name.
+    final class MenuPayload {
+        let themeName: String
+        let anchor: ThemeBrowserView
+
+        init(themeName: String, anchor: ThemeBrowserView) {
+            self.themeName = themeName
+            self.anchor = anchor
+        }
+    }
+
+    /// Designated initializer with an injected theme-name list so tests can
+    /// assert row behavior without depending on the app bundle catalog.
+    init(frame frameRect: NSRect = .zero, themeNames: [String]) {
         backgroundView = NSVisualEffectView()
         backgroundView.material = .sidebar
         backgroundView.blendingMode = .behindWindow
@@ -64,7 +90,7 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
 
-        super.init(frame: frame)
+        super.init(frame: frameRect)
 
         translatesAutoresizingMaskIntoConstraints = false
 
@@ -129,8 +155,13 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
         menu.delegate = self
         tableView.menu = menu
 
-        allNames = ThemeCatalog.shared.names
+        allNames = themeNames
         filteredNames = allNames
+    }
+
+    /// Production entry point: theme names come from the bundled catalog.
+    override convenience init(frame frameRect: NSRect) {
+        self.init(frame: frameRect, themeNames: ThemeCatalog.shared.names)
     }
 
     required init?(coder: NSCoder) {
@@ -294,20 +325,36 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
 
     // MARK: - NSMenuDelegate
 
-    /// Build the context menu for the right-clicked row.
-    func menuNeedsUpdate(_ menu: NSMenu) {
+    /// Rebuild the right-click menu for `row`, using NSTableView.clickedRow
+    /// semantics where -1 means the click missed every row.
+    func buildThemeContextMenu(into menu: NSMenu, forRow row: Int) {
         menu.removeAllItems()
-        let clickedRow = tableView.clickedRow
-        guard clickedRow >= 0, clickedRow < filteredNames.count else { return }
+        guard row >= 0, row < filteredNames.count else { return }
         let item = NSMenuItem(title: "Copy Name", action: #selector(copyThemeName(_:)), keyEquivalent: "")
         item.target = self
-        item.representedObject = filteredNames[clickedRow]
+        item.representedObject = MenuPayload(themeName: filteredNames[row], anchor: self)
         menu.addItem(item)
     }
 
+    /// NSMenuDelegate: build the context menu for the right-clicked row.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        buildThemeContextMenu(into: menu, forRow: tableView.clickedRow)
+    }
+
+    /// NSMenuDelegate: break the anchor cycle after AppKit finishes tracking.
+    func menuDidClose(_ menu: NSMenu) {
+        RunLoop.main.perform {
+            for item in menu.items {
+                item.target = nil
+                item.representedObject = nil
+            }
+            menu.removeAllItems()
+        }
+    }
+
     @objc private func copyThemeName(_ sender: NSMenuItem) {
-        guard let name = sender.representedObject as? String else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(name, forType: .string)
+        guard let name = (sender.representedObject as? MenuPayload)?.themeName else { return }
+        pasteboard.clearContents()
+        pasteboard.setString(name, forType: .string)
     }
 }

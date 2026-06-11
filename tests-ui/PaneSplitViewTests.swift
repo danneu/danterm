@@ -18,6 +18,7 @@ struct UITestRunner {
         sidebarRenameRecycleTests()
         sidebarContextMenuTests()
         tabTodoPopoverViewTests()
+        themeBrowserViewTests()
         todoPopoverViewTests()
 
         print("\n\(uiTotal - uiFailures)/\(uiTotal) passed")

@@ -89,7 +89,7 @@ The current high-risk sites are safe for these specific reasons:
   (`app/SidebarView.swift:1367-1434`, `app/PreferencesPanel.swift:94-118`,
   `app/SearchOverlayView.swift:86`) uses `NSTextField` / `NSSearchField` edit
   sessions rather than a standalone undo-enabled `NSTextView`.
-- Context menus are safe in two shapes. `SidebarView` menus target the
+- Context menus are safe in three shapes. `SidebarView` menus target the
   long-lived sidebar and carry model ids or id boxes in `representedObject`;
   tab actions re-resolve/filter live ids through `currentModel` and core update
   paths (`app/SidebarView.swift:787-807,847-995,1040-1078`). Group "New Tab" is
@@ -100,7 +100,11 @@ The current high-risk sites are safe for these specific reasons:
   `PaneWrapperView.makePaneMenu` targets the reconcile-ephemeral wrapper and
   anchors it via `representedObject = self` on each wrapper-targeted item
   (`app/PaneWrapperView.swift:425-485`); its clipboard items target the
-  reconcile-stable `TerminalView` and need no anchor.
+  reconcile-stable `TerminalView` and need no anchor. `ThemeBrowserView` uses a
+  persistent table menu, so `buildThemeContextMenu(into:forRow:)` anchors the
+  browser with a payload carrying the stable theme name, then `menuDidClose`
+  clears the items on the next main-run-loop turn to break the menu -> payload ->
+  browser cycle (`app/ThemeBrowserView.swift:330-352`).
 - Menu `undo:` / `redo:` (`app/AppDelegate.swift:246-249`) dispatches through
   the responder chain. DanTerm has no window-level `registerUndo` site.
 - `WindowChromeView` selector observers

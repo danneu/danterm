@@ -33,6 +33,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Msg.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Command.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/DanTermConfig.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/ThemeColorParser.swift" \
         "$SCRIPT_DIR/app/BadgeLabel.swift" \
         "$SCRIPT_DIR/app/MenuCommandPolicy.swift" \
         "$SCRIPT_DIR/app/PaneSplitView.swift" \
@@ -49,6 +50,10 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/PaneWrapperView.swift" \
         "$SCRIPT_DIR/app/SplitContainerView.swift" \
         "$SCRIPT_DIR/app/SidebarView.swift" \
+        "$SCRIPT_DIR/app/ThemeColorFileLoader.swift" \
+        "$SCRIPT_DIR/app/ThemeCatalog.swift" \
+        "$SCRIPT_DIR/app/ThemeSwatchViews.swift" \
+        "$SCRIPT_DIR/app/ThemeBrowserView.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarBadgeTests.swift" \
         "$SCRIPT_DIR/tests-ui/MenuCommandPolicyTests.swift" \
         "$SCRIPT_DIR/tests-ui/TodoInputViewTests.swift" \
@@ -59,6 +64,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/tests-ui/PaneWrapperViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/TabTodoPopoverViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/TodoPopoverViewTests.swift" \
+        "$SCRIPT_DIR/tests-ui/ThemeBrowserViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/PaneSplitViewTests.swift" \
         -framework Cocoa
 )

@@ -1,5 +1,5 @@
 // Minimal test-only symbols needed to compile SidebarView, PaneWrapperView,
-// TodoPopoverView, and TabTodoPopoverView in the UI harness.
+// ThemeBrowserView, TodoPopoverView, and TabTodoPopoverView in the UI harness.
 import Cocoa
 
 final class AppRuntime {
@@ -10,6 +10,7 @@ final class AppRuntime {
     var tabTodoPopover: NSPopover?
     var onSend: ((Msg) -> Void)?
     var focusedPaneSurfaces: [PaneId] = []
+    var themeBrowserToggles = 0
 
     init(model: AppModel = AppModel(groups: [])) {
         self.model = model
@@ -30,6 +31,10 @@ final class AppRuntime {
     func focusPaneSurface(_ paneId: PaneId) {
         focusedPaneSurfaces.append(paneId)
     }
+
+    /// ThemeBrowserView close-button hook. Production toggles the panel in and
+    /// out of the content area; the harness only counts invocations.
+    func toggleThemeBrowser() { themeBrowserToggles += 1 }
 }
 
 class TerminalView: NSView {
