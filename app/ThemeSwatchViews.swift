@@ -1,5 +1,5 @@
-// Shared theme preview components used by both the sidebar theme browser
-// and the remote theme picker sheet.
+// Shared theme preview components and row-cell construction used by both the
+// sidebar theme browser and the remote theme picker sheet.
 import Cocoa
 
 /// Bold/regular monospaced fonts at the size where "test\u{2588}" just fits a swatch's
@@ -95,5 +95,59 @@ final class ThemeBrowserCellView: NSTableCellView {
         textField?.textColor = backgroundStyle == .emphasized
             ? .alternateSelectedControlTextColor
             : .labelColor
+    }
+}
+
+extension ThemeBrowserCellView {
+    /// Owns the shared theme-row rendering contract while each caller keeps a
+    /// distinct reuse identifier and selection behavior.
+    static func themeCell(
+        in tableView: NSTableView,
+        reuseIdentifier: NSUserInterfaceItemIdentifier,
+        themeName: String,
+        isCurrentTheme: Bool
+    ) -> ThemeBrowserCellView {
+        let cell: ThemeBrowserCellView
+        if let existing = tableView.makeView(withIdentifier: reuseIdentifier, owner: nil) as? ThemeBrowserCellView {
+            cell = existing
+        } else {
+            cell = ThemeBrowserCellView()
+            cell.identifier = reuseIdentifier
+
+            let swatch = ColorSwatchView()
+            swatch.translatesAutoresizingMaskIntoConstraints = false
+            cell.addSubview(swatch)
+            cell.swatchView = swatch
+
+            let text = NSTextField(labelWithString: "")
+            text.translatesAutoresizingMaskIntoConstraints = false
+            text.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+            text.lineBreakMode = .byTruncatingTail
+            cell.addSubview(text)
+            cell.textField = text
+
+            NSLayoutConstraint.activate([
+                swatch.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
+                swatch.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                swatch.widthAnchor.constraint(equalToConstant: 50),
+                swatch.heightAnchor.constraint(equalTo: cell.heightAnchor),
+                text.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12),
+                text.trailingAnchor.constraint(equalTo: swatch.leadingAnchor, constant: -4),
+                text.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            ])
+        }
+
+        if isCurrentTheme {
+            cell.textField?.stringValue = "\u{2713} \(themeName)"
+        } else {
+            cell.textField?.stringValue = themeName
+        }
+        cell.updateTextColor()
+        if let tc = ThemeCatalog.shared.colors[themeName] {
+            cell.swatchView?.colors = (tc.background, tc.foreground, tc.accent, tc.palette)
+        } else {
+            cell.swatchView?.colors = (.clear, .clear, .clear, [])
+        }
+        return cell
     }
 }

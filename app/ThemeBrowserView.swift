@@ -270,51 +270,13 @@ class ThemeBrowserView: NSView, NSTableViewDataSource, NSTableViewDelegate, NSSe
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let id = NSUserInterfaceItemIdentifier("ThemeCell")
-        let cell: ThemeBrowserCellView
-        if let existing = tableView.makeView(withIdentifier: id, owner: nil) as? ThemeBrowserCellView {
-            cell = existing
-        } else {
-            cell = ThemeBrowserCellView()
-            cell.identifier = id
-
-            let swatch = ColorSwatchView()
-            swatch.translatesAutoresizingMaskIntoConstraints = false
-            cell.addSubview(swatch)
-            cell.swatchView = swatch
-
-            let text = NSTextField(labelWithString: "")
-            text.translatesAutoresizingMaskIntoConstraints = false
-            text.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
-            text.lineBreakMode = .byTruncatingTail
-            cell.addSubview(text)
-            cell.textField = text
-
-            NSLayoutConstraint.activate([
-                swatch.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
-                swatch.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-                swatch.widthAnchor.constraint(equalToConstant: 50),
-                swatch.heightAnchor.constraint(equalTo: cell.heightAnchor),
-                text.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12),
-                text.trailingAnchor.constraint(equalTo: swatch.leadingAnchor, constant: -4),
-                text.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            ])
-        }
-
-        // Configure cell content
         let name = filteredNames[row]
-        if name == currentThemeName {
-            cell.textField?.stringValue = "\u{2713} \(name)"
-        } else {
-            cell.textField?.stringValue = name
-        }
-        cell.updateTextColor()
-        if let tc = ThemeCatalog.shared.colors[name] {
-            cell.swatchView?.colors = (tc.background, tc.foreground, tc.accent, tc.palette)
-        } else {
-            cell.swatchView?.colors = (.clear, .clear, .clear, [])
-        }
-        return cell
+        return ThemeBrowserCellView.themeCell(
+            in: tableView,
+            reuseIdentifier: NSUserInterfaceItemIdentifier("ThemeCell"),
+            themeName: name,
+            isCurrentTheme: name == currentThemeName
+        )
     }
 
     // MARK: - NSSearchFieldDelegate
