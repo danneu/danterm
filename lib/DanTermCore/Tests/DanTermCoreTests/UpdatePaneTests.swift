@@ -894,6 +894,37 @@ import Testing
         #expect(commands.count == 0, "zoomed tab is no-op")
     }
 
+    @Test("movePane ignores panes that are only present in a background tab")
+    func movePaneBackgroundTabPanesAreNoOp() throws {
+        // Intent: .movePane whose source and target live outside the selected
+        //   tab returns [] and leaves the model unchanged -- no focusedPaneId
+        //   corruption, no zoom clobber, no scheduleCheckpoint.
+        // Why it exists: pins the selected-tab-scoped invariant documented by
+        //   the .movePane handler comment.
+        // Scenario: spec-first; a pane drop dispatch races a tab switch, so
+        //   the drag's panes are still in the old tab while a different tab is
+        //   now selected.
+        var swap = makeTwoTabFixture()
+        swap.model.groups[0].tabs[1].isZoomed = false
+        let swapTarget = try #require(swap.a2, "fixture should provide a second pane in tab A")
+        let beforeSwap = swap.model
+
+        let swapCommands = update(&swap.model, .movePane(source: swap.a1, target: swapTarget, intent: .swap))
+
+        #expect(swapCommands.isEmpty, "background-tab swap should produce no commands")
+        #expect(swap.model == beforeSwap, "background-tab swap must not mutate the model")
+
+        var split = makeTwoTabFixture()
+        split.model.groups[0].tabs[1].isZoomed = false
+        let splitTarget = try #require(split.a2, "fixture should provide a second pane in tab A")
+        let beforeSplit = split.model
+
+        let splitCommands = update(&split.model, .movePane(source: split.a1, target: splitTarget, intent: .splitRight))
+
+        #expect(splitCommands.isEmpty, "background-tab split move should produce no commands")
+        #expect(split.model == beforeSplit, "background-tab split move must not mutate the model")
+    }
+
     @Test("testSplitPaneTargetsByPaneId")
     func testSplitPaneTargetsByPaneId() {
         // Intent: splitPane(paneId:) targets that pane regardless of

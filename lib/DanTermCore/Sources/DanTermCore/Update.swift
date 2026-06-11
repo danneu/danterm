@@ -254,6 +254,14 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         return commands
 
     case .movePane(let source, let target, let intent):
+        // Selected-tab scoping is deliberate: unlike .closePane/.splitPane,
+        // which resolve tabForPane because background-tab dispatches are real,
+        // .movePane's only producer is the PaneWrapperView drag gesture, bound
+        // to the selected tab by construction. A stale dispatch whose panes
+        // live elsewhere no-ops below: swapLeaves/moveLeaf return nil unless
+        // both ids are in this tree, before focusedPaneId is written. Resolving
+        // the panes' real tab instead would silently rearrange a tab the user is
+        // not looking at. Revisit if .movePane gains an IPC producer.
         guard source != target else { return [] }
         guard let tab = selectedTab(in: model) else { return [] }
         guard !tab.isZoomed else { return [] }
