@@ -1,12 +1,14 @@
-// Minimal test-only symbols needed to compile SidebarView, PaneWrapperView, and
-// TabTodoPopoverView in the UI harness.
+// Minimal test-only symbols needed to compile SidebarView, PaneWrapperView,
+// TodoPopoverView, and TabTodoPopoverView in the UI harness.
 import Cocoa
 
 final class AppRuntime {
     var model: AppModel
     var viewLocalState = ViewLocalState()
     var sentMessages: [Msg] = []
+    var todoPopover: NSPopover?
     var tabTodoPopover: NSPopover?
+    var onSend: ((Msg) -> Void)?
     var focusedPaneSurfaces: [PaneId] = []
 
     init(model: AppModel = AppModel(groups: [])) {
@@ -15,6 +17,7 @@ final class AppRuntime {
 
     func send(_ msg: Msg) {
         sentMessages.append(msg)
+        onSend?(msg)
     }
 
     // Pane drag API that ToolbarDragHandleView compiles against. The harness

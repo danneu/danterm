@@ -40,6 +40,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/TodoRowView.swift" \
         "$SCRIPT_DIR/app/TodoShortcutHelpView.swift" \
         "$SCRIPT_DIR/app/TabTodoPopoverView.swift" \
+        "$SCRIPT_DIR/app/TodoPopoverView.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/SidebarItemStore.swift" \
         "$SCRIPT_DIR/tests-ui/TypedIdTestInit.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarViewTestShim.swift" \
@@ -57,6 +58,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/tests-ui/SplitContainerViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/PaneWrapperViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/TabTodoPopoverViewTests.swift" \
+        "$SCRIPT_DIR/tests-ui/TodoPopoverViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/PaneSplitViewTests.swift" \
         -framework Cocoa
 )
