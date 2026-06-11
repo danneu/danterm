@@ -349,6 +349,20 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
     }
 
+    /// A cell dequeued from NSOutlineView's reuse pool can carry a stranded inline
+    /// rename: AppKit aborts a live field editor on programmatic selection changes and
+    /// collapseItem with NO NSTextFieldDelegate callback, leaving `isEditable = true`.
+    /// An editable NSTextField reports no intrinsic width, so a poisoned cell renders
+    /// its title ~2pt wide no matter what stringValue holds (the 2026-06-11 blank
+    /// tab-title incident). Belt-and-braces reset at the reuse boundary.
+    private func resetRecycledRenameState(_ cell: NSTableCellView) {
+        guard let textField = cell.textField else { return }
+        if textField.currentEditor() != nil { textField.abortEditing() }
+        guard textField.isEditable else { return }
+        textField.isEditable = false
+        objc_setAssociatedObject(textField, &AssociatedKeys.renameTarget, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+    }
+
     /// Forcibly end any in-progress inline rename without dispatching a rename Msg, so a
     /// removed/moved edited row never strands its field editor. The guard already cleared
     /// the sidecar; clearing the per-field associated object here makes the
@@ -380,6 +394,28 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 nonFocusRows.insert(row)
             }
         }
+
+        // A programmatic selectRowIndexes that CHANGES the selection aborts a live
+        // field editor with NO NSTextFieldDelegate callback, stranding
+        // isEditable = true on the cell (and from there into the reuse pool -- the
+        // 2026-06-11 blank-tab-title bug; Cmd-T's spawn+select reconcile is exactly
+        // this). End the edit through the proper path first, then resync the row
+        // from the new model since the guard suppressed its reload while editing.
+        if let target = runtime?.viewLocalState.sidebarRenameTarget {
+            var intended = nonFocusRows
+            if let f = focusRow { intended.insert(f) }
+            let willChangeSelection = (focusRow != nil || !nonFocusRows.isEmpty || !restoreSet.isEmpty)
+                && intended != outlineView.selectedRowIndexes
+            if willChangeSelection, let model = currentModel {
+                runtime?.viewLocalState.sidebarRenameTarget = nil
+                endActiveInlineRename()
+                switch target {
+                case .tab(let id): updateTabRow(tabId: id, model: model)
+                case .group(let id): updateGroupRow(groupId: id, model: model)
+                }
+            }
+        }
+
         if let f = focusRow {
             if nonFocusRows.isEmpty {
                 outlineView.selectRowIndexes(
@@ -1062,6 +1098,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         let cellId = NSUserInterfaceItemIdentifier("GroupCell")
 
         if let existing = outlineView.makeView(withIdentifier: cellId, owner: nil) as? NSTableCellView {
+            resetRecycledRenameState(existing)
             configureGroupCell(existing, group: group)
             return existing
         }
@@ -1165,6 +1202,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
         let cell: NSTableCellView
         if let existing = outlineView.makeView(withIdentifier: cellId, owner: nil) as? NSTableCellView {
+            resetRecycledRenameState(existing)
             cell = existing
         } else {
             cell = NSTableCellView()

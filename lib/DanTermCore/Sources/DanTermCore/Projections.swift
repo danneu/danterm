@@ -540,7 +540,9 @@ func computeSidebarRowOps(old: SidebarProjection?, new: SidebarProjection) -> [S
 /// by the live field editor -- but every structural op still applies: a tab being
 /// renamed can be closed or moved by another `send()`. `clearRename` tells the executor
 /// to end the now-orphaned edit (and clear the sidecar) when the edited row is removed
-/// (absent from `new`), moved (a re-insert op carries its id), or caught in a reloadAll
+/// (absent from `new`), moved (a re-insert op carries its id), hidden by its group
+/// collapsing (collapseItem tears the cell down with no field-editor delegate callback,
+/// which would strand `isEditable = true` into the reuse pool), or caught in a reloadAll
 /// rebuild. Factored pure so the rename-guard-scope test is structure-insensitive.
 func guardSidebarRenameOps(
   ops: [SidebarRowOp],
@@ -556,6 +558,13 @@ func guardSidebarRenameOps(
     }
   }()
 
+  // The group whose collapse would hide the edited tab's row. A group rename is
+  // unaffected: collapsing a group hides its children but keeps the group row visible.
+  let editedTabGroupId: GroupId? = {
+    guard case .tab(let id) = renameTarget else { return nil }
+    return new.groups.first { $0.tabs.contains { $0.id == id } }?.id
+  }()
+
   var out: [SidebarRowOp] = []
   var clearRename = !targetPresent   // the edited row was removed/closed -> end the edit
   for op in ops {
@@ -564,6 +573,8 @@ func guardSidebarRenameOps(
       continue   // suppress: field editor owns this row
     case .reloadGroup(let id) where renameTarget == .group(id):
       continue   // suppress
+    case .setGroupCollapsed(let id, true) where id == editedTabGroupId:
+      out.append(op); clearRename = true   // collapse hides the edited row -> end edit
     case .insertTab(let id, _, _) where renameTarget == .tab(id):
       out.append(op); clearRename = true   // edited row moved (remove+insert) -> end edit
     case .insertGroup(let id, _) where renameTarget == .group(id):

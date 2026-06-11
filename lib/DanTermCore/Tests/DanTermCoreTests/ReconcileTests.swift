@@ -260,6 +260,44 @@ import Testing
             "the move (remove + insert-by-id) still applies")
     }
 
+    @Test("guardSidebarRenameOps: collapsing the edited row's group ends the edit")
+    func guardSidebarRenameOpsCollapseEndsEdit() {
+        // Intent: a setGroupCollapsed(collapsed: true) on the group holding the
+        //   edited tab applies normally AND clears the rename sidecar, exactly
+        //   like close/move/reloadAll of the edited row.
+        // Why it exists: collapseItem tears down the edited row's cell view with
+        //   no field-editor delegate callback, so a rename left live across a
+        //   collapse strands an editable cell in NSOutlineView's reuse pool; the
+        //   next inserted tab row dequeues that cell and renders a blank title
+        //   no matter what the model says.
+        // Scenario: 2026-06-11 incident -- a tab spawned via `danterm tab new`
+        //   showed an empty sidebar title even though the model title was
+        //   correct; AX inspection showed its title field was a recycled
+        //   still-editable rename cell.
+        let g1 = GroupId(); let g2 = GroupId(); let a = TabId(); let c = TabId()
+        let old = sbProj(false, [
+            sbGroup(g1, "L", first: true, [sbTabFull(a, "a", bell: 0)]),
+            sbGroup(g2, "R", [sbTabFull(c, "c", bell: 0)]),
+        ])
+        let collapsed = sbProj(false, [
+            sbGroup(g1, "L", collapsed: true, first: true, [sbTabFull(a, "a", bell: 0)]),
+            sbGroup(g2, "R", [sbTabFull(c, "c", bell: 0)]),
+        ])
+        let guarded = guardSidebarRenameOps(
+            ops: computeSidebarRowOps(old: old, new: collapsed), renameTarget: .tab(a), new: collapsed)
+        #expect(guarded.clearRename, "collapsing the edited row's group ends the edit")
+        #expect(guarded.ops.contains(.setGroupCollapsed(id: g1, collapsed: true)),
+            "the collapse still applies")
+        // Collapsing an unrelated group leaves the edit alone.
+        let otherCollapsed = sbProj(false, [
+            sbGroup(g1, "L", first: true, [sbTabFull(a, "a", bell: 0)]),
+            sbGroup(g2, "R", collapsed: true, [sbTabFull(c, "c", bell: 0)]),
+        ])
+        let otherGuarded = guardSidebarRenameOps(
+            ops: computeSidebarRowOps(old: old, new: otherCollapsed), renameTarget: .tab(a), new: otherCollapsed)
+        #expect(!otherGuarded.clearRename, "collapsing an unrelated group does not end the edit")
+    }
+
     @Test("guardSidebarRenameOps: nil rename target is a pass-through")
     func guardSidebarRenameOpsNilRenameTargetPassThrough() {
         // Intent: a nil rename target makes the guard a no-op.

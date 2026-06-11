@@ -15,6 +15,7 @@ struct UITestRunner {
         todoInputViewTests()
         sidebarSelectionCacheTests()
         sidebarScrollRevealTests()
+        sidebarRenameRecycleTests()
 
         print("\n\(uiTotal - uiFailures)/\(uiTotal) passed")
         if uiFailures > 0 { exit(1) }
