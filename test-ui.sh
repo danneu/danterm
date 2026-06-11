@@ -55,6 +55,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/ThemeCatalog.swift" \
         "$SCRIPT_DIR/app/ThemeSwatchViews.swift" \
         "$SCRIPT_DIR/app/ThemeBrowserView.swift" \
+        "$SCRIPT_DIR/app/RemoteThemePickerSheet.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarBadgeTests.swift" \
         "$SCRIPT_DIR/tests-ui/MenuCommandPolicyTests.swift" \
         "$SCRIPT_DIR/tests-ui/TodoInputViewTests.swift" \
@@ -66,6 +67,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/tests-ui/TabTodoPopoverViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/TodoPopoverViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/ThemeBrowserViewTests.swift" \
+        "$SCRIPT_DIR/tests-ui/RemoteThemePickerSheetTests.swift" \
         "$SCRIPT_DIR/tests-ui/PaneSplitViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/AlertsPopoverViewTests.swift" \
         -framework Cocoa

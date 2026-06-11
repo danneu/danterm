@@ -10,13 +10,26 @@ class RemoteThemePickerSheet: NSViewController, NSTableViewDataSource, NSTableVi
     /// Pre-selects this theme on appear.
     var currentThemeName: String?
 
-    private let searchField = NSSearchField()
+    let searchField = NSSearchField()
     private let scrollView = NSScrollView()
-    private let tableView = NSTableView()
-    private let selectButton = NSButton(title: "Select", target: nil, action: nil)
+    let tableView = NSTableView()
+    let selectButton = NSButton(title: "Select", target: nil, action: nil)
+    let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
 
-    private var allNames: [String] = ThemeCatalog.shared.names
-    private var filteredNames: [String] = ThemeCatalog.shared.names
+    private var allNames: [String]
+    private var filteredNames: [String]
+
+    /// Test entry point: inject theme names so the harness can assert row
+    /// behavior without depending on the app bundle catalog.
+    init(themeNames: [String] = ThemeCatalog.shared.names) {
+        allNames = themeNames
+        filteredNames = themeNames
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) not implemented")
+    }
 
     override func loadView() {
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 400))
@@ -43,7 +56,8 @@ class RemoteThemePickerSheet: NSViewController, NSTableViewDataSource, NSTableVi
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
 
-        let cancelButton = NSButton(title: "Cancel", target: self, action: #selector(cancel))
+        cancelButton.target = self
+        cancelButton.action = #selector(cancel)
         cancelButton.keyEquivalent = "\u{1b}" // Escape
 
         selectButton.target = self
