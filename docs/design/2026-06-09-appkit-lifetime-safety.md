@@ -54,6 +54,16 @@ stored-callback code:
    [`../upgrading-ghostty.md#steps`](../upgrading-ghostty.md#steps).
 6. Prefer `[weak self]` for stored escaping closures, timers, monitors, and
    async hops. Avoid `unowned`; the codebase currently has none.
+7. `NSMenuItem.target` is weak -- an AppKit target that can outlive its referent
+   must not be the only object keeping menu actions alive. A menu
+   owned by a reconcile-ephemeral view (for example `PaneWrapperView`) must
+   anchor that owner for the menu's lifetime by setting `representedObject` to
+   it on every owner-targeted item; otherwise a reconcile mid-track can
+   deallocate the target and turn actions into silent no-ops. Menu actions
+   identify subjects with stable model ids rather than row indices and resolve
+   those ids against the live model at fire time. Stale ids must either fail
+   closed or use an intentional fallback documented at the handler/core
+   boundary.
 
 ## Consequences
 
@@ -79,6 +89,18 @@ The current high-risk sites are safe for these specific reasons:
   (`app/SidebarView.swift:1367-1434`, `app/PreferencesPanel.swift:94-118`,
   `app/SearchOverlayView.swift:86`) uses `NSTextField` / `NSSearchField` edit
   sessions rather than a standalone undo-enabled `NSTextView`.
+- Context menus are safe in two shapes. `SidebarView` menus target the
+  long-lived sidebar and carry model ids or id boxes in `representedObject`;
+  tab actions re-resolve/filter live ids through `currentModel` and core update
+  paths (`app/SidebarView.swift:787-807,847-995,1040-1078`). Group "New Tab" is
+  not a fail-closed stale-id example: a stale group id follows `createTab`'s
+  existing fallback to the selected tab's group
+  (`lib/DanTermCore/Sources/DanTermCore/Update.swift:51-60`,
+  `lib/DanTermCore/Tests/DanTermCoreTests/UpdateTabTests.swift:274-304`).
+  `PaneWrapperView.makePaneMenu` targets the reconcile-ephemeral wrapper and
+  anchors it via `representedObject = self` on each wrapper-targeted item
+  (`app/PaneWrapperView.swift:425-485`); its clipboard items target the
+  reconcile-stable `TerminalView` and need no anchor.
 - Menu `undo:` / `redo:` (`app/AppDelegate.swift:246-249`) dispatches through
   the responder chain. DanTerm has no window-level `registerUndo` site.
 - `WindowChromeView` selector observers
@@ -118,6 +140,8 @@ closures.
   keeping todo input undo out of the window undo manager.
 - `docs/upgrading-ghostty.md` -- Ghostty upgrade step that re-checks the
   deferred-free `nsview` assumption.
+- `app/PaneWrapperView.swift:425-485` -- `makePaneMenu` / `wrapperItem`, the
+  `representedObject` anchor for menus owned by a reconcile-ephemeral view.
 - [Apple: Using Undo in AppKit-Based Applications](https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/UndoArchitecture/Articles/AppKitUndo.html)
   -- AppKit's undo-manager lookup, `NSTextView` undo behavior, and text-field
   edit-session undo behavior.

@@ -271,6 +271,38 @@ import Testing
         #expect(model.groups[1].tabs.count == 2, "Work should have auto-created tab + explicit tab")
     }
 
+    @Test("testCreateTabUnknownGroupFallsBackToSelectedTabsGroup")
+    func testCreateTabUnknownGroupFallsBackToSelectedTabsGroup() {
+        // Intent: createTab with an unknown explicit group id routes through
+        //   the selected tab's group instead of the first group.
+        // Why it exists: the AppKit lifetime ADR documents this fallback as
+        //   intentional for menu actions, while IPC tab.new explicitly rejects
+        //   unknown explicit groups; this keeps the two contracts distinct.
+        // Scenario: spec-first stale group id -- a menu action fires after
+        //   its group id has gone stale while a tab in another group is selected.
+        var model = makeModel()
+        update(&model, .createGroup(name: "Work"))
+        let generalCountBefore = model.groups[0].tabs.count
+        let workGroupId = model.groups[1].id
+        let selectedWorkTabId = model.groups[1].tabs[0].id
+        update(&model, .selectTab(id: selectedWorkTabId))
+        let workTabIdsBefore = model.groups[1].tabs.map(\.id)
+        let unknownGroupId = GroupId()
+
+        update(&model, .createTab(inGroupId: unknownGroupId))
+
+        #expect(model.groups[0].tabs.count == generalCountBefore,
+            "unknown explicit group should not fall back to group 0")
+        #expect(model.groups[1].id == workGroupId, "pre-existing Work group should remain the target")
+        #expect(model.groups[1].tabs.count == workTabIdsBefore.count + 1,
+            "unknown explicit group should use selected tab's group")
+        #expect(model.groups[1].tabs.dropLast().map(\.id) == workTabIdsBefore,
+            "existing Work tabs should remain in order")
+        #expect(!model.groups.contains { $0.id == unknownGroupId }, "unknown id should not create a group")
+        #expect(model.selectedTabId == model.groups[1].tabs.last?.id,
+            "new fallback tab should be selected")
+    }
+
     @Test("testCreateTabBackgroundIntoSpecificGroup")
     func testCreateTabBackgroundIntoSpecificGroup() {
         // Intent: an inGroupId + background create lands in the requested
