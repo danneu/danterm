@@ -158,6 +158,21 @@ final class KeyTokensTests: XCTestCase {
         XCTAssertEqual(KeyName(wireName: "F12"), .named(.f12))
     }
 
+    func testEveryNamedKeyWireNameRoundTrips() {
+        // Intent: every NamedKey's canonical wireName decodes back to that same key.
+        // Why it exists: NamedKey.wireName (encode) and namedAliases/KeyName(wireName:)
+        //   (decode) are now one derived pair; this CaseIterable sweep turns any future
+        //   case that forgets to round-trip into a test failure, not a silent wire bug.
+        // Scenario: spec-first invariant for the pane.input key serialization bijection.
+        for k in NamedKey.allCases {
+            XCTAssertEqual(
+                KeyName(wireName: KeyName.named(k).wireName),
+                .named(k),
+                "wireName round-trip failed for \(k)"
+            )
+        }
+    }
+
     func testWireNameF30Rejected() {
         XCTAssertNil(KeyName(wireName: "F30"))
     }

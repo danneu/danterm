@@ -223,6 +223,21 @@ final class CLIParserTests: XCTestCase {
         ]))
     }
 
+    func testPaneInputSerializesKeyEventJSON() throws {
+        // Intent: `pane input` serializes each token to the exact wire JSON the IPC
+        //   decoder consumes -- the encode path end-to-end (argv -> params["input"]).
+        // Why it exists: this plan moves key encoding into KeyName.wireName and rewires
+        //   inputEventToJSON; without asserting the payload, a bad `.letter` arm or a
+        //   mis-wired call ships silently (the round-trip and classifier tests miss it).
+        // Scenario: spec-first contract for the pane.input params["input"] array.
+        let cmd = try parseCLI(["pane", "input", "--pane", "P1", "--", "BSpace", "F12", "C-c"])
+        XCTAssertEqual(cmd.params["input"], .array([
+            .object(["key": .string("BSpace")]),
+            .object(["key": .string("F12")]),
+            .object(["key": .string("c"), "mods": .array([.string("ctrl")])]),
+        ]))
+    }
+
     func testPaneSplitParsesBackgroundFlag() throws {
         let command = try parseCLI(["pane", "split", "-h", "--background"])
         XCTAssertEqual(command.method, Methods.paneSplit)

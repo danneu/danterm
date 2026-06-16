@@ -1,6 +1,7 @@
 // Structured input events used by the `pane.input` IPC method to drive a pane
 // as if the user typed at the keyboard. The CLI parses argv tokens into these
-// values; the wire form decodes one-to-one via `KeyName(wireName:)`.
+// values; the wire form encodes via `KeyName.wireName` and decodes one-to-one
+// via `KeyName(wireName:)`, an inverse pinned by protocol tests.
 import Foundation
 
 public enum InputEvent: Equatable {
@@ -14,15 +15,20 @@ public enum KeyName: Equatable {
     // Single lowercase ASCII letter, used for modifier-letter combos (e.g. C-c).
     case letter(Character)
 
-    // Decode a wire `key` string. Case-sensitive, returns nil for anything
-    // outside the closed set so the caller can surface a JSON-RPC error.
+    /// Canonical IPC serialization name for a key event.
+    public var wireName: String {
+        switch self {
+        case .letter(let c):
+            return String(c)
+        case .named(let n):
+            return n.wireName
+        }
+    }
+
+    /// Decodes a case-sensitive wire `key` string so IPC can reject unknown keys.
     public init?(wireName: String) {
         if let canonical = KeyName.namedAliases[wireName] {
             self = .named(canonical)
-            return
-        }
-        if let fn = KeyName.parseFunctionKey(wireName) {
-            self = .named(fn)
             return
         }
         if wireName.count == 1,
@@ -34,44 +40,13 @@ public enum KeyName: Equatable {
         return nil
     }
 
-    // Wire-name -> canonical NamedKey. The map is the single source of truth
-    // for the accepted keynames; aliases (BSpace/Backspace, Esc/Escape) map to
-    // the same canonical case.
-    public static let namedAliases: [String: NamedKey] = [
-        "Enter": .enter,
-        "Tab": .tab,
-        "BSpace": .bspace,
-        "Backspace": .bspace,
-        "Escape": .escape,
-        "Esc": .escape,
-        "Up": .up,
-        "Down": .down,
-        "Left": .left,
-        "Right": .right,
-        "Home": .home,
-        "End": .end,
-        "PgUp": .pgUp,
-        "PgDn": .pgDn,
-        "Delete": .delete,
-    ]
-
-    private static func parseFunctionKey(_ name: String) -> NamedKey? {
-        switch name {
-        case "F1": return .f1
-        case "F2": return .f2
-        case "F3": return .f3
-        case "F4": return .f4
-        case "F5": return .f5
-        case "F6": return .f6
-        case "F7": return .f7
-        case "F8": return .f8
-        case "F9": return .f9
-        case "F10": return .f10
-        case "F11": return .f11
-        case "F12": return .f12
-        default: return nil
-        }
-    }
+    /// Wire-name lookup derived from `NamedKey.wireName`, plus decode-only aliases.
+    public static let namedAliases: [String: NamedKey] = {
+        var map = Dictionary(uniqueKeysWithValues: NamedKey.allCases.map { ($0.wireName, $0) })
+        map["Backspace"] = .bspace
+        map["Esc"] = .escape
+        return map
+    }()
 }
 
 public enum NamedKey: Equatable, CaseIterable {
@@ -89,6 +64,38 @@ public enum NamedKey: Equatable, CaseIterable {
     case pgDn
     case delete
     case f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12
+
+    // Update integrations/danterm/SKILL.md's human-facing key list when adding a case.
+    /// Canonical IPC serialization name for a named key.
+    public var wireName: String {
+        switch self {
+        case .enter:  return "Enter"
+        case .tab:    return "Tab"
+        case .bspace: return "BSpace"
+        case .escape: return "Escape"
+        case .up:     return "Up"
+        case .down:   return "Down"
+        case .left:   return "Left"
+        case .right:  return "Right"
+        case .home:   return "Home"
+        case .end:    return "End"
+        case .pgUp:   return "PgUp"
+        case .pgDn:   return "PgDn"
+        case .delete: return "Delete"
+        case .f1:  return "F1"
+        case .f2:  return "F2"
+        case .f3:  return "F3"
+        case .f4:  return "F4"
+        case .f5:  return "F5"
+        case .f6:  return "F6"
+        case .f7:  return "F7"
+        case .f8:  return "F8"
+        case .f9:  return "F9"
+        case .f10: return "F10"
+        case .f11: return "F11"
+        case .f12: return "F12"
+        }
+    }
 }
 
 public struct KeyMods: OptionSet, Equatable {

@@ -395,7 +395,7 @@ private func inputEventToJSON(_ event: InputEvent) -> JSONValue {
     case .text(let text):
         return .object(["text": .string(text)])
     case .key(let key, let mods):
-        var object: [String: JSONValue] = ["key": .string(wireName(for: key))]
+        var object: [String: JSONValue] = ["key": .string(key.wireName)]
         if !mods.isEmpty {
             var modNames: [JSONValue] = []
             if mods.contains(.ctrl) { modNames.append(.string("ctrl")) }
@@ -403,40 +403,5 @@ private func inputEventToJSON(_ event: InputEvent) -> JSONValue {
             object["mods"] = .array(modNames)
         }
         return .object(object)
-    }
-}
-
-private func wireName(for key: KeyName) -> String {
-    switch key {
-    case .letter(let c):
-        return String(c)
-    case .named(let n):
-        switch n {
-        case .enter:  return "Enter"
-        case .tab:    return "Tab"
-        case .bspace: return "BSpace"
-        case .escape: return "Escape"
-        case .up:     return "Up"
-        case .down:   return "Down"
-        case .left:   return "Left"
-        case .right:  return "Right"
-        case .home:   return "Home"
-        case .end:    return "End"
-        case .pgUp:   return "PgUp"
-        case .pgDn:   return "PgDn"
-        case .delete: return "Delete"
-        case .f1:  return "F1"
-        case .f2:  return "F2"
-        case .f3:  return "F3"
-        case .f4:  return "F4"
-        case .f5:  return "F5"
-        case .f6:  return "F6"
-        case .f7:  return "F7"
-        case .f8:  return "F8"
-        case .f9:  return "F9"
-        case .f10: return "F10"
-        case .f11: return "F11"
-        case .f12: return "F12"
-        }
     }
 }
