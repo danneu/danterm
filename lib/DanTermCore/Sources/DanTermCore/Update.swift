@@ -1464,6 +1464,8 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
 
 // MARK: - IPC Handlers
 
+/// Non-throwing IPC error boundary: callers get `Command` replies while the
+/// method dispatcher can use thrown validation errors internally.
 private func handleIpcRequest(
     _ model: inout AppModel,
     reqId: UUID,
@@ -1472,29 +1474,47 @@ private func handleIpcRequest(
     context: IpcRequestContext,
     env: CoreEnv
 ) -> [Command] {
+    do {
+        return try dispatchIpc(
+            &model,
+            reqId: reqId,
+            method: method,
+            params: params,
+            context: context,
+            env: env
+        )
+    } catch let error as IpcParamsError {
+        return ipcInvalidParams(reqId, error.message)
+    } catch let error as LaunchSpecParseError {
+        return ipcInvalidParams(reqId, launchSpecErrorMessage(error))
+    } catch {
+        return [.ipcError(reqId: reqId, code: -32603, message: "internal error")]
+    }
+}
+
+/// Carries per-method IPC dispatch behind `handleIpcRequest`, so each case can
+/// validate with `throw` before mutating the model and leave reply translation central.
+private func dispatchIpc(
+    _ model: inout AppModel,
+    reqId: UUID,
+    method: String,
+    params: JSONValue,
+    context: IpcRequestContext,
+    env: CoreEnv
+) throws -> [Command] {
     switch method {
     case Methods.ls:
-        do {
-            let snapshot = toSnapshot(model, home: env.homeDirectory())
-            let data = try JSONEncoder().encode(snapshot)
-            let value = try JSONDecoder().decode(JSONValue.self, from: data)
-            return [.ipcReply(reqId: reqId, result: value)]
-        } catch {
-            return [.ipcError(reqId: reqId, code: -32603, message: "internal error")]
-        }
+        let snapshot = toSnapshot(model, home: env.homeDirectory())
+        let data = try JSONEncoder().encode(snapshot)
+        let value = try JSONDecoder().decode(JSONValue.self, from: data)
+        return [.ipcReply(reqId: reqId, result: value)]
 
     case Methods.paneInfo:
-        do {
-            let paneId = try resolveTargetPane(params: params, context: context, in: model)
-            guard let result = paneInfoResult(paneId, in: model) else {
-                return ipcInvalidParams(reqId, "pane not found")
-            }
-            return [.ipcReply(reqId: reqId, result: result)]
-        } catch let error as IpcParamsError {
-            return ipcInvalidParams(reqId, error.message)
-        } catch {
-            return ipcInvalidParams(reqId, "invalid pane info params")
+        let paneId = try resolveTargetPane(params: params, context: context, in: model)
+        guard let result = paneInfoResult(paneId, in: model) else {
+            throw IpcParamsError("pane not found")
         }
+        return [.ipcReply(reqId: reqId, result: result)]
 
     case Methods.agentAttach:
         guard case .object(let object) = params,
@@ -1502,16 +1522,9 @@ private func handleIpcRequest(
               case .string(let sessionId)? = object["id"],
               let session = AgentSession(kind: kind, sessionId: sessionId)
         else {
-            return ipcInvalidParams(reqId, "invalid agent session")
+            throw IpcParamsError("invalid agent session")
         }
-        let paneId: PaneId
-        do {
-            paneId = try resolveTargetPane(params: params, context: context, in: model)
-        } catch let error as IpcParamsError {
-            return ipcInvalidParams(reqId, error.message)
-        } catch {
-            return ipcInvalidParams(reqId, "invalid agent session")
-        }
+        let paneId = try resolveTargetPane(params: params, context: context, in: model)
         model.updatePane(paneId) { $0.agentSession = session }
         return [
             .scheduleCheckpoint,
@@ -1520,18 +1533,11 @@ private func handleIpcRequest(
 
     case Methods.tabRename:
         guard case .object(let object) = params else {
-            return ipcInvalidParams(reqId, "invalid params")
+            throw IpcParamsError("invalid params")
         }
-        let tabId: TabId
-        do {
-            tabId = try resolveIpcTabId(params: params, context: context, in: model)
-        } catch let error as IpcParamsError {
-            return ipcInvalidParams(reqId, error.message)
-        } catch {
-            return ipcInvalidParams(reqId, "invalid tab")
-        }
+        let tabId = try resolveIpcTabId(params: params, context: context, in: model)
         guard let titleValue = object["title"] else {
-            return ipcInvalidParams(reqId, "invalid title")
+            throw IpcParamsError("invalid title")
         }
         let title: String?
         switch titleValue {
@@ -1540,25 +1546,18 @@ private func handleIpcRequest(
         case .null:
             title = nil
         default:
-            return ipcInvalidParams(reqId, "invalid title")
+            throw IpcParamsError("invalid title")
         }
         let commands = update(&model, .renameTab(id: tabId, name: title), env: env)
         return commands + [.ipcReply(reqId: reqId, result: tabRenameResult(tabById(tabId, in: model)))]
 
     case Methods.tabClose:
-        let tabId: TabId
-        do {
-            tabId = try resolveIpcTabId(params: params, context: context, in: model)
-        } catch let error as IpcParamsError {
-            return ipcInvalidParams(reqId, error.message)
-        } catch {
-            return ipcInvalidParams(reqId, "invalid tab")
-        }
+        let tabId = try resolveIpcTabId(params: params, context: context, in: model)
         // Refuse the last tab: routing it through .closeTab would set a terminate
         // confirmation, leave the tab open, and strand pendingConfirmation. The CLI
         // never quits the app as a side effect of closing a tab.
         if wouldQuitFromClose(model) {
-            return ipcInvalidParams(reqId, "cannot close the last tab")
+            throw IpcParamsError("cannot close the last tab")
         }
         let commands = update(&model, .closeTab(id: tabId), env: env)
         return commands + [.ipcReply(reqId: reqId, result: .object([
@@ -1566,56 +1565,32 @@ private func handleIpcRequest(
         ]))]
 
     case Methods.paneSplit:
-        do {
-            guard case .object(let object) = params,
-                  case .string(let rawDirection)? = object["direction"],
-                  let direction = ipcSplitDirection(rawDirection)
-            else {
-                throw IpcParamsError("invalid pane split params")
-            }
-            let launch = try parseLaunchSpec(object["launch"])
-            let background = try parseOptionalBool(object["background"], name: "background")
-            let paneId = try resolvePaneSplitTarget(params: params, context: context, in: model)
-            let before = Set(model.allPaneIds)
-            let commands = update(
-                &model,
-                .splitPane(paneId: paneId, direction: direction, launch: launch, background: background),
-                env: env
-            )
-            let newPaneId = model.allPaneIds.first(where: { !before.contains($0) })
-            return commands + [.ipcReply(reqId: reqId, result: paneResult(newPaneId))]
-        } catch let error as LaunchSpecParseError {
-            return ipcInvalidParams(reqId, launchSpecErrorMessage(error))
-        } catch let error as IpcParamsError {
-            return ipcInvalidParams(reqId, error.message)
-        } catch {
-            return ipcInvalidParams(reqId, "invalid pane split params")
+        guard case .object(let object) = params,
+              case .string(let rawDirection)? = object["direction"],
+              let direction = ipcSplitDirection(rawDirection)
+        else {
+            throw IpcParamsError("invalid pane split params")
         }
+        let launch = try parseLaunchSpec(object["launch"])
+        let background = try parseOptionalBool(object["background"], name: "background")
+        let paneId = try resolvePaneSplitTarget(params: params, context: context, in: model)
+        let before = Set(model.allPaneIds)
+        let commands = update(
+            &model,
+            .splitPane(paneId: paneId, direction: direction, launch: launch, background: background),
+            env: env
+        )
+        let newPaneId = model.allPaneIds.first(where: { !before.contains($0) })
+        return commands + [.ipcReply(reqId: reqId, result: paneResult(newPaneId))]
 
     case Methods.tabNew:
         guard case .object(let object) = params else {
-            return ipcInvalidParams(reqId, "invalid params")
+            throw IpcParamsError("invalid params")
         }
-        let launch: LaunchSpec?
-        do {
-            launch = try parseLaunchSpec(object["launch"])
-        } catch let error as LaunchSpecParseError {
-            return ipcInvalidParams(reqId, launchSpecErrorMessage(error))
-        } catch {
-            return ipcInvalidParams(reqId, "invalid launch")
-        }
-        let background: Bool
-        let groupId: GroupId
-        let position: TabInsertPosition?
-        do {
-            background = try parseOptionalBool(object["background"], name: "background")
-            position = try parseTabInsertPosition(object)
-            groupId = try resolveTabNewTargetGroup(position: position, params: params, context: context, in: model)
-        } catch let error as IpcParamsError {
-            return ipcInvalidParams(reqId, error.message)
-        } catch {
-            return ipcInvalidParams(reqId, "invalid group")
-        }
+        let launch = try parseLaunchSpec(object["launch"])
+        let background = try parseOptionalBool(object["background"], name: "background")
+        let position = try parseTabInsertPosition(object)
+        let groupId = try resolveTabNewTargetGroup(position: position, params: params, context: context, in: model)
         var effectiveLaunch = launch
         if effectiveLaunch?.cwd == nil,
            let callerPaneId = resolveIpcPaneId(context, in: model),
@@ -1643,7 +1618,7 @@ private func handleIpcRequest(
               let paneId = parsePaneId(rawPaneId),
               model.pane(paneId) != nil
         else {
-            return ipcInvalidParams(reqId, "invalid pane id")
+            throw IpcParamsError("invalid pane id")
         }
         let commands = navigateToPane(paneId, in: &model, env: env)
         return commands + [.ipcReply(reqId: reqId, result: tabFocusResult(tabForPane(paneId, in: model)))]
@@ -1652,16 +1627,9 @@ private func handleIpcRequest(
         guard case .object(let object) = params,
               let themeValue = object["themeName"]
         else {
-            return ipcInvalidParams(reqId, "invalid theme params")
+            throw IpcParamsError("invalid theme params")
         }
-        let paneId: PaneId
-        do {
-            paneId = try resolveTargetPane(params: params, context: context, in: model)
-        } catch let error as IpcParamsError {
-            return ipcInvalidParams(reqId, error.message)
-        } catch {
-            return ipcInvalidParams(reqId, "invalid theme params")
-        }
+        let paneId = try resolveTargetPane(params: params, context: context, in: model)
         let themeName: String?
         switch themeValue {
         case .null:
@@ -1669,117 +1637,92 @@ private func handleIpcRequest(
         case .string(let name):
             themeName = name
         default:
-            return ipcInvalidParams(reqId, "invalid theme name")
+            throw IpcParamsError("invalid theme name")
         }
         let commands = update(&model, .setPaneTheme(paneId: paneId, themeName: themeName), env: env)
         return commands + [.ipcReply(reqId: reqId, result: paneThemeResult(paneId, in: model))]
 
     case Methods.paneInput:
-        do {
-            let paneId = try resolveSendKeysPane(params: params, context: context, in: model)
-            guard case .object(let object) = params else {
-                throw IpcParamsError("text or input required")
+        let paneId = try resolveSendKeysPane(params: params, context: context, in: model)
+        guard case .object(let object) = params else {
+            throw IpcParamsError("text or input required")
+        }
+        let textValue = object["text"]
+        let inputValue = object["input"]
+        switch (textValue, inputValue) {
+        case (.some, .some):
+            throw IpcParamsError("text or input required, not both")
+        case (.none, .none):
+            throw IpcParamsError("text or input required")
+        case (.some(let t), .none):
+            // Top-level IPC text keeps paste-path semantics.
+            guard case .string(let text) = t, !text.isEmpty else {
+                throw IpcParamsError("invalid text")
             }
-            let textValue = object["text"]
-            let inputValue = object["input"]
-            switch (textValue, inputValue) {
-            case (.some, .some):
-                throw IpcParamsError("text or input required, not both")
-            case (.none, .none):
-                throw IpcParamsError("text or input required")
-            case (.some(let t), .none):
-                // Top-level IPC text keeps paste-path semantics.
-                guard case .string(let text) = t, !text.isEmpty else {
-                    throw IpcParamsError("invalid text")
-                }
-                return [
-                    .sendText(paneId: paneId, text: text),
-                    .ipcReply(reqId: reqId, result: okResult()),
-                ]
-            case (.none, .some(let i)):
-                guard case .array(let arr) = i else {
-                    throw IpcParamsError("input must be an array")
-                }
-                var commands: [Command] = []
-                commands.reserveCapacity(arr.count + 1)
-                for value in arr {
-                    let event = try parseInputEvent(value)
-                    switch event {
-                    case .text(let text):
-                        commands.append(.sendInputText(paneId: paneId, text: text))
-                    case .key(let key, let mods):
-                        commands.append(.sendInputKey(paneId: paneId, key: key, mods: mods))
-                    }
-                }
-                commands.append(.ipcReply(reqId: reqId, result: okResult()))
-                return commands
+            return [
+                .sendText(paneId: paneId, text: text),
+                .ipcReply(reqId: reqId, result: okResult()),
+            ]
+        case (.none, .some(let i)):
+            guard case .array(let arr) = i else {
+                throw IpcParamsError("input must be an array")
             }
-        } catch let error as IpcParamsError {
-            return ipcInvalidParams(reqId, error.message)
-        } catch {
-            return ipcInvalidParams(reqId, "invalid params")
+            var commands: [Command] = []
+            commands.reserveCapacity(arr.count + 1)
+            for value in arr {
+                let event = try parseInputEvent(value)
+                switch event {
+                case .text(let text):
+                    commands.append(.sendInputText(paneId: paneId, text: text))
+                case .key(let key, let mods):
+                    commands.append(.sendInputKey(paneId: paneId, key: key, mods: mods))
+                }
+            }
+            commands.append(.ipcReply(reqId: reqId, result: okResult()))
+            return commands
         }
 
     case Methods.paneRead:
-        do {
-            guard case .object(let object) = params else {
-                throw IpcParamsError("invalid params")
-            }
-            guard case .string(let rawPane)? = object["pane"] else {
-                throw IpcParamsError("pane required")
-            }
-            guard let paneId = parsePaneId(rawPane), model.pane(paneId) != nil else {
-                throw IpcParamsError("pane not found")
-            }
+        guard case .object(let object) = params else {
+            throw IpcParamsError("invalid params")
+        }
+        guard case .string(let rawPane)? = object["pane"] else {
+            throw IpcParamsError("pane required")
+        }
+        guard let paneId = parsePaneId(rawPane), model.pane(paneId) != nil else {
+            throw IpcParamsError("pane not found")
+        }
 
-            let lineLimit: Int?
-            switch object["lines"] {
-            case .none, .some(.null):
-                lineLimit = nil
-            case .some(.number(let n)):
-                guard let i = Int(exactly: n), i > 0 else {
-                    throw IpcParamsError("lines must be a positive integer")
-                }
-                lineLimit = i
-            default:
+        let lineLimit: Int?
+        switch object["lines"] {
+        case .none, .some(.null):
+            lineLimit = nil
+        case .some(.number(let n)):
+            guard let i = Int(exactly: n), i > 0 else {
                 throw IpcParamsError("lines must be a positive integer")
             }
-            return [.readPaneText(reqId: reqId, paneId: paneId, lineLimit: lineLimit)]
-        } catch let error as IpcParamsError {
-            return ipcInvalidParams(reqId, error.message)
-        } catch {
-            return ipcInvalidParams(reqId, "invalid params")
+            lineLimit = i
+        default:
+            throw IpcParamsError("lines must be a positive integer")
         }
+        return [.readPaneText(reqId: reqId, paneId: paneId, lineLimit: lineLimit)]
 
     case Methods.todoList:
-        do {
-            let paneId = try resolveTargetPane(params: params, context: context, in: model)
-            guard let todos = model.pane(paneId)?.todos else {
-                return ipcInvalidParams(reqId, "no pane in context")
-            }
-            return [.ipcReply(reqId: reqId, result: todoListResult(todos))]
-        } catch let error as IpcParamsError {
-            return ipcInvalidParams(reqId, error.message)
-        } catch {
-            return ipcInvalidParams(reqId, "invalid todo params")
+        let paneId = try resolveTargetPane(params: params, context: context, in: model)
+        guard let todos = model.pane(paneId)?.todos else {
+            throw IpcParamsError("no pane in context")
         }
+        return [.ipcReply(reqId: reqId, result: todoListResult(todos))]
 
     case Methods.todoAdd:
         guard case .object(let object) = params,
               case .string(let text)? = object["text"]
         else {
-            return ipcInvalidParams(reqId, "invalid todo text")
+            throw IpcParamsError("invalid todo text")
         }
-        let paneId: PaneId
-        do {
-            paneId = try resolveTargetPane(params: params, context: context, in: model)
-        } catch let error as IpcParamsError {
-            return ipcInvalidParams(reqId, error.message)
-        } catch {
-            return ipcInvalidParams(reqId, "invalid todo text")
-        }
+        let paneId = try resolveTargetPane(params: params, context: context, in: model)
         guard let item = appendTodo(&model, paneId: paneId, text: text, id: env.newId()) else {
-            return ipcInvalidParams(reqId, "invalid todo text")
+            throw IpcParamsError("invalid todo text")
         }
         // Pane toolbar (incl. todo counts) reconciles from the model change above.
         return [
@@ -1794,18 +1737,11 @@ private func handleIpcRequest(
               let todoId = parseTodoId(rawTodoId),
               !text.trimmingCharacters(in: .whitespaces).isEmpty
         else {
-            return ipcInvalidParams(reqId, "invalid todo")
+            throw IpcParamsError("invalid todo")
         }
-        let paneId: PaneId
-        do {
-            paneId = try resolveTargetPane(params: params, context: context, in: model)
-        } catch let error as IpcParamsError {
-            return ipcInvalidParams(reqId, error.message)
-        } catch {
-            return ipcInvalidParams(reqId, "invalid todo")
-        }
+        let paneId = try resolveTargetPane(params: params, context: context, in: model)
         guard todoExists(todoId, paneId: paneId, in: model) else {
-            return ipcInvalidParams(reqId, "invalid todo")
+            throw IpcParamsError("invalid todo")
         }
         let commands = update(&model, .editTodoText(paneId: paneId, todoId: todoId, text: text), env: env)
         let updated = model.pane(paneId)?.todos.first(where: { $0.id == todoId })
@@ -1818,18 +1754,11 @@ private func handleIpcRequest(
               case .string(let rawTodoId)? = object["todoId"],
               let todoId = parseTodoId(rawTodoId)
         else {
-            return ipcInvalidParams(reqId, "invalid todo")
+            throw IpcParamsError("invalid todo")
         }
-        let paneId: PaneId
-        do {
-            paneId = try resolveTargetPane(params: params, context: context, in: model)
-        } catch let error as IpcParamsError {
-            return ipcInvalidParams(reqId, error.message)
-        } catch {
-            return ipcInvalidParams(reqId, "invalid todo")
-        }
+        let paneId = try resolveTargetPane(params: params, context: context, in: model)
         guard todoExists(todoId, paneId: paneId, in: model) else {
-            return ipcInvalidParams(reqId, "invalid todo")
+            throw IpcParamsError("invalid todo")
         }
         let shouldBeDone = method == Methods.todoDone
         let commands = update(&model, .setTodoDone(paneId: paneId, todoId: todoId, isDone: shouldBeDone), env: env)
@@ -1843,18 +1772,11 @@ private func handleIpcRequest(
               case .string(let rawTodoId)? = object["todoId"],
               let todoId = parseTodoId(rawTodoId)
         else {
-            return ipcInvalidParams(reqId, "invalid todo")
+            throw IpcParamsError("invalid todo")
         }
-        let paneId: PaneId
-        do {
-            paneId = try resolveTargetPane(params: params, context: context, in: model)
-        } catch let error as IpcParamsError {
-            return ipcInvalidParams(reqId, error.message)
-        } catch {
-            return ipcInvalidParams(reqId, "invalid todo")
-        }
+        let paneId = try resolveTargetPane(params: params, context: context, in: model)
         guard todoExists(todoId, paneId: paneId, in: model) else {
-            return ipcInvalidParams(reqId, "invalid todo")
+            throw IpcParamsError("invalid todo")
         }
         let commands = update(&model, .deleteTodo(paneId: paneId, todoId: todoId), env: env)
         return commands + [
@@ -1862,14 +1784,7 @@ private func handleIpcRequest(
         ]
 
     case Methods.todoClearCompleted:
-        let paneId: PaneId
-        do {
-            paneId = try resolveTargetPane(params: params, context: context, in: model)
-        } catch let error as IpcParamsError {
-            return ipcInvalidParams(reqId, error.message)
-        } catch {
-            return ipcInvalidParams(reqId, "no pane in context")
-        }
+        let paneId = try resolveTargetPane(params: params, context: context, in: model)
         let commands = update(&model, .clearCompletedTodos(paneId: paneId), env: env)
         return commands + [
             .ipcReply(reqId: reqId, result: okResult()),
