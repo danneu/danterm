@@ -526,33 +526,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
     @objc func openDanTermConfig(_ sender: Any?) {
         let path = DanTermConfigPaths.configFilePath()
-        let url = URL(fileURLWithPath: path)
-        // Create file + parent dirs if needed so the editor opens something
-        let fm = FileManager.default
-        let dir = url.deletingLastPathComponent().path
-        if !fm.fileExists(atPath: dir) {
-            try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        }
-        if !fm.fileExists(atPath: path) {
-            // Seed with a comment so macOS recognizes it as a text file
-            let seed = "# DanTerm config — Ghostty keys + DanTerm-specific keys\n# https://github.com/danneu/danterm\n"
-            fm.createFile(atPath: path, contents: seed.data(using: .utf8))
-        }
-        NSWorkspace.shared.open(url)
+        // Create file + parent dirs if needed so the editor opens something; the
+        // seed comment also makes macOS recognize it as a text file.
+        ensureFileExists(atPath: path, seed: DanTermConfigPaths.configFileSeed.data(using: .utf8))
+        NSWorkspace.shared.open(URL(fileURLWithPath: path))
     }
 
     @objc func openGhosttyConfig(_ sender: Any?) {
         guard let path = GhosttyApp.configFilePath() else { return }
-        let url = URL(fileURLWithPath: path)
-        let fm = FileManager.default
-        let dir = url.deletingLastPathComponent().path
-        if !fm.fileExists(atPath: dir) {
-            try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        }
-        if !fm.fileExists(atPath: path) {
-            fm.createFile(atPath: path, contents: nil)
-        }
-        NSWorkspace.shared.open(url)
+        ensureFileExists(atPath: path, seed: nil)
+        NSWorkspace.shared.open(URL(fileURLWithPath: path))
     }
 
     @objc func reloadConfig(_ sender: Any?) {

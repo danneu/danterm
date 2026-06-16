@@ -544,15 +544,7 @@ class AppRuntime {
         case .saveDanTermConfigKey(let key, let value):
             let path = DanTermConfigPaths.configFilePath()
             let url = URL(fileURLWithPath: path)
-            let fm = FileManager.default
-            let dir = url.deletingLastPathComponent().path
-            if !fm.fileExists(atPath: dir) {
-                try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
-            }
-            if !fm.fileExists(atPath: path) {
-                let seed = "# DanTerm config\n"
-                fm.createFile(atPath: path, contents: seed.data(using: .utf8))
-            }
+            ensureFileExists(atPath: path, seed: DanTermConfigPaths.configFileSeed.data(using: .utf8))
             let existing = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
             let updated = DanTermConfigWriter.setKey(key, value: value, in: existing)
             try? updated.write(to: url, atomically: true, encoding: .utf8)

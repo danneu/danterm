@@ -16,6 +16,11 @@ enum DanTermConfigPaths {
         let home = NSHomeDirectory()
         return "\(home)/.config/danterm/config"
     }
+
+    /// Seed written when the config file is first created (open-config or
+    /// save-key flow). Shared so both sites stamp the same header into the
+    /// same file; ASCII-only per house style (no em-dash).
+    static let configFileSeed = "# DanTerm config -- Ghostty keys + DanTerm-specific keys\n# https://github.com/danneu/danterm\n"
 }
 
 extension DanTermConfigParser {
