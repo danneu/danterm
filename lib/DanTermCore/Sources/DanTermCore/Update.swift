@@ -220,9 +220,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         // Surface teardown is reconcileSurfaceExistence's now (paneId leaves the tree
         // below, so the next reconcile tears its surface down); keep side-table cleanup.
         var commands: [Command] = []
-        removeAlertsForPane(paneId, in: &model)
-        removePaneSearchState(paneId, from: &model)
-        model.lastNotificationTime.removeValue(forKey: paneId)
+        clearPaneSideTables(paneId, in: &model)
         if model.todoPopover == .pane(paneId) {
             model.todoPopover = nil
             commands.append(.dismissTodoPopover)
@@ -803,10 +801,8 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
                 var commands: [Command] = []
                 for pid in allPaneIds(tab.rootNode) {
                     // Surface teardown is reconcileSurfaceExistence's (these panes leave the
-                    // tree below); keep the id-keyed side-table cleanup here.
-                    removeAlertsForPane(pid, in: &model)
-                    removePaneSearchState(pid, from: &model)
-                    model.lastNotificationTime.removeValue(forKey: pid)
+                    // tree below); keep side-table cleanup via clearPaneSideTables.
+                    clearPaneSideTables(pid, in: &model)
                 }
 
                 model.groups[gi].tabs.remove(at: ti)
@@ -825,9 +821,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         }
         // A pane in no tree cannot exist now, so this fallback is just defensive
         // side-table cleanup -- no tree/pane removal needed.
-        removeAlertsForPane(paneId, in: &model)
-        removePaneSearchState(paneId, from: &model)
-        model.lastNotificationTime.removeValue(forKey: paneId)
+        clearPaneSideTables(paneId, in: &model)
         return []
 
     // MARK: - Lifecycle
@@ -992,10 +986,8 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
             for tab in group.tabs {
                 for pid in allPaneIds(tab.rootNode) {
                     // Surface teardown is reconcileSurfaceExistence's (these panes leave the
-                    // tree below); keep the id-keyed side-table cleanup here.
-                    removeAlertsForPane(pid, in: &model)
-                    removePaneSearchState(pid, from: &model)
-                    model.lastNotificationTime.removeValue(forKey: pid)
+                    // tree below); keep side-table cleanup via clearPaneSideTables.
+                    clearPaneSideTables(pid, in: &model)
                 }
             }
             model.groups.remove(at: idx)
@@ -2397,11 +2389,6 @@ private func unreadAlertPaneIds(for paneIds: [PaneId], in model: AppModel) -> [P
 // reconcileSidebar now derives from the projection (the bell-badge counts).
 
 
-/// Remove all alerts for a pane that is being destroyed.
-private func removeAlertsForPane(_ paneId: PaneId, in model: inout AppModel) {
-    model.alerts.removeAll { $0.paneId == paneId }
-}
-
 private func normalizedLiveTabIds(_ ids: [TabId], in model: AppModel) -> [TabId] {
     var seen = Set<TabId>()
     return ids.filter { id in
@@ -2433,10 +2420,8 @@ private func closeTabBody(_ model: inout AppModel, id: TabId) -> [Command] {
     var commands: [Command] = []
     for pid in paneIds {
         // Surface teardown is reconcileSurfaceExistence's (these panes leave the tree
-        // below); keep the id-keyed side-table cleanup + per-pane popover dismiss here.
-        removeAlertsForPane(pid, in: &model)
-        removePaneSearchState(pid, from: &model)
-        model.lastNotificationTime.removeValue(forKey: pid)
+        // below); keep side-table cleanup + per-pane popover dismiss here.
+        clearPaneSideTables(pid, in: &model)
         if model.todoPopover == .pane(pid) {
             model.todoPopover = nil
             commands.append(.dismissTodoPopover)

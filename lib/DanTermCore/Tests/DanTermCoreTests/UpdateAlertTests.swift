@@ -333,10 +333,9 @@ import Testing
 
     @Test("testClosePaneRemovesAlertsAndCleansUpThrottle")
     func testClosePaneRemovesAlertsAndCleansUpThrottle() {
-        // Intent: closePane removes the pane's alerts and throttle
-        //   bookkeeping.
-        // Why it exists: pins the per-pane teardown of alert + throttle
-        //   state.
+        // Intent: closePane removes the pane's alerts, search state, and
+        //   throttle bookkeeping.
+        // Why it exists: pins the full per-pane side-table teardown.
         // Scenario: spec-first closePane cleanup.
         var model = makeModel()
         createTab(&model)
@@ -348,17 +347,19 @@ import Testing
             id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
+        model.searchState[paneA] = SearchModel(needle: "test")
         model.lastNotificationTime[paneA] = [.bell: Date()]
 
         update(&model, .closePane(paneId: paneA))
         #expect(model.alerts.isEmpty, "closing pane should remove its alerts")
+        #expect(model.searchState[paneA] == nil, "closing pane should clean up search state")
         #expect(model.lastNotificationTime[paneA] == nil, "closing pane should clean up throttle data")
     }
 
     @Test("testCloseTabRemovesAlertsForAllPanes")
     func testCloseTabRemovesAlertsForAllPanes() {
-        // Intent: closeTab removes alerts for every pane in the tab.
-        // Why it exists: pins the per-tab cleanup.
+        // Intent: closeTab removes side-table state for every pane in the tab.
+        // Why it exists: pins the full per-tab cleanup.
         // Scenario: spec-first closeTab cleanup.
         var model = makeModel()
         createTab(&model)
@@ -378,16 +379,24 @@ import Testing
             id: AlertId(), kind: .bell, paneId: paneB,
             title: "DanTerm", body: "b", createdAt: Date(), isUnread: true
         ), at: 0)
+        model.searchState[paneA] = SearchModel(needle: "a")
+        model.searchState[paneB] = SearchModel(needle: "b")
+        model.lastNotificationTime[paneA] = [.bell: Date()]
+        model.lastNotificationTime[paneB] = [.bell: Date()]
 
         update(&model, .closeTab(id: tabId))
         #expect(model.alerts.isEmpty, "closing tab should remove alerts for all its panes")
+        #expect(model.searchState[paneA] == nil, "closing tab should clean up paneA search state")
+        #expect(model.searchState[paneB] == nil, "closing tab should clean up paneB search state")
+        #expect(model.lastNotificationTime[paneA] == nil, "closing tab should clean up paneA throttle data")
+        #expect(model.lastNotificationTime[paneB] == nil, "closing tab should clean up paneB throttle data")
     }
 
     @Test("testSurfaceCreationFailedRemovesAlerts")
     func testSurfaceCreationFailedRemovesAlerts() {
-        // Intent: surfaceCreationFailed removes the failed pane's alerts
-        //   and throttle bookkeeping.
-        // Why it exists: pins the failure-path cleanup symmetry.
+        // Intent: surfaceCreationFailed removes the failed pane's alerts,
+        //   search state, and throttle bookkeeping.
+        // Why it exists: pins the full failure-path cleanup symmetry.
         // Scenario: spec-first failure cleanup.
         var model = makeModel()
         createTab(&model)
@@ -399,10 +408,12 @@ import Testing
             id: AlertId(), kind: .bell, paneId: paneA,
             title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
         ), at: 0)
+        model.searchState[paneA] = SearchModel(needle: "test")
         model.lastNotificationTime[paneA] = [.bell: Date()]
 
         update(&model, .surfaceCreationFailed(paneId: paneA))
         #expect(model.alerts.isEmpty, "surfaceCreationFailed should remove pane's alerts")
+        #expect(model.searchState[paneA] == nil, "surfaceCreationFailed should clean up search state")
         #expect(model.lastNotificationTime[paneA] == nil, "surfaceCreationFailed should clean up throttle data")
     }
 

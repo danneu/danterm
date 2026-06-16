@@ -230,9 +230,9 @@ import Testing
 
     @Test("deleteGroup cleans up search state")
     func deleteGroupCleansUpSearchState() {
-        // Intent: deleteGroup clears searchState for every pane in the
-        //   deleted group's tabs.
-        // Why it exists: pins the per-group teardown.
+        // Intent: deleteGroup clears side-table state for every pane in
+        //   the deleted group's tabs.
+        // Why it exists: pins the full per-group teardown.
         // Scenario: spec-first deleteGroup cleanup.
         var model = makeModel()
         createTab(&model)
@@ -241,8 +241,15 @@ import Testing
         let group2Id = model.groups.first(where: { $0.id != group1Id })!.id
         let group2Tab = model.groups.first(where: { $0.id == group2Id })!.tabs[0]
         let group2PaneId = group2Tab.focusedPaneId
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: group2PaneId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
         model.searchState[group2PaneId] = SearchModel(needle: "test")
+        model.lastNotificationTime[group2PaneId] = [.bell: Date()]
         update(&model, .deleteGroup(id: group2Id, moveTabs: false))
+        #expect(!model.alerts.contains { $0.paneId == group2PaneId }, "alerts should be cleaned up on group delete")
         #expect(model.searchState[group2PaneId] == nil, "search state should be cleaned up on group delete")
+        #expect(model.lastNotificationTime[group2PaneId] == nil, "throttle data should be cleaned up on group delete")
     }
 }

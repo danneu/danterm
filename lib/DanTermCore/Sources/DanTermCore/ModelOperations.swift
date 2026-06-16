@@ -25,11 +25,24 @@ func effectiveTheme(for pane: PaneModel) -> String? {
   pane.remoteThemeOverride ?? pane.theme
 }
 
-// MARK: - Search Cleanup
+// MARK: - Pane side-table cleanup
 
-/// Remove search state for a pane being destroyed. Called from all pane-destruction paths.
+/// Remove all alerts for a pane being destroyed. Called via `clearPaneSideTables`.
+func removeAlertsForPane(_ paneId: PaneId, in model: inout AppModel) {
+    model.alerts.removeAll { $0.paneId == paneId }
+}
+
+/// Remove search state for a pane being destroyed.
 func removePaneSearchState(_ paneId: PaneId, from model: inout AppModel) {
     model.searchState.removeValue(forKey: paneId)
+}
+
+/// The single place that prunes every per-pane id-keyed side table when a pane
+/// is destroyed.
+func clearPaneSideTables(_ paneId: PaneId, in model: inout AppModel) {
+    removeAlertsForPane(paneId, in: &model)
+    removePaneSearchState(paneId, from: &model)
+    model.lastNotificationTime.removeValue(forKey: paneId)
 }
 
 // MARK: - Sidebar Row Emphasis

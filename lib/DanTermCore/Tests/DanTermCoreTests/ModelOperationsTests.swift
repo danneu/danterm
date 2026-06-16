@@ -972,6 +972,33 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(action == nil, "last remaining group should return nil")
     }
 
+    // MARK: - Pane side-table cleanup
+
+    @Test("clearPaneSideTables prunes every pane-keyed side table")
+    func clearPaneSideTablesPrunesEveryPaneKeyedSideTable() {
+        // Intent: clearPaneSideTables removes the complete set of
+        //   pane-keyed side tables from one helper.
+        // Why it exists: pins the central cleanup invariant so a future
+        //   pane-keyed table has one helper and one direct test to update.
+        // Scenario: spec-first pane teardown -- a destroyed pane has alert,
+        //   search, and throttle state, all of which disappear together.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+        model.searchState[paneId] = SearchModel(needle: "test")
+        model.lastNotificationTime[paneId] = [.bell: Date()]
+
+        clearPaneSideTables(paneId, in: &model)
+
+        #expect(!model.alerts.contains { $0.paneId == paneId }, "alerts should be removed")
+        #expect(model.searchState[paneId] == nil, "search state should be removed")
+        #expect(model.lastNotificationTime[paneId] == nil, "throttle data should be removed")
+    }
+
     // MARK: - bellCount / groupBellCount
 
     @Test("testUnreadAlertCount")

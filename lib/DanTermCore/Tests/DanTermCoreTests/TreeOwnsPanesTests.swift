@@ -307,9 +307,9 @@ import Testing
     func surfaceCreationFailedForUnknownPaneIsNoop() {
         // Intent: surfaceCreationFailed with an id owned by no tree (which is
         //   structurally impossible under tree-owns-panes, but still defended
-        //   against) emits no commands and leaves the model unchanged.
-        // Why it exists: pins the safe-no-op guard so a stray async failure
-        //   callback for a pane already cleaned up cannot mutate the model.
+        //   against) emits no commands and leaves structure-only state unchanged.
+        // Why it exists: pins the safe-no-op guard for a stray async failure
+        //   callback after the pane and its side tables were already cleaned up.
         // Scenario: spec-first defensive-noop -- a surface-failed Msg arrives
         //   for an unknown pane id; the model and commands are byte-equal to
         //   before.
@@ -321,6 +321,33 @@ import Testing
 
         #expect(commands.isEmpty, "unknown pane should emit no commands")
         expectNoDifference(model, before)
+    }
+
+    @Test("surfaceCreationFailed for a pane in no tree cleans side tables")
+    func surfaceCreationFailedForPaneInNoTreeCleansSideTables() {
+        // Intent: the defensive no-tree branch still prunes per-pane side
+        //   tables for the failed pane id.
+        // Why it exists: pins the cleanup behavior that a structure-only
+        //   no-op assertion cannot observe.
+        // Scenario: spec-first stale-callback cleanup -- a failure arrives
+        //   for a pane no longer in any tab, but stale per-pane state still
+        //   exists and must be discarded.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = PaneId()
+        model.alerts.insert(AlertModel(
+            id: AlertId(), kind: .bell, paneId: paneId,
+            title: "DanTerm", body: "test", createdAt: Date(), isUnread: true
+        ), at: 0)
+        model.searchState[paneId] = SearchModel(needle: "test")
+        model.lastNotificationTime[paneId] = [.bell: Date()]
+
+        let commands = update(&model, .surfaceCreationFailed(paneId: paneId))
+
+        #expect(commands.isEmpty, "no-tree cleanup should emit no commands")
+        #expect(!model.alerts.contains { $0.paneId == paneId }, "stale alerts should be removed")
+        #expect(model.searchState[paneId] == nil, "stale search state should be removed")
+        #expect(model.lastNotificationTime[paneId] == nil, "stale throttle data should be removed")
     }
 
     // MARK: - Stage 2: leaf-embedded v2 wire format
