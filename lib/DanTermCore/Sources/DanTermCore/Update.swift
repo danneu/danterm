@@ -420,12 +420,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         // Apply the chosen color to every requested tab. No toggle-off
         // semantics here -- the cmd-1-on-red-clears UX is resolved at the
         // dispatcher via resolveColorForBatch before this Msg is sent.
-        var seen = Set<TabId>()
-        let validIds = tabIds.filter { id in
-            guard !seen.contains(id), tabLocation(id, in: model) != nil
-            else { return false }
-            seen.insert(id); return true
-        }
+        let validIds = normalizedLiveTabIds(tabIds, in: model)
         guard !validIds.isEmpty else { return [] }
         var commands: [Command] = []
         for id in validIds {
@@ -436,12 +431,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         return commands
 
     case .clearCustomTitles(let tabIds):
-        var seen = Set<TabId>()
-        let validIds = tabIds.filter { id in
-            guard !seen.contains(id), tabLocation(id, in: model) != nil
-            else { return false }
-            seen.insert(id); return true
-        }
+        let validIds = normalizedLiveTabIds(tabIds, in: model)
         guard !validIds.isEmpty else { return [] }
         for id in validIds {
             updateTab(id, in: &model) { t in t.customTitle = nil }
@@ -451,12 +441,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         return [.scheduleCheckpoint]
 
     case .clearAlertsForTabs(let tabIds):
-        var seen = Set<TabId>()
-        let validIds = tabIds.filter { id in
-            guard !seen.contains(id), tabLocation(id, in: model) != nil
-            else { return false }
-            seen.insert(id); return true
-        }
+        let validIds = normalizedLiveTabIds(tabIds, in: model)
         guard !validIds.isEmpty else { return [] }
         var affectedPaneIds: [PaneId] = []
         for id in validIds {
@@ -1041,12 +1026,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         return [.scheduleCheckpoint]
 
     case .moveTabs(let tabIds, let toGroupId, let atIndex):
-        var seen = Set<TabId>()
-        let validIds = tabIds.filter { id in
-            guard !seen.contains(id), tabLocation(id, in: model) != nil
-            else { return false }
-            seen.insert(id); return true
-        }
+        let validIds = normalizedLiveTabIds(tabIds, in: model)
         guard !validIds.isEmpty,
               let dstGroupIdx = model.groups.firstIndex(where: { $0.id == toGroupId })
         else { return [] }
@@ -1095,13 +1075,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         return [.scheduleCheckpoint]
 
     case .extractTabsToNewGroup(let tabIds, let groupName):
-        // Dedupe and drop ids that no longer exist.
-        var seen = Set<TabId>()
-        let validIds = tabIds.filter { id in
-            guard !seen.contains(id), tabLocation(id, in: model) != nil
-            else { return false }
-            seen.insert(id); return true
-        }
+        let validIds = normalizedLiveTabIds(tabIds, in: model)
         guard !validIds.isEmpty else { return [] }
 
         // No-op: extracting every live tab (whether from one group or
