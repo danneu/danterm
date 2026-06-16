@@ -51,12 +51,6 @@ struct TodoPopoverState<Target: Equatable>: Equatable {
         mode = .list
     }
 
-    /// Reconcile edit mode against the rebuilt target set.
-    mutating func rebuild(targetsAvailable: (Target) -> Bool) {
-        guard let target = editTarget, !targetsAvailable(target) else { return }
-        mode = .list
-    }
-
     /// Reconcile edit mode against a rebuilt target set, allowing callers to
     /// retarget the edit before falling back to list mode.
     mutating func reconcileEditTarget(resolve: (Target) -> Target?) {

@@ -1,14 +1,13 @@
 // Swift Testing migration of the legacy `tests/TodoPopoverStateTests.swift`
 // harness suite. Pins TodoPopoverState pure list/edit mode + draft-
 // preservation rules: 4 explicit tests for retarget / missing-target /
-// cross-bucket retarget / rejected-save, plus 10 parametric scenarios run
+// cross-bucket retarget / rejected-save, plus 8 parametric scenarios run
 // over BOTH `UUID` and `TabTodoEditTarget` target types (selection, enter,
-// save, cancel, empty-save, rebuild-missing, rebuild-on-list, clear, edit
-// cmd-n success, edit cmd-n rejected). The 10 parametric source names
-// preserve the `\(label):` template literally so the inventory's source-
-// grep parity check matches. Each parametric @Test calls a small private
-// generic helper twice (once per target type), so source-level #expect
-// lines match the legacy helper's 26 assertions.
+// save, cancel, empty-save, clear, edit cmd-n success, edit cmd-n
+// rejected). The parametric source names preserve the `\(label):` template
+// literally so the inventory's source-grep parity check matches. Each
+// parametric @Test calls a small private generic helper twice (once per
+// target type).
 import Foundation
 import Testing
 
@@ -140,31 +139,6 @@ import Testing
         )
     }
 
-    @Test("\\(label): rebuild missing target falls back")
-    func rebuildMissingTargetFallsBack() {
-        // Intent: rebuild with a predicate that excludes the current
-        //   target falls back to .list (preserves draft).
-        // Why it exists: pins the rebuild fallback path.
-        // Scenario: spec-first rebuild fallback.
-        runRebuildMissingTargetFallsBack(target: UUID(), otherTarget: UUID())
-        runRebuildMissingTargetFallsBack(
-            target: TabTodoEditTarget.tab(todoId: UUID()),
-            otherTarget: TabTodoEditTarget.pane(paneId: PaneId(), todoId: UUID())
-        )
-    }
-
-    @Test("\\(label): rebuild preserves draft on list")
-    func rebuildPreservesDraftOnList() {
-        // Intent: rebuild in .list mode never disturbs the draft.
-        // Why it exists: pins the no-op-on-list rule.
-        // Scenario: spec-first rebuild on list.
-        runRebuildPreservesDraftOnList(target: UUID(), otherTarget: UUID())
-        runRebuildPreservesDraftOnList(
-            target: TabTodoEditTarget.tab(todoId: UUID()),
-            otherTarget: TabTodoEditTarget.pane(paneId: PaneId(), todoId: UUID())
-        )
-    }
-
     @Test("\\(label): clear from list")
     func clearFromList() {
         // Intent: clearComposeDraft on the .list state empties the
@@ -241,20 +215,6 @@ private func runEmptySaveIsRejected<T: Equatable>(target: T, otherTarget: T) {
     let result = state.saveEdit(text: "   ")
     #expect(result == .rejected)
     #expect(state.mode == .edit(target))
-    #expect(state.composeDraft == "abc")
-}
-
-private func runRebuildMissingTargetFallsBack<T: Equatable>(target: T, otherTarget: T) {
-    var state = TodoPopoverState<T>(mode: .edit(target), composeDraft: "abc")
-    state.rebuild { $0 == otherTarget }
-    #expect(state.mode == .list)
-    #expect(state.composeDraft == "abc")
-}
-
-private func runRebuildPreservesDraftOnList<T: Equatable>(target: T, otherTarget: T) {
-    var state = TodoPopoverState<T>(mode: .list, composeDraft: "abc")
-    state.rebuild { $0 == target }
-    #expect(state.mode == .list)
     #expect(state.composeDraft == "abc")
 }
 
