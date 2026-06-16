@@ -40,6 +40,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/TodoInputView.swift" \
         "$SCRIPT_DIR/app/TodoRowView.swift" \
         "$SCRIPT_DIR/app/TodoShortcutHelpView.swift" \
+        "$SCRIPT_DIR/app/TodoPopoverControllerBase.swift" \
         "$SCRIPT_DIR/app/TabTodoPopoverView.swift" \
         "$SCRIPT_DIR/app/TodoPopoverView.swift" \
         "$SCRIPT_DIR/app/AlertsPopoverView.swift" \

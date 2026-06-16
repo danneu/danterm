@@ -54,30 +54,6 @@ extension TabTodoDragPayload.Source: Codable {
     }
 }
 
-private final class TabTodoPopoverRootView: NSView {
-    var handleKeyEquivalent: ((NSEvent) -> Bool)?
-
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if handleKeyEquivalent?(event) == true { return true }
-        return super.performKeyEquivalent(with: event)
-    }
-}
-
-private final class TabTodoTableView: NSTableView {
-    var handleListKeyDown: ((NSEvent) -> Bool)?
-    var handleCancelOperation: (() -> Bool)?
-
-    override func keyDown(with event: NSEvent) {
-        if handleListKeyDown?(event) == true { return }
-        super.keyDown(with: event)
-    }
-
-    override func cancelOperation(_ sender: Any?) {
-        if handleCancelOperation?() == true { return }
-        super.cancelOperation(sender)
-    }
-}
-
 // MARK: - Header row view
 
 /// Bold/secondary header row used for both the tab section and pane sections.
@@ -141,204 +117,65 @@ private final class TabTodoEmptyRowView: NSView {
 
 // MARK: - View Controller
 
-class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
-    weak var runtime: AppRuntime?
+class TabTodoPopoverViewController: TodoPopoverControllerBase {
     let tabId: TabId
-    private let tableView = TabTodoTableView()
-    private let scrollView = NSScrollView()
-    private let headerLabel = NSTextField(labelWithString: "Tab To-Do")
-    private let clearButton = NSButton(title: "Clear completed", target: nil, action: nil)
     private let newButton = NSButton(title: "New (\u{2318}N)", target: nil, action: nil)
-    private let helpButton = NSButton()
-    private let addInput = TodoInputView(placeholder: "Add a tab task…")
-    private let composeHintLabel = makeTodoShortcutHintLabel()
-    private let editTitleLabel: NSTextField = {
-        let tf = NSTextField(labelWithString: "Edit tab task")
-        tf.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
-        tf.textColor = .labelColor
-        tf.lineBreakMode = .byTruncatingTail
-        return tf
-    }()
-    private let editInput = TodoInputView(placeholder: "Edit task...", visibleLineCount: TodoInputView.editVisibleLineCount)
-    private let editHintLabel = makeTodoShortcutHintLabel()
-    private let saveButton = NSButton(title: "Save", target: nil, action: nil)
-    private let cancelButton = NSButton(title: "Cancel", target: nil, action: nil)
-    private var bottomStack: NSStackView!
-    private var editContainer: NSStackView!
 
     private var popoverState = TodoPopoverState<TabTodoEditTarget>()
-    private var isSyncingTableSelection = false
-    private var shortcutHelpPopover: NSPopover?
     private var projection: TabTodoPopoverProjection
     private var rows: [TabTodoRow] { projection.rows }
 
     init(tabId: TabId, runtime: AppRuntime?) {
         self.tabId = tabId
-        self.runtime = runtime
         self.projection = TabTodoPopoverProjection(
             tabId: tabId,
             rows: [],
             paneOrder: [],
             tabHasCompleted: false
         )
-        super.init(nibName: nil, bundle: nil)
+        super.init(runtime: runtime)
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) not implemented")
     }
 
-    override func loadView() {
-        let size = NSSize(width: 320, height: 400)
-        preferredContentSize = size
+    override var composeDraft: String {
+        get { popoverState.composeDraft }
+        set { popoverState.setComposeDraft(newValue) }
+    }
 
-        let wrapper = TabTodoPopoverRootView(frame: NSRect(origin: .zero, size: size))
-        wrapper.handleKeyEquivalent = { [weak self] event in
-            self?.performTodoKeyEquivalent(with: event) ?? false
-        }
-        let container = NSView()
-        container.translatesAutoresizingMaskIntoConstraints = false
-        wrapper.addSubview(container)
+    override func clearComposeDraft() {
+        popoverState.clearComposeDraft()
+    }
 
-        headerLabel.font = .preferredFont(forTextStyle: .headline)
-        headerLabel.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(headerLabel)
+    override var isEditing: Bool { popoverState.isEditing }
 
-        clearButton.target = self
-        clearButton.action = #selector(clearCompleted)
-        clearButton.bezelStyle = .accessoryBarAction
-        clearButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        clearButton.translatesAutoresizingMaskIntoConstraints = false
+    override func applyStoredProjection() {
+        apply(projection)
+    }
 
+    override var parentTodoPopover: NSPopover? { runtime?.tabTodoPopover }
+
+    override var shortcutHelpScope: TodoShortcutScope { .tab }
+
+    override var headerTitle: String { "Tab To-Do" }
+
+    override func headerActionButtons() -> [NSView] {
         newButton.target = self
         newButton.action = #selector(focusComposeAction(_:))
         newButton.bezelStyle = .accessoryBarAction
         newButton.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         newButton.translatesAutoresizingMaskIntoConstraints = false
+        return [clearButton, newButton]
+    }
 
-        let headerActions = NSStackView(views: [clearButton, newButton])
-        headerActions.orientation = .horizontal
-        headerActions.alignment = .centerY
-        headerActions.spacing = 6
-        headerActions.detachesHiddenViews = true
-        headerActions.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(headerActions)
+    override var composePlaceholder: String? { "Add a tab task…" }
 
-        configureTodoShortcutHelpButton(helpButton, target: self, action: #selector(toggleShortcutHelp(_:)))
-        container.addSubview(helpButton)
+    override var tableColumnIdentifier: String { "tabtodo" }
 
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("tabtodo"))
-        tableView.addTableColumn(column)
-        tableView.headerView = nil
-        tableView.style = .plain
-        tableView.selectionHighlightStyle = .regular
-        tableView.dataSource = self
-        tableView.delegate = self
-        tableView.target = self
-        tableView.doubleAction = #selector(tableRowDoubleClicked(_:))
-        tableView.handleListKeyDown = { [weak self] event in
-            self?.handleListKeyDown(event) ?? false
-        }
-        tableView.handleCancelOperation = { [weak self] in
-            self?.closePopoverFromList()
-            return true
-        }
+    override func registerDragTypes(on tableView: NSTableView) {
         tableView.registerForDraggedTypes([tabTodoRowDragType])
-
-        scrollView.documentView = tableView
-        scrollView.hasVerticalScroller = true
-        scrollView.scrollerStyle = .overlay
-        scrollView.drawsBackground = false
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(scrollView)
-
-        let sep = NSBox()
-        sep.boxType = .separator
-
-        saveButton.target = self
-        saveButton.action = #selector(saveEditButtonClicked(_:))
-        saveButton.bezelStyle = .rounded
-
-        cancelButton.target = self
-        cancelButton.action = #selector(cancelEditButtonClicked(_:))
-        cancelButton.bezelStyle = .rounded
-
-        editInput.textView.delegate = self
-
-        let editButtons = NSStackView(views: [saveButton, cancelButton])
-        editButtons.orientation = .horizontal
-        editButtons.alignment = .centerY
-        editButtons.spacing = 8
-
-        editContainer = NSStackView(views: [editTitleLabel, editInput, editHintLabel, editButtons])
-        editContainer.orientation = .vertical
-        editContainer.alignment = .leading
-        editContainer.spacing = 8
-        editContainer.translatesAutoresizingMaskIntoConstraints = false
-        editContainer.isHidden = true
-        container.addSubview(editContainer)
-
-        addInput.textView.delegate = self
-
-        bottomStack = NSStackView(views: [sep, addInput, composeHintLabel])
-        bottomStack.orientation = .vertical
-        bottomStack.alignment = .leading
-        bottomStack.spacing = 4
-        bottomStack.translatesAutoresizingMaskIntoConstraints = false
-        bottomStack.detachesHiddenViews = true
-        container.addSubview(bottomStack)
-
-        NSLayoutConstraint.activate([
-            container.topAnchor.constraint(equalTo: wrapper.topAnchor),
-            container.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor),
-            container.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor),
-            container.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
-            container.widthAnchor.constraint(equalToConstant: size.width),
-            container.heightAnchor.constraint(equalToConstant: size.height),
-
-            headerLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
-            headerLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            headerLabel.trailingAnchor.constraint(lessThanOrEqualTo: headerActions.leadingAnchor, constant: -8),
-            headerActions.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
-            headerActions.trailingAnchor.constraint(equalTo: helpButton.leadingAnchor, constant: -6),
-            helpButton.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor),
-            helpButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
-
-            scrollView.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 8),
-            scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: bottomStack.topAnchor),
-
-            editContainer.topAnchor.constraint(equalTo: headerLabel.bottomAnchor, constant: 12),
-            editContainer.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            editContainer.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-            editContainer.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -12),
-            editInput.widthAnchor.constraint(equalTo: editContainer.widthAnchor),
-
-            bottomStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
-            bottomStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
-            bottomStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
-
-            sep.widthAnchor.constraint(equalTo: bottomStack.widthAnchor),
-            addInput.widthAnchor.constraint(equalTo: bottomStack.widthAnchor),
-        ])
-
-        self.view = wrapper
-    }
-
-    override func viewWillAppear() {
-        super.viewWillAppear()
-        apply(projection)
-    }
-
-    override func viewDidAppear() {
-        super.viewDidAppear()
-        focusInitialMode()
-    }
-
-    override func viewWillDisappear() {
-        super.viewWillDisappear()
-        closeShortcutHelpPopover()
     }
 
     /// Render the latest model projection while preserving view-local drafts,
@@ -404,8 +241,6 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
 
     // MARK: - Focus and edit transitions
 
-    private var isEditing: Bool { popoverState.isEditing }
-
     private func selectedEditTarget() -> TabTodoEditTarget? {
         let row = tableView.selectedRow
         guard rows.indices.contains(row) else { return nil }
@@ -462,49 +297,8 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         }
     }
 
-    private func restoreFirstResponder(
-        composeWasFirstResponder: Bool,
-        editWasFirstResponder: Bool,
-        tableWasFirstResponder: Bool,
-        saveWasFirstResponder: Bool,
-        cancelWasFirstResponder: Bool
-    ) {
-        guard let window = view.window else { return }
-        if isEditing {
-            if editWasFirstResponder {
-                window.makeFirstResponder(editInput.textView)
-            } else if saveWasFirstResponder {
-                window.makeFirstResponder(saveButton)
-            } else if cancelWasFirstResponder {
-                window.makeFirstResponder(cancelButton)
-            }
-            return
-        }
-        if editWasFirstResponder || saveWasFirstResponder || cancelWasFirstResponder {
-            if tableView.selectedRow >= 0 {
-                window.makeFirstResponder(tableView)
-            } else {
-                focusComposeInput()
-            }
-            return
-        }
-        if composeWasFirstResponder {
-            window.makeFirstResponder(addInput.textView)
-        } else if tableWasFirstResponder {
-            if tableView.selectedRow >= 0 {
-                window.makeFirstResponder(tableView)
-            } else {
-                focusComposeInput()
-            }
-        }
-    }
-
-    private func focusInitialMode() {
-        focusComposeInput()
-    }
-
     @discardableResult
-    private func focusListFromInput() -> Bool {
+    override func focusListFromInput() -> Bool {
         popoverState.setComposeDraft(addInput.string)
         var row = tableView.selectedRow
         if !rows.indices.contains(row) || !rows[row].isSelectable {
@@ -518,14 +312,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         return true
     }
 
-    private func focusComposeInput() {
-        addInput.string = popoverState.composeDraft
-        syncModeVisibility()
-        view.window?.makeFirstResponder(addInput.textView)
-        addInput.textView.moveToEndOfDocument(nil)
-    }
-
-    private func enterEditForSelectedRow() {
+    override func enterEditForSelectedRow() {
         guard let target = selectedEditTarget(), let item = item(for: target) else { return }
         popoverState.enterEdit(target: target, itemText: item.text)
         editInput.string = item.text
@@ -536,7 +323,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
     }
 
     @discardableResult
-    private func saveEditThenReturnToList() -> Bool {
+    override func saveEditThenReturnToList() -> Bool {
         switch popoverState.saveEdit(text: editInput.string) {
         case .saved(let target, let text):
             saveEdit(target: target, text: text)
@@ -550,7 +337,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         }
     }
 
-    private func addTodoAndStayInCompose() {
+    override func addTodoAndStayInCompose() {
         let text = addInput.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         let previousTabTodoIds = Set(rows.compactMap { row -> UUID? in
@@ -569,7 +356,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         view.window?.makeFirstResponder(addInput.textView)
     }
 
-    private func cancelEditAndReturnToList() {
+    override func cancelEditAndReturnToList() {
         guard let target = popoverState.editTarget else { return }
         popoverState.cancelEdit()
         syncModeVisibility()
@@ -578,27 +365,6 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         } else {
             focusListFromInput()
         }
-    }
-
-    private func saveEditThenFocusCompose(clearingDraft: Bool) {
-        guard saveEditThenReturnToList() else { return }
-        if clearingDraft {
-            popoverState.clearComposeDraft()
-        }
-        focusComposeInput()
-    }
-
-    // Shared command/button path: save an active edit before moving to compose.
-    private func focusComposeFromShortcut() {
-        if isEditing {
-            saveEditThenFocusCompose(clearingDraft: true)
-        } else {
-            focusComposeInput()
-        }
-    }
-
-    @objc private func focusComposeAction(_ sender: Any?) {
-        focusComposeFromShortcut()
     }
 
     private func saveEdit(target: TabTodoEditTarget, text: String) {
@@ -646,7 +412,7 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         }
     }
 
-    private func syncModeVisibility() {
+    override func syncModeVisibility() {
         let editMode = popoverState.isEditing
         clearButton.isHidden = editMode || !projection.tabHasCompleted
         newButton.isHidden = editMode
@@ -661,21 +427,9 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         }
     }
 
-    private func installEditKeyLoop() {
-        editInput.textView.nextKeyView = saveButton
-        saveButton.nextKeyView = cancelButton
-        cancelButton.nextKeyView = editInput.textView
-    }
-
-    private func tearDownEditKeyLoop() {
-        editInput.textView.nextKeyView = nil
-        saveButton.nextKeyView = nil
-        cancelButton.nextKeyView = nil
-    }
-
     // MARK: - NSTableViewDataSource
 
-    func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
+    override func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
     // MARK: - NSTableViewDelegate
 
@@ -880,64 +634,10 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         if let selectedTarget { _ = selectResolvedTarget(selectedTarget) }
     }
 
-    @objc private func clearCompleted() {
+    @objc override func clearCompleted() {
         let selectedTarget = selectedEditTarget()
         runtime?.send(.clearCompletedTabTodos(tabId: tabId))
         if let selectedTarget { _ = selectResolvedTarget(selectedTarget) }
-    }
-
-    @objc private func tableRowDoubleClicked(_ sender: Any?) {
-        guard tableView.clickedRow >= 0 else { return }
-        enterEditForSelectedRow()
-    }
-
-    @objc private func saveEditButtonClicked(_ sender: Any?) {
-        _ = saveEditThenReturnToList()
-    }
-
-    @objc private func cancelEditButtonClicked(_ sender: Any?) {
-        cancelEditAndReturnToList()
-    }
-
-    @objc private func toggleShortcutHelp(_ sender: Any?) {
-        if shortcutHelpPopover != nil {
-            closeShortcutHelpPopover()
-        } else {
-            showShortcutHelpPopover()
-        }
-    }
-
-    /// Close shortcut help before the parent popover closes or reanchors.
-    func closeShortcutHelpPopover() {
-        guard let popover = shortcutHelpPopover else { return }
-        popover.performClose(nil)
-    }
-
-    /// Show tab-scope help while preserving the parent popover's dismissal behavior.
-    private func showShortcutHelpPopover() {
-        guard shortcutHelpPopover == nil else {
-            closeShortcutHelpPopover()
-            return
-        }
-        guard let parentPopover = runtime?.tabTodoPopover else { return }
-        let savedResponder = view.window?.firstResponder
-        let popover = NSPopover()
-        let controller = TodoShortcutHelpViewController(
-            scope: .tab,
-            parentPopover: parentPopover,
-            parentView: view,
-            savedResponder: savedResponder
-        ) { [weak self, weak popover] in
-            guard let self, self.shortcutHelpPopover === popover else { return }
-            self.shortcutHelpPopover = nil
-        }
-        popover.contentViewController = controller
-        popover.behavior = .applicationDefined
-        popover.delegate = controller
-        controller.popover = popover
-        parentPopover.behavior = .applicationDefined
-        shortcutHelpPopover = popover
-        popover.show(relativeTo: helpButton.bounds, of: helpButton, preferredEdge: .minY)
     }
 
     private func toggleSelectedTodoDone() {
@@ -1063,8 +763,8 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         return true
     }
 
-    private func handleListKeyDown(_ event: NSEvent) -> Bool {
-        let action = classifyListAction(key: tabListKey(from: event), modifiers: tabKeyModifiers(from: event))
+    override func handleListKeyDown(_ event: NSEvent) -> Bool {
+        let action = classifyListAction(key: todoListKey(from: event), modifiers: todoKeyModifiers(from: event))
         switch action {
         case .moveSelection(let delta):
             moveSelection(delta: delta)
@@ -1094,9 +794,9 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         }
     }
 
-    private func performTodoKeyEquivalent(with event: NSEvent) -> Bool {
-        let modifiers = tabKeyModifiers(from: event)
-        let key = tabListKey(from: event)
+    override func performTodoKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = todoKeyModifiers(from: event)
+        let key = todoListKey(from: event)
         if classifyListAction(key: key, modifiers: modifiers) == .showShortcutHelp {
             toggleShortcutHelp(nil)
             return true
@@ -1131,100 +831,9 @@ class TabTodoPopoverViewController: NSViewController, NSTableViewDataSource, NST
         }
     }
 
-    private func closePopoverFromList() {
+    override func closePopoverFromList() {
         runtime?.send(.toggleTodoPopoverForTab(tabId: tabId))
     }
-}
-
-// MARK: - NSTextViewDelegate
-
-extension TabTodoPopoverViewController: NSTextViewDelegate {
-    func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        guard textView === addInput.textView || textView === editInput.textView else { return false }
-        if commandSelector == #selector(insertNewline(_:)),
-           let event = NSApp.currentEvent,
-           event.modifierFlags.contains(.command) {
-            return performTodoKeyEquivalent(with: event)
-        }
-        if commandSelector == #selector(deleteBackward(_:)),
-           NSApp.currentEvent?.modifierFlags.contains(.command) == true {
-            return false
-        }
-
-        let key: InputKey
-        if commandSelector == #selector(insertNewline(_:)) {
-            key = NSApp.currentEvent?.modifierFlags.contains(.shift) == true ? .shiftEnter : .enter
-        } else if commandSelector == #selector(cancelOperation(_:)) {
-            key = .escape
-        } else if commandSelector == #selector(deleteBackward(_:)) {
-            key = .backspace
-        } else if commandSelector == #selector(insertTab(_:)) {
-            key = .tab
-        } else if commandSelector == #selector(insertBacktab(_:)) {
-            key = .backtab
-        } else {
-            key = .other
-        }
-
-        let action = classifyInputAction(
-            key: key,
-            isEditing: isEditing,
-            fieldEmpty: textView.string.isEmpty
-        )
-
-        switch action {
-        case .submit:
-            if isEditing {
-                _ = saveEditThenReturnToList()
-            } else {
-                addTodoAndStayInCompose()
-            }
-            return true
-        case .insertNewline:
-            textView.insertNewlineIgnoringFieldEditor(nil)
-            return true
-        case .cancelEdit:
-            cancelEditAndReturnToList()
-            return true
-        case .dismiss:
-            if !focusListFromInput() {
-                closePopoverFromList()
-            }
-            return true
-        case .moveFocusForward:
-            if isEditing {
-                view.window?.selectNextKeyView(nil)
-            } else {
-                _ = focusListFromInput()
-            }
-            return true
-        case .moveFocusBackward:
-            if isEditing {
-                view.window?.selectPreviousKeyView(nil)
-            } else {
-                _ = focusListFromInput()
-            }
-            return true
-        case .unhandled:
-            if key == .backtab { return true }
-            return false
-        }
-    }
-
-    /// NSTextViewDelegate: keep the compose draft live while adding a tab item.
-    func textDidChange(_ notification: Notification) {
-        guard notification.object as AnyObject? === addInput.textView else { return }
-        guard !isEditing else { return }
-        popoverState.setComposeDraft(addInput.string)
-    }
-}
-
-private func tabKeyModifiers(from event: NSEvent) -> KeyModifiers {
-    var modifiers = KeyModifiers()
-    let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-    if flags.contains(.command) { modifiers.insert(.command) }
-    if flags.contains(.shift) { modifiers.insert(.shift) }
-    return modifiers
 }
 
 private func tabTodoDropOperation(from operation: NSTableView.DropOperation) -> TabTodoDropOperation? {
@@ -1265,41 +874,5 @@ private func tabTodoTargetsReferToSameTodo(_ lhs: TabTodoEditTarget, _ rhs: TabT
          (.pane(_, let left), .tab(let right)),
          (.pane(_, let left), .pane(_, let right)):
         return left == right
-    }
-}
-
-private func tabListKey(from event: NSEvent) -> ListKey {
-    switch event.keyCode {
-    case 36, 76:
-        return .enter
-    case 48:
-        return event.modifierFlags.contains(.shift) ? .backtab : .tab
-    case 49:
-        return .space
-    case 51:
-        return .backspace
-    case 125:
-        return .downArrow
-    case 126:
-        return .upArrow
-    default:
-        break
-    }
-
-    switch event.charactersIgnoringModifiers?.lowercased() {
-    case "h":
-        return .h
-    case "j":
-        return .j
-    case "k":
-        return .k
-    case "l":
-        return .l
-    case "/", "?":
-        return .slash
-    case "n":
-        return .n
-    default:
-        return .other
     }
 }

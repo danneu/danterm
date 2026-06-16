@@ -475,6 +475,30 @@ func todoPopoverViewTests() {
         try uiExpect(visible.string.isEmpty, "compose draft should be cleared")
         try uiExpect(fx.window.firstResponder === visible.textView, "compose input should be first responder")
     }
+
+    uiTest("shortcut help closes before pane parent disappears") {
+        // Intent: the pane popover closes its shortcut-help child before the
+        //   parent popover disappears.
+        // Why it exists: pins the nested-popover lifetime invariant that the
+        //   shared controller base now owns. Spec-first.
+        // Scenario: a pane TODO popover opens shortcut help, then the parent
+        //   begins closing.
+        let fx = makePaneTodoFixture()
+        defer { fx.window.close() }
+        let parentPopover = NSPopover()
+        fx.runtime.todoPopover = parentPopover
+        fx.window.orderFrontRegardless()
+
+        fx.vc.toggleShortcutHelp(nil)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+
+        try uiExpect(fx.vc.hasShortcutHelpPopover, "shortcut help should open with a parent popover handle")
+
+        fx.vc.viewWillDisappear()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+
+        try uiExpect(!fx.vc.hasShortcutHelpPopover, "shortcut help should close before the pane parent disappears")
+    }
 }
 
 private struct PaneTodoFixture {

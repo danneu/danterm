@@ -368,6 +368,30 @@ func tabTodoPopoverViewTests() {
         try uiExpect(panePayload.paneId == fx.paneIds[0].rawValue.uuidString, "pane payload pane id mismatch")
         try uiExpect(panePayload.todoId == fx.paneOpenId.uuidString, "pane payload todo id mismatch")
     }
+
+    uiTest("shortcut help closes before tab parent disappears") {
+        // Intent: the tab popover closes its shortcut-help child before the
+        //   parent popover disappears.
+        // Why it exists: pins the nested-popover lifetime invariant that the
+        //   shared controller base now owns. Spec-first.
+        // Scenario: a tab TODO popover opens shortcut help, then the parent
+        //   begins closing.
+        let fx = makeTabTodoFixture()
+        defer { fx.window.close() }
+        let parentPopover = NSPopover()
+        fx.runtime.tabTodoPopover = parentPopover
+        fx.window.orderFrontRegardless()
+
+        fx.vc.toggleShortcutHelp(nil)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+
+        try uiExpect(fx.vc.hasShortcutHelpPopover, "shortcut help should open with a parent popover handle")
+
+        fx.vc.viewWillDisappear()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+
+        try uiExpect(!fx.vc.hasShortcutHelpPopover, "shortcut help should close before the tab parent disappears")
+    }
 }
 
 private struct TabTodoFixture {
