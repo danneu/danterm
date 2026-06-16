@@ -199,10 +199,7 @@ class ScrollableTerminalView: NSView {
         lastSentRow = row
 
         guard let surface = terminalView.surface else { return }
-        let action = "scroll_to_row:\(row)"
-        action.withCString { ptr in
-            _ = ghostty_surface_binding_action(surface, ptr, UInt(action.utf8.count))
-        }
+        sendBindingAction(surface, "scroll_to_row:\(row)")
     }
 
     // MARK: - Mouse Events

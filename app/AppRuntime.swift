@@ -598,10 +598,7 @@ class AppRuntime {
 
         case .sendStartSearch(let paneId):
             if let view = surfaces[paneId], let surface = view.surface {
-                let action = "start_search"
-                _ = action.withCString { ptr in
-                    ghostty_surface_binding_action(surface, ptr, UInt(action.utf8.count))
-                }
+                sendBindingAction(surface, "start_search")
             }
 
         case .focusSearchField(let paneId):
@@ -616,10 +613,7 @@ class AppRuntime {
                 guard let self = self,
                       let view = self.surfaces[paneId],
                       let surface = view.surface else { return }
-                let action = "search:\(needle)"
-                _ = action.withCString { ptr in
-                    ghostty_surface_binding_action(surface, ptr, UInt(action.utf8.count))
-                }
+                sendBindingAction(surface, "search:\(needle)")
             }
 
             if delay == 0 {
@@ -637,19 +631,14 @@ class AppRuntime {
         case .sendSearchNavigate(let paneId, let direction):
             if let view = surfaces[paneId], let surface = view.surface {
                 let action = direction == .next ? "navigate_search:next" : "navigate_search:previous"
-                _ = action.withCString { ptr in
-                    ghostty_surface_binding_action(surface, ptr, UInt(action.utf8.count))
-                }
+                sendBindingAction(surface, action)
             }
 
         case .sendEndSearch(let paneId):
             searchDebouncers[paneId]?.cancel()
             searchDebouncers.removeValue(forKey: paneId)
             if let view = surfaces[paneId], let surface = view.surface {
-                let action = "end_search"
-                _ = action.withCString { ptr in
-                    ghostty_surface_binding_action(surface, ptr, UInt(action.utf8.count))
-                }
+                sendBindingAction(surface, "end_search")
             }
 
         // TODO popover

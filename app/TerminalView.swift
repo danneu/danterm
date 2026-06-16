@@ -327,17 +327,13 @@ class TerminalView: NSView, NSTextInputClient {
     /// Copy the current selection to the clipboard via ghostty's binding action.
     @objc func copySelection(_ sender: Any?) {
         guard let surface = surface else { return }
-        "copy_to_clipboard".withCString { ptr in
-            _ = ghostty_surface_binding_action(surface, ptr, UInt(strlen(ptr)))
-        }
+        sendBindingAction(surface, "copy_to_clipboard")
     }
 
     /// Paste from the clipboard via ghostty's binding action.
     @objc func pasteClipboard(_ sender: Any?) {
         guard let surface = surface else { return }
-        "paste_from_clipboard".withCString { ptr in
-            _ = ghostty_surface_binding_action(surface, ptr, UInt(strlen(ptr)))
-        }
+        sendBindingAction(surface, "paste_from_clipboard")
     }
 
     override func mouseMoved(with event: NSEvent) {
