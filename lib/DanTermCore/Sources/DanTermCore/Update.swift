@@ -1273,14 +1273,8 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         return [.scheduleCheckpoint]
 
     case .reorderTabTodo(let tabId, let todoId, let toIndex):
-        guard let tab = tabById(tabId, in: model) else { return [] }
-        var todos = tab.todos
-        guard let fromIndex = todos.firstIndex(where: { $0.id == todoId }),
-              toIndex >= 0, toIndex <= todos.count else { return [] }
-        let clampedTo = min(toIndex, todos.count - 1)
-        guard fromIndex != clampedTo else { return [] }
-        let item = todos.remove(at: fromIndex)
-        todos.insert(item, at: min(clampedTo, todos.count))
+        guard let tab = tabById(tabId, in: model),
+              let todos = reorderedTodos(tab.todos, moving: todoId, to: toIndex) else { return [] }
         updateTab(tabId, in: &model) { t in t.todos = todos }
         return [.scheduleCheckpoint]
 
@@ -1386,14 +1380,8 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         return [.scheduleCheckpoint]
 
     case .reorderTodo(let paneId, let todoId, let toIndex):
-        guard var todos = model.pane(paneId)?.todos,
-              let fromIndex = todos.firstIndex(where: { $0.id == todoId }),
-              toIndex >= 0, toIndex <= todos.count else { return [] }
-        let clampedTo = min(toIndex, todos.count - 1)
-        guard fromIndex != clampedTo else { return [] }
-        let item = todos.remove(at: fromIndex)
-        let insertAt = clampedTo > fromIndex ? clampedTo : clampedTo
-        todos.insert(item, at: min(insertAt, todos.count))
+        guard let current = model.pane(paneId)?.todos,
+              let todos = reorderedTodos(current, moving: todoId, to: toIndex) else { return [] }
         model.updatePane(paneId) { $0.todos = todos }
         return [.scheduleCheckpoint]
 
@@ -1452,6 +1440,21 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
     case .jumpModeCanceled:
         return jumpModeCancel(&model)
     }
+}
+
+/// Pure todo reorder shared by the pane and tab handlers: removes `todoId` and
+/// reinserts it at the clamped destination. Returns nil when the id is absent,
+/// the index is out of range, or the item would not move -- so both callers can
+/// `guard let` it and skip the checkpoint on a no-op.
+func reorderedTodos(_ todos: [TodoItem], moving todoId: UUID, to toIndex: Int) -> [TodoItem]? {
+    guard let fromIndex = todos.firstIndex(where: { $0.id == todoId }),
+          toIndex >= 0, toIndex <= todos.count else { return nil }
+    let clampedTo = min(toIndex, todos.count - 1)
+    guard fromIndex != clampedTo else { return nil }
+    var result = todos
+    let item = result.remove(at: fromIndex)
+    result.insert(item, at: min(clampedTo, result.count))
+    return result
 }
 
 // MARK: - IPC Handlers
