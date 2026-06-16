@@ -4,7 +4,7 @@
 // manual mode preservation), activateAlert (tab + focus navigation, zoom
 // clear / preserve, stale-pane handling, popover dismissal), the quit
 // confirmation cycle (requestQuit -> confirmTerminate / cancelTerminate),
-// the close-tab confirmation response shim, and the no-op guards while
+// the close-tab(s) confirmation response shims, and the no-op guards while
 // either confirmation is pending. The `case .setAppFocus / .terminate /
 // .confirmCloseTab / .cancelCloseTab` pattern matches inside `commands[0]`
 // convert to `Issue.record + return` to preserve the per-file failure-site
@@ -547,6 +547,41 @@ import Testing
             // good
         } else {
             Issue.record("expected cancelCloseTab")
+            return
+        }
+    }
+
+    @Test("testCloseTabsConfirmationResponseConfirm")
+    func testCloseTabsConfirmationResponseConfirm() {
+        // Intent: closeTabsConfirmationResponse(isConfirm: true) returns
+        //   .confirmCloseTabs carrying the tab ids.
+        // Why it exists: pins the dispatcher-side shim that converts an
+        //   NSAlert response into a Msg for batch tab close confirmations.
+        // Scenario: spec-first batch response confirm.
+        let tabIds = [TabId(), TabId()]
+
+        let msg = closeTabsConfirmationResponse(isConfirm: true, ids: tabIds)
+
+        if case .confirmCloseTabs(let returnedIds) = msg {
+            #expect(returnedIds == tabIds, "confirm should carry the tab ids")
+        } else {
+            Issue.record("expected confirmCloseTabs")
+            return
+        }
+    }
+
+    @Test("testCloseTabsConfirmationResponseCancel")
+    func testCloseTabsConfirmationResponseCancel() {
+        // Intent: closeTabsConfirmationResponse(isConfirm: false) returns
+        //   .cancelCloseTabs.
+        // Why it exists: pins the cancel branch of the batch confirmation shim.
+        // Scenario: spec-first batch response cancel.
+        let msg = closeTabsConfirmationResponse(isConfirm: false, ids: [TabId()])
+
+        if case .cancelCloseTabs = msg {
+            // good
+        } else {
+            Issue.record("expected cancelCloseTabs")
             return
         }
     }

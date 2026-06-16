@@ -507,46 +507,30 @@ class AppRuntime {
             connection.writeSuccess(reqId: reqId, result: .object(["text": .string(text)]))
 
         case .showCloseTabConfirmation(let tabId, let tabTitle, let paneCount, let isLastTab, let uncompletedTodoCount):
-            let alert = NSAlert()
-            alert.messageText = "Close tab \"\(tabTitle)\"?"
-            alert.informativeText = closeTabConfirmationCopy(
-                paneCount: paneCount,
-                uncompletedTodoCount: uncompletedTodoCount,
-                isLastTab: isLastTab
-            )
-            alert.addButton(withTitle: "Close Tab")
-            alert.addButton(withTitle: "Cancel")
-            if let window = window {
-                alert.beginSheetModal(for: window) { [weak self] response in
-                    let isConfirm = response == .alertFirstButtonReturn
-                    self?.send(closeTabConfirmationResponse(isConfirm: isConfirm, tabId: tabId))
-                }
-            } else {
-                let response = alert.runModal()
-                let isConfirm = response == .alertFirstButtonReturn
-                self.send(closeTabConfirmationResponse(isConfirm: isConfirm, tabId: tabId))
+            runConfirmation(
+                messageText: "Close tab \"\(tabTitle)\"?",
+                informativeText: closeTabConfirmationCopy(
+                    paneCount: paneCount,
+                    uncompletedTodoCount: uncompletedTodoCount,
+                    isLastTab: isLastTab
+                ),
+                confirmTitle: "Close Tab"
+            ) { [weak self] isConfirm in
+                self?.send(closeTabConfirmationResponse(isConfirm: isConfirm, tabId: tabId))
             }
 
         case .showCloseTabsConfirmation(let tabIds, let tabCount, let totalPaneCount, let totalUncompletedTodos, let isQuit):
-            let alert = NSAlert()
-            alert.messageText = isQuit ? "Close \(tabCount) tabs and quit DanTerm?" : "Close \(tabCount) tabs?"
-            alert.informativeText = closeTabsConfirmationCopy(
-                tabCount: tabCount,
-                totalPaneCount: totalPaneCount,
-                totalUncompletedTodos: totalUncompletedTodos,
-                isQuit: isQuit
-            )
-            alert.addButton(withTitle: "Close \(tabCount) Tabs")
-            alert.addButton(withTitle: "Cancel")
-            if let window = window {
-                alert.beginSheetModal(for: window) { [weak self] response in
-                    let isConfirm = response == .alertFirstButtonReturn
-                    self?.send(closeTabsConfirmationResponse(isConfirm: isConfirm, ids: tabIds))
-                }
-            } else {
-                let response = alert.runModal()
-                let isConfirm = response == .alertFirstButtonReturn
-                self.send(closeTabsConfirmationResponse(isConfirm: isConfirm, ids: tabIds))
+            runConfirmation(
+                messageText: isQuit ? "Close \(tabCount) tabs and quit DanTerm?" : "Close \(tabCount) tabs?",
+                informativeText: closeTabsConfirmationCopy(
+                    tabCount: tabCount,
+                    totalPaneCount: totalPaneCount,
+                    totalUncompletedTodos: totalUncompletedTodos,
+                    isQuit: isQuit
+                ),
+                confirmTitle: "Close \(tabCount) Tabs"
+            ) { [weak self] isConfirm in
+                self?.send(closeTabsConfirmationResponse(isConfirm: isConfirm, ids: tabIds))
             }
 
         case .saveDanTermConfigKey(let key, let value):
@@ -702,21 +686,14 @@ class AppRuntime {
             dismissTabTodoPopoverPair()
 
         case .showClosePaneConfirmation(let paneId, let uncompletedCount):
-            let alert = NSAlert()
             let tasks = uncompletedCount == 1 ? "1 uncompleted task" : "\(uncompletedCount) uncompleted tasks"
-            alert.messageText = "Close pane?"
-            alert.informativeText = "This pane has \(tasks)."
-            alert.addButton(withTitle: "Close Pane")
-            alert.addButton(withTitle: "Cancel")
-            alert.alertStyle = .warning
-            if let window = window {
-                alert.beginSheetModal(for: window) { [weak self] response in
-                    if response == .alertFirstButtonReturn {
-                        if let surface = self?.surfaces[paneId]?.surface {
-                            ghostty_surface_request_close(surface)
-                        }
-                    }
-                }
+            runConfirmation(
+                messageText: "Close pane?",
+                informativeText: "This pane has \(tasks).",
+                confirmTitle: "Close Pane"
+            ) { [weak self] isConfirm in
+                guard isConfirm, let surface = self?.surfaces[paneId]?.surface else { return }
+                ghostty_surface_request_close(surface)
             }
         }
     }
@@ -1279,6 +1256,30 @@ class AppRuntime {
             return "Unsupported state file version: \(version)."
         case .invalidSnapshot:
             return "The selected state file failed snapshot validation."
+        }
+    }
+
+    /// Run a two-button confirm/cancel alert and report both outcomes through one
+    /// completion. This centralizes the sheet-vs-modal split and confirm-button
+    /// mapping so close-confirmation callers keep their cancel cleanup paths.
+    private func runConfirmation(
+        messageText: String,
+        informativeText: String,
+        confirmTitle: String,
+        onResponse: @escaping (Bool) -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = messageText
+        alert.informativeText = informativeText
+        alert.addButton(withTitle: confirmTitle)
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+        if let window = window {
+            alert.beginSheetModal(for: window) { response in
+                onResponse(response == .alertFirstButtonReturn)
+            }
+        } else {
+            onResponse(alert.runModal() == .alertFirstButtonReturn)
         }
     }
 
