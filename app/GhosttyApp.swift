@@ -240,48 +240,63 @@ class GhosttyApp {
         return target.target.surface
     }
 
+    /// Resolve a target to its SurfaceBridge while keeping bridge lookup internal
+    /// to the action-dispatch helpers.
+    private static func surfaceBridge(forTarget target: ghostty_target_s) -> SurfaceBridge? {
+        guard let surface = targetSurface(target) else { return nil }
+        return surfaceBridge(from: surface)
+    }
+
+    /// Send a pane-scoped model message after resolving all surface state before
+    /// the main-queue hop.
+    private func sendForPane(
+        _ target: ghostty_target_s,
+        _ make: (PaneId) -> Msg
+    ) {
+        guard let bridge = Self.surfaceBridge(forTarget: target),
+              let paneId = bridge.paneId else { return }
+        let msg = make(paneId)
+        DispatchQueue.main.async { [weak self] in
+            self?.runtime?.send(msg)
+        }
+    }
+
+    /// Run view-scoped work on the main queue with the TerminalView weakly
+    /// captured from the resolved SurfaceBridge.
+    private func withSurfaceView(
+        _ target: ghostty_target_s,
+        _ body: @escaping (TerminalView) -> Void
+    ) {
+        guard let bridge = Self.surfaceBridge(forTarget: target) else { return }
+        DispatchQueue.main.async { [weak view = bridge.view] in
+            guard let view = view else { return }
+            body(view)
+        }
+    }
+
     func handleAction(target: ghostty_target_s, action: ghostty_action_s) -> Bool {
         switch action.tag {
         case GHOSTTY_ACTION_RENDER:
-            if let surface = Self.targetSurface(target),
-               let bridge = Self.surfaceBridge(from: surface) {
-                DispatchQueue.main.async { [weak view = bridge.view] in
-                    view?.needsDisplay = true
-                }
-            }
+            withSurfaceView(target) { $0.needsDisplay = true }
             return true
 
         case GHOSTTY_ACTION_SET_TITLE:
-            if let surface = Self.targetSurface(target),
-               let bridge = Self.surfaceBridge(from: surface),
-               let paneId = bridge.paneId,
-               let titlePtr = action.action.set_title.title {
+            if let titlePtr = action.action.set_title.title {
                 let title = String(cString: titlePtr)
-                DispatchQueue.main.async { [weak self] in
-                    self?.runtime?.send(.surfaceTitle(paneId: paneId, title: title))
-                }
+                sendForPane(target) { .surfaceTitle(paneId: $0, title: title) }
             }
             return true
 
         case GHOSTTY_ACTION_PWD:
-            if let surface = Self.targetSurface(target),
-               let bridge = Self.surfaceBridge(from: surface),
-               let paneId = bridge.paneId,
-               let pwdPtr = action.action.pwd.pwd {
+            if let pwdPtr = action.action.pwd.pwd {
                 let cwd = String(cString: pwdPtr)
-                DispatchQueue.main.async { [weak self] in
-                    self?.runtime?.send(.surfaceCwd(paneId: paneId, cwd: cwd))
-                }
+                sendForPane(target) { .surfaceCwd(paneId: $0, cwd: cwd) }
             }
             return true
 
         case GHOSTTY_ACTION_MOUSE_SHAPE:
-            if let surface = Self.targetSurface(target),
-               let bridge = Self.surfaceBridge(from: surface) {
-                DispatchQueue.main.async { [weak view = bridge.view] in
-                    view?.updateMouseCursor(action.action.mouse_shape)
-                }
-            }
+            let shape = action.action.mouse_shape
+            withSurfaceView(target) { $0.updateMouseCursor(shape) }
             return true
 
         case GHOSTTY_ACTION_QUIT:
@@ -291,47 +306,36 @@ class GhosttyApp {
             return true
 
         case GHOSTTY_ACTION_CLOSE_WINDOW:
-            if let surface = Self.targetSurface(target),
-               let bridge = Self.surfaceBridge(from: surface) {
-                DispatchQueue.main.async { [weak view = bridge.view] in
-                    view?.window?.close()
-                }
-            }
+            withSurfaceView(target) { $0.window?.close() }
             return true
 
         case GHOSTTY_ACTION_SIZE_LIMIT:
-            if let surface = Self.targetSurface(target),
-               let bridge = Self.surfaceBridge(from: surface) {
-                let limits = action.action.size_limit
-                DispatchQueue.main.async { [weak view = bridge.view] in
-                    guard let window = view?.window else { return }
-                    if limits.min_width > 0 && limits.min_height > 0 {
-                        // Use the reported limits but never go below the app-level floor
-                        window.minSize = NSSize(
-                            width: max(CGFloat(limits.min_width), AppDelegate.minWindowWidth),
-                            height: max(CGFloat(limits.min_height), AppDelegate.minWindowHeight)
-                        )
-                    }
-                    if limits.max_width > 0 && limits.max_height > 0 {
-                        window.maxSize = NSSize(
-                            width: CGFloat(limits.max_width),
-                            height: CGFloat(limits.max_height)
-                        )
-                    }
+            let limits = action.action.size_limit
+            withSurfaceView(target) { view in
+                guard let window = view.window else { return }
+                if limits.min_width > 0 && limits.min_height > 0 {
+                    // Use the reported limits but never go below the app-level floor
+                    window.minSize = NSSize(
+                        width: max(CGFloat(limits.min_width), AppDelegate.minWindowWidth),
+                        height: max(CGFloat(limits.min_height), AppDelegate.minWindowHeight)
+                    )
+                }
+                if limits.max_width > 0 && limits.max_height > 0 {
+                    window.maxSize = NSSize(
+                        width: CGFloat(limits.max_width),
+                        height: CGFloat(limits.max_height)
+                    )
                 }
             }
             return true
 
         case GHOSTTY_ACTION_INITIAL_SIZE:
-            if let surface = Self.targetSurface(target),
-               let bridge = Self.surfaceBridge(from: surface) {
-                let size = action.action.initial_size
-                DispatchQueue.main.async { [weak view = bridge.view] in
-                    guard let window = view?.window else { return }
-                    let newSize = NSSize(width: CGFloat(size.width), height: CGFloat(size.height))
-                    window.setContentSize(newSize)
-                    window.center()
-                }
+            let size = action.action.initial_size
+            withSurfaceView(target) { view in
+                guard let window = view.window else { return }
+                let newSize = NSSize(width: CGFloat(size.width), height: CGFloat(size.height))
+                window.setContentSize(newSize)
+                window.center()
             }
             return true
 
@@ -416,95 +420,57 @@ class GhosttyApp {
             return true
 
         case GHOSTTY_ACTION_RING_BELL:
-            if let surface = Self.targetSurface(target),
-               let bridge = Self.surfaceBridge(from: surface),
-               let paneId = bridge.paneId {
-                DispatchQueue.main.async { [weak self] in
-                    self?.runtime?.send(.surfaceBell(paneId: paneId))
-                }
-            }
+            sendForPane(target) { .surfaceBell(paneId: $0) }
             return true
 
         case GHOSTTY_ACTION_PROGRESS_REPORT:
-            if let surface = Self.targetSurface(target),
-               let bridge = Self.surfaceBridge(from: surface),
-               let paneId = bridge.paneId {
-                guard progressStyleEnabled else {
-                    // progress-style = false: libghostty still fires this action, so we
-                    // suppress it here and clear any progress already shown for the pane.
-                    DispatchQueue.main.async { [weak self] in
-                        self?.runtime?.send(.surfaceProgress(paneId: paneId, state: nil))
-                    }
-                    return true
-                }
-                let raw = action.action.progress_report
-                let progress: UInt8? = raw.progress >= 0 ? UInt8(raw.progress) : nil
-                let state: ProgressState?
-                switch raw.state {
-                case GHOSTTY_PROGRESS_STATE_REMOVE:        state = nil
-                case GHOSTTY_PROGRESS_STATE_SET:           state = .set(percent: progress ?? 0)
-                case GHOSTTY_PROGRESS_STATE_ERROR:         state = .error(percent: progress)
-                case GHOSTTY_PROGRESS_STATE_INDETERMINATE: state = .indeterminate
-                case GHOSTTY_PROGRESS_STATE_PAUSE:         state = .pause(percent: progress)
-                default:                                   state = nil
-                }
-                DispatchQueue.main.async { [weak self] in
-                    self?.runtime?.send(.surfaceProgress(paneId: paneId, state: state))
-                }
+            guard progressStyleEnabled else {
+                // progress-style = false: libghostty still fires this action, so we
+                // suppress it here and clear any progress already shown for the pane.
+                sendForPane(target) { .surfaceProgress(paneId: $0, state: nil) }
+                return true
             }
+            let raw = action.action.progress_report
+            let progress: UInt8? = raw.progress >= 0 ? UInt8(raw.progress) : nil
+            let state: ProgressState?
+            switch raw.state {
+            case GHOSTTY_PROGRESS_STATE_REMOVE:        state = nil
+            case GHOSTTY_PROGRESS_STATE_SET:           state = .set(percent: progress ?? 0)
+            case GHOSTTY_PROGRESS_STATE_ERROR:         state = .error(percent: progress)
+            case GHOSTTY_PROGRESS_STATE_INDETERMINATE: state = .indeterminate
+            case GHOSTTY_PROGRESS_STATE_PAUSE:         state = .pause(percent: progress)
+            default:                                   state = nil
+            }
+            sendForPane(target) { .surfaceProgress(paneId: $0, state: state) }
             return true
 
         case GHOSTTY_ACTION_DESKTOP_NOTIFICATION:
-            if let surface = Self.targetSurface(target),
-               let bridge = Self.surfaceBridge(from: surface),
-               let paneId = bridge.paneId {
-                let notif = action.action.desktop_notification
-                let title = String(cString: notif.title)
-                let body = String(cString: notif.body)
-                DispatchQueue.main.async { [weak self] in
-                    self?.runtime?.send(.desktopNotification(paneId: paneId, title: title, body: body))
-                }
-            }
+            let notif = action.action.desktop_notification
+            let title = String(cString: notif.title)
+            let body = String(cString: notif.body)
+            sendForPane(target) { .desktopNotification(paneId: $0, title: title, body: body) }
             return true
 
         case GHOSTTY_ACTION_START_SEARCH:
-            if let surface = Self.targetSurface(target),
-               let bridge = Self.surfaceBridge(from: surface),
-               let paneId = bridge.paneId {
-                let needle: String
-                if let ptr = action.action.start_search.needle {
-                    needle = String(cString: ptr)
-                } else {
-                    needle = ""
-                }
-                DispatchQueue.main.async { [weak self] in
-                    self?.runtime?.send(.ghosttyStartSearch(paneId: paneId, needle: needle))
-                }
+            let needle: String
+            if let ptr = action.action.start_search.needle {
+                needle = String(cString: ptr)
+            } else {
+                needle = ""
             }
+            sendForPane(target) { .ghosttyStartSearch(paneId: $0, needle: needle) }
             return true
 
         case GHOSTTY_ACTION_SEARCH_TOTAL:
-            if let surface = Self.targetSurface(target),
-               let bridge = Self.surfaceBridge(from: surface),
-               let paneId = bridge.paneId {
-                let raw = action.action.search_total.total
-                let total: Int? = raw >= 0 ? Int(raw) : nil
-                DispatchQueue.main.async { [weak self] in
-                    self?.runtime?.send(.ghosttySearchTotal(paneId: paneId, total: total))
-                }
-            }
+            let raw = action.action.search_total.total
+            let total: Int? = raw >= 0 ? Int(raw) : nil
+            sendForPane(target) { .ghosttySearchTotal(paneId: $0, total: total) }
             return true
 
         case GHOSTTY_ACTION_SEARCH_SELECTED:
-            if let surface = Self.targetSurface(target),
-               let bridge = Self.surfaceBridge(from: surface),
-               let paneId = bridge.paneId {
-                let raw = action.action.search_selected.selected
-                let selected: Int? = raw >= 0 ? Int(raw) : nil
-                DispatchQueue.main.async { [weak self] in
-                    self?.runtime?.send(.ghosttySearchSelected(paneId: paneId, selected: selected))
-                }
-            }
+            let raw = action.action.search_selected.selected
+            let selected: Int? = raw >= 0 ? Int(raw) : nil
+            sendForPane(target) { .ghosttySearchSelected(paneId: $0, selected: selected) }
             return true
 
         default:
