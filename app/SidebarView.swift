@@ -836,14 +836,6 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
     }
 
-    /// Public: true when a screen point lands inside the sidebar view.
-    func containsScreenPoint(_ point: NSPoint) -> Bool {
-        guard let window else { return false }
-        let windowPoint = window.convertPoint(fromScreen: point)
-        let localPoint = convert(windowPoint, from: nil)
-        return bounds.contains(localPoint)
-    }
-
     /// Resolve the tab ids targeted by a context-menu action using the
     /// Finder/Mail rule (helper lives in ModelOperations.swift so it's
     /// unit-tested without AppKit).

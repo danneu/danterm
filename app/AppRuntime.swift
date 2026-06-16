@@ -207,18 +207,9 @@ class AppRuntime {
         return mods
     }
 
-    private func screenPoint(for event: NSEvent) -> NSPoint {
-        if let window = event.window ?? self.window {
-            let screenRect = window.convertToScreen(NSRect(origin: event.locationInWindow, size: .zero))
-            return screenRect.origin
-        }
-        return NSEvent.mouseLocation
-    }
-
     private func handleJumpModeMouseDown(_ event: NSEvent) -> NSEvent? {
-        // Mouse clicks always cancel jump mode but continue to the original
-        // target; SidebarView owns the hit-test details for sidebar clicks.
-        _ = sidebarView?.containsScreenPoint(screenPoint(for: event)) ?? false
+        // A mouse click cancels jump mode, then continues to its original
+        // target (returning the event passes the click through unmodified).
         send(.jumpModeCanceled)
         return event
     }
