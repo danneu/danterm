@@ -151,17 +151,10 @@ final class CLIPathInstaller {
 
     /// Reuses the installer's injected path/translocation seams for diagnostics
     /// without performing install or uninstall side effects.
-    func installDiagnostics() -> (entry: SymlinkEntry, sourceMatches: Bool, translocated: Bool) {
+    func installDiagnostics() -> (entry: SymlinkEntry, translocated: Bool) {
         let entry = destinationSymlinkEntry()
-        let sourceMatches: Bool
-        if case .symlink(let target, targetExists: _) = entry {
-            sourceMatches = URL(fileURLWithPath: target).standardizedFileURL == deps.sourceURL().standardizedFileURL
-        } else {
-            sourceMatches = false
-        }
         return (
             entry: entry,
-            sourceMatches: sourceMatches,
             translocated: deps.bundleURL().path.contains("/AppTranslocation/")
         )
     }
