@@ -716,7 +716,7 @@ import DanTermProtocol
         let commands = sendIpc(
             &model,
             method: Methods.paneFocus,
-            params: .object(["paneId": .string(targetPaneId.rawValue.uuidString)])
+            params: .object(["pane": .string(targetPaneId.rawValue.uuidString)])
         )
 
         #expect(model.selectedTabId == targetTabId)
@@ -746,7 +746,7 @@ import DanTermProtocol
         let commands = sendIpc(
             &model,
             method: Methods.paneFocus,
-            params: .object(["paneId": .string(secondPaneId.rawValue.uuidString)])
+            params: .object(["pane": .string(secondPaneId.rawValue.uuidString)])
         )
 
         let reply = try requireIpcReply(commands)
@@ -773,7 +773,7 @@ import DanTermProtocol
         _ = sendIpc(
             &model,
             method: Methods.paneFocus,
-            params: .object(["paneId": .string(secondPaneId.rawValue.uuidString)]),
+            params: .object(["pane": .string(secondPaneId.rawValue.uuidString)]),
             context: contextForSelectedPane(in: model)
         )
 
@@ -808,10 +808,125 @@ import DanTermProtocol
         _ = sendIpc(
             &model,
             method: Methods.paneFocus,
-            params: .object(["paneId": .string(secondPaneId.rawValue.uuidString)])
+            params: .object(["pane": .string(secondPaneId.rawValue.uuidString)])
         )
 
         #expect(model.alerts[0].isUnread == false, "focusing pane should mark its alerts read")
+    }
+
+    @Test("pane.focus requires an explicit pane")
+    func paneFocusRequiresExplicitPane() throws {
+        // Intent: pane.focus does not fall back to IPC pane context.
+        // Why it exists: pins the explicit-required policy while the
+        //   implementation moves through the generic resolver.
+        // Scenario: spec-first no explicit focus target.
+        var model = makeModel()
+        createTab(&model)
+        let context = contextForSelectedPane(in: model)
+
+        let commands = sendIpc(&model, method: Methods.paneFocus, context: context)
+
+        let error = try requireIpcError(commands)
+        #expect(error.code == -32602)
+        #expect(error.message == "pane required")
+    }
+
+    @Test("pane.focus rejects non-string pane")
+    func paneFocusRejectsNonStringPane() throws {
+        // Intent: pane.focus rejects non-string explicit panes with the
+        //   shared pane-target vocabulary.
+        // Why it exists: pins the generic resolver's type error for an
+        //   explicit-required command.
+        // Scenario: spec-first malformed explicit focus target.
+        for paneValue in [JSONValue.number(5), .array([]), .object([:])] {
+            var model = makeModel()
+            createTab(&model)
+
+            let commands = sendIpc(
+                &model,
+                method: Methods.paneFocus,
+                params: .object(["pane": paneValue])
+            )
+
+            let error = try requireIpcError(commands)
+            #expect(error.code == -32602)
+            #expect(error.message == "pane must be a string")
+        }
+    }
+
+    @Test("pane.focus rejects unknown pane")
+    func paneFocusRejectsUnknownPane() throws {
+        // Intent: pane.focus rejects malformed or stale explicit pane
+        //   strings with "pane not found".
+        // Why it exists: replaces the older catch-all "invalid pane id"
+        //   branch with the shared resolver vocabulary.
+        // Scenario: spec-first unknown explicit focus target.
+        for rawPane in ["bogus", UUID().uuidString] {
+            var model = makeModel()
+            createTab(&model)
+
+            let commands = sendIpc(
+                &model,
+                method: Methods.paneFocus,
+                params: .object(["pane": .string(rawPane)])
+            )
+
+            let error = try requireIpcError(commands)
+            #expect(error.code == -32602)
+            #expect(error.message == "pane not found")
+        }
+    }
+
+    @Test("pane.focus accepts legacy paneId alias")
+    func paneFocusAcceptsLegacyPaneIdAlias() throws {
+        // Intent: raw IPC clients that still send paneId can focus a
+        //   pane when the forward pane field is absent.
+        // Why it exists: paneId is a deprecated wire alias, not a CLI-
+        //   emitted field; direct IPC clients may still rely on it.
+        // Scenario: back-compat direct IPC request with paneId only.
+        var model = makeModel()
+        createTab(&model)
+        let targetTabId = selectedTab(in: model)!.id
+        let targetPaneId = selectedTab(in: model)!.focusedPaneId
+        createTab(&model)
+
+        let commands = sendIpc(
+            &model,
+            method: Methods.paneFocus,
+            params: .object(["paneId": .string(targetPaneId.rawValue.uuidString)])
+        )
+
+        let reply = try requireIpcReply(commands)
+        #expect(model.selectedTabId == targetTabId)
+        #expect(reply["tab"]?["focusedPaneId"]?.asString == targetPaneId.rawValue.uuidString)
+    }
+
+    @Test("pane.focus pane field wins over legacy paneId alias")
+    func paneFocusPaneFieldWinsOverLegacyPaneIdAlias() throws {
+        // Intent: the forward pane field is authoritative when both it
+        //   and the deprecated paneId alias are present.
+        // Why it exists: prevents legacy-alias normalization from
+        //   overwriting the explicit forward target.
+        // Scenario: direct IPC request sends both pane and paneId.
+        var model = makeModel()
+        createTab(&model)
+        let firstTabId = selectedTab(in: model)!.id
+        let firstPaneId = selectedTab(in: model)!.focusedPaneId
+        createTab(&model)
+        let secondPaneId = selectedTab(in: model)!.focusedPaneId
+
+        let commands = sendIpc(
+            &model,
+            method: Methods.paneFocus,
+            params: .object([
+                "pane": .string(firstPaneId.rawValue.uuidString),
+                "paneId": .string(secondPaneId.rawValue.uuidString),
+            ])
+        )
+
+        let reply = try requireIpcReply(commands)
+        #expect(model.selectedTabId == firstTabId)
+        #expect(reply["tab"]?["focusedPaneId"]?.asString == firstPaneId.rawValue.uuidString)
     }
 
     @Test("tab.new explicit group id creates tab in that group")
@@ -929,6 +1044,75 @@ import DanTermProtocol
         let error = try requireIpcError(commands)
         #expect(error.code == -32602)
         #expect(model.groups.flatMap(\.tabs).count == tabsBefore)
+    }
+
+    @Test("tab and group explicit target errors use uniform vocabulary")
+    func tabAndGroupExplicitTargetErrorsUseUniformVocabulary() throws {
+        // Intent: tab and group resolvers use the same explicit-target
+        //   vocabulary as panes.
+        // Why it exists: locks the message contract before the call
+        //   sites move behind a generic resolver.
+        // Scenario: spec-first explicit target errors for tab.rename
+        //   and tab.new group routing.
+        struct TargetCase {
+            let entity: String
+            let method: String
+            let explicitParams: (JSONValue) -> JSONValue
+            let absentParams: JSONValue
+        }
+
+        let targetCases = [
+            TargetCase(
+                entity: "tab",
+                method: Methods.tabRename,
+                explicitParams: { .object(["tab": $0, "title": .string("build")]) },
+                absentParams: .object(["title": .string("build")])
+            ),
+            TargetCase(
+                entity: "group",
+                method: Methods.tabNew,
+                explicitParams: { .object(["group": $0]) },
+                absentParams: .object([:])
+            ),
+        ]
+
+        for targetCase in targetCases {
+            var nonStringModel = makeModel()
+            createTab(&nonStringModel)
+            let nonStringCommands = sendIpc(
+                &nonStringModel,
+                method: targetCase.method,
+                params: targetCase.explicitParams(.number(7)),
+                context: contextForSelectedPane(in: nonStringModel)
+            )
+            let nonStringError = try requireIpcError(nonStringCommands)
+            #expect(nonStringError.code == -32602)
+            #expect(nonStringError.message == "\(targetCase.entity) must be a string")
+
+            var unknownModel = makeModel()
+            createTab(&unknownModel)
+            let unknownCommands = sendIpc(
+                &unknownModel,
+                method: targetCase.method,
+                params: targetCase.explicitParams(.string(UUID().uuidString)),
+                context: contextForSelectedPane(in: unknownModel)
+            )
+            let unknownError = try requireIpcError(unknownCommands)
+            #expect(unknownError.code == -32602)
+            #expect(unknownError.message == "\(targetCase.entity) not found")
+
+            var absentModel = makeModel()
+            createTab(&absentModel)
+            let absentCommands = sendIpc(
+                &absentModel,
+                method: targetCase.method,
+                params: targetCase.absentParams,
+                context: IpcRequestContext()
+            )
+            let absentError = try requireIpcError(absentCommands)
+            #expect(absentError.code == -32602)
+            #expect(absentError.message == "no \(targetCase.entity) in context")
+        }
     }
 
     @Test("tab.new background does not steal selection")
@@ -2289,7 +2473,7 @@ import DanTermProtocol
     @Test("pane.read non-string pane param errors")
     func paneReadNonStringPaneParamErrors() throws {
         // Intent: non-string pane param returns -32602 with "pane
-        //   required".
+        //   must be a string".
         // Why it exists: pins the type check.
         // Scenario: spec-first non-string pane.
         for paneValue in [JSONValue.number(5), .array([]), .object([:])] {
@@ -2302,7 +2486,7 @@ import DanTermProtocol
             )
             let error = try requireIpcError(commands)
             #expect(error.code == -32602)
-            #expect(error.message == "pane required")
+            #expect(error.message == "pane must be a string")
         }
     }
 

@@ -76,6 +76,15 @@ final class CLIParserTests: XCTestCase {
         XCTAssertEqual(implicit.params["pane"], nil)
     }
 
+    func testPaneFocusParsesPaneParam() throws {
+        let command = try parseCLI(["pane", "focus", "P1"])
+
+        XCTAssertEqual(command.method, Methods.paneFocus)
+        XCTAssertEqual(command.outputMode, .none)
+        XCTAssertEqual(command.params["pane"], .string("P1"))
+        XCTAssertEqual(command.params["paneId"], nil)
+    }
+
     func testAgentAttachParsesToSilentMutation() throws {
         let command = try parseCLI(["agent", "attach", "--kind", "claude", "--id", "4f3a2b1c"])
 

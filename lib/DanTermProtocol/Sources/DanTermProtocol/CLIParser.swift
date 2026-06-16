@@ -56,7 +56,7 @@ public func parseCLI(_ args: [String]) throws -> CLICommand {
         switch args[1] {
         case "focus":
             guard args.count == 3 else { throw CLIParseError("usage: danterm pane focus <pane-id>") }
-            return CLICommand(method: Methods.paneFocus, params: ["paneId": .string(args[2])], outputMode: .none)
+            return CLICommand(method: Methods.paneFocus, params: ["pane": .string(args[2])], outputMode: .none)
         case "info":
             return try parsePaneInfoCommand(Array(args.dropFirst(2)))
         case "split":
