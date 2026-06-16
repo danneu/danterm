@@ -295,6 +295,23 @@ class AppRuntime {
         tabTodoPopoverDelegate = nil
     }
 
+    /// Build, configure, and show a transient popover anchored to `anchor`, returning
+    /// it so the caller can store it in the retained handle that owns its lifetime.
+    /// Callers do their own pre-show VC setup and delegate lifetime management.
+    private func presentTransientPopover(
+        _ contentViewController: NSViewController,
+        delegate: NSPopoverDelegate?,
+        from anchor: NSView,
+        preferredEdge: NSRectEdge = .minY
+    ) -> NSPopover {
+        let popover = NSPopover()
+        popover.contentViewController = contentViewController
+        popover.behavior = .transient
+        popover.delegate = delegate
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: preferredEdge)
+        return popover
+    }
+
     func terminalView(for paneId: PaneId) -> TerminalView? {
         return surfaces[paneId]
     }
@@ -649,18 +666,12 @@ class AppRuntime {
         case .showTodoPopover(let paneId):
             dismissTodoPopoverPair()
             guard let wrapper = findPaneWrapper(for: paneId) else { return }
-            let anchor = wrapper.todoButtonView
             let vc = TodoPopoverViewController(paneId: paneId, runtime: self)
             let delegate = TodoPopoverDelegateAdapter(paneId: paneId, runtime: self)
-            let popover = NSPopover()
-            popover.contentViewController = vc
-            popover.behavior = .transient
-            popover.delegate = delegate
             vc.loadViewIfNeeded()
             guard let projection = desiredPaneTodoPopover(paneId: paneId, in: model) else { return }
             vc.apply(projection)
-            popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
-            todoPopover = popover
+            todoPopover = presentTransientPopover(vc, delegate: delegate, from: wrapper.todoButtonView)
             todoPopoverDelegate = delegate
 
         case .dismissTodoPopover:
@@ -671,15 +682,10 @@ class AppRuntime {
             guard let anchor = chromeView?.tabTodoButton else { return }
             let vc = TabTodoPopoverViewController(tabId: tabId, runtime: self)
             let delegate = TabTodoPopoverDelegateAdapter(tabId: tabId, runtime: self)
-            let popover = NSPopover()
-            popover.contentViewController = vc
-            popover.behavior = .transient
-            popover.delegate = delegate
             vc.loadViewIfNeeded()
             guard let projection = desiredTabTodoPopover(tabId: tabId, in: model) else { return }
             vc.apply(projection)
-            popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
-            tabTodoPopover = popover
+            tabTodoPopover = presentTransientPopover(vc, delegate: delegate, from: anchor)
             tabTodoPopoverDelegate = delegate
 
         case .dismissTodoPopoverForTab:
@@ -1397,12 +1403,7 @@ class AppRuntime {
         vc.runtime = self
         vc.loadViewIfNeeded()
         vc.apply(desiredAlertsPopover(in: model))
-        let popover = NSPopover()
-        popover.contentViewController = vc
-        popover.behavior = .transient
-        popover.delegate = alertsPopoverDelegate
-        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
-        alertsPopover = popover
+        alertsPopover = presentTransientPopover(vc, delegate: alertsPopoverDelegate, from: anchor)
     }
 }
 
