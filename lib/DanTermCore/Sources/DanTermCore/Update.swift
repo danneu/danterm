@@ -514,9 +514,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
             p.isRemote = false
             p.remoteSession = nil
             p.agentSession = nil
-        }
-        if pane.remoteThemeOverride != nil {
-            model.updatePane(paneId) { $0.remoteThemeOverride = nil }
+            p.remoteThemeOverride = nil
         }
         return hadAgentSession ? [.scheduleCheckpoint] : []
 
