@@ -76,6 +76,53 @@ import Testing
             "the disappeared key is pruned even when remove is the default no-op")
     }
 
+    @Test("applyDiff in steady state invokes neither apply nor remove and leaves the cache unchanged")
+    func applyDiffSteadyStateIsNoOp() {
+        // Intent: when desired's keys and values equal the cache's, applyDiff
+        //   invokes neither apply nor remove and leaves the cache unchanged.
+        // Why it exists: pins the idempotent steady-state path -- the
+        //   overwhelmingly common sweep case where no key changed or disappeared,
+        //   and the one branch none of the existing tests reach (each feeds a delta).
+        // Scenario: spec-first steady-state diff (no delta between desired and cache).
+        var cache: [String: Int] = ["a": 1, "b": 2]
+        var applied: [String] = []
+        var removed: [String] = []
+        let desired: [String: Int] = ["a": 1, "b": 2]
+        applyDiff(desired, &cache,
+            apply: { k, _ in applied.append(k) },
+            remove: { k in removed.append(k) })
+
+        #expect(applied.isEmpty, "no key changed or is new, so nothing applies")
+        #expect(removed.isEmpty, "no key disappeared, so nothing is removed")
+        #expect(cache == desired, "the cache is unchanged and still equals desired")
+    }
+
+    @Test("applyDiff in one pass applies the changed and new keys, removes only the dropped key, and ends equal to desired")
+    func applyDiffCombinedDeltaInOnePass() {
+        // Intent: a single call that changes a key, adds a key, and drops a key
+        //   applies the changed+new keys, removes only the dropped key exactly once,
+        //   and ends with cache == desired.
+        // Why it exists: pins that the apply loop and the remove/prune loop compose --
+        //   a key the apply loop adds (c) must not then be seen as "disappeared," and
+        //   removing the dropped key (b) must not disturb the surviving (a) or new (c)
+        //   keys. The three existing tests each exercise change/new/remove in isolation,
+        //   so this interaction -- the realistic single-sweep shape, and the property
+        //   any two-loop refactor is most likely to break -- is currently uncovered.
+        // Scenario: spec-first combined diff (change + add + drop in one pass).
+        var cache: [String: Int] = ["a": 1, "b": 2]
+        var applied: [String] = []
+        var removed: [String] = []
+        let desired: [String: Int] = ["a": 9, "c": 3]
+        applyDiff(desired, &cache,
+            apply: { k, _ in applied.append(k) },
+            remove: { k in removed.append(k) })
+
+        #expect(Set(applied) == Set(["a", "c"]), "the changed key (a) and new key (c) apply")
+        #expect(applied.count == 2, "each applies exactly once -- no key is applied twice")
+        #expect(removed == ["b"], "only the dropped key (b) is removed, exactly once")
+        #expect(cache == desired, "cache ends equal to desired -- c was not spuriously pruned")
+    }
+
     // MARK: - Command.isPostReconcile (command-phase split, Stage 4)
 
     @Test("Command.isPostReconcile: exactly makeFirstResponder + focusSearchField defer past reconcile")
