@@ -22,6 +22,20 @@ class GhosttyApp {
     /// Whether scrollbar is enabled based on the current app config.
     var scrollbarEnabled: Bool { Self.readScrollbarEnabled(from: config) }
 
+    /// Read copy-on-select from any config. Returns true unless set to "false".
+    /// The C API returns the enum tag name, so the pure core owns the decision.
+    static func readCopyOnSelectEnabled(from config: ghostty_config_t?) -> Bool {
+        guard let config = config else { return true }
+        var v: UnsafePointer<Int8>?
+        let key = "copy-on-select"
+        guard ghostty_config_get(config, &v, key, UInt(key.utf8.count)) else { return true }
+        guard let ptr = v else { return true }
+        return isCopyOnSelectEnabled(setting: String(cString: ptr))
+    }
+
+    /// Copy-on-select from app config, used only to seed newly-created surfaces.
+    var copyOnSelectEnabled: Bool { Self.readCopyOnSelectEnabled(from: config) }
+
     /// Read a C-string config value from the retained app config.
     /// Only valid for keys whose C export type is a string pointer (e.g. theme, scrollbar).
     func readConfigString(key: String) -> String? {
@@ -412,6 +426,7 @@ class GhosttyApp {
                    let view = bridge.view {
                     let enabled = Self.readScrollbarEnabled(from: changeConfig)
                     view.scrollbarEnabled = enabled
+                    view.copyOnSelectEnabled = Self.readCopyOnSelectEnabled(from: changeConfig)
                 }
 
             default:

@@ -725,12 +725,7 @@ class AppRuntime {
         var text = ghostty_text_s()
         guard ghostty_surface_read_text(surface, selection, &text) else { return nil }
         defer { ghostty_surface_free_text(surface, &text) }
-        guard text.text_len > 0 else { return "" }
-        guard let ptr = text.text else { return nil }
-        let len = Int(text.text_len)
-        return ptr.withMemoryRebound(to: UInt8.self, capacity: len) { reboundPtr in
-            String(bytes: UnsafeBufferPointer(start: reboundPtr, count: len), encoding: .utf8)
-        }
+        return decodeGhosttyText(text)
     }
 
     /// Capture visible text, or full written text tailed to a requested line count.
@@ -1224,6 +1219,7 @@ class AppRuntime {
         view.bridge.paneId = paneId
         view.runtime = self
         view.scrollbarEnabled = ghosttyApp.scrollbarEnabled
+        view.copyOnSelectEnabled = ghosttyApp.copyOnSelectEnabled
         return view
     }
 

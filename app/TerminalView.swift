@@ -49,6 +49,11 @@ class TerminalView: NSView, NSTextInputClient {
         didSet { scrollDelegate?.scrollbarConfigDidChange() }
     }
 
+    /// Effective copy-on-select for this surface. Seeded at creation and kept in
+    /// sync from surface-target config-change actions, because libghostty exposes
+    /// no per-surface effective-config getter.
+    var copyOnSelectEnabled: Bool = true
+
     override var acceptsFirstResponder: Bool { true }
 
     // MARK: - Init
@@ -275,6 +280,30 @@ class TerminalView: NSView, NSTextInputClient {
         guard let surface = surface else { return }
         let mods = Self.ghosttyMods(event.modifierFlags)
         ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, mods)
+        reassertCopyOnSelect()
+    }
+
+    /// Guarantee the system clipboard holds the finalized mouse selection when
+    /// copy-on-select is enabled. This is idempotent: the common path where
+    /// libghostty already wrote the same text does not bump pasteboard history.
+    private func reassertCopyOnSelect() {
+        guard let surface = surface else { return }
+        guard copyOnSelectEnabled, ghostty_surface_has_selection(surface) else { return }
+        guard let selection = readSelectionText(surface), selection.isEmpty == false else { return }
+
+        let pasteboard = NSPasteboard.general
+        guard pasteboard.string(forType: .string) != selection else { return }
+        pasteboard.clearContents()
+        pasteboard.setString(selection, forType: .string)
+    }
+
+    /// Read and decode the current selection while keeping libghostty buffer
+    /// ownership in one place.
+    private func readSelectionText(_ surface: ghostty_surface_t) -> String? {
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_selection(surface, &text) else { return nil }
+        defer { ghostty_surface_free_text(surface, &text) }
+        return decodeGhosttyText(text)
     }
 
     override func rightMouseDown(with event: NSEvent) {
