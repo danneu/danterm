@@ -34,7 +34,11 @@ extension TabColor {
 /// responder state. The terminal pane always holds first responder, so
 /// without this the focused tab would draw grey instead of blue.
 final class SidebarRowView: NSTableRowView {
-    var forceEmphasizedSelection = false { didSet { needsDisplay = true } }
+    var forceEmphasizedSelection = false {
+        didSet {
+            if forceEmphasizedSelection != oldValue { needsDisplay = true }
+        }
+    }
 
     /// AppKit consults `isEmphasized` when drawing the selection: true
     /// -> accent color, false -> secondary grey. We force true for the
@@ -260,7 +264,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             liveTabIds: liveTabIds(in: model),
             selectedTabId: model.selectedTabId)
         applyRestoreSelection(restoreSet, selectedTabId: model.selectedTabId)
-        refreshRowEmphasis(focusedTabId: model.selectedTabId)
+        // Empty-op cosmetic sweeps can leave already-visible row emphasis alone.
+        // New/reused rows get their flag when NSOutlineView asks for a row view.
+        if !ops.isEmpty || priorFocusedTabId != model.selectedTabId {
+            refreshRowEmphasis(focusedTabId: model.selectedTabId)
+        }
 
         // Reveal only on real focus changes; cosmetic reconcile sweeps must not
         // fight a user who has manually scrolled the focused row off-screen.
@@ -394,6 +402,15 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 nonFocusRows.insert(row)
             }
         }
+
+        // A cosmetic sweep often asks for the selection NSOutlineView already has.
+        // Skip only when both the selected set and focused lead row already match
+        // the two-phase restore below.
+        let liveSelection = outlineView.selectedRowIndexes
+        var targetSelection = restoreSet.isEmpty ? liveSelection : nonFocusRows
+        if !restoreSet.isEmpty, let f = focusRow { targetSelection.insert(f) }
+        let leadMatches = focusRow.map { outlineView.selectedRow == $0 } ?? true
+        if targetSelection == liveSelection && leadMatches { return }
 
         // A programmatic selectRowIndexes that CHANGES the selection aborts a live
         // field editor with NO NSTextFieldDelegate callback, stranding

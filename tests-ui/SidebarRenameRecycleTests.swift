@@ -114,6 +114,42 @@ func sidebarRenameRecycleTests() {
             "selection moving away must clear the rename sidecar")
     }
 
+    uiTest("cosmetic sweep with unchanged selection leaves inline rename intact") {
+        // Intent: an empty-op reconcile whose selection target already matches the
+        //   live view leaves an active inline rename alone.
+        // Why it exists: the selection no-op guard must bail before redundant
+        //   NSOutlineView reselection can interfere with the field editor.
+        // Scenario: a pane churns cosmetic updates while the user is editing a tab
+        //   title in the sidebar.
+        let (sidebar, outline, window, runtime) = makeRenameRecycleHarness()
+        defer { window.close() }
+
+        let group = GroupId()
+        let edited = TabId()
+        let other = TabId()
+        let model = renameRecycleModel(
+            [(group, "G", false, [(edited, "alpha"), (other, "beta")])],
+            selected: edited)
+        let projection = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
+
+        sidebar.beginRenamingTab(edited)
+        let editedRow = try renameRecycleRow(for: edited, in: outline)
+        let editedCell = outline.view(atColumn: 0, row: editedRow, makeIfNecessary: false) as! NSTableCellView
+        try uiExpect(editedCell.textField?.currentEditor() != nil,
+            "precondition: rename should attach a live field editor")
+        try uiExpect(runtime.viewLocalState.sidebarRenameTarget == .tab(edited),
+            "precondition: rename should mirror into the sidecar")
+
+        _ = applyRenameRecycleTransition(
+            old: projection, newModel: model,
+            to: sidebar, outline: outline, runtime: runtime)
+
+        try uiExpect(editedCell.textField?.currentEditor() != nil,
+            "cosmetic sweep should leave the live field editor attached")
+        try uiExpect(runtime.viewLocalState.sidebarRenameTarget == .tab(edited),
+            "cosmetic sweep should preserve the rename sidecar")
+    }
+
     uiTest("a tab row inserted after a collapse-stranded rename shows its title") {
         // Intent: a new tab inserted after an edited row was torn down by a group
         //   collapse gets a clean cell: non-editable title field, no field editor,

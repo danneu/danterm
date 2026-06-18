@@ -73,6 +73,125 @@ func sidebarSelectionCacheTests() {
         try uiExpect(!visible.contains(closed), "closed tab should no longer be visible")
         try assertSidebarSelectedTab(survivor, in: outline)
     }
+
+    uiTest("cosmetic sidebar sweep marks no row for redraw") {
+        // Intent: an empty-op sidebar reconcile with unchanged focus leaves every
+        //   visible row view clean and does not re-issue the current selection.
+        // Why it exists: cosmetic coalesced sweeps used to reassert row emphasis and
+        //   restore selection at about 13 Hz, dirtying the whole sidebar.
+        // Scenario: a busy pane emits progress/search/split-ratio churn while the
+        //   sidebar projection and focused tab are unchanged.
+        let (sidebar, outline, window) = makeSidebarSelectionHarness()
+        defer { window.close() }
+
+        let tabIds = (0..<8).map { _ in TabId() }
+        let model = sidebarOverflowModel(tabIds: tabIds, selected: tabIds[2])
+        let projection = applyInitialSidebarModel(model, to: sidebar, outline: outline)
+        let selectedRows = outline.selectedRowIndexes
+
+        clearVisibleSidebarRowDisplayFlags(in: outline)
+        applySidebarTransition(old: projection, newModel: model, to: sidebar, outline: outline)
+
+        try assertVisibleSidebarRowsDoNotNeedDisplay(in: outline)
+        try uiExpect(outline.selectedRowIndexes == selectedRows,
+            "cosmetic sweep should preserve the selected row set")
+    }
+
+    uiTest("reloadTab sweep with unchanged focus does not redraw unchanged rows") {
+        // Intent: a title-only sidebar update changes the affected row without
+        //   dirtying every other row view's background/selection layer.
+        // Why it exists: reloadTab sweeps still need to refresh the edited cell, but
+        //   same-value emphasis assignments should not invalidate row backgrounds.
+        // Scenario: an unnamed busy tab streams title/cwd changes while the focused
+        //   sidebar row is unchanged.
+        let (sidebar, outline, window) = makeSidebarSelectionHarness()
+        defer { window.close() }
+
+        let tabIds = (0..<8).map { _ in TabId() }
+        let tabs = tabIds.map(sidebarSelectionTab)
+        let model = sidebarOverflowModel(tabs: tabs, selected: tabIds[0])
+        let projection = applyInitialSidebarModel(model, to: sidebar, outline: outline)
+
+        var changedTabs = tabs
+        changedTabs[4].customTitle = "changed"
+        let changedModel = sidebarOverflowModel(
+            groupId: model.groups[0].id,
+            tabs: changedTabs,
+            selected: tabIds[0])
+
+        clearVisibleSidebarRowDisplayFlags(in: outline)
+        applySidebarTransition(old: projection, newModel: changedModel, to: sidebar, outline: outline)
+
+        let changedRow = try sidebarRow(for: tabIds[4], in: outline)
+        try assertVisibleSidebarRowsDoNotNeedDisplay(in: outline, except: [changedRow])
+    }
+
+    uiTest("empty-op sweep restores the focused tab as the lead row") {
+        // Intent: when the selected set already matches the model, restore still fixes
+        //   the lead/last-selected row so range selection anchors on the focused tab.
+        // Why it exists: a set-only no-op guard would strand the wrong lead row while
+        //   appearing to preserve selection correctly.
+        // Scenario: focus remains on the first tab in a multi-selection, but AppKit's
+        //   lead row points at another selected tab before reconcile runs.
+        let (sidebar, outline, window) = makeSidebarSelectionHarness()
+        defer { window.close() }
+
+        let tabIds = (0..<6).map { _ in TabId() }
+        let model = sidebarOverflowModel(tabIds: tabIds, selected: tabIds[0])
+        let projection = applyInitialSidebarModel(model, to: sidebar, outline: outline)
+        let focusRow = try sidebarRow(for: tabIds[0], in: outline)
+        let otherRow = try sidebarRow(for: tabIds[5], in: outline)
+
+        outline.selectRowIndexes(IndexSet(integer: focusRow), byExtendingSelection: false)
+        outline.selectRowIndexes(IndexSet(integer: otherRow), byExtendingSelection: true)
+        try uiExpect(outline.selectedRow == otherRow,
+            "precondition: extended selection should make the last row the lead")
+
+        applySidebarTransition(old: projection, newModel: model, to: sidebar, outline: outline)
+
+        var expected = IndexSet(integer: focusRow)
+        expected.insert(otherRow)
+        try uiExpect(outline.selectedRowIndexes == expected,
+            "restore should preserve the selected set")
+        try uiExpect(outline.selectedRow == focusRow,
+            "restore should make the focused tab the lead row")
+    }
+
+    uiTest("focus change re-emphasizes the new row and de-emphasizes the old") {
+        // Intent: a focus-only transition updates forced accent drawing for both
+        //   affected visible rows.
+        // Why it exists: the redraw optimization must not skip emphasis refresh when
+        //   the projection is unchanged but model focus moved.
+        // Scenario: keyboard focus moves between two existing tabs without any
+        //   sidebar row insertion, removal, or reload op.
+        let (sidebar, outline, window) = makeSidebarSelectionHarness()
+        defer { window.close() }
+
+        let first = TabId()
+        let second = TabId()
+        let group = GroupId()
+        let model = sidebarOverflowModel(
+            groupId: group,
+            tabIds: [first, second],
+            selected: first)
+        let projection = applyInitialSidebarModel(model, to: sidebar, outline: outline)
+
+        try uiExpect(try sidebarRowView(for: first, in: outline).forceEmphasizedSelection,
+            "precondition: initially focused row should force emphasis")
+        try uiExpect(!((try sidebarRowView(for: second, in: outline)).forceEmphasizedSelection),
+            "precondition: unfocused row should not force emphasis")
+
+        let focusedSecond = sidebarOverflowModel(
+            groupId: group,
+            tabIds: [first, second],
+            selected: second)
+        applySidebarTransition(old: projection, newModel: focusedSecond, to: sidebar, outline: outline)
+
+        try uiExpect(!((try sidebarRowView(for: first, in: outline)).forceEmphasizedSelection),
+            "old focused row should stop forcing emphasis")
+        try uiExpect(try sidebarRowView(for: second, in: outline).forceEmphasizedSelection,
+            "new focused row should force emphasis")
+    }
 }
 
 func sidebarScrollRevealTests() {
@@ -215,6 +334,42 @@ private func materializeSidebarRows(_ sidebar: SidebarView, outline: NSOutlineVi
         _ = outline.view(atColumn: 0, row: row, makeIfNecessary: true)
         _ = outline.rowView(atRow: row, makeIfNecessary: true)
     }
+}
+
+private func clearVisibleSidebarRowDisplayFlags(in outline: NSOutlineView) {
+    outline.displayIfNeeded()
+    for row in 0..<outline.numberOfRows {
+        guard let rowView = outline.rowView(atRow: row, makeIfNecessary: false) as? SidebarRowView
+        else { continue }
+        rowView.needsDisplay = false
+    }
+}
+
+private func assertVisibleSidebarRowsDoNotNeedDisplay(
+    in outline: NSOutlineView,
+    except allowedRows: Set<Int> = [],
+    file: String = #file,
+    line: Int = #line
+) throws {
+    for row in 0..<outline.numberOfRows {
+        if allowedRows.contains(row) { continue }
+        guard let rowView = outline.rowView(atRow: row, makeIfNecessary: false) as? SidebarRowView
+        else { continue }
+        try uiExpect(!rowView.needsDisplay, "row \(row) should not need display", file: file, line: line)
+    }
+}
+
+private func sidebarRowView(
+    for tabId: TabId,
+    in outline: NSOutlineView,
+    file: String = #file,
+    line: Int = #line
+) throws -> SidebarRowView {
+    let row = try sidebarRow(for: tabId, in: outline, file: file, line: line)
+    guard let rowView = outline.rowView(atRow: row, makeIfNecessary: true) as? SidebarRowView else {
+        throw UITestFailure(message: "missing SidebarRowView for tab \(tabId) (\(file):\(line))")
+    }
+    return rowView
 }
 
 private func assertSidebarSelectedTab(
