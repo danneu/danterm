@@ -34,8 +34,10 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/Command.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/DanTermConfig.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/ThemeColorParser.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/ClipboardWriteItems.swift" \
         "$SCRIPT_DIR/app/BadgeLabel.swift" \
         "$SCRIPT_DIR/app/MenuCommandPolicy.swift" \
+        "$SCRIPT_DIR/app/ClipboardWriteSurface.swift" \
         "$SCRIPT_DIR/app/PaneSplitView.swift" \
         "$SCRIPT_DIR/app/TodoInputView.swift" \
         "$SCRIPT_DIR/app/TodoRowView.swift" \
@@ -68,6 +70,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/tests-ui/TabTodoPopoverViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/TodoPopoverViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/ThemeBrowserViewTests.swift" \
+        "$SCRIPT_DIR/tests-ui/ClipboardWriteTests.swift" \
         "$SCRIPT_DIR/tests-ui/RemoteThemePickerSheetTests.swift" \
         "$SCRIPT_DIR/tests-ui/PaneSplitViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/AlertsPopoverViewTests.swift" \
