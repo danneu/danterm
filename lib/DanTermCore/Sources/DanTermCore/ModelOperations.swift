@@ -709,6 +709,59 @@ func totalUnreadAlertCount(model: AppModel) -> Int {
   model.alerts.filter(\.isUnread).count
 }
 
+// MARK: - Unread Alert Tally
+//
+// This single-pass rollup must stay numerically equivalent to
+// `paneHasUnreadAlert`, `unreadAlertCount`, `groupUnreadAlertCount`, and
+// `totalUnreadAlertCount`. It exists so reconcile can compute alert counts once
+// and thread them through every alert-consuming projection.
+
+/// Precomputed unread-alert counts for one AppModel snapshot.
+///
+/// `total` counts every unread alert, including stale-pane alerts whose pane no
+/// longer appears in any split tree. `byTab` and `byGroup` are tree-restricted,
+/// matching the tab/group helper semantics.
+struct UnreadAlertTally: Equatable {
+  var byPane: [PaneId: Int]
+  var byTab: [TabId: Int]
+  var byGroup: [GroupId: Int]
+  var total: Int
+}
+
+/// Build the unread-alert tally that reconcile threads through alert consumers.
+func unreadAlertTally(for model: AppModel) -> UnreadAlertTally {
+  var byPane: [PaneId: Int] = [:]
+  var total = 0
+  for alert in model.alerts where alert.isUnread {
+    byPane[alert.paneId, default: 0] += 1
+    total += 1
+  }
+
+  var byTab: [TabId: Int] = [:]
+  var byGroup: [GroupId: Int] = [:]
+  for group in model.groups {
+    var groupCount = 0
+    for tab in group.tabs {
+      let tabCount = sumUnread(in: tab.rootNode, byPane: byPane)
+      byTab[tab.id] = tabCount
+      groupCount += tabCount
+    }
+    byGroup[group.id] = groupCount
+  }
+
+  return UnreadAlertTally(byPane: byPane, byTab: byTab, byGroup: byGroup, total: total)
+}
+
+/// Sum per-pane unread counts through a split tree without allocating a pane-id set.
+private func sumUnread(in node: SplitNodeModel, byPane: [PaneId: Int]) -> Int {
+  switch node {
+  case .leaf(let pane):
+    return byPane[pane.id] ?? 0
+  case .split(_, _, let first, let second, _):
+    return sumUnread(in: first, byPane: byPane) + sumUnread(in: second, byPane: byPane)
+  }
+}
+
 /// Structural fingerprint of a split tree: split ids + directions + leaf pane ids,
 /// with ratios and the leaf PaneModel payload dropped. Equatable so two trees that
 /// differ only in ratio or payload compare equal.

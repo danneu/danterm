@@ -2876,6 +2876,41 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
             "projection reads pane.theme, never effectiveTheme")
     }
 
+    // MARK: - alert projection tally overloads
+
+    @Test("alert projections read the supplied tally")
+    func alertProjectionsReadSuppliedTally() throws {
+        // Intent: every tally overload surfaces injected counts instead of
+        //   recomputing from model.alerts.
+        // Why it exists: this guards the hot-path wiring against a body that
+        //   accepts a tally parameter but ignores it.
+        // Scenario: empty alerts plus sentinel tally counts; projections
+        //   still render those sentinel values.
+        var model = makeModel()
+        createTab(&model)
+        let tabId = model.groups[0].tabs[0].id
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        model.groups[0].tabs[0].customTitle = "Alpha"
+        model.mruCycle = MruCycleState(frozenOrder: [tabId], cursorIndex: 0)
+        let tally = UnreadAlertTally(
+            byPane: [paneId: 7],
+            byTab: [tabId: 11],
+            byGroup: [model.groups[0].id: 13],
+            total: 99
+        )
+
+        #expect(desiredFocusBorders(in: model, tally: tally)[paneId]?.bell == true)
+        #expect(desiredPaneToolbar(in: model, tally: tally)[paneId]?.unreadAlertCount == 7)
+        #expect(desiredWindowChrome(in: model, tally: tally).unreadCount == 99)
+
+        let sidebar = desiredSidebar(in: model, tally: tally)
+        #expect(sidebar.groups[0].unreadAlertCount == 13)
+        #expect(sidebar.groups[0].tabs[0].unreadAlertCount == 11)
+
+        let switcher = try #require(desiredSwitcher(in: model, tally: tally))
+        #expect(switcher.rows[0].alertCount == 11)
+    }
+
     // MARK: - desiredFocusBorders (focus-border projection, Stage 3)
 
     @Test("desiredFocusBorders: single-pane selected tab draws no focus border (bell still shows)")

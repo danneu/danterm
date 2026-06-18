@@ -84,15 +84,16 @@ extension AppRuntime {
         reconcileSurfaceExistence()         // destroy surfaces for panes gone from model.allPaneIds
         reconcilePaneConfig()
         let mountFocusTab = reconcileContainers()  // eager: selected visible, rest mounted+hidden
-        reconcileFocusBorders()
-        reconcilePaneChrome()
+        let alertTally = unreadAlertTally(for: model)
+        reconcileFocusBorders(tally: alertTally)
+        reconcilePaneChrome(tally: alertTally)
         // Mount-time focus runs AFTER reconcilePaneChrome so an active-search pane's
         // (just-rebuilt) search field exists when applyMountTimeFocus targets it. No-op
         // unless reconcileContainers built/rebuilt or newly showed the selected container.
         applyMountTimeFocus(mountFocusTab)
-        reconcileSidebar()
-        reconcileWindowChrome()
-        reconcileSwitcher()      // single-optional MRU projection; nil (no mruCycle) -> orderOut
+        reconcileSidebar(tally: alertTally)
+        reconcileWindowChrome(tally: alertTally)
+        reconcileSwitcher(tally: alertTally)      // single-optional MRU projection; nil (no mruCycle) -> orderOut
         reconcileQuitConfirmation()
         reconcilePreferencesPanel()
         reconcileAlertsPopover()
@@ -182,8 +183,8 @@ extension AppRuntime {
     /// unchanged -- only the computation moved into the pure `desiredFocusBorders`.
     /// The default no-op `remove` is correct here: a pane's TerminalView is torn
     /// down elsewhere, so a key leaving the projection only prunes the cache.
-    func reconcileFocusBorders() {
-        applyDiff(desiredFocusBorders(in: model), &caches.focusBorders, apply: { paneId, state in
+    func reconcileFocusBorders(tally: UnreadAlertTally) {
+        applyDiff(desiredFocusBorders(in: model, tally: tally), &caches.focusBorders, apply: { paneId, state in
             surfaces[paneId]?.setFocusBorder(state.focused, hasBell: state.bell)
         })
     }
@@ -215,8 +216,8 @@ extension AppRuntime {
     /// just prunes the cache. Search overlay: keyed iff search is active, so the key
     /// disappears on `.endSearch` while the wrapper survives -- a non-default `remove`
     /// tears the overlay down (the disappear-but-host-survives discipline).
-    func reconcilePaneChrome() {
-        applyDiff(desiredPaneToolbar(in: model), &caches.paneToolbar, apply: { paneId, render in
+    func reconcilePaneChrome(tally: UnreadAlertTally) {
+        applyDiff(desiredPaneToolbar(in: model, tally: tally), &caches.paneToolbar, apply: { paneId, render in
             findPaneWrapper(for: paneId)?.updateToolbar(
                 title: render.title,
                 cwd: render.cwd,
@@ -250,9 +251,9 @@ extension AppRuntime {
     /// the sidecar. Replaces the deleted `reloadSidebar` / `setSidebarSelection` /
     /// `updateSidebarTabRow` / `updateSidebarGroupRow` effects + the imperative
     /// `reload(model:)`.
-    func reconcileSidebar() {
+    func reconcileSidebar(tally: UnreadAlertTally) {
         guard let sidebarView = sidebarView else { return }
-        let new = desiredSidebar(in: model)
+        let new = desiredSidebar(in: model, tally: tally)
         let rawOps = computeSidebarRowOps(old: caches.sidebar, new: new)
         let guarded = guardSidebarRenameOps(
             ops: rawOps,
@@ -283,8 +284,8 @@ extension AppRuntime {
     /// the projected values -- never by re-reading the model (same discipline as Stage 4's
     /// toolbar), which is why the old model-reading `refreshContentTitlebar`/
     /// `refreshTabTodoButton` helpers are gone.
-    func reconcileWindowChrome() {
-        let new = desiredWindowChrome(in: model)
+    func reconcileWindowChrome(tally: UnreadAlertTally) {
+        let new = desiredWindowChrome(in: model, tally: tally)
         guard caches.windowChrome != new else { return }
         window?.title = new.windowTitle
         chromeView?.updateTitle(new.contentTitle)
@@ -305,8 +306,8 @@ extension AppRuntime {
     /// change is idempotent (matching the old per-step `.showSwitcherOverlay`); the `nil`
     /// transition is what hides the panel on cycle end/cancel. The panel persists across
     /// container rebuilds, so no cross-pass invalidation.
-    func reconcileSwitcher() {
-        let new = desiredSwitcher(in: model)
+    func reconcileSwitcher(tally: UnreadAlertTally) {
+        let new = desiredSwitcher(in: model, tally: tally)
         guard caches.switcher != new else { return }
         if let proj = new {
             // Non-activating: orderFront, never makeKeyAndOrderFront -- key would steal

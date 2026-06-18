@@ -153,15 +153,10 @@ func desiredAlertsPopover(in model: AppModel) -> AlertsPopoverProjection {
 
 // MARK: - View Reconciler (pure projections + diff)
 //
-// These projections intentionally prefer local model reads over a shared
-// precomputed reconcile input. Focus borders, pane toolbar, and pane config walk
-// `model.allPanes` during each reconcile sweep; alert-derived renders rescan
-// `model.alerts` per pane, which is O(panes x alerts). That is accepted because
-// rapidly-firing title/cwd/progress updates are coalesced to about 75ms by
-// `AppRuntime.reconcileCoalesceInterval` / `Msg.coalescesReconcile`, while
-// inline reconciles are human-paced (tab/pane creation, focus, sidebar ops).
-// `model.alerts` is hard-capped at 100, pane/tab counts are expected to stay
-// human-scale, and reconcile never runs per render frame or typed keystroke. See
+// Focus borders, pane toolbar, and pane config still walk `model.allPanes`
+// during each reconcile sweep. Alert-derived renders read an UnreadAlertTally
+// computed once in `reconcile()` and threaded through the hot-path calls; the
+// no-arg projection wrappers recompute it only for tests and cold callers. See
 // `Projection Scan Cost` in `docs/design/2026-05-27-model-driven-view-reconciliation.md`.
 
 /// Return whether a pane should show the green focus border in the current content view.
@@ -184,17 +179,23 @@ struct BorderState: Equatable {
   let bell: Bool
 }
 
+/// Convenience wrapper for tests and cold callers; hot-path callers pass the
+/// precomputed unread-alert tally to avoid rescanning alerts.
+func desiredFocusBorders(in model: AppModel) -> [PaneId: BorderState] {
+  desiredFocusBorders(in: model, tally: unreadAlertTally(for: model))
+}
+
 /// Focus-border projection: one `BorderState` per live pane. Keyed over every pane
 /// (`allPanes`) so a pane leaving the model drops its key and the reconciler's
 /// `applyDiff` prunes the cache. `isFocusedAndVisible` already encodes the
 /// single-pane-tab rule (a lone leaf draws no green border); `bell` is independent,
 /// so a single-pane tab can still show the red unread-alert border.
-func desiredFocusBorders(in model: AppModel) -> [PaneId: BorderState] {
+func desiredFocusBorders(in model: AppModel, tally: UnreadAlertTally) -> [PaneId: BorderState] {
   var result: [PaneId: BorderState] = [:]
   for pane in model.allPanes {
     result[pane.id] = BorderState(
       focused: isFocusedAndVisible(pane.id, in: model),
-      bell: paneHasUnreadAlert(pane.id, alerts: model.alerts)
+      bell: (tally.byPane[pane.id] ?? 0) > 0
     )
   }
   return result
@@ -216,11 +217,17 @@ struct PaneToolbarRender: Equatable {
   let uncompletedTodoCount: Int
 }
 
+/// Convenience wrapper for tests and cold callers; hot-path callers pass the
+/// precomputed unread-alert tally to avoid rescanning alerts.
+func desiredPaneToolbar(in model: AppModel) -> [PaneId: PaneToolbarRender] {
+  desiredPaneToolbar(in: model, tally: unreadAlertTally(for: model))
+}
+
 /// Pane-toolbar projection: one `PaneToolbarRender` per live pane. Keyed over every
 /// pane (`allPanes`) so a key leaves only when its pane is gone -- at which point the
 /// container pass has already torn down the host wrapper -- so `reconcilePaneChrome`
 /// diffs this with the default no-op `remove`.
-func desiredPaneToolbar(in model: AppModel) -> [PaneId: PaneToolbarRender] {
+func desiredPaneToolbar(in model: AppModel, tally: UnreadAlertTally) -> [PaneId: PaneToolbarRender] {
   var result: [PaneId: PaneToolbarRender] = [:]
   for pane in model.allPanes {
     let (title, cwd) = paneToolbarText(for: pane.id, in: model)
@@ -231,7 +238,7 @@ func desiredPaneToolbar(in model: AppModel) -> [PaneId: PaneToolbarRender] {
       isRemote: pane.isRemote,
       remoteSession: pane.remoteSession,
       agentSession: pane.agentSession,
-      unreadAlertCount: model.alerts.count { $0.paneId == pane.id && $0.isUnread },
+      unreadAlertCount: tally.byPane[pane.id] ?? 0,
       totalTodoCount: pane.todos.count,
       uncompletedTodoCount: pane.todos.count { !$0.isDone }
     )
@@ -299,7 +306,7 @@ func applyDiff<K: Hashable, V: Equatable>(
 
 // MARK: - Window Chrome Projection (reconcileWindowChrome)
 //
-// Unread-alert scans intentionally stay local projection work; see
+// Window chrome reads the precomputed unread-alert tally's total count; see
 // `Projection Scan Cost` in `docs/design/2026-05-27-model-driven-view-reconciliation.md`.
 
 /// The window's title-bar string: the selected tab's display title, plus
@@ -327,16 +334,22 @@ struct WindowChromeProjection: Equatable {
   let tabTodoUncompleted: Int   // tab-todo button uncompleted
 }
 
+/// Convenience wrapper for tests and cold callers; hot-path callers pass the
+/// precomputed unread-alert tally to avoid rescanning alerts.
+func desiredWindowChrome(in model: AppModel) -> WindowChromeProjection {
+  desiredWindowChrome(in: model, tally: unreadAlertTally(for: model))
+}
+
 /// Window-chrome projection. Derives from the *selected* tab (empty titles +
 /// a (0,0) rollup when there is none), the global unread-alert count, and the
 /// selected tab's todo rollup. Pure: same `(AppModel)` -> same projection.
-func desiredWindowChrome(in model: AppModel) -> WindowChromeProjection {
+func desiredWindowChrome(in model: AppModel, tally: UnreadAlertTally) -> WindowChromeProjection {
   let tab = selectedTab(in: model)
   let rollup = tab.map { tabTodoRollup($0.id, in: model) } ?? (total: 0, uncompleted: 0)
   return WindowChromeProjection(
     windowTitle: tab.map { windowTitle(for: $0) } ?? "",
     contentTitle: tab?.displayTitle ?? "",
-    unreadCount: totalUnreadAlertCount(model: model),
+    unreadCount: tally.total,
     tabTodoTotal: rollup.total,
     tabTodoUncompleted: rollup.uncompleted
   )
@@ -344,8 +357,9 @@ func desiredWindowChrome(in model: AppModel) -> WindowChromeProjection {
 
 // MARK: - Sidebar Projection + Row-Op Diff (reconcileSidebar)
 //
-// The sidebar's per-tab and per-group alert scans intentionally stay local; see
-// `Projection Scan Cost` in `docs/design/2026-05-27-model-driven-view-reconciliation.md`.
+// Sidebar rows read the precomputed unread-alert tally's per-tab and per-group
+// rollups; see `Projection Scan Cost` in
+// `docs/design/2026-05-27-model-driven-view-reconciliation.md`.
 
 /// One sidebar tab row's rendered attributes -- everything `configureTabCell` draws.
 /// `id` keys the row; the remaining fields are compared to decide a `reloadTab` op.
@@ -386,16 +400,22 @@ struct SidebarProjection: Equatable {
   var groups: [SidebarGroupProjection]
 }
 
+/// Convenience wrapper for tests and cold callers; hot-path callers pass the
+/// precomputed unread-alert tally to avoid rescanning alerts.
+func desiredSidebar(in model: AppModel) -> SidebarProjection {
+  desiredSidebar(in: model, tally: unreadAlertTally(for: model))
+}
+
 /// Project the sidebar outline from the model. Selection is excluded by design
 /// (view-owned). The jump badge comes from `model.jumpMode?.keyMap[tab.id]`.
-func desiredSidebar(in model: AppModel) -> SidebarProjection {
+func desiredSidebar(in model: AppModel, tally: UnreadAlertTally) -> SidebarProjection {
   let firstGroupId = model.groups.first?.id
   let groups = model.groups.map { group in
     SidebarGroupProjection(
       id: group.id,
       isCollapsed: group.isCollapsed,
       name: group.name,
-      unreadAlertCount: groupUnreadAlertCount(for: group, alerts: model.alerts),
+      unreadAlertCount: tally.byGroup[group.id] ?? 0,
       tabCount: group.tabs.count,
       isFirst: group.id == firstGroupId,
       tabs: group.tabs.map { tab in
@@ -403,7 +423,7 @@ func desiredSidebar(in model: AppModel) -> SidebarProjection {
           id: tab.id,
           displayTitle: tab.displayTitle,
           subtitle: tab.subtitle,
-          unreadAlertCount: unreadAlertCount(for: tab, alerts: model.alerts),
+          unreadAlertCount: tally.byTab[tab.id] ?? 0,
           jumpKey: model.jumpMode?.keyMap[tab.id],
           color: tab.color
         )
@@ -759,10 +779,18 @@ struct SwitcherProjection: Equatable {
 /// Project the MRU switcher overlay from the model. Returns nil when no cycle is
 /// active (mruCycle == nil) or every frozen tab has been removed mid-cycle
 /// (resolveLiveCycle == nil) -- reconcileSwitcher turns that nil into an orderOut.
-/// Otherwise builds one row per live tab in the resolved (frozen) order. Pure:
-/// mirrors SwitcherPanel.render's old body minus the view calls (resolveLiveCycle /
-/// tabById / unreadAlertCount are all pure).
+/// Convenience wrapper for tests and cold callers; hot-path callers pass the
+/// precomputed unread-alert tally to avoid rescanning alerts.
 func desiredSwitcher(in model: AppModel) -> SwitcherProjection? {
+  desiredSwitcher(in: model, tally: unreadAlertTally(for: model))
+}
+
+/// Project the MRU switcher overlay from the model. Returns nil when no cycle is
+/// active (mruCycle == nil) or every frozen tab has been removed mid-cycle
+/// (resolveLiveCycle == nil) -- reconcileSwitcher turns that nil into an orderOut.
+/// Otherwise builds one row per live tab in the resolved (frozen) order. Pure:
+/// mirrors SwitcherPanel.render's old body minus the view calls.
+func desiredSwitcher(in model: AppModel, tally: UnreadAlertTally) -> SwitcherProjection? {
   guard
     let cycle = model.mruCycle,
     let resolved = resolveLiveCycle(cycle, in: model)
@@ -774,7 +802,7 @@ func desiredSwitcher(in model: AppModel) -> SwitcherProjection? {
       tabId: tabId,
       name: tab.displayTitle,
       color: tab.color,
-      alertCount: unreadAlertCount(for: tab, alerts: model.alerts)
+      alertCount: tally.byTab[tabId] ?? 0
     )
   }
   return SwitcherProjection(rows: rows, cursorIndex: resolved.cursorIndex)

@@ -130,26 +130,27 @@ not observe stale, double-written, or out-of-order state.
 
 ## Projection Scan Cost
 
-Projection passes deliberately rescan alerts and rebuild `allPanes` rather than
-sharing a precomputed reconcile input. The cost is O(panes/tabs x alerts), with
-the sidebar's per-tab plus per-group unread rollups being the largest current
-instance. This is accepted for two reasons. First, the scheduling policy above
+Projection passes still rebuild `allPanes` locally rather than sharing a
+precomputed pane list. That cost is accepted because the scheduling policy above
 coalesces the only rapidly-firing triggers (title, cwd, and progress) to about
-75ms while all other messages reconcile inline but at human pace. Second, the
-per-pane alert factor is bounded: `model.alerts` is hard-capped at 100 by
-trimming on insert in `app/Update.swift:731` and `app/Update.swift:761`. Pane
-and tab counts are not capped -- `createTab` and `splitPane` enforce no ceiling
--- so the assumption is only that interactive use stays human-scale.
+75ms while all other messages reconcile inline but at human pace. Pane and tab
+counts are not capped -- `createTab` and `splitPane` enforce no ceiling -- so the
+assumption remains that interactive use stays human-scale.
 
-Do not precompute this speculatively. A shared `allPanes` plus unread-alert tally
-would couple the pure projection layer to an extra `(AppModel, tally)` input just
-to save negligible cold-path work. If profiling ever shows `reconcile()` hot, the
-measured fix is to compute that input once in `reconcile()` and thread it through
-all alert consumers: `paneHasUnreadAlert`, the inline toolbar count in
-`desiredPaneToolbar`, `unreadAlertCount`, `groupUnreadAlertCount`, and
-`totalUnreadAlertCount`. Because pane and tab counts are an expectation rather
-than an invariant, a credible high-pane or high-tab performance report is itself
-a valid trigger to revisit this decision.
+Unread-alert counts are no longer local repeated scans. A credible high-pane and
+high-tab latency report triggered the measured fix: `reconcile()` now computes
+one `UnreadAlertTally` per model snapshot and threads it through the alert
+consumers in focus borders, pane toolbar badges, sidebar tab/group rollups,
+window chrome, and the MRU switcher. That reduces the alert portion from
+O(panes/tabs x alerts), including sidebar per-tab set allocations, to
+O(alerts + panes + tabs) plus O(1) lookups in each projection. The total alert
+scan remains bounded by the `model.alerts` hard cap, while tab/group rollups are
+restricted to panes reachable from each split tree.
+
+Do not precompute further reconcile inputs speculatively. The alert-count tally
+was added only after the hot path had a concrete high-pane/high-tab report; apply
+the same bar to future shared inputs, especially `allPanes`, so the pure
+projection layer does not accrete context bags for negligible cold-path work.
 
 ## Non-Goals
 
