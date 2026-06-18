@@ -107,11 +107,14 @@ adding a command requires an explicit phase decision.
 ## Scheduling And External Invalidation
 
 Reconcile scheduling may coalesce only changes whose delayed application is
-semantically safe. Today that means high-frequency cosmetic surface metadata.
-Structural/container-affecting messages reconcile inline. Any future coalescing
-of structural messages must first add a behavioral popover/surface sync test
-that proves model state, AppKit teardown, and post-reconcile commands stay
-aligned.
+semantically safe. Today that means high-frequency cosmetic surface metadata,
+background-pane alert badges from bell/desktop-notification events, and
+shell-integration command events. These feed only sidebar/window/focus-border/
+toolbar badge chrome, the pane toolbar, and per-pane theme config; they never
+change `ContainerShape`. Structural/container-affecting messages reconcile
+inline. Any future coalescing of structural messages must first add a behavioral
+popover/surface sync test that proves model state, AppKit teardown, and
+post-reconcile commands stay aligned.
 
 If external state changes what a projection should apply while the model value
 looks unchanged, prefer an explicit model event or generation value included in
@@ -132,10 +135,11 @@ not observe stale, double-written, or out-of-order state.
 
 Projection passes still rebuild `allPanes` locally rather than sharing a
 precomputed pane list. That cost is accepted because the scheduling policy above
-coalesces the only rapidly-firing triggers (title, cwd, and progress) to about
-75ms while all other messages reconcile inline but at human pace. Pane and tab
-counts are not capped -- `createTab` and `splitPane` enforce no ceiling -- so the
-assumption remains that interactive use stays human-scale.
+coalesces the rapidly-firing cosmetic triggers (title, cwd, progress,
+bell/desktop-notification alert badges, and shell command events) to about 75 ms
+while structural messages reconcile inline. Pane and tab counts are not capped --
+`createTab` and `splitPane` enforce no ceiling -- so the assumption remains that
+interactive use stays human-scale.
 
 Unread-alert counts are no longer local repeated scans. A credible high-pane and
 high-tab latency report triggered the measured fix: `reconcile()` now computes

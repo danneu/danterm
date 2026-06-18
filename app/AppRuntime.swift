@@ -804,9 +804,10 @@ class AppRuntime {
         }
     }
 
-    /// Defer the whole-model reconcile() sweep while title/cwd/progress messages
-    /// arrive at high frequency. The timer reads the latest model when it fires.
-    /// This is fixed-window coalescing; use Debouncer for trailing-edge debounce.
+    /// Defer the whole-model reconcile() sweep while cosmetic title/cwd/progress,
+    /// background alert-badge, and shell command-event messages arrive at high
+    /// frequency. The timer reads the latest model when it fires. This is
+    /// fixed-window coalescing; use Debouncer for trailing-edge debounce.
     private func scheduleCoalescedReconcile() {
         guard coalescedReconcileTimer == nil else { return }
         let timer = DispatchSource.makeTimerSource(queue: .main)

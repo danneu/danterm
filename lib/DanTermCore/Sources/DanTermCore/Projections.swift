@@ -156,8 +156,10 @@ func desiredAlertsPopover(in model: AppModel) -> AlertsPopoverProjection {
 // Focus borders, pane toolbar, and pane config still walk `model.allPanes`
 // during each reconcile sweep. Alert-derived renders read an UnreadAlertTally
 // computed once in `reconcile()` and threaded through the hot-path calls; the
-// no-arg projection wrappers recompute it only for tests and cold callers. See
-// `Projection Scan Cost` in `docs/design/2026-05-27-model-driven-view-reconciliation.md`.
+// no-arg projection wrappers recompute it only for tests and cold callers. Rapid
+// title/cwd/progress, background alert-badge, and command-event updates coalesce
+// to about 75 ms, keeping inline reconciles at human pace. See `Projection Scan
+// Cost` in `docs/design/2026-05-27-model-driven-view-reconciliation.md`.
 
 /// Return whether a pane should show the green focus border in the current content view.
 func isFocusedAndVisible(_ paneId: PaneId, in model: AppModel) -> Bool {

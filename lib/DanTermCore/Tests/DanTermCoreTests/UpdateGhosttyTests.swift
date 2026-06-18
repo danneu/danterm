@@ -3,7 +3,7 @@
 // desktopNotification routing (focused-pane suppression vs background-pane
 // alert + sendNotification, with per-kind throttling), surfaceCreationFailed
 // cleanup (single + split tab, terminate vs fallback), surface metadata
-// updates (title/cwd/progress) and the reconcile-decision coalescing policy
+// updates (title/cwd/progress), alert and command-event coalescing policy
 // against post-reconcile forcing. The few tests already carrying Intent /
 // Why / Scenario preambles in the legacy file keep them verbatim; the rest
 // get new spec-first preambles.
@@ -165,13 +165,15 @@ import Testing
 
     @Test("reconcileDecision coalesces only eligible high-frequency messages")
     func reconcileDecisionCoalescesOnlyEligibleMessages() {
-        // Intent: high-frequency split-ratio and search-count messages classify
-        //   as coalesce-eligible while post-reconcile commands still force inline.
+        // Intent: high-frequency split-ratio, search-count, background alert,
+        //   and command-event messages classify as coalesce-eligible while
+        //   post-reconcile commands still force inline.
         // Why it exists: pins reconcile coalescing policy against regressions in
         //   message classification, pending-state handling, and post-reconcile
         //   command forcing.
-        // Scenario: divider drags and streaming search scans emit bursts whose
-        //   empty or cosmetic sweeps defer into the 75 ms timer. Spec-first -- no
+        // Scenario: divider drags, streaming search scans, bell/notification
+        //   storms, and shell-integration command loops emit bursts whose empty
+        //   or cosmetic sweeps defer into the 75 ms timer. Spec-first -- no
         //   incident to cite, and none should be invented.
         let paneId = PaneId()
         let coalescedMessages: [Msg] = [
@@ -180,7 +182,11 @@ import Testing
             .surfaceProgress(paneId: paneId, state: .set(percent: 50)),
             .splitRatioChanged(splitId: SplitId(), ratio: 0.3),
             .ghosttySearchTotal(paneId: paneId, total: 42),
-            .ghosttySearchSelected(paneId: paneId, selected: 3)
+            .ghosttySearchSelected(paneId: paneId, selected: 3),
+            .surfaceBell(paneId: paneId),
+            .desktopNotification(paneId: paneId, title: "build", body: "done"),
+            .commandStarted(paneId: paneId, command: "make test"),
+            .commandEnded(paneId: paneId)
         ]
 
         for msg in coalescedMessages {
@@ -203,8 +209,6 @@ import Testing
         }
 
         let inlineMessages: [Msg] = [
-            .surfaceBell(paneId: paneId),
-            .commandStarted(paneId: paneId, command: "make test"),
             .preferencesOpened(ghostty: GhosttyPrefs(theme: "Dracula", fontSize: "14")),
             .preferencesClosed
         ]
@@ -220,14 +224,15 @@ import Testing
         }
     }
 
-    @Test("surface metadata updates stay coalesce eligible")
-    func surfaceMetadataUpdatesStayCoalesceEligible() {
-        // Intent: surface metadata updates (title / cwd / progress) emit no
+    @Test("coalesce-eligible messages emit no post-reconcile commands")
+    func coalesceEligibleMessagesEmitNoPostReconcileCommands() {
+        // Intent: coalesce-eligible metadata, alert, and command events emit no
         //   post-reconcile commands so they can ride the coalesced sweep.
-        // Why it exists: pins the "no post-reconcile in metadata" rule the
-        //   coalescer relies on.
-        // Scenario: spec-first metadata coalesce -- iterate focused and
-        //   unfocused-pane metadata Msgs; none emit post-reconcile commands.
+        // Why it exists: pins the "no post-reconcile in coalesced messages" rule
+        //   the coalescer relies on.
+        // Scenario: spec-first coalesce eligibility -- iterate focused and
+        //   unfocused-pane metadata Msgs plus background alert and command Msgs;
+        //   none emit post-reconcile commands.
         var focusedModel = makeModel()
         createTab(&focusedModel)
         let focusedPane = focusedModel.groups[0].tabs[0].focusedPaneId
@@ -237,20 +242,29 @@ import Testing
         let unfocusedPane = unfocusedModel.groups[0].tabs[0].focusedPaneId
         update(&unfocusedModel, .splitPane(direction: .horizontal))
 
+        var agentCommandEndedModel = unfocusedModel
+        agentCommandEndedModel.updatePane(unfocusedPane) {
+            $0.agentSession = AgentSession(kind: "claude", sessionId: "4f3a2b1c")
+        }
+
         let scenarios: [(Msg, AppModel)] = [
             (.surfaceTitle(paneId: focusedPane, title: "vim"), focusedModel),
             (.surfaceCwd(paneId: focusedPane, cwd: "/tmp"), focusedModel),
             (.surfaceProgress(paneId: focusedPane, state: .set(percent: 50)), focusedModel),
             (.surfaceTitle(paneId: unfocusedPane, title: "htop"), unfocusedModel),
             (.surfaceCwd(paneId: unfocusedPane, cwd: "/var/tmp"), unfocusedModel),
-            (.surfaceProgress(paneId: unfocusedPane, state: .indeterminate), unfocusedModel)
+            (.surfaceProgress(paneId: unfocusedPane, state: .indeterminate), unfocusedModel),
+            (.surfaceBell(paneId: unfocusedPane), unfocusedModel),
+            (.desktopNotification(paneId: unfocusedPane, title: "build", body: "done"), unfocusedModel),
+            (.commandStarted(paneId: unfocusedPane, command: "make"), unfocusedModel),
+            (.commandEnded(paneId: unfocusedPane), agentCommandEndedModel)
         ]
 
         for (msg, seedModel) in scenarios {
             var model = seedModel
             let commands = update(&model, msg)
-            #expect(commands.allSatisfy { !$0.isPostReconcile },
-                "coalesced surface metadata update should not emit post-reconcile commands")
+            #expect(commands.allSatisfy { $0.isPostReconcile == false },
+                "coalesced update should not emit post-reconcile commands")
         }
     }
 

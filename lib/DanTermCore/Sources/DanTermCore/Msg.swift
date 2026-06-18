@@ -188,14 +188,20 @@ enum Msg {
 extension Msg {
     /// Whether this message is eligible to defer its reconcile() sweep so bursts
     /// coalesce. A message opts in when its sweep is either empty (split-ratio:
-    /// ContainerShape drops ratios) or merely cosmetic and safe to throttle to
-    /// ~13 Hz (title/cwd/progress, live search match count). update() still runs
-    /// immediately, so the model stays current and the final value is never
-    /// dropped; only the whole-model view sweep is deferred. The runtime evaluates
-    /// this on the translated message, keeping title-channel IPC events on the
-    /// inline path. Eligibility is necessary but not sufficient: reconcileDecision
-    /// still forces an inline reconcile when update() emitted a post-reconcile
-    /// command, so opting a message in here is always safe.
+    /// ContainerShape drops ratios; commandStarted: no projection reads
+    /// lastCommand) or merely cosmetic and safe to throttle to ~13 Hz (title/cwd/
+    /// progress, live search match count, background-pane alert badges, the
+    /// remote/agent toolbar + per-pane theme a command event clears). update()
+    /// still runs immediately, so the model stays current and the final value is
+    /// never dropped; only the whole-model view sweep is deferred -- and the
+    /// side-effecting commands these emit (.sendNotification, .scheduleCheckpoint)
+    /// are not post-reconcile, so they still run inline. The runtime evaluates this
+    /// on the translated message, so a title-channel `__DANTERM_EVT__:` event's
+    /// eligibility is its translated case's: commandStarted/commandEnded opt in
+    /// here; remoteSession start/report events stay inline. Eligibility is
+    /// necessary but not sufficient: reconcileDecision still forces an inline
+    /// reconcile when update() emitted a post-reconcile command, so opting a message
+    /// in here is always safe.
     var coalescesReconcile: Bool {
         switch self {
         // Cosmetic chrome a TUI/search updates at 30-60 Hz: the sweep produces a
@@ -208,6 +214,21 @@ extension Msg {
         // drops split ratios (see ReconcileTests "split ratio is excluded"), so
         // the sweep is an empty diff -- pure waste; defer it.
         case .splitRatioChanged:
+            return true
+        // Background-pane alert badges. A bell/notify storm (spinner, `printf '\a'`
+        // loop, OSC 9 burst) fires one full sweep per event; the alert is inserted
+        // into the model inline (badge never lost) and the desktop notification
+        // rides a non-post-reconcile .sendNotification, so only the cosmetic badge
+        // sweep (reconcileSidebar / reconcileWindowChrome / reconcileFocusBorders /
+        // reconcilePaneChrome unread-alert counts) defers.
+        case .surfaceBell, .desktopNotification:
+            return true
+        // Shell-integration command events, one per prompt in a command loop.
+        // commandStarted only sets pane.lastCommand, which no projection reads --
+        // an empty view diff; commandEnded clears agent/remote/theme, which feed
+        // only the pane toolbar (desiredPaneToolbar) and per-pane theme
+        // (desiredPaneConfig) -- cosmetic, never ContainerShape.
+        case .commandStarted, .commandEnded:
             return true
         default:
             return false
