@@ -114,8 +114,9 @@ that bypass that delay and emit immediate per-pane OSC 777 notifications when
 Claude finishes a turn or needs user input.
 
 The hook notifies for final top-level turns, suppresses subagent completion
-noise, and still alerts when any agent is blocked on user input, including MCP
-elicitation dialogs.
+noise, stays quiet when a top-level turn merely parks to wait on still-running
+background work (background agents, workflows, or shells), and still alerts when
+any agent is blocked on user input, including MCP elicitation dialogs.
 
 ### Requirements
 

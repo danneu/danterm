@@ -93,6 +93,34 @@ check_case "subagentstop: subagent ignored" \
   '{"hook_event_name":"SubagentStop","agent_id":"agent-1","last_assistant_message":"x"}' \
   ""
 
+# --- Stop while background work is pending (the "parked to wait" case) ---
+# A main-thread Stop fires the moment Claude launches background agents and
+# parks; that is not "done responding", so it must stay quiet.
+
+check_case "stop: parked on running background agent suppressed" \
+  '{"hook_event_name":"Stop","last_assistant_message":"2 background agents launched","background_tasks":[{"id":"t1","type":"subagent","status":"running","description":"Research"}]}' \
+  ""
+
+check_case "stop: mixed completed+running background tasks suppressed" \
+  '{"hook_event_name":"Stop","last_assistant_message":"x","background_tasks":[{"id":"t1","type":"subagent","status":"completed"},{"id":"t2","type":"subagent","status":"running"}]}' \
+  ""
+
+# Unknown/future status counts as active (bias to quiet).
+check_case "stop: unknown background status suppressed" \
+  '{"hook_event_name":"Stop","last_assistant_message":"x","background_tasks":[{"id":"t1","type":"workflow","status":"reticulating"}]}' \
+  ""
+
+# Once every background task is terminal, the main-thread Stop is genuine
+# completion and notifies normally.
+check_case "stop: all background tasks terminal notifies" \
+  '{"hook_event_name":"Stop","last_assistant_message":"all done","background_tasks":[{"id":"t1","type":"subagent","status":"completed"},{"id":"t2","type":"subagent","status":"failed"}]}' \
+  "$(expected_seq 'all done')"
+
+# Empty background_tasks (or the field absent on older Claude) notifies.
+check_case "stop: empty background_tasks notifies" \
+  '{"hook_event_name":"Stop","last_assistant_message":"hi","background_tasks":[]}' \
+  "$(expected_seq hi)"
+
 # --- PreToolUse event ---
 
 check_case "pretooluse: AskUserQuestion" \
