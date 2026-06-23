@@ -69,15 +69,6 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
     )
 }
 
-// MARK: - Pane Toolbar
-
-func paneToolbarText(for paneId: PaneId, in model: AppModel) -> (title: String, cwd: String?) {
-  guard let pane = model.pane(paneId) else {
-    return (title: "Terminal", cwd: nil)
-  }
-  return (title: pane.title, cwd: pane.cwd)
-}
-
 // MARK: - TODO Popover Projections
 
 struct PaneTodoPopoverProjection: Equatable {
@@ -161,15 +152,20 @@ func desiredAlertsPopover(in model: AppModel) -> AlertsPopoverProjection {
 // to about 75 ms, keeping inline reconciles at human pace. See `Projection Scan
 // Cost` in `docs/design/2026-05-27-model-driven-view-reconciliation.md`.
 
-/// Return whether a pane should show the green focus border in the current content view.
-func isFocusedAndVisible(_ paneId: PaneId, in model: AppModel) -> Bool {
-  guard let tab = selectedTab(in: model),
-    tab.focusedPaneId == paneId
-  else {
+/// Whether `paneId` draws the green focus border for an already-resolved selected tab.
+/// Centralizes the focused-pane and lone-leaf rule so loops and convenience callers
+/// share one predicate body.
+func isFocusedAndVisible(_ paneId: PaneId, in tab: TabModel?) -> Bool {
+  guard let tab, tab.focusedPaneId == paneId else {
     return false
   }
   if case .leaf = tab.rootNode { return false }
   return true
+}
+
+/// Return whether a pane should show the green focus border in the current content view.
+func isFocusedAndVisible(_ paneId: PaneId, in model: AppModel) -> Bool {
+  isFocusedAndVisible(paneId, in: selectedTab(in: model))
 }
 
 /// Per-pane focus-border state the reconciler diffs and pushes to a TerminalView.
@@ -193,10 +189,11 @@ func desiredFocusBorders(in model: AppModel) -> [PaneId: BorderState] {
 /// single-pane-tab rule (a lone leaf draws no green border); `bell` is independent,
 /// so a single-pane tab can still show the red unread-alert border.
 func desiredFocusBorders(in model: AppModel, tally: UnreadAlertTally) -> [PaneId: BorderState] {
+  let selected = selectedTab(in: model)
   var result: [PaneId: BorderState] = [:]
   for pane in model.allPanes {
     result[pane.id] = BorderState(
-      focused: isFocusedAndVisible(pane.id, in: model),
+      focused: isFocusedAndVisible(pane.id, in: selected),
       bell: (tally.byPane[pane.id] ?? 0) > 0
     )
   }
@@ -232,10 +229,9 @@ func desiredPaneToolbar(in model: AppModel) -> [PaneId: PaneToolbarRender] {
 func desiredPaneToolbar(in model: AppModel, tally: UnreadAlertTally) -> [PaneId: PaneToolbarRender] {
   var result: [PaneId: PaneToolbarRender] = [:]
   for pane in model.allPanes {
-    let (title, cwd) = paneToolbarText(for: pane.id, in: model)
     result[pane.id] = PaneToolbarRender(
-      title: title,
-      cwd: cwd,
+      title: pane.title,
+      cwd: pane.cwd,
       progress: pane.progress,
       isRemote: pane.isRemote,
       remoteSession: pane.remoteSession,
