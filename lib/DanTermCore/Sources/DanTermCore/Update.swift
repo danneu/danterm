@@ -143,8 +143,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         var commands = closeTabBody(&model, id: id)
 
         // Check if all tabs gone
-        let allTabs = model.groups.flatMap(\.tabs)
-        if allTabs.isEmpty {
+        if !model.hasAnyTab {
             return commands + [.terminate]
         }
         // Persist tab removal + new selection so closed tabs don't reappear on restore.
@@ -531,19 +530,15 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         return []
 
     case .remoteSessionReported(let paneId, let session):
-        guard let existing = model.pane(paneId) else { return [] }
-        let wasRemote = existing.isRemote
-        let oldSession = existing.remoteSession
         let remoteTheme = model.config.remoteTheme
         model.updatePane(paneId) { p in
+            let wasRemote = p.isRemote
             p.isRemote = true
             p.remoteSession = session
             if !wasRemote {
                 p.remoteThemeOverride = remoteTheme
             }
         }
-
-        guard !wasRemote || oldSession != session else { return [] }
         return []
 
     // MARK: - Config (external reload)
@@ -809,7 +804,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
                 if model.selectedTabId == tabId {
                     model.selectedTabId = model.groups.flatMap(\.tabs).first?.id
                 }
-                if model.groups.flatMap(\.tabs).isEmpty {
+                if !model.hasAnyTab {
                     return commands + [.terminate]
                 }
                 // Persist tab removal after a failed surface so it doesn't reappear.
@@ -945,8 +940,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
             commands.append(contentsOf: closeTabBody(&model, id: id))
         }
 
-        let allTabs = model.groups.flatMap(\.tabs)
-        if allTabs.isEmpty {
+        if !model.hasAnyTab {
             return commands + [.terminate]
         }
         commands.append(.scheduleCheckpoint)
@@ -989,7 +983,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
                 }
             }
             model.groups.remove(at: idx)
-            if model.groups.flatMap(\.tabs).isEmpty {
+            if !model.hasAnyTab {
                 return commands + [.terminate]
             }
             // Fix selection if needed
@@ -1361,8 +1355,9 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         return [.scheduleCheckpoint]
 
     case .setTodoDone(let paneId, let todoId, let isDone):
-        guard let idx = model.pane(paneId)?.todos.firstIndex(where: { $0.id == todoId }) else { return [] }
-        guard model.pane(paneId)!.todos[idx].isDone != isDone else { return [] }
+        guard let pane = model.pane(paneId),
+              let idx = pane.todos.firstIndex(where: { $0.id == todoId }),
+              pane.todos[idx].isDone != isDone else { return [] }
         model.updatePane(paneId) { $0.todos[idx].isDone = isDone }
         return [.scheduleCheckpoint]
 

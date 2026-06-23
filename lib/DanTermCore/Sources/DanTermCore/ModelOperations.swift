@@ -596,10 +596,9 @@ func tabTodoRollup(_ tabId: TabId, in model: AppModel) -> (total: Int, uncomplet
   guard let tab = tabById(tabId, in: model) else { return (0, 0) }
   var total = tab.todos.count
   var uncompleted = tab.todos.count { !$0.isDone }
-  for paneId in allPaneIds(tab.rootNode) {
-    guard let todos = model.pane(paneId)?.todos else { continue }
-    total += todos.count
-    uncompleted += todos.count { !$0.isDone }
+  for pane in panesInNode(tab.rootNode) {
+    total += pane.todos.count
+    uncompleted += pane.todos.count { !$0.isDone }
   }
   return (total, uncompleted)
 }

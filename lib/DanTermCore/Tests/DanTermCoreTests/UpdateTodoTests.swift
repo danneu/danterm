@@ -91,6 +91,33 @@ private struct SectionRow {
         #expect(model.pane(paneId)!.todos[0].isDone == false)
     }
 
+    @Test("setTodoDone sets explicit value; same value is a no-op")
+    func setTodoDoneSetsExplicitValueNoOpWhenUnchanged() {
+        // Intent: setTodoDone(paneId:todoId:isDone:) assigns isDone explicitly and
+        //   emits scheduleCheckpoint, but returns no commands when the value is
+        //   already what was requested.
+        // Why it exists: pins the value-unchanged guard the item-3 fold relies on
+        //   -- the rewrite reads the pane once and bails on `isDone != isDone`
+        //   before mutating, so the no-op contract must be locked first.
+        // Scenario: spec-first -- no incident; the pane-level arm mirrors the
+        //   already-pinned tab-level `setTabTodoDoneSetsExplicitValue`.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        update(&model, .addTodo(paneId: paneId, text: "task"))
+        let todoId = model.pane(paneId)!.todos[0].id
+
+        let setCommands = update(&model, .setTodoDone(paneId: paneId, todoId: todoId, isDone: true))
+        #expect(model.pane(paneId)!.todos[0].isDone == true)
+        #expect(hasEffect(setCommands) {
+            if case .scheduleCheckpoint = $0 { return true }
+            return false
+        }, "expected scheduleCheckpoint on a real change")
+
+        let noopCommands = update(&model, .setTodoDone(paneId: paneId, todoId: todoId, isDone: true))
+        #expect(noopCommands.isEmpty, "no-op when value unchanged")
+    }
+
     // MARK: - editTodoText
 
     @Test("editTodoText updates text")
