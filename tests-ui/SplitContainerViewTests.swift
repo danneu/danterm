@@ -65,6 +65,41 @@ func splitContainerViewTests() {
         try uiExpect(abs(splitView.arrangedSubviews[0].frame.width - firstWidth) < 0.5, "second ensureLaidOut should keep the divider stable")
         try uiExpect(splitRatioChangedMessages(runtime.sentMessages).count == messageCount, "second ensureLaidOut should not send splitRatioChanged")
     }
+
+    uiTest("nested split containers arm guards and apply each stored ratio") {
+        // Intent: nested split containers apply every split node's stored ratio and
+        //   release the resize-feedback guard for every realized PaneSplitView.
+        // Why it exists: pins the exhaustive nested-split behavior that lets the
+        //   split view lookup mechanism change without losing inner split nodes.
+        // Scenario: a restored tab contains a horizontal split whose second pane
+        //   is split vertically, then the tab is revealed. Spec-first -- no
+        //   incident to cite.
+        let outerSplitId = SplitId()
+        let innerSplitId = SplitId()
+        let container = makeNestedSplitContainer(
+            outerSplitId: outerSplitId,
+            innerSplitId: innerSplitId,
+            outerRatio: 0.65,
+            innerRatio: 0.7
+        )
+
+        container.rebuild()
+        let splitViews = paneSplitViews(in: container)
+        try uiExpect(splitViews.count == 2, "expected two PaneSplitViews, got \(splitViews.count)")
+        try uiExpect(splitViews.allSatisfy(\.isApplyingRatio), "rebuild should leave every split guard armed")
+
+        container.ensureLaidOut()
+        let splitViewsById = Dictionary(uniqueKeysWithValues: paneSplitViews(in: container).map { ($0.splitId, $0) })
+        try uiExpect(splitViewsById.count == 2, "expected two indexed PaneSplitViews, got \(splitViewsById.count)")
+        try uiExpect(splitViewsById[outerSplitId] != nil, "missing outer PaneSplitView")
+        try uiExpect(splitViewsById[innerSplitId] != nil, "missing inner PaneSplitView")
+
+        let outerSplitView = splitViewsById[outerSplitId]!
+        let innerSplitView = splitViewsById[innerSplitId]!
+        try uiExpect(!outerSplitView.isApplyingRatio && !innerSplitView.isApplyingRatio, "ensureLaidOut should release every split guard")
+        try uiExpect(firstSubviewRatio(in: outerSplitView, expectedRatio: 0.65), "outer split should match stored ratio")
+        try uiExpect(firstSubviewRatio(in: innerSplitView, expectedRatio: 0.7), "inner split should match stored ratio")
+    }
 }
 
 private func makeSplitContainer(splitId: SplitId, ratio: CGFloat, runtime: AppRuntime? = nil) -> SplitContainerView {
@@ -79,6 +114,30 @@ private func makeSplitContainer(splitId: SplitId, ratio: CGFloat, runtime: AppRu
         rootNode: root,
         surfaceLookup: { _ in nil },
         runtime: runtime,
+        isZoomed: false,
+        hasSplits: true,
+        frame: NSRect(x: 0, y: 0, width: 800, height: 600)
+    )
+}
+
+private func makeNestedSplitContainer(outerSplitId: SplitId, innerSplitId: SplitId, outerRatio: CGFloat, innerRatio: CGFloat) -> SplitContainerView {
+    let root = SplitNodeModel.split(
+        id: outerSplitId,
+        direction: .horizontal,
+        first: .leaf(PaneModel(id: PaneId())),
+        second: .split(
+            id: innerSplitId,
+            direction: .vertical,
+            first: .leaf(PaneModel(id: PaneId())),
+            second: .leaf(PaneModel(id: PaneId())),
+            ratio: innerRatio
+        ),
+        ratio: outerRatio
+    )
+    return SplitContainerView(
+        rootNode: root,
+        surfaceLookup: { _ in nil },
+        runtime: nil,
         isZoomed: false,
         hasSplits: true,
         frame: NSRect(x: 0, y: 0, width: 800, height: 600)
@@ -107,6 +166,14 @@ private func firstSubviewRatio(in splitView: PaneSplitView, expectedTotal: CGFlo
     let total = splitView.isVertical ? splitView.bounds.width : splitView.bounds.height
     let first = splitView.isVertical ? splitView.arrangedSubviews[0].frame.width : splitView.arrangedSubviews[0].frame.height
     return abs(total - expectedTotal) < 0.5 && abs(first - expectedTotal * expectedRatio) < 2
+}
+
+private func firstSubviewRatio(in splitView: PaneSplitView, expectedRatio: CGFloat) -> Bool {
+    guard splitView.arrangedSubviews.count == 2 else { return false }
+    let total = splitView.isVertical ? splitView.bounds.width : splitView.bounds.height
+    guard total > 0 else { return false }
+    let first = splitView.isVertical ? splitView.arrangedSubviews[0].frame.width : splitView.arrangedSubviews[0].frame.height
+    return abs(first - total * expectedRatio) < 2
 }
 
 private func splitRatioChangedMessages(_ messages: [Msg]) -> [(SplitId, CGFloat)] {

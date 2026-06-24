@@ -13,6 +13,9 @@ class SplitContainerView: NSView {
     let hasSplits: Bool
     weak var runtime: AppRuntime?
     private var hasBeenLaidOut = false
+    /// Split views built for the current tree, kept so deferred ratio application
+    /// can address each split by id without re-searching the AppKit hierarchy.
+    private var splitViews: [SplitId: PaneSplitView] = [:]
 
     init(rootNode: SplitNodeModel, surfaceLookup: @escaping (PaneId) -> TerminalView?, runtime: AppRuntime?, isZoomed: Bool, hasSplits: Bool, frame: NSRect) {
         self.rootNode = rootNode
@@ -33,6 +36,7 @@ class SplitContainerView: NSView {
         for sub in subviews {
             sub.removeFromSuperview()
         }
+        splitViews.removeAll(keepingCapacity: true)
 
         let view = buildView(for: rootNode)
         view.translatesAutoresizingMaskIntoConstraints = false
@@ -45,7 +49,7 @@ class SplitContainerView: NSView {
             view.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])
 
-        setApplyingRatio(true, in: self)
+        setApplyingRatio(true)
         hasBeenLaidOut = false
     }
 
@@ -54,35 +58,18 @@ class SplitContainerView: NSView {
         guard !hasBeenLaidOut else { return }
         layoutSubtreeIfNeeded()
         applyRatios(for: rootNode)
-        setApplyingRatio(false, in: self)
+        setApplyingRatio(false)
         hasBeenLaidOut = true
     }
 
     private func applyRatios(for node: SplitNodeModel) {
-        guard case .split(_, _, let first, let second, _) = node else { return }
-        if let paneSplit = findPaneSplitView(for: node) {
+        guard case .split(let id, _, let first, let second, _) = node else { return }
+        if let paneSplit = splitViews[id] {
             paneSplit.applyRatio()
             paneSplit.layoutSubtreeIfNeeded()
         }
         applyRatios(for: first)
         applyRatios(for: second)
-    }
-
-    private func findPaneSplitView(for node: SplitNodeModel) -> PaneSplitView? {
-        guard case .split(let id, _, _, _, _) = node else { return nil }
-        return findPaneSplitViewIn(view: self, id: id)
-    }
-
-    private func findPaneSplitViewIn(view: NSView, id: SplitId) -> PaneSplitView? {
-        if let psv = view as? PaneSplitView, psv.splitId == id {
-            return psv
-        }
-        for sub in view.subviews {
-            if let found = findPaneSplitViewIn(view: sub, id: id) {
-                return found
-            }
-        }
-        return nil
     }
 
     private func buildView(for node: SplitNodeModel) -> NSView {
@@ -99,6 +86,7 @@ class SplitContainerView: NSView {
 
         case .split(let id, let direction, let first, let second, let ratio):
             let splitView = PaneSplitView(splitId: id, ratio: ratio)
+            splitViews[id] = splitView
             splitView.onRatioChanged = { [weak self] splitId, ratio in
                 self?.runtime?.send(.splitRatioChanged(splitId: splitId, ratio: ratio))
             }
@@ -122,12 +110,9 @@ class SplitContainerView: NSView {
         }
     }
 
-    private func setApplyingRatio(_ value: Bool, in view: NSView) {
-        if let paneSplit = view as? PaneSplitView {
-            paneSplit.isApplyingRatio = value
-        }
-        for sub in view.subviews {
-            setApplyingRatio(value, in: sub)
+    private func setApplyingRatio(_ value: Bool) {
+        for splitView in splitViews.values {
+            splitView.isApplyingRatio = value
         }
     }
 }
