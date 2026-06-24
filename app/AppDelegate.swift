@@ -6,9 +6,9 @@ import GhosttyKit
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitViewDelegate, @preconcurrency UNUserNotificationCenterDelegate, WindowIndependentMenuActions {
-    static let minWindowWidth: CGFloat = 600
-    static let minWindowHeight: CGFloat = 300
-    static let minSidebarWidth: CGFloat = 200
+    nonisolated static let minWindowWidth: CGFloat = 600
+    nonisolated static let minWindowHeight: CGFloat = 300
+    nonisolated static let minSidebarWidth: CGFloat = 200
 
     var window: NSWindow!
     var ghosttyApp: GhosttyApp!
