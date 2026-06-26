@@ -13,5 +13,7 @@ INSTALL_APP="$HOME/Applications/DanTerm Dev.app"
 # Kill previous instance
 killall "DanTerm Dev" 2>/dev/null || true
 
-# Run installed app
-"$INSTALL_APP/Contents/MacOS/DanTerm Dev"
+# Run installed app via LaunchServices: gives Dock launch feedback, lets the
+# WindowServer activate the window normally, and returns the shell prompt
+# immediately instead of blocking on the app for its whole lifetime.
+open "$INSTALL_APP"
