@@ -494,6 +494,29 @@ class GhosttyApp {
             sendForPane(target) { .ghosttySearchSelected(paneId: $0, selected: selected) }
             return true
 
+        case GHOSTTY_ACTION_OPEN_URL:
+            let v = action.action.open_url
+            // Only take over `.unknown` (cmd-clicked links / OSC8). Return false for
+            // `.text`/`.html` so libghostty keeps its kind-specific fallback (`open -t`
+            // for text) until DanTerm ports native handling for those kinds.
+            guard v.kind == GHOSTTY_ACTION_OPEN_URL_KIND_UNKNOWN else { return false }
+            guard v.len > 0, let ptr = v.url,
+                  let raw = String(data: Data(bytes: ptr, count: Int(v.len)), encoding: .utf8),
+                  !raw.isEmpty
+            else { return false }
+            // Synchronous: the action callback already runs on the main thread (via
+            // wakeup_cb), so NSWorkspace.open is safe to call directly -- no dispatch,
+            // no captured-self lifetime concern.
+            // Ambient home: opening a URL is a live, discarded effect (not saved/sent/
+            // asserted), so reading the real home here is correct per the inject-vs-
+            // ambient rule. The pure resolveOpenUrl stays deterministic via the param.
+            //
+            // Return AppKit's success Bool, NOT a hardcoded `true`: if NSWorkspace
+            // refuses the open (false), libghostty re-runs its own fallback opener
+            // (Surface.zig:4528-4548), so a failed native open degrades to the
+            // subprocess path instead of dying silently.
+            return NSWorkspace.shared.open(resolveOpenUrl(raw, home: NSHomeDirectory()))
+
         default:
             return false
         }
