@@ -150,6 +150,56 @@ func sidebarRenameRecycleTests() {
             "cosmetic sweep should preserve the rename sidecar")
     }
 
+    uiTest("selection-ending rename resync retains a dropped tab reload") {
+        // Intent: the inline resync that runs after a selection change ends a live
+        //   rename feeds dropped row ids into the sidebar cache advance.
+        // Why it exists: covers the direct updateTabRow call site in
+        //   applyRestoreSelection, not just explicit reloadTab row ops.
+        // Scenario: Cmd-T changes selection while the edited tab also has a pending
+        //   row-attr update, and the resync cell fetch is transiently unavailable.
+        let (sidebar, outline, window, runtime) = makeRenameRecycleHarness()
+        defer { window.close() }
+
+        let group = GroupId()
+        let edited = TabId(); let other = TabId(); let spawned = TabId()
+        let initial = renameRecycleModel(
+            [(group, "G", false, [(edited, "alpha"), (other, "beta")])],
+            selected: edited)
+        let initialProjection = applyRenameRecycleModel(initial, to: sidebar, outline: outline, old: nil)
+
+        sidebar.beginRenamingTab(edited)
+        let editedRow = try renameRecycleRow(for: edited, in: outline)
+        let editedCell = outline.view(atColumn: 0, row: editedRow, makeIfNecessary: false) as! NSTableCellView
+        try uiExpect(editedCell.textField?.currentEditor() != nil,
+            "precondition: rename should attach a live field editor")
+
+        let afterCmdT = renameRecycleModel(
+            [(group, "G", false, [(edited, "alpha updated"), (other, "beta"), (spawned, "Terminal")])],
+            selected: spawned)
+        sidebar.testForceNextNilCellTabIds.insert(edited)
+        let dropped = applyRenameRecycleTransitionResult(
+            old: initialProjection, newModel: afterCmdT,
+            to: sidebar, outline: outline, runtime: runtime)
+
+        try uiExpect(dropped.droppedTabs == Set([edited]),
+            "rename resync should report the dropped edited tab")
+        try uiExpect(runtime.viewLocalState.sidebarRenameTarget == nil,
+            "selection-moving reconcile should still clear the rename sidecar")
+        try uiExpect(editedCell.textField?.stringValue == "alpha",
+            "dropped resync should leave the old edited-row title visible")
+
+        let repainted = applyRenameRecycleTransitionResult(
+            old: dropped.advancedProjection, newModel: afterCmdT,
+            to: sidebar, outline: outline, runtime: runtime)
+
+        let updatedRow = try renameRecycleRow(for: edited, in: outline)
+        let updatedCell = outline.view(atColumn: 0, row: updatedRow, makeIfNecessary: false) as! NSTableCellView
+        try uiExpect(repainted.droppedTabs.isEmpty,
+            "retry should fetch and paint the edited tab row")
+        try uiExpect(updatedCell.textField?.stringValue == "alpha updated",
+            "retry should repaint the edited row from the live model")
+    }
+
     uiTest("a tab row inserted after a collapse-stranded rename shows its title") {
         // Intent: a new tab inserted after an edited row was torn down by a group
         //   collapse gets a clean cell: non-editable title field, no field editor,
@@ -271,6 +321,24 @@ private func applyRenameRecycleTransition(
     outline: NSOutlineView,
     runtime: AppRuntime
 ) -> SidebarProjection {
+    applyRenameRecycleTransitionResult(
+        old: oldProjection, newModel: newModel,
+        to: sidebar, outline: outline, runtime: runtime
+    ).advancedProjection
+}
+
+@discardableResult
+private func applyRenameRecycleTransitionResult(
+    old oldProjection: SidebarProjection,
+    newModel: AppModel,
+    to sidebar: SidebarView,
+    outline: NSOutlineView,
+    runtime: AppRuntime
+) -> (
+    advancedProjection: SidebarProjection,
+    droppedTabs: Set<TabId>,
+    droppedGroups: Set<GroupId>
+) {
     let newProjection = desiredSidebar(in: newModel)
     let rawOps = computeSidebarRowOps(old: oldProjection, new: newProjection)
     let guarded = guardSidebarRenameOps(
@@ -280,12 +348,15 @@ private func applyRenameRecycleTransition(
     if guarded.clearRename {
         runtime.viewLocalState.sidebarRenameTarget = nil
     }
-    sidebar.applySidebarOps(
+    let dropped = sidebar.applySidebarOps(
         guarded.ops, model: newModel, clearActiveRename: guarded.clearRename)
     materializeRenameRecycleRows(sidebar, outline: outline)
-    return advanceSidebarCache(
+    let advanced = advanceSidebarCache(
         old: oldProjection, new: newProjection,
-        suppressedRenameTarget: runtime.viewLocalState.sidebarRenameTarget)
+        suppressedRenameTarget: runtime.viewLocalState.sidebarRenameTarget,
+        unappliedTabIds: dropped.tabs,
+        unappliedGroupIds: dropped.groups)
+    return (advanced, dropped.tabs, dropped.groups)
 }
 
 private func materializeRenameRecycleRows(_ sidebar: SidebarView, outline: NSOutlineView) {

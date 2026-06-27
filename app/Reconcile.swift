@@ -264,13 +264,16 @@ extension AppRuntime {
             // end the now-orphaned edit so the field editor never strands.
             viewLocalState.sidebarRenameTarget = nil
         }
-        sidebarView.applySidebarOps(
+        let unapplied = sidebarView.applySidebarOps(
             guarded.ops, model: model, clearActiveRename: guarded.clearRename)
         // Advance the cache. If a reload was suppressed for the still-editing row,
-        // retain its prior projection so the deferred attr update re-fires on edit-end.
+        // or could not paint a visible row, retain its prior projection so the deferred
+        // attr update re-fires later.
         caches.sidebar = advanceSidebarCache(
             old: caches.sidebar, new: new,
-            suppressedRenameTarget: viewLocalState.sidebarRenameTarget)
+            suppressedRenameTarget: viewLocalState.sidebarRenameTarget,
+            unappliedTabIds: unapplied.tabs,
+            unappliedGroupIds: unapplied.groups)
     }
 
     /// Push the window chrome -- window/content title, dock + toolbar-bell unread badge,

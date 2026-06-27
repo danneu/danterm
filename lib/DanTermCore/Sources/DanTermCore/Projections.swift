@@ -608,37 +608,56 @@ func guardSidebarRenameOps(
 
 /// Advance the reconcileSidebar cache to `new` after applying ops -- but if a row's
 /// reload was suppressed because it is the live-editing row (`suppressedRenameTarget`
-/// non-nil after the guard ran), retain that row's *prior* projection so the deferred
-/// attribute update re-fires the next time the row diffs (once the edit ends and the
-/// guard stops suppressing). Without this the cache would claim the suppressed attrs
-/// were applied and silently drift (a cancelled rename would strand a stale badge).
-/// The suppressed row never has a structural op (those clear the rename target), so
-/// retaining its old attrs in `new`'s structure is safe.
+/// non-nil after the guard ran), or a visible row reload could not fetch its cell,
+/// retain that row's *prior* projection so the deferred attribute update re-fires the
+/// next time the row diffs. Without this the cache would claim unapplied attrs were
+/// painted and silently drift.
 func advanceSidebarCache(
   old: SidebarProjection?,
   new: SidebarProjection,
-  suppressedRenameTarget: RenameTarget?
+  suppressedRenameTarget: RenameTarget?,
+  unappliedTabIds: Set<TabId> = [],
+  unappliedGroupIds: Set<GroupId> = []
 ) -> SidebarProjection {
-  guard let target = suppressedRenameTarget, let old = old else { return new }
+  guard let old = old else { return new }
   var merged = new
-  switch target {
-  case .tab(let id):
-    guard let oldTab = old.groups.flatMap(\.tabs).first(where: { $0.id == id }) else { return new }
+
+  func retainTabProjection(_ id: TabId) {
+    guard let oldTab = old.groups.flatMap(\.tabs).first(where: { $0.id == id }) else { return }
     for gi in merged.groups.indices {
       if let ti = merged.groups[gi].tabs.firstIndex(where: { $0.id == id }) {
         merged.groups[gi].tabs[ti] = oldTab
-        return merged
+        return
       }
     }
-  case .group(let id):
+  }
+
+  func retainGroupReloadAttrs(_ id: GroupId) {
     guard let oldGroup = old.groups.first(where: { $0.id == id }),
-          let gi = merged.groups.firstIndex(where: { $0.id == id }) else { return new }
+          let gi = merged.groups.firstIndex(where: { $0.id == id }) else { return }
     // Retain only the reload-attrs (collapse + tab list are structural, already applied).
     merged.groups[gi].name = oldGroup.name
     merged.groups[gi].unreadAlertCount = oldGroup.unreadAlertCount
     merged.groups[gi].tabCount = oldGroup.tabCount
     merged.groups[gi].isFirst = oldGroup.isFirst
   }
+
+  if let target = suppressedRenameTarget {
+    switch target {
+    case .tab(let id):
+      retainTabProjection(id)
+    case .group(let id):
+      retainGroupReloadAttrs(id)
+    }
+  }
+
+  for id in unappliedTabIds {
+    retainTabProjection(id)
+  }
+  for id in unappliedGroupIds {
+    retainGroupReloadAttrs(id)
+  }
+
   return merged
 }
 

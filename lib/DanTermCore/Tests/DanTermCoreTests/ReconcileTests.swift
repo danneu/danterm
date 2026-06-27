@@ -414,6 +414,70 @@ import Testing
             "missing old cache leaves the cache at new")
     }
 
+    @Test("advanceSidebarCache retains unapplied row attrs for retry")
+    func advanceSidebarCacheRetainsUnappliedRowAttrsForRetry() throws {
+        // Intent: an in-place sidebar reload that did not paint keeps its old cache
+        //   attrs so the next diff re-emits the row reload.
+        // Why it exists: pins the temporal desync fix where a visible row cell could
+        //   miss a reload while the toolbar bell advanced from the same model tally.
+        // Scenario: a sidebar badge clear reaches the projection, but the on-screen
+        //   tab cell is transiently unavailable during the row-op batch.
+        let g1 = GroupId(); let g2 = GroupId()
+        let a = TabId(); let b = TabId(); let c = TabId()
+        let oldTabA = sbTabFull(a, "a", bell: 1)
+        let oldTabB = sbTabFull(b, "b-old", bell: 2)
+        let newTabA = sbTabFull(a, "a", bell: 0)
+        let newTabB = sbTabFull(b, "b-new", bell: 0)
+        let newTabC = sbTabFull(c, "c-new", bell: 0)
+        let old = sbProj(false, [
+            sbGroup(g1, "Old G1", first: true, [oldTabA, oldTabB]),
+            sbGroup(g2, "Old G2", [sbTabFull(c, "c-old", bell: 3)]),
+        ])
+        let new = sbProj(false, [
+            sbGroup(g1, "New G1", collapsed: true, [newTabA, newTabB]),
+            sbGroup(g2, "New G2", first: true, [newTabC]),
+        ])
+
+        let tabRetained = advanceSidebarCache(
+            old: old, new: new, suppressedRenameTarget: nil, unappliedTabIds: [a])
+        let retainedTabA = try #require(tabRetained.groups.flatMap(\.tabs).first { $0.id == a })
+        #expect(retainedTabA == oldTabA, "unapplied tab keeps its old projection")
+        #expect(computeSidebarRowOps(old: tabRetained, new: new).contains(.reloadTab(id: a)),
+            "retained tab attrs re-emit reloadTab")
+
+        let fullyAdvanced = advanceSidebarCache(old: old, new: new, suppressedRenameTarget: nil)
+        #expect(fullyAdvanced == new, "empty unapplied sets advance fully to the new projection")
+        #expect(computeSidebarRowOps(old: fullyAdvanced, new: new).contains(.reloadTab(id: a)) == false,
+            "fully advanced attrs do not churn reloadTab")
+
+        let groupRetained = advanceSidebarCache(
+            old: old, new: new, suppressedRenameTarget: nil, unappliedGroupIds: [g1])
+        let retainedGroup = try #require(groupRetained.groups.first { $0.id == g1 })
+        #expect(retainedGroup.name == old.groups[0].name,
+            "unapplied group keeps its old reload attrs")
+        #expect(retainedGroup.unreadAlertCount == old.groups[0].unreadAlertCount,
+            "unapplied group keeps its old unread badge")
+        #expect(retainedGroup.tabCount == old.groups[0].tabCount,
+            "unapplied group keeps its old tab-count badge")
+        #expect(retainedGroup.isFirst == old.groups[0].isFirst,
+            "unapplied group keeps its old first-row attr")
+        #expect(retainedGroup.isCollapsed == new.groups[0].isCollapsed,
+            "unapplied group still applies collapse structure")
+        #expect(retainedGroup.tabs == new.groups[0].tabs,
+            "unapplied group still applies tab structure")
+        #expect(computeSidebarRowOps(old: groupRetained, new: new).contains(.reloadGroup(id: g1)),
+            "retained group attrs re-emit reloadGroup")
+
+        let composed = advanceSidebarCache(
+            old: old, new: new, suppressedRenameTarget: .tab(b), unappliedTabIds: [a])
+        let composedTabA = try #require(composed.groups.flatMap(\.tabs).first { $0.id == a })
+        let composedTabB = try #require(composed.groups.flatMap(\.tabs).first { $0.id == b })
+        let composedTabC = try #require(composed.groups.flatMap(\.tabs).first { $0.id == c })
+        #expect(composedTabA == oldTabA, "dropped tab retention composes with rename retention")
+        #expect(composedTabB == oldTabB, "rename-suppressed tab still keeps its old projection")
+        #expect(composedTabC == newTabC, "unrelated sibling takes the new projection")
+    }
+
     @Test("desiredContainerShapes: eager projection includes selected and background tabs")
     func desiredContainerShapesEagerProjectionIncludesBackgroundTabs() {
         // Intent: desiredContainerShapes covers every tab (selected,

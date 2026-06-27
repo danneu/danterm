@@ -126,6 +126,107 @@ func sidebarSelectionCacheTests() {
         try assertVisibleSidebarRowsDoNotNeedDisplay(in: outline, except: [changedRow])
     }
 
+    uiTest("visible painted badge reload reports no dropped row") {
+        // Intent: a visible, materialized tab row that paints successfully reports
+        //   no unapplied row ids.
+        // Why it exists: guards the updateTabRow return polarity that reconcile
+        //   uses to decide whether to retain the old sidebar projection.
+        // Scenario: a tab alert badge clears while the row is already visible.
+        let (sidebar, outline, window) = makeSidebarSelectionHarness()
+        defer { window.close() }
+
+        let group = GroupId()
+        let tab = TabId()
+        let pane = PaneId()
+        let model = sidebarAlertModel(groupId: group, tabId: tab, paneId: pane, unread: true)
+        let projection = applyInitialSidebarModel(model, to: sidebar, outline: outline)
+        try uiExpect(try sidebarBadgeCount(for: tab, in: outline) == 1,
+            "precondition: alert badge should be visible")
+
+        let cleared = sidebarAlertModel(groupId: group, tabId: tab, paneId: pane, unread: false)
+        let result = applySidebarTransitionResult(
+            old: projection, newModel: cleared, to: sidebar, outline: outline)
+
+        try uiExpect(result.droppedTabs.isEmpty, "painted tab row should not report a drop")
+        try uiExpect(result.droppedGroups.isEmpty, "painted tab row should not drop groups")
+        try uiExpect(try sidebarBadgeCount(for: tab, in: outline) == 0,
+            "painted row should show the live cleared badge")
+    }
+
+    uiTest("off-screen nil-cell badge reload is not retained") {
+        // Intent: a reload for an off-screen tab row does not request cache
+        //   retention even when the cell is unavailable.
+        // Why it exists: prevents the F1 over-retention case where an ordinary
+        //   discarded off-screen cell would re-emit reloadTab every reconcile.
+        // Scenario: a sidebar with enough rows to scroll has an off-screen tab
+        //   badge clear before the user scrolls it back into view.
+        let (sidebar, outline, window) = makeSidebarSelectionHarness()
+        defer { window.close() }
+
+        let group = GroupId()
+        let tabIds = (0..<30).map { _ in TabId() }
+        let panes = tabIds.map { _ in PaneId() }
+        let model = sidebarAlertModel(
+            groupId: group, tabIds: tabIds, paneIds: panes,
+            selected: tabIds[0], unreadPaneIds: [panes[29]])
+        let projection = applyInitialSidebarModel(model, to: sidebar, outline: outline)
+        try assertSidebarRowOffScreen(29, in: outline)
+
+        let cleared = sidebarAlertModel(
+            groupId: group, tabIds: tabIds, paneIds: panes,
+            selected: tabIds[0], unreadPaneIds: [])
+        sidebar.testForceNextNilCellTabIds.insert(tabIds[29])
+        let result = applySidebarTransitionResult(
+            old: projection, newModel: cleared, to: sidebar, outline: outline)
+
+        try uiExpect(result.droppedTabs.contains(tabIds[29]) == false,
+            "off-screen nil-cell tab should not be retained")
+        try uiExpect(result.advancedProjection == desiredSidebar(in: cleared),
+            "off-screen nil-cell tab should still advance the cache")
+    }
+
+    uiTest("visible nil-cell badge reload is retained and repaints on retry") {
+        // Intent: a visible row whose cell cannot be fetched stays pending in the
+        //   cache, then the next reconcile re-emits and paints the live badge.
+        // Why it exists: pins the app-layer bridge between updateTabRow's dropped
+        //   result, applySidebarOps accumulation, and advanceSidebarCache retention.
+        // Scenario: an on-screen tab badge clears during a row-op batch where the
+        //   cell is transiently unavailable.
+        let (sidebar, outline, window) = makeSidebarSelectionHarness()
+        defer { window.close() }
+
+        let group = GroupId()
+        let tab = TabId()
+        let pane = PaneId()
+        let model = sidebarAlertModel(groupId: group, tabId: tab, paneId: pane, unread: true)
+        let projection = applyInitialSidebarModel(model, to: sidebar, outline: outline)
+        let row = try sidebarRow(for: tab, in: outline)
+        try assertSidebarRowVisible(row, in: outline)
+        try uiExpect(try sidebarBadgeCount(for: tab, in: outline) == 1,
+            "precondition: alert badge should be visible")
+
+        let cleared = sidebarAlertModel(groupId: group, tabId: tab, paneId: pane, unread: false)
+        sidebar.testForceNextNilCellTabIds.insert(tab)
+        let dropped = applySidebarTransitionResult(
+            old: projection, newModel: cleared, to: sidebar, outline: outline)
+
+        try uiExpect(dropped.droppedTabs == Set([tab]),
+            "visible nil-cell tab should report a dropped paint")
+        try uiExpect(try sidebarBadgeCount(for: tab, in: outline) == 1,
+            "dropped paint should leave the old badge visible")
+        try uiExpect(dropped.advancedProjection != desiredSidebar(in: cleared),
+            "dropped paint should retain old attrs in the advanced cache")
+
+        let repainted = applySidebarTransitionResult(
+            old: dropped.advancedProjection, newModel: cleared, to: sidebar, outline: outline)
+
+        try uiExpect(repainted.droppedTabs.isEmpty, "retry should fetch and paint the tab row")
+        try uiExpect(try sidebarBadgeCount(for: tab, in: outline) == 0,
+            "retry should repaint the visible badge from the live model")
+        try uiExpect(repainted.advancedProjection == desiredSidebar(in: cleared),
+            "cache should converge after the retry paints")
+    }
+
     uiTest("empty-op sweep restores the focused tab as the lead row") {
         // Intent: when the selected set already matches the model, restore still fixes
         //   the lead/last-selected row so range selection anchors on the focused tab.
@@ -318,13 +419,38 @@ private func applySidebarTransition(
     to sidebar: SidebarView,
     outline: NSOutlineView
 ) -> SidebarProjection {
+    applySidebarTransitionResult(
+        old: oldProjection, newModel: newModel, to: sidebar, outline: outline
+    ).advancedProjection
+}
+
+@discardableResult
+private func applySidebarTransitionResult(
+    old oldProjection: SidebarProjection,
+    newModel: AppModel,
+    to sidebar: SidebarView,
+    outline: NSOutlineView,
+    materializeRows: Bool = true
+) -> (
+    advancedProjection: SidebarProjection,
+    droppedTabs: Set<TabId>,
+    droppedGroups: Set<GroupId>
+) {
     let newProjection = desiredSidebar(in: newModel)
-    sidebar.applySidebarOps(
+    let dropped = sidebar.applySidebarOps(
         computeSidebarRowOps(old: oldProjection, new: newProjection),
         model: newModel,
         clearActiveRename: false)
-    materializeSidebarRows(sidebar, outline: outline)
-    return newProjection
+    if materializeRows {
+        materializeSidebarRows(sidebar, outline: outline)
+    }
+    let advanced = advanceSidebarCache(
+        old: oldProjection,
+        new: newProjection,
+        suppressedRenameTarget: nil,
+        unappliedTabIds: dropped.tabs,
+        unappliedGroupIds: dropped.groups)
+    return (advanced, dropped.tabs, dropped.groups)
 }
 
 private func materializeSidebarRows(_ sidebar: SidebarView, outline: NSOutlineView) {
@@ -467,6 +593,56 @@ private func sidebarOverflowModel(
         selectedTabId: selectedTabId)
 }
 
+private func sidebarAlertModel(
+    groupId: GroupId,
+    tabId: TabId,
+    paneId: PaneId,
+    unread: Bool,
+    selected selectedTabId: TabId? = nil
+) -> AppModel {
+    sidebarAlertModel(
+        groupId: groupId,
+        tabIds: [tabId],
+        paneIds: [paneId],
+        selected: selectedTabId ?? tabId,
+        unreadPaneIds: unread ? [paneId] : [])
+}
+
+private func sidebarAlertModel(
+    groupId: GroupId,
+    tabIds: [TabId],
+    paneIds: [PaneId],
+    selected selectedTabId: TabId?,
+    unreadPaneIds: [PaneId]
+) -> AppModel {
+    var model = AppModel(
+        groups: [
+            GroupModel(
+                id: groupId,
+                name: "Alerts",
+                tabs: zip(tabIds, paneIds).map { tabId, paneId in
+                    TabModel(
+                        id: tabId,
+                        focusedPaneId: paneId,
+                        rootNode: .leaf(PaneModel(id: paneId)))
+                }),
+        ],
+        selectedTabId: selectedTabId)
+    model.alerts = unreadPaneIds.map(sidebarBellAlert)
+    return model
+}
+
+private func sidebarBellAlert(paneId: PaneId) -> AlertModel {
+    AlertModel(
+        id: AlertId(),
+        kind: .bell,
+        paneId: paneId,
+        title: "Bell",
+        body: "",
+        createdAt: Date(timeIntervalSince1970: 0),
+        isUnread: true)
+}
+
 private func sidebarSelectionTab(_ id: TabId) -> TabModel {
     let paneId = PaneId()
     return TabModel(
@@ -474,6 +650,19 @@ private func sidebarSelectionTab(_ id: TabId) -> TabModel {
         focusedPaneId: paneId,
         rootNode: .leaf(PaneModel(id: paneId))
     )
+}
+
+private func sidebarBadgeCount(
+    for tabId: TabId,
+    in outline: NSOutlineView,
+    file: String = #file,
+    line: Int = #line
+) throws -> Int {
+    let row = try sidebarRow(for: tabId, in: outline, file: file, line: line)
+    guard let cell = outline.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView
+    else { throw UITestFailure(message: "missing cell for tab \(tabId) (\(file):\(line))") }
+    guard let badge = visibleAlertBadge(in: cell) as? NSTextField else { return 0 }
+    return Int(badge.stringValue) ?? -1
 }
 
 private func assertSidebarRowOffScreen(

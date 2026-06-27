@@ -145,6 +145,13 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     private var childItems: [GroupId: [SidebarItem]] { store.childItems }
     private var currentModel: AppModel?
 
+#if DANTERM_UI_TEST
+    /// UI-harness seam that forces the next in-place update for selected rows down
+    /// the visible-but-unmaterialized branch without depending on AppKit timing.
+    var testForceNextNilCellTabIds: Set<TabId> = []
+    var testForceNextNilCellGroupIds: Set<GroupId> = []
+#endif
+
     private var isSingleGroupMode: Bool {
         currentModel?.groups.count == 1
     }
@@ -241,11 +248,18 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// mutate -> resolveReloadSelection -> restore), but the mutation is now the granular
     /// op list rather than a full reloadData -- so the field editor and unchanged rows
     /// survive (an empty op list is a pure selection refresh).
-    func applySidebarOps(_ ops: [SidebarRowOp], model: AppModel, clearActiveRename: Bool) {
+    @discardableResult
+    func applySidebarOps(
+        _ ops: [SidebarRowOp],
+        model: AppModel,
+        clearActiveRename: Bool
+    ) -> (tabs: Set<TabId>, groups: Set<GroupId>) {
         isReloading = true
         defer { isReloading = false }
         let priorFocusedTabId = currentModel?.selectedTabId
         currentModel = model
+        var unappliedTabIds = Set<TabId>()
+        var unappliedGroupIds = Set<GroupId>()
 
         // End an orphaned inline edit before its row is removed/moved (the guard already
         // cleared the sidecar). Clearing the per-field associated object first makes the
@@ -255,7 +269,13 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         // Snapshot the user's multi-selection by tab id BEFORE the rows move.
         let priorSelectedTabIds = Set(selectedTabIds())
 
-        for op in ops { applyRowOp(op, model: model) }
+        for op in ops {
+            applyRowOp(
+                op,
+                model: model,
+                unappliedTabIds: &unappliedTabIds,
+                unappliedGroupIds: &unappliedGroupIds)
+        }
 
         // Reapply selection (NSOutlineView-owned) through the existing pure rule, then
         // refresh the forced-accent emphasis on the surviving rows.
@@ -263,7 +283,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             priorSelectedTabIds: priorSelectedTabIds,
             liveTabIds: liveTabIds(in: model),
             selectedTabId: model.selectedTabId)
-        applyRestoreSelection(restoreSet, selectedTabId: model.selectedTabId)
+        applyRestoreSelection(
+            restoreSet,
+            selectedTabId: model.selectedTabId,
+            unappliedTabIds: &unappliedTabIds,
+            unappliedGroupIds: &unappliedGroupIds)
         // Empty-op cosmetic sweeps can leave already-visible row emphasis alone.
         // New/reused rows get their flag when NSOutlineView asks for a row view.
         if !ops.isEmpty || priorFocusedTabId != model.selectedTabId {
@@ -278,6 +302,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             let row = outlineView.row(forItem: item)
             if row >= 0 { outlineView.scrollRowToVisible(row) }
         }
+        return (unappliedTabIds, unappliedGroupIds)
     }
 
     /// Apply one ordered op, keeping the dataSource backing store (rootItems / childItems
@@ -286,7 +311,12 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
     /// animated row methods). Indices are relative to the running state (the op list is a
     /// sequential script). In single-group mode tabs are root rows (parent nil); in
     /// multi-group mode they are children of their group item.
-    private func applyRowOp(_ op: SidebarRowOp, model: AppModel) {
+    private func applyRowOp(
+        _ op: SidebarRowOp,
+        model: AppModel,
+        unappliedTabIds: inout Set<TabId>,
+        unappliedGroupIds: inout Set<GroupId>
+    ) {
         switch op {
         case .reloadAll:
             rebuildAllRows(model: model)
@@ -307,7 +337,9 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
         case .reloadGroup(let id):
             _ = store.apply(op, model: model, isSingleGroupMode: isSingleGroupMode)
-            updateGroupRow(groupId: id, model: model)
+            if updateGroupRow(groupId: id, model: model) {
+                unappliedGroupIds.insert(id)
+            }
 
         case .setGroupCollapsed(let id, let collapsed):
             _ = store.apply(op, model: model, isSingleGroupMode: isSingleGroupMode)
@@ -335,7 +367,9 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
         case .reloadTab(let id):
             _ = store.apply(op, model: model, isSingleGroupMode: isSingleGroupMode)
-            updateTabRow(tabId: id, model: model)
+            if updateTabRow(tabId: id, model: model) {
+                unappliedTabIds.insert(id)
+            }
         }
     }
 
@@ -389,7 +423,12 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
 
     /// Restore AppKit selection so multi-selection stays live while the focused
     /// row remains the last selected row for shift-click and keyboard range use.
-    private func applyRestoreSelection(_ restoreSet: Set<TabId>, selectedTabId: TabId?) {
+    private func applyRestoreSelection(
+        _ restoreSet: Set<TabId>,
+        selectedTabId: TabId?,
+        unappliedTabIds: inout Set<TabId>,
+        unappliedGroupIds: inout Set<GroupId>
+    ) {
         var nonFocusRows = IndexSet()
         var focusRow: Int? = nil
         for id in restoreSet {
@@ -427,8 +466,14 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 runtime?.viewLocalState.sidebarRenameTarget = nil
                 endActiveInlineRename()
                 switch target {
-                case .tab(let id): updateTabRow(tabId: id, model: model)
-                case .group(let id): updateGroupRow(groupId: id, model: model)
+                case .tab(let id):
+                    if updateTabRow(tabId: id, model: model) {
+                        unappliedTabIds.insert(id)
+                    }
+                case .group(let id):
+                    if updateGroupRow(groupId: id, model: model) {
+                        unappliedGroupIds.insert(id)
+                    }
                 }
             }
         }
@@ -470,34 +515,47 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         }
     }
 
-    /// Mutate an existing tab cell's subviews in place (title, subtitle, badge,
-    /// color stripe) without destroying the cell view. This avoids the view churn
-    /// of reloadData(forRowIndexes:) and preserves the field editor during inline
-    /// rename — skipTitle prevents clobbering the text being edited while still
-    /// updating badge/subtitle/color. Offscreen or uncached rows are silently
-    /// skipped; they'll render from current state when scrolled into view.
-    func updateTabRow(tabId: TabId, model: AppModel) {
+    /// Mutate an existing tab cell's subviews in place. Returns true only when an
+    /// on-screen row could not fetch its cell, so the caller should retain the old
+    /// projection and retry the reload in a later reconcile pass.
+    func updateTabRow(tabId: TabId, model: AppModel) -> Bool {
         currentModel = model
-        guard let item = store.updateTabItem(tabId: tabId, model: model) else { return }
+        guard let item = store.updateTabItem(tabId: tabId, model: model) else { return false }
         let row = outlineView.row(forItem: item)
-        guard row >= 0,
-              let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView,
-              case .tab(let tab) = item.kind else { return }
+        guard row >= 0 else { return false }
+        let isVisible = outlineView.visibleRect.intersects(outlineView.rect(ofRow: row))
+#if DANTERM_UI_TEST
+        if testForceNextNilCellTabIds.remove(tabId) != nil {
+            return isVisible
+        }
+#endif
+        guard let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView
+        else { return isVisible }
+        guard case .tab(let tab) = item.kind else { return false }
         let isEditing = cell.textField?.currentEditor() != nil
         configureTabCell(cell, tab: tab, skipTitle: isEditing)
+        return false
     }
 
-    /// In-place group row update — same rationale as updateTabRow. Updates the
-    /// group name, collapse caret, and bell badge without recreating the cell.
-    func updateGroupRow(groupId: GroupId, model: AppModel) {
+    /// In-place group row update. Returns true only when an on-screen row could
+    /// not fetch its cell, so the caller should retain and retry the reload attrs.
+    func updateGroupRow(groupId: GroupId, model: AppModel) -> Bool {
         currentModel = model
-        guard let item = store.updateGroupItem(groupId: groupId, model: model) else { return }
+        guard let item = store.updateGroupItem(groupId: groupId, model: model) else { return false }
         let row = outlineView.row(forItem: item)
-        guard row >= 0,
-              let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView,
-              case .group(let group) = item.kind else { return }
+        guard row >= 0 else { return false }
+        let isVisible = outlineView.visibleRect.intersects(outlineView.rect(ofRow: row))
+#if DANTERM_UI_TEST
+        if testForceNextNilCellGroupIds.remove(groupId) != nil {
+            return isVisible
+        }
+#endif
+        guard let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView
+        else { return isVisible }
+        guard case .group(let group) = item.kind else { return false }
         let isEditing = cell.textField?.currentEditor() != nil
         configureGroupCell(cell, group: group, skipTitle: isEditing)
+        return false
     }
 
     // MARK: - Inline Rename

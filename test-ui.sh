@@ -15,7 +15,7 @@ xcrun swiftc \
 echo "Compiling UI tests..."
 (
     cd "$PROTO_BUILD"
-    xcrun swiftc -o /tmp/danterm-ui-tests \
+    xcrun swiftc -D DANTERM_UI_TEST -o /tmp/danterm-ui-tests \
         -parse-as-library \
         -I "$PROTO_BUILD" \
         -L "$PROTO_BUILD" \
