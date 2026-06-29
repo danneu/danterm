@@ -404,18 +404,20 @@ class TerminalView: NSView, NSTextInputClient {
             return
         }
 
-        let translationModsGhostty = Self.eventModifierFlags(
-            ghostty_surface_key_translation_mods(surface, Self.ghosttyMods(event.modifierFlags))
-        )
-
-        // Preserve hidden event bits that AppKit uses for some dead keys while applying
-        // only Ghostty's translated modifier state to the IME event.
         var translationMods = event.modifierFlags
-        for flag in [NSEvent.ModifierFlags.shift, .control, .option, .command] {
-            if translationModsGhostty.contains(flag) {
-                translationMods.insert(flag)
-            } else {
-                translationMods.remove(flag)
+        if Self.hasExplicitMacOSOptionAsAlt(ghosttyApp.config) {
+            let translationModsGhostty = Self.eventModifierFlags(
+                ghostty_surface_key_translation_mods(surface, Self.ghosttyMods(event.modifierFlags))
+            )
+
+            // Preserve hidden event bits that AppKit uses for some dead keys while applying
+            // only Ghostty's translated modifier state to the IME event.
+            for flag in [NSEvent.ModifierFlags.shift, .control, .option, .command] {
+                if translationModsGhostty.contains(flag) {
+                    translationMods.insert(flag)
+                } else {
+                    translationMods.remove(flag)
+                }
             }
         }
 
@@ -704,6 +706,13 @@ class TerminalView: NSView, NSTextInputClient {
         if mods.rawValue & GHOSTTY_MODS_ALT.rawValue != 0 { flags.insert(.option) }
         if mods.rawValue & GHOSTTY_MODS_SUPER.rawValue != 0 { flags.insert(.command) }
         return flags
+    }
+
+    static func hasExplicitMacOSOptionAsAlt(_ config: ghostty_config_t?) -> Bool {
+        guard let config else { return false }
+        var value: UnsafePointer<Int8>?
+        let key = "macos-option-as-alt"
+        return ghostty_config_get(config, &value, key, UInt(key.utf8.count))
     }
 }
 
