@@ -399,9 +399,42 @@ class TerminalView: NSView, NSTextInputClient {
     // MARK: - Keyboard Events
 
     override func keyDown(with event: NSEvent) {
-        guard surface != nil else {
+        guard let surface = surface else {
             interpretKeyEvents([event])
             return
+        }
+
+        let translationModsGhostty = Self.eventModifierFlags(
+            ghostty_surface_key_translation_mods(surface, Self.ghosttyMods(event.modifierFlags))
+        )
+
+        // Preserve hidden event bits that AppKit uses for some dead keys while applying
+        // only Ghostty's translated modifier state to the IME event.
+        var translationMods = event.modifierFlags
+        for flag in [NSEvent.ModifierFlags.shift, .control, .option, .command] {
+            if translationModsGhostty.contains(flag) {
+                translationMods.insert(flag)
+            } else {
+                translationMods.remove(flag)
+            }
+        }
+
+        let translationEvent: NSEvent
+        if translationMods == event.modifierFlags {
+            translationEvent = event
+        } else {
+            translationEvent = NSEvent.keyEvent(
+                with: event.type,
+                location: event.locationInWindow,
+                modifierFlags: translationMods,
+                timestamp: event.timestamp,
+                windowNumber: event.windowNumber,
+                context: nil,
+                characters: event.characters(byApplyingModifiers: translationMods) ?? "",
+                charactersIgnoringModifiers: event.charactersIgnoringModifiers ?? "",
+                isARepeat: event.isARepeat,
+                keyCode: event.keyCode
+            ) ?? event
         }
 
         let action: ghostty_input_action_e = event.isARepeat ? GHOSTTY_ACTION_REPEAT : GHOSTTY_ACTION_PRESS
@@ -410,33 +443,41 @@ class TerminalView: NSView, NSTextInputClient {
         keyTextAccumulator = []
         defer { keyTextAccumulator = nil }
 
-        interpretKeyEvents([event])
+        let markedTextBefore = markedText.length > 0
+
+        interpretKeyEvents([translationEvent])
 
         if let texts = keyTextAccumulator, !texts.isEmpty {
             // We got text from the input system — send key events with text
             for text in texts {
-                sendKeyEvent(action, event: event, text: text)
+                sendKeyEvent(action, event: event, translationEvent: translationEvent, text: text)
             }
         } else {
             // No text — send key event without text.
             // Filter out PUA function key characters (arrow keys, etc.) — libghostty
             // handles these via keycode, not text.
             let text: String? = {
-                guard let chars = event.characters,
+                guard let chars = translationEvent.characters,
                       chars.count == 1,
                       let scalar = chars.unicodeScalars.first
-                else { return event.characters }
+                else { return translationEvent.characters }
                 // PUA range = function keys (arrows, F1-F12, etc.) — let libghostty
                 // handle via keycode
                 if scalar.value >= 0xF700 && scalar.value <= 0xF8FF { return nil }
                 // Control characters — let libghostty handle ctrl encoding
                 if scalar.value < 0x20 {
-                    return event.characters(byApplyingModifiers:
-                        event.modifierFlags.subtracting(.control))
+                    return translationEvent.characters(byApplyingModifiers:
+                        translationEvent.modifierFlags.subtracting(.control))
                 }
                 return chars
             }()
-            sendKeyEvent(action, event: event, text: text)
+            sendKeyEvent(
+                action,
+                event: event,
+                translationEvent: translationEvent,
+                text: text,
+                composing: markedText.length > 0 || markedTextBefore
+            )
         }
     }
 
@@ -465,6 +506,7 @@ class TerminalView: NSView, NSTextInputClient {
     private func sendKeyEvent(
         _ action: ghostty_input_action_e,
         event: NSEvent,
+        translationEvent: NSEvent? = nil,
         text: String?,
         composing: Bool = false
     ) {
@@ -474,7 +516,7 @@ class TerminalView: NSView, NSTextInputClient {
         keyEvent.action = action
         keyEvent.mods = Self.ghosttyMods(event.modifierFlags)
         keyEvent.consumed_mods = Self.ghosttyMods(
-            event.modifierFlags.subtracting([.control, .command])
+            (translationEvent ?? event).modifierFlags.subtracting([.control, .command])
         )
         keyEvent.keycode = UInt32(event.keyCode)
         keyEvent.composing = composing
@@ -653,6 +695,15 @@ class TerminalView: NSView, NSTextInputClient {
         if raw & UInt(NX_DEVICERCMDKEYMASK) != 0 { mods |= GHOSTTY_MODS_SUPER_RIGHT.rawValue }
 
         return ghostty_input_mods_e(mods)
+    }
+
+    static func eventModifierFlags(_ mods: ghostty_input_mods_e) -> NSEvent.ModifierFlags {
+        var flags: NSEvent.ModifierFlags = []
+        if mods.rawValue & GHOSTTY_MODS_SHIFT.rawValue != 0 { flags.insert(.shift) }
+        if mods.rawValue & GHOSTTY_MODS_CTRL.rawValue != 0 { flags.insert(.control) }
+        if mods.rawValue & GHOSTTY_MODS_ALT.rawValue != 0 { flags.insert(.option) }
+        if mods.rawValue & GHOSTTY_MODS_SUPER.rawValue != 0 { flags.insert(.command) }
+        return flags
     }
 }
 
