@@ -27,7 +27,7 @@ enum DoctorStatus: Equatable {
 }
 
 /// One rendered-health row before text formatting. OK rows intentionally carry
-/// no message so the default report can collapse them to the footer count.
+/// no message, so they print as a bare `OK <title>` line with nothing to report.
 struct DoctorCheck: Equatable {
     let id: DoctorCheckID
     let title: String
@@ -78,13 +78,10 @@ func evaluateDoctor(_ facts: DoctorFacts) -> [DoctorCheck] {
     ]
 }
 
-/// Renders doctor checks in the CLI's plain text format, with OK rows hidden
-/// unless verbose output is requested.
-func renderDoctorReport(_ checks: [DoctorCheck], showOK: Bool) -> String {
-    let body = checks.compactMap { check -> String? in
-        if check.status == .ok, !showOK {
-            return nil
-        }
+/// Renders doctor checks in the CLI's plain text format: one line per check
+/// (OK rows included), followed by the summary footer.
+func renderDoctorReport(_ checks: [DoctorCheck]) -> String {
+    let body = checks.map { check -> String in
         let prefix = statusPrefix(check.status)
         guard let message = check.message, !message.isEmpty else {
             return "\(prefix) \(check.title)"
@@ -302,7 +299,7 @@ private func statusPrefix(_ status: DoctorStatus) -> String {
     }
 }
 
-/// Counts every status class into the report footer, including hidden OK rows.
+/// Counts every status class into the report footer, including OK rows.
 private func renderFooter(_ checks: [DoctorCheck]) -> String {
     let errors = checks.count { $0.status == .error }
     let warnings = checks.count { $0.status == .warn }

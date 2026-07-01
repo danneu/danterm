@@ -238,8 +238,8 @@ import DanTermProtocol
         ]) == 0)
     }
 
-    @Test("renderer hides OK unless showOK and counts footer statuses")
-    func rendererHidesOKUnlessShowOKAndCountsFooterStatuses() {
+    @Test("renderer prints all rows including OK and counts footer statuses")
+    func rendererPrintsAllRowsIncludingOKAndCountsFooterStatuses() {
         let checks = [
             DoctorCheck(id: .claudeHooks, title: "Claude hooks valid", status: .ok, message: nil),
             DoctorCheck(id: .codexHooks, title: "Codex hooks valid", status: .warn, message: "Codex warn"),
@@ -248,16 +248,13 @@ import DanTermProtocol
             DoctorCheck(id: .translocation, title: "App not translocated", status: .info, message: "Info"),
         ]
 
-        let normal = renderDoctorReport(checks, showOK: false)
-        #expect(normal.contains("OK Claude hooks valid") == false)
-        #expect(normal.contains("WARN Codex hooks valid: Codex warn"))
-        #expect(normal.contains("SKIP jq on PATH: No hooks"))
-        #expect(normal.contains("ERROR Manual app CLI link healthy: Link error"))
-        #expect(normal.contains("INFO App not translocated: Info"))
-        #expect(normal.hasSuffix("1 error, 1 warning, 1 info, 1 ok, 1 skipped\n"))
-
-        let verbose = renderDoctorReport(checks, showOK: true)
-        #expect(verbose.contains("OK Claude hooks valid"))
+        let report = renderDoctorReport(checks)
+        #expect(report.contains("OK Claude hooks valid"))
+        #expect(report.contains("WARN Codex hooks valid: Codex warn"))
+        #expect(report.contains("SKIP jq on PATH: No hooks"))
+        #expect(report.contains("ERROR Manual app CLI link healthy: Link error"))
+        #expect(report.contains("INFO App not translocated: Info"))
+        #expect(report.hasSuffix("1 error, 1 warning, 1 info, 1 ok, 1 skipped\n"))
     }
 }
 

@@ -48,7 +48,8 @@ grep -qF 'pane split [--pane <pane-id>] -h|-v' "$err"
 grep -qF 'pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]' "$err"
 grep -qF 'agent attach --kind <kind> --id <session-id>' "$err"
 grep -qF 'todo clear-completed [--pane <pane-id>]' "$err"
-grep -qF 'doctor [--all|-v]' "$err"
+grep -qE '^ *doctor +Check DanTerm integration health' "$err"
+! grep -qF 'doctor [--all|-v]' "$err"
 grep -qF 'tab new opens in the background at the target group end' "$err"
 grep -qF 'DANTERM_SOCK' "$err"
 grep -qF 'DANTERM_PANE' "$err"
@@ -70,7 +71,8 @@ for help_arg in help --help -h; do
     grep -qF 'pane split [--pane <pane-id>] -h|-v [--cmd <s>] [--cwd <p>] [--title <s>] [--background] [--foreground]' "$out"
     grep -qF 'agent attach --kind <kind> --id <session-id>' "$out"
     grep -qF 'todo clear-completed [--pane <pane-id>]' "$out"
-    grep -qF 'doctor [--all|-v]' "$out"
+    grep -qE '^ *doctor +Check DanTerm integration health' "$out"
+    ! grep -qF 'doctor [--all|-v]' "$out"
     grep -qF 'tab new opens in the background at the target group end' "$out"
     grep -qF 'DANTERM_SOCK' "$out"
     grep -qF 'DANTERM_PANE' "$out"
@@ -93,12 +95,17 @@ run_doctor_with_temp_home doctor
 [[ $status -eq 0 ]]
 [[ -s "$out" ]]
 [[ ! -s "$err" ]]
+grep -qF 'OK ' "$out"
 ! grep -qF 'DanTerm is not running' "$out" "$err"
 run_doctor_with_temp_home doctor --all
-[[ $status -eq 0 ]]
-[[ -s "$out" ]]
-[[ ! -s "$err" ]]
-grep -qF 'OK ' "$out"
+[[ $status -ne 0 ]]
+[[ ! -s "$out" ]]
+grep -qx 'danterm: unknown flag: --all' "$err"
+! grep -qF 'DanTerm is not running' "$out" "$err"
+run_doctor_with_temp_home doctor -v
+[[ $status -ne 0 ]]
+[[ ! -s "$out" ]]
+grep -qx 'danterm: unknown flag: -v' "$err"
 ! grep -qF 'DanTerm is not running' "$out" "$err"
 run_doctor_with_temp_home doctor --bogus
 [[ $status -ne 0 ]]

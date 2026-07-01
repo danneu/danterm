@@ -27,7 +27,7 @@ Keep this section synced with `danterm help` and the parser in
     danterm pane read --pane <pane-id> [--lines <n>]
     danterm theme set [--pane <pane-id>] <name>|--clear
     danterm agent attach --kind <kind> --id <session-id>
-    danterm doctor [--all|-v]
+    danterm doctor
     danterm todo list [--pane <pane-id>]
     danterm todo add [--pane <pane-id>] <text>
     danterm todo edit [--pane <pane-id>] <todo-id> <text>
@@ -261,11 +261,9 @@ the user asks whether DanTerm's shell command, agent hooks, agent skill, or `jq`
 setup is healthy:
 
     danterm doctor
-    danterm doctor --all
 
-The default output reports only INFO/SKIP/WARN/ERROR rows plus a summary footer.
-`--all` (or `-v`) also prints OK rows. Exit status is 1 only when a check is an
-ERROR; WARN/INFO/SKIP still exit 0.
+The output reports all rows (INFO/SKIP/WARN/ERROR/OK) plus a summary footer.
+Exit status is 1 only when a check is an ERROR; WARN/INFO/SKIP still exit 0.
 
 ### Todos
 
