@@ -319,6 +319,18 @@ class GhosttyApp {
             withSurfaceView(target) { $0.updateMouseCursor(shape) }
             return true
 
+        case GHOSTTY_ACTION_MOUSE_OVER_LINK:
+            // Empty URL = pointer left the link or Cmd was released. libghostty
+            // already gates this action on Cmd-hover and the link-previews config.
+            let v = action.action.mouse_over_link
+            var url: String?
+            if v.len > 0, let ptr = v.url {
+                url = String(data: Data(bytes: ptr, count: Int(v.len)), encoding: .utf8)
+            }
+            let hoverUrl = url
+            withSurfaceView(target) { $0.setHoverUrl(hoverUrl) }
+            return true
+
         case GHOSTTY_ACTION_QUIT:
             DispatchQueue.main.async { [weak self] in
                 self?.runtime?.send(.requestQuit)

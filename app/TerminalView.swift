@@ -24,6 +24,7 @@ class TerminalView: NSView, NSTextInputClient {
     weak var runtime: AppRuntime?
     private var markedText = NSMutableAttributedString()
     private var keyTextAccumulator: [String]?
+    private var linkPreview: LinkPreviewView?
 
     // Scrollbar support: updated synchronously from ghostty action callbacks.
     weak var scrollDelegate: ScrollableTerminalView?
@@ -232,6 +233,7 @@ class TerminalView: NSView, NSTextInputClient {
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         syncSurfaceGeometry(logicalSize: newSize)
+        linkPreview?.layoutPill(in: bounds)
     }
 
     override func updateTrackingAreas() {
@@ -365,11 +367,29 @@ class TerminalView: NSView, NSTextInputClient {
         sendBindingAction(surface, "paste_from_clipboard")
     }
 
+    // NSView: re-establish mouse position after a prior mouseExited sent -1/-1.
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        guard let surface = surface else { return }
+        let pos = convert(event.locationInWindow, from: nil)
+        let mods = Self.ghosttyMods(event.modifierFlags)
+        ghostty_surface_mouse_pos(surface, pos.x, frame.height - pos.y, mods)
+    }
+
+    // NSView: tell libghostty the pointer left the viewport so it clears hover state.
+    override func mouseExited(with event: NSEvent) {
+        guard let surface = surface else { return }
+        guard NSEvent.pressedMouseButtons == 0 else { return }
+        let mods = Self.ghosttyMods(event.modifierFlags)
+        ghostty_surface_mouse_pos(surface, -1, -1, mods)
+    }
+
     override func mouseMoved(with event: NSEvent) {
         guard let surface = surface else { return }
         let pos = convert(event.locationInWindow, from: nil)
         let mods = Self.ghosttyMods(event.modifierFlags)
         ghostty_surface_mouse_pos(surface, pos.x, frame.height - pos.y, mods)
+        linkPreview?.pointerMoved(to: pos, in: bounds)
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -565,6 +585,32 @@ class TerminalView: NSView, NSTextInputClient {
         default:
             NSCursor.arrow.set()
         }
+    }
+
+    /// Show or hide libghostty's Cmd-hover link URL preview for this surface.
+    func setHoverUrl(_ url: String?) {
+        guard let url, !url.isEmpty else {
+            linkPreview?.hide()
+            return
+        }
+
+        let preview = ensureLinkPreview()
+        preview.show(url: url)
+        preview.layoutPill(in: bounds)
+
+        if let window {
+            let point = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+            preview.pointerMoved(to: point, in: bounds)
+        }
+    }
+
+    private func ensureLinkPreview() -> LinkPreviewView {
+        if let linkPreview { return linkPreview }
+
+        let preview = LinkPreviewView()
+        addSubview(preview)
+        linkPreview = preview
+        return preview
     }
 
     // MARK: - NSTextInputClient

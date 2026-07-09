@@ -51,6 +51,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/tests-ui/SidebarViewTestShim.swift" \
         "$SCRIPT_DIR/app/TodoToolbarButton.swift" \
         "$SCRIPT_DIR/app/SearchOverlayView.swift" \
+        "$SCRIPT_DIR/app/LinkPreviewView.swift" \
         "$SCRIPT_DIR/app/PaneWrapperView.swift" \
         "$SCRIPT_DIR/app/SplitContainerView.swift" \
         "$SCRIPT_DIR/app/SidebarView.swift" \
@@ -66,6 +67,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/tests-ui/SidebarRenameRecycleTests.swift" \
         "$SCRIPT_DIR/tests-ui/SidebarContextMenuTests.swift" \
         "$SCRIPT_DIR/tests-ui/SplitContainerViewTests.swift" \
+        "$SCRIPT_DIR/tests-ui/LinkPreviewViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/PaneWrapperViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/TabTodoPopoverViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/TodoPopoverViewTests.swift" \
