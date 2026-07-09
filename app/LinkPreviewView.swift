@@ -94,11 +94,10 @@ class LinkPreviewView: NSView {
     }
 
     private func pillFittingSize() -> NSSize {
-        let font = label.font ?? NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
-        let labelSize = NSAttributedString(string: label.stringValue, attributes: [.font: font]).size()
+        let cellSize = label.cell?.cellSize ?? .zero
         return NSSize(
-            width: ceil(labelSize.width) + Self.padding * 2,
-            height: ceil(labelSize.height) + Self.padding * 2
+            width: ceil(cellSize.width) + Self.padding * 2,
+            height: ceil(cellSize.height) + Self.padding * 2
         )
     }
 

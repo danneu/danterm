@@ -108,6 +108,26 @@ func linkPreviewViewTests() {
         try uiExpect(view.label.maximumNumberOfLines == 1, "label should be single-line")
     }
 
+    uiTest("pill gives the label its full required width in a wide pane") {
+        // Intent: after show + layoutPill in a pane with room to spare, the
+        //   label's frame is at least the width its own cell needs to draw
+        //   without truncation.
+        // Why it exists: guards the measure/render seam -- pill width must come
+        //   from the same machinery that draws the text (cellSize), not a raw
+        //   NSAttributedString measurement.
+        // Scenario: 2026-07-09 incident -- pill sized labels from
+        //   NSAttributedString.size(), ~4pt short of NSTextFieldCell's needs,
+        //   so https://example.com middle-truncated to https://e...ple.com in
+        //   panes with hundreds of points to spare.
+        let view = LinkPreviewView()
+        view.show(url: "https://example.com")
+        view.layoutPill(in: NSRect(x: 0, y: 0, width: 800, height: 200))
+
+        let needed = view.label.cell?.cellSize.width ?? .infinity
+        try uiExpect(needed <= view.label.frame.width,
+                     "label needs \(needed)pt but got \(view.label.frame.width)pt")
+    }
+
     uiTest("masked corners follow the current side") {
         let view = LinkPreviewView()
         let bounds = NSRect(x: 0, y: 0, width: 420, height: 200)
