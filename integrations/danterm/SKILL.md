@@ -344,6 +344,10 @@ on success.
   placement anchor.
 - When a recipe needs an id, derive it from `pane info` or `ls` using the
   targeting rule above; do not guess UUIDs.
-- Errors print to stderr as `danterm: <message>` and exit non-zero. Surface
-  them rather than retrying blindly.
+- Errors print to stderr as `danterm: <message>` and exit non-zero. `DanTerm is
+  not running` means the app's control socket is unavailable. A `cannot access
+  control socket (sandbox or permissions)` error is an access denial: surface
+  it to the user instead of treating the app as stopped or retrying blindly.
+  Surface other connection errors too; their POSIX reason and socket path are
+  diagnostic context.
 - macOS only. If `danterm` is not on PATH, stop.

@@ -209,11 +209,24 @@ struct DanTermCLI {
                 Darwin.connect(fd, sockaddrPtr, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
         }
-        guard result == 0 else {
+        if result != 0 {
+            let connectErrno = errno
             Darwin.close(fd)
-            throw CLIError("DanTerm is not running")
+            throw connectError(errorNumber: connectErrno, path: path)
         }
         return fd
+    }
+
+    private static func connectError(errorNumber: Int32, path: String) -> CLIError {
+        switch errorNumber {
+        case ENOENT, ECONNREFUSED:
+            return CLIError("DanTerm is not running")
+        case EACCES, EPERM:
+            return CLIError("cannot access control socket (sandbox or permissions): \(path)")
+        default:
+            let reason = String(cString: strerror(errorNumber))
+            return CLIError("cannot connect to control socket (\(reason)): \(path)")
+        }
     }
 
     private static func configureSocketTimeouts(_ fd: Int32) throws {

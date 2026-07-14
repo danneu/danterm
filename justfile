@@ -37,6 +37,7 @@ test:
     ./scripts/tests/build-lib-stale-guard_test.sh
     ./scripts/tests/build-lib-fetch_test.sh
     ./scripts/tests/build-lib-contract_test.sh
+    ./scripts/tests/danterm-cli-connect-errors_test.sh
 
 # Run UI tests (AppKit, requires display)
 test-ui:
