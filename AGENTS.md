@@ -2,6 +2,10 @@
 
 Custom terminal emulator built on libghostty (the Zig library from Ghostty).
 
+This experimental branch is replacing libghostty with a DanTerm-owned Swift
+terminal engine. Read [plan-terminal-engine/README.md](plan-terminal-engine/README.md)
+before planning or implementing that work.
+
 ## App design goals
 
 - Split pane system
