@@ -10,6 +10,111 @@ import Cocoa
 func sidebarRenameRecycleTests() {
     print("SidebarRenameRecycle")
 
+    uiTest("tab and group rename fields retain their title lanes") {
+        // Intent: editable tab and group title fields keep useful horizontal space,
+        //   including when the tab shares its leading lane with a jump badge.
+        // Why it exists: NSTextField loses intrinsic horizontal width while editable;
+        //   a title lane constrained only by an upper bound can collapse to about 2pt.
+        // Scenario: the 2026-07-17 incident showed a correct title string in a nearly
+        //   zero-width field after inline rename state became stranded.
+        let (sidebar, outline, window, _) = makeRenameRecycleHarness()
+        defer { window.close() }
+
+        let groupA = GroupId(); let groupB = GroupId()
+        let tab = TabId(); let anchor = TabId()
+        var model = renameRecycleModel([
+            (groupA, "A useful group title", false, [(tab, "a useful tab title")]),
+            (groupB, "Anchor", false, [(anchor, "anchor")]),
+        ], selected: tab)
+        model.jumpMode = JumpModeState(keyMap: [tab: "a"])
+        _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
+
+        sidebar.beginRenamingTab(tab)
+        let tabCell = try renameRecycleCell(for: .tab(tab), in: outline)
+        tabCell.textField?.frame.size.width = 0
+        tabCell.textField?.invalidateIntrinsicContentSize()
+        window.contentView?.layoutSubtreeIfNeeded()
+        try uiExpect((tabCell.textField?.frame.width ?? 0) > 80,
+            "editable tab title should retain useful width beside its jump badge")
+
+        window.makeFirstResponder(nil)
+        sidebar.beginRenamingGroup(groupA)
+        let groupCell = try renameRecycleCell(for: .group(groupA), in: outline)
+        groupCell.textField?.frame.size.width = 0
+        groupCell.textField?.invalidateIntrinsicContentSize()
+        window.contentView?.layoutSubtreeIfNeeded()
+        try uiExpect((groupCell.textField?.frame.width ?? 0) > 80,
+            "editable group title should retain useful width beside its accessories")
+    }
+
+    uiTest("pointer click-away commits a live rename exactly once") {
+        // Intent: an outline pointer interaction commits the current draft before
+        //   AppKit can discard the editor, without producing duplicate rename sends.
+        // Why it exists: direct-click ordering can remove the field editor before
+        //   selection reconciliation, bypassing the normal delegate completion path.
+        // Scenario: the user edits a tab title and clicks another sidebar row.
+        let (sidebar, outline, window, runtime) = makeRenameRecycleHarness()
+        defer { window.close() }
+
+        let group = GroupId(); let tab = TabId(); let other = TabId()
+        let model = renameRecycleModel(
+            [(group, "G", false, [(tab, "alpha"), (other, "beta")])],
+            selected: tab)
+        _ = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
+        sidebar.beginRenamingTab(tab)
+        let cell = try renameRecycleCell(for: .tab(tab), in: outline)
+        cell.textField?.stringValue = "renamed"
+
+        sidebar.finishActiveRenameForPointerInteraction()
+
+        let renameMessages = runtime.sentMessages.filter {
+            if case .renameTab(let id, let name) = $0 {
+                return id == tab && name == "renamed"
+            }
+            return false
+        }
+        try uiExpect(renameMessages.count == 1,
+            "pointer click-away should dispatch exactly one rename message")
+        try uiExpect(runtime.viewLocalState.sidebarRenameTarget == nil,
+            "pointer click-away should synchronously clear rename ownership")
+        try uiExpect(cell.textField?.isEditable == false,
+            "pointer click-away should return the title field to display state")
+    }
+
+    uiTest("reconcile cancels a rename whose field editor AppKit discarded") {
+        // Intent: the rename sidecar and editable field are normalized when AppKit has
+        //   removed the field editor, even if sidebar selection already matches.
+        // Why it exists: selection's no-op fast path previously trusted the sidecar and
+        //   skipped cleanup, leaving stale editable state able to collapse the title.
+        // Scenario: a direct row click changes selection, AppKit discards the editor,
+        //   and the following reconcile observes the already-matching selection.
+        let (sidebar, outline, window, runtime) = makeRenameRecycleHarness()
+        defer { window.close() }
+
+        let group = GroupId(); let tab = TabId(); let other = TabId()
+        let model = renameRecycleModel(
+            [(group, "G", false, [(tab, "alpha"), (other, "beta")])],
+            selected: tab)
+        let projection = applyRenameRecycleModel(model, to: sidebar, outline: outline, old: nil)
+        sidebar.beginRenamingTab(tab)
+        let cell = try renameRecycleCell(for: .tab(tab), in: outline)
+        cell.textField?.stringValue = "stale draft"
+        cell.textField?.abortEditing()
+        try uiExpect(cell.textField?.currentEditor() == nil,
+            "precondition: AppKit should have discarded the field editor")
+
+        _ = applyRenameRecycleTransition(
+            old: projection, newModel: model,
+            to: sidebar, outline: outline, runtime: runtime)
+
+        try uiExpect(runtime.viewLocalState.sidebarRenameTarget == nil,
+            "abandoned editor should clear the authoritative rename target")
+        try uiExpect(cell.textField?.isEditable == false,
+            "abandoned editor should return the title field to display state")
+        try uiExpect(cell.textField?.stringValue == "alpha",
+            "abandoned editor should restore the model title instead of stale draft text")
+    }
+
     uiTest("collapsing the edited row's group ends the inline rename") {
         // Intent: after a setGroupCollapsed op removes the row being renamed, the
         //   edit is over: re-expanding the group must show a non-editable title
@@ -382,6 +487,30 @@ private func renameRecycleRow(
         return row
     }
     throw UITestFailure(message: "missing row for tab \(tabId) (\(file):\(line))")
+}
+
+private func renameRecycleCell(
+    for target: RenameTarget,
+    in outline: NSOutlineView,
+    file: String = #file,
+    line: Int = #line
+) throws -> NSTableCellView {
+    for row in 0..<outline.numberOfRows {
+        guard let item = outline.item(atRow: row) as? SidebarItem else { continue }
+        let matches: Bool = {
+            switch (target, item.kind) {
+            case (.tab(let expected), .tab(let tab)): return expected == tab.id
+            case (.group(let expected), .group(let group)): return expected == group.id
+            default: return false
+            }
+        }()
+        guard matches,
+              let cell = outline.view(
+                atColumn: 0, row: row, makeIfNecessary: true) as? NSTableCellView
+        else { continue }
+        return cell
+    }
+    throw UITestFailure(message: "missing cell for \(target) (\(file):\(line))")
 }
 
 private func findRenameRecycleOutlineView(in view: NSView) -> NSOutlineView? {

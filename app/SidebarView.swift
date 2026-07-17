@@ -102,6 +102,7 @@ class SidebarOutlineView: NSOutlineView {
     // NSResponder: routes alert-badge clicks to .clearAlertsForTabs, and pre-empts
     // AppKit's deferred selection narrowing so multi-selection clicks feel snappy.
     override func mouseDown(with event: NSEvent) {
+        sidebarView?.finishActiveRenameForPointerInteraction()
         let point = convert(event.locationInWindow, from: nil)
         if let tab = tabForBadgeHit(at: point) {
             sidebarView?.runtime?.send(.clearAlertsForTabs(tabIds: [tab.id]))
@@ -264,7 +265,11 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         // End an orphaned inline edit before its row is removed/moved (the guard already
         // cleared the sidecar). Clearing the per-field associated object first makes the
         // resign-triggered textShouldEndEditing a no-op (no stray rename Msg).
-        if clearActiveRename { endActiveInlineRename() }
+        if clearActiveRename {
+            cancelActiveInlineRename()
+        } else {
+            cancelAbandonedInlineRenameIfNeeded()
+        }
 
         // Snapshot the user's multi-selection by tab id BEFORE the rows move.
         let priorSelectedTabIds = Set(selectedTabIds())
@@ -405,20 +410,75 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         objc_setAssociatedObject(textField, &AssociatedKeys.renameTarget, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
     }
 
-    /// Forcibly end any in-progress inline rename without dispatching a rename Msg, so a
-    /// removed/moved edited row never strands its field editor. The guard already cleared
-    /// the sidecar; clearing the per-field associated object here makes the
-    /// resign-triggered textShouldEndEditing a no-op.
-    func endActiveInlineRename() {
+    /// Commit a live rename before an outline interaction lets AppKit change selection.
+    /// The delegate's click-away path deliberately leaves the clicked destination focused.
+    func finishActiveRenameForPointerInteraction() {
+        guard let target = runtime?.viewLocalState.sidebarRenameTarget,
+              let textField = textField(for: target)
+        else { return }
+        guard textField.currentEditor() != nil else {
+            cancelAbandonedInlineRenameIfNeeded()
+            return
+        }
+        let newName = textField.stringValue.trimmingCharacters(in: .whitespaces)
+        objc_setAssociatedObject(
+            textField, &AssociatedKeys.renameTarget, nil,
+            .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        textField.abortEditing()
+        finishInlineRename(textField: textField, target: target)
+
+        switch target {
+        case .tab(let id):
+            let name: String? = newName.isEmpty ? nil : newName
+            runtime?.send(.renameTab(id: id, name: name))
+        case .group(let id):
+            guard !newName.isEmpty else { return }
+            runtime?.send(.renameGroup(id: id, name: newName))
+        }
+    }
+
+    /// Cancel a structurally orphaned rename without dispatching a rename message.
+    private func cancelActiveInlineRename() {
         for row in 0..<outlineView.numberOfRows {
             guard let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView,
                   let textField = cell.textField,
-                  textField.currentEditor() != nil else { continue }
+                  let target = objc_getAssociatedObject(
+                    textField, &AssociatedKeys.renameTarget) as? RenameTarget
+            else { continue }
             objc_setAssociatedObject(textField, &AssociatedKeys.renameTarget, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-            textField.isEditable = false
-            window?.makeFirstResponder(nil)
+            if textField.currentEditor() != nil { textField.abortEditing() }
+            finishInlineRename(textField: textField, target: target)
             break
         }
+    }
+
+    /// Reconciliation owns the rename sidecar, so it also repairs AppKit silently
+    /// discarding the matching field editor before delegate cleanup can run.
+    private func cancelAbandonedInlineRenameIfNeeded() {
+        guard let target = runtime?.viewLocalState.sidebarRenameTarget else { return }
+        guard let textField = textField(for: target), textField.currentEditor() != nil else {
+            runtime?.viewLocalState.sidebarRenameTarget = nil
+            if let textField = textField(for: target) {
+                finishInlineRename(textField: textField, target: target)
+            }
+            return
+        }
+    }
+
+    private func textField(for target: RenameTarget) -> NSTextField? {
+        let item: SidebarItem? = {
+            switch target {
+            case .tab(let id): return tabItemCache[id]
+            case .group(let id): return groupItemCache[id]
+            }
+        }()
+        guard let item else { return nil }
+        let row = outlineView.row(forItem: item)
+        guard row >= 0,
+              let cell = outlineView.view(
+                atColumn: 0, row: row, makeIfNecessary: false) as? NSTableCellView
+        else { return nil }
+        return cell.textField
     }
 
     /// Restore AppKit selection so multi-selection stays live while the focused
@@ -464,7 +524,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 && intended != outlineView.selectedRowIndexes
             if willChangeSelection, let model = currentModel {
                 runtime?.viewLocalState.sidebarRenameTarget = nil
-                endActiveInlineRename()
+                cancelActiveInlineRename()
                 switch target {
                 case .tab(let id):
                     if updateTabRow(tabId: id, model: model) {
@@ -1181,6 +1241,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
         textField.font = .preferredFont(forTextStyle: .headline)
         textField.lineBreakMode = .byTruncatingTail
         textField.isEditable = false
+        textField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         textField.delegate = self
         cell.addSubview(textField)
         cell.textField = textField
@@ -1220,7 +1281,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             separator.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
             textField.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
             textField.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            textField.trailingAnchor.constraint(lessThanOrEqualTo: accessoryStack.leadingAnchor, constant: -4),
+            textField.trailingAnchor.constraint(equalTo: accessoryStack.leadingAnchor, constant: -4),
             accessoryStack.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -2),
             accessoryStack.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             caretButton.widthAnchor.constraint(equalToConstant: 16),
@@ -1291,6 +1352,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             textField.font = .systemFont(ofSize: NSFont.systemFontSize)
             textField.lineBreakMode = .byTruncatingTail
             textField.isEditable = false
+            textField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             textField.delegate = self
             cell.textField = textField
 
@@ -1300,7 +1362,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
             leadingStack.alignment = .centerY
             leadingStack.spacing = 4
             leadingStack.identifier = leadingStackId
-            leadingStack.setHuggingPriority(.required, for: .horizontal)
+            leadingStack.setHuggingPriority(.defaultLow, for: .horizontal)
             cell.addSubview(leadingStack)
 
             let subtitleField = NSTextField(labelWithString: "")
@@ -1330,7 +1392,7 @@ class SidebarView: NSView, NSOutlineViewDataSource, NSOutlineViewDelegate {
                 accessoryStack.topAnchor.constraint(equalTo: cell.topAnchor, constant: 4),
                 leadingStack.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12),
                 leadingStack.topAnchor.constraint(equalTo: cell.topAnchor, constant: 4),
-                leadingStack.trailingAnchor.constraint(lessThanOrEqualTo: accessoryStack.leadingAnchor, constant: -4),
+                leadingStack.trailingAnchor.constraint(equalTo: accessoryStack.leadingAnchor, constant: -4),
                 subtitleField.leadingAnchor.constraint(equalTo: textField.leadingAnchor),
                 subtitleField.trailingAnchor.constraint(lessThanOrEqualTo: accessoryStack.leadingAnchor, constant: -4),
                 subtitleField.topAnchor.constraint(equalTo: textField.bottomAnchor, constant: 1),
