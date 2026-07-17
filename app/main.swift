@@ -1,5 +1,37 @@
+// Application entry point: initializes libghostty, resolves explicit init or
+// recovery state, then hands startup ownership to AppKit.
 import Cocoa
+import DanTermProtocol
 import GhosttyKit
+
+#if DANTERM_TERMINAL_CHARACTERIZATION
+/// Publish the app process's resolved filesystem paths before terminal creation,
+/// allowing the real-backend harness to reject any escape from its isolated run.
+func writeTerminalCharacterizationPathProbe(to path: String) throws {
+    let fileManager = FileManager.default
+    let paths: [String: String] = [
+        "home": NSHomeDirectory(),
+        "applicationSupport": fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].path,
+        "caches": fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0].path,
+        "temporary": danTermTemporaryDirectoryURL(fileManager: fileManager).path,
+        "config": DanTermConfigPaths.configFilePath(),
+        "recovery": recoveryDirectoryURL().path,
+        "socket": controlSocketPath().path,
+        "replay": scrollbackReplayDirectoryURL().path,
+    ]
+    let data = try JSONSerialization.data(withJSONObject: paths, options: [.prettyPrinted, .sortedKeys])
+    try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+}
+
+if let path = ProcessInfo.processInfo.environment["DANTERM_TERMINAL_CHARACTERIZATION_PATH_PROBE"] {
+    do {
+        try writeTerminalCharacterizationPathProbe(to: path)
+    } catch {
+        print("[characterization] Failed to write path probe: \(error)")
+        exit(1)
+    }
+}
+#endif
 
 // Initialize ghostty — must happen before anything else.
 let rc = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv)

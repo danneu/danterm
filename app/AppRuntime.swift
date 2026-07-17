@@ -5,6 +5,24 @@ import GhosttyKit
 import UniformTypeIdentifiers
 @preconcurrency import UserNotifications
 
+/// Resolve DanTerm's process-temporary root, with a characterization-only
+/// override because macOS Foundation ignores a launched app's `TMPDIR` value.
+func danTermTemporaryDirectoryURL(fileManager: FileManager = .default) -> URL {
+    #if DANTERM_TERMINAL_CHARACTERIZATION
+    if let path = ProcessInfo.processInfo.environment["DANTERM_TERMINAL_CHARACTERIZATION_TEMP_ROOT"] {
+        return URL(fileURLWithPath: path, isDirectory: true)
+    }
+    #endif
+    return fileManager.temporaryDirectory
+}
+
+/// Centralize the replay directory used by restore writes, stale cleanup, and
+/// the characterization isolation probe so all three observe the same path.
+func scrollbackReplayDirectoryURL(fileManager: FileManager = .default) -> URL {
+    danTermTemporaryDirectoryURL(fileManager: fileManager)
+        .appendingPathComponent("danterm-scrollback", isDirectory: true)
+}
+
 // App runtime owns the mutable app model, performs the commands emitted by the
 // pure update function, and bridges model changes into AppKit/Ghostty objects.
 @MainActor
@@ -53,7 +71,6 @@ class AppRuntime {
     private var switcherEventMonitor: Any?
     private var dragCoordinator: PaneDragCoordinator?
     private var replayFiles: [PaneId: URL] = [:]
-    private static let replayDirectoryName = "danterm-scrollback"
     // Session persistence uses two tiers of checkpoints:
     //   Light  — pure model serialization (no scrollback), written after a 2s debounce
     //            following any state-mutating Msg. Cheap and frequent.
@@ -748,8 +765,7 @@ class AppRuntime {
     /// Write scrollback text to a temp file for shell replay. Returns the file URL.
     private func writeReplayFile(scrollback: String) -> URL? {
         guard let data = scrollback.data(using: .utf8) else { return nil }
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(Self.replayDirectoryName, isDirectory: true)
+        let dir = scrollbackReplayDirectoryURL()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let fileURL = dir.appendingPathComponent(UUID().uuidString).appendingPathExtension("txt")
         guard (try? data.write(to: fileURL, options: .atomic)) != nil else { return nil }
@@ -779,8 +795,7 @@ class AppRuntime {
 
     /// Delete all files in $TMPDIR/danterm-scrollback/ from prior sessions.
     func cleanupStaleReplayDirectory() {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent(Self.replayDirectoryName, isDirectory: true)
+        let dir = scrollbackReplayDirectoryURL()
         try? FileManager.default.removeItem(at: dir)
     }
 

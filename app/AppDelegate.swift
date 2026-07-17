@@ -167,17 +167,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
             runtime.send(.createTab(inGroupId: nil))
         }
 
+        #if !DANTERM_TERMINAL_CHARACTERIZATION
         // Set up notification center
         let notifCenter = UNUserNotificationCenter.current()
         notifCenter.delegate = self
+        #endif
 
         NSApp.activate(ignoringOtherApps: true)
 
+        #if !DANTERM_TERMINAL_CHARACTERIZATION
         // Request notification authorization after the app is active so the
         // system prompt is not racing the initial launch and window setup.
         DispatchQueue.main.async { [weak self] in
             self?.requestNotificationAuthorizationIfNeeded()
         }
+        #endif
 
     }
 

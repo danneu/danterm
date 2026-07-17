@@ -38,10 +38,15 @@ test:
     ./scripts/tests/build-lib-fetch_test.sh
     ./scripts/tests/build-lib-contract_test.sh
     ./scripts/tests/danterm-cli-connect-errors_test.sh
+    ./scripts/tests/terminal-characterization-harness_test.sh
 
 # Run UI tests (AppKit, requires display)
 test-ui:
     ./test-ui.sh
+
+# Run opt-in real-Ghostty pane-read and recovery characterization (requires GUI + Accessibility)
+test-terminal-characterization:
+    ./scripts/terminal-characterization.sh
 
 # Run CLI smoke test (requires GUI access, jq, and DANTERM_CLI_TEST_ALLOW_APP_CONTROL=1)
 test-cli:
