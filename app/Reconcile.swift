@@ -12,7 +12,6 @@
 //      panel, a direct compare against a single-optional cache field)
 //   4. delete the matching Command case + its perform arm, in the same stage
 import Cocoa
-import GhosttyKit
 
 /// Per-pass diff caches, bundled so teardown resets them all by re-init (a newly
 /// added field resets for free). Each cache holds the last value its pass applied,
@@ -20,10 +19,10 @@ import GhosttyKit
 /// `AppRuntime.tearDownCurrentSession` so a post-restore reconcile is a clean
 /// build, not a stale diff.
 struct ReconcilerCaches {
-    // focusBorders rides the persisted TerminalView in `surfaces`, which survives
+    // focusBorders rides the persisted terminal session in `surfaces`, which survives
     // container rebuilds, so this cache needs no cross-pass invalidation.
     var focusBorders: [PaneId: BorderState] = [:]
-    // paneConfig also rides the persisted TerminalView in `surfaces`, so the
+    // paneConfig also rides the persisted terminal session in `surfaces`, so the
     // cache needs no cross-pass invalidation.
     var paneConfig: [PaneId: PaneConfigKey] = [:]
     // paneToolbar / searchOverlay are the *host-recreated* caches: their host is the
@@ -131,7 +130,7 @@ extension AppRuntime {
         // PaneWrapperViews (toolbar + search overlay are wrapper subviews), so clear those
         // panes' chrome caches BEFORE reconcilePaneChrome (the next pass) runs -- its
         // value-unchanged diff then re-pushes chrome onto the fresh wrapper. focusBorders
-        // is NOT invalidated: its TerminalView host persists in `surfaces`.
+        // is NOT invalidated: its terminal host persists in `surfaces`.
         for paneId in chromeInvalidation(ops: ops, newShapes: new) {
             caches.paneToolbar.removeValue(forKey: paneId)
             caches.searchOverlay.removeValue(forKey: paneId)
@@ -177,11 +176,11 @@ extension AppRuntime {
         return activatedSelected ? model.selectedTabId : nil
     }
 
-    /// Push each pane's (focused, bell) border to its TerminalView, diffed against
+    /// Push each pane's (focused, bell) border to its terminal session, diffed against
     /// the focusBorders cache so unchanged panes are skipped. Replaces the deleted
-    /// `.refreshPaneBorder` effect; the executor (TerminalView.setFocusBorder) is
+    /// `.refreshPaneBorder` effect; the session executor is
     /// unchanged -- only the computation moved into the pure `desiredFocusBorders`.
-    /// The default no-op `remove` is correct here: a pane's TerminalView is torn
+    /// The default no-op `remove` is correct here: a pane's terminal session is torn
     /// down elsewhere, so a key leaving the projection only prunes the cache.
     func reconcileFocusBorders(tally: UnreadAlertTally) {
         applyDiff(desiredFocusBorders(in: model, tally: tally), &caches.focusBorders, apply: { paneId, state in
@@ -189,18 +188,13 @@ extension AppRuntime {
         })
     }
 
-    /// Push each themed pane's effective Ghostty config to its TerminalView, diffed
-    /// against the paneConfig cache. A key disappearing means the pane still exists
-    /// but no longer has a theme override, so reload the base config for that surface.
+    /// Push each themed pane's config through its terminal session, diffed against
+    /// the paneConfig cache. A disappearing key clears the pane override.
     func reconcilePaneConfig() {
         applyDiff(desiredPaneConfig(in: model), &caches.paneConfig, apply: { paneId, key in
-            guard let surface = surfaces[paneId]?.surface,
-                  let config = ghosttyApp.loadConfigWithTheme(key.theme) else { return }
-            ghostty_surface_update_config(surface, config)
-            ghostty_config_free(config)
+            surfaces[paneId]?.applyTheme(key.theme)
         }, remove: { paneId in
-            guard let surface = surfaces[paneId]?.surface else { return }
-            ghosttyApp.reloadConfig(surface: surface, soft: false)
+            surfaces[paneId]?.clearTheme()
         })
     }
 

@@ -1,6 +1,7 @@
 // Minimal test-only symbols needed to compile the real app/ views in the UI
 // harness. See the app-file section of test-ui.sh's compile list.
 import Cocoa
+import DanTermProtocol
 
 final class AppRuntime {
     var model: AppModel
@@ -37,22 +38,47 @@ final class AppRuntime {
     func toggleThemeBrowser() { themeBrowserToggles += 1 }
 }
 
-class TerminalView: NSView {
+class TerminalView: NSView, TerminalSession {
     weak var paneWrapper: PaneWrapperView?
     var hasSelection = false
     var performedActions: [String] = []
+    var hostView: NSView { self }
+    var state = TerminalSessionState(scrollbarEnabled: true, cellHeight: 0, scrollPosition: nil)
+    weak var stateObserver: (any TerminalSessionStateObserver)?
+    var onEvent: ((TerminalSessionEvent) -> Void)?
 
-    @objc func copySelection(_ sender: Any?) {
+    func copySelection() {
         performedActions.append("copySelection")
     }
 
-    @objc func pasteClipboard(_ sender: Any?) {
+    func pasteClipboard() {
         performedActions.append("pasteClipboard")
     }
+
+    func sendText(_ text: String) {}
+    func sendInputText(_ text: String) {}
+    func sendInputKey(_ key: KeyName, modifiers: KeyMods) {}
+    func setFocused(_ focused: Bool) {}
+    func setVisible(_ visible: Bool) {}
+    func setDisplayID(_ displayID: UInt32) {}
+    func setScrollbarEnabled(_ enabled: Bool) {}
+    func refreshBackingProperties() {}
+    func applyTheme(_ themeName: String) {}
+    func clearTheme() {}
+    func startSearch() {}
+    func setSearchNeedle(_ needle: String) {}
+    func navigateSearch(_ direction: SearchDirection) {}
+    func endSearch() {}
+    func readViewportText() -> String? { nil }
+    func readFullHistoryText() -> String? { nil }
+    func scroll(toRow row: Int) {}
+    func requestClose() {}
+    func setFocusBorder(_ focused: Bool, hasBell: Bool) {}
+    func tearDown() {}
 }
 
 class ScrollableTerminalView: NSView {
-    init(terminalView: TerminalView) {
+    init(terminalSession: any TerminalSession) {
         super.init(frame: .zero)
     }
 

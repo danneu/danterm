@@ -137,6 +137,7 @@ ISOLATED_TMP="$RUN_ROOT/tmp"
 APP_PATH="$RUN_ROOT/$CHARACTERIZATION_APP_NAME.app"
 APP_LOG="$RUN_ROOT/app.log"
 PATH_PROBE="$RUN_ROOT/path-probe.json"
+EVENT_LOG="$RUN_ROOT/terminal-events.log"
 APP_PID=""
 CHILD_PID=""
 FAILURE_DIRECTORY=""
@@ -225,6 +226,8 @@ wait-after-command = true
 font-family = Menlo
 font-size = 12
 scrollbar = never
+keybind = ctrl+r=reload_config
+keybind = ctrl+w=close_surface
 EOF
 
 echo "Launching $CHARACTERIZATION_APP_NAME in $RUN_ROOT..."
@@ -234,6 +237,7 @@ env \
     TMPDIR="$ISOLATED_TMP/" \
     DANTERM_TERMINAL_CHARACTERIZATION_PATH_PROBE="$PATH_PROBE" \
     DANTERM_TERMINAL_CHARACTERIZATION_TEMP_ROOT="$ISOLATED_TMP" \
+    DANTERM_TERMINAL_CHARACTERIZATION_EVENT_LOG="$EVENT_LOG" \
     "$APP_PATH/Contents/MacOS/$CHARACTERIZATION_APP_NAME" \
     >"$APP_LOG" 2>&1 &
 APP_PID=$!
@@ -291,6 +295,70 @@ wait_for_pane() {
     done
 }
 wait_for_pane
+
+wait_for_event() {
+    local expected="$1"
+    local deadline=$((SECONDS + CHARACTERIZATION_TIMEOUT_SECONDS))
+    while true; do
+        if [[ -f "$EVENT_LOG" ]] && grep -qxF "$expected" "$EVENT_LOG"; then
+            return 0
+        fi
+        if (( SECONDS >= deadline )); then
+            echo "Timed out waiting for terminal boundary event: $expected" >&2
+            sed -n '1,80p' "$EVENT_LOG" >&2 2>/dev/null || true
+            return 1
+        fi
+        sleep 0.05
+    done
+}
+
+wait_for_input_bytes() {
+    local expected="$1"
+    local deadline=$((SECONDS + CHARACTERIZATION_TIMEOUT_SECONDS))
+    while true; do
+        if [[ -f "$STATE_DIRECTORY/input-bytes" ]] \
+            && cmp -s "$expected" "$STATE_DIRECTORY/input-bytes"; then
+            return 0
+        fi
+        if (( SECONDS >= deadline )); then
+            echo "Timed out waiting for CLI input bytes" >&2
+            od -An -tx1 "$STATE_DIRECTORY/input-bytes" >&2 2>/dev/null || true
+            return 1
+        fi
+        sleep 0.05
+    done
+}
+
+wait_for_pane_absent() {
+    local pane_id="$1"
+    local deadline=$((SECONDS + CHARACTERIZATION_TIMEOUT_SECONDS))
+    while "$CLI" pane info --pane "$pane_id" >/dev/null 2>&1; do
+        if (( SECONDS >= deadline )); then
+            echo "Timed out waiting for closed pane to leave the model: $pane_id" >&2
+            return 1
+        fi
+        sleep 0.05
+    done
+}
+
+rm -f "$STATE_DIRECTORY/input-bytes"
+"$CLI" pane input --pane "$PANE_ID" --literal -- "BOUNDARY-TEXT"
+"$CLI" pane input --pane "$PANE_ID" -- Enter
+EXPECTED_INPUT="$RUN_ROOT/expected-input-bytes"
+printf 'BOUNDARY-TEXT\n' >"$EXPECTED_INPUT"
+wait_for_input_bytes "$EXPECTED_INPUT"
+
+"$CLI" pane input --pane "$PANE_ID" -- C-r
+for expected_event in \
+    "backend.configReloaded" \
+    "backend.configChanged:scrollbar=false"; do
+    wait_for_event "$expected_event"
+done
+
+CLOSE_PANE_ID="$("$CLI" pane split --pane "$PANE_ID" -h --cmd '/bin/sleep 120' | jq -er '.pane.id')"
+"$CLI" pane input --pane "$CLOSE_PANE_ID" -- C-w
+wait_for_event "session.closeRequested"
+wait_for_pane_absent "$CLOSE_PANE_ID"
 
 sample_columns() {
     rm -f "$STATE_DIRECTORY/size"
@@ -409,6 +477,19 @@ resize_to_columns "$CHARACTERIZATION_NARROW_COLUMNS"
 kill -USR1 "$CHILD_PID"
 wait_for_file "$STATE_DIRECTORY/primary-ready" "primary corpus output"
 wait_for_pane_marker "CORPUS-END"
+for expected_event in \
+    "session.titleChanged:boundary-title" \
+    "session.cwdChanged:/tmp/boundary-cwd" \
+    "session.bell" \
+    "session.desktopNotification::boundary-notification" \
+    "session.progress:Optional(DanTerm.ProgressState.set(percent: 42))"; do
+    wait_for_event "$expected_event"
+done
+PANE_INFO="$CAPTURE_DIRECTORY/boundary-pane-info.json"
+"$CLI" pane info --pane "$PANE_ID" >"$PANE_INFO"
+jq -e \
+    '.pane.title == "boundary-title" and .pane.cwd == "/tmp/boundary-cwd"' \
+    "$PANE_INFO" >/dev/null
 capture_width narrow "$CHARACTERIZATION_NARROW_COLUMNS"
 capture_width wide "$CHARACTERIZATION_WIDE_COLUMNS"
 capture_width narrow-after-reflow "$CHARACTERIZATION_NARROW_COLUMNS"

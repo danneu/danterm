@@ -3,6 +3,7 @@
 // state, action routing, and menu-lifetime retention of the ephemeral wrapper.
 import Cocoa
 
+@MainActor
 func paneWrapperViewTests() {
     print("PaneWrapperView")
 

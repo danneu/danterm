@@ -3,13 +3,28 @@
 import Cocoa
 import GhosttyKit
 
-class GhosttyApp {
+/// Constructs the linked Ghostty adapter without exposing its concrete type to launch code.
+@MainActor
+func makeGhosttyBackend() -> any TerminalBackend {
+    GhosttyApp()
+}
+
+class GhosttyApp: TerminalBackend {
     var app: ghostty_app_t?
-    weak var runtime: AppRuntime?
+    var onEvent: ((TerminalBackendEvent) -> Void)?
     /// Retained clone of the ghostty config for runtime reads (e.g. scrollbar setting).
     var config: ghostty_config_t?
     /// Coalesces high-volume libghostty wakeups into one main-queue tick per turn.
     let tickCoalescer = TickCoalescer()
+
+    var isReady: Bool { app != nil }
+    var preferences: GhosttyPrefs {
+        GhosttyPrefs(
+            theme: readConfigString(key: "theme"),
+            fontSize: readConfigFloatString(key: "font-size")
+        )
+    }
+    var configFilePath: String? { Self.configFilePath() }
 
     /// Read the scrollbar setting from any config. Returns true unless set to "never".
     static func readScrollbarEnabled(from config: ghostty_config_t?) -> Bool {
@@ -109,7 +124,7 @@ class GhosttyApp {
     }
 
     /// App-level config reload: re-reads config files from disk (or soft-applies the existing config).
-    func reloadConfig(soft: Bool = false) {
+    func reloadConfig(soft: Bool) {
         guard let app = app else { return }
         if soft {
             guard let config = config else { return }
@@ -119,6 +134,31 @@ class GhosttyApp {
         guard let newConfig = Self.loadConfig() else { return }
         ghostty_app_update_config(app, newConfig)
         ghostty_config_free(newConfig)
+    }
+
+    func reloadConfig() {
+        reloadConfig(soft: false)
+    }
+
+    func setAppFocused(_ focused: Bool) {
+        guard let app else { return }
+        ghostty_app_set_focus(app, focused)
+    }
+
+    func createSession(_ request: TerminalSessionRequest) -> (any TerminalSession)? {
+        let view = TerminalView(
+            ghosttyApp: self,
+            workingDirectory: request.workingDirectory,
+            command: request.command,
+            launchCommand: request.launchCommand,
+            waitAfterCommand: request.waitAfterCommand,
+            restoreCommandBehavior: request.restoreCommandBehavior,
+            envVars: request.environment
+        )
+        guard view.surface != nil else { return nil }
+        view.scrollbarEnabled = scrollbarEnabled
+        view.copyOnSelectEnabled = copyOnSelectEnabled
+        return view
     }
 
     /// Create a config with a specific theme applied.
@@ -223,9 +263,9 @@ class GhosttyApp {
             close_surface_cb: { userdata, processAlive in
                 guard let userdata = userdata else { return }
                 let bridge = Unmanaged<SurfaceBridge>.fromOpaque(userdata).takeUnretainedValue()
-                guard let view = bridge.view, let paneId = bridge.paneId else { return }
-                DispatchQueue.main.async {
-                    view.runtime?.send(.surfaceClosed(paneId: paneId))
+                guard let view = bridge.view else { return }
+                DispatchQueue.main.async { [weak view] in
+                    view?.emit(.closeRequested)
                 }
             }
         )
@@ -267,17 +307,21 @@ class GhosttyApp {
         return surfaceBridge(from: surface)
     }
 
-    /// Send a pane-scoped model message after resolving all surface state before
-    /// the main-queue hop.
-    private func sendForPane(
+    /// Emit a typed pane event after resolving the weak session view.
+    private func emitForSession(
         _ target: ghostty_target_s,
-        _ make: (PaneId) -> Msg
+        _ event: TerminalSessionEvent
     ) {
-        guard let bridge = Self.surfaceBridge(forTarget: target),
-              let paneId = bridge.paneId else { return }
-        let msg = make(paneId)
+        guard let bridge = Self.surfaceBridge(forTarget: target) else { return }
+        DispatchQueue.main.async { [weak view = bridge.view] in
+            view?.emit(event)
+        }
+    }
+
+    /// Emit one process-wide backend event on the main actor.
+    private func emitBackend(_ event: TerminalBackendEvent) {
         DispatchQueue.main.async { [weak self] in
-            self?.runtime?.send(msg)
+            self?.onEvent?(event)
         }
     }
 
@@ -303,14 +347,14 @@ class GhosttyApp {
         case GHOSTTY_ACTION_SET_TITLE:
             if let titlePtr = action.action.set_title.title {
                 let title = String(cString: titlePtr)
-                sendForPane(target) { .surfaceTitle(paneId: $0, title: title) }
+                emitForSession(target, .titleChanged(title))
             }
             return true
 
         case GHOSTTY_ACTION_PWD:
             if let pwdPtr = action.action.pwd.pwd {
                 let cwd = String(cString: pwdPtr)
-                sendForPane(target) { .surfaceCwd(paneId: $0, cwd: cwd) }
+                emitForSession(target, .cwdChanged(cwd))
             }
             return true
 
@@ -332,9 +376,7 @@ class GhosttyApp {
             return true
 
         case GHOSTTY_ACTION_QUIT:
-            DispatchQueue.main.async { [weak self] in
-                self?.runtime?.send(.requestQuit)
-            }
+            emitBackend(.quitRequested)
             return true
 
         case GHOSTTY_ACTION_CLOSE_WINDOW:
@@ -400,15 +442,11 @@ class GhosttyApp {
             case GHOSTTY_TARGET_APP:
                 reloadConfig(soft: soft)
                 // Bump the model generation so themed panes re-layer over the new base config.
-                DispatchQueue.main.async { [weak self] in
-                    self?.runtime?.send(.ghosttyConfigReloaded)
-                }
+                emitBackend(.configReloaded)
             case GHOSTTY_TARGET_SURFACE:
                 if let surface = Self.targetSurface(target) {
                     reloadConfig(surface: surface, soft: soft)
-                    DispatchQueue.main.async { [weak self] in
-                        self?.runtime?.send(.ghosttyConfigReloaded)
-                    }
+                    emitBackend(.configReloaded)
                 }
             default:
                 break
@@ -425,17 +463,7 @@ class GhosttyApp {
                 // Fan out scrollbar setting to all surfaces
                 let enabled = Self.readScrollbarEnabled(from: newConfig)
                 // Read Ghostty prefs from the freshly-cloned config for the prefs panel.
-                let prefs = GhosttyPrefs(
-                    theme: self.readConfigString(key: "theme"),
-                    fontSize: self.readConfigFloatString(key: "font-size")
-                )
-                DispatchQueue.main.async { [weak self] in
-                    guard let self = self else { return }
-                    for (_, view) in self.runtime?.surfaces ?? [:] {
-                        view.scrollbarEnabled = enabled
-                    }
-                    self.runtime?.send(.ghosttyPrefsRefreshed(prefs))
-                }
+                emitBackend(.configChanged(prefs: preferences, scrollbarEnabled: enabled))
 
             case GHOSTTY_TARGET_SURFACE:
                 // Update only the addressed surface
@@ -453,14 +481,14 @@ class GhosttyApp {
             return true
 
         case GHOSTTY_ACTION_RING_BELL:
-            sendForPane(target) { .surfaceBell(paneId: $0) }
+            emitForSession(target, .bell)
             return true
 
         case GHOSTTY_ACTION_PROGRESS_REPORT:
             guard progressStyleEnabled else {
                 // progress-style = false: libghostty still fires this action, so we
                 // suppress it here and clear any progress already shown for the pane.
-                sendForPane(target) { .surfaceProgress(paneId: $0, state: nil) }
+                emitForSession(target, .progress(nil))
                 return true
             }
             let raw = action.action.progress_report
@@ -474,14 +502,14 @@ class GhosttyApp {
             case GHOSTTY_PROGRESS_STATE_PAUSE:         state = .pause(percent: progress)
             default:                                   state = nil
             }
-            sendForPane(target) { .surfaceProgress(paneId: $0, state: state) }
+            emitForSession(target, .progress(state))
             return true
 
         case GHOSTTY_ACTION_DESKTOP_NOTIFICATION:
             let notif = action.action.desktop_notification
             let title = String(cString: notif.title)
             let body = String(cString: notif.body)
-            sendForPane(target) { .desktopNotification(paneId: $0, title: title, body: body) }
+            emitForSession(target, .desktopNotification(title: title, body: body))
             return true
 
         case GHOSTTY_ACTION_START_SEARCH:
@@ -491,19 +519,19 @@ class GhosttyApp {
             } else {
                 needle = ""
             }
-            sendForPane(target) { .ghosttyStartSearch(paneId: $0, needle: needle) }
+            emitForSession(target, .searchStarted(needle))
             return true
 
         case GHOSTTY_ACTION_SEARCH_TOTAL:
             let raw = action.action.search_total.total
             let total: Int? = raw >= 0 ? Int(raw) : nil
-            sendForPane(target) { .ghosttySearchTotal(paneId: $0, total: total) }
+            emitForSession(target, .searchTotal(total))
             return true
 
         case GHOSTTY_ACTION_SEARCH_SELECTED:
             let raw = action.action.search_selected.selected
             let selected: Int? = raw >= 0 ? Int(raw) : nil
-            sendForPane(target) { .ghosttySearchSelected(paneId: $0, selected: selected) }
+            emitForSession(target, .searchSelected(selected))
             return true
 
         case GHOSTTY_ACTION_OPEN_URL:

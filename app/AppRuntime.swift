@@ -1,7 +1,6 @@
 // Runtime bridge that performs update commands and synchronizes AppKit/Ghostty views.
 import Cocoa
 import DanTermProtocol
-import GhosttyKit
 import UniformTypeIdentifiers
 @preconcurrency import UserNotifications
 
@@ -23,13 +22,81 @@ func scrollbackReplayDirectoryURL(fileManager: FileManager = .default) -> URL {
         .appendingPathComponent("danterm-scrollback", isDirectory: true)
 }
 
+#if DANTERM_TERMINAL_CHARACTERIZATION
+/// Records boundary events emitted by the real Ghostty adapter so the opt-in
+/// characterization harness can assert callback conformance after rewiring.
+@MainActor
+func recordTerminalCharacterizationEvent(_ event: TerminalSessionEvent) {
+    let description: String
+    switch event {
+    case .titleChanged(let title):
+        description = "session.titleChanged:\(title)"
+    case .cwdChanged(let cwd):
+        description = "session.cwdChanged:\(cwd)"
+    case .bell:
+        description = "session.bell"
+    case .desktopNotification(let title, let body):
+        description = "session.desktopNotification:\(title):\(body)"
+    case .progress(let progress):
+        description = "session.progress:\(String(describing: progress))"
+    case .searchStarted(let needle):
+        description = "session.searchStarted:\(needle)"
+    case .searchTotal(let total):
+        description = "session.searchTotal:\(String(describing: total))"
+    case .searchSelected(let selected):
+        description = "session.searchSelected:\(String(describing: selected))"
+    case .becameFirstResponder:
+        description = "session.becameFirstResponder"
+    case .closeRequested:
+        description = "session.closeRequested"
+    }
+    appendTerminalCharacterizationEvent(description)
+}
+
+/// Records process-wide boundary events without serializing Ghostty preference
+/// details that are already covered by pure event translation tests.
+@MainActor
+func recordTerminalCharacterizationEvent(_ event: TerminalBackendEvent) {
+    let description: String
+    switch event {
+    case .configReloaded:
+        description = "backend.configReloaded"
+    case .configChanged(_, let scrollbarEnabled):
+        description = "backend.configChanged:scrollbar=\(scrollbarEnabled)"
+    case .quitRequested:
+        description = "backend.quitRequested"
+    }
+    appendTerminalCharacterizationEvent(description)
+}
+
+@MainActor
+private func appendTerminalCharacterizationEvent(_ description: String) {
+    guard let path = ProcessInfo.processInfo.environment[
+        "DANTERM_TERMINAL_CHARACTERIZATION_EVENT_LOG"
+    ] else { return }
+    let data = Data("\(description)\n".utf8)
+    if FileManager.default.fileExists(atPath: path) == false {
+        FileManager.default.createFile(atPath: path, contents: data)
+        return
+    }
+    guard let handle = FileHandle(forWritingAtPath: path) else { return }
+    defer { try? handle.close() }
+    do {
+        try handle.seekToEnd()
+        try handle.write(contentsOf: data)
+    } catch {
+        print("[characterization] Failed to record terminal event: \(error)")
+    }
+}
+#endif
+
 // App runtime owns the mutable app model, performs the commands emitted by the
 // pure update function, and bridges model changes into AppKit/Ghostty objects.
 @MainActor
 class AppRuntime {
     private struct StagedRestoreSession {
         let model: AppModel
-        let surfaces: [PaneId: TerminalView]
+        let surfaces: [PaneId: any TerminalSession]
         let tokenStore: PaneTokenStore
         let replayFiles: [PaneId: URL]
     }
@@ -39,8 +106,8 @@ class AppRuntime {
     // Today just the inline-rename target, set/cleared by SidebarView's rename paths and
     // read only by reconcileSidebar's rename guard.
     var viewLocalState = ViewLocalState()
-    let ghosttyApp: GhosttyApp
-    var surfaces: [PaneId: TerminalView] = [:]
+    let terminalBackend: any TerminalBackend
+    var surfaces: [PaneId: any TerminalSession] = [:]
     // Last libghostty occlusion value pushed for each live surface.
     // Cleared on teardown because restore/import can reuse pane IDs for fresh surfaces.
     private var surfaceVisibility: [PaneId: Bool] = [:]
@@ -94,14 +161,27 @@ class AppRuntime {
     // https://github.com/danneu/danterm/issues/31
     private static let enrichedCheckpointInterval: TimeInterval = 600.0
 
-    init(ghosttyApp: GhosttyApp) {
-        self.ghosttyApp = ghosttyApp
+    init(terminalBackend: any TerminalBackend) {
+        self.terminalBackend = terminalBackend
         // Empty launch: one group, no tabs/leaves yet (panes live in leaves).
         self.model = AppModel(
             groups: [GroupModel(id: GroupId(rawValue: CoreEnv.live.newId()), name: "General")]
         )
         // Load DanTerm config before any tabs are created
         self.model.config = DanTermConfigParser.loadFromDisk()
+
+        terminalBackend.onEvent = { [weak self] event in
+            guard let self else { return }
+            #if DANTERM_TERMINAL_CHARACTERIZATION
+            recordTerminalCharacterizationEvent(event)
+            #endif
+            if case .configChanged(_, let scrollbarEnabled) = event {
+                for session in self.surfaces.values {
+                    session.setScrollbarEnabled(scrollbarEnabled)
+                }
+            }
+            self.send(terminalMessage(for: event))
+        }
 
         // Build the MRU switcher panel eagerly — pay first-frame cost at
         // launch instead of on every cmd-shift-i. Keep it offscreen until
@@ -320,20 +400,15 @@ class AppRuntime {
         return popover
     }
 
-    func terminalView(for paneId: PaneId) -> TerminalView? {
-        return surfaces[paneId]
-    }
-
-    /// Push effective model visibility to live libghostty surfaces, skipping unchanged panes.
+    /// Push effective model visibility to live terminal sessions, skipping unchanged panes.
     func syncSurfaceVisibility() {
         let windowVisible = window?.occlusionState.contains(.visible) ?? true
         let desired = effectiveSurfaceVisibility(in: model, windowVisible: windowVisible)
 
-        for (paneId, view) in surfaces {
-            guard let surface = view.surface else { continue }
+        for (paneId, session) in surfaces {
             let visible = desired[paneId] ?? true
             if surfaceVisibility[paneId] != visible {
-                ghostty_surface_set_occlusion(surface, visible)
+                session.setVisible(visible)
                 surfaceVisibility[paneId] = visible
             }
         }
@@ -347,17 +422,16 @@ class AppRuntime {
     /// per-surface CVDisplayLink re-syncs to that monitor's refresh rate.
     func syncSurfaceDisplayID() {
         guard let displayID = window?.screen?.displayID else { return }
-        for (_, view) in surfaces {
-            guard let surface = view.surface else { continue }
-            ghostty_surface_set_display_id(surface, displayID)
+        for session in surfaces.values {
+            session.setDisplayID(displayID)
         }
 
         // Mirror Ghostty's screen-change path: nudge backing properties on the
         // next main-loop turn because AppKit can skip the automatic callback.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            for (_, view) in self.surfaces {
-                view.viewDidChangeBackingProperties()
+            for session in self.surfaces.values {
+                session.refreshBackingProperties()
             }
         }
     }
@@ -366,8 +440,8 @@ class AppRuntime {
     /// recovery path for terminal activation.
     /// See docs/design/2026-05-27-terminal-focus-display-link.md.
     func focusPaneSurface(_ paneId: PaneId) {
-        guard let view = surfaces[paneId] else { return }
-        window?.makeFirstResponder(view)
+        guard let session = surfaces[paneId] else { return }
+        window?.makeFirstResponder(session.hostView)
     }
 
     var ipcSocketPath: URL {
@@ -395,7 +469,7 @@ class AppRuntime {
                 paneId: paneId,
                 token: token
             )
-            let view = makeTerminalView(
+            guard let session = makeTerminalSession(
                 paneId: paneId,
                 workingDirectory: cwd,
                 command: command,
@@ -403,63 +477,28 @@ class AppRuntime {
                 waitAfterCommand: waitAfterCommand,
                 restoreCommandBehavior: .execute,
                 envVars: envVars
-            )
-            surfaces[paneId] = view
-            if view.surface == nil {
+            ) else {
+                tokenStore.remove(paneId)
                 send(.surfaceCreationFailed(paneId: paneId))
+                break
             }
+            surfaces[paneId] = session
 
         case .sendText(let paneId, let text):
-            guard !text.isEmpty,
-                  let surface = surfaces[paneId]?.surface else { break }
-            text.withCString { ptr in
-                ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
-            }
+            surfaces[paneId]?.sendText(text)
 
         case .sendInputText(let paneId, let text):
-            // Send a press-only key event with keycode 0 and the literal
-            // UTF-8 text attached. Avoids paste stripping and bracketed-paste
-            // markers so TUIs receive characters as if typed.
-            guard !text.isEmpty,
-                  let surface = surfaces[paneId]?.surface else { break }
-            var ev = ghostty_input_key_s()
-            ev.action = GHOSTTY_ACTION_PRESS
-            ev.keycode = 0
-            ev.mods = GHOSTTY_MODS_NONE
-            ev.consumed_mods = GHOSTTY_MODS_NONE
-            ev.unshifted_codepoint = 0
-            ev.composing = false
-            text.withCString { ptr in
-                ev.text = ptr
-                _ = ghostty_surface_key(surface, ev)
-            }
+            surfaces[paneId]?.sendInputText(text)
 
         case .sendInputKey(let paneId, let key, let mods):
-            // Press + matching release so a follow-up key event isn't
-            // interpreted as auto-repeat. Ghostty's keymap layer handles
-            // terminal encoding and DECCKM for us.
-            guard let surface = surfaces[paneId]?.surface else { break }
-            let (keycode, codepoint) = macKeyMapping(for: key)
-            var ev = ghostty_input_key_s()
-            ev.action = GHOSTTY_ACTION_PRESS
-            ev.keycode = keycode
-            ev.mods = ghosttyMods(mods)
-            ev.consumed_mods = GHOSTTY_MODS_NONE
-            ev.unshifted_codepoint = codepoint
-            ev.composing = false
-            ev.text = nil
-            _ = ghostty_surface_key(surface, ev)
-            ev.action = GHOSTTY_ACTION_RELEASE
-            _ = ghostty_surface_key(surface, ev)
+            surfaces[paneId]?.sendInputKey(key, modifiers: mods)
 
         case .focusSurface(let paneId, let focused):
-            if let view = surfaces[paneId], let surface = view.surface {
-                ghostty_surface_set_focus(surface, focused)
-            }
+            surfaces[paneId]?.setFocused(focused)
 
         case .makeFirstResponder(let paneId):
-            if let view = surfaces[paneId] {
-                window?.makeFirstResponder(view)
+            if let session = surfaces[paneId] {
+                window?.makeFirstResponder(session.hostView)
             }
 
         case .sendNotification(let alertId, let title, let body):
@@ -521,14 +560,16 @@ class AppRuntime {
 
         case .readPaneText(let reqId, let paneId, let lineLimit):
             guard let connection = ipcConnections.removeValue(forKey: reqId) else { break }
-            guard let surface = surfaces[paneId]?.surface else {
+            guard let session = surfaces[paneId] else {
                 connection.writeError(reqId: reqId, code: -32603, message: "pane no longer available")
                 break
             }
-            guard let text = capturePaneText(surface: surface, lineLimit: lineLimit) else {
+            let raw = lineLimit == nil ? session.readViewportText() : session.readFullHistoryText()
+            guard let raw else {
                 connection.writeError(reqId: reqId, code: -32603, message: "failed to read pane text")
                 break
             }
+            let text = lineLimit.map { tailLines(raw, n: $0) } ?? raw
             connection.writeSuccess(reqId: reqId, result: .object(["text": .string(text)]))
 
         case .showCloseTabConfirmation(let tabId, let tabTitle, let paneCount, let isLastTab, let uncompletedTodoCount):
@@ -595,9 +636,7 @@ class AppRuntime {
             window?.makeKeyAndOrderFront(nil)
 
         case .setAppFocus(let focused):
-            if let app = ghosttyApp.app {
-                ghostty_app_set_focus(app, focused)
-            }
+            terminalBackend.setAppFocused(focused)
 
         case .dismissAlertsPopover:
             alertsPopover?.performClose(nil)
@@ -606,9 +645,7 @@ class AppRuntime {
         // Search commands
 
         case .sendStartSearch(let paneId):
-            if let view = surfaces[paneId], let surface = view.surface {
-                sendBindingAction(surface, "start_search")
-            }
+            surfaces[paneId]?.startSearch()
 
         case .focusSearchField(let paneId):
             if let field = findPaneWrapper(for: paneId)?.searchOverlay?.searchField {
@@ -619,10 +656,8 @@ class AppRuntime {
             // Debounce: immediate for empty or 3+ chars, 300ms for 1-2 chars
             let delay: TimeInterval = (needle.isEmpty || needle.count >= 3) ? 0 : 0.3
             let sendNeedle = { [weak self] in
-                guard let self = self,
-                      let view = self.surfaces[paneId],
-                      let surface = view.surface else { return }
-                sendBindingAction(surface, "search:\(needle)")
+                guard let self else { return }
+                self.surfaces[paneId]?.setSearchNeedle(needle)
             }
 
             if delay == 0 {
@@ -638,17 +673,12 @@ class AppRuntime {
             }
 
         case .sendSearchNavigate(let paneId, let direction):
-            if let view = surfaces[paneId], let surface = view.surface {
-                let action = direction == .next ? "navigate_search:next" : "navigate_search:previous"
-                sendBindingAction(surface, action)
-            }
+            surfaces[paneId]?.navigateSearch(direction)
 
         case .sendEndSearch(let paneId):
             searchDebouncers[paneId]?.cancel()
             searchDebouncers.removeValue(forKey: paneId)
-            if let view = surfaces[paneId], let surface = view.surface {
-                sendBindingAction(surface, "end_search")
-            }
+            surfaces[paneId]?.endSearch()
 
         // TODO popover
 
@@ -687,8 +717,8 @@ class AppRuntime {
                 informativeText: "This pane has \(tasks).",
                 confirmTitle: "Close Pane"
             ) { [weak self] isConfirm in
-                guard isConfirm, let surface = self?.surfaces[paneId]?.surface else { return }
-                ghostty_surface_request_close(surface)
+                guard isConfirm else { return }
+                self?.surfaces[paneId]?.requestClose()
             }
         }
     }
@@ -731,37 +761,6 @@ class AppRuntime {
 
     // MARK: - Scrollback Replay Files
 
-    /// Read text from one Ghostty point tag using line-based selection.
-    private func readSurfaceRegion(
-        surface: ghostty_surface_t,
-        tag: ghostty_point_tag_e
-    ) -> String? {
-        let topLeft = ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0)
-        let bottomRight = ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0)
-        let selection = ghostty_selection_s(top_left: topLeft, bottom_right: bottomRight, rectangle: false)
-        var text = ghostty_text_s()
-        guard ghostty_surface_read_text(surface, selection, &text) else { return nil }
-        defer { ghostty_surface_free_text(surface, &text) }
-        return decodeGhosttyText(text)
-    }
-
-    /// Capture visible text, or full written text tailed to a requested line count.
-    private func capturePaneText(surface: ghostty_surface_t, lineLimit: Int?) -> String? {
-        let tag: ghostty_point_tag_e = lineLimit == nil ? GHOSTTY_POINT_VIEWPORT : GHOSTTY_POINT_SCREEN
-        guard let raw = readSurfaceRegion(surface: surface, tag: tag) else {
-            return nil
-        }
-        guard let n = lineLimit else {
-            return raw
-        }
-        return tailLines(raw, n: n)
-    }
-
-    /// Read full scrollback text from a ghostty surface using line-based selection.
-    private func readScrollbackText(surface: ghostty_surface_t) -> String? {
-        return readSurfaceRegion(surface: surface, tag: GHOSTTY_POINT_SCREEN)
-    }
-
     /// Write scrollback text to a temp file for shell replay. Returns the file URL.
     private func writeReplayFile(scrollback: String) -> URL? {
         guard let data = scrollback.data(using: .utf8) else { return nil }
@@ -788,8 +787,8 @@ class AppRuntime {
         cleanupReplayFile(for: paneId)
         searchDebouncers[paneId]?.cancel()
         searchDebouncers.removeValue(forKey: paneId)
-        if let view = surfaces.removeValue(forKey: paneId) {
-            view.closeSurface()
+        if let session = surfaces.removeValue(forKey: paneId) {
+            session.tearDown()
         }
     }
 
@@ -878,9 +877,8 @@ class AppRuntime {
     /// this map into a snapshot's tree leaves.
     private func scrollbackByPaneId() -> [PaneId: String] {
         var result: [PaneId: String] = [:]
-        for (paneId, view) in surfaces {
-            guard let surface = view.surface,
-                  let rawText = readScrollbackText(surface: surface),
+        for (paneId, session) in surfaces {
+            guard let rawText = session.readFullHistoryText(),
                   let scrollback = truncateScrollback(rawText) else {
                 continue
             }
@@ -999,7 +997,7 @@ class AppRuntime {
 
     /// Full config reload: Ghostty files, DanTerm config, then themed pane re-layering.
     func reloadAllConfig() {
-        ghosttyApp.reloadConfig()
+        terminalBackend.reloadConfig()
         reloadDanTermConfig()
         send(.ghosttyConfigReloaded)
     }
@@ -1016,11 +1014,7 @@ class AppRuntime {
     /// seed the draft, then lets reconcile create/show from the model. The final
     /// makeKeyAndOrderFront call re-raises an already-open normal-level panel.
     func showPreferencesPanel() {
-        let ghostty = GhosttyPrefs(
-            theme: ghosttyApp.readConfigString(key: "theme"),
-            fontSize: ghosttyApp.readConfigFloatString(key: "font-size")
-        )
-        send(.preferencesOpened(ghostty: ghostty))
+        send(.preferencesOpened(ghostty: terminalBackend.preferences))
         preferencesPanel?.makeKeyAndOrderFront(nil)
     }
 
@@ -1034,8 +1028,8 @@ class AppRuntime {
             reconcileThemeBrowser()
             // Restore focus to the focused pane's surface
             if let tab = selectedTab(in: model),
-               let view = surfaces[tab.focusedPaneId] {
-                window?.makeFirstResponder(view)
+               let session = surfaces[tab.focusedPaneId] {
+                window?.makeFirstResponder(session.hostView)
             }
             return
         }
@@ -1087,7 +1081,7 @@ class AppRuntime {
         _ loaded: ValidatedAppRestore,
         restoreCommandBehavior: RestoreCommandBehavior
     ) throws -> StagedRestoreSession {
-        var stagedSurfaces: [PaneId: TerminalView] = [:]
+        var stagedSurfaces: [PaneId: any TerminalSession] = [:]
         var stagedTokenStore = PaneTokenStore()
         var stagedReplayFiles: [PaneId: URL] = [:]
 
@@ -1110,7 +1104,7 @@ class AppRuntime {
                             token: token,
                             scrollbackFilePath: scrollbackFilePath
                         )
-                        let view = makeTerminalView(
+                        guard let session = makeTerminalSession(
                             paneId: paneId,
                             workingDirectory: resolved?.cwd,
                             command: resolved?.command,
@@ -1118,11 +1112,10 @@ class AppRuntime {
                             waitAfterCommand: true,
                             restoreCommandBehavior: restoreCommandBehavior,
                             envVars: envVars
-                        )
-                        stagedSurfaces[paneId] = view
-                        if view.surface == nil {
+                        ) else {
                             throw RestoreBuildError.surfaceCreationFailed
                         }
+                        stagedSurfaces[paneId] = session
                     }
                 }
             }
@@ -1163,8 +1156,8 @@ class AppRuntime {
 
         for paneId in Array(surfaces.keys) {
             cleanupReplayFile(for: paneId)
-            if let view = surfaces.removeValue(forKey: paneId) {
-                view.closeSurface()
+            if let session = surfaces.removeValue(forKey: paneId) {
+                session.tearDown()
             }
         }
         surfaceVisibility.removeAll()
@@ -1204,16 +1197,16 @@ class AppRuntime {
 
     /// Dispose of a staged restore after a failed build so no temp state leaks into the live session.
     private func discardRestoreSession(_ staged: StagedRestoreSession) {
-        for (_, view) in staged.surfaces {
-            view.closeSurface()
+        for session in staged.surfaces.values {
+            session.tearDown()
         }
         for url in staged.replayFiles.values {
             try? FileManager.default.removeItem(at: url)
         }
     }
 
-    /// Construct a terminal view and attach DanTerm runtime metadata before first use.
-    private func makeTerminalView(
+    /// Construct one backend session and install its pane-scoped event translation.
+    private func makeTerminalSession(
         paneId: PaneId,
         workingDirectory: String?,
         command: String?,
@@ -1221,21 +1214,23 @@ class AppRuntime {
         waitAfterCommand: Bool,
         restoreCommandBehavior: RestoreCommandBehavior,
         envVars: [(String, String)]
-    ) -> TerminalView {
-        let view = TerminalView(
-            ghosttyApp: ghosttyApp,
+    ) -> (any TerminalSession)? {
+        let request = TerminalSessionRequest(
             workingDirectory: workingDirectory,
             command: command,
             launchCommand: launchCommand,
             waitAfterCommand: waitAfterCommand,
             restoreCommandBehavior: restoreCommandBehavior,
-            envVars: envVars
+            environment: envVars
         )
-        view.bridge.paneId = paneId
-        view.runtime = self
-        view.scrollbarEnabled = ghosttyApp.scrollbarEnabled
-        view.copyOnSelectEnabled = ghosttyApp.copyOnSelectEnabled
-        return view
+        guard let session = terminalBackend.createSession(request) else { return nil }
+        session.onEvent = { [weak self] event in
+            #if DANTERM_TERMINAL_CHARACTERIZATION
+            recordTerminalCharacterizationEvent(event)
+            #endif
+            self?.send(terminalMessage(for: event, paneId: paneId))
+        }
+        return session
     }
 
     private func importErrorMessage(for error: AppInitFileLoadError) -> String {
@@ -1282,7 +1277,7 @@ class AppRuntime {
 
     // MARK: - Pane Toolbars
 
-    // Resolve via the existing PaneId -> TerminalView index. `internal` (not `private`)
+    // Resolve via the existing PaneId -> TerminalSession index. `internal` (not `private`)
     // so reconcilePaneChrome in Reconcile.swift can reach the live wrapper.
     func findPaneWrapper(for paneId: PaneId) -> PaneWrapperView? {
         surfaces[paneId]?.paneWrapper
@@ -1303,9 +1298,7 @@ class AppRuntime {
 
         // Defocus all surfaces before rebuilding
         for paneId in allPaneIds(tab.rootNode) {
-            if let view = surfaces[paneId], let surface = view.surface {
-                ghostty_surface_set_focus(surface, false)
-            }
+            surfaces[paneId]?.setFocused(false)
         }
 
         let container = SplitContainerView(
@@ -1360,8 +1353,8 @@ class AppRuntime {
         // Focus the focused pane's surface -- unless the theme browser owns focus or the
         // pane has an active search (whose field is focused just below instead).
         if browserFocus == nil, model.searchState[focusedId] == nil,
-           let focusedView = surfaces[focusedId] {
-            window?.makeFirstResponder(focusedView)
+           let focusedSession = surfaces[focusedId] {
+            window?.makeFirstResponder(focusedSession.hostView)
         }
         // Active search on the focused pane: focus its (paneChrome-rebuilt) search field.
         if browserFocus == nil, model.searchState[focusedId] != nil,
@@ -1473,60 +1466,4 @@ func closeTabConfirmationCopy(paneCount: Int, uncompletedTodoCount: Int, isLastT
 
 private enum RestoreBuildError: Error {
     case surfaceCreationFailed
-}
-
-// macOS hardware keycodes (kVK_*) for the closed `KeyName` set, plus the ASCII
-// codepoint for letters so Ghostty's keymap layer encodes the right terminal
-// bytes. Total: every enum case maps to a concrete (keycode, codepoint) pair.
-private func macKeyMapping(for key: KeyName) -> (UInt32, UInt32) {
-    switch key {
-    case .named(let n):
-        switch n {
-        case .enter:  return (36, 0)
-        case .tab:    return (48, 0)
-        case .bspace: return (51, 0)
-        case .escape: return (53, 0)
-        case .up:     return (126, 0)
-        case .down:   return (125, 0)
-        case .left:   return (123, 0)
-        case .right:  return (124, 0)
-        case .home:   return (115, 0)
-        case .end:    return (119, 0)
-        case .pgUp:   return (116, 0)
-        case .pgDn:   return (121, 0)
-        case .delete: return (117, 0)
-        case .f1:  return (122, 0)
-        case .f2:  return (120, 0)
-        case .f3:  return (99, 0)
-        case .f4:  return (118, 0)
-        case .f5:  return (96, 0)
-        case .f6:  return (97, 0)
-        case .f7:  return (98, 0)
-        case .f8:  return (100, 0)
-        case .f9:  return (101, 0)
-        case .f10: return (109, 0)
-        case .f11: return (103, 0)
-        case .f12: return (111, 0)
-        }
-    case .letter(let c):
-        let keycode = letterKeycodes[c] ?? 0
-        let codepoint = UInt32(c.asciiValue ?? 0)
-        return (keycode, codepoint)
-    }
-}
-
-// kVK_ANSI_* keycodes for a-z. Non-sequential — these come from the original
-// ADB keyboard layout and have stuck around.
-private let letterKeycodes: [Character: UInt32] = [
-    "a": 0,  "s": 1,  "d": 2,  "f": 3,  "h": 4,  "g": 5,  "z": 6,  "x": 7,
-    "c": 8,  "v": 9,  "b": 11, "q": 12, "w": 13, "e": 14, "r": 15, "y": 16,
-    "t": 17, "o": 31, "u": 32, "i": 34, "p": 35, "l": 37, "j": 38, "k": 40,
-    "n": 45, "m": 46,
-]
-
-private func ghosttyMods(_ mods: KeyMods) -> ghostty_input_mods_e {
-    var raw: UInt32 = GHOSTTY_MODS_NONE.rawValue
-    if mods.contains(.ctrl) { raw |= GHOSTTY_MODS_CTRL.rawValue }
-    if mods.contains(.alt)  { raw |= GHOSTTY_MODS_ALT.rawValue }
-    return ghostty_input_mods_e(raw)
 }

@@ -1,36 +1,52 @@
 // NSView host for Ghostty surfaces and terminal input forwarding.
 
 import Cocoa
+import DanTermProtocol
 import GhosttyKit
 
 class SurfaceBridge {
     weak var view: TerminalView?
-    var paneId: PaneId?
     init() {}
     init(view: TerminalView) { self.view = view }
 
     deinit {
         #if DEBUG
-        print("[bridge] SurfaceBridge deallocated (paneId: \(paneId?.rawValue.uuidString.prefix(5) ?? "nil"))")
+        print("[bridge] SurfaceBridge deallocated")
         #endif
     }
 }
 
-class TerminalView: NSView, NSTextInputClient {
+class TerminalView: NSView, NSTextInputClient, TerminalSession {
     let ghosttyApp: GhosttyApp
     var surface: ghostty_surface_t?
     let bridge: SurfaceBridge
     private var bridgeRetain: Unmanaged<SurfaceBridge>?
-    weak var runtime: AppRuntime?
+    private let callbackGate = TerminalSessionCallbackGate()
     private var markedText = NSMutableAttributedString()
     private var keyTextAccumulator: [String]?
     private var linkPreview: LinkPreviewView?
 
-    // Scrollbar support: updated synchronously from ghostty action callbacks.
-    weak var scrollDelegate: ScrollableTerminalView?
-
     // Back-pointer to the wrapper currently hosting this terminal. Weak: the wrapper owns us.
     weak var paneWrapper: PaneWrapperView?
+
+    var hostView: NSView { self }
+    var onEvent: ((TerminalSessionEvent) -> Void)? {
+        get { callbackGate.onEvent }
+        set { callbackGate.onEvent = newValue }
+    }
+    weak var stateObserver: (any TerminalSessionStateObserver)? {
+        get { callbackGate.stateObserver }
+        set { callbackGate.stateObserver = newValue }
+    }
+    var state: TerminalSessionState {
+        TerminalSessionState(
+            scrollbarEnabled: scrollbarEnabled,
+            cellHeight: cellSize.height,
+            scrollPosition: scrollbarState.map {
+                TerminalScrollPosition(total: $0.total, offset: $0.offset, length: $0.len)
+            }
+        )
+    }
 
     /// Whether the surface has a text selection; drives the context menu's Copy item.
     var hasSelection: Bool {
@@ -39,15 +55,15 @@ class TerminalView: NSView, NSTextInputClient {
     }
 
     var cellSize: NSSize = .zero {
-        didSet { scrollDelegate?.scrollbarStateDidChange() }
+        didSet { emitState() }
     }
 
     var scrollbarState: (total: UInt64, offset: UInt64, len: UInt64)? {
-        didSet { scrollDelegate?.scrollbarStateDidChange() }
+        didSet { emitState() }
     }
 
     var scrollbarEnabled: Bool = true {
-        didSet { scrollDelegate?.scrollbarConfigDidChange() }
+        didSet { emitState() }
     }
 
     /// Effective copy-on-select for this surface. Seeded at creation and kept in
@@ -56,6 +72,15 @@ class TerminalView: NSView, NSTextInputClient {
     var copyOnSelectEnabled: Bool = true
 
     override var acceptsFirstResponder: Bool { true }
+
+    private func emitState() {
+        callbackGate.emit(state)
+    }
+
+    /// Accept a typed product event from the Ghostty callback adapter.
+    func emit(_ event: TerminalSessionEvent) {
+        callbackGate.emit(event)
+    }
 
     // MARK: - Init
 
@@ -167,6 +192,7 @@ class TerminalView: NSView, NSTextInputClient {
     }
 
     func closeSurface() {
+        callbackGate.tearDown()
         guard let surface = surface else { return }
         self.surface = nil
         // Defer surface free to next main-actor turn to avoid re-entrant
@@ -255,9 +281,7 @@ class TerminalView: NSView, NSTextInputClient {
         let result = super.becomeFirstResponder()
         if result, let surface = surface {
             ghostty_surface_set_focus(surface, true)
-            if let paneId = bridge.paneId {
-                runtime?.send(.paneBecameFirstResponder(paneId: paneId))
-            }
+            callbackGate.emit(.becameFirstResponder)
         }
         return result
     }
@@ -759,6 +783,198 @@ class TerminalView: NSView, NSTextInputClient {
         var value: UnsafePointer<Int8>?
         let key = "macos-option-as-alt"
         return ghostty_config_get(config, &value, key, UInt(key.utf8.count))
+    }
+}
+
+// MARK: - TerminalSession
+
+extension TerminalView {
+    func sendText(_ text: String) {
+        guard text.isEmpty == false, let surface else { return }
+        text.withCString { ptr in
+            ghostty_surface_text(surface, ptr, UInt(text.utf8.count))
+        }
+    }
+
+    func sendInputText(_ text: String) {
+        guard text.isEmpty == false, let surface else { return }
+        var event = ghostty_input_key_s()
+        event.action = GHOSTTY_ACTION_PRESS
+        event.keycode = 0
+        event.mods = GHOSTTY_MODS_NONE
+        event.consumed_mods = GHOSTTY_MODS_NONE
+        event.unshifted_codepoint = 0
+        event.composing = false
+        text.withCString { ptr in
+            event.text = ptr
+            _ = ghostty_surface_key(surface, event)
+        }
+    }
+
+    func sendInputKey(_ key: KeyName, modifiers: KeyMods) {
+        guard let surface else { return }
+        let (keycode, codepoint) = Self.macKeyMapping(for: key)
+        var event = ghostty_input_key_s()
+        event.action = GHOSTTY_ACTION_PRESS
+        event.keycode = keycode
+        event.mods = Self.ghosttyMods(modifiers)
+        event.consumed_mods = GHOSTTY_MODS_NONE
+        event.unshifted_codepoint = codepoint
+        event.composing = false
+        event.text = nil
+        _ = ghostty_surface_key(surface, event)
+        event.action = GHOSTTY_ACTION_RELEASE
+        _ = ghostty_surface_key(surface, event)
+    }
+
+    func setFocused(_ focused: Bool) {
+        guard let surface else { return }
+        ghostty_surface_set_focus(surface, focused)
+    }
+
+    func setVisible(_ visible: Bool) {
+        guard let surface else { return }
+        ghostty_surface_set_occlusion(surface, visible)
+    }
+
+    func setDisplayID(_ displayID: UInt32) {
+        guard let surface else { return }
+        ghostty_surface_set_display_id(surface, displayID)
+    }
+
+    func setScrollbarEnabled(_ enabled: Bool) {
+        scrollbarEnabled = enabled
+    }
+
+    func refreshBackingProperties() {
+        viewDidChangeBackingProperties()
+    }
+
+    func applyTheme(_ themeName: String) {
+        guard let surface, let config = ghosttyApp.loadConfigWithTheme(themeName) else { return }
+        ghostty_surface_update_config(surface, config)
+        ghostty_config_free(config)
+    }
+
+    func clearTheme() {
+        guard let surface else { return }
+        ghosttyApp.reloadConfig(surface: surface, soft: false)
+    }
+
+    func startSearch() {
+        guard let surface else { return }
+        sendBindingAction(surface, "start_search")
+    }
+
+    func setSearchNeedle(_ needle: String) {
+        guard let surface else { return }
+        sendBindingAction(surface, "search:\(needle)")
+    }
+
+    func navigateSearch(_ direction: SearchDirection) {
+        guard let surface else { return }
+        let value = direction == .next ? "next" : "previous"
+        sendBindingAction(surface, "navigate_search:\(value)")
+    }
+
+    func endSearch() {
+        guard let surface else { return }
+        sendBindingAction(surface, "end_search")
+    }
+
+    func readViewportText() -> String? {
+        readSurfaceRegion(GHOSTTY_POINT_VIEWPORT)
+    }
+
+    func readFullHistoryText() -> String? {
+        readSurfaceRegion(GHOSTTY_POINT_SCREEN)
+    }
+
+    func scroll(toRow row: Int) {
+        guard let surface else { return }
+        sendBindingAction(surface, "scroll_to_row:\(row)")
+    }
+
+    func copySelection() {
+        copySelection(nil)
+    }
+
+    func pasteClipboard() {
+        pasteClipboard(nil)
+    }
+
+    func requestClose() {
+        guard let surface else { return }
+        ghostty_surface_request_close(surface)
+    }
+
+    func tearDown() {
+        closeSurface()
+    }
+
+    private func readSurfaceRegion(_ tag: ghostty_point_tag_e) -> String? {
+        guard let surface else { return nil }
+        let topLeft = ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_TOP_LEFT, x: 0, y: 0)
+        let bottomRight = ghostty_point_s(tag: tag, coord: GHOSTTY_POINT_COORD_BOTTOM_RIGHT, x: 0, y: 0)
+        let selection = ghostty_selection_s(
+            top_left: topLeft,
+            bottom_right: bottomRight,
+            rectangle: false
+        )
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_text(surface, selection, &text) else { return nil }
+        defer { ghostty_surface_free_text(surface, &text) }
+        return decodeGhosttyText(text)
+    }
+
+    private static func macKeyMapping(for key: KeyName) -> (UInt32, UInt32) {
+        switch key {
+        case .named(let name):
+            switch name {
+            case .enter:  return (36, 0)
+            case .tab:    return (48, 0)
+            case .bspace: return (51, 0)
+            case .escape: return (53, 0)
+            case .up:     return (126, 0)
+            case .down:   return (125, 0)
+            case .left:   return (123, 0)
+            case .right:  return (124, 0)
+            case .home:   return (115, 0)
+            case .end:    return (119, 0)
+            case .pgUp:   return (116, 0)
+            case .pgDn:   return (121, 0)
+            case .delete: return (117, 0)
+            case .f1:  return (122, 0)
+            case .f2:  return (120, 0)
+            case .f3:  return (99, 0)
+            case .f4:  return (118, 0)
+            case .f5:  return (96, 0)
+            case .f6:  return (97, 0)
+            case .f7:  return (98, 0)
+            case .f8:  return (100, 0)
+            case .f9:  return (101, 0)
+            case .f10: return (109, 0)
+            case .f11: return (103, 0)
+            case .f12: return (111, 0)
+            }
+        case .letter(let character):
+            let keycode = letterKeycodes[character] ?? 0
+            return (keycode, UInt32(character.asciiValue ?? 0))
+        }
+    }
+
+    private static let letterKeycodes: [Character: UInt32] = [
+        "a": 0,  "s": 1,  "d": 2,  "f": 3,  "h": 4,  "g": 5,  "z": 6,  "x": 7,
+        "c": 8,  "v": 9,  "b": 11, "q": 12, "w": 13, "e": 14, "r": 15, "y": 16,
+        "t": 17, "o": 31, "u": 32, "i": 34, "p": 35, "l": 37, "j": 38, "k": 40,
+        "n": 45, "m": 46,
+    ]
+
+    private static func ghosttyMods(_ modifiers: KeyMods) -> ghostty_input_mods_e {
+        var raw: UInt32 = GHOSTTY_MODS_NONE.rawValue
+        if modifiers.contains(.ctrl) { raw |= GHOSTTY_MODS_CTRL.rawValue }
+        if modifiers.contains(.alt) { raw |= GHOSTTY_MODS_ALT.rawValue }
+        return ghostty_input_mods_e(raw)
     }
 }
 

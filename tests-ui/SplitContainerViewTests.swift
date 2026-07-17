@@ -1,6 +1,7 @@
 // UI-harness tests for SplitContainerView's first-reveal layout lifecycle.
 import Cocoa
 
+@MainActor
 func splitContainerViewTests() {
     print("SplitContainerView")
 
@@ -99,6 +100,33 @@ func splitContainerViewTests() {
         try uiExpect(!outerSplitView.isApplyingRatio && !innerSplitView.isApplyingRatio, "ensureLaidOut should release every split guard")
         try uiExpect(firstSubviewRatio(in: outerSplitView, expectedRatio: 0.65), "outer split should match stored ratio")
         try uiExpect(firstSubviewRatio(in: innerSplitView, expectedRatio: 0.7), "inner split should match stored ratio")
+    }
+
+    uiTest("container rebuild reparents the same terminal host") {
+        // Intent: rebuilding pane containers replaces wrapper chrome but preserves
+        //   the terminal session and its stable host-view identity.
+        // Why it exists: pane moves and zoom rebuilds must not recreate the PTY owner.
+        // Scenario: spec-first container rebuild for one live pane.
+        let paneId = PaneId()
+        let terminal = TerminalView()
+        let root = SplitNodeModel.leaf(PaneModel(id: paneId))
+        let container = SplitContainerView(
+            rootNode: root,
+            surfaceLookup: { id in id == paneId ? terminal : nil },
+            runtime: nil,
+            isZoomed: false,
+            hasSplits: false,
+            frame: NSRect(x: 0, y: 0, width: 800, height: 600)
+        )
+
+        container.rebuild()
+        let firstWrapper = terminal.paneWrapper
+        container.rebuild()
+        let secondWrapper = terminal.paneWrapper
+
+        try uiExpect(terminal.hostView === terminal, "session host identity changed")
+        try uiExpect(firstWrapper != nil && secondWrapper != nil, "rebuild should mount both wrappers")
+        try uiExpect(firstWrapper !== secondWrapper, "rebuild should replace wrapper chrome")
     }
 }
 

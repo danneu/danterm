@@ -1,7 +1,6 @@
 // App delegate responsible for window setup, app lifecycle hooks, menus, and
 // notification center delegation.
 import Cocoa
-import GhosttyKit
 @preconcurrency import UserNotifications
 
 @MainActor
@@ -11,7 +10,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     nonisolated static let minSidebarWidth: CGFloat = 200
 
     var window: NSWindow!
-    var ghosttyApp: GhosttyApp!
+    var terminalBackend: (any TerminalBackend)!
     var runtime: AppRuntime!
     var sidebarView: SidebarView!
     var contentArea: NSView!
@@ -29,17 +28,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     // NSApplicationDelegate: finish bootstrapping the Ghostty runtime, main
     // window, and launch-time services once AppKit has started the app.
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Create ghostty app (config + runtime callbacks)
-        ghosttyApp = GhosttyApp()
-        guard ghosttyApp.app != nil else {
-            print("Failed to create GhosttyApp")
+        let backendValue = ProcessInfo.processInfo.environment["DANTERM_TERMINAL_BACKEND"]
+        let backendKind: TerminalBackendKind
+        do {
+            backendKind = try resolveTerminalBackend(backendValue)
+        } catch {
+            fatalError("Unsupported DANTERM_TERMINAL_BACKEND value: \(backendValue ?? "")")
+        }
+        switch backendKind {
+        case .ghostty:
+            terminalBackend = makeGhosttyBackend()
+        case .swift:
+            fatalError("DANTERM_TERMINAL_BACKEND=swift is not implemented")
+        }
+        guard terminalBackend.isReady else {
+            print("Failed to create terminal backend")
             NSApp.terminate(nil)
             return
         }
 
         // Create runtime
-        runtime = AppRuntime(ghosttyApp: ghosttyApp)
-        ghosttyApp.runtime = runtime
+        runtime = AppRuntime(terminalBackend: terminalBackend)
 
         // Build menu bar
         buildMenu()
@@ -537,7 +546,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     }
 
     @objc func openGhosttyConfig(_ sender: Any?) {
-        guard let path = GhosttyApp.configFilePath() else { return }
+        guard let path = terminalBackend.configFilePath else { return }
         ensureFileExists(atPath: path, seed: nil)
         NSWorkspace.shared.open(URL(fileURLWithPath: path))
     }

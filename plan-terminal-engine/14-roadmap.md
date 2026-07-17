@@ -9,7 +9,7 @@ mean.
 
 ## Roadmap
 
-- [ ] **1. Isolate the experiment and establish the terminal backend boundary**
+- [x] **1. Isolate the experiment and establish the terminal backend boundary**
   - Engine work begins on `experiment/swift-terminal-engine`; normal DanTerm
     development does not depend on the experiment before its viability decision.
   - The DanTerm-facing contract in

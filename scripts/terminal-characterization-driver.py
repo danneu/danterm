@@ -3,6 +3,7 @@
 
 import os
 import pathlib
+import select
 import signal
 import sys
 import termios
@@ -11,6 +12,11 @@ import termios
 STATE_DIRECTORY = pathlib.Path(sys.argv[1])
 HISTORY_CORPUS = b"".join(f"HISTORY-{index:02d}\r\n".encode("ascii") for index in range(1, 46))
 PRIMARY_CORPUS = b"\x1b[3J\x1b[2J\x1b[H" + HISTORY_CORPUS + (
+    b"\x1b]2;boundary-title\x07"
+    b"\x1b]7;file://localhost/tmp/boundary-cwd\x07"
+    b"\x07"
+    b"\x1b]9;boundary-notification\x07"
+    b"\x1b]9;4;1;42\x07"
     b"HARD-BOUNDARY-A\r\nHARD-BOUNDARY-B\r\n"
     b"WRITTEN-SPACES:[  lead middle  trail  ]  \r\n"
     b"EMPTY-BEFORE\r\n\r\nEMPTY-AFTER\r\n"
@@ -69,7 +75,7 @@ def request_size(_signum: int, _frame: object) -> None:
 
 
 def main() -> None:
-    """Wait for signal-driven phases while keeping terminal bytes deterministic."""
+    """Drive output phases and record app-injected PTY bytes out of band."""
     global phase
     STATE_DIRECTORY.mkdir(parents=True, exist_ok=True)
     disable_input_echo()
@@ -80,8 +86,14 @@ def main() -> None:
     record_size()
     write_state("ready")
 
+    input_path = STATE_DIRECTORY / "input-bytes"
     while True:
-        signal.pause()
+        readable, _, _ = select.select([sys.stdin.fileno()], [], [], 0.05)
+        if readable:
+            data = os.read(sys.stdin.fileno(), 4096)
+            if data:
+                with input_path.open("ab") as handle:
+                    handle.write(data)
         if phase == "emit-primary":
             os.write(sys.stdout.fileno(), PRIMARY_CORPUS)
             phase = "primary"
