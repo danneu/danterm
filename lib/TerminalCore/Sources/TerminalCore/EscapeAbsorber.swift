@@ -3,6 +3,7 @@
 /// Carries one parser event from raw escape recognition into the stream reducer.
 enum EscapeEvent: Equatable, Sendable {
     case execute(UInt8)
+    case escape(UInt8)
     case csi(CSISequence)
 }
 
@@ -117,6 +118,7 @@ struct EscapeAbsorber: Equatable, Sendable {
             case 0x30...0x4F, 0x51...0x57, 0x59...0x5A, 0x5C, 0x60...0x7E:
                 clearCollection()
                 state = .ground
+                return .escape(byte)
             default:
                 break
             }

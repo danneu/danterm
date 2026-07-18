@@ -4,6 +4,7 @@
 enum TerminalStreamAction: Equatable, Sendable {
     case print(Unicode.Scalar)
     case execute(UInt8)
+    case escape(UInt8)
     case csi(CSISequence)
 }
 
@@ -23,6 +24,8 @@ struct TerminalInputStream: Equatable, Sendable {
                 switch event {
                 case let .execute(control):
                     actions.append(.execute(control))
+                case let .escape(final):
+                    actions.append(.escape(final))
                 case let .csi(sequence):
                     actions.append(.csi(sequence))
                 }

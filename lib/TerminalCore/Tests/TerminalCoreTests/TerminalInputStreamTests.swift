@@ -97,9 +97,16 @@ struct TerminalInputStreamTests {
             intermediates: [],
             final: 0x6D
         ))
-        #expect(actions == (bytes[1...].starts(with: [0x1B, 0x5B])
-            ? [.print("A"), csi, .print("B")]
-            : [.print("A"), .print("B")]))
+        var expected: [TerminalStreamAction] = [.print("A")]
+        if bytes[1...].starts(with: [0x1B, 0x5B]) {
+            expected.append(csi)
+        } else if bytes[1...].starts(with: [0x1B, 0x37]) {
+            expected.append(.escape(0x37))
+        } else if bytes.contains(0x5C) {
+            expected.append(.escape(0x5C))
+        }
+        expected.append(.print("B"))
+        #expect(actions == expected)
     }
 
     @Test("CAN and SUB abort sequences and execute as controls", arguments: [0x18, 0x1A] as [UInt8])
@@ -137,6 +144,7 @@ struct TerminalInputStreamTests {
 
         #expect(actions == [
             .execute(0x00),
+            .escape(0x37),
             .execute(0x07),
             .csi(CSISequence(
                 parameters: [31],
@@ -149,7 +157,7 @@ struct TerminalInputStreamTests {
     }
 
     @Test(
-        "payload controls are discarded where VT500 grammar does not execute them",
+        "payload controls are discarded while the ST final is surfaced",
         arguments: [
             [0x1B, 0x50, 0x71, 0x00, 0x07, 0x1B, 0x5C, 0x41],
             [0x1B, 0x5D, 0x78, 0x00, 0x1B, 0x5C, 0x41],
@@ -161,7 +169,26 @@ struct TerminalInputStreamTests {
 
         let actions = stream.feed(bytes)
 
-        #expect(actions == [.print("A")])
+        #expect(actions == [.escape(0x5C), .print("A")])
+    }
+
+    @Test("bare ESC finals surface without interpreting their meaning")
+    func bareEscapeFinalsSurface() {
+        var stream = TerminalInputStream()
+
+        let actions = stream.feed([
+            0x1B, 0x44,
+            0x1B, 0x45,
+            0x1B, 0x4D,
+            0x1B, 0x37,
+        ])
+
+        #expect(actions == [
+            .escape(0x44),
+            .escape(0x45),
+            .escape(0x4D),
+            .escape(0x37),
+        ])
     }
 
     @Test(

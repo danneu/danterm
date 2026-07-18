@@ -73,6 +73,7 @@ public struct Terminal: Equatable, Sendable {
     private var rowCount: Int
     private var scrollbackRows: [GridRow] = []
     private var rows: [GridRow]
+    private var scrollRegion: Range<Int>?
     private var cursor = CellPosition(row: 0, column: 0)
     private var isPendingWrap = false
     private var clusterContext: ClusterContext?
@@ -106,6 +107,8 @@ public struct Terminal: Equatable, Sendable {
                 print(scalar)
             case let .execute(control):
                 execute(control)
+            case let .escape(final):
+                dispatchEscape(final)
             case let .csi(sequence):
                 dispatchCSI(sequence)
             }
@@ -117,6 +120,7 @@ public struct Terminal: Equatable, Sendable {
         guard columns >= 2, rows >= 1 else { return }
         guard columns != columnCount || rows != rowCount else { return }
 
+        scrollRegion = nil
         if rows != rowCount {
             resizeHeight(to: rows)
         }
@@ -630,8 +634,16 @@ public struct Terminal: Equatable, Sendable {
         case 0x58:
             guard let amount = movementAmount(sequence.parameters) else { return }
             eraseCharacters(amount: amount)
+        case 0x53:
+            guard let amount = movementAmount(sequence.parameters) else { return }
+            scrollUp(amount: amount)
+        case 0x54:
+            guard let amount = movementAmount(sequence.parameters) else { return }
+            scrollDown(amount: amount)
         case 0x6D:
             applySGR(sequence)
+        case 0x72:
+            setScrollRegion(sequence.parameters)
         default:
             break
         }
@@ -880,6 +892,23 @@ public struct Terminal: Equatable, Sendable {
         max(Int(parameter ?? 1), 1) - 1
     }
 
+    private mutating func dispatchEscape(_ final: UInt8) {
+        switch final {
+        case 0x44:
+            clearPendingMotionState()
+            lineFeed()
+        case 0x45:
+            clearPendingMotionState()
+            lineFeed()
+            cursor.column = 0
+        case 0x4D:
+            clearPendingMotionState()
+            reverseIndex()
+        default:
+            break
+        }
+    }
+
     private mutating func execute(_ control: UInt8) {
         switch control {
         case 0x08:
@@ -1011,7 +1040,7 @@ public struct Terminal: Equatable, Sendable {
             )
             rows[target.row].isSoftWrapped = true
             cursor = target
-            advanceToNextRow()
+            advanceToNextRow(preservingWrapClaim: true)
             cursor.column = 0
             destination = cursor
             clearCellAndPair(row: destination.row, column: 0, clearsPreviousSpacer: false)
@@ -1075,7 +1104,7 @@ public struct Terminal: Equatable, Sendable {
                 style: currentStyle
             )
             rows[cursor.row].isSoftWrapped = true
-            advanceToNextRow()
+            advanceToNextRow(preservingWrapClaim: true)
             cursor.column = 0
             preservesWrappedSpacer = true
         }
@@ -1116,7 +1145,7 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func softWrap() {
         rows[cursor.row].isSoftWrapped = true
-        advanceToNextRow()
+        advanceToNextRow(preservingWrapClaim: true)
         cursor.column = 0
         isPendingWrap = false
         clusterContext = nil
@@ -1126,12 +1155,139 @@ public struct Terminal: Equatable, Sendable {
         advanceToNextRow()
     }
 
-    private mutating func advanceToNextRow() {
-        if cursor.row == rowCount - 1 {
-            scrollbackRows.append(rows.removeFirst())
-            rows.append(makeBlankRow(columns: columnCount, style: backgroundEraseStyle))
-        } else {
+    private mutating func advanceToNextRow(preservingWrapClaim: Bool = false) {
+        let region = activeScrollRegion
+        if cursor.row == region.upperBound - 1 {
+            moveAndFillRows(
+                in: region,
+                by: -1,
+                pushesToScrollback: scrollRegion == nil,
+                preservesTrailingWrap: preservingWrapClaim
+            )
+        } else if cursor.row < rowCount - 1 {
             cursor.row += 1
+        }
+        if preservingWrapClaim {
+            restoreWrapClaimBeforeCursor()
+        }
+    }
+
+    private var activeScrollRegion: Range<Int> {
+        scrollRegion ?? 0..<rowCount
+    }
+
+    private mutating func setScrollRegion(_ parameters: [UInt16]) {
+        guard parameters.count <= 2 else { return }
+
+        let top = max(Int(parameters.first ?? 1), 1)
+        let bottomParameter = parameters.dropFirst().first ?? 0
+        let bottom = bottomParameter == 0
+            ? rowCount
+            : min(Int(bottomParameter), rowCount)
+        if bottom <= top {
+            scrollRegion = nil
+        } else {
+            let candidate = (top - 1)..<bottom
+            scrollRegion = candidate == 0..<rowCount ? nil : candidate
+        }
+        moveCursor(row: 0, column: 0)
+    }
+
+    private mutating func scrollUp(amount: Int) {
+        clearPendingMotionState()
+        moveAndFillRows(
+            in: activeScrollRegion,
+            by: -amount,
+            pushesToScrollback: scrollRegion == nil
+        )
+    }
+
+    private mutating func scrollDown(amount: Int) {
+        clearPendingMotionState()
+        moveAndFillRows(in: activeScrollRegion, by: amount, pushesToScrollback: false)
+    }
+
+    private mutating func reverseIndex() {
+        let region = activeScrollRegion
+        if cursor.row == region.lowerBound {
+            moveAndFillRows(in: region, by: 1, pushesToScrollback: false)
+        } else {
+            cursor.row = max(0, cursor.row - 1)
+        }
+    }
+
+    private mutating func moveAndFillRows(
+        in range: Range<Int>,
+        by delta: Int,
+        pushesToScrollback: Bool,
+        preservesTrailingWrap: Bool = false
+    ) {
+        guard range.isEmpty == false, delta != 0 else { return }
+        let amount = min(abs(delta), range.count)
+        let sourceRows = Array(rows[range])
+        let style = backgroundEraseStyle
+
+        if delta < 0, pushesToScrollback {
+            scrollbackRows.append(contentsOf: sourceRows.prefix(amount))
+        } else {
+            severWrapClaim(before: range.lowerBound, replacementStyle: style)
+        }
+
+        for destination in range {
+            let source = delta < 0 ? destination + amount : destination - amount
+            if range.contains(source) {
+                rows[destination] = sourceRows[source - range.lowerBound]
+            } else {
+                rows[destination] = makeBlankRow(columns: columnCount, style: style)
+            }
+        }
+
+        let survivingCount = range.count - amount
+        if survivingCount > 0, preservesTrailingWrap == false {
+            let lastSurvivor = delta < 0
+                ? range.lowerBound + survivingCount - 1
+                : range.upperBound - 1
+            severWrapClaim(at: lastSurvivor, replacementStyle: style)
+        }
+    }
+
+    private mutating func severWrapClaim(
+        before row: Int,
+        replacementStyle: TerminalStyle
+    ) {
+        if row > 0 {
+            severWrapClaim(at: row - 1, replacementStyle: replacementStyle)
+        } else if let last = scrollbackRows.indices.last {
+            severScrollbackWrapClaim(at: last, replacementStyle: replacementStyle)
+        }
+    }
+
+    private mutating func severWrapClaim(
+        at row: Int,
+        replacementStyle: TerminalStyle
+    ) {
+        guard rows.indices.contains(row) else { return }
+        rows[row].isSoftWrapped = false
+        if rows[row].cells[columnCount - 1].kind == .spacerHead {
+            rows[row].cells[columnCount - 1] = GridCell(style: replacementStyle)
+        }
+    }
+
+    private mutating func severScrollbackWrapClaim(
+        at row: Int,
+        replacementStyle: TerminalStyle
+    ) {
+        scrollbackRows[row].isSoftWrapped = false
+        if scrollbackRows[row].cells[columnCount - 1].kind == .spacerHead {
+            scrollbackRows[row].cells[columnCount - 1] = GridCell(style: replacementStyle)
+        }
+    }
+
+    private mutating func restoreWrapClaimBeforeCursor() {
+        if cursor.row > 0 {
+            rows[cursor.row - 1].isSoftWrapped = true
+        } else if let last = scrollbackRows.indices.last {
+            scrollbackRows[last].isSoftWrapped = true
         }
     }
 
