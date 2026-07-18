@@ -238,7 +238,7 @@ struct TerminalScrollRegionTests {
         var unsupported = try #require(Terminal(columns: 2, rows: 2))
         unsupported.feed(Array("AB\u{200D}".utf8))
         let expectedUnsupported = unsupported
-        unsupported.feed([0x1B, 0x37])
+        unsupported.feed([0x1B, 0x39])
         #expect(unsupported == expectedUnsupported)
     }
 

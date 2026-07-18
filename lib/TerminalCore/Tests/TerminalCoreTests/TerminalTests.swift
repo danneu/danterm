@@ -380,7 +380,8 @@ struct TerminalTests {
             0x1B, 0x5B, 0x30, 0x31, 0x32, 0x39, 0x3A, 0x3B, 0x3F,
             0x20, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x48, 0x4A,
             0x4B, 0x4C, 0x4D, 0x50, 0x53, 0x54, 0x58, 0x60, 0x64,
-            0x66, 0x68, 0x6A, 0x6B, 0x6C, 0x72, 0x18, 0x1A, 0x7F,
+            0x66, 0x67, 0x68, 0x6A, 0x6B, 0x6C, 0x72, 0x73,
+            0x75, 0x18, 0x1A, 0x7F,
         ].map { [$0] }
         let sgrFragments = [
             Array("\u{1B}[m".utf8),
@@ -400,11 +401,19 @@ struct TerminalTests {
             Array("\u{1B}[?6h\u{1B}[?6l".utf8),
             Array("\u{1B}[?7l\u{1B}[?7h".utf8),
         ]
+        let tabAndSaveFragments = [
+            Array("\u{1B}H\u{1B}[3g".utf8),
+            Array("\u{1B}7\u{1B}8".utf8),
+            Array("\u{1B}[s\u{1B}[u".utf8),
+            Array("\u{1B}[?1048h\u{1B}[?1048l".utf8),
+        ]
         let alphabet = byteAlphabet + sgrFragments + sliceSixFragments + modeFragments
+            + tabAndSaveFragments
         for seed in UInt64(1)...256 {
             var generator = Generator(state: seed)
             var terminal = try #require(Terminal(columns: 7, rows: 3))
-            for fragment in sgrFragments + sliceSixFragments + modeFragments + (0..<256).map({ _ in
+            for fragment in sgrFragments + sliceSixFragments + modeFragments
+                + tabAndSaveFragments + (0..<256).map({ _ in
                 alphabet[Int(generator.next()) % alphabet.count]
             }) {
                 terminal.feed(fragment)

@@ -459,6 +459,6 @@ suites, not fixtures (provenance requires an upstream case).
 ## Commit progress
 
 - [x] 1. Add terminal mode semantics
-- [ ] 2. Add tab stops and saved cursor
+- [x] 2. Add tab stops and saved cursor
 - [ ] 3. Add REP and terminal reset semantics
 - [ ] 4. Adopt terminal-state fixtures and complete the slice gate

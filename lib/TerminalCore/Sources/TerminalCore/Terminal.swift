@@ -21,6 +21,14 @@ public struct Terminal: Equatable, Sendable {
         var column: Int
     }
 
+    /// Keeps the one DECSC slot independent from live cursor and mode mutation.
+    private struct SavedCursorState: Equatable, Sendable {
+        var position = CellPosition(row: 0, column: 0)
+        var style = TerminalStyle()
+        var isPendingWrap = false
+        var isOriginMode = false
+    }
+
     /// Retains exactly the target and pairwise look-behind for one open grapheme cluster.
     private struct ClusterContext: Equatable, Sendable {
         var target: CellPosition
@@ -80,6 +88,8 @@ public struct Terminal: Equatable, Sendable {
     private var isLineFeedNewLineMode = false
     private var isOriginMode = false
     private var isAutoWrapMode = true
+    private var tabStops: Set<Int>
+    private var savedCursor = SavedCursorState()
     private var clusterContext: ClusterContext?
     private var inputStream = TerminalInputStream()
 
@@ -98,6 +108,7 @@ public struct Terminal: Equatable, Sendable {
         guard columns >= 2, rows >= 1 else { return nil }
         columnCount = columns
         rowCount = rows
+        tabStops = Self.defaultTabStops(columns: columns)
         self.rows = (0..<rows).map { _ in
             GridRow(cells: (0..<columns).map { _ in GridCell() })
         }
@@ -129,6 +140,7 @@ public struct Terminal: Equatable, Sendable {
             resizeHeight(to: rows)
         }
         if columns != columnCount {
+            resizeTabStops(from: columnCount, to: columns)
             resizeWidth(to: columns)
         }
         clusterContext = nil
@@ -677,6 +689,14 @@ public struct Terminal: Equatable, Sendable {
             applySGR(sequence)
         case 0x72:
             setScrollRegion(sequence.parameters)
+        case 0x67:
+            clearTabStop(sequence.parameters)
+        case 0x73:
+            guard sequence.parameters.isEmpty else { return }
+            saveCursor()
+        case 0x75:
+            guard sequence.parameters.isEmpty else { return }
+            restoreCursor()
         case 0x68:
             applyANSIModes(sequence.parameters, enabled: true)
         case 0x6C:
@@ -706,21 +726,31 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func applyDECPrivateModes(_ parameters: [UInt16], enabled: Bool) {
-        var recognized = false
+        var shouldClearPendingMotion = false
         for parameter in parameters {
             switch parameter {
             case 6:
                 isOriginMode = enabled
                 cursor = CellPosition(row: positioningOriginRow, column: 0)
-                recognized = true
+                shouldClearPendingMotion = true
             case 7:
                 isAutoWrapMode = enabled
-                recognized = true
+                shouldClearPendingMotion = true
+            case 1048:
+                if shouldClearPendingMotion {
+                    clearPendingMotionState()
+                    shouldClearPendingMotion = false
+                }
+                if enabled {
+                    saveCursor()
+                } else {
+                    restoreCursor()
+                }
             default:
                 continue
             }
         }
-        if recognized {
+        if shouldClearPendingMotion {
             clearPendingMotionState()
         }
     }
@@ -986,6 +1016,10 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func dispatchEscape(_ final: UInt8) {
         switch final {
+        case 0x37:
+            saveCursor()
+        case 0x38:
+            restoreCursor()
         case 0x44:
             clearPendingMotionState()
             lineFeed()
@@ -996,6 +1030,9 @@ public struct Terminal: Equatable, Sendable {
         case 0x4D:
             clearPendingMotionState()
             reverseIndex()
+        case 0x48:
+            tabStops.insert(cursor.column)
+            clearPendingMotionState()
         default:
             break
         }
@@ -1008,8 +1045,8 @@ public struct Terminal: Equatable, Sendable {
             clearPendingMotionState()
         case 0x09:
             let previousColumn = cursor.column
-            let nextStop = ((cursor.column / 8) + 1) * 8
-            cursor.column = min(nextStop, columnCount - 1)
+            cursor.column = tabStops.filter { $0 > cursor.column }.min()
+                ?? columnCount - 1
             if cursor.column != previousColumn {
                 clusterContext = nil
             }
@@ -1030,6 +1067,54 @@ public struct Terminal: Equatable, Sendable {
     private mutating func clearPendingMotionState() {
         isPendingWrap = false
         clusterContext = nil
+    }
+
+    private static func defaultTabStops(columns: Int) -> Set<Int> {
+        Set(stride(from: 0, to: columns, by: 8))
+    }
+
+    private mutating func resizeTabStops(from oldColumnCount: Int, to newColumnCount: Int) {
+        tabStops = Set(tabStops.filter { $0 < newColumnCount })
+        guard newColumnCount > oldColumnCount else { return }
+        for column in oldColumnCount..<newColumnCount where column.isMultiple(of: 8) {
+            tabStops.insert(column)
+        }
+    }
+
+    private mutating func clearTabStop(_ parameters: [UInt16]) {
+        guard parameters.count <= 1 else { return }
+        switch parameters.first ?? 0 {
+        case 0:
+            tabStops.remove(cursor.column)
+        case 3:
+            tabStops.removeAll(keepingCapacity: true)
+        default:
+            return
+        }
+        clearPendingMotionState()
+    }
+
+    private mutating func saveCursor() {
+        savedCursor = SavedCursorState(
+            position: cursor,
+            style: currentStyle,
+            isPendingWrap: isPendingWrap,
+            isOriginMode: isOriginMode
+        )
+    }
+
+    private mutating func restoreCursor() {
+        isOriginMode = savedCursor.isOriginMode
+        let rowRange = positioningRowRange
+        cursor = CellPosition(
+            row: min(max(savedCursor.position.row, rowRange.lowerBound), rowRange.upperBound - 1),
+            column: min(max(savedCursor.position.column, 0), columnCount - 1)
+        )
+        currentStyle = savedCursor.style
+        clusterContext = nil
+        isPendingWrap = savedCursor.isPendingWrap
+            && isAutoWrapMode
+            && cursor.column == columnCount - 1
     }
 
     private mutating func print(_ scalar: Unicode.Scalar) {
