@@ -1,10 +1,11 @@
 # Built artifacts under lib/ (rebuild with ./build-lib.sh).
-# Source packages (DanTermProtocol, DanTermCore, DanTermSupport) ARE tracked -- only
-# the build artifacts (GhosttyKit.xcframework, ghostty-themes) are ignored.
+# Source packages (DanTermProtocol, DanTermCore, DanTermSupport, TerminalCore) ARE
+# tracked -- only the build artifacts (GhosttyKit.xcframework, ghostty-themes) are ignored.
 lib/*
 !lib/DanTermProtocol/
 !lib/DanTermCore/
 !lib/DanTermSupport/
+!lib/TerminalCore/
 
 # Ghostty source cache
 .ghostty-src/

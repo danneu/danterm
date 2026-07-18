@@ -29,8 +29,11 @@ build-icons:
 test:
     swift test --package-path lib/DanTermProtocol --filter DanTermProtocolTests
     swift test --package-path lib/DanTermCore
+    swift test --package-path lib/TerminalCore
     swift test --package-path lib/DanTermSupport
     ./scripts/core-purity-lint.sh
+    ./scripts/core-purity-lint.sh lib/TerminalCore/Sources/TerminalCore
+    ./scripts/core-purity-lint.sh --forbid-imports lib/TerminalCore/Sources/TerminalCore
     ./scripts/core-purity-lint.sh --profile portable lib/DanTermSupport/Sources/DanTermSupport
     ./scripts/tests/core-purity-lint_test.sh
     ./scripts/terminal-backend-boundary-lint.sh

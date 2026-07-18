@@ -14,7 +14,9 @@
 #        - comment/string stripping keeps pure comments and the deterministic
 #          UUID(uuidString:) / Date(timeIntervalSince1970:) parses from tripping;
 #   3. the portable profile's GhosttyKit rule plus its deliberate tolerance of
-#      portable IO (FileManager/DispatchSource/ProcessInfo are fine in support).
+#      portable IO (FileManager/DispatchSource/ProcessInfo are fine in support);
+#   4. the opt-in import gate rejects every library-target import while allowing
+#      import-free Swift source.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LINT="$SCRIPT_DIR/../core-purity-lint.sh"
@@ -35,6 +37,18 @@ assert_lint() {
     local got
     if "$LINT" --profile "$profile" "$dir" >/dev/null 2>&1; then got="pass"; else got="trip"; fi
     [[ "$got" == "$expect" ]] || fail "[$profile] expected '$expect' got '$got' :: $desc :: <$line>"
+    TOTAL=$((TOTAL + 1))
+}
+
+# assert_import_gate <trip|pass> <description> <source-line>
+assert_import_gate() {
+    local expect="$1" desc="$2" line="$3"
+    local dir="$TMP/import-case"
+    rm -rf "$dir"; mkdir -p "$dir"
+    printf '%s\n' "$line" > "$dir/Module.swift"
+    local got
+    if "$LINT" --forbid-imports "$dir" >/dev/null 2>&1; then got="pass"; else got="trip"; fi
+    [[ "$got" == "$expect" ]] || fail "[import gate] expected '$expect' got '$got' :: $desc :: <$line>"
     TOTAL=$((TOTAL + 1))
 }
 
@@ -118,4 +132,15 @@ assert_lint portable pass "port: ProcessInfo ok"       "        let pid = Proces
 assert_lint portable pass "port: Process( ok"          "        let p = Process()"
 assert_lint portable pass "port: import Foundation"    "import Foundation"
 
-echo "core-purity lint self-test passed ($TOTAL assertions across pure + portable profiles)"
+# ---------------------------------------------------------------------------
+# import-free library gate -- any real import trips; ordinary source passes.
+# ---------------------------------------------------------------------------
+assert_import_gate trip "Foundation is still an import" "import Foundation"
+assert_import_gate trip "Testing is still an import"    "import Testing"
+assert_import_gate trip "attributed import"             "@_implementationOnly import Foundation"
+assert_import_gate trip "access-level import"            "public import Foundation"
+assert_import_gate trip "stacked import modifiers"       "@preconcurrency public import Foundation"
+assert_import_gate pass "import-free declaration"       "struct Cell { let value: UInt32 }"
+assert_import_gate pass "commented import"              "// import Foundation"
+
+echo "core-purity lint self-test passed ($TOTAL assertions across pure + portable profiles and import gate)"

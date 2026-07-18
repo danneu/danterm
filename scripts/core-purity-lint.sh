@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local purity lint with two profiles:
+# Local purity lint with two profiles plus an opt-in import-free gate:
 #
 #   pure     (default; target lib/DanTermCore/Sources/DanTermCore)
 #            Bans Cocoa/AppKit/SwiftUI imports AND a denylist of side-effecting /
@@ -18,6 +18,10 @@
 #            DanTermSupport legitimately performs portable IO (FileManager,
 #            Process, DispatchSource, ProcessInfo), so the pure-tier IO bans do
 #            NOT apply here. The profiles are deliberately kept separate.
+#   --forbid-imports
+#            Rejects every real Swift import, including Foundation. TerminalCore
+#            uses this alongside the pure profile so its dependency-free package
+#            cannot silently acquire a toolchain- or OS-versioned framework.
 #
 # The regex denylist is a heuristic regression guard, not the proof of purity:
 # the real proof is structural (the nested test packages compile core/support
@@ -35,10 +39,12 @@ CORE_DEFAULT="$SCRIPT_DIR/../lib/DanTermCore/Sources/DanTermCore"
 
 PROFILE="pure"
 TARGET=""
+FORBID_IMPORTS=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --profile) PROFILE="${2:?--profile needs a value}"; shift 2 ;;
         --profile=*) PROFILE="${1#*=}"; shift ;;
+        --forbid-imports) FORBID_IMPORTS=1; shift ;;
         *) TARGET="$1"; shift ;;
     esac
 done
@@ -48,6 +54,14 @@ case "$PROFILE" in
     pure|portable) ;;
     *) echo "core-purity-lint: unknown profile '$PROFILE' (expected pure|portable)" >&2; exit 2 ;;
 esac
+
+# Import-free modules may use the Swift standard library without an import, but
+# no explicit module dependency. Line anchoring ignores commented-out examples.
+if [[ "$FORBID_IMPORTS" -eq 1 ]] &&
+   grep -rnE '^[[:space:]]*((@[^[:space:]]+|public|internal|package|private|fileprivate)[[:space:]]+)*import[[:space:]]+[[:alnum:]_][[:alnum:]_.]*([^[:alnum:]_]|$)' "$TARGET"; then
+    echo "Swift import found in $TARGET (module must remain import-free)" >&2
+    exit 1
+fi
 
 # --- Cocoa/AppKit/SwiftUI import rule (both profiles). Line-anchored; tolerates
 # leading whitespace + an optional @<attr>; the trailing non-identifier guard

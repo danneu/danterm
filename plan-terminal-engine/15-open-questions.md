@@ -6,8 +6,6 @@ silently.
 
 ## Architecture and concurrency
 
-- Should new engine packages use Swift 6 language mode and strict concurrency
-  while the existing app remains in Swift 5 mode?
 - Which concurrency primitive realizes the required single ordered pane owner,
   and how do read-only render snapshots cross safely into AppKit?
 - Which boundaries deserve separate packages versus internal targets?
