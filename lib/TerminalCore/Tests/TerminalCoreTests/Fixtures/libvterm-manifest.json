@@ -1,0 +1,148 @@
+{
+  "version": 1,
+  "source": "libvterm",
+  "sourceURL": "https://github.com/neovim/libvterm/tree/nvim/t",
+  "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+  "files": [
+    {
+      "path": "t/16state_resize.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        {
+          "name": "Placement",
+          "disposition": "superseded",
+          "rationale": "Slices 1 and 2 already pin printing, absolute column movement, deferred wrap, and putglyph-equivalent placement more strongly through public cells."
+        },
+        {
+          "name": "Resize",
+          "disposition": "adopted",
+          "rationale": "Phase B adopts growth with cursor attachment through the neutral resize fixture seam."
+        },
+        {
+          "name": "Resize without reset",
+          "disposition": "adopted",
+          "rationale": "Phase B keeps existing content and cursor attachment across consecutive effective resizes."
+        },
+        {
+          "name": "Resize shrink moves cursor",
+          "disposition": "adapted",
+          "rationale": "DanTerm always reflows primary content, so phase B asserts the declared cell or padding anchor instead of libvterm's state-layer column clamp."
+        },
+        {
+          "name": "Resize grow doesn't cancel phantom",
+          "disposition": "adopted",
+          "rationale": "Phase B preserves the pending boundary anchor and places the next print at its reflowed location."
+        }
+      ]
+    },
+    {
+      "path": "t/32state_flow.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        {
+          "name": "Spillover text marks continuation on second line",
+          "disposition": "adopted",
+          "rationale": "flow-soft-wrap.json translates libvterm's continuation-row mark to DanTerm's continues-into-next-row flag."
+        },
+        {
+          "name": "CRLF in column 80 does not mark continuation",
+          "disposition": "adopted",
+          "rationale": "flow-hard-boundary.json reduces the dimensions while retaining the exact right-margin CRLF behavior."
+        },
+        {
+          "name": "EL cancels continuation of following line",
+          "disposition": "adapted",
+          "rationale": "flow-soft-wrap.json uses CUP because reverse index is not implemented, then asserts the equivalent hard-boundary projection."
+        }
+      ]
+    },
+    {
+      "path": "t/63screen_resize.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        {
+          "name": "Resize wider preserves cells",
+          "disposition": "adopted",
+          "rationale": "Phase B asserts scalar-exact cells and logical text after growth."
+        },
+        {
+          "name": "Resize wider allows print in new area",
+          "disposition": "adopted",
+          "rationale": "Phase B verifies post-growth cursor placement and printing in the expanded grid."
+        },
+        {
+          "name": "Resize shorter with blanks just truncates",
+          "disposition": "adopted",
+          "rationale": "Phase B trims filler rows strictly below the cursor before any top-row displacement."
+        },
+        {
+          "name": "Resize shorter with content must scroll",
+          "disposition": "adopted",
+          "rationale": "Phase B translates callback order into exact oldest-first scrollback rows, including four blank hard lines."
+        },
+        {
+          "name": "Resize shorter does not lose line with cursor",
+          "disposition": "adopted",
+          "rationale": "Phase B retains the cursor row and displaces only rows required by the smaller viewport."
+        },
+        {
+          "name": "Resize shorter does not send the cursor to a negative row",
+          "disposition": "adapted",
+          "rationale": "DanTerm's declared D2 behavior clamps a displaced cursor to the top viewport row while preserving column and pending wrap."
+        },
+        {
+          "name": "Resize taller attempts to pop scrollback",
+          "disposition": "adapted",
+          "rationale": "Phase B pins no pull when the cursor is above the bottom and adds a native bottom-cursor case that does pull eligible history."
+        },
+        {
+          "name": "Resize can operate on altscreen",
+          "disposition": "out-of-scope",
+          "rationale": "No alternate screen exists in Milestone 2; alternate-screen resize is deferred to Milestone 6."
+        }
+      ]
+    },
+    {
+      "path": "t/69screen_pushline.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        {
+          "name": "Spillover text marks continuation on second line",
+          "disposition": "adapted",
+          "rationale": "scrollback-pushline.json reduces dimensions and observes DanTerm's preceding-row wrap flag through public history."
+        },
+        {
+          "name": "Continuation mark sent to sb_pushline",
+          "disposition": "adapted",
+          "rationale": "scrollback-pushline.json replaces callback timing with exact retained cells and soft-wrap identity at each scroll-off boundary."
+        }
+      ]
+    },
+    {
+      "path": "t/69screen_reflow.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        {
+          "name": "Resize wider reflows wide lines",
+          "disposition": "adopted",
+          "rationale": "Phase B adopts the wider reflow outcome and cursor attachment through public rows."
+        },
+        {
+          "name": "Resize narrower can create continuation lines",
+          "disposition": "adopted",
+          "rationale": "Phase B adopts narrower reflow with DanTerm's mechanically translated wrap flag."
+        },
+        {
+          "name": "Shell wrapped prompt behaviour",
+          "disposition": "adapted",
+          "rationale": "Phase B adopts the early widths and expects one-stream history reflow to pull the first prompt back at the final width."
+        },
+        {
+          "name": "Cursor goes missing",
+          "disposition": "adapted",
+          "rationale": "Sub-minimum requests become bit-identical no-ops under D6, while native two-column fixtures preserve the crash-regression intent."
+        }
+      ]
+    }
+  ]
+}

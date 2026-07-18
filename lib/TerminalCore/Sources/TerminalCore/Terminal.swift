@@ -1,6 +1,6 @@
 // Pure headless terminal reduction: byte ingestion, grid mutation, controls, and inspection.
 
-/// Reduces terminal bytes into a deterministic value-semantic viewport without IO or callbacks.
+/// Reduces terminal bytes into deterministic value-semantic primary-screen state without IO.
 public struct Terminal: Equatable, Sendable {
     /// Keeps scalar storage and wide-cell roles together for invariant-preserving mutation.
     private struct GridCell: Equatable, Sendable {
@@ -29,6 +29,7 @@ public struct Terminal: Equatable, Sendable {
 
     private let columnCount: Int
     private let rowCount: Int
+    private var scrollbackRows: [GridRow] = []
     private var rows: [GridRow]
     private var cursor = CellPosition(row: 0, column: 0)
     private var isPendingWrap = false
@@ -77,6 +78,38 @@ public struct Terminal: Equatable, Sendable {
             }
             return result
         }.joined(separator: "\n")
+    }
+
+    /// Returns retained primary rows in oldest-first order.
+    public var scrollbackRowCount: Int {
+        scrollbackRows.count
+    }
+
+    /// Exposes one retained row without allowing callers to mutate terminal storage.
+    public func scrollbackRow(at index: Int) -> TerminalScrollbackRow? {
+        guard scrollbackRows.indices.contains(index) else { return nil }
+        let row = scrollbackRows[index]
+        return TerminalScrollbackRow(
+            cells: row.cells.map { TerminalCell(kind: $0.kind, scalars: $0.scalars) },
+            isSoftWrapped: row.isSoftWrapped
+        )
+    }
+
+    /// Projects retained history and the viewport as logical text without a final newline.
+    public var fullHistoryText: String {
+        let stream = scrollbackRows + rows
+        guard let lastContentRow = stream.lastIndex(where: rowContainsContent) else {
+            return ""
+        }
+
+        var result = ""
+        for index in 0...lastContentRow {
+            appendProjectedText(from: stream[index], to: &result)
+            if index < lastContentRow, stream[index].isSoftWrapped == false {
+                result.append("\n")
+            }
+        }
+        return result
     }
 
     /// Projects cell roles, row wraps, and cursor state without exposing mutable storage.
@@ -400,11 +433,8 @@ public struct Terminal: Equatable, Sendable {
         rows[target.row].cells[target.column].kind = .narrow
         rows[target.row].cells[target.column + 1] = GridCell()
 
-        if target.column == 0,
-           target.row > 0,
-           rows[target.row - 1].cells[columnCount - 1].kind == .spacerHead
-        {
-            rows[target.row - 1].cells[columnCount - 1] = GridCell()
+        if target.column == 0 {
+            clearPreviousSpacer(beforeRow: target.row, column: target.column)
         }
 
         if cursor.column == columnCount - 1 {
@@ -477,10 +507,35 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func advanceToNextRow() {
         if cursor.row == rowCount - 1 {
-            rows.removeFirst()
+            scrollbackRows.append(rows.removeFirst())
             rows.append(GridRow(cells: (0..<columnCount).map { _ in GridCell() }))
         } else {
             cursor.row += 1
+        }
+    }
+
+    private func rowContainsContent(_ row: GridRow) -> Bool {
+        row.cells.contains { cell in
+            cell.kind == .narrow || cell.kind == .wideHead
+        }
+    }
+
+    private func appendProjectedText(from row: GridRow, to result: inout String) {
+        let end = row.isSoftWrapped
+            ? row.cells.endIndex
+            : (row.cells.lastIndex { cell in
+                cell.kind == .narrow || cell.kind == .wideHead
+            }.map { $0 + 1 } ?? row.cells.startIndex)
+
+        for cell in row.cells[..<end] {
+            switch cell.kind {
+            case .narrow, .wideHead:
+                result.unicodeScalars.append(contentsOf: cell.scalars)
+            case .padding:
+                result.append(" ")
+            case .wideTail, .spacerHead:
+                break
+            }
         }
     }
 
@@ -505,12 +560,20 @@ public struct Terminal: Equatable, Sendable {
             rows[row].cells[column] = GridCell()
         }
 
-        if clearsPreviousSpacer,
-           row > 0,
-           column <= 1,
-           rows[row - 1].cells[columnCount - 1].kind == .spacerHead
-        {
+        if clearsPreviousSpacer {
+            clearPreviousSpacer(beforeRow: row, column: column)
+        }
+    }
+
+    private mutating func clearPreviousSpacer(beforeRow row: Int, column: Int) {
+        guard column <= 1 else { return }
+        if row > 0, rows[row - 1].cells[columnCount - 1].kind == .spacerHead {
             rows[row - 1].cells[columnCount - 1] = GridCell()
+        } else if row == 0,
+                  let last = scrollbackRows.indices.last,
+                  scrollbackRows[last].cells[columnCount - 1].kind == .spacerHead
+        {
+            scrollbackRows[last].cells[columnCount - 1] = GridCell()
         }
     }
 }

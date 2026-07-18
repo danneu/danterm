@@ -18,6 +18,15 @@ public struct TerminalCell: Equatable, Sendable {
     public let scalars: [Unicode.Scalar]
 }
 
+/// Preserves an off-screen primary row's exact cells and logical continuation identity.
+public struct TerminalScrollbackRow: Equatable, Sendable {
+    /// Exact retained cells distinguish written spaces from never-written padding.
+    public let cells: [TerminalCell]
+
+    /// True when this visual row continues into the following retained or viewport row.
+    public let isSoftWrapped: Bool
+}
+
 /// Describes a cursor position together with VT100 deferred-wrap state.
 public struct TerminalCursor: Equatable, Sendable {
     /// Zero-based viewport row.

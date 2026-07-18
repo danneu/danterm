@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/nvim/t/32state_flow.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Spillover text marks continuation on second line; EL cancels continuation of following line",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": ["DanTerm marks the row that continues; libvterm marks the continuation row.", "EL is positioned with CUP because reverse index is not implemented."]
+  },
+  "initial": { "columns": 4, "rows": 2 },
+  "events": [
+    { "type": "feed", "text": "ABCDE" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "ABCD\nE   ",
+        "cellKinds": [
+          ["narrow", "narrow", "narrow", "narrow"],
+          ["narrow", "padding", "padding", "padding"]
+        ],
+        "softWraps": [true, false],
+        "cursor": { "row": 1, "column": 1, "pendingWrap": false },
+        "scrollbackCount": 0,
+        "fullHistoryText": "ABCDE"
+      }
+    },
+    { "type": "feed", "text": "\u001b[1;4H\u001b[K" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "ABC \nE   ",
+        "cellKinds": [
+          ["narrow", "narrow", "narrow", "padding"],
+          ["narrow", "padding", "padding", "padding"]
+        ],
+        "softWraps": [false, false],
+        "cursor": { "row": 0, "column": 3, "pendingWrap": false },
+        "scrollbackCount": 0,
+        "fullHistoryText": "ABC\nE"
+      }
+    }
+  ]
+}

@@ -17,6 +17,7 @@ let package = Package(
             name: "TerminalCoreTests",
             dependencies: ["TerminalCore"],
             path: "Tests/TerminalCoreTests",
+            resources: [.copy("Fixtures")],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]

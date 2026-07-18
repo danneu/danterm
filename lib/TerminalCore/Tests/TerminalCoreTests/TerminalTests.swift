@@ -262,7 +262,7 @@ struct TerminalTests {
         expectValidGrid(terminal.geometry)
     }
 
-    @Test("bottom scrolling moves wrap flags and discards wide rows whole", arguments: [2, 6])
+    @Test("bottom scrolling moves wrap flags and wide rows whole", arguments: [2, 6])
     func scrollingPreservesWideIntegrity(columns: Int) throws {
         var terminal = try #require(Terminal(columns: columns, rows: 2))
         terminal.moveCursor(row: 0, column: columns - 1)
@@ -278,6 +278,10 @@ struct TerminalTests {
         #expect(terminal.geometry.rows.allSatisfy { row in
             row.cells.allSatisfy { $0.kind == .padding }
         })
+        let retained = try #require(terminal.scrollbackRow(at: 1))
+        #expect(retained.cells[0].kind == .wideHead)
+        #expect(retained.cells[1].kind == .wideTail)
+        #expect(retained.isSoftWrapped == false)
         expectValidGrid(terminal.geometry)
     }
 

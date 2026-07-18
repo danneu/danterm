@@ -123,11 +123,18 @@ struct CSIEraseTests {
     @Test("ED scrollback mode is bit-identical and preserves combining attachment")
     func eraseDisplayScrollbackIsNoOp() throws {
         // Intent: prove ED 3 does not inherit active-grid erase side effects
-        //   while this terminal has no scrollback storage.
+        //   and deliberately leaves retained history untouched until Milestone 6.
         // Why it exists: routing ED modes through a shared cleanup path could
-        //   silently clear pending wrap or the combining attachment target.
-        // Scenario: terminal output requests scrollback erasure between a
-        //   base character and its combining mark, and at a pending wrap.
+        //   silently erase retained rows, clear pending wrap, or lose the
+        //   combining attachment target before ED 3 semantics are delivered.
+        // Scenario: terminal output requests scrollback erasure with history
+        //   populated, between a base and combining mark, and at pending wrap.
+        var retained = try #require(Terminal(columns: 2, rows: 1))
+        retained.feed(Array("ABC".utf8))
+        let expectedRetained = retained
+        retained.feed(Array("\u{1B}[3J".utf8))
+        #expect(retained == expectedRetained)
+
         var pending = try #require(Terminal(columns: 2, rows: 2))
         pending.feed(Array("AB".utf8))
         let expected = pending

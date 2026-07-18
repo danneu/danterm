@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/nvim/t/32state_flow.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "CRLF in column 80 does not mark continuation",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": ["Dimensions reduced while preserving the right-margin behavior."]
+  },
+  "initial": { "columns": 4, "rows": 2 },
+  "events": [
+    { "type": "feed", "text": "ABCD\r\nEF" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "ABCD\nEF  ",
+        "cellKinds": [
+          ["narrow", "narrow", "narrow", "narrow"],
+          ["narrow", "narrow", "padding", "padding"]
+        ],
+        "softWraps": [false, false],
+        "cursor": { "row": 1, "column": 2, "pendingWrap": false },
+        "scrollbackCount": 0,
+        "fullHistoryText": "ABCD\nEF"
+      }
+    }
+  ]
+}
