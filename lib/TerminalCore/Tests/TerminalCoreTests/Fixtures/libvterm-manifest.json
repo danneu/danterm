@@ -4,10 +4,289 @@
   "sourceURL": "https://github.com/neovim/libvterm/tree/nvim/t",
   "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
   "recordedDeviations": [
+    "DanTerm clears pending wrap and open grapheme attachment on every recognized valid scroll/edit operation.",
+    "DanTerm pushes scrollback only for full-screen upward scrolls; bounded regions and line edits never retain vacated rows.",
     "DanTerm retains default and indexed colors semantically instead of resolving libvterm palette RGB values.",
     "Pinned libvterm lacks SGR 58/59 and mishandles 38:2::r:g:b; DanTerm deliberately consumes both correctly."
   ],
   "files": [
+    {
+      "path": "t/12state_scroll.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        {
+          "name": "Linefeed",
+          "disposition": "adopted",
+          "rationale": "scroll-controls.json replays full-screen linefeed and observes the retained row through public scrollback state."
+        },
+        {
+          "name": "Index",
+          "disposition": "adopted",
+          "rationale": "scroll-controls.json replays ESC D at the bottom row and asserts viewport, cursor, and scrollback outcomes."
+        },
+        {
+          "name": "Reverse Index",
+          "disposition": "adopted",
+          "rationale": "scroll-controls.json replays ESC M at the top row and asserts the inserted blank without a history push."
+        },
+        {
+          "name": "Linefeed in DECSTBM",
+          "disposition": "adapted",
+          "rationale": "scroll-region-linefeed.json retains the region scroll but applies DanTerm's strict full-screen-only scrollback policy."
+        },
+        {
+          "name": "Linefeed outside DECSTBM",
+          "disposition": "adopted",
+          "rationale": "scroll-region-linefeed.json pins linefeed at the physical bottom below a bounded region as a no-op."
+        },
+        {
+          "name": "Index in DECSTBM",
+          "disposition": "adopted",
+          "rationale": "scroll-region-index.json follows the actual ESC M bytes, noting that the upstream title says Index while the case exercises reverse index."
+        },
+        {
+          "name": "Reverse Index in DECSTBM",
+          "disposition": "adopted",
+          "rationale": "scroll-region-index.json follows the actual LF bytes and pins the below-region physical-bottom no-op."
+        },
+        {
+          "name": "Linefeed in DECSTBM+DECSLRM",
+          "disposition": "out-of-scope",
+          "rationale": "Horizontal margins and their clipping interaction with line advance are deferred."
+        },
+        {
+          "name": "IND/RI in DECSTBM+DECSLRM",
+          "disposition": "out-of-scope",
+          "rationale": "Horizontal margins and their clipping interaction with index controls are deferred."
+        },
+        {
+          "name": "DECRQSS on DECSTBM",
+          "disposition": "out-of-scope",
+          "rationale": "DECRQSS query replies are deferred beyond this Milestone 2 slice."
+        },
+        {
+          "name": "DECRQSS on DECSLRM",
+          "disposition": "out-of-scope",
+          "rationale": "DECRQSS query replies and horizontal margins are both deferred."
+        },
+        {
+          "name": "Setting invalid DECSLRM with !DECVSSM is still rejected",
+          "disposition": "out-of-scope",
+          "rationale": "DECSLRM and DECLRMM mode behavior are deferred."
+        },
+        {
+          "name": "Scroll Down",
+          "disposition": "adopted",
+          "rationale": "scroll-up-down.json replays CSI S counts 1, 2, and 100 and pins the upstream title's inversion relative to the SU mnemonic."
+        },
+        {
+          "name": "Scroll Up",
+          "disposition": "adopted",
+          "rationale": "scroll-up-down.json replays CSI T counts 1, 2, and 100 and pins the upstream title's inversion relative to the SD mnemonic."
+        },
+        {
+          "name": "SD/SU in DECSTBM",
+          "disposition": "adopted",
+          "rationale": "scroll-region-up-down.json asserts both cursor-independent directions within a vertical region."
+        },
+        {
+          "name": "SD/SU in DECSTBM+DECSLRM",
+          "disposition": "adapted",
+          "rationale": "scroll-region-up-down.json retains the full-width vertical-region half while dropping deferred horizontal-margin clipping."
+        },
+        {
+          "name": "Invalid boundaries",
+          "disposition": "adopted",
+          "rationale": "scroll-boundaries.json pins inverted and wholly out-of-range DECSTBM boundaries to normalized full-screen behavior."
+        },
+        {
+          "name": "Scroll Down move+erase emulation",
+          "disposition": "superseded",
+          "rationale": "This callback-decomposition variant is covered by the public viewport and scrollback assertions for the base CSI S case."
+        },
+        {
+          "name": "Scroll Up move+erase emulation",
+          "disposition": "superseded",
+          "rationale": "This callback-decomposition variant is covered by the public viewport assertions for the base CSI T case."
+        },
+        {
+          "name": "DECSTBM resets cursor position",
+          "disposition": "adopted",
+          "rationale": "scroll-boundaries.json asserts absolute cursor homing after a default DECSTBM sequence."
+        }
+      ]
+    },
+    {
+      "path": "t/13state_edit.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        {
+          "name": "ICH",
+          "disposition": "adopted",
+          "rationale": "edit-characters.json replays default and counted insertion while asserting public viewport and cursor state."
+        },
+        {
+          "name": "ICH with DECSLRM",
+          "disposition": "out-of-scope",
+          "rationale": "Horizontal margins are deferred."
+        },
+        {
+          "name": "ICH outside DECSLRM",
+          "disposition": "out-of-scope",
+          "rationale": "Horizontal margins and their operation guards are deferred."
+        },
+        {
+          "name": "DCH",
+          "disposition": "adopted",
+          "rationale": "edit-characters.json replays default and counted deletion while asserting public viewport and cursor state."
+        },
+        {
+          "name": "DCH with DECSLRM",
+          "disposition": "out-of-scope",
+          "rationale": "Horizontal margins are deferred."
+        },
+        {
+          "name": "DCH outside DECSLRM",
+          "disposition": "out-of-scope",
+          "rationale": "Horizontal margins and their operation guards are deferred."
+        },
+        {
+          "name": "ECH",
+          "disposition": "adopted",
+          "rationale": "Earlier cursor/erase slices already pin bounded ECH behavior through public cells."
+        },
+        {
+          "name": "IL",
+          "disposition": "adopted",
+          "rationale": "edit-lines.json replays default and counted insertion and pins the upstream TODO's keep-column behavior."
+        },
+        {
+          "name": "IL with DECSTBM",
+          "disposition": "adopted",
+          "rationale": "edit-lines.json asserts insertion clipped to the active vertical region."
+        },
+        {
+          "name": "IL outside DECSTBM",
+          "disposition": "adopted",
+          "rationale": "edit-lines.json pins outside-region insertion as a grid no-op."
+        },
+        {
+          "name": "IL with DECSTBM+DECSLRM",
+          "disposition": "out-of-scope",
+          "rationale": "Horizontal margins and their interaction with line insertion are deferred."
+        },
+        {
+          "name": "DL",
+          "disposition": "adapted",
+          "rationale": "edit-lines.json adopts deletion and edit-lines-scrollback.json extends it with DanTerm's row-zero no-push policy."
+        },
+        {
+          "name": "DL with DECSTBM",
+          "disposition": "adopted",
+          "rationale": "edit-lines.json asserts deletion clipped to the active vertical region."
+        },
+        {
+          "name": "DL outside DECSTBM",
+          "disposition": "adopted",
+          "rationale": "edit-lines.json pins outside-region deletion as a grid no-op."
+        },
+        {
+          "name": "DL with DECSTBM+DECSLRM",
+          "disposition": "out-of-scope",
+          "rationale": "Horizontal margins and their interaction with line deletion are deferred."
+        },
+        {
+          "name": "DECIC",
+          "disposition": "out-of-scope",
+          "rationale": "DECIC is deferred with horizontal-margin operations."
+        },
+        {
+          "name": "DECIC with DECSTBM+DECSLRM",
+          "disposition": "out-of-scope",
+          "rationale": "DECIC and horizontal margins are deferred."
+        },
+        {
+          "name": "DECIC outside DECSLRM",
+          "disposition": "out-of-scope",
+          "rationale": "DECIC and horizontal margins are deferred."
+        },
+        {
+          "name": "DECDC",
+          "disposition": "out-of-scope",
+          "rationale": "DECDC is deferred with horizontal-margin operations."
+        },
+        {
+          "name": "DECDC with DECSTBM+DECSLRM",
+          "disposition": "out-of-scope",
+          "rationale": "DECDC and horizontal margins are deferred."
+        },
+        {
+          "name": "DECDC outside DECSLRM",
+          "disposition": "out-of-scope",
+          "rationale": "DECDC and horizontal margins are deferred."
+        },
+        {
+          "name": "EL 0",
+          "disposition": "adopted",
+          "rationale": "Earlier erase suites pin EL 0 through public viewport and cell state."
+        },
+        {
+          "name": "EL 1",
+          "disposition": "adopted",
+          "rationale": "Earlier erase suites pin EL 1 through public viewport and cell state."
+        },
+        {
+          "name": "EL 2",
+          "disposition": "adopted",
+          "rationale": "Earlier erase suites pin EL 2 through public viewport and cell state."
+        },
+        {
+          "name": "SEL",
+          "disposition": "out-of-scope",
+          "rationale": "Selective erase is deferred."
+        },
+        {
+          "name": "ED 0",
+          "disposition": "adopted",
+          "rationale": "Earlier erase suites pin ED 0 through public viewport and cell state."
+        },
+        {
+          "name": "ED 1",
+          "disposition": "adopted",
+          "rationale": "Earlier erase suites pin ED 1 through public viewport and cell state."
+        },
+        {
+          "name": "ED 2",
+          "disposition": "adopted",
+          "rationale": "Earlier erase suites pin ED 2 through public viewport and cell state."
+        },
+        {
+          "name": "ED 3",
+          "disposition": "adopted",
+          "rationale": "erase-scrollback.json clears retained history while preserving viewport, cursor, and region behavior."
+        },
+        {
+          "name": "SED",
+          "disposition": "out-of-scope",
+          "rationale": "Selective erase is deferred."
+        },
+        {
+          "name": "DECRQSS on DECSCA",
+          "disposition": "out-of-scope",
+          "rationale": "DECSCA and DECRQSS query replies are deferred."
+        },
+        {
+          "name": "ICH move+erase emuation",
+          "disposition": "superseded",
+          "rationale": "This callback-decomposition variant is covered by edit-characters.json's public viewport assertions for ICH."
+        },
+        {
+          "name": "DCH move+erase emulation",
+          "disposition": "superseded",
+          "rationale": "This callback-decomposition variant is covered by edit-characters.json's public viewport assertions for DCH."
+        }
+      ]
+    },
     {
       "path": "t/16state_resize.test",
       "licenseNotice": "LICENSE.libvterm.txt",
@@ -123,6 +402,42 @@
           "name": "EL cancels continuation of following line",
           "disposition": "adapted",
           "rationale": "flow-soft-wrap.json uses CUP because reverse index is not implemented, then asserts the equivalent hard-boundary projection."
+        }
+      ]
+    },
+    {
+      "path": "t/60screen_ascii.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        {
+          "name": "Get",
+          "disposition": "adopted",
+          "rationale": "Earlier foundation suites pin public cell lookup and screen text projection."
+        },
+        {
+          "name": "Erase",
+          "disposition": "adopted",
+          "rationale": "Earlier erase suites pin screen clearing through public viewport and cell state."
+        },
+        {
+          "name": "Copycell",
+          "disposition": "adopted",
+          "rationale": "screen-copycell.json translates the ICH and DCH copy-cell events to public viewport assertions."
+        },
+        {
+          "name": "Space padding",
+          "disposition": "adopted",
+          "rationale": "Earlier foundation suites pin cursor-forward padding and public screen text."
+        },
+        {
+          "name": "Linefeed padding",
+          "disposition": "adopted",
+          "rationale": "Earlier foundation and scroll suites pin hard linefeed projection through public screen text."
+        },
+        {
+          "name": "Altscreen",
+          "disposition": "out-of-scope",
+          "rationale": "Alternate-screen behavior is deferred to Milestone 6."
         }
       ]
     },

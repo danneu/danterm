@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/12state_scroll.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Invalid boundaries; DECSTBM resets cursor position",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": []
+  },
+  "initial": { "columns": 5, "rows": 4 },
+  "events": [
+    { "type": "feed", "text": "\u001b[4;5H\u001b[r" },
+    {
+      "type": "expect",
+      "expect": {
+        "cursor": { "row": 0, "column": 0, "pendingWrap": false },
+        "scrollbackCount": 0
+      }
+    },
+    { "type": "feed", "text": "\u001b[100;105r\u001bD" },
+    {
+      "type": "expect",
+      "expect": {
+        "cursor": { "row": 1, "column": 0, "pendingWrap": false },
+        "scrollbackCount": 0
+      }
+    },
+    { "type": "feed", "text": "\u001b[5;2r\u001bD" },
+    {
+      "type": "expect",
+      "expect": {
+        "cursor": { "row": 1, "column": 0, "pendingWrap": false },
+        "scrollbackCount": 0
+      }
+    }
+  ]
+}

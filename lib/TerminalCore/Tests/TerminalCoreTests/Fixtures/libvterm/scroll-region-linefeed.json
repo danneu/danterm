@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/12state_scroll.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Linefeed in DECSTBM; Linefeed outside DECSTBM",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": [
+      "DanTerm does not push scrollback for a top-anchored bounded region."
+    ]
+  },
+  "initial": { "columns": 4, "rows": 4 },
+  "events": [
+    { "type": "feed", "text": "A\r\nB\r\nC\r\nD\u001b[1;3r\u001b[3H\n" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "B   \nC   \n    \nD   ",
+        "cursor": { "row": 2, "column": 0, "pendingWrap": false },
+        "scrollbackCount": 0
+      }
+    },
+    { "type": "feed", "text": "\u001b[4H\n" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "B   \nC   \n    \nD   ",
+        "cursor": { "row": 3, "column": 0, "pendingWrap": false },
+        "scrollbackCount": 0
+      }
+    }
+  ]
+}

@@ -47,6 +47,10 @@ mean.
     semantic pen, style-bearing cells, background-color erase semantics, and
     neutral libvterm pen fixtures. See the
     [implementation plan](../plans/impl/2026-07-18-0235-terminal-presentation-sgr.md).
+  - [x] **Slice 6: Scrolling regions and editing operations.** Adds vertical
+    margins, region-aware index and scroll controls, line and character edits,
+    scrollback erase, and neutral libvterm scroll/edit fixtures. See the
+    [implementation plan](../plans/impl/2026-07-18-0425-terminal-scroll-regions.md).
   - [ ] The pure state machine in [Terminal core](04-terminal-core.md) handles the
     control, screen, mode, and style behavior required by the viability slice.
   - [ ] Its behavior is deterministic, independent of input chunking, and proven

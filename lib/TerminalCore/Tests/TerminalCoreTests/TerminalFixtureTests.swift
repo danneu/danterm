@@ -28,10 +28,10 @@ struct TerminalFixtureTests {
         }
     }
 
-    @Test("libvterm manifest classifies every case from the seven selected source files")
+    @Test("libvterm manifest classifies every case from the ten selected source files")
     func libvtermManifestCoverage() throws {
         // Intent: pin the adoption ledger to every upstream case heading in
-        //   the seven source files selected through the current engine slices.
+        //   the ten source files selected through the current engine slices.
         // Why it exists: fixtures alone make deferred, superseded, and
         //   deliberately incompatible cases disappear from review.
         // Scenario: the pinned libvterm corpus is upgraded or the neutral
@@ -51,6 +51,8 @@ struct TerminalFixtureTests {
         #expect(manifest.version == 1)
         #expect(manifest.pinnedCommit == "934bc2fbf21800ac3458a499df8820ca5fb45fd3")
         #expect(Set(manifest.recordedDeviations) == [
+            "DanTerm clears pending wrap and open grapheme attachment on every recognized valid scroll/edit operation.",
+            "DanTerm pushes scrollback only for full-screen upward scrolls; bounded regions and line edits never retain vacated rows.",
             "DanTerm retains default and indexed colors semantically instead of resolving libvterm palette RGB values.",
             "Pinned libvterm lacks SGR 58/59 and mishandles 38:2::r:g:b; DanTerm deliberately consumes both correctly.",
         ])
@@ -191,6 +193,63 @@ struct TerminalFixtureTests {
     }
 
     private static let expectedCases: [String: Set<String>] = [
+        "t/12state_scroll.test": [
+            "Linefeed",
+            "Index",
+            "Reverse Index",
+            "Linefeed in DECSTBM",
+            "Linefeed outside DECSTBM",
+            "Index in DECSTBM",
+            "Reverse Index in DECSTBM",
+            "Linefeed in DECSTBM+DECSLRM",
+            "IND/RI in DECSTBM+DECSLRM",
+            "DECRQSS on DECSTBM",
+            "DECRQSS on DECSLRM",
+            "Setting invalid DECSLRM with !DECVSSM is still rejected",
+            "Scroll Down",
+            "Scroll Up",
+            "SD/SU in DECSTBM",
+            "SD/SU in DECSTBM+DECSLRM",
+            "Invalid boundaries",
+            "Scroll Down move+erase emulation",
+            "Scroll Up move+erase emulation",
+            "DECSTBM resets cursor position",
+        ],
+        "t/13state_edit.test": [
+            "ICH",
+            "ICH with DECSLRM",
+            "ICH outside DECSLRM",
+            "DCH",
+            "DCH with DECSLRM",
+            "DCH outside DECSLRM",
+            "ECH",
+            "IL",
+            "IL with DECSTBM",
+            "IL outside DECSTBM",
+            "IL with DECSTBM+DECSLRM",
+            "DL",
+            "DL with DECSTBM",
+            "DL outside DECSTBM",
+            "DL with DECSTBM+DECSLRM",
+            "DECIC",
+            "DECIC with DECSTBM+DECSLRM",
+            "DECIC outside DECSLRM",
+            "DECDC",
+            "DECDC with DECSTBM+DECSLRM",
+            "DECDC outside DECSLRM",
+            "EL 0",
+            "EL 1",
+            "EL 2",
+            "SEL",
+            "ED 0",
+            "ED 1",
+            "ED 2",
+            "ED 3",
+            "SED",
+            "DECRQSS on DECSCA",
+            "ICH move+erase emuation",
+            "DCH move+erase emulation",
+        ],
         "t/16state_resize.test": [
             "Placement",
             "Resize",
@@ -216,6 +275,14 @@ struct TerminalFixtureTests {
             "Spillover text marks continuation on second line",
             "CRLF in column 80 does not mark continuation",
             "EL cancels continuation of following line",
+        ],
+        "t/60screen_ascii.test": [
+            "Get",
+            "Erase",
+            "Copycell",
+            "Space padding",
+            "Linefeed padding",
+            "Altscreen",
         ],
         "t/63screen_resize.test": [
             "Resize wider preserves cells",
