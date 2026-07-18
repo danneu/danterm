@@ -303,7 +303,8 @@ struct EscapeAbsorber: Equatable, Sendable {
     private mutating func dispatchCSI(final: UInt8) -> EscapeEvent? {
         defer { clearCollection() }
         guard parameters.count < Self.parameterCapacity else { return nil }
-        if hasParameterDigits {
+        if hasParameterDigits || parameters.isEmpty == false {
+            guard parameters.count < Self.parameterCapacity else { return nil }
             parameters.append(parameterAccumulator)
             colonSeparators.append(false)
         }

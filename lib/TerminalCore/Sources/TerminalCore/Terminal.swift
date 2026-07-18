@@ -77,6 +77,9 @@ public struct Terminal: Equatable, Sendable {
     private var clusterContext: ClusterContext?
     private var inputStream = TerminalInputStream()
 
+    /// Exposes the semantic SGR pen without allowing callers to mutate terminal state.
+    public private(set) var currentStyle = TerminalStyle()
+
     /// Rejects dimensions that cannot represent all supported terminal cells.
     public init?(columns: Int, rows: Int) {
         guard columns >= 2, rows >= 1 else { return nil }
@@ -606,8 +609,189 @@ public struct Terminal: Equatable, Sendable {
         case 0x58:
             guard let amount = movementAmount(sequence.parameters) else { return }
             eraseCharacters(amount: amount)
+        case 0x6D:
+            applySGR(sequence)
         default:
             break
+        }
+    }
+
+    private mutating func applySGR(_ sequence: CSISequence) {
+        guard sequence.parameters.isEmpty == false else {
+            currentStyle = TerminalStyle()
+            return
+        }
+
+        var index = 0
+        while index < sequence.parameters.count {
+            var groupEnd = index + 1
+            while groupEnd < sequence.parameters.count,
+                  sequence.colonSeparators[groupEnd - 1]
+            {
+                groupEnd += 1
+            }
+
+            if groupEnd > index + 1 {
+                applyColonSGR(Array(sequence.parameters[index..<groupEnd]))
+                index = groupEnd
+                continue
+            }
+
+            let parameter = sequence.parameters[index]
+            if parameter == 38 || parameter == 48 || parameter == 58 {
+                let result = semicolonColor(
+                    in: sequence.parameters,
+                    selectorIndex: index + 1
+                )
+                if parameter != 58, let color = result.color {
+                    set(color: color, foreground: parameter == 38)
+                }
+                index = result.nextIndex
+            } else {
+                applySimpleSGR(parameter)
+                index += 1
+            }
+        }
+    }
+
+    private mutating func applyColonSGR(_ group: [UInt16]) {
+        guard let leading = group.first else { return }
+        switch leading {
+        case 4:
+            switch group.dropFirst().first {
+            case 0:
+                currentStyle.underline = .none
+            case 2:
+                currentStyle.underline = .double
+            case 3:
+                currentStyle.underline = .curly
+            default:
+                currentStyle.underline = .single
+            }
+        case 38, 48, 58:
+            if leading != 58, let color = colonColor(in: group) {
+                set(color: color, foreground: leading == 38)
+            }
+        default:
+            applySimpleSGR(leading)
+        }
+    }
+
+    private mutating func applySimpleSGR(_ parameter: UInt16) {
+        switch parameter {
+        case 0:
+            currentStyle = TerminalStyle()
+        case 1:
+            currentStyle.bold = true
+        case 2:
+            currentStyle.dim = true
+        case 3:
+            currentStyle.italic = true
+        case 4:
+            currentStyle.underline = .single
+        case 7:
+            currentStyle.reverse = true
+        case 8:
+            currentStyle.hidden = true
+        case 9:
+            currentStyle.strikethrough = true
+        case 21:
+            currentStyle.underline = .double
+        case 22:
+            currentStyle.bold = false
+            currentStyle.dim = false
+        case 23:
+            currentStyle.italic = false
+        case 24:
+            currentStyle.underline = .none
+        case 27:
+            currentStyle.reverse = false
+        case 28:
+            currentStyle.hidden = false
+        case 29:
+            currentStyle.strikethrough = false
+        case 30...37:
+            currentStyle.foreground = .indexed(UInt8(parameter - 30))
+        case 39:
+            currentStyle.foreground = .default
+        case 40...47:
+            currentStyle.background = .indexed(UInt8(parameter - 40))
+        case 49:
+            currentStyle.background = .default
+        case 90...97:
+            currentStyle.foreground = .indexed(UInt8(parameter - 90 + 8))
+        case 100...107:
+            currentStyle.background = .indexed(UInt8(parameter - 100 + 8))
+        default:
+            break
+        }
+    }
+
+    private func colonColor(in group: [UInt16]) -> TerminalColor? {
+        guard group.count >= 3 else { return nil }
+        switch group[1] {
+        case 5:
+            return .indexed(UInt8(truncatingIfNeeded: group[2]))
+        case 2:
+            if group.count >= 6 {
+                return .rgb(
+                    red: UInt8(truncatingIfNeeded: group[3]),
+                    green: UInt8(truncatingIfNeeded: group[4]),
+                    blue: UInt8(truncatingIfNeeded: group[5])
+                )
+            }
+            guard group.count >= 5 else { return nil }
+            return .rgb(
+                red: UInt8(truncatingIfNeeded: group[2]),
+                green: UInt8(truncatingIfNeeded: group[3]),
+                blue: UInt8(truncatingIfNeeded: group[4])
+            )
+        default:
+            return nil
+        }
+    }
+
+    private func semicolonColor(
+        in parameters: [UInt16],
+        selectorIndex: Int
+    ) -> (color: TerminalColor?, nextIndex: Int) {
+        guard parameters.indices.contains(selectorIndex) else {
+            return (nil, parameters.endIndex)
+        }
+
+        switch parameters[selectorIndex] {
+        case 5:
+            let nextIndex = min(parameters.endIndex, selectorIndex + 2)
+            guard parameters.indices.contains(selectorIndex + 1) else {
+                return (nil, nextIndex)
+            }
+            return (
+                .indexed(UInt8(truncatingIfNeeded: parameters[selectorIndex + 1])),
+                nextIndex
+            )
+        case 2:
+            let nextIndex = min(parameters.endIndex, selectorIndex + 4)
+            guard selectorIndex + 3 < parameters.endIndex else {
+                return (nil, nextIndex)
+            }
+            return (
+                .rgb(
+                    red: UInt8(truncatingIfNeeded: parameters[selectorIndex + 1]),
+                    green: UInt8(truncatingIfNeeded: parameters[selectorIndex + 2]),
+                    blue: UInt8(truncatingIfNeeded: parameters[selectorIndex + 3])
+                ),
+                nextIndex
+            )
+        default:
+            return (nil, selectorIndex + 1)
+        }
+    }
+
+    private mutating func set(color: TerminalColor, foreground: Bool) {
+        if foreground {
+            currentStyle.foreground = color
+        } else {
+            currentStyle.background = color
         }
     }
 

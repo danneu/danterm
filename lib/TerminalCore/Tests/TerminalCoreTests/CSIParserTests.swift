@@ -18,6 +18,22 @@ struct CSIParserTests {
                 final: 0x48
             ),
         ])
+        #expect(dispatches("\u{1B}[31;m") == [
+            CSISequence(
+                parameters: [31, 0],
+                colonSeparators: [false, false],
+                intermediates: [],
+                final: 0x6D
+            ),
+        ])
+        #expect(dispatches("\u{1B}[2;J") == [
+            CSISequence(
+                parameters: [2, 0],
+                colonSeparators: [false, false],
+                intermediates: [],
+                final: 0x4A
+            ),
+        ])
     }
 
     @Test("CSI dispatch preserves colon and mixed SGR separators")
@@ -207,7 +223,7 @@ struct CSIParserTests {
 
     @Test("surfaced but uninterpreted CSI leaves terminal state bit-identical")
     func uninterpretedDispatchIsNoOp() throws {
-        for sequence in ["\u{1B}[31m", "\u{1B}[?2026$p", "\u{1B}[9z"] {
+        for sequence in ["\u{1B}[?2026$p", "\u{1B}[9z"] {
             var terminal = try #require(Terminal(columns: 2, rows: 2))
             terminal.feed(Array("AB".utf8))
             let expected = terminal
@@ -216,6 +232,17 @@ struct CSIParserTests {
 
             #expect(terminal == expected)
         }
+    }
+
+    @Test("trailing separators make strict-arity non-SGR dispatches no-ops")
+    func trailingSeparatorStrictArity() throws {
+        var terminal = try #require(Terminal(columns: 2, rows: 1))
+        terminal.feed(Array("AB".utf8))
+        let expected = terminal
+
+        terminal.feed(Array("\u{1B}[2;J".utf8))
+
+        #expect(terminal == expected)
     }
 
     private func dispatches(_ input: String) -> [CSISequence] {
