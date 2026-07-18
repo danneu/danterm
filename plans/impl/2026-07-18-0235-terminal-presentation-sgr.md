@@ -231,6 +231,6 @@ grid-validation helper, fixture runner, `Fixtures/`).
 ## Commit progress
 
 - [x] 1. Interpret semantic SGR pen state
-- [ ] 2. Stamp and preserve cell styles
+- [x] 2. Stamp and preserve cell styles
 - [ ] 3. Apply background-color erase styles
 - [ ] 4. Adopt style fixtures and complete verification

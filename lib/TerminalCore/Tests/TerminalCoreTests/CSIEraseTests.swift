@@ -41,7 +41,7 @@ struct CSIEraseTests {
 
         #expect(terminal.geometry.rows[0].cells.map(\.kind) == fixture.expectedKinds)
         #expect(terminal.geometry.cursor == expectedCursor)
-        expectValidGrid(terminal.geometry)
+        expectValidGrid(terminal)
     }
 
     @Test("EL right resets soft wrap while left and complete preserve it")
@@ -64,7 +64,7 @@ struct CSIEraseTests {
 
             #expect(terminal.geometry.rows[0].isSoftWrapped == expectedWrap)
             #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 2, isPendingWrap: false))
-            expectValidGrid(terminal.geometry)
+            expectValidGrid(terminal)
         }
     }
 
@@ -103,7 +103,7 @@ struct CSIEraseTests {
             #expect(terminal.geometry.rows.allSatisfy { $0.isSoftWrapped == false })
         }
         #expect(terminal.geometry.cursor == expectedCursor)
-        expectValidGrid(terminal.geometry)
+        expectValidGrid(terminal)
     }
 
     @Test("home then ED complete clears the viewport without moving the home cursor")
@@ -117,7 +117,7 @@ struct CSIEraseTests {
         #expect(terminal.geometry.rows.allSatisfy { row in
             row.cells.allSatisfy { $0.kind == .padding } && row.isSoftWrapped == false
         })
-        expectValidGrid(terminal.geometry)
+        expectValidGrid(terminal)
     }
 
     @Test("ED scrollback mode is bit-identical and preserves combining attachment")
@@ -144,7 +144,7 @@ struct CSIEraseTests {
         var combining = try #require(Terminal(columns: 3, rows: 1))
         combining.feed(Array("A\u{1B}[3J\u{0301}".utf8))
         #expect(combining.cell(row: 0, column: 0)?.scalars == ["A", "\u{0301}"])
-        expectValidGrid(combining.geometry)
+        expectValidGrid(combining)
     }
 
     @Test("ECH defaults and zero to one, clamps, widens, and supports two columns")
@@ -167,7 +167,7 @@ struct CSIEraseTests {
                 .narrow, .padding, .padding, .narrow, .narrow, .padding,
             ])
             #expect(terminal.geometry.cursor == expectedCursor)
-            expectValidGrid(terminal.geometry)
+            expectValidGrid(terminal)
         }
 
         var clamped = try #require(Terminal(columns: 6, rows: 1))
@@ -177,14 +177,14 @@ struct CSIEraseTests {
         #expect(clamped.geometry.rows[0].cells.map(\.kind) == [
             .narrow, .narrow, .narrow, .padding, .padding, .padding,
         ])
-        expectValidGrid(clamped.geometry)
+        expectValidGrid(clamped)
 
         var minimal = try #require(Terminal(columns: 2, rows: 1))
         minimal.feed(Array("\u{754C}".utf8))
         minimal.moveCursor(row: 0, column: 0)
         minimal.feed(Array("\u{1B}[X".utf8))
         #expect(minimal.geometry.rows[0].cells.map(\.kind) == [.padding, .padding])
-        expectValidGrid(minimal.geometry)
+        expectValidGrid(minimal)
     }
 
     @Test("ECH resets a mid-row wrap and clears the preceding spacer head")
@@ -200,7 +200,7 @@ struct CSIEraseTests {
         midRow.moveCursor(row: 0, column: 1)
         midRow.feed(Array("\u{1B}[X".utf8))
         #expect(midRow.geometry.rows[0].isSoftWrapped == false)
-        expectValidGrid(midRow.geometry)
+        expectValidGrid(midRow)
 
         var spacer = try #require(Terminal(columns: 4, rows: 2))
         spacer.moveCursor(row: 0, column: 3)
@@ -209,7 +209,7 @@ struct CSIEraseTests {
         spacer.moveCursor(row: 1, column: 0)
         spacer.feed(Array("\u{1B}[X".utf8))
         #expect(spacer.geometry.rows[0].cells[3].kind == .padding)
-        expectValidGrid(spacer.geometry)
+        expectValidGrid(spacer)
     }
 
     @Test("active-grid erases clear pending wrap and combining attachment")
@@ -225,13 +225,13 @@ struct CSIEraseTests {
             terminal.feed(Array("AB".utf8))
             terminal.feed(Array(sequence.utf8))
             #expect(terminal.geometry.cursor.isPendingWrap == false)
-            expectValidGrid(terminal.geometry)
+            expectValidGrid(terminal)
         }
 
         var combining = try #require(Terminal(columns: 4, rows: 1))
         combining.feed(Array("A\u{1B}[X\u{0301}".utf8))
         #expect(combining.cell(row: 0, column: 0)?.scalars == ["A"])
-        expectValidGrid(combining.geometry)
+        expectValidGrid(combining)
     }
 
     @Test("erasure produces padding rather than written spaces")
@@ -246,7 +246,7 @@ struct CSIEraseTests {
         #expect(terminal.screenText == "A B ")
         #expect(terminal.geometry.rows[0].cells[1].kind == .padding)
         #expect(terminal.geometry.cursor == expectedCursor)
-        expectValidGrid(terminal.geometry)
+        expectValidGrid(terminal)
     }
 
     @Test(

@@ -24,7 +24,7 @@ struct TerminalGraphemeWidthTests {
                 .padding, .wideHead, .wideTail, .padding, .padding,
             ])
             #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 3, isPendingWrap: false))
-            expectValidGrid(terminal.geometry)
+            expectValidGrid(terminal)
         }
     }
 
@@ -41,7 +41,7 @@ struct TerminalGraphemeWidthTests {
             .wideHead, .wideTail, .padding, .padding,
         ])
         #expect(midScreen.geometry.cursor == TerminalCursor(row: 1, column: 2, isPendingWrap: false))
-        expectValidGrid(midScreen.geometry)
+        expectValidGrid(midScreen)
 
         var bottom = try #require(Terminal(columns: 4, rows: 2))
         bottom.feed(Array("A".utf8))
@@ -53,7 +53,7 @@ struct TerminalGraphemeWidthTests {
         #expect(bottom.geometry.rows[0].isSoftWrapped)
         #expect(bottom.cell(row: 1, column: 0)?.scalars == ["#", "\u{FE0F}"])
         #expect(bottom.geometry.cursor == TerminalCursor(row: 1, column: 2, isPendingWrap: false))
-        expectValidGrid(bottom.geometry)
+        expectValidGrid(bottom)
 
         var minimum = try #require(Terminal(columns: 2, rows: 2))
         minimum.moveCursor(row: 0, column: 1)
@@ -63,7 +63,7 @@ struct TerminalGraphemeWidthTests {
         #expect(minimum.cell(row: 1, column: 0)?.scalars == ["#", "\u{FE0F}"])
         #expect(minimum.geometry.rows[1].cells.map(\.kind) == [.wideHead, .wideTail])
         #expect(minimum.geometry.cursor == TerminalCursor(row: 1, column: 1, isPendingWrap: true))
-        expectValidGrid(minimum.geometry)
+        expectValidGrid(minimum)
     }
 
     @Test("VS15 downgrades in place and clears stale relocation spacers")
@@ -76,14 +76,14 @@ struct TerminalGraphemeWidthTests {
             .narrow, .padding, .padding, .padding, .padding,
         ])
         #expect(midRow.geometry.cursor == TerminalCursor(row: 0, column: 1, isPendingWrap: false))
-        expectValidGrid(midRow.geometry)
+        expectValidGrid(midRow)
 
         var rightEdge = try #require(Terminal(columns: 2, rows: 1))
         rightEdge.feed(Array("\u{00A9}\u{FE0F}\u{FE0E}".utf8))
 
         #expect(rightEdge.geometry.rows[0].cells.map(\.kind) == [.narrow, .padding])
         #expect(rightEdge.geometry.cursor == TerminalCursor(row: 0, column: 1, isPendingWrap: false))
-        expectValidGrid(rightEdge.geometry)
+        expectValidGrid(rightEdge)
 
         var relocated = try #require(Terminal(columns: 4, rows: 2))
         relocated.moveCursor(row: 0, column: 3)
@@ -96,7 +96,7 @@ struct TerminalGraphemeWidthTests {
             .narrow, .padding, .padding, .padding,
         ])
         #expect(relocated.geometry.cursor == TerminalCursor(row: 1, column: 1, isPendingWrap: false))
-        expectValidGrid(relocated.geometry)
+        expectValidGrid(relocated)
     }
 
     @Test("valid selectors force width while invalid selectors only remain stored")
@@ -109,7 +109,7 @@ struct TerminalGraphemeWidthTests {
             .wideHead, .wideTail, .padding, .padding,
         ])
         #expect(valid.geometry.cursor == TerminalCursor(row: 0, column: 2, isPendingWrap: false))
-        expectValidGrid(valid.geometry)
+        expectValidGrid(valid)
 
         var invalid = try #require(Terminal(columns: 4, rows: 1))
         invalid.feed(Array("A\u{FE0E}\u{FE0F}".utf8))
@@ -118,7 +118,7 @@ struct TerminalGraphemeWidthTests {
         #expect(invalid.geometry.rows[0].cells.map(\.kind) == [
             .narrow, .padding, .padding, .padding,
         ])
-        expectValidGrid(invalid.geometry)
+        expectValidGrid(invalid)
     }
 
     @Test("Regional Indicators are wide alone and in paired clusters")
@@ -133,7 +133,7 @@ struct TerminalGraphemeWidthTests {
             .wideHead, .wideTail, .wideHead, .wideTail, .padding, .padding, .padding,
         ])
         #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 4, isPendingWrap: false))
-        expectValidGrid(terminal.geometry)
+        expectValidGrid(terminal)
     }
 
     @Test("upgraded clusters remain atomic under overwrite and erase")
@@ -150,7 +150,7 @@ struct TerminalGraphemeWidthTests {
             #expect(overwritten.geometry.rows[0].cells[1].kind == (
                 targetColumn == 1 ? .narrow : .padding
             ))
-            expectValidGrid(overwritten.geometry)
+            expectValidGrid(overwritten)
         }
 
         var erased = try #require(Terminal(columns: 4, rows: 1))
@@ -158,7 +158,7 @@ struct TerminalGraphemeWidthTests {
         erased.eraseCells(row: 0, columns: 1..<2)
 
         #expect(erased.geometry.rows[0].cells.prefix(2).allSatisfy { $0.kind == .padding })
-        expectValidGrid(erased.geometry)
+        expectValidGrid(erased)
     }
 
     @Test("joining positive-width scalars upgrade a narrow cluster")
@@ -176,7 +176,7 @@ struct TerminalGraphemeWidthTests {
             #expect(terminal.geometry.rows[0].cells.map(\.kind) == [
                 .wideHead, .wideTail, .padding, .padding,
             ])
-            expectValidGrid(terminal.geometry)
+            expectValidGrid(terminal)
         }
     }
 
@@ -196,7 +196,7 @@ struct TerminalGraphemeWidthTests {
             #expect(terminal.geometry.rows[0].cells.map(\.kind) == [
                 .narrow, .padding, .padding, .padding,
             ])
-            expectValidGrid(terminal.geometry)
+            expectValidGrid(terminal)
         }
     }
 

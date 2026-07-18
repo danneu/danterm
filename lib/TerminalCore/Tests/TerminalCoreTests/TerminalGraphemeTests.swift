@@ -186,20 +186,20 @@ struct TerminalGraphemeTests {
 
             #expect(terminal.geometry.rows[0].cells[0].kind == (targetColumn == 0 ? .narrow : .padding))
             #expect(terminal.geometry.rows[0].cells[1].kind == (targetColumn == 1 ? .narrow : .padding))
-            expectValidGrid(terminal.geometry)
+            expectValidGrid(terminal)
         }
 
         var erased = try #require(Terminal(columns: 4, rows: 1))
         erased.feed(Array(family.utf8))
         erased.eraseCells(row: 0, columns: 1..<2)
         #expect(erased.geometry.rows[0].cells.prefix(2).allSatisfy { $0.kind == .padding })
-        expectValidGrid(erased.geometry)
+        expectValidGrid(erased)
 
         var scrolled = try #require(Terminal(columns: 4, rows: 2))
         scrolled.feed(Array(family.utf8))
         scrolled.feed([0x0A, 0x0A])
         #expect(scrolled.screenText.contains(family) == false)
-        expectValidGrid(scrolled.geometry)
+        expectValidGrid(scrolled)
     }
 
     @Test("grapheme-biased terminal bytes recover and preserve grid validity")
@@ -227,7 +227,7 @@ struct TerminalGraphemeTests {
             terminal.feed(bytes + [0x18, 0x7C])
 
             #expect(terminal.screenText.unicodeScalars.contains("|"))
-            expectValidGrid(terminal.geometry)
+            expectValidGrid(terminal)
         }
     }
 

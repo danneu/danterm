@@ -218,7 +218,7 @@ struct TerminalTests {
 
             #expect(terminal.geometry.rows[0].cells[0].kind == (targetColumn == 0 ? .narrow : .padding))
             #expect(terminal.geometry.rows[0].cells[1].kind == (targetColumn == 1 ? .narrow : .padding))
-            expectValidGrid(terminal.geometry)
+            expectValidGrid(terminal)
         }
     }
 
@@ -234,7 +234,7 @@ struct TerminalTests {
             ? [.wideHead, .wideTail]
             : [.padding, .wideHead, .wideTail, .padding, .padding, .padding]
         #expect(terminal.geometry.rows[0].cells.map(\.kind) == expected)
-        expectValidGrid(terminal.geometry)
+        expectValidGrid(terminal)
     }
 
     @Test("erase widens a split range to full wide pairs", arguments: [2, 6])
@@ -246,7 +246,7 @@ struct TerminalTests {
 
         #expect(terminal.geometry.rows[0].cells[0].kind == .padding)
         #expect(terminal.geometry.rows[0].cells[1].kind == .padding)
-        expectValidGrid(terminal.geometry)
+        expectValidGrid(terminal)
     }
 
     @Test("clearing a wrapped pair removes its previous-row spacer head", arguments: [2, 6])
@@ -259,7 +259,7 @@ struct TerminalTests {
         terminal.feed(Array("X".utf8))
 
         #expect(terminal.geometry.rows[0].cells[columns - 1].kind == .padding)
-        expectValidGrid(terminal.geometry)
+        expectValidGrid(terminal)
     }
 
     @Test("bottom scrolling moves wrap flags and wide rows whole", arguments: [2, 6])
@@ -272,7 +272,7 @@ struct TerminalTests {
         #expect(terminal.geometry.rows[0].cells[0].kind == .wideHead)
         #expect(terminal.geometry.rows[0].isSoftWrapped == false)
         #expect(terminal.geometry.rows[1].cells.allSatisfy { $0.kind == .padding })
-        expectValidGrid(terminal.geometry)
+        expectValidGrid(terminal)
 
         terminal.feed([0x0A])
         #expect(terminal.geometry.rows.allSatisfy { row in
@@ -282,7 +282,7 @@ struct TerminalTests {
         #expect(retained.cells[0].kind == .wideHead)
         #expect(retained.cells[1].kind == .wideTail)
         #expect(retained.isSoftWrapped == false)
-        expectValidGrid(terminal.geometry)
+        expectValidGrid(terminal)
     }
 
     @Test("every representative chunk split produces identical terminal state")
@@ -364,7 +364,7 @@ struct TerminalTests {
             terminal.feed([0x18, 0x7C])
 
             #expect(terminal.screenText.contains("|"))
-            expectValidGrid(terminal.geometry)
+            expectValidGrid(terminal)
         }
     }
 
@@ -390,7 +390,7 @@ struct TerminalTests {
             terminal.feed([0x18, 0x7C])
 
             #expect(terminal.screenText.contains("|"))
-            expectValidGrid(terminal.geometry)
+            expectValidGrid(terminal)
         }
     }
 

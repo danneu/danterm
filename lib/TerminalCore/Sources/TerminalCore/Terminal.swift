@@ -6,6 +6,7 @@ public struct Terminal: Equatable, Sendable {
     private struct GridCell: Equatable, Sendable {
         var kind: TerminalCellKind = .padding
         var scalars: [Unicode.Scalar] = []
+        var style = TerminalStyle()
     }
 
     /// Moves soft-wrap identity with its cells during viewport scrolling.
@@ -148,7 +149,9 @@ public struct Terminal: Equatable, Sendable {
         guard scrollbackRows.indices.contains(index) else { return nil }
         let row = scrollbackRows[index]
         return TerminalScrollbackRow(
-            cells: row.cells.map { TerminalCell(kind: $0.kind, scalars: $0.scalars) },
+            cells: row.cells.map {
+                TerminalCell(kind: $0.kind, scalars: $0.scalars, style: $0.style)
+            },
             isSoftWrapped: row.isSoftWrapped
         )
     }
@@ -194,7 +197,7 @@ public struct Terminal: Equatable, Sendable {
             return nil
         }
         let cell = rows[row].cells[column]
-        return TerminalCell(kind: cell.kind, scalars: cell.scalars)
+        return TerminalCell(kind: cell.kind, scalars: cell.scalars, style: cell.style)
     }
 
     /// Positions future parser actions while preserving the same cursor validity rules.
@@ -416,7 +419,10 @@ public struct Terminal: Equatable, Sendable {
                         retainedSourceKeys.insert(source.key)
                     }
                     currentLine.units.append(ReflowUnit(
-                        cells: [cell, GridCell(kind: .wideTail, scalars: [])],
+                        cells: [
+                            cell,
+                            GridCell(kind: .wideTail, scalars: [], style: cell.style),
+                        ],
                         sourceOffsets: sources
                     ))
                     logicalOffset += 2
@@ -508,7 +514,11 @@ public struct Terminal: Equatable, Sendable {
                 column = 0
             }
             if unit.cells.count == 2, columns - column == 1 {
-                packedRows[row].cells[column] = GridCell(kind: .spacerHead, scalars: [])
+                packedRows[row].cells[column] = GridCell(
+                    kind: .spacerHead,
+                    scalars: [],
+                    style: unit.cells[0].style
+                )
                 packedRows[row].isSoftWrapped = true
                 packedRows.append(makeBlankRow(columns: columns))
                 row += 1
@@ -978,11 +988,16 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func upgradeClusterToWide(at target: CellPosition) -> CellPosition {
         let scalars = rows[target.row].cells[target.column].scalars
+        let style = rows[target.row].cells[target.column].style
         var destination = target
 
         if target.column == columnCount - 1 {
             clearCellAndPair(row: target.row, column: target.column)
-            rows[target.row].cells[target.column] = GridCell(kind: .spacerHead, scalars: [])
+            rows[target.row].cells[target.column] = GridCell(
+                kind: .spacerHead,
+                scalars: [],
+                style: style
+            )
             rows[target.row].isSoftWrapped = true
             cursor = target
             advanceToNextRow()
@@ -996,11 +1011,13 @@ public struct Terminal: Equatable, Sendable {
 
         rows[destination.row].cells[destination.column] = GridCell(
             kind: .wideHead,
-            scalars: scalars
+            scalars: scalars,
+            style: style
         )
         rows[destination.row].cells[destination.column + 1] = GridCell(
             kind: .wideTail,
-            scalars: []
+            scalars: [],
+            style: style
         )
         advanceCursorPastWideCell(at: destination)
         return destination
@@ -1023,7 +1040,11 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func printNarrow(_ scalar: Unicode.Scalar) {
         clearCellAndPair(row: cursor.row, column: cursor.column)
-        rows[cursor.row].cells[cursor.column] = GridCell(kind: .narrow, scalars: [scalar])
+        rows[cursor.row].cells[cursor.column] = GridCell(
+            kind: .narrow,
+            scalars: [scalar],
+            style: currentStyle
+        )
         clusterContext = ClusterContext(target: cursor, previousScalar: scalar)
 
         if cursor.column == columnCount - 1 {
@@ -1037,7 +1058,11 @@ public struct Terminal: Equatable, Sendable {
         var preservesWrappedSpacer = false
         if cursor.column == columnCount - 1 {
             clearCellAndPair(row: cursor.row, column: cursor.column)
-            rows[cursor.row].cells[cursor.column] = GridCell(kind: .spacerHead, scalars: [])
+            rows[cursor.row].cells[cursor.column] = GridCell(
+                kind: .spacerHead,
+                scalars: [],
+                style: currentStyle
+            )
             rows[cursor.row].isSoftWrapped = true
             advanceToNextRow()
             cursor.column = 0
@@ -1054,8 +1079,16 @@ public struct Terminal: Equatable, Sendable {
             column: cursor.column + 1,
             clearsPreviousSpacer: preservesWrappedSpacer == false
         )
-        rows[cursor.row].cells[cursor.column] = GridCell(kind: .wideHead, scalars: [scalar])
-        rows[cursor.row].cells[cursor.column + 1] = GridCell(kind: .wideTail, scalars: [])
+        rows[cursor.row].cells[cursor.column] = GridCell(
+            kind: .wideHead,
+            scalars: [scalar],
+            style: currentStyle
+        )
+        rows[cursor.row].cells[cursor.column + 1] = GridCell(
+            kind: .wideTail,
+            scalars: [],
+            style: currentStyle
+        )
         clusterContext = ClusterContext(target: cursor, previousScalar: scalar)
         advanceCursorPastWideCell(at: cursor)
     }
