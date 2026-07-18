@@ -63,7 +63,7 @@ public struct TerminalCellGeometry: Equatable, Sendable {
 
 /// Provides stable viewport geometry for tests and future rendering boundaries.
 public struct TerminalGeometry: Equatable, Sendable {
-    /// Fixed number of columns in every row.
+    /// Current number of columns in every row.
     public let columns: Int
 
     /// Viewport rows in top-to-bottom order.

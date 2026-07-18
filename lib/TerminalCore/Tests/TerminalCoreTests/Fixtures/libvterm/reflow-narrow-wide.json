@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/69screen_reflow.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Resize narrower can create continuation lines",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": [
+      "DanTerm inserts a spacer head rather than splitting a wide cell at the odd-width boundary."
+    ]
+  },
+  "initial": { "columns": 6, "rows": 3 },
+  "events": [
+    { "type": "feed", "text": "ab\u754ccd" },
+    { "type": "resize", "columns": 3, "rows": 3 },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "ab \n\u754cc\nd  ",
+        "cellKinds": [
+          ["narrow", "narrow", "spacer-head"],
+          ["wide-head", "wide-tail", "narrow"],
+          ["narrow", "padding", "padding"]
+        ],
+        "softWraps": [true, true, false],
+        "cursor": { "row": 2, "column": 1, "pendingWrap": false },
+        "scrollbackCount": 0,
+        "fullHistoryText": "ab\u754ccd"
+      }
+    }
+  ]
+}

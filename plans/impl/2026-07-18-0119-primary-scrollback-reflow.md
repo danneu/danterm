@@ -370,4 +370,4 @@ schema.
 ## Commit progress
 
 - [x] 1. Retain primary scrollback and add the full-history replay seam
-- [ ] 2. Implement primary-screen resize reflow
+- [x] 2. Implement primary-screen resize reflow

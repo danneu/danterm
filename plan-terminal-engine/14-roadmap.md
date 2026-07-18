@@ -39,6 +39,10 @@ mean.
     Unicode grapheme segmentation, break-driven cluster cells, deterministic
     emoji width, and atomic width transitions. See the
     [implementation plan](../plans/impl/2026-07-17-2342-grapheme-cluster-assembly-emoji-width.md).
+  - [x] **Slice 4: Primary-screen scrollback and resize reflow.** Retains exact
+    visual rows and hard/soft identity, reflows the one-stream primary history
+    with cursor attachment, and adopts neutral libvterm resize fixtures. See the
+    [implementation plan](../plans/impl/2026-07-18-0119-primary-scrollback-reflow.md).
   - [ ] The pure state machine in [Terminal core](04-terminal-core.md) handles the
     control, screen, mode, and style behavior required by the viability slice.
   - [ ] Its behavior is deterministic, independent of input chunking, and proven

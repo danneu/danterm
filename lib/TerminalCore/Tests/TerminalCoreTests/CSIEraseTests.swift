@@ -284,30 +284,4 @@ struct CSIEraseTests {
         let expectedKinds: [TerminalCellKind]
     }
 
-    private func expectValidGrid(
-        _ geometry: TerminalGeometry,
-        sourceLocation: SourceLocation = #_sourceLocation
-    ) {
-        for row in geometry.rows {
-            for column in row.cells.indices {
-                switch row.cells[column].kind {
-                case .wideHead:
-                    #expect(column + 1 < row.cells.count, sourceLocation: sourceLocation)
-                    if column + 1 < row.cells.count {
-                        #expect(row.cells[column + 1].kind == .wideTail, sourceLocation: sourceLocation)
-                    }
-                case .wideTail:
-                    #expect(column > 0, sourceLocation: sourceLocation)
-                    if column > 0 {
-                        #expect(row.cells[column - 1].kind == .wideHead, sourceLocation: sourceLocation)
-                    }
-                case .spacerHead:
-                    #expect(column == row.cells.count - 1, sourceLocation: sourceLocation)
-                    #expect(row.isSoftWrapped, sourceLocation: sourceLocation)
-                case .padding, .narrow:
-                    break
-                }
-            }
-        }
-    }
 }

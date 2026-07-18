@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/16state_resize.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Resize grow doesn't cancel phantom",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": []
+  },
+  "initial": { "columns": 6, "rows": 2 },
+  "events": [
+    { "type": "feed", "text": "abcdef" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "abcdef\n      ",
+        "softWraps": [false, false],
+        "cursor": { "row": 0, "column": 5, "pendingWrap": true },
+        "scrollbackCount": 0,
+        "fullHistoryText": "abcdef"
+      }
+    },
+    { "type": "resize", "columns": 8, "rows": 2 },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "abcdef  \n        ",
+        "softWraps": [false, false],
+        "cursor": { "row": 0, "column": 6, "pendingWrap": false },
+        "scrollbackCount": 0,
+        "fullHistoryText": "abcdef"
+      }
+    }
+  ]
+}

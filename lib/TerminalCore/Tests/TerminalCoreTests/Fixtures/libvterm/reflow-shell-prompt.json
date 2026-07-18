@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/69screen_reflow.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Shell wrapped prompt behaviour",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": [
+      "DanTerm reflows scrollback and viewport as one stream, so growth pulls the prompt head back."
+    ]
+  },
+  "initial": { "columns": 4, "rows": 2 },
+  "events": [
+    { "type": "feed", "text": "abcdefghij" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "efgh\nij  ",
+        "softWraps": [true, false],
+        "cursor": { "row": 1, "column": 2, "pendingWrap": false },
+        "scrollbackCount": 1,
+        "fullHistoryText": "abcdefghij"
+      }
+    },
+    { "type": "resize", "columns": 8, "rows": 2 },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "abcdefgh\nij      ",
+        "softWraps": [true, false],
+        "cursor": { "row": 1, "column": 2, "pendingWrap": false },
+        "scrollbackCount": 0,
+        "fullHistoryText": "abcdefghij"
+      }
+    }
+  ]
+}

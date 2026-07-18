@@ -27,8 +27,49 @@ public struct Terminal: Equatable, Sendable {
         var breakState = GraphemeBreakState()
     }
 
-    private let columnCount: Int
-    private let rowCount: Int
+    /// Carries one atomic cell unit and the old coordinates that must follow it.
+    private struct ReflowUnit {
+        var cells: [GridCell]
+        var sourceOffsets: [(key: Int, offset: Int)]
+    }
+
+    /// Reconstructs one hard-delimited logical line only for the duration of reflow.
+    private struct ReflowLine {
+        var units: [ReflowUnit] = []
+    }
+
+    /// Relates an old visual row to its transient logical line and boundary.
+    private struct ReflowRowMetadata {
+        var line: Int
+        var boundaryOffset: Int
+        var retainedEnd: Int
+        var firstSourceKey: Int?
+    }
+
+    /// Distinguishes cursor meanings that require different resize attachment rules.
+    private enum ReflowCursorAnchor {
+        case cell(key: Int)
+        case trailingPadding(line: Int, distance: Int, allPaddingColumn: Int?)
+        case boundary(line: Int, offset: Int)
+    }
+
+    /// Records a cursor destination before the rebuilt stream is split into regions.
+    private struct ReflowDestination {
+        var row: Int
+        var column: Int
+        var isPendingWrap: Bool
+    }
+
+    /// Holds one packed logical line and the attachment lookup produced with it.
+    private struct PackedReflowLine {
+        var rows: [GridRow]
+        var cellDestinations: [Int: ReflowDestination]
+        var boundaryDestinations: [Int: ReflowDestination]
+        var contentEnd: ReflowDestination
+    }
+
+    private var columnCount: Int
+    private var rowCount: Int
     private var scrollbackRows: [GridRow] = []
     private var rows: [GridRow]
     private var cursor = CellPosition(row: 0, column: 0)
@@ -60,7 +101,21 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    /// Renders the fixed viewport as unstyled text, representing padding as spaces.
+    /// Resizes the primary screen while preserving its logical history and cursor attachment.
+    public mutating func resize(columns: Int, rows: Int) {
+        guard columns >= 2, rows >= 1 else { return }
+        guard columns != columnCount || rows != rowCount else { return }
+
+        if rows != rowCount {
+            resizeHeight(to: rows)
+        }
+        if columns != columnCount {
+            resizeWidth(to: columns)
+        }
+        clusterContext = nil
+    }
+
+    /// Renders the current viewport as unstyled text, representing padding as spaces.
     public var screenText: String {
         rows.map { row in
             var result = ""
@@ -166,6 +221,344 @@ public struct Terminal: Equatable, Sendable {
             clearCellAndPair(row: row, column: column)
         }
         clusterContext = nil
+    }
+
+    private mutating func resizeHeight(to newRowCount: Int) {
+        if newRowCount < rowCount {
+            while rows.count > newRowCount,
+                  rows.indices.last.map({ $0 > cursor.row }) == true,
+                  let last = rows.last,
+                  last.isSoftWrapped == false,
+                  last.cells.allSatisfy({ $0.kind == .padding })
+            {
+                rows.removeLast()
+            }
+
+            let displacedCount = rows.count - newRowCount
+            if displacedCount > 0 {
+                scrollbackRows.append(contentsOf: rows.prefix(displacedCount))
+                rows.removeFirst(displacedCount)
+                if cursor.row < displacedCount {
+                    cursor.row = 0
+                } else {
+                    cursor.row -= displacedCount
+                }
+            }
+        } else {
+            let addedCount = newRowCount - rowCount
+            var pulledCount = 0
+            if cursor.row == rowCount - 1 {
+                pulledCount = min(addedCount, scrollbackRows.count)
+                if pulledCount > 0 {
+                    let split = scrollbackRows.count - pulledCount
+                    let pulled = Array(scrollbackRows[split...])
+                    scrollbackRows.removeLast(pulledCount)
+                    rows.insert(contentsOf: pulled, at: 0)
+                    cursor.row += pulledCount
+                }
+            }
+            rows.append(contentsOf: (pulledCount..<addedCount).map { _ in
+                makeBlankRow(columns: columnCount)
+            })
+        }
+        rowCount = newRowCount
+    }
+
+    private mutating func resizeWidth(to newColumnCount: Int) {
+        let oldColumnCount = columnCount
+        let oldBottomDistance = rowCount - 1 - cursor.row
+        let oldCursorGlobalRow = scrollbackRows.count + cursor.row
+        let fullStream = scrollbackRows + rows
+        let lastContentRow = fullStream.lastIndex(where: rowContainsContent) ?? 0
+        let retainedLastRow = max(oldCursorGlobalRow, lastContentRow)
+        let sourceRows = Array(fullStream[...retainedLastRow])
+        let reconstruction = reconstructLogicalLines(
+            from: sourceRows,
+            cursorGlobalRow: oldCursorGlobalRow,
+            viewportTopGlobalRow: scrollbackRows.count,
+            oldColumnCount: oldColumnCount
+        )
+
+        var rebuiltRows: [GridRow] = []
+        var cursorDestination: ReflowDestination?
+        var viewportTopDestinationRow = 0
+        for (lineIndex, line) in reconstruction.lines.enumerated() {
+            let packed = pack(line: line, columns: newColumnCount)
+            let baseRow = rebuiltRows.count
+
+            if lineIndex == reconstruction.viewportTopLine {
+                if let key = reconstruction.viewportTopKey,
+                   let local = packed.cellDestinations[key]
+                {
+                    viewportTopDestinationRow = baseRow + local.row
+                } else {
+                    viewportTopDestinationRow = baseRow
+                }
+            }
+
+            switch reconstruction.anchor {
+            case let .cell(key) where lineIndex == reconstruction.cursorLine:
+                if let local = packed.cellDestinations[key] {
+                    cursorDestination = ReflowDestination(
+                        row: baseRow + local.row,
+                        column: local.column,
+                        isPendingWrap: false
+                    )
+                }
+            case let .trailingPadding(line, distance, allPaddingColumn) where line == lineIndex:
+                if let allPaddingColumn {
+                    cursorDestination = ReflowDestination(
+                        row: baseRow,
+                        column: min(allPaddingColumn, newColumnCount - 1),
+                        isPendingWrap: false
+                    )
+                } else {
+                    cursorDestination = ReflowDestination(
+                        row: baseRow + packed.contentEnd.row,
+                        column: min(packed.contentEnd.column + distance, newColumnCount - 1),
+                        isPendingWrap: false
+                    )
+                }
+            case let .boundary(line, offset) where line == lineIndex:
+                if let local = packed.boundaryDestinations[offset] {
+                    cursorDestination = ReflowDestination(
+                        row: baseRow + local.row,
+                        column: local.column,
+                        isPendingWrap: local.isPendingWrap
+                    )
+                }
+            default:
+                break
+            }
+            rebuiltRows.append(contentsOf: packed.rows)
+        }
+
+        let destination = cursorDestination ?? ReflowDestination(
+            row: 0,
+            column: min(cursor.column, newColumnCount - 1),
+            isPendingWrap: false
+        )
+        let continuationIncrease = max(
+            0,
+            destination.row - viewportTopDestinationRow - cursor.row
+        )
+        let desiredBottomDistance = max(0, oldBottomDistance - continuationIncrease)
+        let requiredRowCount = max(
+            rowCount,
+            destination.row + desiredBottomDistance + 1
+        )
+        while rebuiltRows.count < requiredRowCount {
+            rebuiltRows.append(makeBlankRow(columns: newColumnCount))
+        }
+
+        let viewportStart = rebuiltRows.count - rowCount
+        scrollbackRows = Array(rebuiltRows[..<viewportStart])
+        rows = Array(rebuiltRows[viewportStart...])
+        columnCount = newColumnCount
+        cursor = CellPosition(
+            row: max(0, destination.row - viewportStart),
+            column: destination.column
+        )
+        isPendingWrap = destination.isPendingWrap
+    }
+
+    private func reconstructLogicalLines(
+        from sourceRows: [GridRow],
+        cursorGlobalRow: Int,
+        viewportTopGlobalRow: Int,
+        oldColumnCount: Int
+    ) -> (
+        lines: [ReflowLine],
+        anchor: ReflowCursorAnchor,
+        cursorLine: Int,
+        viewportTopLine: Int,
+        viewportTopKey: Int?
+    ) {
+        var lines: [ReflowLine] = []
+        var currentLine = ReflowLine()
+        var metadata: [ReflowRowMetadata] = []
+        var logicalOffset = 0
+        var pendingSpacerKeys: [Int] = []
+        var retainedSourceKeys = Set<Int>()
+
+        for (rowIndex, row) in sourceRows.enumerated() {
+            let retainedEnd = retainedContentEnd(in: row)
+            let iterationEnd = row.isSoftWrapped ? oldColumnCount : retainedEnd
+            var column = 0
+            var firstSourceKey: Int?
+            while column < iterationEnd {
+                let cell = row.cells[column]
+                let key = sourceKey(row: rowIndex, column: column, columns: oldColumnCount)
+                switch cell.kind {
+                case .spacerHead:
+                    firstSourceKey = firstSourceKey ?? key
+                    pendingSpacerKeys.append(key)
+                    column += 1
+                case .wideHead:
+                    firstSourceKey = firstSourceKey ?? key
+                    var sources = pendingSpacerKeys.map { (key: $0, offset: 0) }
+                    pendingSpacerKeys.removeAll(keepingCapacity: true)
+                    sources.append((key: key, offset: 0))
+                    retainedSourceKeys.insert(key)
+                    if column + 1 < row.cells.count {
+                        let tailKey = sourceKey(
+                            row: rowIndex,
+                            column: column + 1,
+                            columns: oldColumnCount
+                        )
+                        sources.append((key: tailKey, offset: 1))
+                        retainedSourceKeys.insert(tailKey)
+                    }
+                    for source in sources {
+                        retainedSourceKeys.insert(source.key)
+                    }
+                    currentLine.units.append(ReflowUnit(
+                        cells: [cell, GridCell(kind: .wideTail, scalars: [])],
+                        sourceOffsets: sources
+                    ))
+                    logicalOffset += 2
+                    column += 2
+                case .narrow, .padding:
+                    firstSourceKey = firstSourceKey ?? key
+                    currentLine.units.append(ReflowUnit(
+                        cells: [cell],
+                        sourceOffsets: [(key: key, offset: 0)]
+                    ))
+                    retainedSourceKeys.insert(key)
+                    logicalOffset += 1
+                    column += 1
+                case .wideTail:
+                    column += 1
+                }
+            }
+
+            metadata.append(ReflowRowMetadata(
+                line: lines.count,
+                boundaryOffset: logicalOffset,
+                retainedEnd: retainedEnd,
+                firstSourceKey: firstSourceKey
+            ))
+            if row.isSoftWrapped == false {
+                lines.append(currentLine)
+                currentLine = ReflowLine()
+                logicalOffset = 0
+                pendingSpacerKeys.removeAll(keepingCapacity: true)
+            }
+        }
+        if sourceRows.last?.isSoftWrapped == true {
+            lines.append(currentLine)
+        }
+
+        let cursorMetadata = metadata[cursorGlobalRow]
+        let viewportTopMetadata = metadata[viewportTopGlobalRow]
+        let cursorKey = sourceKey(
+            row: cursorGlobalRow,
+            column: cursor.column,
+            columns: oldColumnCount
+        )
+        let anchor: ReflowCursorAnchor
+        if isPendingWrap {
+            anchor = .boundary(
+                line: cursorMetadata.line,
+                offset: cursorMetadata.boundaryOffset
+            )
+        } else if retainedSourceKeys.contains(cursorKey) {
+            anchor = .cell(key: cursorKey)
+        } else if cursorMetadata.retainedEnd == 0 {
+            anchor = .trailingPadding(
+                line: cursorMetadata.line,
+                distance: 0,
+                allPaddingColumn: cursor.column
+            )
+        } else {
+            anchor = .trailingPadding(
+                line: cursorMetadata.line,
+                distance: max(0, cursor.column - cursorMetadata.retainedEnd),
+                allPaddingColumn: nil
+            )
+        }
+
+        return (
+            lines,
+            anchor,
+            cursorMetadata.line,
+            viewportTopMetadata.line,
+            viewportTopMetadata.firstSourceKey
+        )
+    }
+
+    private func pack(line: ReflowLine, columns: Int) -> PackedReflowLine {
+        var packedRows = [makeBlankRow(columns: columns)]
+        var cellDestinations: [Int: ReflowDestination] = [:]
+        var boundaryDestinations = [
+            0: ReflowDestination(row: 0, column: 0, isPendingWrap: false),
+        ]
+        var row = 0
+        var column = 0
+        var logicalOffset = 0
+
+        for unit in line.units {
+            if column == columns {
+                packedRows[row].isSoftWrapped = true
+                packedRows.append(makeBlankRow(columns: columns))
+                row += 1
+                column = 0
+            }
+            if unit.cells.count == 2, columns - column == 1 {
+                packedRows[row].cells[column] = GridCell(kind: .spacerHead, scalars: [])
+                packedRows[row].isSoftWrapped = true
+                packedRows.append(makeBlankRow(columns: columns))
+                row += 1
+                column = 0
+            }
+
+            for (offset, cell) in unit.cells.enumerated() {
+                packedRows[row].cells[column + offset] = cell
+            }
+            for source in unit.sourceOffsets {
+                cellDestinations[source.key] = ReflowDestination(
+                    row: row,
+                    column: column + source.offset,
+                    isPendingWrap: false
+                )
+            }
+            column += unit.cells.count
+            logicalOffset += unit.cells.count
+            boundaryDestinations[logicalOffset] = column == columns
+                ? ReflowDestination(row: row, column: columns - 1, isPendingWrap: true)
+                : ReflowDestination(row: row, column: column, isPendingWrap: false)
+        }
+
+        return PackedReflowLine(
+            rows: packedRows,
+            cellDestinations: cellDestinations,
+            boundaryDestinations: boundaryDestinations,
+            contentEnd: ReflowDestination(
+                row: row,
+                column: column,
+                isPendingWrap: false
+            )
+        )
+    }
+
+    private func retainedContentEnd(in row: GridRow) -> Int {
+        guard let lastContent = row.cells.lastIndex(where: { cell in
+            cell.kind == .narrow || cell.kind == .wideHead
+        }) else {
+            return 0
+        }
+        return min(
+            row.cells.count,
+            lastContent + (row.cells[lastContent].kind == .wideHead ? 2 : 1)
+        )
+    }
+
+    private func sourceKey(row: Int, column: Int, columns: Int) -> Int {
+        row * columns + column
+    }
+
+    private func makeBlankRow(columns: Int) -> GridRow {
+        GridRow(cells: (0..<columns).map { _ in GridCell() })
     }
 
     private mutating func dispatchCSI(_ sequence: CSISequence) {

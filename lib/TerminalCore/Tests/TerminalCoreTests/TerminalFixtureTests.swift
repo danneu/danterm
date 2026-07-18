@@ -119,6 +119,11 @@ struct TerminalFixtureTests {
                 case .split:
                     terminal.feed(bytes)
                 }
+            case "resize":
+                terminal.resize(
+                    columns: try #require(event.columns),
+                    rows: try #require(event.rows)
+                )
             case "expect":
                 try assert(event.expectation, against: terminal)
             default:
@@ -240,12 +245,16 @@ private struct FixtureEvent: Decodable {
     let type: String
     let text: String?
     let hex: String?
+    let columns: Int?
+    let rows: Int?
     let expectation: FixtureExpectation?
 
     private enum CodingKeys: String, CodingKey {
         case type
         case text
         case hex
+        case columns
+        case rows
         case expectation = "expect"
     }
 
