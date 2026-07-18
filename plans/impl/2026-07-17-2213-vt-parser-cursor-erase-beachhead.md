@@ -253,7 +253,7 @@ events/damage, scrollback, and tab-stop manipulation.
 
 - [x] 1. Surface bounded, chunk-invariant CSI dispatch values
 - [x] 2. Interpret cursor movement and positioning dispatches
-- [ ] 3. Implement erase semantics and integrated recovery proofs
+- [x] 3. Implement erase semantics and integrated recovery proofs
 
 ## Implementation notes
 

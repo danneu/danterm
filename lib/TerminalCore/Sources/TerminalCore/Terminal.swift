@@ -162,9 +162,75 @@ public struct Terminal: Equatable, Sendable {
                 row: absolutePosition(sequence.parameters.first),
                 column: absolutePosition(sequence.parameters.dropFirst().first)
             )
+        case 0x4A:
+            guard sequence.parameters.count <= 1 else { return }
+            eraseDisplay(mode: sequence.parameters.first ?? 0)
+        case 0x4B:
+            guard sequence.parameters.count <= 1 else { return }
+            let mode = sequence.parameters.first ?? 0
+            guard mode <= 2 else { return }
+            eraseLine(mode: mode)
+        case 0x58:
+            guard let amount = movementAmount(sequence.parameters) else { return }
+            eraseCharacters(amount: amount)
         default:
             break
         }
+    }
+
+    private mutating func eraseLine(mode: UInt16) {
+        switch mode {
+        case 0:
+            eraseCells(row: cursor.row, columns: cursor.column..<columnCount)
+            rows[cursor.row].isSoftWrapped = false
+        case 1:
+            eraseCells(row: cursor.row, columns: 0..<(cursor.column + 1))
+        case 2:
+            eraseCells(row: cursor.row, columns: 0..<columnCount)
+        default:
+            return
+        }
+        clearPendingMotionState()
+    }
+
+    private mutating func eraseDisplay(mode: UInt16) {
+        switch mode {
+        case 0:
+            eraseLine(mode: 0)
+            if cursor.row + 1 < rowCount {
+                for row in (cursor.row + 1)..<rowCount {
+                    eraseEntireRow(row)
+                }
+            }
+        case 1:
+            if cursor.row > 0 {
+                for row in 0..<cursor.row {
+                    eraseEntireRow(row)
+                }
+            }
+            eraseLine(mode: 1)
+        case 2:
+            for row in rows.indices {
+                eraseEntireRow(row)
+            }
+            clearPendingMotionState()
+        case 3:
+            break
+        default:
+            return
+        }
+    }
+
+    private mutating func eraseCharacters(amount: Int) {
+        let upper = min(cursor.column + amount, columnCount)
+        eraseCells(row: cursor.row, columns: cursor.column..<upper)
+        rows[cursor.row].isSoftWrapped = false
+        clearPendingMotionState()
+    }
+
+    private mutating func eraseEntireRow(_ row: Int) {
+        eraseCells(row: row, columns: 0..<columnCount)
+        rows[row].isSoftWrapped = false
     }
 
     private func movementAmount(_ parameters: [UInt16]) -> Int? {
