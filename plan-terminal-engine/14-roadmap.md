@@ -38,6 +38,11 @@ mean.
   - Reflow preserves logical content, hard line boundaries, cursor attachment,
     and live/scrolled viewport anchors across the slice's width and height
     changes.
+  - The Milestone 2 tranche in
+    [External terminal test research](../docs/research/1-external-tests.md)
+    establishes structure-insensitive replay and adopts or classifies
+    applicable parser, Unicode, grid, and reflow fixtures early enough to
+    inform the core's public contracts.
 
 - [ ] **3. Integrate PTY process lifecycle**
   - [PTY and process lifecycle](07-pty-process-lifecycle.md) proves launch,
@@ -55,6 +60,11 @@ mean.
     [Migration and app boundary](02-migration-and-boundary.md).
   - The slice is reproducible and its terminal-core behavior has deterministic
     proof at the lowest practical layer.
+  - Selected external recordings from
+    [External terminal test research](../docs/research/1-external-tests.md)
+    replay through the headless core and interactive slice; any optional
+    differential or vttest experiment improves diagnostic evidence without
+    becoming an unrecorded viability dependency.
 
 - [ ] **5. Make the experiment decision**
   - Evidence from the viability slice records whether the architecture is
@@ -63,6 +73,10 @@ mean.
   - Explicitly choose to abandon the experiment, continue it, retain only
     independently useful infrastructure, or commit to the remaining replacement
     roadmap.
+  - Decision evidence records what the staged corpora and tools in
+    [External terminal test research](../docs/research/1-external-tests.md)
+    revealed about architecture, diagnostic quality, and the value of retaining
+    differential testing.
 
 - [ ] **6. Complete required terminal behavior and interaction**
   - [Terminal core](04-terminal-core.md) completes the accepted baseline control,
@@ -80,6 +94,10 @@ mean.
     local wheel/scrollbar history navigation, clipboard writes, links, font
     fallback, colors, cursor behavior, and correct display scaling.
   - Logical damage and full redraw produce the same visible state.
+  - Every external case family assigned through Milestone 6 in
+    [External terminal test research](../docs/research/1-external-tests.md) has
+    an adopted, adapted, superseded, or out-of-scope disposition; every
+    applicable case passes through DanTerm's public behavioral seams.
 
 - [ ] **7. Reach shell and baseline application compatibility**
   - zsh, bash, fish, ssh, fzf, more, and less complete the minimum workflows in
@@ -88,12 +106,20 @@ mean.
     the advertised terminal environment, current DanTerm shell events, title,
     cwd, notifications, progress, links, clipboard policy, capability manifest,
     bell behavior, and cross-component protocol limits.
+  - The supported black-box protocol and capability tranche in
+    [External terminal test research](../docs/research/1-external-tests.md)
+    passes against the real pane, and failures reduce to native deterministic
+    fixtures where practical.
 
 - [ ] **8. Reach tmux, editor, and advanced TUI compatibility**
   - tmux, vim, neovim, btop, htop, lazygit, Claude Code, and Codex complete the
     minimum workflows in [Testing and conformance](12-testing-conformance.md).
   - Relevant workflows pass both directly and through tmux or ssh where those
     layers materially change terminal behavior.
+  - External and DanTerm-owned recordings identified in
+    [External terminal test research](../docs/research/1-external-tests.md)
+    cover the supported tmux, editor, and advanced-TUI behaviors without making
+    another emulator's output normative.
 
 - [ ] **9. Pass the replacement quality gates**
   - Every required component invariant has the behavioral proof required by
@@ -103,6 +129,10 @@ mean.
     gates.
   - The Swift backend is suitable for sustained daily use without a required
     fallback to Ghostty.
+  - The complete pinned evidence package from
+    [External terminal test research](../docs/research/1-external-tests.md) is
+    reproducible and gating; upstream updates cannot silently change expected
+    behavior.
 
 - [ ] **10. Remove libghostty**
   - No required runtime, build, config, test, documentation, or release path

@@ -33,6 +33,9 @@ The proof strategy includes:
   tests for their adapters
 - AppKit interaction and lifecycle tests
 - representative workflows for the prioritized compatibility applications
+- roadmap-staged external fixture corpora, differential comparisons, and
+  black-box conformance tracked in
+  [External terminal test research](../docs/research/1-external-tests.md)
 - performance, idle, visibility, sleep/wake, and teardown regressions
 
 TDD remains the development rule: a new supported behavior begins with a test
