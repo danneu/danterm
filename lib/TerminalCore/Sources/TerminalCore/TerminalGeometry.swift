@@ -17,7 +17,7 @@ public struct TerminalCell: Equatable, Sendable {
     /// Preserves the exact decoded scalar sequence without normalization.
     public let scalars: [Unicode.Scalar]
 
-    /// Retains the semantic pen that was active when the cell's cluster began.
+    /// Retains semantic presentation for written content or background-color erase padding.
     public let style: TerminalStyle
 }
 

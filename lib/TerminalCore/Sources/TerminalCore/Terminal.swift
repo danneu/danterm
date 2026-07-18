@@ -81,6 +81,13 @@ public struct Terminal: Equatable, Sendable {
     /// Exposes the semantic SGR pen without allowing callers to mutate terminal state.
     public private(set) var currentStyle = TerminalStyle()
 
+    private var backgroundEraseStyle: TerminalStyle {
+        TerminalStyle(
+            foreground: currentStyle.foreground,
+            background: currentStyle.background
+        )
+    }
+
     /// Rejects dimensions that cannot represent all supported terminal cells.
     public init?(columns: Int, rows: Int) {
         guard columns >= 2, rows >= 1 else { return nil }
@@ -208,7 +215,7 @@ public struct Terminal: Equatable, Sendable {
         clusterContext = nil
     }
 
-    /// Clears a row range after expanding its boundaries across intersected wide pairs.
+    /// Erases a row range with pen colors after expanding across intersected wide pairs.
     mutating func eraseCells(row: Int, columns: Range<Int>) {
         guard rows.indices.contains(row), columns.isEmpty == false else { return }
         var lower = max(0, columns.lowerBound)
@@ -223,8 +230,9 @@ public struct Terminal: Equatable, Sendable {
         }
         upper = min(upper, columnCount)
 
+        let style = backgroundEraseStyle
         for column in lower..<upper {
-            clearCellAndPair(row: row, column: column)
+            clearCellAndPair(row: row, column: column, replacementStyle: style)
         }
         clusterContext = nil
     }
@@ -570,8 +578,11 @@ public struct Terminal: Equatable, Sendable {
         row * columns + column
     }
 
-    private func makeBlankRow(columns: Int) -> GridRow {
-        GridRow(cells: (0..<columns).map { _ in GridCell() })
+    private func makeBlankRow(
+        columns: Int,
+        style: TerminalStyle = TerminalStyle()
+    ) -> GridRow {
+        GridRow(cells: (0..<columns).map { _ in GridCell(style: style) })
     }
 
     private mutating func dispatchCSI(_ sequence: CSISequence) {
@@ -1118,7 +1129,7 @@ public struct Terminal: Equatable, Sendable {
     private mutating func advanceToNextRow() {
         if cursor.row == rowCount - 1 {
             scrollbackRows.append(rows.removeFirst())
-            rows.append(GridRow(cells: (0..<columnCount).map { _ in GridCell() }))
+            rows.append(makeBlankRow(columns: columnCount, style: backgroundEraseStyle))
         } else {
             cursor.row += 1
         }
@@ -1152,38 +1163,47 @@ public struct Terminal: Equatable, Sendable {
     private mutating func clearCellAndPair(
         row: Int,
         column: Int,
-        clearsPreviousSpacer: Bool = true
+        clearsPreviousSpacer: Bool = true,
+        replacementStyle: TerminalStyle = TerminalStyle()
     ) {
         guard rows.indices.contains(row), rows[row].cells.indices.contains(column) else { return }
         switch rows[row].cells[column].kind {
         case .wideHead:
-            rows[row].cells[column] = GridCell()
+            rows[row].cells[column] = GridCell(style: replacementStyle)
             if column + 1 < columnCount {
-                rows[row].cells[column + 1] = GridCell()
+                rows[row].cells[column + 1] = GridCell(style: replacementStyle)
             }
         case .wideTail:
-            rows[row].cells[column] = GridCell()
+            rows[row].cells[column] = GridCell(style: replacementStyle)
             if column > 0 {
-                rows[row].cells[column - 1] = GridCell()
+                rows[row].cells[column - 1] = GridCell(style: replacementStyle)
             }
         case .padding, .narrow, .spacerHead:
-            rows[row].cells[column] = GridCell()
+            rows[row].cells[column] = GridCell(style: replacementStyle)
         }
 
         if clearsPreviousSpacer {
-            clearPreviousSpacer(beforeRow: row, column: column)
+            clearPreviousSpacer(
+                beforeRow: row,
+                column: column,
+                replacementStyle: replacementStyle
+            )
         }
     }
 
-    private mutating func clearPreviousSpacer(beforeRow row: Int, column: Int) {
+    private mutating func clearPreviousSpacer(
+        beforeRow row: Int,
+        column: Int,
+        replacementStyle: TerminalStyle = TerminalStyle()
+    ) {
         guard column <= 1 else { return }
         if row > 0, rows[row - 1].cells[columnCount - 1].kind == .spacerHead {
-            rows[row - 1].cells[columnCount - 1] = GridCell()
+            rows[row - 1].cells[columnCount - 1] = GridCell(style: replacementStyle)
         } else if row == 0,
                   let last = scrollbackRows.indices.last,
                   scrollbackRows[last].cells[columnCount - 1].kind == .spacerHead
         {
-            scrollbackRows[last].cells[columnCount - 1] = GridCell()
+            scrollbackRows[last].cells[columnCount - 1] = GridCell(style: replacementStyle)
         }
     }
 }

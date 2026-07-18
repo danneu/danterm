@@ -3,8 +3,174 @@ import Testing
 
 @testable import TerminalCore
 
-/// Locks cell presentation to write-time style and grid-preserving transformations.
+/// Locks cell presentation across writing, erasure, scrolling, and grid transformations.
 struct TerminalCellStyleTests {
+    @Test(
+        "EL, ED, and ECH stamp only the current colors onto erased cells",
+        arguments: [
+            EraseStyleFixture(sequence: "\u{1B}[K", erasedIndices: [1, 2, 3]),
+            EraseStyleFixture(sequence: "\u{1B}[2J", erasedIndices: Array(0..<8)),
+            EraseStyleFixture(sequence: "\u{1B}[2X", erasedIndices: [1, 2]),
+        ]
+    )
+    func erasesStampColorsWithoutAttributes(fixture: EraseStyleFixture) throws {
+        // Intent: EL, ED, and ECH fill their regions with the pen's foreground
+        //   and background while clearing every presentation attribute.
+        // Why it exists: reusing the current pen wholesale would make blank
+        //   cells bold, underlined, reversed, hidden, or struck through.
+        // Scenario: a decorated application clears part or all of its viewport.
+        let eraseStyle = TerminalStyle(foreground: .indexed(1), background: .indexed(4))
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("ABCDEFGH".utf8))
+        terminal.moveCursor(row: 0, column: 1)
+
+        terminal.feed(Array(
+            "\u{1B}[1;2;3;4:3;7;8;9;31;44m\(fixture.sequence)".utf8
+        ))
+
+        let erased = Set(fixture.erasedIndices)
+        for index in 0..<8 {
+            let cell = try #require(terminal.cell(row: index / 4, column: index % 4))
+            if erased.contains(index) {
+                #expect(cell.kind == .padding)
+                #expect(cell.style == eraseStyle)
+            } else {
+                #expect(cell.style == TerminalStyle())
+            }
+        }
+        expectValidGrid(terminal)
+    }
+
+    @Test("erasing either half of a wide cell applies BCE style to both halves")
+    func wideEraseStylesBothCells() throws {
+        let eraseStyle = TerminalStyle(foreground: .indexed(1), background: .indexed(4))
+        var terminal = try #require(Terminal(columns: 5, rows: 1))
+        terminal.feed(Array("A\u{754C}B".utf8))
+        terminal.moveCursor(row: 0, column: 2)
+
+        terminal.feed(Array("\u{1B}[1;4;31;44m\u{1B}[X".utf8))
+
+        #expect(terminal.cell(row: 0, column: 1)?.kind == .padding)
+        #expect(terminal.cell(row: 0, column: 2)?.kind == .padding)
+        #expect(terminal.cell(row: 0, column: 1)?.style == eraseStyle)
+        #expect(terminal.cell(row: 0, column: 2)?.style == eraseStyle)
+        expectValidGrid(terminal)
+    }
+
+    @Test("LF, soft wrap, and wide wrap reveal rows filled with BCE style")
+    func scrollOffFillsRevealedRowWithColors() throws {
+        // Intent: every route that scrolls the viewport reveals padding with
+        //   the active pen colors and no other attributes.
+        // Why it exists: LF, deferred soft wrap, and margin-wide wrap share a
+        //   scroll primitive but reach it through independent control paths.
+        // Scenario: a one-row terminal scrolls while a decorated color pen is active.
+        let penSequence = "\u{1B}[1;2;3;4:3;7;8;9;31;44m"
+        let penStyle = TerminalStyle(
+            foreground: .indexed(1),
+            background: .indexed(4),
+            bold: true,
+            dim: true,
+            italic: true,
+            underline: .curly,
+            reverse: true,
+            hidden: true,
+            strikethrough: true
+        )
+        let eraseStyle = TerminalStyle(foreground: .indexed(1), background: .indexed(4))
+
+        var lineFeed = try #require(Terminal(columns: 3, rows: 1))
+        lineFeed.feed(Array("\(penSequence)\n".utf8))
+        for column in 0..<3 {
+            #expect(lineFeed.cell(row: 0, column: column)?.style == eraseStyle)
+        }
+
+        var softWrap = try #require(Terminal(columns: 2, rows: 1))
+        softWrap.feed(Array("\(penSequence)ABC".utf8))
+        #expect(softWrap.cell(row: 0, column: 0)?.style == penStyle)
+        #expect(softWrap.cell(row: 0, column: 1)?.style == eraseStyle)
+
+        var wideWrap = try #require(Terminal(columns: 3, rows: 1))
+        wideWrap.feed(Array(penSequence.utf8))
+        wideWrap.moveCursor(row: 0, column: 2)
+        wideWrap.feed(Array("\u{754C}".utf8))
+        #expect(wideWrap.cell(row: 0, column: 0)?.style == penStyle)
+        #expect(wideWrap.cell(row: 0, column: 1)?.style == penStyle)
+        #expect(wideWrap.cell(row: 0, column: 2)?.style == eraseStyle)
+
+        expectValidGrid(lineFeed)
+        expectValidGrid(softWrap)
+        expectValidGrid(wideWrap)
+    }
+
+    @Test("default-pen erase remains bit-identical to default structural clearing")
+    func defaultEraseRemainsBitIdentical() throws {
+        var terminal = try #require(Terminal(columns: 4, rows: 1))
+        terminal.feed(Array("A\u{754C}".utf8))
+        terminal.moveCursor(row: 0, column: 2)
+        var expected = terminal
+        expected.eraseCells(row: 0, columns: 2..<3)
+
+        terminal.feed(Array("\u{1B}[X".utf8))
+
+        #expect(terminal == expected)
+    }
+
+    @Test("overwriting half a styled wide pair leaves the vacated cell default styled")
+    func structuralWideClearRemainsDefaultStyled() throws {
+        // Intent: distinguish ordinary overwrite cleanup from BCE erasure.
+        // Why it exists: structural clearing must not inherit either the old
+        //   wide cell's style or the current pen used for the replacement.
+        // Scenario: colored narrow output overwrites the tail of a differently
+        //   colored wide glyph.
+        let green = TerminalStyle(foreground: .indexed(2))
+        var terminal = try #require(Terminal(columns: 4, rows: 1))
+        terminal.feed(Array("\u{1B}[31m\u{754C}\u{1B}[32m".utf8))
+        terminal.moveCursor(row: 0, column: 1)
+
+        terminal.feed(Array("X".utf8))
+
+        #expect(terminal.cell(row: 0, column: 0)?.kind == .padding)
+        #expect(terminal.cell(row: 0, column: 0)?.style == TerminalStyle())
+        #expect(terminal.cell(row: 0, column: 1)?.style == green)
+        expectValidGrid(terminal)
+    }
+
+    @Test("BCE-only padding remains style-blind during width and height resize")
+    func bcePaddingDoesNotBecomeResizeContent() throws {
+        // Intent: background-colored padding remains absent from resize's
+        //   content model even though public cell inspection exposes its style.
+        // Why it exists: treating BCE style as content would retain blank rows
+        //   or carry erase colors into resize-synthesized filler.
+        // Scenario: an application colors and clears an otherwise empty viewport,
+        //   then the user narrows it or shrinks away its trailing blank rows.
+        let eraseStyle = TerminalStyle(foreground: .indexed(1), background: .indexed(4))
+        let eraseSequence = "\u{1B}[1;4;31;44m\u{1B}[2J"
+
+        var width = try #require(Terminal(columns: 4, rows: 2))
+        width.feed(Array(eraseSequence.utf8))
+        #expect(width.cell(row: 0, column: 0)?.style == eraseStyle)
+
+        width.resize(columns: 2, rows: 2)
+
+        for row in 0..<2 {
+            for column in 0..<2 {
+                #expect(width.cell(row: row, column: column)?.style == TerminalStyle())
+            }
+        }
+        #expect(width.fullHistoryText == "")
+
+        var height = try #require(Terminal(columns: 4, rows: 3))
+        height.feed(Array(eraseSequence.utf8))
+
+        height.resize(columns: 4, rows: 1)
+
+        #expect(height.scrollbackRowCount == 0)
+        for column in 0..<4 {
+            #expect(height.cell(row: 0, column: column)?.style == eraseStyle)
+        }
+        #expect(height.fullHistoryText == "")
+    }
+
     @Test("prints stamp the current style without restyling earlier cells")
     func stampAtPrintTime() throws {
         let decorated = TerminalStyle(
@@ -127,5 +293,10 @@ struct TerminalCellStyleTests {
                 #expect(terminal.cell(row: row, column: column)?.style == TerminalStyle())
             }
         }
+    }
+
+    struct EraseStyleFixture: Sendable {
+        let sequence: String
+        let erasedIndices: [Int]
     }
 }
