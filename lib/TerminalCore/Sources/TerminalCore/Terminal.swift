@@ -29,6 +29,12 @@ public struct Terminal: Equatable, Sendable {
         var isOriginMode = false
     }
 
+    /// Keeps REP independent from later cursor movement and grid replacement.
+    private struct LastPrintedCluster: Equatable, Sendable {
+        var scalars: [Unicode.Scalar]
+        var cellWidth: Int
+    }
+
     /// Retains exactly the target and pairwise look-behind for one open grapheme cluster.
     private struct ClusterContext: Equatable, Sendable {
         var target: CellPosition
@@ -90,6 +96,7 @@ public struct Terminal: Equatable, Sendable {
     private var isAutoWrapMode = true
     private var tabStops: Set<Int>
     private var savedCursor = SavedCursorState()
+    private var lastPrintedCluster: LastPrintedCluster?
     private var clusterContext: ClusterContext?
     private var inputStream = TerminalInputStream()
 
@@ -606,6 +613,11 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func dispatchCSI(_ sequence: CSISequence) {
+        if sequence.intermediates == [0x21] {
+            guard sequence.final == 0x70, sequence.parameters.isEmpty else { return }
+            softReset()
+            return
+        }
         if sequence.intermediates == [0x3F] {
             switch sequence.final {
             case 0x68:
@@ -697,6 +709,8 @@ public struct Terminal: Equatable, Sendable {
         case 0x75:
             guard sequence.parameters.isEmpty else { return }
             restoreCursor()
+        case 0x62:
+            repeatLastPrintedCluster(sequence.parameters)
         case 0x68:
             applyANSIModes(sequence.parameters, enabled: true)
         case 0x6C:
@@ -1033,6 +1047,8 @@ public struct Terminal: Equatable, Sendable {
         case 0x48:
             tabStops.insert(cursor.column)
             clearPendingMotionState()
+        case 0x63:
+            hardReset()
         default:
             break
         }
@@ -1117,8 +1133,56 @@ public struct Terminal: Equatable, Sendable {
             && cursor.column == columnCount - 1
     }
 
+    private mutating func repeatLastPrintedCluster(_ parameters: [UInt16]) {
+        guard parameters.count <= 1,
+              let cluster = lastPrintedCluster,
+              isPendingWrap == false
+        else { return }
+
+        let requestedCount = max(Int(parameters.first ?? 1), 1)
+        let availableColumns = columnCount - cursor.column
+        let repeatCount = min(requestedCount, availableColumns / cluster.cellWidth)
+        guard repeatCount > 0 else { return }
+
+        for _ in 0..<repeatCount {
+            clusterContext = nil
+            for scalar in cluster.scalars {
+                print(scalar)
+            }
+        }
+    }
+
+    private mutating func softReset() {
+        resetControlState()
+        clearPendingMotionState()
+    }
+
+    private mutating func hardReset() {
+        resetControlState()
+        cursor = CellPosition(row: 0, column: 0)
+        clearPendingMotionState()
+        lastPrintedCluster = nil
+
+        let style = backgroundEraseStyle
+        severWrapClaim(before: 0, replacementStyle: style)
+        for row in rows.indices {
+            eraseEntireRow(row)
+        }
+    }
+
+    private mutating func resetControlState() {
+        scrollRegion = nil
+        isInsertMode = false
+        isLineFeedNewLineMode = false
+        isOriginMode = false
+        isAutoWrapMode = true
+        tabStops = Self.defaultTabStops(columns: columnCount)
+        currentStyle = TerminalStyle()
+    }
+
     private mutating func print(_ scalar: Unicode.Scalar) {
         if appendToOpenClusterIfJoined(scalar) {
+            rememberOpenCluster()
             return
         }
 
@@ -1137,6 +1201,16 @@ public struct Terminal: Equatable, Sendable {
         case .wide:
             printWide(scalar)
         }
+        rememberOpenCluster()
+    }
+
+    private mutating func rememberOpenCluster() {
+        guard let context = clusterContext else { return }
+        let cell = rows[context.target.row].cells[context.target.column]
+        lastPrintedCluster = LastPrintedCluster(
+            scalars: cell.scalars,
+            cellWidth: cell.kind == .wideHead ? 2 : 1
+        )
     }
 
     private mutating func appendToOpenClusterIfJoined(_ scalar: Unicode.Scalar) -> Bool {
