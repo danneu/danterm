@@ -4,7 +4,7 @@
     "source": "libvterm",
     "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/30state_pen.test",
     "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
-    "upstreamCase": "Reset; Bold; Underline; Italic; Reverse; Foreground; Background",
+    "upstreamCase": "Reset; Bold; Underline; Italic; Reverse; Foreground; Background; DECSTR resets pen attributes",
     "license": "MIT",
     "licenseNotice": "LICENSE.libvterm.txt",
     "recordedDeviations": [
@@ -291,6 +291,18 @@
       }
     },
     { "type": "feed", "text": "\u001b[49m" },
+    {
+      "type": "expect",
+      "expect": {
+        "currentStyle": {
+          "foreground": "default",
+          "background": "default",
+          "attributes": [],
+          "underline": "none"
+        }
+      }
+    },
+    { "type": "feed", "text": "\u001b[1;4m\u001b[!p" },
     {
       "type": "expect",
       "expect": {

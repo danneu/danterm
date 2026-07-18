@@ -461,4 +461,4 @@ suites, not fixtures (provenance requires an upstream case).
 - [x] 1. Add terminal mode semantics
 - [x] 2. Add tab stops and saved cursor
 - [x] 3. Add REP and terminal reset semantics
-- [ ] 4. Adopt terminal-state fixtures and complete the slice gate
+- [x] 4. Adopt terminal-state fixtures and complete the slice gate

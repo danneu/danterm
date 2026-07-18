@@ -51,9 +51,13 @@ mean.
     margins, region-aware index and scroll controls, line and character edits,
     scrollback erase, and neutral libvterm scroll/edit fixtures. See the
     [implementation plan](../plans/impl/2026-07-18-0425-terminal-scroll-regions.md).
-  - [ ] The pure state machine in [Terminal core](04-terminal-core.md) handles the
+  - [x] **Slice 7: Terminal modes, tab stops, saved cursor, REP, and resets.**
+    Adds persistent mode and tab state, saved-cursor aliases, repeat and reset
+    semantics, and neutral libvterm state fixtures. See the
+    [implementation plan](../plans/impl/2026-07-18-1751-terminal-modes-tabs-saved-cursor-reset.md).
+  - [x] The pure state machine in [Terminal core](04-terminal-core.md) handles the
     control, screen, mode, and style behavior required by the viability slice.
-  - [ ] Its behavior is deterministic, independent of input chunking, and proven
+  - [x] Its behavior is deterministic, independent of input chunking, and proven
     without a PTY, AppKit, or renderer.
   - [ ] The foundational contracts in
     [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md) pass for
@@ -67,6 +71,10 @@ mean.
     establishes structure-insensitive replay and adopts or classifies
     applicable parser, Unicode, grid, and reflow fixtures early enough to
     inform the core's public contracts.
+    Slice 7 judgment: this gate remains open. The provenance ledger now covers
+    sixteen libvterm state, screen, resize, reflow, mode, tab, save, reset, and
+    REP files, while the early parser/encoding/Unicode and vttest-derived
+    families still need explicit fixture dispositions.
 
 - [ ] **3. Integrate PTY process lifecycle**
   - [ ] [PTY and process lifecycle](07-pty-process-lifecycle.md) proves launch,

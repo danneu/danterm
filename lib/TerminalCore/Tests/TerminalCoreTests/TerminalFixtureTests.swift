@@ -28,10 +28,10 @@ struct TerminalFixtureTests {
         }
     }
 
-    @Test("libvterm manifest classifies every case from the ten selected source files")
+    @Test("libvterm manifest classifies every case from the sixteen selected source files")
     func libvtermManifestCoverage() throws {
         // Intent: pin the adoption ledger to every upstream case heading in
-        //   the ten source files selected through the current engine slices.
+        //   the sixteen source files selected through the current engine slices.
         // Why it exists: fixtures alone make deferred, superseded, and
         //   deliberately incompatible cases disappear from review.
         // Scenario: the pinned libvterm corpus is upgraded or the neutral
@@ -193,6 +193,46 @@ struct TerminalFixtureTests {
     }
 
     private static let expectedCases: [String: Set<String>] = [
+        "t/15state_mode.test": [
+            "Insert/Replace Mode",
+            "Insert mode only happens once for UTF-8 combining",
+            "Newline/Linefeed mode",
+            "DEC origin mode",
+            "DECRQM on DECOM",
+            "Origin mode with DECSLRM",
+            "Origin mode bounds cursor to scrolling region",
+            "Origin mode without scroll region",
+        ],
+        "t/20state_wrapping.test": [
+            "79th Column",
+            "80th Column Phantom",
+            "Line Wraparound",
+            "Line Wraparound during combined write",
+            "DEC Auto Wrap Mode",
+            "80th column causes linefeed on wraparound",
+            "80th column phantom linefeed phantom cancelled by explicit cursor move",
+        ],
+        "t/21state_tabstops.test": [
+            "Initial",
+            "HTS",
+            "TBC 0",
+            "TBC 3",
+            "Tabstops after resize",
+        ],
+        "t/22state_save.test": [
+            "Set up state",
+            "Save",
+            "Change state",
+            "Restore",
+            "Save/restore using DECSC/DECRC",
+            "Save twice, restore twice happens on both edge transitions",
+        ],
+        "t/27state_reset.test": [
+            "RIS homes cursor",
+            "RIS cancels scrolling region",
+            "RIS erases screen",
+            "RIS clears tabstops",
+        ],
         "t/12state_scroll.test": [
             "Linefeed",
             "Index",
@@ -270,6 +310,15 @@ struct TerminalFixtureTests {
             "Bold+ANSI colour == highbright",
             "Super/Subscript",
             "DECSTR resets pen attributes",
+        ],
+        "t/31state_rep.test": [
+            "REP no argument",
+            "REP zero (zero should be interpreted as one)",
+            "REP lowercase a times two",
+            "REP with UTF-8 1 char",
+            "REP with UTF-8 wide char",
+            "REP with UTF-8 combining character",
+            "REP till end of line",
         ],
         "t/32state_flow.test": [
             "Spillover text marks continuation on second line",

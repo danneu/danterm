@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/22state_save.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Set up state; Save; Change state; Restore; Save/restore using DECSC/DECRC; Save twice, restore twice happens on both edge transitions",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": []
+  },
+  "initial": { "columns": 10, "rows": 6 },
+  "events": [
+    { "type": "feed", "text": "\u001b[2;2H\u001b[1m" },
+    {
+      "type": "expect",
+      "expect": {
+        "cursor": { "row": 1, "column": 1, "pendingWrap": false },
+        "currentStyle": { "foreground": "default", "background": "default", "attributes": ["bold"], "underline": "none" }
+      }
+    },
+    { "type": "feed", "text": "\u001b[?1048h" },
+    { "type": "feed", "text": "\u001b[5;5H\u001b[4 q\u001b[22;4m" },
+    {
+      "type": "expect",
+      "expect": {
+        "cursor": { "row": 4, "column": 4, "pendingWrap": false },
+        "currentStyle": { "foreground": "default", "background": "default", "attributes": [], "underline": "single" }
+      }
+    },
+    { "type": "feed", "text": "\u001b[?1048l" },
+    {
+      "type": "expect",
+      "expect": {
+        "cursor": { "row": 1, "column": 1, "pendingWrap": false },
+        "currentStyle": { "foreground": "default", "background": "default", "attributes": ["bold"], "underline": "none" }
+      }
+    },
+    { "type": "feed", "text": "\u001b[2;2H\u001b7\u001b[5;5H\u001b8" },
+    { "type": "expect", "expect": { "cursor": { "row": 1, "column": 1, "pendingWrap": false } } },
+    { "type": "feed", "text": "\u001b[2;10H\u001b[?1048h\u001b[6;10H\u001b[?1048h\u001b[H\u001b[?1048l" },
+    { "type": "expect", "expect": { "cursor": { "row": 5, "column": 9, "pendingWrap": false } } },
+    { "type": "feed", "text": "\u001b[H\u001b[?1048l" },
+    { "type": "expect", "expect": { "cursor": { "row": 5, "column": 9, "pendingWrap": false } } }
+  ]
+}

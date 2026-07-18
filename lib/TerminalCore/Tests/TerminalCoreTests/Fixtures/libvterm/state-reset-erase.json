@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/27state_reset.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "RIS erases screen",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": []
+  },
+  "initial": { "columns": 5, "rows": 3 },
+  "events": [
+    { "type": "feed", "text": "ABCDE\u001bc" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "     \n     \n     ",
+        "cursor": { "row": 0, "column": 0, "pendingWrap": false },
+        "scrollbackCount": 0
+      }
+    }
+  ]
+}

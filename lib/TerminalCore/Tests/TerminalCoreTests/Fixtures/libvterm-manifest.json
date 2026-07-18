@@ -288,6 +288,186 @@
       ]
     },
     {
+      "path": "t/15state_mode.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        {
+          "name": "Insert/Replace Mode",
+          "disposition": "adopted",
+          "rationale": "state-mode.json replays replacement and insertion through the public viewport and cursor projections."
+        },
+        {
+          "name": "Insert mode only happens once for UTF-8 combining",
+          "disposition": "adopted",
+          "rationale": "state-mode.json pins the combined cluster without a second insertion shift."
+        },
+        {
+          "name": "Newline/Linefeed mode",
+          "disposition": "adopted",
+          "rationale": "state-mode.json observes the column difference between ordinary linefeed and LNM through the public cursor."
+        },
+        {
+          "name": "DEC origin mode",
+          "disposition": "adopted",
+          "rationale": "state-mode.json replays absolute and region-relative cursor positioning against the upstream margins."
+        },
+        {
+          "name": "DECRQM on DECOM",
+          "disposition": "out-of-scope",
+          "rationale": "Query replies are deferred until the terminal engine has an output channel."
+        },
+        {
+          "name": "Origin mode with DECSLRM",
+          "disposition": "out-of-scope",
+          "rationale": "Horizontal margins are deferred beyond the foundational core milestone."
+        },
+        {
+          "name": "Origin mode bounds cursor to scrolling region",
+          "disposition": "adapted",
+          "rationale": "state-mode.json re-establishes the vertical region and origin mode directly because the preceding DECSLRM case is out of scope."
+        },
+        {
+          "name": "Origin mode without scroll region",
+          "disposition": "adopted",
+          "rationale": "state-mode.json clears the margins and observes origin-mode homing at the full-screen origin."
+        }
+      ]
+    },
+    {
+      "path": "t/20state_wrapping.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        {
+          "name": "79th Column",
+          "disposition": "adopted",
+          "rationale": "state-wrapping.json retains the upstream 80-column geometry and observes the cursor before the right margin."
+        },
+        {
+          "name": "80th Column Phantom",
+          "disposition": "adopted",
+          "rationale": "state-wrapping.json observes the pending-wrap cursor after the final column is filled."
+        },
+        {
+          "name": "Line Wraparound",
+          "disposition": "adopted",
+          "rationale": "state-wrapping.json observes the following glyph on a soft-wrapped row."
+        },
+        {
+          "name": "Line Wraparound during combined write",
+          "disposition": "adopted",
+          "rationale": "state-wrapping.json replays the combined write and asserts its two soft-wrap boundaries and cursor."
+        },
+        {
+          "name": "DEC Auto Wrap Mode",
+          "disposition": "adopted",
+          "rationale": "state-wrapping.json pins repeated overwrite at column 80 while autowrap is disabled."
+        },
+        {
+          "name": "80th column causes linefeed on wraparound",
+          "disposition": "adopted",
+          "rationale": "state-wrapping-bottom.json retains the 80x25 geometry and observes the full-screen scrollback push."
+        },
+        {
+          "name": "80th column phantom linefeed phantom cancelled by explicit cursor move",
+          "disposition": "adopted",
+          "rationale": "state-wrapping-bottom.json observes that CUP cancels pending wrap without another history push."
+        }
+      ]
+    },
+    {
+      "path": "t/21state_tabstops.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        {
+          "name": "Initial",
+          "disposition": "adopted",
+          "rationale": "state-tabstops.json observes the default stops at columns 9 and 17."
+        },
+        {
+          "name": "HTS",
+          "disposition": "adopted",
+          "rationale": "state-tabstops.json installs and targets a custom stop at column 5."
+        },
+        {
+          "name": "TBC 0",
+          "disposition": "adopted",
+          "rationale": "state-tabstops.json clears only the selected default stop while retaining the custom and following stops."
+        },
+        {
+          "name": "TBC 3",
+          "disposition": "adopted",
+          "rationale": "state-tabstops.json clears all stops, installs one at column 50, and targets it from home."
+        },
+        {
+          "name": "Tabstops after resize",
+          "disposition": "adopted",
+          "rationale": "state-tabstops.json resets before growing to 100x30 and walks all twelve default stops."
+        }
+      ]
+    },
+    {
+      "path": "t/22state_save.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        {
+          "name": "Set up state",
+          "disposition": "adopted",
+          "rationale": "state-save.json establishes the upstream cursor position and bold pen through public state."
+        },
+        {
+          "name": "Save",
+          "disposition": "adopted",
+          "rationale": "state-save.json uses DEC private mode 1048 to snapshot the cursor and pen."
+        },
+        {
+          "name": "Change state",
+          "disposition": "adapted",
+          "rationale": "state-save.json still feeds DECSCUSR and requires it to remain inert while dropping unsupported cursor appearance callbacks."
+        },
+        {
+          "name": "Restore",
+          "disposition": "adapted",
+          "rationale": "state-save.json asserts restored cursor and pen while omitting unsupported visibility, blink, and shape properties."
+        },
+        {
+          "name": "Save/restore using DECSC/DECRC",
+          "disposition": "adapted",
+          "rationale": "state-save.json adopts the ESC aliases while omitting unsupported cursor appearance properties."
+        },
+        {
+          "name": "Save twice, restore twice happens on both edge transitions",
+          "disposition": "adapted",
+          "rationale": "state-save.json pins single-slot overwrite and repeatable restore while omitting unsupported cursor appearance properties."
+        }
+      ]
+    },
+    {
+      "path": "t/27state_reset.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        {
+          "name": "RIS homes cursor",
+          "disposition": "adopted",
+          "rationale": "state-reset.json observes the cursor at the origin after RIS."
+        },
+        {
+          "name": "RIS cancels scrolling region",
+          "disposition": "adopted",
+          "rationale": "state-reset.json translates the scroll callback to the full-screen scrollback result after RIS."
+        },
+        {
+          "name": "RIS erases screen",
+          "disposition": "adopted",
+          "rationale": "state-reset-erase.json observes a blank viewport without a scrollback push."
+        },
+        {
+          "name": "RIS clears tabstops",
+          "disposition": "adopted",
+          "rationale": "state-reset.json observes RIS replacing a custom stop with the default column-9 stop."
+        }
+      ]
+    },
+    {
       "path": "t/16state_resize.test",
       "licenseNotice": "LICENSE.libvterm.txt",
       "cases": [
@@ -379,8 +559,49 @@
         },
         {
           "name": "DECSTR resets pen attributes",
-          "disposition": "out-of-scope",
-          "rationale": "DECSTR terminal reset behavior is deferred beyond this Milestone 2 slice."
+          "disposition": "adopted",
+          "rationale": "state-pen.json replays DECSTR and observes the freshly reset public pen."
+        }
+      ]
+    },
+    {
+      "path": "t/31state_rep.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        {
+          "name": "REP no argument",
+          "disposition": "adopted",
+          "rationale": "state-rep.json observes the default single repetition through viewport text and cursor state."
+        },
+        {
+          "name": "REP zero (zero should be interpreted as one)",
+          "disposition": "adopted",
+          "rationale": "state-rep.json observes zero normalized to one repetition."
+        },
+        {
+          "name": "REP lowercase a times two",
+          "disposition": "adopted",
+          "rationale": "state-rep.json observes two requested repetitions following the original glyph."
+        },
+        {
+          "name": "REP with UTF-8 1 char",
+          "disposition": "adopted",
+          "rationale": "state-rep.json repeats the complete UTF-8 scalar through the public viewport."
+        },
+        {
+          "name": "REP with UTF-8 wide char",
+          "disposition": "adopted",
+          "rationale": "state-rep.json observes each repeated fullwidth cluster advancing by two cells."
+        },
+        {
+          "name": "REP with UTF-8 combining character",
+          "disposition": "adopted",
+          "rationale": "state-rep.json observes the base and combining scalar repeated as one cluster."
+        },
+        {
+          "name": "REP till end of line",
+          "disposition": "adopted",
+          "rationale": "state-rep-edge.json retains the 80-column boundary, caps the huge count, and observes the following glyph after soft wrap."
         }
       ]
     },
