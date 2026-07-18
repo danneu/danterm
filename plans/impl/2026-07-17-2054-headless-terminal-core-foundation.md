@@ -262,7 +262,7 @@ differential traces against live Ghostty.
 
 - [x] 1. Establish the pure Swift 6 package and pinned Unicode property foundation
 - [x] 2. Add chunk-invariant UTF-8 decoding and escape absorption
-- [ ] 3. Add terminal grid, controls, wrapping, and wide-cell invariants
+- [x] 3. Add terminal grid, controls, wrapping, and wide-cell invariants
 
 ## Implementation notes
 
@@ -274,3 +274,6 @@ differential traces against live Ghostty.
   callback. Commit 3 consumes them inside the public terminal's void ingestion
   method, preserving the no-callback and no-public-effects contracts while
   keeping decoder and absorber behavior independently testable.
+- The public geometry projection carries cell roles, wrap flags, and cursor
+  state but not scalar payloads, so canonically equivalent text compares as the
+  same geometry. Scalar-exact content remains available through cell inspection.
