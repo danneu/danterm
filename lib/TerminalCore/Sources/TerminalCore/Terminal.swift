@@ -46,8 +46,8 @@ public struct Terminal: Equatable, Sendable {
                 print(scalar)
             case let .execute(control):
                 execute(control)
-            case .csi:
-                break
+            case let .csi(sequence):
+                dispatchCSI(sequence)
             }
         }
     }
@@ -126,6 +126,54 @@ public struct Terminal: Equatable, Sendable {
             clearCellAndPair(row: row, column: column)
         }
         attachTarget = nil
+    }
+
+    private mutating func dispatchCSI(_ sequence: CSISequence) {
+        guard sequence.intermediates.isEmpty else { return }
+
+        switch sequence.final {
+        case 0x41, 0x6B:
+            guard let amount = movementAmount(sequence.parameters) else { return }
+            moveCursor(row: cursor.row - amount, column: cursor.column)
+        case 0x42:
+            guard let amount = movementAmount(sequence.parameters) else { return }
+            moveCursor(row: cursor.row + amount, column: cursor.column)
+        case 0x43:
+            guard let amount = movementAmount(sequence.parameters) else { return }
+            moveCursor(row: cursor.row, column: cursor.column + amount)
+        case 0x44, 0x6A:
+            guard let amount = movementAmount(sequence.parameters) else { return }
+            moveCursor(row: cursor.row, column: cursor.column - amount)
+        case 0x45:
+            guard let amount = movementAmount(sequence.parameters) else { return }
+            moveCursor(row: cursor.row + amount, column: 0)
+        case 0x46:
+            guard let amount = movementAmount(sequence.parameters) else { return }
+            moveCursor(row: cursor.row - amount, column: 0)
+        case 0x47, 0x60:
+            guard sequence.parameters.count <= 1 else { return }
+            moveCursor(row: cursor.row, column: absolutePosition(sequence.parameters.first))
+        case 0x64:
+            guard sequence.parameters.count <= 1 else { return }
+            moveCursor(row: absolutePosition(sequence.parameters.first), column: cursor.column)
+        case 0x48, 0x66:
+            guard sequence.parameters.count <= 2 else { return }
+            moveCursor(
+                row: absolutePosition(sequence.parameters.first),
+                column: absolutePosition(sequence.parameters.dropFirst().first)
+            )
+        default:
+            break
+        }
+    }
+
+    private func movementAmount(_ parameters: [UInt16]) -> Int? {
+        guard parameters.count <= 1 else { return nil }
+        return max(Int(parameters.first ?? 1), 1)
+    }
+
+    private func absolutePosition(_ parameter: UInt16?) -> Int {
+        max(Int(parameter ?? 1), 1) - 1
     }
 
     private mutating func execute(_ control: UInt8) {
