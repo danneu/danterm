@@ -1,9 +1,10 @@
-// Byte-oriented stream reduction that joins incremental UTF-8 with discard-only VT recognition.
+// Byte-oriented stream reduction that joins incremental UTF-8 with bounded VT recognition.
 
 /// Carries scalar and control actions from stream recognition into the terminal grid reducer.
 enum TerminalStreamAction: Equatable, Sendable {
     case print(Unicode.Scalar)
     case execute(UInt8)
+    case csi(CSISequence)
 }
 
 /// Owns all pending ingestion state so feeds remain deterministic and value-semantic.
@@ -18,8 +19,13 @@ struct TerminalInputStream: Equatable, Sendable {
         for byte in bytes {
             if absorber.isGround {
                 decode(byte, into: &actions)
-            } else if let control = absorber.consume(byte) {
-                actions.append(.execute(control))
+            } else if let event = absorber.consume(byte) {
+                switch event {
+                case let .execute(control):
+                    actions.append(.execute(control))
+                case let .csi(sequence):
+                    actions.append(.csi(sequence))
+                }
             }
         }
 

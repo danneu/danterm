@@ -3,7 +3,7 @@ import Testing
 
 @testable import TerminalCore
 
-/// Locks the stream boundary to chunk-invariant UTF-8 and discard-only VT recognition.
+/// Locks the stream boundary to chunk-invariant UTF-8 and bounded VT recognition.
 struct TerminalInputStreamTests {
     @Test("well-formed UTF-8 emits one print action per scalar")
     func wellFormedUTF8() {
@@ -74,7 +74,7 @@ struct TerminalInputStreamTests {
     }
 
     @Test(
-        "7-bit VT sequence families are absorbed and printable text resumes",
+        "7-bit VT sequence families are consumed and printable text resumes",
         arguments: [
             [0x41, 0x1B, 0x37, 0x42],
             [0x41, 0x1B, 0x5B, 0x33, 0x31, 0x6D, 0x42],
@@ -91,7 +91,15 @@ struct TerminalInputStreamTests {
 
         let actions = stream.feed(bytes)
 
-        #expect(actions == [.print("A"), .print("B")])
+        let csi = TerminalStreamAction.csi(CSISequence(
+            parameters: [31],
+            colonSeparators: [false],
+            intermediates: [],
+            final: 0x6D
+        ))
+        #expect(actions == (bytes[1...].starts(with: [0x1B, 0x5B])
+            ? [.print("A"), csi, .print("B")]
+            : [.print("A"), .print("B")]))
     }
 
     @Test("CAN and SUB abort sequences and execute as controls", arguments: [0x18, 0x1A] as [UInt8])
@@ -127,7 +135,17 @@ struct TerminalInputStreamTests {
             0x41,
         ])
 
-        #expect(actions == [.execute(0x00), .execute(0x07), .print("A")])
+        #expect(actions == [
+            .execute(0x00),
+            .execute(0x07),
+            .csi(CSISequence(
+                parameters: [31],
+                colonSeparators: [false],
+                intermediates: [],
+                final: 0x6D
+            )),
+            .print("A"),
+        ])
     }
 
     @Test(
@@ -153,7 +171,15 @@ struct TerminalInputStreamTests {
             C1Fixture(bytes: [0x98, 0x78, 0x9C], actions: []),
             C1Fixture(bytes: [0x9E, 0x78, 0x9C], actions: []),
             C1Fixture(bytes: [0x9F, 0x78, 0x9C], actions: []),
-            C1Fixture(bytes: [0x9B, 0x6D], actions: []),
+            C1Fixture(
+                bytes: [0x9B, 0x6D],
+                actions: [.csi(CSISequence(
+                    parameters: [],
+                    colonSeparators: [],
+                    intermediates: [],
+                    final: 0x6D
+                ))]
+            ),
             C1Fixture(bytes: [0x9D, 0x78, 0x07], actions: []),
             C1Fixture(bytes: [0x80], actions: [.execute(0x80)]),
             C1Fixture(bytes: [0x91], actions: [.execute(0x91)]),
@@ -195,7 +221,16 @@ struct TerminalInputStreamTests {
 
         let actions = stream.feed([0xE2, 0x1B, 0x5B, 0x33, 0x31, 0x6D, 0x41])
 
-        #expect(actions == [.print("\u{FFFD}"), .print("A")])
+        #expect(actions == [
+            .print("\u{FFFD}"),
+            .csi(CSISequence(
+                parameters: [31],
+                colonSeparators: [false],
+                intermediates: [],
+                final: 0x6D
+            )),
+            .print("A"),
+        ])
     }
 
     @Test("all 2-way and 3-way chunk splits preserve actions and pending state")

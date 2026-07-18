@@ -46,6 +46,8 @@ public struct Terminal: Equatable, Sendable {
                 print(scalar)
             case let .execute(control):
                 execute(control)
+            case .csi:
+                break
             }
         }
     }
