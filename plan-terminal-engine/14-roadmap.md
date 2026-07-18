@@ -10,134 +10,142 @@ mean.
 ## Roadmap
 
 - [x] **1. Isolate the experiment and establish the terminal backend boundary**
-  - Engine work begins on `experiment/swift-terminal-engine`; normal DanTerm
+  - [x] Engine work begins on `experiment/swift-terminal-engine`; normal DanTerm
     development does not depend on the experiment before its viability decision.
-  - The DanTerm-facing contract in
+  - [x] The DanTerm-facing contract in
     [Migration and app boundary](02-migration-and-boundary.md) covers the
     lifecycle, input, output, inspection, config, and event capabilities the app
     consumes.
-  - The ownership and effect boundaries in
+  - [x] The ownership and effect boundaries in
     [Engine architecture and testability](03-engine-architecture.md) are in
     place without routing PTY bytes, grid state, or render damage through the
     top-level DanTerm model.
-  - The existing Ghostty backend runs through that boundary without changing
+  - [x] The existing Ghostty backend runs through that boundary without changing
     DanTerm pane, tab, split, alert, persistence, or IPC behavior.
-  - Characterization fixtures record the current inspection and recovery
+  - [x] Characterization fixtures record the current inspection and recovery
     behavior in [Inspection, search, and recovery](06-inspection-recovery.md)
     before the Swift backend replaces runtime text extraction.
 
 - [ ] **2. Build the foundational headless terminal core and Unicode model**
-  - The pure state machine in [Terminal core](04-terminal-core.md) handles the
+  - [x] **Slice 1: Headless terminal core foundation.** Establishes the pure
+    terminal value, streaming UTF-8 ingestion, Unicode width policy, fixed
+    viewport grid, wide-cell invariants, and baseline controls. See the
+    [implementation plan](../plans/impl/2026-07-17-2054-headless-terminal-core-foundation.md).
+  - [x] **Slice 2: VT parser and cursor/erase beachhead.** Adds bounded,
+    chunk-invariant CSI dispatch plus cursor movement, positioning, erase
+    semantics, and integrated recovery proofs. See the
+    [implementation plan](../plans/impl/2026-07-17-2213-vt-parser-cursor-erase-beachhead.md).
+  - [ ] The pure state machine in [Terminal core](04-terminal-core.md) handles the
     control, screen, mode, and style behavior required by the viability slice.
-  - Its behavior is deterministic, independent of input chunking, and proven
+  - [ ] Its behavior is deterministic, independent of input chunking, and proven
     without a PTY, AppKit, or renderer.
-  - The foundational contracts in
+  - [ ] The foundational contracts in
     [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md) pass for
     Spanish text, Chinese wide text, basic emoji, wide-cell mutations, hard and
     soft line identity, and primary-screen resize reflow.
-  - Reflow preserves logical content, hard line boundaries, cursor attachment,
+  - [ ] Reflow preserves logical content, hard line boundaries, cursor attachment,
     and live/scrolled viewport anchors across the slice's width and height
     changes.
-  - The Milestone 2 tranche in
+  - [ ] The Milestone 2 tranche in
     [External terminal test research](../docs/research/1-external-tests.md)
     establishes structure-insensitive replay and adopts or classifies
     applicable parser, Unicode, grid, and reflow fixtures early enough to
     inform the core's public contracts.
 
 - [ ] **3. Integrate PTY process lifecycle**
-  - [PTY and process lifecycle](07-pty-process-lifecycle.md) proves launch,
+  - [ ] [PTY and process lifecycle](07-pty-process-lifecycle.md) proves launch,
     ordered IO, environment, resize, EOF, exit, cancellation, and teardown with
     controlled child processes.
-  - A headless pane can run a shell session without leaking resources or
+  - [ ] A headless pane can run a shell session without leaking resources or
     depending on rendering.
 
 - [ ] **4. Prove the interactive viability slice**
-  - One Swift-engine pane launches zsh, renders a recognizable prompt, accepts
+  - [ ] One Swift-engine pane launches zsh, renders a recognizable prompt, accepts
     ordinary and dead-key-composed text, displays the required foundational
     Unicode cases, runs `ls`, `cat`, and `less`, and resizes with basic reflow.
-  - Shell exit and pane closure release resources; idle and sleep/wake behavior
+  - [ ] Shell exit and pane closure release resources; idle and sleep/wake behavior
     satisfy the experiment gate in
     [Migration and app boundary](02-migration-and-boundary.md).
-  - The slice is reproducible and its terminal-core behavior has deterministic
+  - [ ] The slice is reproducible and its terminal-core behavior has deterministic
     proof at the lowest practical layer.
-  - Selected external recordings from
+  - [ ] Selected external recordings from
     [External terminal test research](../docs/research/1-external-tests.md)
     replay through the headless core and interactive slice; any optional
     differential or vttest experiment improves diagnostic evidence without
     becoming an unrecorded viability dependency.
 
 - [ ] **5. Make the experiment decision**
-  - Evidence from the viability slice records whether the architecture is
+  - [ ] Evidence from the viability slice records whether the architecture is
     pleasant to extend and whether Unicode/reflow, PTY ownership, rendering,
     concurrency, lifecycle, and power behavior are tractable.
-  - Explicitly choose to abandon the experiment, continue it, retain only
+  - [ ] Explicitly choose to abandon the experiment, continue it, retain only
     independently useful infrastructure, or commit to the remaining replacement
     roadmap.
-  - Decision evidence records what the staged corpora and tools in
+  - [ ] Decision evidence records what the staged corpora and tools in
     [External terminal test research](../docs/research/1-external-tests.md)
     revealed about architecture, diagnostic quality, and the value of retaining
     differential testing.
 
 - [ ] **6. Complete required terminal behavior and interaction**
-  - [Terminal core](04-terminal-core.md) completes the accepted baseline control,
+  - [ ] [Terminal core](04-terminal-core.md) completes the accepted baseline control,
     screen, mode, style, query, and recovery behavior.
-  - [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md) completes
+  - [ ] [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md) completes
     selection/search/viewport anchors, primary- and alternate-screen resize
     behavior, and the fixed 10 MiB scrollback contract.
-  - [Inspection, search, and recovery](06-inspection-recovery.md) preserves the
+  - [ ] [Inspection, search, and recovery](06-inspection-recovery.md) preserves the
     characterized viewport/full-history, logical-line, selection, search, pane
     read, export, recovery text, and event-driven recovery-freshness behavior
     across reflow.
-  - [Input and interaction](08-input-interaction.md) and
+  - [ ] [Input and interaction](08-input-interaction.md) and
     [Renderer](09-renderer.md) provide an interactive pane with macOS text
     composition, terminal keys, mouse reporting, selection, safe paste,
     local wheel/scrollbar history navigation, clipboard writes, links, font
     fallback, colors, cursor behavior, and correct display scaling.
-  - Logical damage and full redraw produce the same visible state.
-  - Every external case family assigned through Milestone 6 in
+  - [ ] Logical damage and full redraw produce the same visible state.
+  - [ ] Every external case family assigned through Milestone 6 in
     [External terminal test research](../docs/research/1-external-tests.md) has
     an adopted, adapted, superseded, or out-of-scope disposition; every
     applicable case passes through DanTerm's public behavioral seams.
 
 - [ ] **7. Reach shell and baseline application compatibility**
-  - zsh, bash, fish, ssh, fzf, more, and less complete the minimum workflows in
+  - [ ] zsh, bash, fish, ssh, fzf, more, and less complete the minimum workflows in
     [Testing and conformance](12-testing-conformance.md).
-  - [Protocols and shell integration](10-protocols-shell-integration.md) proves
+  - [ ] [Protocols and shell integration](10-protocols-shell-integration.md) proves
     the advertised terminal environment, current DanTerm shell events, title,
     cwd, notifications, progress, links, clipboard policy, capability manifest,
     bell behavior, and cross-component protocol limits.
-  - The supported black-box protocol and capability tranche in
+  - [ ] The supported black-box protocol and capability tranche in
     [External terminal test research](../docs/research/1-external-tests.md)
     passes against the real pane, and failures reduce to native deterministic
     fixtures where practical.
 
 - [ ] **8. Reach tmux, editor, and advanced TUI compatibility**
-  - tmux, vim, neovim, btop, htop, lazygit, Claude Code, and Codex complete the
+  - [ ] tmux, vim, neovim, btop, htop, lazygit, Claude Code, and Codex complete the
     minimum workflows in [Testing and conformance](12-testing-conformance.md).
-  - Relevant workflows pass both directly and through tmux or ssh where those
+  - [ ] Relevant workflows pass both directly and through tmux or ssh where those
     layers materially change terminal behavior.
-  - External and DanTerm-owned recordings identified in
+  - [ ] External and DanTerm-owned recordings identified in
     [External terminal test research](../docs/research/1-external-tests.md)
     cover the supported tmux, editor, and advanced-TUI behaviors without making
     another emulator's output normative.
 
 - [ ] **9. Pass the replacement quality gates**
-  - Every required component invariant has the behavioral proof required by
+  - [ ] Every required component invariant has the behavioral proof required by
     [Testing and conformance](12-testing-conformance.md).
-  - [Power and performance](13-power-performance.md) passes idle, hidden-pane,
+  - [ ] [Power and performance](13-power-performance.md) passes idle, hidden-pane,
     visible-output, recovery-freshness, sleep/wake, responsiveness, and teardown
     gates.
-  - The Swift backend is suitable for sustained daily use without a required
+  - [ ] The Swift backend is suitable for sustained daily use without a required
     fallback to Ghostty.
-  - The complete pinned evidence package from
+  - [ ] The complete pinned evidence package from
     [External terminal test research](../docs/research/1-external-tests.md) is
     reproducible and gating; upstream updates cannot silently change expected
     behavior.
 
 - [ ] **10. Remove libghostty**
-  - No required runtime, build, config, test, documentation, or release path
+  - [ ] No required runtime, build, config, test, documentation, or release path
     depends on Ghostty.
-  - The Swift engine is the sole terminal backend and the full DanTerm test gate
+  - [ ] The Swift engine is the sole terminal backend and the full DanTerm test gate
     remains green.
 
 ## Direction
