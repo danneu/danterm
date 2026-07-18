@@ -261,7 +261,7 @@ differential traces against live Ghostty.
 ## Commit progress
 
 - [x] 1. Establish the pure Swift 6 package and pinned Unicode property foundation
-- [ ] 2. Add chunk-invariant UTF-8 decoding and escape absorption
+- [x] 2. Add chunk-invariant UTF-8 decoding and escape absorption
 - [ ] 3. Add terminal grid, controls, wrapping, and wide-cell invariants
 
 ## Implementation notes
@@ -270,3 +270,7 @@ differential traces against live Ghostty.
   and record official-file SHA-256 hashes in the generator. The generated test
   reference independently combines the source properties into exhaustive runs
   so `just test` validates every scalar without network access.
+- The stream-to-grid handoff uses internal scalar/control actions rather than a
+  callback. Commit 3 consumes them inside the public terminal's void ingestion
+  method, preserving the no-callback and no-public-effects contracts while
+  keeping decoder and absorber behavior independently testable.
