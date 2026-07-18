@@ -14,10 +14,17 @@ public struct Terminal: Equatable, Sendable {
         var isSoftWrapped = false
     }
 
-    /// Tracks cursor and combining-mark attachment coordinates without exposing storage indices.
+    /// Tracks cursor coordinates without exposing storage indices.
     private struct CellPosition: Equatable, Sendable {
         var row: Int
         var column: Int
+    }
+
+    /// Retains exactly the target and pairwise look-behind for one open grapheme cluster.
+    private struct ClusterContext: Equatable, Sendable {
+        var target: CellPosition
+        var previousScalar: Unicode.Scalar
+        var breakState = GraphemeBreakState()
     }
 
     private let columnCount: Int
@@ -25,7 +32,7 @@ public struct Terminal: Equatable, Sendable {
     private var rows: [GridRow]
     private var cursor = CellPosition(row: 0, column: 0)
     private var isPendingWrap = false
-    private var attachTarget: CellPosition?
+    private var clusterContext: ClusterContext?
     private var inputStream = TerminalInputStream()
 
     /// Rejects dimensions that cannot represent all supported terminal cells.
@@ -104,7 +111,7 @@ public struct Terminal: Equatable, Sendable {
         cursor.row = min(max(row, 0), rowCount - 1)
         cursor.column = min(max(column, 0), columnCount - 1)
         isPendingWrap = false
-        attachTarget = nil
+        clusterContext = nil
     }
 
     /// Clears a row range after expanding its boundaries across intersected wide pairs.
@@ -125,7 +132,7 @@ public struct Terminal: Equatable, Sendable {
         for column in lower..<upper {
             clearCellAndPair(row: row, column: column)
         }
-        attachTarget = nil
+        clusterContext = nil
     }
 
     private mutating func dispatchCSI(_ sequence: CSISequence) {
@@ -252,7 +259,7 @@ public struct Terminal: Equatable, Sendable {
             let nextStop = ((cursor.column / 8) + 1) * 8
             cursor.column = min(nextStop, columnCount - 1)
             if cursor.column != previousColumn {
-                attachTarget = nil
+                clusterContext = nil
             }
         case 0x0A, 0x0B, 0x0C:
             clearPendingMotionState()
@@ -267,15 +274,16 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func clearPendingMotionState() {
         isPendingWrap = false
-        attachTarget = nil
+        clusterContext = nil
     }
 
     private mutating func print(_ scalar: Unicode.Scalar) {
-        let properties = terminalUnicodeProperties(for: scalar)
-        if properties.cellWidth == .zero {
-            appendZeroWidth(scalar)
+        if appendToOpenClusterIfJoined(scalar) {
             return
         }
+
+        let properties = terminalUnicodeProperties(for: scalar)
+        guard properties.cellWidth != .zero else { return }
 
         if isPendingWrap {
             softWrap()
@@ -291,31 +299,40 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    private mutating func appendZeroWidth(_ scalar: Unicode.Scalar) {
-        guard let target = attachTarget else { return }
+    private mutating func appendToOpenClusterIfJoined(_ scalar: Unicode.Scalar) -> Bool {
+        guard var context = clusterContext else { return false }
+        let target = context.target
         guard rows.indices.contains(target.row), rows[target.row].cells.indices.contains(target.column) else {
-            attachTarget = nil
-            return
+            clusterContext = nil
+            return false
         }
         guard rows[target.row].cells[target.column].kind == .narrow
             || rows[target.row].cells[target.column].kind == .wideHead
         else {
-            attachTarget = nil
-            return
+            clusterContext = nil
+            return false
         }
 
-        if scalar.value == 0xFE0E || scalar.value == 0xFE0F {
-            guard let base = rows[target.row].cells[target.column].scalars.first,
-                  terminalUnicodeProperties(for: base).isExtendedPictographic
-            else { return }
+        var nextBreakState = context.breakState
+        guard graphemeBreak(
+            between: context.previousScalar,
+            and: scalar,
+            state: &nextBreakState
+        ) == false else {
+            return false
         }
+
         rows[target.row].cells[target.column].scalars.append(scalar)
+        context.previousScalar = scalar
+        context.breakState = nextBreakState
+        clusterContext = context
+        return true
     }
 
     private mutating func printNarrow(_ scalar: Unicode.Scalar) {
         clearCellAndPair(row: cursor.row, column: cursor.column)
         rows[cursor.row].cells[cursor.column] = GridCell(kind: .narrow, scalars: [scalar])
-        attachTarget = cursor
+        clusterContext = ClusterContext(target: cursor, previousScalar: scalar)
 
         if cursor.column == columnCount - 1 {
             isPendingWrap = true
@@ -347,7 +364,7 @@ public struct Terminal: Equatable, Sendable {
         )
         rows[cursor.row].cells[cursor.column] = GridCell(kind: .wideHead, scalars: [scalar])
         rows[cursor.row].cells[cursor.column + 1] = GridCell(kind: .wideTail, scalars: [])
-        attachTarget = cursor
+        clusterContext = ClusterContext(target: cursor, previousScalar: scalar)
 
         cursor.column += 1
         if cursor.column == columnCount - 1 {
@@ -363,7 +380,7 @@ public struct Terminal: Equatable, Sendable {
         advanceToNextRow()
         cursor.column = 0
         isPendingWrap = false
-        attachTarget = nil
+        clusterContext = nil
     }
 
     private mutating func lineFeed() {

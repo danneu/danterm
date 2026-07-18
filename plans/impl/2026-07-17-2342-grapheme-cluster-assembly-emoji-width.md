@@ -284,5 +284,5 @@ storage caps, and differential traces against live Ghostty.
 ## Commit progress
 
 - [x] 1. Add pinned grapheme tables, the pure segmenter, and official corpus coverage
-- [ ] 2. Assemble grapheme clusters through break-driven terminal attachment
+- [x] 2. Assemble grapheme clusters through break-driven terminal attachment
 - [ ] 3. Apply cluster width policy and upgrade/downgrade geometry

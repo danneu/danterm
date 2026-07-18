@@ -88,7 +88,7 @@ struct TerminalTests {
         #expect(pending.geometry.rows[0].isSoftWrapped == false)
     }
 
-    @Test("variation selectors require an Extended_Pictographic base")
+    @Test("variation selectors remain stored on any no-break base")
     func variationSelectorAttachPolicy() throws {
         var emoji = try #require(Terminal(columns: 4, rows: 1))
         emoji.feed(Array("\u{1F618}\u{FE0E}\u{FE0F}".utf8))
@@ -97,7 +97,7 @@ struct TerminalTests {
 
         var text = try #require(Terminal(columns: 4, rows: 1))
         text.feed(Array("A\u{FE0E}\u{FE0F}".utf8))
-        #expect(text.cell(row: 0, column: 0)?.scalars == ["A"])
+        #expect(text.cell(row: 0, column: 0)?.scalars == ["A", "\u{FE0E}", "\u{FE0F}"])
     }
 
     @Test("ground controls move the cursor without writing cells")
@@ -293,6 +293,12 @@ struct TerminalTests {
             Array("ma\u{00F1}ana".utf8),
             Array("man\u{0303}ana".utf8),
             Array("\u{754C}\u{1F618}".utf8),
+            Array("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}".utf8),
+            Array("\u{1F44D}\u{1F3FD}".utf8),
+            Array("\u{1F1FA}\u{1F1F8}\u{1F1E8}".utf8),
+            Array("#\u{FE0F}\u{20E3}".utf8),
+            Array("\u{0915}\u{094D}\u{200D}\u{0915}".utf8),
+            Array("\u{1F468}\u{200D}".utf8) + [0x80] + Array("\u{0301}\u{1F469}".utf8),
             [0x41, 0x0D, 0x09, 0x08, 0x0A, 0x42],
             [0xF0, 0x9F, 0x41, 0x80, 0x42],
             [0x41, 0x1B, 0x5B, 0x33, 0x31, 0x6D, 0x42],
