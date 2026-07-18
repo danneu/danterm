@@ -120,31 +120,43 @@ struct CSIEraseTests {
         expectValidGrid(terminal)
     }
 
-    @Test("ED scrollback mode is bit-identical and preserves combining attachment")
-    func eraseDisplayScrollbackIsNoOp() throws {
-        // Intent: prove ED 3 does not inherit active-grid erase side effects
-        //   and deliberately leaves retained history untouched until Milestone 6.
-        // Why it exists: routing ED modes through a shared cleanup path could
-        //   silently erase retained rows, clear pending wrap, or lose the
-        //   combining attachment target before ED 3 semantics are delivered.
-        // Scenario: terminal output requests scrollback erasure with history
-        //   populated, between a base and combining mark, and at pending wrap.
-        var retained = try #require(Terminal(columns: 2, rows: 1))
-        retained.feed(Array("ABC".utf8))
-        let expectedRetained = retained
-        retained.feed(Array("\u{1B}[3J".utf8))
-        #expect(retained == expectedRetained)
+    @Test("ED 3 clears only scrollback and pending motion state")
+    func eraseDisplayScrollback() throws {
+        // Intent: clear retained history without changing viewport, cursor,
+        //   pen, or active region, while ending deferred wrap and attachment.
+        // Why it exists: ED 3 shares dispatch with active-grid erase modes but
+        //   has a distinct target and the slice-wide side-state policy.
+        // Scenario: a shell clears its transcript while a bounded TUI remains
+        //   displayed and continues scrolling inside the same margins.
+        var terminal = try #require(Terminal(columns: 3, rows: 3))
+        terminal.feed(Array("ABCDEFGHIJ".utf8))
+        terminal.feed(Array("\u{1B}[2;3r\u{1B}[3;2H\u{1B}[1;31;44m".utf8))
+        let expectedGeometry = terminal.geometry
+        let expectedStyle = terminal.currentStyle
+        #expect(terminal.scrollbackRowCount == 1)
 
-        var pending = try #require(Terminal(columns: 2, rows: 2))
-        pending.feed(Array("AB".utf8))
-        let expected = pending
-        pending.feed(Array("\u{1B}[3J".utf8))
-        #expect(pending == expected)
+        terminal.feed(Array("\u{1B}[3J".utf8))
+
+        #expect(terminal.scrollbackRowCount == 0)
+        #expect(terminal.geometry == expectedGeometry)
+        #expect(terminal.currentStyle == expectedStyle)
+        #expect(terminal.geometry.cursor.isPendingWrap == false)
+        terminal.feed(Array("\u{1B}[S".utf8))
+        #expect(terminal.scrollbackRowCount == 0)
+        expectValidGrid(terminal)
+
+        let once = terminal
+        terminal.feed(Array("\u{1B}[3J".utf8))
+        #expect(terminal == once)
+
+        terminal.moveCursor(row: 0, column: 0)
+        terminal.feed(Array("Z".utf8))
+        #expect(terminal.cell(row: 0, column: 0)?.scalars == ["Z"])
+        expectValidGrid(terminal)
 
         var combining = try #require(Terminal(columns: 3, rows: 1))
         combining.feed(Array("A\u{1B}[3J\u{0301}".utf8))
-        #expect(combining.cell(row: 0, column: 0)?.scalars == ["A", "\u{0301}"])
-        expectValidGrid(combining)
+        #expect(combining.cell(row: 0, column: 0)?.scalars == ["A"])
     }
 
     @Test("ECH defaults and zero to one, clamps, widens, and supports two columns")

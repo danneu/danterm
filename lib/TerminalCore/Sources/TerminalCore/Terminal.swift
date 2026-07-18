@@ -634,6 +634,18 @@ public struct Terminal: Equatable, Sendable {
         case 0x58:
             guard let amount = movementAmount(sequence.parameters) else { return }
             eraseCharacters(amount: amount)
+        case 0x40:
+            guard let amount = movementAmount(sequence.parameters) else { return }
+            insertCharacters(amount: amount)
+        case 0x50:
+            guard let amount = movementAmount(sequence.parameters) else { return }
+            deleteCharacters(amount: amount)
+        case 0x4C:
+            guard let amount = movementAmount(sequence.parameters) else { return }
+            insertLines(amount: amount)
+        case 0x4D:
+            guard let amount = movementAmount(sequence.parameters) else { return }
+            deleteLines(amount: amount)
         case 0x53:
             guard let amount = movementAmount(sequence.parameters) else { return }
             scrollUp(amount: amount)
@@ -865,7 +877,8 @@ public struct Terminal: Equatable, Sendable {
             }
             clearPendingMotionState()
         case 3:
-            break
+            scrollbackRows.removeAll(keepingCapacity: true)
+            clearPendingMotionState()
         default:
             return
         }
@@ -1207,6 +1220,48 @@ public struct Terminal: Equatable, Sendable {
         moveAndFillRows(in: activeScrollRegion, by: amount, pushesToScrollback: false)
     }
 
+    private mutating func insertCharacters(amount: Int) {
+        clearPendingMotionState()
+        guard activeScrollRegion.contains(cursor.row) else { return }
+        moveAndFillCells(
+            in: cursor.column..<columnCount,
+            row: cursor.row,
+            by: amount
+        )
+    }
+
+    private mutating func deleteCharacters(amount: Int) {
+        clearPendingMotionState()
+        guard activeScrollRegion.contains(cursor.row) else { return }
+        moveAndFillCells(
+            in: cursor.column..<columnCount,
+            row: cursor.row,
+            by: -amount
+        )
+    }
+
+    private mutating func insertLines(amount: Int) {
+        clearPendingMotionState()
+        let region = activeScrollRegion
+        guard region.contains(cursor.row) else { return }
+        moveAndFillRows(
+            in: cursor.row..<region.upperBound,
+            by: amount,
+            pushesToScrollback: false
+        )
+    }
+
+    private mutating func deleteLines(amount: Int) {
+        clearPendingMotionState()
+        let region = activeScrollRegion
+        guard region.contains(cursor.row) else { return }
+        moveAndFillRows(
+            in: cursor.row..<region.upperBound,
+            by: -amount,
+            pushesToScrollback: false
+        )
+    }
+
     private mutating func reverseIndex() {
         let region = activeScrollRegion
         if cursor.row == region.lowerBound {
@@ -1248,6 +1303,64 @@ public struct Terminal: Equatable, Sendable {
                 ? range.lowerBound + survivingCount - 1
                 : range.upperBound - 1
             severWrapClaim(at: lastSurvivor, replacementStyle: style)
+        }
+    }
+
+    // Horizontal counterpart to moveAndFillRows: both primitives snapshot,
+    // clip, move intact storage, BCE-fill the vacated strip, and repair seams.
+    private mutating func moveAndFillCells(
+        in range: Range<Int>,
+        row: Int,
+        by delta: Int
+    ) {
+        guard range.isEmpty == false, delta != 0 else { return }
+        let amount = min(abs(delta), range.count)
+        let sourceCells = Array(rows[row].cells[range])
+        let style = backgroundEraseStyle
+
+        for destination in range {
+            let source = delta < 0 ? destination + amount : destination - amount
+            if range.contains(source) {
+                rows[row].cells[destination] = sourceCells[source - range.lowerBound]
+            } else {
+                rows[row].cells[destination] = GridCell(style: style)
+            }
+        }
+
+        severWrapClaim(at: row, replacementStyle: style)
+        clearPreviousSpacer(
+            beforeRow: row,
+            column: range.lowerBound,
+            replacementStyle: style
+        )
+        repairHorizontalMove(in: row, replacementStyle: style)
+    }
+
+    private mutating func repairHorizontalMove(
+        in row: Int,
+        replacementStyle: TerminalStyle
+    ) {
+        let cells = rows[row].cells
+        var invalidColumns: [Int] = []
+        for column in cells.indices {
+            switch cells[column].kind {
+            case .wideHead:
+                if column + 1 >= columnCount || cells[column + 1].kind != .wideTail {
+                    invalidColumns.append(column)
+                }
+            case .wideTail:
+                if column == 0 || cells[column - 1].kind != .wideHead {
+                    invalidColumns.append(column)
+                }
+            case .spacerHead:
+                invalidColumns.append(column)
+            case .padding, .narrow:
+                break
+            }
+        }
+
+        for column in invalidColumns {
+            rows[row].cells[column] = GridCell(style: replacementStyle)
         }
     }
 

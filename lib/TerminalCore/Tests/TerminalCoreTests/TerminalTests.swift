@@ -378,8 +378,9 @@ struct TerminalTests {
         //   a printable sentinel that must survive in a structurally valid grid.
         let byteAlphabet: [[UInt8]] = [
             0x1B, 0x5B, 0x30, 0x31, 0x32, 0x39, 0x3A, 0x3B, 0x3F,
-            0x20, 0x41, 0x42, 0x43, 0x44, 0x48, 0x4A, 0x4B, 0x58,
-            0x60, 0x64, 0x66, 0x6A, 0x6B, 0x18, 0x1A, 0x7F,
+            0x20, 0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x48, 0x4A,
+            0x4B, 0x4C, 0x4D, 0x50, 0x53, 0x54, 0x58, 0x60, 0x64,
+            0x66, 0x6A, 0x6B, 0x72, 0x18, 0x1A, 0x7F,
         ].map { [$0] }
         let sgrFragments = [
             Array("\u{1B}[m".utf8),
@@ -387,11 +388,17 @@ struct TerminalTests {
             Array("\u{1B}[38;5;200m".utf8),
             Array("\u{1B}[48:2::1:2:3m".utf8),
         ]
-        let alphabet = byteAlphabet + sgrFragments
+        let sliceSixFragments = [
+            Array("\u{1B}[2;3r".utf8),
+            Array("\u{1B}[S\u{1B}[T".utf8),
+            Array("\u{1B}[@\u{1B}[P\u{1B}[L\u{1B}[M".utf8),
+            Array("\u{1B}[3J\u{1B}D\u{1B}E\u{1B}M".utf8),
+        ]
+        let alphabet = byteAlphabet + sgrFragments + sliceSixFragments
         for seed in UInt64(1)...256 {
             var generator = Generator(state: seed)
             var terminal = try #require(Terminal(columns: 7, rows: 3))
-            for fragment in sgrFragments + (0..<256).map({ _ in
+            for fragment in sgrFragments + sliceSixFragments + (0..<256).map({ _ in
                 alphabet[Int(generator.next()) % alphabet.count]
             }) {
                 terminal.feed(fragment)

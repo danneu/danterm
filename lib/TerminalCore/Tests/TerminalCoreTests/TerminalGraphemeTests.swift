@@ -118,7 +118,7 @@ struct TerminalGraphemeTests {
     func noOpEventsPreserveCluster() throws {
         let noOps: [[UInt8]] = [
             [0x00],
-            [0x1B, 0x5B, 0x33, 0x4A],
+            [0x1B, 0x5B, 0x39, 0x7A],
             [0x1B, 0x5B, 0x6D],
         ]
 

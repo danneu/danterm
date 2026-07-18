@@ -483,5 +483,5 @@ attachment) clearing on valid scroll/edit operations (D2).
 ## Commit progress
 
 - [x] 1. Add region-aware scrolling and index controls
-- [ ] 2. Add terminal editing operations and scrollback erase
+- [x] 2. Add terminal editing operations and scrollback erase
 - [ ] 3. Adopt scroll/edit fixtures and complete the slice gate
