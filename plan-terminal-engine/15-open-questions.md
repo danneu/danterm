@@ -24,7 +24,6 @@ silently.
 
 - Which less-common DEC modes and rectangle operations are required by the
   accepted application workflows?
-- What exact fallback width applies to malformed or unsupported emoji clusters?
 
 ## Runtime integration
 

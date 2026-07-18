@@ -10,9 +10,9 @@ struct TerminalGraphemeTests {
         let fixtures: [(text: String, kind: TerminalCellKind)] = [
             ("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}", .wideHead),
             ("\u{1F44D}\u{1F3FD}", .wideHead),
-            ("\u{1F1FA}\u{1F1F8}", .narrow),
-            ("#\u{FE0F}\u{20E3}", .narrow),
-            ("\u{0915}\u{094D}\u{200D}\u{0915}", .narrow),
+            ("\u{1F1FA}\u{1F1F8}", .wideHead),
+            ("#\u{FE0F}\u{20E3}", .wideHead),
+            ("\u{0915}\u{094D}\u{200D}\u{0915}", .wideHead),
         ]
 
         for fixture in fixtures {
@@ -27,22 +27,22 @@ struct TerminalGraphemeTests {
 
     @Test("a third Regional Indicator starts a new cluster")
     func regionalIndicatorParity() throws {
-        var terminal = try #require(Terminal(columns: 6, rows: 1))
+        var terminal = try #require(Terminal(columns: 7, rows: 1))
 
         terminal.feed(Array("\u{1F1E6}\u{1F1E7}\u{1F1E8}".utf8))
 
         #expect(terminal.cell(row: 0, column: 0)?.scalars == ["\u{1F1E6}", "\u{1F1E7}"])
-        #expect(terminal.cell(row: 0, column: 1)?.scalars == ["\u{1F1E8}"])
+        #expect(terminal.cell(row: 0, column: 2)?.scalars == ["\u{1F1E8}"])
     }
 
     @Test("soft wrap starts the next grapheme with fresh break state")
     func softWrapResetsLookBehind() throws {
-        var terminal = try #require(Terminal(columns: 2, rows: 2))
-        terminal.moveCursor(row: 0, column: 1)
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.moveCursor(row: 0, column: 2)
 
         terminal.feed(Array("\u{1F1E6}\u{1F1E7}\u{1F1E8}\u{1F1E9}".utf8))
 
-        #expect(terminal.cell(row: 0, column: 1)?.scalars == ["\u{1F1E6}", "\u{1F1E7}"])
+        #expect(terminal.cell(row: 0, column: 2)?.scalars == ["\u{1F1E6}", "\u{1F1E7}"])
         #expect(terminal.cell(row: 1, column: 0)?.scalars == ["\u{1F1E8}", "\u{1F1E9}"])
         #expect(terminal.geometry.rows[0].isSoftWrapped)
     }

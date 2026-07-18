@@ -19,6 +19,8 @@ import Testing
         #expect(terminalUnicodeProperties(for: "\u{200D}").cellWidth == .zero)
         #expect(terminalUnicodeProperties(for: "\u{3099}").cellWidth == .zero)
         #expect(terminalUnicodeProperties(for: "\u{00A1}").cellWidth == .narrow)
+        #expect(terminalUnicodeProperties(for: "\u{1F1E6}").cellWidth == .wide)
+        #expect(terminalUnicodeProperties(for: "\u{1F3FD}").isEmojiModifier)
     }
 
     @Test("Extended_Pictographic is independent from scalar width")
@@ -41,6 +43,7 @@ import Testing
                 let properties = terminalUnicodeProperties(for: scalar)
                 #expect(properties.cellWidth.rawValue == range.cellWidth)
                 #expect(properties.isExtendedPictographic == range.isExtendedPictographic)
+                #expect(properties.isEmojiModifier == range.isEmojiModifier)
             }
         }
     }

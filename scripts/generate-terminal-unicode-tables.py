@@ -301,6 +301,7 @@ def production_source(
     zero_width: list[tuple[int, int]],
     wide: list[tuple[int, int]],
     pictographic: list[tuple[int, int]],
+    emoji_modifiers: list[tuple[int, int]],
     emoji_variation_bases: list[tuple[int, int]],
     grapheme_classes: list[tuple[int, int, int]],
 ) -> str:
@@ -321,6 +322,7 @@ enum TerminalCellWidth: UInt8, Equatable, Sendable {{
 struct TerminalUnicodeProperties: Equatable, Sendable {{
     let cellWidth: TerminalCellWidth
     let isExtendedPictographic: Bool
+    let isEmojiModifier: Bool
     let isEmojiVariationBase: Bool
 }}
 
@@ -340,6 +342,10 @@ func terminalUnicodeProperties(for scalar: Unicode.Scalar) -> TerminalUnicodePro
         isExtendedPictographic: GeneratedUnicodeTables.contains(
             value,
             in: GeneratedUnicodeTables.extendedPictographic
+        ),
+        isEmojiModifier: GeneratedUnicodeTables.contains(
+            value,
+            in: GeneratedUnicodeTables.emojiModifier
         ),
         isEmojiVariationBase: GeneratedUnicodeTables.contains(
             value,
@@ -365,6 +371,10 @@ private enum GeneratedUnicodeTables {{
 
     static let extendedPictographic: [UInt32] = [
 {boundary_array(pictographic)}
+    ]
+
+    static let emojiModifier: [UInt32] = [
+{boundary_array(emoji_modifiers)}
     ]
 
     static let emojiVariationBase: [UInt32] = [
@@ -423,34 +433,39 @@ def reference_ranges(
     zero_width: list[tuple[int, int]],
     wide: list[tuple[int, int]],
     pictographic: list[tuple[int, int]],
-) -> list[tuple[int, int, int, bool]]:
+    emoji_modifiers: list[tuple[int, int]],
+) -> list[tuple[int, int, int, bool, bool]]:
     widths = bytearray([1]) * (MAX_SCALAR + 1)
     pictographs = bytearray(MAX_SCALAR + 1)
+    modifiers = bytearray(MAX_SCALAR + 1)
     for lower, upper in wide:
         widths[lower : upper + 1] = bytes([2]) * (upper - lower + 1)
     for lower, upper in zero_width:
         widths[lower : upper + 1] = bytes([0]) * (upper - lower + 1)
     for lower, upper in pictographic:
         pictographs[lower : upper + 1] = bytes([1]) * (upper - lower + 1)
+    for lower, upper in emoji_modifiers:
+        modifiers[lower : upper + 1] = bytes([1]) * (upper - lower + 1)
 
-    result: list[tuple[int, int, int, bool]] = []
+    result: list[tuple[int, int, int, bool, bool]] = []
     start = 0
-    prior = (widths[0], bool(pictographs[0]))
+    prior = (widths[0], bool(pictographs[0]), bool(modifiers[0]))
     for value in range(1, MAX_SCALAR + 1):
-        current = (widths[value], bool(pictographs[value]))
+        current = (widths[value], bool(pictographs[value]), bool(modifiers[value]))
         if current != prior:
-            result.append((start, value - 1, prior[0], prior[1]))
+            result.append((start, value - 1, prior[0], prior[1], prior[2]))
             start = value
             prior = current
-    result.append((start, MAX_SCALAR, prior[0], prior[1]))
+    result.append((start, MAX_SCALAR, prior[0], prior[1], prior[2]))
     return result
 
 
-def reference_source(ranges: list[tuple[int, int, int, bool]]) -> str:
+def reference_source(ranges: list[tuple[int, int, int, bool, bool]]) -> str:
     entries = "\n".join(
         f"    UnicodeReferenceRange(lowerBound: 0x{lower:X}, upperBound: 0x{upper:X}, "
-        f"cellWidth: {width}, isExtendedPictographic: {str(pictographic).lower()}),"
-        for lower, upper, width, pictographic in ranges
+        f"cellWidth: {width}, isExtendedPictographic: {str(pictographic).lower()}, "
+        f"isEmojiModifier: {str(is_modifier).lower()}),"
+        for lower, upper, width, pictographic, is_modifier in ranges
     )
     return f'''// Generated independently from the official Unicode {UNICODE_VERSION} property files.
 
@@ -460,6 +475,7 @@ struct UnicodeReferenceRange {{
     let upperBound: UInt32
     let cellWidth: UInt8
     let isExtendedPictographic: Bool
+    let isEmojiModifier: Bool
 }}
 
 let unicodeReferenceRanges: [UnicodeReferenceRange] = [
@@ -554,13 +570,24 @@ def main() -> None:
     args = parse_args()
     data = verified_data(args.data_dir)
     zero_width = parse_zero_width_ranges(data["UnicodeData.txt"])
-    wide = parse_property_ranges(data["EastAsianWidth.txt"], {"W", "F"})
+    grapheme_properties = parse_named_property_ranges(data["GraphemeBreakProperty.txt"])
+    wide = merge_ranges(
+        parse_property_ranges(data["EastAsianWidth.txt"], {"W", "F"})
+        + grapheme_properties["Regional_Indicator"]
+    )
+    reference_wide = merge_ranges(
+        parse_property_ranges(data["EastAsianWidth.txt"], {"W", "F"})
+        + parse_property_ranges(
+            data["GraphemeBreakProperty.txt"], {"Regional_Indicator"}
+        )
+    )
     pictographic = parse_property_ranges(data["emoji-data.txt"], {"Extended_Pictographic"})
+    emoji_modifiers = parse_property_ranges(data["emoji-data.txt"], {"Emoji_Modifier"})
     emoji_variation_bases = parse_emoji_variation_bases(
         data["emoji-variation-sequences.txt"]
     )
     classes = folded_grapheme_classes(
-        parse_named_property_ranges(data["GraphemeBreakProperty.txt"]),
+        grapheme_properties,
         parse_incb_ranges(data["DerivedCoreProperties.txt"]),
         pictographic,
     )
@@ -587,13 +614,16 @@ def main() -> None:
             zero_width,
             wide,
             pictographic,
+            emoji_modifiers,
             emoji_variation_bases,
             byte_runs(classes),
         ),
         encoding="utf-8",
     )
     reference.write_text(
-        reference_source(reference_ranges(zero_width, wide, pictographic)),
+        reference_source(
+            reference_ranges(zero_width, reference_wide, pictographic, emoji_modifiers)
+        ),
         encoding="utf-8",
     )
     grapheme_reference.write_text(

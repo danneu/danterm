@@ -35,6 +35,10 @@ mean.
     chunk-invariant CSI dispatch plus cursor movement, positioning, erase
     semantics, and integrated recovery proofs. See the
     [implementation plan](../plans/impl/2026-07-17-2213-vt-parser-cursor-erase-beachhead.md).
+  - [x] **Slice 3: Grapheme cluster assembly and emoji width.** Adds pinned
+    Unicode grapheme segmentation, break-driven cluster cells, deterministic
+    emoji width, and atomic width transitions. See the
+    [implementation plan](../plans/impl/2026-07-17-2342-grapheme-cluster-assembly-emoji-width.md).
   - [ ] The pure state machine in [Terminal core](04-terminal-core.md) handles the
     control, screen, mode, and style behavior required by the viability slice.
   - [ ] Its behavior is deterministic, independent of input chunking, and proven

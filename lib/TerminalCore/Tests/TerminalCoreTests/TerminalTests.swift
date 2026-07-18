@@ -296,6 +296,7 @@ struct TerminalTests {
             Array("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}".utf8),
             Array("\u{1F44D}\u{1F3FD}".utf8),
             Array("\u{1F1FA}\u{1F1F8}\u{1F1E8}".utf8),
+            Array("AB#\u{FE0F}".utf8),
             Array("#\u{FE0F}\u{20E3}".utf8),
             Array("\u{0915}\u{094D}\u{200D}\u{0915}".utf8),
             Array("\u{1F468}\u{200D}".utf8) + [0x80] + Array("\u{0301}\u{1F469}".utf8),

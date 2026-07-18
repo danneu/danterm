@@ -14,6 +14,7 @@ enum TerminalCellWidth: UInt8, Equatable, Sendable {
 struct TerminalUnicodeProperties: Equatable, Sendable {
     let cellWidth: TerminalCellWidth
     let isExtendedPictographic: Bool
+    let isEmojiModifier: Bool
     let isEmojiVariationBase: Bool
 }
 
@@ -33,6 +34,10 @@ func terminalUnicodeProperties(for scalar: Unicode.Scalar) -> TerminalUnicodePro
         isExtendedPictographic: GeneratedUnicodeTables.contains(
             value,
             in: GeneratedUnicodeTables.extendedPictographic
+        ),
+        isEmojiModifier: GeneratedUnicodeTables.contains(
+            value,
+            in: GeneratedUnicodeTables.emojiModifier
         ),
         isEmojiVariationBase: GeneratedUnicodeTables.contains(
             value,
@@ -165,7 +170,7 @@ private enum GeneratedUnicodeTables {
         0x1AFF0, 0x1AFF3, 0x1AFF5, 0x1AFFB, 0x1AFFD, 0x1AFFE, 0x1B000, 0x1B122,
         0x1B132, 0x1B132, 0x1B150, 0x1B152, 0x1B155, 0x1B155, 0x1B164, 0x1B167,
         0x1B170, 0x1B2FB, 0x1D300, 0x1D356, 0x1D360, 0x1D376, 0x1F004, 0x1F004,
-        0x1F0CF, 0x1F0CF, 0x1F18E, 0x1F18E, 0x1F191, 0x1F19A, 0x1F200, 0x1F202,
+        0x1F0CF, 0x1F0CF, 0x1F18E, 0x1F18E, 0x1F191, 0x1F19A, 0x1F1E6, 0x1F202,
         0x1F210, 0x1F23B, 0x1F240, 0x1F248, 0x1F250, 0x1F251, 0x1F260, 0x1F265,
         0x1F300, 0x1F320, 0x1F32D, 0x1F335, 0x1F337, 0x1F37C, 0x1F37E, 0x1F393,
         0x1F3A0, 0x1F3CA, 0x1F3CF, 0x1F3D3, 0x1F3E0, 0x1F3F0, 0x1F3F4, 0x1F3F4,
@@ -219,6 +224,10 @@ private enum GeneratedUnicodeTables {
         0x1F85A, 0x1F85F, 0x1F888, 0x1F88F, 0x1F8AE, 0x1F8AF, 0x1F8BC, 0x1F8BF,
         0x1F8C2, 0x1F8CF, 0x1F8D9, 0x1F8FF, 0x1F90C, 0x1F93A, 0x1F93C, 0x1F945,
         0x1F947, 0x1F9FF, 0x1FA58, 0x1FA5F, 0x1FA6E, 0x1FAFF, 0x1FC00, 0x1FFFD,
+    ]
+
+    static let emojiModifier: [UInt32] = [
+        0x1F3FB, 0x1F3FF,
     ]
 
     static let emojiVariationBase: [UInt32] = [

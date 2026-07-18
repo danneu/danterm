@@ -301,7 +301,7 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func appendToOpenClusterIfJoined(_ scalar: Unicode.Scalar) -> Bool {
         guard var context = clusterContext else { return false }
-        let target = context.target
+        var target = context.target
         guard rows.indices.contains(target.row), rows[target.row].cells.indices.contains(target.column) else {
             clusterContext = nil
             return false
@@ -322,11 +322,96 @@ public struct Terminal: Equatable, Sendable {
             return false
         }
 
+        guard let baseScalar = rows[target.row].cells[target.column].scalars.first else {
+            clusterContext = nil
+            return false
+        }
+        switch desiredClusterWidth(for: scalar, baseScalar: baseScalar) {
+        case .wide where rows[target.row].cells[target.column].kind == .narrow:
+            target = upgradeClusterToWide(at: target)
+        case .narrow where rows[target.row].cells[target.column].kind == .wideHead:
+            downgradeClusterToNarrow(at: target)
+        case .zero, .narrow, .wide, nil:
+            break
+        }
+
         rows[target.row].cells[target.column].scalars.append(scalar)
+        context.target = target
         context.previousScalar = scalar
         context.breakState = nextBreakState
         clusterContext = context
         return true
+    }
+
+    private func desiredClusterWidth(
+        for scalar: Unicode.Scalar,
+        baseScalar: Unicode.Scalar
+    ) -> TerminalCellWidth? {
+        if scalar.value == 0xFE0F || scalar.value == 0xFE0E {
+            guard terminalUnicodeProperties(for: baseScalar).isEmojiVariationBase else {
+                return nil
+            }
+            return scalar.value == 0xFE0F ? .wide : .narrow
+        }
+
+        let properties = terminalUnicodeProperties(for: scalar)
+        guard properties.cellWidth != .zero, properties.isEmojiModifier == false else {
+            return nil
+        }
+        switch graphemeBreakClass(for: scalar) {
+        case .v, .t, .prepend:
+            return nil
+        default:
+            return .wide
+        }
+    }
+
+    private mutating func upgradeClusterToWide(at target: CellPosition) -> CellPosition {
+        let scalars = rows[target.row].cells[target.column].scalars
+        var destination = target
+
+        if target.column == columnCount - 1 {
+            clearCellAndPair(row: target.row, column: target.column)
+            rows[target.row].cells[target.column] = GridCell(kind: .spacerHead, scalars: [])
+            rows[target.row].isSoftWrapped = true
+            cursor = target
+            advanceToNextRow()
+            cursor.column = 0
+            destination = cursor
+            clearCellAndPair(row: destination.row, column: 0, clearsPreviousSpacer: false)
+            clearCellAndPair(row: destination.row, column: 1, clearsPreviousSpacer: false)
+        } else {
+            clearCellAndPair(row: target.row, column: target.column + 1)
+        }
+
+        rows[destination.row].cells[destination.column] = GridCell(
+            kind: .wideHead,
+            scalars: scalars
+        )
+        rows[destination.row].cells[destination.column + 1] = GridCell(
+            kind: .wideTail,
+            scalars: []
+        )
+        advanceCursorPastWideCell(at: destination)
+        return destination
+    }
+
+    private mutating func downgradeClusterToNarrow(at target: CellPosition) {
+        rows[target.row].cells[target.column].kind = .narrow
+        rows[target.row].cells[target.column + 1] = GridCell()
+
+        if target.column == 0,
+           target.row > 0,
+           rows[target.row - 1].cells[columnCount - 1].kind == .spacerHead
+        {
+            rows[target.row - 1].cells[columnCount - 1] = GridCell()
+        }
+
+        if cursor.column == columnCount - 1 {
+            isPendingWrap = false
+        } else {
+            cursor.column -= 1
+        }
     }
 
     private mutating func printNarrow(_ scalar: Unicode.Scalar) {
@@ -365,8 +450,11 @@ public struct Terminal: Equatable, Sendable {
         rows[cursor.row].cells[cursor.column] = GridCell(kind: .wideHead, scalars: [scalar])
         rows[cursor.row].cells[cursor.column + 1] = GridCell(kind: .wideTail, scalars: [])
         clusterContext = ClusterContext(target: cursor, previousScalar: scalar)
+        advanceCursorPastWideCell(at: cursor)
+    }
 
-        cursor.column += 1
+    private mutating func advanceCursorPastWideCell(at head: CellPosition) {
+        cursor = CellPosition(row: head.row, column: head.column + 1)
         if cursor.column == columnCount - 1 {
             isPendingWrap = true
         } else {
