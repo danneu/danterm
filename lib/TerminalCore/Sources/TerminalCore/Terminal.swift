@@ -76,6 +76,10 @@ public struct Terminal: Equatable, Sendable {
     private var scrollRegion: Range<Int>?
     private var cursor = CellPosition(row: 0, column: 0)
     private var isPendingWrap = false
+    private var isInsertMode = false
+    private var isLineFeedNewLineMode = false
+    private var isOriginMode = false
+    private var isAutoWrapMode = true
     private var clusterContext: ClusterContext?
     private var inputStream = TerminalInputStream()
 
@@ -590,37 +594,54 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func dispatchCSI(_ sequence: CSISequence) {
+        if sequence.intermediates == [0x3F] {
+            switch sequence.final {
+            case 0x68:
+                applyDECPrivateModes(sequence.parameters, enabled: true)
+            case 0x6C:
+                applyDECPrivateModes(sequence.parameters, enabled: false)
+            default:
+                break
+            }
+            return
+        }
         guard sequence.intermediates.isEmpty else { return }
 
         switch sequence.final {
         case 0x41, 0x6B:
             guard let amount = movementAmount(sequence.parameters) else { return }
-            moveCursor(row: cursor.row - amount, column: cursor.column)
+            movePositionedCursor(row: cursor.row - amount, column: cursor.column)
         case 0x42:
             guard let amount = movementAmount(sequence.parameters) else { return }
-            moveCursor(row: cursor.row + amount, column: cursor.column)
+            movePositionedCursor(row: cursor.row + amount, column: cursor.column)
         case 0x43:
             guard let amount = movementAmount(sequence.parameters) else { return }
-            moveCursor(row: cursor.row, column: cursor.column + amount)
+            movePositionedCursor(row: cursor.row, column: cursor.column + amount)
         case 0x44, 0x6A:
             guard let amount = movementAmount(sequence.parameters) else { return }
-            moveCursor(row: cursor.row, column: cursor.column - amount)
+            movePositionedCursor(row: cursor.row, column: cursor.column - amount)
         case 0x45:
             guard let amount = movementAmount(sequence.parameters) else { return }
-            moveCursor(row: cursor.row + amount, column: 0)
+            movePositionedCursor(row: cursor.row + amount, column: 0)
         case 0x46:
             guard let amount = movementAmount(sequence.parameters) else { return }
-            moveCursor(row: cursor.row - amount, column: 0)
+            movePositionedCursor(row: cursor.row - amount, column: 0)
         case 0x47, 0x60:
             guard sequence.parameters.count <= 1 else { return }
-            moveCursor(row: cursor.row, column: absolutePosition(sequence.parameters.first))
+            movePositionedCursor(
+                row: cursor.row,
+                column: absolutePosition(sequence.parameters.first)
+            )
         case 0x64:
             guard sequence.parameters.count <= 1 else { return }
-            moveCursor(row: absolutePosition(sequence.parameters.first), column: cursor.column)
+            movePositionedCursor(
+                row: positioningOriginRow + absolutePosition(sequence.parameters.first),
+                column: cursor.column
+            )
         case 0x48, 0x66:
             guard sequence.parameters.count <= 2 else { return }
-            moveCursor(
-                row: absolutePosition(sequence.parameters.first),
+            movePositionedCursor(
+                row: positioningOriginRow + absolutePosition(sequence.parameters.first),
                 column: absolutePosition(sequence.parameters.dropFirst().first)
             )
         case 0x4A:
@@ -656,8 +677,51 @@ public struct Terminal: Equatable, Sendable {
             applySGR(sequence)
         case 0x72:
             setScrollRegion(sequence.parameters)
+        case 0x68:
+            applyANSIModes(sequence.parameters, enabled: true)
+        case 0x6C:
+            applyANSIModes(sequence.parameters, enabled: false)
         default:
             break
+        }
+    }
+
+    private mutating func applyANSIModes(_ parameters: [UInt16], enabled: Bool) {
+        var recognized = false
+        for parameter in parameters {
+            switch parameter {
+            case 4:
+                isInsertMode = enabled
+                recognized = true
+            case 20:
+                isLineFeedNewLineMode = enabled
+                recognized = true
+            default:
+                continue
+            }
+        }
+        if recognized {
+            clearPendingMotionState()
+        }
+    }
+
+    private mutating func applyDECPrivateModes(_ parameters: [UInt16], enabled: Bool) {
+        var recognized = false
+        for parameter in parameters {
+            switch parameter {
+            case 6:
+                isOriginMode = enabled
+                cursor = CellPosition(row: positioningOriginRow, column: 0)
+                recognized = true
+            case 7:
+                isAutoWrapMode = enabled
+                recognized = true
+            default:
+                continue
+            }
+        }
+        if recognized {
+            clearPendingMotionState()
         }
     }
 
@@ -905,6 +969,21 @@ public struct Terminal: Equatable, Sendable {
         max(Int(parameter ?? 1), 1) - 1
     }
 
+    private var positioningRowRange: Range<Int> {
+        isOriginMode ? activeScrollRegion : 0..<rowCount
+    }
+
+    private var positioningOriginRow: Int {
+        positioningRowRange.lowerBound
+    }
+
+    private mutating func movePositionedCursor(row: Int, column: Int) {
+        let rowRange = positioningRowRange
+        cursor.row = min(max(row, rowRange.lowerBound), rowRange.upperBound - 1)
+        cursor.column = min(max(column, 0), columnCount - 1)
+        clearPendingMotionState()
+    }
+
     private mutating func dispatchEscape(_ final: UInt8) {
         switch final {
         case 0x44:
@@ -937,6 +1016,9 @@ public struct Terminal: Equatable, Sendable {
         case 0x0A, 0x0B, 0x0C:
             clearPendingMotionState()
             lineFeed()
+            if isLineFeedNewLineMode {
+                cursor.column = 0
+            }
         case 0x0D:
             cursor.column = 0
             clearPendingMotionState()
@@ -1045,19 +1127,26 @@ public struct Terminal: Equatable, Sendable {
         var destination = target
 
         if target.column == columnCount - 1 {
-            clearCellAndPair(row: target.row, column: target.column)
-            rows[target.row].cells[target.column] = GridCell(
-                kind: .spacerHead,
-                scalars: [],
-                style: style
-            )
-            rows[target.row].isSoftWrapped = true
-            cursor = target
-            advanceToNextRow(preservingWrapClaim: true)
-            cursor.column = 0
-            destination = cursor
-            clearCellAndPair(row: destination.row, column: 0, clearsPreviousSpacer: false)
-            clearCellAndPair(row: destination.row, column: 1, clearsPreviousSpacer: false)
+            if isAutoWrapMode {
+                clearCellAndPair(row: target.row, column: target.column)
+                rows[target.row].cells[target.column] = GridCell(
+                    kind: .spacerHead,
+                    scalars: [],
+                    style: style
+                )
+                rows[target.row].isSoftWrapped = true
+                cursor = target
+                advanceToNextRow(preservingWrapClaim: true)
+                cursor.column = 0
+                destination = cursor
+                clearCellAndPair(row: destination.row, column: 0, clearsPreviousSpacer: false)
+                clearCellAndPair(row: destination.row, column: 1, clearsPreviousSpacer: false)
+            } else {
+                destination.column = columnCount - 2
+                clearCellAndPair(row: target.row, column: target.column)
+                clearCellAndPair(row: destination.row, column: destination.column)
+                clearCellAndPair(row: destination.row, column: destination.column + 1)
+            }
         } else {
             clearCellAndPair(row: target.row, column: target.column + 1)
         }
@@ -1092,6 +1181,13 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func printNarrow(_ scalar: Unicode.Scalar) {
+        if isInsertMode {
+            moveAndFillCells(
+                in: cursor.column..<columnCount,
+                row: cursor.row,
+                by: 1
+            )
+        }
         clearCellAndPair(row: cursor.row, column: cursor.column)
         rows[cursor.row].cells[cursor.column] = GridCell(
             kind: .narrow,
@@ -1101,7 +1197,7 @@ public struct Terminal: Equatable, Sendable {
         clusterContext = ClusterContext(target: cursor, previousScalar: scalar)
 
         if cursor.column == columnCount - 1 {
-            isPendingWrap = true
+            isPendingWrap = isAutoWrapMode
         } else {
             cursor.column += 1
         }
@@ -1110,16 +1206,28 @@ public struct Terminal: Equatable, Sendable {
     private mutating func printWide(_ scalar: Unicode.Scalar) {
         var preservesWrappedSpacer = false
         if cursor.column == columnCount - 1 {
-            clearCellAndPair(row: cursor.row, column: cursor.column)
-            rows[cursor.row].cells[cursor.column] = GridCell(
-                kind: .spacerHead,
-                scalars: [],
-                style: currentStyle
+            if isAutoWrapMode {
+                clearCellAndPair(row: cursor.row, column: cursor.column)
+                rows[cursor.row].cells[cursor.column] = GridCell(
+                    kind: .spacerHead,
+                    scalars: [],
+                    style: currentStyle
+                )
+                rows[cursor.row].isSoftWrapped = true
+                advanceToNextRow(preservingWrapClaim: true)
+                cursor.column = 0
+                preservesWrappedSpacer = true
+            } else {
+                cursor.column = columnCount - 2
+            }
+        }
+
+        if isInsertMode {
+            moveAndFillCells(
+                in: cursor.column..<columnCount,
+                row: cursor.row,
+                by: 2
             )
-            rows[cursor.row].isSoftWrapped = true
-            advanceToNextRow(preservingWrapClaim: true)
-            cursor.column = 0
-            preservesWrappedSpacer = true
         }
 
         clearCellAndPair(
@@ -1147,6 +1255,11 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func advanceCursorPastWideCell(at head: CellPosition) {
+        if isAutoWrapMode == false, head.column + 1 == columnCount - 1 {
+            cursor = head
+            isPendingWrap = false
+            return
+        }
         cursor = CellPosition(row: head.row, column: head.column + 1)
         if cursor.column == columnCount - 1 {
             isPendingWrap = true
@@ -1203,7 +1316,7 @@ public struct Terminal: Equatable, Sendable {
             let candidate = (top - 1)..<bottom
             scrollRegion = candidate == 0..<rowCount ? nil : candidate
         }
-        moveCursor(row: 0, column: 0)
+        moveCursor(row: positioningOriginRow, column: 0)
     }
 
     private mutating func scrollUp(amount: Int) {
