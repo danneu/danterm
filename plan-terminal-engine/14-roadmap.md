@@ -43,6 +43,10 @@ mean.
     visual rows and hard/soft identity, reflows the one-stream primary history
     with cursor attachment, and adopts neutral libvterm resize fixtures. See the
     [implementation plan](../plans/impl/2026-07-18-0119-primary-scrollback-reflow.md).
+  - [x] **Slice 5: Terminal presentation state and SGR/reset behavior.** Adds a
+    semantic pen, style-bearing cells, background-color erase semantics, and
+    neutral libvterm pen fixtures. See the
+    [implementation plan](../plans/impl/2026-07-18-0235-terminal-presentation-sgr.md).
   - [ ] The pure state machine in [Terminal core](04-terminal-core.md) handles the
     control, screen, mode, and style behavior required by the viability slice.
   - [ ] Its behavior is deterministic, independent of input chunking, and proven

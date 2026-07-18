@@ -3,6 +3,10 @@
   "source": "libvterm",
   "sourceURL": "https://github.com/neovim/libvterm/tree/nvim/t",
   "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+  "recordedDeviations": [
+    "DanTerm retains default and indexed colors semantically instead of resolving libvterm palette RGB values.",
+    "Pinned libvterm lacks SGR 58/59 and mishandles 38:2::r:g:b; DanTerm deliberately consumes both correctly."
+  ],
   "files": [
     {
       "path": "t/16state_resize.test",
@@ -32,6 +36,72 @@
           "name": "Resize grow doesn't cancel phantom",
           "disposition": "adopted",
           "rationale": "Phase B preserves the pending boundary anchor and places the next print at its reflowed location."
+        }
+      ]
+    },
+    {
+      "path": "t/30state_pen.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        {
+          "name": "Reset",
+          "disposition": "adapted",
+          "rationale": "state-pen.json asserts semantic default colors rather than libvterm's resolved palette RGB values."
+        },
+        {
+          "name": "Bold",
+          "disposition": "adopted",
+          "rationale": "state-pen.json replays bold set, clear, and reset through the public current pen."
+        },
+        {
+          "name": "Underline",
+          "disposition": "adopted",
+          "rationale": "state-pen.json covers none, single, double, and curly underline values through the public current pen."
+        },
+        {
+          "name": "Italic",
+          "disposition": "adopted",
+          "rationale": "state-pen.json replays italic set, clear, and reset through the public current pen."
+        },
+        {
+          "name": "Blink",
+          "disposition": "out-of-scope",
+          "rationale": "Blink is a declared contract omission and its SGR parameters are consumed without stored state."
+        },
+        {
+          "name": "Reverse",
+          "disposition": "adopted",
+          "rationale": "state-pen.json replays reverse set, clear, and reset through the public current pen."
+        },
+        {
+          "name": "Font Selection",
+          "disposition": "out-of-scope",
+          "rationale": "Alternate font selection is a declared contract omission and its SGR parameters are consumed without stored state."
+        },
+        {
+          "name": "Foreground",
+          "disposition": "adapted",
+          "rationale": "state-pen.json adopts base, bright, indexed, RGB, and reset behavior while retaining colors semantically."
+        },
+        {
+          "name": "Background",
+          "disposition": "adapted",
+          "rationale": "state-pen.json adopts base, bright, indexed, RGB, and reset behavior while retaining colors semantically."
+        },
+        {
+          "name": "Bold+ANSI colour == highbright",
+          "disposition": "out-of-scope",
+          "rationale": "Bold-to-highbright coupling belongs to renderer palette policy; engine bold and indexed colors remain independent."
+        },
+        {
+          "name": "Super/Subscript",
+          "disposition": "out-of-scope",
+          "rationale": "Super/subscript presentation is a declared contract omission and its SGR parameters are consumed without stored state."
+        },
+        {
+          "name": "DECSTR resets pen attributes",
+          "disposition": "out-of-scope",
+          "rationale": "DECSTR terminal reset behavior is deferred beyond this Milestone 2 slice."
         }
       ]
     },
@@ -99,6 +169,72 @@
           "name": "Resize can operate on altscreen",
           "disposition": "out-of-scope",
           "rationale": "No alternate screen exists in Milestone 2; alternate-screen resize is deferred to Milestone 6."
+        }
+      ]
+    },
+    {
+      "path": "t/64screen_pen.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        {
+          "name": "Plain",
+          "disposition": "adapted",
+          "rationale": "screen-pen.json reduces dimensions and asserts default colors semantically on a plain cell."
+        },
+        {
+          "name": "Bold",
+          "disposition": "adapted",
+          "rationale": "screen-pen.json reduces dimensions and inspects bold on the written cell through public cell style."
+        },
+        {
+          "name": "Italic",
+          "disposition": "adapted",
+          "rationale": "screen-pen.json reduces dimensions and inspects cumulative bold and italic on the written cell."
+        },
+        {
+          "name": "Underline",
+          "disposition": "adapted",
+          "rationale": "screen-pen.json reduces dimensions and inspects cumulative bold, italic, and single underline on the written cell."
+        },
+        {
+          "name": "Reset",
+          "disposition": "adapted",
+          "rationale": "screen-pen.json reduces dimensions and verifies reset restores the default semantic cell style."
+        },
+        {
+          "name": "Font",
+          "disposition": "out-of-scope",
+          "rationale": "Alternate font selection is a declared contract omission and its SGR parameters are consumed without stored state."
+        },
+        {
+          "name": "Foreground",
+          "disposition": "adapted",
+          "rationale": "screen-pen.json reduces dimensions and asserts the indexed foreground semantically instead of palette RGB."
+        },
+        {
+          "name": "Background",
+          "disposition": "adapted",
+          "rationale": "screen-pen.json reduces dimensions and asserts the indexed background semantically instead of palette RGB."
+        },
+        {
+          "name": "Super/subscript",
+          "disposition": "out-of-scope",
+          "rationale": "Super/subscript presentation is a declared contract omission and its SGR parameters are consumed without stored state."
+        },
+        {
+          "name": "EL sets only colours to end of line, not other attrs",
+          "disposition": "adapted",
+          "rationale": "screen-pen.json reduces dimensions and pins BCE padding colors with reverse and other attributes cleared."
+        },
+        {
+          "name": "DECSCNM xors reverse for entire screen",
+          "disposition": "out-of-scope",
+          "rationale": "DECSCNM is outside this slice's mode and terminal reset scope."
+        },
+        {
+          "name": "Set default colours",
+          "disposition": "out-of-scope",
+          "rationale": "Configurable default palette colors belong to future renderer and theme policy."
         }
       ]
     },

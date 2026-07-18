@@ -28,13 +28,13 @@ struct TerminalFixtureTests {
         }
     }
 
-    @Test("libvterm manifest classifies every case from the five resize and flow files")
+    @Test("libvterm manifest classifies every case from the seven selected source files")
     func libvtermManifestCoverage() throws {
         // Intent: pin the adoption ledger to every upstream case heading in
-        //   the five source files selected for this scrollback/resize slice.
+        //   the seven source files selected through the current engine slices.
         // Why it exists: fixtures alone make deferred, superseded, and
         //   deliberately incompatible cases disappear from review.
-        // Scenario: the pinned libvterm corpus is upgraded or the phase B
+        // Scenario: the pinned libvterm corpus is upgraded or the neutral
         //   fixture set grows without losing an explicit disposition.
         let url = try #require(
             Bundle.module.url(
@@ -50,6 +50,10 @@ struct TerminalFixtureTests {
 
         #expect(manifest.version == 1)
         #expect(manifest.pinnedCommit == "934bc2fbf21800ac3458a499df8820ca5fb45fd3")
+        #expect(Set(manifest.recordedDeviations) == [
+            "DanTerm retains default and indexed colors semantically instead of resolving libvterm palette RGB values.",
+            "Pinned libvterm lacks SGR 58/59 and mishandles 38:2::r:g:b; DanTerm deliberately consumes both correctly.",
+        ])
         #expect(Set(manifest.files.map(\.path)) == Set(Self.expectedCases.keys))
         for file in manifest.files {
             #expect(file.licenseNotice == "LICENSE.libvterm.txt")
@@ -135,6 +139,15 @@ struct TerminalFixtureTests {
 
     private func assert(_ expectation: FixtureExpectation?, against terminal: Terminal) throws {
         let expectation = try #require(expectation)
+        if let currentStyle = expectation.currentStyle {
+            #expect(terminal.currentStyle == (try currentStyle.terminalStyle()))
+        }
+        if let cellStyles = expectation.cellStyles {
+            for point in cellStyles {
+                let cell = try #require(terminal.cell(row: point.row, column: point.column))
+                #expect(cell.style == (try point.style.terminalStyle()))
+            }
+        }
         if let viewportText = expectation.viewportText {
             #expect(terminal.screenText == viewportText)
         }
@@ -165,6 +178,11 @@ struct TerminalFixtureTests {
                     text.unicodeScalars.append(contentsOf: cell.scalars)
                     return text
                 } == expectedRow.cells.map(\.scalars))
+                for (column, expectedCell) in expectedRow.cells.enumerated() {
+                    if let style = expectedCell.style {
+                        #expect(actual.cells[column].style == (try style.terminalStyle()))
+                    }
+                }
             }
         }
         if let fullHistoryText = expectation.fullHistoryText {
@@ -180,6 +198,20 @@ struct TerminalFixtureTests {
             "Resize shrink moves cursor",
             "Resize grow doesn't cancel phantom",
         ],
+        "t/30state_pen.test": [
+            "Reset",
+            "Bold",
+            "Underline",
+            "Italic",
+            "Blink",
+            "Reverse",
+            "Font Selection",
+            "Foreground",
+            "Background",
+            "Bold+ANSI colour == highbright",
+            "Super/Subscript",
+            "DECSTR resets pen attributes",
+        ],
         "t/32state_flow.test": [
             "Spillover text marks continuation on second line",
             "CRLF in column 80 does not mark continuation",
@@ -194,6 +226,20 @@ struct TerminalFixtureTests {
             "Resize shorter does not send the cursor to a negative row",
             "Resize taller attempts to pop scrollback",
             "Resize can operate on altscreen",
+        ],
+        "t/64screen_pen.test": [
+            "Plain",
+            "Bold",
+            "Italic",
+            "Underline",
+            "Reset",
+            "Font",
+            "Foreground",
+            "Background",
+            "Super/subscript",
+            "EL sets only colours to end of line, not other attrs",
+            "DECSCNM xors reverse for entire screen",
+            "Set default colours",
         ],
         "t/69screen_pushline.test": [
             "Spillover text marks continuation on second line",
@@ -216,6 +262,7 @@ private enum ChunkStrategy {
 
 private enum FixtureError: Error {
     case invalidHex(String)
+    case invalidStyleToken(String)
     case unsupportedEvent(String)
 }
 
@@ -285,6 +332,8 @@ private struct FixtureExpectation: Decodable {
     let scrollbackCount: Int?
     let scrollbackRows: [FixtureRow]?
     let fullHistoryText: String?
+    let currentStyle: FixtureStyle?
+    let cellStyles: [FixtureCellStyle]?
 }
 
 private struct FixtureCursor: Decodable {
@@ -301,11 +350,89 @@ private struct FixtureRow: Decodable {
 private struct FixtureCell: Decodable {
     let kind: String
     let scalars: String
+    let style: FixtureStyle?
+}
+
+private struct FixtureCellStyle: Decodable {
+    let row: Int
+    let column: Int
+    let style: FixtureStyle
+}
+
+private struct FixtureStyle: Decodable {
+    let foreground: String
+    let background: String
+    let attributes: [String]
+    let underline: String
+
+    func terminalStyle() throws -> TerminalStyle {
+        var bold = false
+        var dim = false
+        var italic = false
+        var reverse = false
+        var hidden = false
+        var strikethrough = false
+        for attribute in attributes {
+            switch attribute {
+            case "bold": bold = true
+            case "dim": dim = true
+            case "italic": italic = true
+            case "reverse": reverse = true
+            case "hidden": hidden = true
+            case "strikethrough": strikethrough = true
+            default: throw FixtureError.invalidStyleToken(attribute)
+            }
+        }
+
+        let underlineStyle: TerminalUnderlineStyle
+        switch underline {
+        case "none": underlineStyle = .none
+        case "single": underlineStyle = .single
+        case "double": underlineStyle = .double
+        case "curly": underlineStyle = .curly
+        default: throw FixtureError.invalidStyleToken(underline)
+        }
+
+        return try TerminalStyle(
+            foreground: Self.color(from: foreground),
+            background: Self.color(from: background),
+            bold: bold,
+            dim: dim,
+            italic: italic,
+            underline: underlineStyle,
+            reverse: reverse,
+            hidden: hidden,
+            strikethrough: strikethrough
+        )
+    }
+
+    private static func color(from token: String) throws -> TerminalColor {
+        if token == "default" {
+            return .default
+        }
+        if token.hasPrefix("indexed:"),
+           let index = UInt8(token.dropFirst("indexed:".count))
+        {
+            return .indexed(index)
+        }
+        if token.hasPrefix("rgb:") {
+            let components = token.dropFirst("rgb:".count).split(separator: ",")
+            if components.count == 3,
+               let red = UInt8(components[0]),
+               let green = UInt8(components[1]),
+               let blue = UInt8(components[2])
+            {
+                return .rgb(red: red, green: green, blue: blue)
+            }
+        }
+        throw FixtureError.invalidStyleToken(token)
+    }
 }
 
 private struct FixtureManifest: Decodable {
     let version: Int
     let pinnedCommit: String
+    let recordedDeviations: [String]
     let files: [ManifestFile]
 }
 

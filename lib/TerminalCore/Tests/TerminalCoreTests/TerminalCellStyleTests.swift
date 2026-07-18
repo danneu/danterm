@@ -115,6 +115,31 @@ struct TerminalCellStyleTests {
         #expect(terminal == expected)
     }
 
+    @Test("streams without SGR keep slice-4 default presentation state")
+    func nonSGRStreamKeepsDefaultPresentation() throws {
+        // Intent: a representative pre-style stream leaves the pen and every
+        //   retained or viewport cell at the default semantic style.
+        // Why it exists: adding style storage touched every cell creation and
+        //   movement path, so a missed default would break slice-4 identity.
+        // Scenario: ordinary narrow and wide output scrolls and reflows without
+        //   emitting SGR or a trailing-separator CSI sequence.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("A\u{754C}\r\nBC\r\nD".utf8))
+        terminal.resize(columns: 3, rows: 3)
+
+        #expect(terminal.currentStyle == TerminalStyle())
+        for index in 0..<terminal.scrollbackRowCount {
+            let row = try #require(terminal.scrollbackRow(at: index))
+            #expect(row.cells.allSatisfy { $0.style == TerminalStyle() })
+        }
+        for row in 0..<terminal.geometry.rows.count {
+            for column in 0..<terminal.geometry.columns {
+                #expect(terminal.cell(row: row, column: column)?.style == TerminalStyle())
+            }
+        }
+        expectValidGrid(terminal)
+    }
+
     @Test("overwriting half a styled wide pair leaves the vacated cell default styled")
     func structuralWideClearRemainsDefaultStyled() throws {
         // Intent: distinguish ordinary overwrite cleanup from BCE erasure.

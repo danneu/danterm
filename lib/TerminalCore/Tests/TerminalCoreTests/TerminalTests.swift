@@ -376,17 +376,26 @@ struct TerminalTests {
         //   states and erase boundaries most likely to expose grid corruption.
         // Scenario: deterministic adversarial PTY traffic is canceled before
         //   a printable sentinel that must survive in a structurally valid grid.
-        let alphabet: [UInt8] = [
+        let byteAlphabet: [[UInt8]] = [
             0x1B, 0x5B, 0x30, 0x31, 0x32, 0x39, 0x3A, 0x3B, 0x3F,
             0x20, 0x41, 0x42, 0x43, 0x44, 0x48, 0x4A, 0x4B, 0x58,
             0x60, 0x64, 0x66, 0x6A, 0x6B, 0x18, 0x1A, 0x7F,
+        ].map { [$0] }
+        let sgrFragments = [
+            Array("\u{1B}[m".utf8),
+            Array("\u{1B}[1;2;3;4:3;7;8;9m".utf8),
+            Array("\u{1B}[38;5;200m".utf8),
+            Array("\u{1B}[48:2::1:2:3m".utf8),
         ]
+        let alphabet = byteAlphabet + sgrFragments
         for seed in UInt64(1)...256 {
             var generator = Generator(state: seed)
             var terminal = try #require(Terminal(columns: 7, rows: 3))
-            terminal.feed((0..<256).map { _ in
+            for fragment in sgrFragments + (0..<256).map({ _ in
                 alphabet[Int(generator.next()) % alphabet.count]
-            })
+            }) {
+                terminal.feed(fragment)
+            }
             terminal.feed([0x18, 0x7C])
 
             #expect(terminal.screenText.contains("|"))

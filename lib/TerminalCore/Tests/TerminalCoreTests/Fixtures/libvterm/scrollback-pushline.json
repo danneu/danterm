@@ -24,7 +24,11 @@
           {
             "softWrapped": true,
             "cells": [
-              { "kind": "narrow", "scalars": "A" },
+              {
+                "kind": "narrow",
+                "scalars": "A",
+                "style": { "foreground": "default", "background": "default", "attributes": [], "underline": "none" }
+              },
               { "kind": "narrow", "scalars": "B" },
               { "kind": "narrow", "scalars": "C" },
               { "kind": "narrow", "scalars": "D" }
@@ -46,7 +50,11 @@
           {
             "softWrapped": true,
             "cells": [
-              { "kind": "narrow", "scalars": "A" },
+              {
+                "kind": "narrow",
+                "scalars": "A",
+                "style": { "foreground": "default", "background": "default", "attributes": [], "underline": "none" }
+              },
               { "kind": "narrow", "scalars": "B" },
               { "kind": "narrow", "scalars": "C" },
               { "kind": "narrow", "scalars": "D" }
