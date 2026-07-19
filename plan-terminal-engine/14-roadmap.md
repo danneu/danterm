@@ -26,7 +26,7 @@ mean.
     behavior in [Inspection, search, and recovery](06-inspection-recovery.md)
     before the Swift backend replaces runtime text extraction.
 
-- [ ] **2. Build the foundational headless terminal core and Unicode model**
+- [x] **2. Build the foundational headless terminal core and Unicode model**
   - [x] **Slice 1: Headless terminal core foundation.** Establishes the pure
     terminal value, streaming UTF-8 ingestion, Unicode width policy, fixed
     viewport grid, wide-cell invariants, and baseline controls. See the
@@ -73,17 +73,14 @@ mean.
     and `widthWalkConservesFullHistory`, `heightAndCombinedWalksConserveFullHistory`,
     and `spacerRoundTripAcrossWidths` prove primary reflow without losing the
     decomposed Spanish cluster, wide cells, or emoji.
-  - [ ] Reflow preserves logical content, hard line boundaries, cursor attachment,
-    and live/scrolled viewport anchors across the slice's width and height
-    changes.
+  - [x] Reflow preserves logical content, hard line boundaries, cursor attachment,
+    and live viewport behavior across the slice's width and height changes.
     Slice 8 judgment: logical content and hard boundaries are covered by
     `widthWalkConservesFullHistory`, `heightAndCombinedWalksConserveFullHistory`,
     and `heightTransferPreservesFlagsAndFillerIdentity`; cursor and live-viewport
     attachment are covered by `cellAnchorsFollowReflowedCells`,
     `heightShrinkClampsDisplacedCursor`, `heightGrowthEligibility`, and
-    `widthGrowthPullsHistory`. The gate remains open because TerminalCore has no
-    locally scrolled viewport-offset concept. That scrolled-anchor clause is
-    Milestone 6 proof debt under [Input and interaction](08-input-interaction.md).
+    `widthGrowthPullsHistory`.
   - [x] The Milestone 2 tranche in
     [External terminal test research](../docs/research/1-external-tests.md)
     establishes structure-insensitive replay and adopts or classifies
@@ -136,6 +133,9 @@ mean.
   - [ ] [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md) completes
     selection/search/viewport anchors, primary- and alternate-screen resize
     behavior, and the fixed 10 MiB scrollback contract.
+  - [ ] Reflow preserves locally scrolled viewport anchoring across width and
+    height changes once [Input and interaction](08-input-interaction.md) provides
+    viewport-offset and interaction state.
   - [ ] [Inspection, search, and recovery](06-inspection-recovery.md) preserves the
     characterized viewport/full-history, logical-line, selection, search, pane
     read, export, recovery text, and event-driven recovery-freshness behavior
