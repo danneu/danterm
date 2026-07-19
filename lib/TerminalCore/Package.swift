@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .library(name: "TerminalCore", targets: ["TerminalCore"]),
         .library(name: "TerminalCoreRecording", targets: ["TerminalCoreRecording"]),
+        .library(name: "TerminalRenderPlanning", targets: ["TerminalRenderPlanning"]),
     ],
     targets: [
         .target(
@@ -18,6 +19,12 @@ let package = Package(
             name: "TerminalCoreRecording",
             dependencies: ["TerminalCore"],
             path: "Sources/TerminalCoreRecording",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .target(
+            name: "TerminalRenderPlanning",
+            dependencies: ["TerminalCore"],
+            path: "Sources/TerminalRenderPlanning",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(

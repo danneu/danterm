@@ -35,6 +35,8 @@ test:
     ./scripts/core-purity-lint.sh
     ./scripts/core-purity-lint.sh lib/TerminalCore/Sources/TerminalCore
     ./scripts/core-purity-lint.sh --forbid-imports lib/TerminalCore/Sources/TerminalCore
+    ./scripts/core-purity-lint.sh lib/TerminalCore/Sources/TerminalRenderPlanning
+    ./scripts/core-purity-lint.sh --allow-imports TerminalCore lib/TerminalCore/Sources/TerminalRenderPlanning
     ./scripts/core-purity-lint.sh lib/TerminalPTY/Sources/PaneLifecycle
     ./scripts/core-purity-lint.sh --forbid-imports lib/TerminalPTY/Sources/PaneLifecycle
     ./scripts/core-purity-lint.sh --profile portable lib/DanTermSupport/Sources/DanTermSupport

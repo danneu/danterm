@@ -22,6 +22,10 @@
 #            Rejects every real Swift import, including Foundation. TerminalCore
 #            uses this alongside the pure profile so its dependency-free package
 #            cannot silently acquire a toolchain- or OS-versioned framework.
+#   --allow-imports <module[,module...]>
+#            Rejects every real Swift import except the exact named modules.
+#            TerminalRenderPlanning uses this alongside the pure profile so it
+#            can depend on TerminalCore without acquiring framework imports.
 #
 # The regex denylist is a heuristic regression guard, not the proof of purity:
 # the real proof is structural (the nested test packages compile core/support
@@ -40,15 +44,23 @@ CORE_DEFAULT="$SCRIPT_DIR/../lib/DanTermCore/Sources/DanTermCore"
 PROFILE="pure"
 TARGET=""
 FORBID_IMPORTS=0
+ALLOWED_IMPORTS=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --profile) PROFILE="${2:?--profile needs a value}"; shift 2 ;;
         --profile=*) PROFILE="${1#*=}"; shift ;;
         --forbid-imports) FORBID_IMPORTS=1; shift ;;
+        --allow-imports) ALLOWED_IMPORTS="${2:?--allow-imports needs a value}"; shift 2 ;;
+        --allow-imports=*) ALLOWED_IMPORTS="${1#*=}"; shift ;;
         *) TARGET="$1"; shift ;;
     esac
 done
 [[ -n "$TARGET" ]] || TARGET="$CORE_DEFAULT"
+
+if [[ "$FORBID_IMPORTS" -eq 1 && -n "$ALLOWED_IMPORTS" ]]; then
+    echo "core-purity-lint: --forbid-imports and --allow-imports are mutually exclusive" >&2
+    exit 2
+fi
 
 case "$PROFILE" in
     pure|portable) ;;
@@ -61,6 +73,32 @@ if [[ "$FORBID_IMPORTS" -eq 1 ]] &&
    grep -rnE '^[[:space:]]*((@[^[:space:]]+|public|internal|package|private|fileprivate)[[:space:]]+)*import[[:space:]]+[[:alnum:]_][[:alnum:]_.]*([^[:alnum:]_]|$)' "$TARGET"; then
     echo "Swift import found in $TARGET (module must remain import-free)" >&2
     exit 1
+fi
+
+if [[ -n "$ALLOWED_IMPORTS" ]]; then
+    if ! find "$TARGET" -name '*.swift' -print0 | xargs -0 awk -v allowed="$ALLOWED_IMPORTS" '
+    BEGIN {
+        count = split(allowed, modules, ",")
+        for (i = 1; i <= count; i++) allowedModule[modules[i]] = 1
+        bad = 0
+    }
+    {
+        line = $0
+        if (line ~ /^[[:space:]]*((@[^[:space:]]+|public|internal|package|private|fileprivate)[[:space:]]+)*import[[:space:]]+[[:alnum:]_][[:alnum:]_.]*([^[:alnum:]_]|$)/) {
+            sub(/^[[:space:]]*((@[^[:space:]]+|public|internal|package|private|fileprivate)[[:space:]]+)*import[[:space:]]+/, "", line)
+            module = line
+            sub(/[^[:alnum:]_.].*$/, "", module)
+            if (!(module in allowedModule)) {
+                printf("%s:%d: disallowed Swift import %s\n", FILENAME, FNR, module) > "/dev/stderr"
+                bad = 1
+            }
+        }
+    }
+    END { if (bad) exit 1 }
+'; then
+        echo "Swift import outside allowlist '$ALLOWED_IMPORTS' found in $TARGET" >&2
+        exit 1
+    fi
 fi
 
 # --- Cocoa/AppKit/SwiftUI import rule (both profiles). Line-anchored; tolerates

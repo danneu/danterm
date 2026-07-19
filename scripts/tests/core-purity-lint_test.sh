@@ -15,8 +15,8 @@
 #          UUID(uuidString:) / Date(timeIntervalSince1970:) parses from tripping;
 #   3. the portable profile's GhosttyKit rule plus its deliberate tolerance of
 #      portable IO (FileManager/DispatchSource/ProcessInfo are fine in support);
-#   4. the opt-in import gate rejects every library-target import while allowing
-#      import-free Swift source.
+#   4. the opt-in import gates either reject every library-target import or
+#      allow exactly the named modules while rejecting every other real import.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LINT="$SCRIPT_DIR/../core-purity-lint.sh"
@@ -49,6 +49,18 @@ assert_import_gate() {
     local got
     if "$LINT" --forbid-imports "$dir" >/dev/null 2>&1; then got="pass"; else got="trip"; fi
     [[ "$got" == "$expect" ]] || fail "[import gate] expected '$expect' got '$got' :: $desc :: <$line>"
+    TOTAL=$((TOTAL + 1))
+}
+
+# assert_import_allowlist <allowed-modules> <trip|pass> <description> <source-line>
+assert_import_allowlist() {
+    local allowed="$1" expect="$2" desc="$3" line="$4"
+    local dir="$TMP/import-allowlist-case"
+    rm -rf "$dir"; mkdir -p "$dir"
+    printf '%s\n' "$line" > "$dir/Module.swift"
+    local got
+    if "$LINT" --allow-imports "$allowed" "$dir" >/dev/null 2>&1; then got="pass"; else got="trip"; fi
+    [[ "$got" == "$expect" ]] || fail "[import allowlist] expected '$expect' got '$got' :: $desc :: <$line>"
     TOTAL=$((TOTAL + 1))
 }
 
@@ -143,4 +155,17 @@ assert_import_gate trip "stacked import modifiers"       "@preconcurrency public
 assert_import_gate pass "import-free declaration"       "struct Cell { let value: UInt32 }"
 assert_import_gate pass "commented import"              "// import Foundation"
 
-echo "core-purity lint self-test passed ($TOTAL assertions across pure + portable profiles and import gate)"
+# ---------------------------------------------------------------------------
+# import-allowlist library gate -- named modules pass; every other real import
+# trips, including a submodule of an allowed module.
+# ---------------------------------------------------------------------------
+assert_import_allowlist TerminalCore pass "allowed module"                 "import TerminalCore"
+assert_import_allowlist TerminalCore pass "allowed attributed import"      "@_implementationOnly import TerminalCore"
+assert_import_allowlist TerminalCore pass "import-free declaration"        "struct RenderPlan {}"
+assert_import_allowlist TerminalCore pass "commented disallowed import"     "// import Foundation"
+assert_import_allowlist TerminalCore trip "Foundation is not allowed"       "import Foundation"
+assert_import_allowlist TerminalCore trip "allowed module subpath is exact" "import TerminalCore.Internal"
+assert_import_allowlist TerminalCore,Testing pass "multiple allowed modules" "import Testing"
+assert_import_allowlist TerminalCore,Testing trip "module outside list"      "import AppKit"
+
+echo "core-purity lint self-test passed ($TOTAL assertions across pure + portable profiles and import gates)"
