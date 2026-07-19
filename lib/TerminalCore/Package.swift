@@ -34,5 +34,11 @@ let package = Package(
             resources: [.copy("Fixtures")],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
+        .testTarget(
+            name: "TerminalRenderPlanningTests",
+            dependencies: ["TerminalRenderPlanning", "TerminalCore", "TerminalCoreRecording"],
+            path: "Tests/TerminalRenderPlanningTests",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
     ]
 )

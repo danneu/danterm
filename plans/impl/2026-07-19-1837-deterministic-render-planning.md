@@ -361,5 +361,13 @@ unfiltered, the new target's lint lines, and the lint self-test.
 ## Commit progress
 
 - [x] 1. Enforce the render planner purity boundary
-- [ ] 2. Add deterministic render values and color resolution
+- [x] 2. Add deterministic render values and color resolution
 - [ ] 3. Plan complete viewport frames with corpus-backed proofs
+
+## Implementation notes
+
+- The baked dark theme uses the canonical xterm 16-color palette, with xterm
+  white/black also serving as the default and cursor foreground/background.
+- Dim halves each post-reverse foreground RGB component using integer
+  truncation, keeping the transform deterministic and independent of executor
+  blending behavior.
