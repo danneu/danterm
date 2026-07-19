@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/03encoding_utf8.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Low; 2 byte; 3 byte; 4 byte; Early termination; Early restart; Overlong; UTF-16 Surrogates; Split write",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": [
+      "Raw ground-state C1 bytes and UTF-8 encodings beyond U+10FFFF are replaced by U+FFFD using maximal-subpart recovery."
+    ]
+  },
+  "initial": { "columns": 16, "rows": 1 },
+  "events": [
+    { "type": "feed", "text": "123" },
+    { "type": "expect", "expect": { "viewportText": "123             " } },
+    { "type": "feed", "hex": "1b 63 c2 80 df bf" },
+    { "type": "expect", "expect": { "viewportText": "\u0080\u07ff              " } },
+    { "type": "feed", "hex": "1b 63 e0 a0 80 ef bf bd" },
+    { "type": "expect", "expect": { "viewportText": "\u0800\ufffd              " } },
+    { "type": "feed", "hex": "1b 63 f0 90 80 80 f7 bf bf bf" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "\ud800\udc00\ufffd\ufffd\ufffd\ufffd           ",
+        "cursor": { "row": 0, "column": 5, "pendingWrap": false }
+      }
+    },
+    { "type": "feed", "hex": "1b 63 c2 21 e0 21 e0 a0 21 f0 21 f0 90 21 f0 90 80 21" },
+    { "type": "expect", "expect": { "viewportText": "\ufffd!\ufffd!\ufffd!\ufffd!\ufffd!\ufffd!    " } },
+    { "type": "feed", "hex": "1b 63 c2 c2 90 e0 c2 90 f0 90 c2 90" },
+    { "type": "expect", "expect": { "viewportText": "\ufffd\u0090\ufffd\u0090\ufffd\u0090          " } },
+    { "type": "feed", "hex": "1b 63 c0 80 c1 bf" },
+    { "type": "expect", "expect": { "viewportText": "\ufffd\ufffd\ufffd\ufffd            " } },
+    { "type": "feed", "hex": "1b 63 e0 80 80 e0 9f bf" },
+    { "type": "expect", "expect": { "viewportText": "\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd          " } },
+    { "type": "feed", "hex": "1b 63 f0 80 80 80 f0 8f bf bf" },
+    { "type": "expect", "expect": { "viewportText": "\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd        " } },
+    { "type": "feed", "hex": "1b 63 ed a0 80 ed bf bf" },
+    { "type": "expect", "expect": { "viewportText": "\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd          " } },
+    { "type": "feed", "hex": "1b 63 c2" },
+    { "type": "feed", "hex": "a0" },
+    { "type": "feed", "hex": "e0 a0" },
+    { "type": "feed", "hex": "80" },
+    { "type": "feed", "hex": "f0 90 80" },
+    { "type": "feed", "hex": "80" },
+    {
+      "type": "expect",
+      "expect": {
+        "cellScalars": [
+          { "row": 0, "column": 0, "scalars": "\u00a0" },
+          { "row": 0, "column": 1, "scalars": "\u0800" },
+          { "row": 0, "column": 2, "scalars": "\ud800\udc00" }
+        ],
+        "cursor": { "row": 0, "column": 3, "pendingWrap": false }
+      }
+    },
+    { "type": "feed", "hex": "1b 63 83 99 41" },
+    { "type": "expect", "expect": { "viewportText": "\ufffd\ufffdA             " } }
+  ]
+}

@@ -15,13 +15,19 @@ struct CSICursorMovementTests {
             MovementFixture(sequence: "\u{1B}[0B", start: (2, 2), expected: (3, 2)),
             MovementFixture(sequence: "\u{1B}[C", start: (2, 2), expected: (2, 3)),
             MovementFixture(sequence: "\u{1B}[0C", start: (2, 2), expected: (2, 3)),
+            MovementFixture(sequence: "\u{1B}[a", start: (2, 2), expected: (2, 3)),
+            MovementFixture(sequence: "\u{1B}[0a", start: (2, 2), expected: (2, 3)),
             MovementFixture(sequence: "\u{1B}[D", start: (2, 2), expected: (2, 1)),
             MovementFixture(sequence: "\u{1B}[0D", start: (2, 2), expected: (2, 1)),
             MovementFixture(sequence: "\u{1B}[2j", start: (2, 2), expected: (2, 0)),
+            MovementFixture(sequence: "\u{1B}[e", start: (2, 2), expected: (3, 2)),
+            MovementFixture(sequence: "\u{1B}[0e", start: (2, 2), expected: (3, 2)),
             MovementFixture(sequence: "\u{1B}[99A", start: (2, 2), expected: (0, 2)),
             MovementFixture(sequence: "\u{1B}[99B", start: (2, 2), expected: (4, 2)),
             MovementFixture(sequence: "\u{1B}[99C", start: (2, 2), expected: (2, 4)),
+            MovementFixture(sequence: "\u{1B}[99a", start: (2, 2), expected: (2, 4)),
             MovementFixture(sequence: "\u{1B}[99D", start: (2, 2), expected: (2, 0)),
+            MovementFixture(sequence: "\u{1B}[99e", start: (2, 2), expected: (4, 2)),
         ]
     )
     func relativeMovement(fixture: MovementFixture) throws {
@@ -142,8 +148,11 @@ struct CSICursorMovementTests {
         #expect(terminal == expected)
     }
 
-    @Test("valid movement clears pending wrap and the combining attachment target")
-    func movementClearsPendingState() throws {
+    @Test(
+        "valid movement clears pending wrap and the combining attachment target",
+        arguments: ["\u{1B}[C", "\u{1B}[a", "\u{1B}[B", "\u{1B}[e"]
+    )
+    func movementClearsPendingState(sequence: String) throws {
         // Intent: prove even a clamped movement dispatch clears both forms of
         //   pending state before the next printable or zero-width scalar.
         // Why it exists: coordinate equality alone cannot prove a valid CSI
@@ -151,9 +160,11 @@ struct CSICursorMovementTests {
         // Scenario: output fills the last column, moves right at the boundary,
         //   then sends a combining mark that must not attach to the old cell.
         var terminal = try #require(Terminal(columns: 2, rows: 2))
-        terminal.feed(Array("AB\u{1B}[C\u{0301}".utf8))
+        terminal.feed(Array("AB".utf8))
+        terminal.feed(Array(sequence.utf8))
+        terminal.feed(Array("\u{0301}".utf8))
 
-        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 1, isPendingWrap: false))
+        #expect(terminal.geometry.cursor.isPendingWrap == false)
         #expect(terminal.cell(row: 0, column: 1)?.scalars == ["B"])
         #expect(terminal.geometry.rows[0].isSoftWrapped == false)
     }

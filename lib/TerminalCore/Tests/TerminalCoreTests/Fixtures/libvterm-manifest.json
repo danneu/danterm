@@ -7,9 +7,75 @@
     "DanTerm clears pending wrap and open grapheme attachment on every recognized valid scroll/edit operation.",
     "DanTerm pushes scrollback only for full-screen upward scrolls; bounded regions and line edits never retain vacated rows.",
     "DanTerm retains default and indexed colors semantically instead of resolving libvterm palette RGB values.",
-    "Pinned libvterm lacks SGR 58/59 and mishandles 38:2::r:g:b; DanTerm deliberately consumes both correctly."
+    "Pinned libvterm lacks SGR 58/59 and mishandles 38:2::r:g:b; DanTerm deliberately consumes both correctly.",
+    "Raw ground-state C1 bytes and UTF-8 encodings beyond U+10FFFF are replaced by U+FFFD using maximal-subpart recovery.",
+    "DanTerm retains grapheme scalars exactly instead of truncating after five combining marks.",
+    "DanTerm follows VT500 string states: C0 is absorbed inside strings and BEL terminates only OSC."
   ],
   "files": [
+    {
+      "path": "t/02parser.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        { "name": "Basic text", "disposition": "adapted", "rationale": "parser-csi.json observes printable text through public cells instead of parser callbacks." },
+        { "name": "C0", "disposition": "adapted", "rationale": "parser-csi.json observes C0 cursor effects through public geometry instead of control callbacks." },
+        { "name": "C1 8bit", "disposition": "adapted", "rationale": "Raw ground-state C1 bytes are malformed UTF-8 in DanTerm and encoding-utf8.json asserts their U+FFFD replacements." },
+        { "name": "C1 7bit", "disposition": "adapted", "rationale": "parser-csi.json absorbs 7-bit escape forms and asserts their public terminal outcome rather than parser callbacks." },
+        { "name": "High bytes", "disposition": "adapted", "rationale": "DanTerm always decodes ground input as UTF-8, so arbitrary high bytes recover with U+FFFD instead of surfacing raw text bytes." },
+        { "name": "Mixed", "disposition": "adapted", "rationale": "parser-csi.json replaces text/control callback ordering with the resulting public cells and cursor." },
+        { "name": "Escape", "disposition": "adapted", "rationale": "parser-csi.json asserts unsupported escape dispatches as public-state no-ops because DanTerm has no parser-event API." },
+        { "name": "Escape 2-byte", "disposition": "adapted", "rationale": "parser-csi.json checks multi-byte escape absorption through unchanged public state rather than exposing the collected bytes." },
+        { "name": "Split write Escape", "disposition": "adapted", "rationale": "parser-csi.json is replayed at every chunk boundary and checks the resulting public state." },
+        { "name": "Escape cancels Escape, starts another", "disposition": "adapted", "rationale": "parser-csi.json asserts restart recovery through the public grid rather than the replacement escape callback." },
+        { "name": "CAN cancels Escape, returns to normal mode", "disposition": "adapted", "rationale": "parser-csi.json asserts that text resumes after CAN without exposing CAN or parser callbacks." },
+        { "name": "C0 in Escape interrupts and continues", "disposition": "adapted", "rationale": "parser-csi.json observes the C0 cursor effect and continued escape absorption through public state." },
+        { "name": "CSI 0 args", "disposition": "adapted", "rationale": "parser-csi.json routes a zero-argument CSI through terminal dispatch and asserts public geometry instead of a CSI callback." },
+        { "name": "CSI 1 arg", "disposition": "adapted", "rationale": "parser-csi.json observes one-argument CSI dispatch through public cursor movement." },
+        { "name": "CSI 2 args", "disposition": "adapted", "rationale": "parser-csi.json observes two-argument CSI positioning through public cursor geometry." },
+        { "name": "CSI 1 arg 1 sub", "disposition": "adapted", "rationale": "parser-csi.json checks colon-bearing unsupported dispatch through unchanged public state rather than exposing subparameters." },
+        { "name": "CSI many digits", "disposition": "adapted", "rationale": "parser-csi.json checks saturated numeric collection through the clamped public cursor result." },
+        { "name": "CSI leading zero", "disposition": "adapted", "rationale": "parser-csi.json checks leading-zero normalization through public cursor movement." },
+        { "name": "CSI qmark", "disposition": "adapted", "rationale": "parser-csi.json checks private-marker collection through an unsupported public-state no-op." },
+        { "name": "CSI greater", "disposition": "adapted", "rationale": "parser-csi.json checks greater-marker collection through an unsupported public-state no-op." },
+        { "name": "CSI SP", "disposition": "adapted", "rationale": "parser-csi.json checks intermediate collection through an unsupported public-state no-op." },
+        { "name": "Mixed CSI", "disposition": "adapted", "rationale": "parser-csi.json asserts printable text around CSI dispatch through public cells." },
+        { "name": "Split write", "disposition": "adapted", "rationale": "Every parser-csi.json feed is replayed at bytewise and split boundaries to prove collection invariance." },
+        { "name": "Escape cancels CSI, starts Escape", "disposition": "adapted", "rationale": "parser-csi.json asserts escape restart from CSI through recovery to public text." },
+        { "name": "CAN cancels CSI, returns to normal mode", "disposition": "adapted", "rationale": "parser-csi.json asserts text resumes after CSI cancellation through public cells." },
+        { "name": "C0 in Escape interrupts and continues", "disposition": "adapted", "rationale": "parser-csi.json observes C0 execution inside CSI and continued collection through public geometry." },
+        { "name": "OSC BEL", "disposition": "adapted", "rationale": "parser-strings.json asserts OSC BEL absorption through public text because DanTerm exposes no OSC callback." },
+        { "name": "OSC ST (7bit)", "disposition": "adapted", "rationale": "parser-strings.json asserts 7-bit ST termination through public text because DanTerm exposes no OSC callback." },
+        { "name": "OSC ST (8bit)", "disposition": "adapted", "rationale": "Raw ground-state C1 introducers are malformed UTF-8 in DanTerm rather than starting OSC." },
+        { "name": "OSC in parts", "disposition": "adapted", "rationale": "parser-strings.json splits OSC payload feeds and asserts the final public text." },
+        { "name": "OSC BEL without semicolon", "disposition": "adapted", "rationale": "parser-strings.json absorbs a semicolon-free OSC through BEL and asserts public recovery." },
+        { "name": "OSC ST without semicolon", "disposition": "adapted", "rationale": "parser-strings.json absorbs a semicolon-free OSC through ST and asserts public recovery." },
+        { "name": "Escape cancels OSC, starts Escape", "disposition": "adapted", "rationale": "parser-strings.json asserts escape restart from OSC through public text recovery." },
+        { "name": "CAN cancels OSC, returns to normal mode", "disposition": "adapted", "rationale": "parser-strings.json asserts CAN cancellation through resumed public text." },
+        { "name": "C0 in OSC interrupts and continues", "disposition": "adapted", "rationale": "DanTerm follows VT500 by absorbing C0 inside OSC; parser-strings.json pins the no-motion outcome." },
+        { "name": "DCS BEL", "disposition": "adapted", "rationale": "DanTerm does not terminate DCS at BEL; parser-strings.json proves payload remains absorbed until ST." },
+        { "name": "DCS ST (7bit)", "disposition": "adapted", "rationale": "parser-strings.json asserts DCS termination through public text because DanTerm exposes no DCS callback." },
+        { "name": "DCS ST (8bit)", "disposition": "adapted", "rationale": "Raw ground-state C1 introducers are malformed UTF-8 in DanTerm rather than starting DCS." },
+        { "name": "Split write of 7bit ST", "disposition": "adapted", "rationale": "parser-strings.json splits the two-byte ST and asserts chunk-invariant public recovery." },
+        { "name": "Escape cancels DCS, starts Escape", "disposition": "adapted", "rationale": "parser-strings.json asserts escape restart from DCS through public text recovery." },
+        { "name": "CAN cancels DCS, returns to normal mode", "disposition": "adapted", "rationale": "parser-strings.json asserts CAN cancellation through resumed public text." },
+        { "name": "C0 in OSC interrupts and continues", "disposition": "adapted", "rationale": "The upstream block exercises DCS despite its title; DanTerm absorbs its C0 and parser-strings.json pins the result." },
+        { "name": "APC BEL", "disposition": "adapted", "rationale": "DanTerm does not terminate APC at BEL; parser-strings.json proves absorption continues until ST." },
+        { "name": "APC ST (7bit)", "disposition": "adapted", "rationale": "parser-strings.json asserts APC absorption and 7-bit ST recovery through public text." },
+        { "name": "APC ST (8bit)", "disposition": "adapted", "rationale": "Raw ground-state C1 introducers are malformed UTF-8 in DanTerm rather than starting APC." },
+        { "name": "PM BEL", "disposition": "adapted", "rationale": "DanTerm does not terminate PM at BEL; parser-strings.json proves absorption continues until ST." },
+        { "name": "PM ST (7bit)", "disposition": "adapted", "rationale": "parser-strings.json asserts PM absorption and 7-bit ST recovery through public text." },
+        { "name": "PM ST (8bit)", "disposition": "adapted", "rationale": "Raw ground-state C1 introducers are malformed UTF-8 in DanTerm rather than starting PM." },
+        { "name": "SOS BEL", "disposition": "adapted", "rationale": "DanTerm does not terminate SOS at BEL; parser-strings.json proves absorption continues until ST." },
+        { "name": "SOS ST (7bit)", "disposition": "adapted", "rationale": "parser-strings.json asserts SOS absorption and 7-bit ST recovery through public text." },
+        { "name": "SOS ST (8bit)", "disposition": "adapted", "rationale": "Raw ground-state C1 introducers are malformed UTF-8 in DanTerm rather than starting SOS." },
+        { "name": "SOS can contain any C0 or C1 code", "disposition": "adapted", "rationale": "parser-strings.json pins C0 absorption while preserving DanTerm's raw C1 parser transition and public text recovery." },
+        { "name": "NUL ignored", "disposition": "adopted", "rationale": "parser-csi.json feeds NUL in ground state and observes no public-state change." },
+        { "name": "NUL ignored within CSI", "disposition": "adopted", "rationale": "parser-csi.json feeds NUL during CSI collection and observes the normalized dispatch result." },
+        { "name": "DEL ignored", "disposition": "adopted", "rationale": "parser-csi.json feeds DEL in ground state and observes no public-state change." },
+        { "name": "DEL ignored within CSI", "disposition": "adopted", "rationale": "parser-csi.json feeds DEL during CSI collection and observes the normalized dispatch result." },
+        { "name": "DEL inside text\"", "disposition": "adopted", "rationale": "parser-csi.json feeds DEL between printable bytes and observes contiguous public text." }
+      ]
+    },
     {
       "path": "t/12state_scroll.test",
       "licenseNotice": "LICENSE.libvterm.txt",
@@ -285,6 +351,151 @@
           "disposition": "superseded",
           "rationale": "This callback-decomposition variant is covered by edit-characters.json's public viewport assertions for DCH."
         }
+      ]
+    },
+    {
+      "path": "t/03encoding_utf8.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        { "name": "Low", "disposition": "adopted", "rationale": "encoding-utf8.json preserves the upstream ASCII scalars through public cells." },
+        { "name": "2 byte", "disposition": "adopted", "rationale": "encoding-utf8.json adopts the U+0080 and U+07FF boundary scalars." },
+        { "name": "3 byte", "disposition": "adopted", "rationale": "encoding-utf8.json adopts the U+0800 and U+FFFD boundary scalars." },
+        { "name": "4 byte", "disposition": "adapted", "rationale": "encoding-utf8.json adopts U+10000 but replaces upstream U+1FFFFF with U+FFFD because DanTerm caps Unicode at U+10FFFF." },
+        { "name": "Early termination", "disposition": "adopted", "rationale": "encoding-utf8.json pins maximal-subpart recovery followed by the terminating ASCII byte." },
+        { "name": "Early restart", "disposition": "adopted", "rationale": "encoding-utf8.json pins replacement followed by decoding the restarted scalar." },
+        { "name": "Overlong", "disposition": "adapted", "rationale": "encoding-utf8.json replaces every maximal invalid subpart, producing more U+FFFD scalars than libvterm's one-per-sequence recovery." },
+        { "name": "UTF-16 Surrogates", "disposition": "adapted", "rationale": "encoding-utf8.json applies DanTerm's maximal-subpart recovery to surrogate encodings." },
+        { "name": "Split write", "disposition": "adopted", "rationale": "encoding-utf8.json completes two-, three-, and four-byte scalars across authored feed boundaries." }
+      ]
+    },
+    {
+      "path": "t/10state_putglyph.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        { "name": "Low", "disposition": "adopted", "rationale": "state-putglyph.json adopts ASCII placement through public cells." },
+        { "name": "UTF-8 1 char", "disposition": "adopted", "rationale": "state-putglyph.json adopts adjacent single-width UTF-8 placement." },
+        { "name": "UTF-8 split writes", "disposition": "adopted", "rationale": "state-putglyph.json completes a scalar across authored feed boundaries." },
+        { "name": "UTF-8 wide char", "disposition": "adopted", "rationale": "state-putglyph.json adopts the fullwidth digit as a public wide cell followed by a space." },
+        { "name": "UTF-8 emoji wide char", "disposition": "adopted", "rationale": "state-putglyph.json adopts the emoji as a public wide cell followed by a space." },
+        { "name": "UTF-8 combining chars", "disposition": "adopted", "rationale": "state-putglyph.json adopts the combined scalar sequence in one public cell." },
+        { "name": "Combining across buffers", "disposition": "adopted", "rationale": "state-putglyph.json adopts combining attachment across authored feed boundaries." },
+        { "name": "Spare combining chars get truncated", "disposition": "adapted", "rationale": "state-putglyph.json retains all ten marks because DanTerm is scalar-exact rather than truncating at five." },
+        { "name": "DECSCA protected", "disposition": "out-of-scope", "rationale": "DECSCA and selective erase protection are deferred beyond Milestone 2." }
+      ]
+    },
+    {
+      "path": "t/11state_movecursor.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        { "name": "Implicit", "disposition": "adopted", "rationale": "state-movecursor.json adopts implicit cursor advance after printable text." },
+        { "name": "Backspace", "disposition": "adopted", "rationale": "state-movecursor.json adopts one-column backspace movement." },
+        { "name": "Horizontal Tab", "disposition": "adopted", "rationale": "state-movecursor.json adopts ground HT movement across default tab stops." },
+        { "name": "Carriage Return", "disposition": "adopted", "rationale": "state-movecursor.json adopts carriage return to column zero." },
+        { "name": "Linefeed", "disposition": "adopted", "rationale": "state-movecursor.json adopts linefeed while retaining the current column." },
+        { "name": "Backspace bounded by lefthand edge", "disposition": "adopted", "rationale": "state-movecursor.json pins backspace clamping at column zero." },
+        { "name": "Backspace cancels phantom", "disposition": "adopted", "rationale": "state-movecursor.json pins pending-wrap cancellation before backspace movement." },
+        { "name": "HT bounded by righthand edge", "disposition": "adopted", "rationale": "state-movecursor.json pins repeated HT clamping at the last column." },
+        { "name": "Index", "disposition": "adopted", "rationale": "state-movecursor.json adopts ESC D row movement." },
+        { "name": "Reverse Index", "disposition": "adopted", "rationale": "state-movecursor.json adopts ESC M row movement." },
+        { "name": "Newline", "disposition": "adopted", "rationale": "state-movecursor.json adopts ESC E row movement with column reset." },
+        { "name": "Cursor Forward", "disposition": "adopted", "rationale": "state-movecursor.json follows the upstream bytes and adopts defaulted CSI B vertical movement." },
+        { "name": "Cursor Down", "disposition": "adopted", "rationale": "state-movecursor.json follows the upstream bytes and adopts defaulted CSI C horizontal movement." },
+        { "name": "Cursor Up", "disposition": "adopted", "rationale": "state-movecursor.json adopts defaulted and counted CSI A movement." },
+        { "name": "Cursor Backward", "disposition": "adopted", "rationale": "state-movecursor.json adopts defaulted and counted CSI D movement." },
+        { "name": "Cursor Next Line", "disposition": "adopted", "rationale": "state-movecursor.json adopts CSI E row movement with column reset." },
+        { "name": "Cursor Previous Line", "disposition": "adopted", "rationale": "state-movecursor.json adopts CSI F row movement with column reset." },
+        { "name": "Cursor Horizonal Absolute", "disposition": "adopted", "rationale": "state-movecursor.json adopts defaulted and counted CSI G positioning." },
+        { "name": "Cursor Position", "disposition": "adopted", "rationale": "state-movecursor.json adopts one- and two-coordinate CSI H positioning." },
+        { "name": "Cursor Position cancels phantom", "disposition": "adopted", "rationale": "state-movecursor.json pins pending-wrap cancellation before same-position CUP and the next print." },
+        { "name": "Bounds Checking", "disposition": "adopted", "rationale": "state-movecursor.json adopts clamping for every relative and absolute edge case." },
+        { "name": "Horizontal Position Absolute", "disposition": "adopted", "rationale": "state-movecursor.json adopts HPA positioning." },
+        { "name": "Horizontal Position Relative", "disposition": "adopted", "rationale": "state-movecursor.json adopts HPR movement." },
+        { "name": "Horizontal Position Backward", "disposition": "adopted", "rationale": "state-movecursor.json adopts the CSI j backward alias." },
+        { "name": "Horizontal and Vertical Position", "disposition": "adopted", "rationale": "state-movecursor.json adopts HVP positioning." },
+        { "name": "Vertical Position Absolute", "disposition": "adopted", "rationale": "state-movecursor.json adopts VPA positioning." },
+        { "name": "Vertical Position Relative", "disposition": "adopted", "rationale": "state-movecursor.json adopts VPR movement." },
+        { "name": "Vertical Position Backward", "disposition": "adopted", "rationale": "state-movecursor.json adopts the CSI k upward alias." },
+        { "name": "Horizontal Tab", "disposition": "adopted", "rationale": "state-movecursor.json adopts the upstream default-tab walk before cursor-tab commands." },
+        { "name": "Cursor Horizontal Tab", "disposition": "adopted", "rationale": "state-movecursor.json adopts defaulted and counted CHT movement across stored stops." },
+        { "name": "Cursor Backward Tab", "disposition": "adopted", "rationale": "state-movecursor.json adopts defaulted and counted CBT movement across stored stops." }
+      ]
+    },
+    {
+      "path": "t/14state_encoding.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        { "name": "Default", "disposition": "adopted", "rationale": "state-putglyph.json's ASCII case pins the default identity mapping." },
+        { "name": "Designate G0=UK", "disposition": "out-of-scope", "rationale": "Legacy G0 character-set designation is outside the composed-UTF-8 support matrix." },
+        { "name": "Designate G0=DEC drawing", "disposition": "out-of-scope", "rationale": "Legacy DEC drawing-set translation is outside the composed-UTF-8 support matrix." },
+        { "name": "Designate G1 + LS1", "disposition": "out-of-scope", "rationale": "Legacy G1 designation and locking shifts are outside the composed-UTF-8 support matrix." },
+        { "name": "LS0", "disposition": "out-of-scope", "rationale": "Legacy locking-shift translation is outside the composed-UTF-8 support matrix." },
+        { "name": "Designate G2 + LS2", "disposition": "out-of-scope", "rationale": "Legacy G2 designation and locking shifts are outside the composed-UTF-8 support matrix." },
+        { "name": "Designate G3 + LS3", "disposition": "out-of-scope", "rationale": "Legacy G3 designation and locking shifts are outside the composed-UTF-8 support matrix." },
+        { "name": "SS2", "disposition": "out-of-scope", "rationale": "Legacy single-shift translation is outside the composed-UTF-8 support matrix." },
+        { "name": "SS3", "disposition": "out-of-scope", "rationale": "Legacy single-shift translation is outside the composed-UTF-8 support matrix." },
+        { "name": "LS1R", "disposition": "out-of-scope", "rationale": "Legacy right-half locking shifts are outside the composed-UTF-8 support matrix." },
+        { "name": "LS2R", "disposition": "out-of-scope", "rationale": "Legacy right-half locking shifts are outside the composed-UTF-8 support matrix." },
+        { "name": "LS3R", "disposition": "out-of-scope", "rationale": "Legacy right-half locking shifts are outside the composed-UTF-8 support matrix." },
+        { "name": "Mixed US-ASCII and UTF-8", "disposition": "adopted", "rationale": "encoding-utf8.json and state-putglyph.json jointly pin adjacent ASCII and decoded UTF-8 scalars." }
+      ]
+    },
+    {
+      "path": "t/61screen_unicode.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        { "name": "Single width UTF-8", "disposition": "adopted", "rationale": "screen-unicode.json adopts adjacent single-width Unicode cells through public scalar inspection." },
+        { "name": "Wide char", "disposition": "adopted", "rationale": "screen-unicode.json adopts wide-cell overwrite at the cursor home position." },
+        { "name": "Combining char", "disposition": "adopted", "rationale": "screen-unicode.json adopts the base and combining scalar in one public cell." },
+        { "name": "10 combining accents should not crash", "disposition": "adapted", "rationale": "screen-unicode.json retains all ten marks instead of libvterm's five-mark truncation." },
+        { "name": "40 combining accents in two split writes of 20 should not crash", "disposition": "adapted", "rationale": "screen-unicode.json retains all forty marks across the authored split instead of truncating." },
+        { "name": "Outputing CJK doublewidth in 80th column should wraparound to next line and not crash\"", "disposition": "adopted", "rationale": "screen-unicode.json adopts whole-cell wrapping from column 80 and asserts public cursor and wrap state." }
+      ]
+    },
+    {
+      "path": "t/90vttest_01-movement-1.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [{ "name": "Output", "disposition": "out-of-scope", "rationale": "This full-session movement recording opens with deferred DECALN and is staged as Milestone 4 acceptance evidence." }]
+    },
+    {
+      "path": "t/90vttest_01-movement-2.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [{ "name": "Output", "disposition": "out-of-scope", "rationale": "This full-session origin-region movement recording is staged as Milestone 4 acceptance evidence; its supported behavior is covered by state fixtures." }]
+    },
+    {
+      "path": "t/90vttest_01-movement-3.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [{ "name": "Output", "disposition": "out-of-scope", "rationale": "This full-session recording of controls inside escape sequences is staged as Milestone 4 acceptance evidence; parser fixtures cover the supported behavior." }]
+    },
+    {
+      "path": "t/90vttest_01-movement-4.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [{ "name": "Output", "disposition": "out-of-scope", "rationale": "This full-session leading-zero cursor recording is staged as Milestone 4 acceptance evidence; state-movecursor.json covers normalization." }]
+    },
+    {
+      "path": "t/90vttest_02-screen-1.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [{ "name": "Output", "disposition": "out-of-scope", "rationale": "This full-session autowrap recording is staged as Milestone 4 acceptance evidence; adopted wrapping fixtures cover the supported behavior." }]
+    },
+    {
+      "path": "t/90vttest_02-screen-2.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [{ "name": "Output", "disposition": "out-of-scope", "rationale": "This full-session custom-tab-stop recording is staged as Milestone 4 acceptance evidence; adopted tab-stop fixtures cover the supported behavior." }]
+    },
+    {
+      "path": "t/90vttest_02-screen-3.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [{ "name": "Output", "disposition": "out-of-scope", "rationale": "This full-session enabled-origin-mode recording is staged as Milestone 4 acceptance evidence; state-mode.json covers the supported behavior." }]
+    },
+    {
+      "path": "t/90vttest_02-screen-4.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [{ "name": "Output", "disposition": "out-of-scope", "rationale": "This full-session disabled-origin-mode recording is staged as Milestone 4 acceptance evidence; state-mode.json covers the supported behavior." }]
+    },
+    {
+      "path": "t/92lp1640917.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        { "name": "Mouse reporting should not break by idempotent DECSM 1002", "disposition": "out-of-scope", "rationale": "Mouse reporting is a Milestone 6 input-interaction seam." }
       ]
     },
     {

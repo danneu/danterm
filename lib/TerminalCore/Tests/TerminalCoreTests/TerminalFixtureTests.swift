@@ -28,10 +28,10 @@ struct TerminalFixtureTests {
         }
     }
 
-    @Test("libvterm manifest classifies every case from the sixteen selected source files")
+    @Test("libvterm manifest classifies every case from the thirty-one selected source files")
     func libvtermManifestCoverage() throws {
         // Intent: pin the adoption ledger to every upstream case heading in
-        //   the sixteen source files selected through the current engine slices.
+        //   the thirty-one source files selected through the current engine slices.
         // Why it exists: fixtures alone make deferred, superseded, and
         //   deliberately incompatible cases disappear from review.
         // Scenario: the pinned libvterm corpus is upgraded or the neutral
@@ -55,6 +55,9 @@ struct TerminalFixtureTests {
             "DanTerm pushes scrollback only for full-screen upward scrolls; bounded regions and line edits never retain vacated rows.",
             "DanTerm retains default and indexed colors semantically instead of resolving libvterm palette RGB values.",
             "Pinned libvterm lacks SGR 58/59 and mishandles 38:2::r:g:b; DanTerm deliberately consumes both correctly.",
+            "Raw ground-state C1 bytes and UTF-8 encodings beyond U+10FFFF are replaced by U+FFFD using maximal-subpart recovery.",
+            "DanTerm retains grapheme scalars exactly instead of truncating after five combining marks.",
+            "DanTerm follows VT500 string states: C0 is absorbed inside strings and BEL terminates only OSC.",
         ])
         #expect(Set(manifest.files.map(\.path)) == Set(Self.expectedCases.keys))
         for file in manifest.files {
@@ -150,6 +153,12 @@ struct TerminalFixtureTests {
                 #expect(cell.style == (try point.style.terminalStyle()))
             }
         }
+        if let cellScalars = expectation.cellScalars {
+            for point in cellScalars {
+                let cell = try #require(terminal.cell(row: point.row, column: point.column))
+                #expect(cell.scalars == Array(point.scalars.unicodeScalars))
+            }
+        }
         if let viewportText = expectation.viewportText {
             #expect(terminal.screenText == viewportText)
         }
@@ -193,6 +202,110 @@ struct TerminalFixtureTests {
     }
 
     private static let expectedCases: [String: Set<String>] = [
+        "t/02parser.test": [
+            "Basic text",
+            "C0",
+            "C1 8bit",
+            "C1 7bit",
+            "High bytes",
+            "Mixed",
+            "Escape",
+            "Escape 2-byte",
+            "Split write Escape",
+            "Escape cancels Escape, starts another",
+            "CAN cancels Escape, returns to normal mode",
+            "C0 in Escape interrupts and continues",
+            "CSI 0 args",
+            "CSI 1 arg",
+            "CSI 2 args",
+            "CSI 1 arg 1 sub",
+            "CSI many digits",
+            "CSI leading zero",
+            "CSI qmark",
+            "CSI greater",
+            "CSI SP",
+            "Mixed CSI",
+            "Split write",
+            "Escape cancels CSI, starts Escape",
+            "CAN cancels CSI, returns to normal mode",
+            "C0 in Escape interrupts and continues",
+            "OSC BEL",
+            "OSC ST (7bit)",
+            "OSC ST (8bit)",
+            "OSC in parts",
+            "OSC BEL without semicolon",
+            "OSC ST without semicolon",
+            "Escape cancels OSC, starts Escape",
+            "CAN cancels OSC, returns to normal mode",
+            "C0 in OSC interrupts and continues",
+            "DCS BEL",
+            "DCS ST (7bit)",
+            "DCS ST (8bit)",
+            "Split write of 7bit ST",
+            "Escape cancels DCS, starts Escape",
+            "CAN cancels DCS, returns to normal mode",
+            "C0 in OSC interrupts and continues",
+            "APC BEL",
+            "APC ST (7bit)",
+            "APC ST (8bit)",
+            "PM BEL",
+            "PM ST (7bit)",
+            "PM ST (8bit)",
+            "SOS BEL",
+            "SOS ST (7bit)",
+            "SOS ST (8bit)",
+            "SOS can contain any C0 or C1 code",
+            "NUL ignored",
+            "NUL ignored within CSI",
+            "DEL ignored",
+            "DEL ignored within CSI",
+            "DEL inside text\"",
+        ],
+        "t/03encoding_utf8.test": [
+            "Low", "2 byte", "3 byte", "4 byte", "Early termination",
+            "Early restart", "Overlong", "UTF-16 Surrogates", "Split write",
+        ],
+        "t/10state_putglyph.test": [
+            "Low", "UTF-8 1 char", "UTF-8 split writes", "UTF-8 wide char",
+            "UTF-8 emoji wide char", "UTF-8 combining chars",
+            "Combining across buffers", "Spare combining chars get truncated",
+            "DECSCA protected",
+        ],
+        "t/11state_movecursor.test": [
+            "Implicit", "Backspace", "Horizontal Tab", "Carriage Return", "Linefeed",
+            "Backspace bounded by lefthand edge", "Backspace cancels phantom",
+            "HT bounded by righthand edge", "Index", "Reverse Index", "Newline",
+            "Cursor Forward", "Cursor Down", "Cursor Up", "Cursor Backward",
+            "Cursor Next Line", "Cursor Previous Line", "Cursor Horizonal Absolute",
+            "Cursor Position", "Cursor Position cancels phantom", "Bounds Checking",
+            "Horizontal Position Absolute", "Horizontal Position Relative",
+            "Horizontal Position Backward", "Horizontal and Vertical Position",
+            "Vertical Position Absolute", "Vertical Position Relative",
+            "Vertical Position Backward", "Cursor Horizontal Tab", "Cursor Backward Tab",
+        ],
+        "t/14state_encoding.test": [
+            "Default", "Designate G0=UK", "Designate G0=DEC drawing",
+            "Designate G1 + LS1", "LS0", "Designate G2 + LS2",
+            "Designate G3 + LS3", "SS2", "SS3", "LS1R", "LS2R", "LS3R",
+            "Mixed US-ASCII and UTF-8",
+        ],
+        "t/61screen_unicode.test": [
+            "Single width UTF-8", "Wide char", "Combining char",
+            "10 combining accents should not crash",
+            "40 combining accents in two split writes of 20 should not crash",
+            "Outputing CJK doublewidth in 80th column should wraparound to next line and not crash\"",
+        ],
+        "t/90vttest_01-movement-1.test": ["Output"],
+        "t/90vttest_01-movement-2.test": ["Output"],
+        "t/90vttest_01-movement-3.test": ["Output"],
+        "t/90vttest_01-movement-4.test": ["Output"],
+        "t/90vttest_02-screen-1.test": ["Output"],
+        "t/90vttest_02-screen-2.test": ["Output"],
+        "t/90vttest_02-screen-3.test": ["Output"],
+        "t/90vttest_02-screen-4.test": ["Output"],
+        "t/92lp1640917.test": [
+            "Mouse reporting should not break by idempotent DECSM 1002",
+        ],
         "t/15state_mode.test": [
             "Insert/Replace Mode",
             "Insert mode only happens once for UTF-8 combining",
@@ -450,6 +563,7 @@ private struct FixtureExpectation: Decodable {
     let fullHistoryText: String?
     let currentStyle: FixtureStyle?
     let cellStyles: [FixtureCellStyle]?
+    let cellScalars: [FixtureCellScalars]?
 }
 
 private struct FixtureCursor: Decodable {
@@ -473,6 +587,12 @@ private struct FixtureCellStyle: Decodable {
     let row: Int
     let column: Int
     let style: FixtureStyle
+}
+
+private struct FixtureCellScalars: Decodable {
+    let row: Int
+    let column: Int
+    let scalars: String
 }
 
 private struct FixtureStyle: Decodable {

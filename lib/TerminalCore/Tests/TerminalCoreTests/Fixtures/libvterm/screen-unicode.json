@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/61screen_unicode.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Single width UTF-8; Wide char; Combining char; 10 combining accents should not crash; 40 combining accents in two split writes of 20 should not crash; Outputing CJK doublewidth in 80th column should wraparound to next line and not crash\"",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": [
+      "DanTerm retains grapheme scalars exactly instead of truncating after five combining marks."
+    ]
+  },
+  "initial": { "columns": 80, "rows": 2 },
+  "events": [
+    { "type": "feed", "hex": "c3 81 c3 a9" },
+    { "type": "expect", "expect": { "cellScalars": [{ "row": 0, "column": 0, "scalars": "\u00c1" }, { "row": 0, "column": 1, "scalars": "\u00e9" }] } },
+    { "type": "feed", "text": "\u001bc0123\u001b[H\uff10" },
+    { "type": "expect", "expect": { "cellScalars": [{ "row": 0, "column": 0, "scalars": "\uff10" }] } },
+    { "type": "feed", "text": "\u001bc0123\u001b[He\u0301" },
+    { "type": "expect", "expect": { "cellScalars": [{ "row": 0, "column": 0, "scalars": "e\u0301" }] } },
+    { "type": "feed", "text": "\u001bce\u0301\u0302\u0303\u0304\u0305\u0306\u0307\u0308\u0309\u030a" },
+    { "type": "expect", "expect": { "cellScalars": [{ "row": 0, "column": 0, "scalars": "e\u0301\u0302\u0303\u0304\u0305\u0306\u0307\u0308\u0309\u030a" }] } },
+    { "type": "feed", "text": "\u001bce\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301" },
+    { "type": "feed", "text": "\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301" },
+    { "type": "expect", "expect": { "cellScalars": [{ "row": 0, "column": 0, "scalars": "e\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301" }] } },
+    { "type": "feed", "text": "\u001bc\u001b[80G\uff10" },
+    {
+      "type": "expect",
+      "expect": {
+        "cellScalars": [{ "row": 1, "column": 0, "scalars": "\uff10" }],
+        "cursor": { "row": 1, "column": 2, "pendingWrap": false },
+        "softWraps": [true, false]
+      }
+    }
+  ]
+}

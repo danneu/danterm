@@ -59,6 +59,54 @@ struct TerminalTabStopTests {
         #expect(terminal == expected)
     }
 
+    @Test(
+        "CHT and CBT walk stored tab stops, default zero to one, and clamp",
+        arguments: [
+            CursorTabFixture(sequence: "\u{1B}[I", start: 0, expected: 8),
+            CursorTabFixture(sequence: "\u{1B}[0I", start: 0, expected: 8),
+            CursorTabFixture(sequence: "\u{1B}[2I", start: 0, expected: 16),
+            CursorTabFixture(sequence: "\u{1B}[9I", start: 17, expected: 19),
+            CursorTabFixture(sequence: "\u{1B}[Z", start: 19, expected: 16),
+            CursorTabFixture(sequence: "\u{1B}[0Z", start: 9, expected: 8),
+            CursorTabFixture(sequence: "\u{1B}[2Z", start: 19, expected: 8),
+            CursorTabFixture(sequence: "\u{1B}[9Z", start: 0, expected: 0),
+        ]
+    )
+    func cursorTabMovement(fixture: CursorTabFixture) throws {
+        var terminal = try #require(Terminal(columns: 20, rows: 1))
+        terminal.moveCursor(row: 0, column: fixture.start)
+
+        terminal.feed(Array(fixture.sequence.utf8))
+
+        #expect(terminal.geometry.cursor == TerminalCursor(
+            row: 0,
+            column: fixture.expected,
+            isPendingWrap: false
+        ))
+    }
+
+    @Test(
+        "CHT and CBT clear pending wrap and the combining attachment target at the last column",
+        arguments: ["\u{1B}[I", "\u{1B}[Z"]
+    )
+    func cursorTabClearsPendingState(sequence: String) throws {
+        // Intent: prove both cursor-tab directions dispatch through positioned
+        //   movement, even when CHT clamps at the right edge.
+        // Why it exists: coordinate equality cannot distinguish a valid clamped
+        //   CHT from an ignored sequence, and a stale cluster could absorb input.
+        // Scenario: output fills the last column, uses a cursor-tab command,
+        //   then sends a combining mark that must not attach to the old cell.
+        var terminal = try #require(Terminal(columns: 20, rows: 1))
+        terminal.feed(Array(String(repeating: "A", count: 20).utf8))
+
+        terminal.feed(Array(sequence.utf8))
+        terminal.feed(Array("\u{0301}".utf8))
+
+        #expect(terminal.geometry.cursor.isPendingWrap == false)
+        #expect(terminal.cell(row: 0, column: 19)?.scalars == ["A"])
+        #expect(terminal.geometry.rows[0].isSoftWrapped == false)
+    }
+
     @Test("resize preserves retained stops and defaults newly introduced columns")
     func tabStopsAcrossResize() throws {
         // Intent: distinguish retained custom stop state from defaults synthesized
@@ -104,5 +152,11 @@ struct TerminalTabStopTests {
         #expect(customized != baseline)
         baseline.feed(Array("\u{1B}H".utf8))
         #expect(customized == baseline)
+    }
+
+    struct CursorTabFixture: Sendable {
+        let sequence: String
+        let start: Int
+        let expected: Int
     }
 }

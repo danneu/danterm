@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/10state_putglyph.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Low; UTF-8 1 char; UTF-8 split writes; UTF-8 wide char; UTF-8 emoji wide char; UTF-8 combining chars; Combining across buffers; Spare combining chars get truncated",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": [
+      "DanTerm retains grapheme scalars exactly instead of truncating after five combining marks."
+    ]
+  },
+  "initial": { "columns": 16, "rows": 1 },
+  "events": [
+    { "type": "feed", "text": "ABC" },
+    { "type": "expect", "expect": { "viewportText": "ABC             " } },
+    { "type": "feed", "hex": "1b 63 c3 81 c3 a9" },
+    { "type": "expect", "expect": { "viewportText": "\u00c1\u00e9              " } },
+    { "type": "feed", "hex": "1b 63 c3" },
+    { "type": "feed", "hex": "81" },
+    { "type": "expect", "expect": { "cellScalars": [{ "row": 0, "column": 0, "scalars": "\u00c1" }] } },
+    { "type": "feed", "hex": "1b 63 ef bc 90 20" },
+    {
+      "type": "expect",
+      "expect": {
+        "cellKinds": [["wide-head", "wide-tail", "narrow", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding"]],
+        "cellScalars": [{ "row": 0, "column": 0, "scalars": "\uff10" }]
+      }
+    },
+    { "type": "feed", "hex": "1b 63 f0 9f 98 80 20" },
+    {
+      "type": "expect",
+      "expect": {
+        "cellKinds": [["wide-head", "wide-tail", "narrow", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding", "padding"]],
+        "cellScalars": [{ "row": 0, "column": 0, "scalars": "\ud83d\ude00" }]
+      }
+    },
+    { "type": "feed", "hex": "1b 63 65 cc 81 5a" },
+    {
+      "type": "expect",
+      "expect": {
+        "cellScalars": [
+          { "row": 0, "column": 0, "scalars": "e\u0301" },
+          { "row": 0, "column": 1, "scalars": "Z" }
+        ]
+      }
+    },
+    { "type": "feed", "hex": "1b 63 65" },
+    { "type": "feed", "hex": "cc 81 5a" },
+    { "type": "expect", "expect": { "cellScalars": [{ "row": 0, "column": 0, "scalars": "e\u0301" }] } },
+    { "type": "feed", "text": "\u001bce\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301" },
+    {
+      "type": "expect",
+      "expect": {
+        "cellScalars": [{ "row": 0, "column": 0, "scalars": "e\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301\u0301" }],
+        "cursor": { "row": 0, "column": 1, "pendingWrap": false }
+      }
+    }
+  ]
+}

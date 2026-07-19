@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/02parser.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Basic text; C0; C1 7bit; Mixed; Escape; Escape 2-byte; Split write Escape; Escape cancels Escape, starts another; CAN cancels Escape, returns to normal mode; C0 in Escape interrupts and continues; CSI 0 args; CSI 1 arg; CSI 2 args; CSI 1 arg 1 sub; CSI many digits; CSI leading zero; CSI qmark; CSI greater; CSI SP; Mixed CSI; Split write; Escape cancels CSI, starts Escape; CAN cancels CSI, returns to normal mode; C0 in Escape interrupts and continues; NUL ignored; NUL ignored within CSI; DEL ignored; DEL ignored within CSI; DEL inside text\"",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": [
+      "Parser callbacks are adapted to assertions against DanTerm's public terminal state."
+    ]
+  },
+  "initial": { "columns": 12, "rows": 4 },
+  "events": [
+    { "type": "feed", "text": "hello" },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "hello       \n            \n            \n            ",
+        "cursor": { "row": 0, "column": 5, "pendingWrap": false }
+      }
+    },
+    { "type": "feed", "text": "\r1\n2" },
+    {
+      "type": "expect",
+      "expect": {
+        "cellScalars": [
+          { "row": 0, "column": 0, "scalars": "1" },
+          { "row": 1, "column": 1, "scalars": "2" }
+        ],
+        "cursor": { "row": 1, "column": 2, "pendingWrap": false }
+      }
+    },
+    { "type": "feed", "text": "\u001b=\u001b(X\u001b(\u001b)Z\u001b(\u0018AB" },
+    { "type": "expect", "expect": { "cursor": { "row": 1, "column": 4, "pendingWrap": false } } },
+    { "type": "feed", "text": "\u001b(\nX" },
+    { "type": "expect", "expect": { "cursor": { "row": 2, "column": 4, "pendingWrap": false } } },
+    { "type": "feed", "text": "\u001bc\u001b[3;4H#\u001b[2aA" },
+    {
+      "type": "expect",
+      "expect": {
+        "cellScalars": [
+          { "row": 2, "column": 3, "scalars": "#" },
+          { "row": 2, "column": 6, "scalars": "A" }
+        ],
+        "cursor": { "row": 2, "column": 7, "pendingWrap": false }
+      }
+    },
+    { "type": "feed", "text": "\u001b[1:2c\u001b[678dB\u001b[007eC\u001b[?2;7f\u001b[>c\u001b[12 q" },
+    {
+      "type": "expect",
+      "expect": {
+        "cellScalars": [
+          { "row": 3, "column": 7, "scalars": "B" },
+          { "row": 3, "column": 8, "scalars": "C" }
+        ],
+        "cursor": { "row": 3, "column": 9, "pendingWrap": false }
+      }
+    },
+    { "type": "feed", "text": "D\u001b[8mE\u001b[123\u001b9F\u001b[12\u0018GH\u001b[12\n;3X" },
+    {
+      "type": "expect",
+      "expect": {
+        "cursor": { "row": 3, "column": 2, "pendingWrap": false }
+      }
+    },
+    { "type": "feed", "hex": "00 7f 1b 5b 31 32 00 33 6d 49 7f 4a" },
+    {
+      "type": "expect",
+      "expect": {
+        "cellScalars": [
+          { "row": 3, "column": 2, "scalars": "I" },
+          { "row": 3, "column": 3, "scalars": "J" }
+        ],
+        "cursor": { "row": 3, "column": 4, "pendingWrap": false }
+      }
+    }
+  ]
+}

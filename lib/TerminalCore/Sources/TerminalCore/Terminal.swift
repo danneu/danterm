@@ -635,10 +635,10 @@ public struct Terminal: Equatable, Sendable {
         case 0x41, 0x6B:
             guard let amount = movementAmount(sequence.parameters) else { return }
             movePositionedCursor(row: cursor.row - amount, column: cursor.column)
-        case 0x42:
+        case 0x42, 0x65:
             guard let amount = movementAmount(sequence.parameters) else { return }
             movePositionedCursor(row: cursor.row + amount, column: cursor.column)
-        case 0x43:
+        case 0x43, 0x61:
             guard let amount = movementAmount(sequence.parameters) else { return }
             movePositionedCursor(row: cursor.row, column: cursor.column + amount)
         case 0x44, 0x6A:
@@ -668,6 +668,12 @@ public struct Terminal: Equatable, Sendable {
                 row: positioningOriginRow + absolutePosition(sequence.parameters.first),
                 column: absolutePosition(sequence.parameters.dropFirst().first)
             )
+        case 0x49:
+            guard let amount = movementAmount(sequence.parameters) else { return }
+            moveCursorAcrossTabStops(amount: amount, forward: true)
+        case 0x5A:
+            guard let amount = movementAmount(sequence.parameters) else { return }
+            moveCursorAcrossTabStops(amount: amount, forward: false)
         case 0x4A:
             guard sequence.parameters.count <= 1 else { return }
             eraseDisplay(mode: sequence.parameters.first ?? 0)
@@ -1026,6 +1032,17 @@ public struct Terminal: Equatable, Sendable {
         cursor.row = min(max(row, rowRange.lowerBound), rowRange.upperBound - 1)
         cursor.column = min(max(column, 0), columnCount - 1)
         clearPendingMotionState()
+    }
+
+    private mutating func moveCursorAcrossTabStops(amount: Int, forward: Bool) {
+        let candidates = tabStops
+            .filter { forward ? $0 > cursor.column : $0 < cursor.column }
+            .sorted(by: forward ? (<) : (>))
+        let targetIndex = amount - 1
+        let column = candidates.indices.contains(targetIndex)
+            ? candidates[targetIndex]
+            : (forward ? columnCount - 1 : 0)
+        movePositionedCursor(row: cursor.row, column: column)
     }
 
     private mutating func dispatchEscape(_ final: UInt8) {
