@@ -55,26 +55,46 @@ mean.
     Adds persistent mode and tab state, saved-cursor aliases, repeat and reset
     semantics, and neutral libvterm state fixtures. See the
     [implementation plan](../plans/impl/2026-07-18-1751-terminal-modes-tabs-saved-cursor-reset.md).
+  - [x] **Slice 8: Foundational fixture closure and exit audit.** Completes the
+    early parser, encoding, Unicode, movement, and vttest provenance ledger;
+    adds HPR, VPR, CHT, and CBT; and audits the Unicode and reflow gates. See
+    the [implementation plan](../plans/impl/2026-07-19-1346-milestone-2-foundational-fixture-closure.md).
   - [x] The pure state machine in [Terminal core](04-terminal-core.md) handles the
     control, screen, mode, and style behavior required by the viability slice.
   - [x] Its behavior is deterministic, independent of input chunking, and proven
     without a PTY, AppKit, or renderer.
-  - [ ] The foundational contracts in
+  - [x] The foundational contracts in
     [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md) pass for
     Spanish text, Chinese wide text, basic emoji, wide-cell mutations, hard and
     soft line identity, and primary-screen resize reflow.
+    Slice 8 judgment: `spanishCanonicalGeometry`, `wideCellGeometry`,
+    `wideAtRightEdge`, and `clusteredWideCellAtomicity` prove the text and cell
+    cases; `scrollbackRetention` and `fullHistoryEmptyLines` prove line identity;
+    and `widthWalkConservesFullHistory`, `heightAndCombinedWalksConserveFullHistory`,
+    and `spacerRoundTripAcrossWidths` prove primary reflow without losing the
+    decomposed Spanish cluster, wide cells, or emoji.
   - [ ] Reflow preserves logical content, hard line boundaries, cursor attachment,
     and live/scrolled viewport anchors across the slice's width and height
     changes.
-  - [ ] The Milestone 2 tranche in
+    Slice 8 judgment: logical content and hard boundaries are covered by
+    `widthWalkConservesFullHistory`, `heightAndCombinedWalksConserveFullHistory`,
+    and `heightTransferPreservesFlagsAndFillerIdentity`; cursor and live-viewport
+    attachment are covered by `cellAnchorsFollowReflowedCells`,
+    `heightShrinkClampsDisplacedCursor`, `heightGrowthEligibility`, and
+    `widthGrowthPullsHistory`. The gate remains open because TerminalCore has no
+    locally scrolled viewport-offset concept. That scrolled-anchor clause is
+    Milestone 6 proof debt under [Input and interaction](08-input-interaction.md).
+  - [x] The Milestone 2 tranche in
     [External terminal test research](../docs/research/1-external-tests.md)
     establishes structure-insensitive replay and adopts or classifies
     applicable parser, Unicode, grid, and reflow fixtures early enough to
     inform the core's public contracts.
-    Slice 7 judgment: this gate remains open. The provenance ledger now covers
-    sixteen libvterm state, screen, resize, reflow, mode, tab, save, reset, and
-    REP files, while the early parser/encoding/Unicode and vttest-derived
-    families still need explicit fixture dispositions.
+    Slice 8 judgment: this gate closes. `TerminalFixtureTests.replayFixtures`
+    proves every neutral fixture under authored, bytewise, and split replay;
+    `TerminalFixtureTests.libvtermManifestCoverage` pins the upstream commit,
+    seven declared deviations, and a disposition with rationale for every case
+    heading in all 31 selected libvterm files, including the early parser,
+    encoding, Unicode, movement, and vttest-derived families.
 
 - [ ] **3. Integrate PTY process lifecycle**
   - [ ] [PTY and process lifecycle](07-pty-process-lifecycle.md) proves launch,

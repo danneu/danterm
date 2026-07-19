@@ -182,4 +182,4 @@ Gate B's scrolled-anchor clause cannot, so it does not close this slice.
 ## Commit progress
 
 - [x] 1. Complete the foundational fixture tranche and cursor dispatch coverage
-- [ ] 2. Audit and record the Milestone 2 gate status
+- [x] 2. Audit and record the Milestone 2 gate status
