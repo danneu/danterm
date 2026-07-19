@@ -481,7 +481,7 @@ commit is green and failing-test-first.
 - [x] 2. Native macOS PTY owner with controlled children: launch, ordered
   duplex IO, resize, EOF, self-exit convergence, headless composition, and
   the recording round-trip (PO3, PO4, PO5, PO6, PO11).
-- [ ] 3. Teardown ladder, race and leak proofs, liveness under a stalled and
+- [x] 3. Teardown ladder, race and leak proofs, liveness under a stalled and
   a chatty child, the initial-input seam, the opt-in external recipe, and
   docs closure (PO7, PO8, PO9, PO10, PO13, PO14).
 
@@ -493,3 +493,14 @@ commit is green and failing-test-first.
   macOS `tty(4)` requires child-side `TIOCSCTTY`, while the public spawn file
   actions expose no ioctl operation; the bootstrap and close-on-exec status
   pipe preserve the plan's no-fork-in-the-app and classified-failure goals.
+- Slice 3 adds a short owner-queue session census after each signal stage so
+  teardown can observe emptiness after the final `SIGKILL`, which deliberately
+  has no further reducer grace event. Census buffers resize rather than treating
+  truncation or a transient enumeration failure as an empty session. The rapid
+  close-while-spawning test also required installed dispatch sources to be
+  activated before cancellation; process observation stays active through close
+  so the leader is still reaped.
+- The opt-in ssh proof checks both local ownership and remote job cleanup, so
+  `test-pty-external` preflights passwordless localhost authentication in
+  addition to Remote Login. This keeps the automated recipe non-interactive and
+  avoids handling credentials in the test harness.

@@ -16,6 +16,27 @@ enum TerminalPTYAppliedTransition: Equatable, Sendable {
     case resize(TerminalDimensions)
 }
 
+/// Test-support census of resources that must be absent once teardown returns.
+struct TerminalPTYResourceSnapshot: Equatable, Sendable {
+    let hasOpenMaster: Bool
+    let activeSourceCount: Int
+    let hasSpawnTask: Bool
+    let hasLeader: Bool
+    let hasSession: Bool
+    let pendingInputByteCount: Int
+    let callbacksAfterTeardown: Int
+
+    var isReleased: Bool {
+        hasOpenMaster == false
+            && activeSourceCount == 0
+            && hasSpawnTask == false
+            && hasLeader == false
+            && hasSession == false
+            && pendingInputByteCount == 0
+            && callbacksAfterTeardown == 0
+    }
+}
+
 /// Owns one pane's mutable terminal, lifecycle reducer, PTY, child, and event sources.
 public actor TerminalPTYHost {
     // Swift cannot import FIONREAD because its C macro encodes sizeof(int).
@@ -36,9 +57,14 @@ public actor TerminalPTYHost {
     private var sessionID: pid_t?
     private var leaderReaped = false
     private var readSource: (any DispatchSourceRead)?
+    private var readSourceActivated = false
     private var writeSource: (any DispatchSourceWrite)?
     private var processSource: (any DispatchSourceProcess)?
+    private var processSourceActivated = false
     private var graceSource: (any DispatchSourceTimer)?
+    private var sessionPollSource: (any DispatchSourceTimer)?
+    private var sessionPollStage: TeardownStage?
+    private var sessionPollStageSignaled = false
     private var spawnTask: Task<Void, Never>?
 
     private var pendingInput: [UInt8] = []
@@ -49,9 +75,13 @@ public actor TerminalPTYHost {
     private var recentOutput: [UInt8] = []
     private var capturedOutput: [UInt8] = []
     private var appliedTransitions: [TerminalPTYAppliedTransition] = []
+    private var capturedInputWrites: [[UInt8]] = []
     private var outputWaiters: [OutputWaiter] = []
     private var reportedResult: PaneLifecycleResult?
     private var resultWaiters: [CheckedContinuation<PaneLifecycleResult, Never>] = []
+    private var teardownFinished = false
+    private var teardownWaiters: [CheckedContinuation<Void, Never>] = []
+    private var callbacksAfterTeardown = 0
 
     /// Binds Swift actor jobs to the FIFO queue that also delivers every system callback.
     nonisolated public var unownedExecutor: UnownedSerialExecutor {
@@ -109,6 +139,18 @@ public actor TerminalPTYHost {
         process(.resize(dimensions))
     }
 
+    /// Closes one pane and returns only after its owned process session is gone.
+    public func close() async {
+        process(.requestClose)
+        await waitForTeardown()
+    }
+
+    /// Applies the same bounded teardown when the application exits orderly.
+    public func terminateForApplicationExit() async {
+        process(.appTermination)
+        await waitForTeardown()
+    }
+
     /// Returns a Sendable value copy that cannot mutate owner state.
     public func snapshot() -> Terminal {
         terminal
@@ -141,6 +183,37 @@ public actor TerminalPTYHost {
         appliedTransitions
     }
 
+    /// Returns the reducer-emitted writes before nonblocking partial IO splits them.
+    func inputWrites() -> [[UInt8]] {
+        capturedInputWrites
+    }
+
+    /// Exposes an ownership census without leaking mutable descriptors or sources.
+    func resourceSnapshot() -> TerminalPTYResourceSnapshot {
+        TerminalPTYResourceSnapshot(
+            hasOpenMaster: masterFD >= 0,
+            activeSourceCount: [
+                readSource != nil,
+                writeSource != nil,
+                processSource != nil,
+                graceSource != nil,
+                sessionPollSource != nil,
+            ].filter { $0 }.count,
+            hasSpawnTask: spawnTask != nil,
+            hasLeader: leaderPID != nil,
+            hasSession: sessionID != nil,
+            pendingInputByteCount: max(pendingInput.count - pendingInputOffset, 0),
+            callbacksAfterTeardown: callbacksAfterTeardown
+        )
+    }
+
+    private func waitForTeardown() async {
+        if teardownFinished { return }
+        await withCheckedContinuation { continuation in
+            teardownWaiters.append(continuation)
+        }
+    }
+
     private func process(_ event: PaneLifecycleEvent) {
         pendingEvents.append(event)
         guard isReducing == false else { return }
@@ -163,6 +236,7 @@ public actor TerminalPTYHost {
         case .activateIO:
             activateIO()
         case .writeInput(let bytes):
+            if captureTransitions { capturedInputWrites.append(bytes) }
             enqueueInput(bytes)
         case .resize(let dimensions):
             applyResize(dimensions)
@@ -223,9 +297,10 @@ public actor TerminalPTYHost {
     private func installSources(for spawned: SpawnedPTY) {
         let read = DispatchSource.makeReadSource(fileDescriptor: spawned.master, queue: queue)
         read.setEventHandler { [weak self] in
-            self?.assumeIsolated { owner in owner.readReady() }
+            self?.assumeIsolated { owner in owner.readSourceFired() }
         }
         readSource = read
+        readSourceActivated = false
 
         let process = DispatchSource.makeProcessSource(
             identifier: spawned.leader,
@@ -233,14 +308,27 @@ public actor TerminalPTYHost {
             queue: queue
         )
         process.setEventHandler { [weak self] in
-            self?.assumeIsolated { owner in owner.childExited() }
+            self?.assumeIsolated { owner in owner.processSourceFired() }
         }
         processSource = process
+        processSourceActivated = false
     }
 
     private func activateIO() {
-        readSource?.activate()
-        processSource?.activate()
+        activateReadSourceIfNeeded()
+        activateProcessSourceIfNeeded()
+    }
+
+    private func activateReadSourceIfNeeded() {
+        guard let readSource, readSourceActivated == false else { return }
+        readSourceActivated = true
+        readSource.activate()
+    }
+
+    private func activateProcessSourceIfNeeded() {
+        guard let processSource, processSourceActivated == false else { return }
+        processSourceActivated = true
+        processSource.activate()
     }
 
     private func enqueueInput(_ bytes: [UInt8]) {
@@ -286,7 +374,7 @@ public actor TerminalPTYHost {
         guard writeSource == nil, masterFD >= 0 else { return }
         let source = DispatchSource.makeWriteSource(fileDescriptor: masterFD, queue: queue)
         source.setEventHandler { [weak self] in
-            self?.assumeIsolated { owner in owner.flushInput() }
+            self?.assumeIsolated { owner in owner.writeSourceFired() }
         }
         writeSource = source
         source.activate()
@@ -295,6 +383,21 @@ public actor TerminalPTYHost {
     private func cancelWriteSource() {
         writeSource?.cancel()
         writeSource = nil
+    }
+
+    private func readSourceFired() {
+        guard recordSystemCallback() else { return }
+        readReady()
+    }
+
+    private func writeSourceFired() {
+        guard recordSystemCallback() else { return }
+        flushInput()
+    }
+
+    private func processSourceFired() {
+        guard recordSystemCallback() else { return }
+        childExited()
     }
 
     private func readReady() {
@@ -312,8 +415,7 @@ public actor TerminalPTYHost {
                 continue
             }
             if result == 0 || (result < 0 && errno == EIO) {
-                readSource?.cancel()
-                readSource = nil
+                cancelReadSource()
                 process(.outputEOF)
                 return
             }
@@ -337,8 +439,7 @@ public actor TerminalPTYHost {
         default:
             status = .signaled(info.si_status)
         }
-        processSource?.cancel()
-        processSource = nil
+        cancelProcessSource()
         process(.childExited(status))
     }
 
@@ -405,8 +506,11 @@ public actor TerminalPTYHost {
     }
 
     private func closeMaster() {
-        readSource?.cancel()
-        readSource = nil
+        // A close that raced spawn has sources installed but no activateIO
+        // command. Resume before cancellation so libdispatch never releases a
+        // suspended source, and keep process observation live for leader reap.
+        activateProcessSourceIfNeeded()
+        cancelReadSource()
         cancelWriteSource()
         pendingInput.removeAll(keepingCapacity: false)
         pendingInputOffset = 0
@@ -416,16 +520,50 @@ public actor TerminalPTYHost {
         }
     }
 
+    private func cancelReadSource() {
+        guard let readSource else { return }
+        if readSourceActivated == false {
+            readSourceActivated = true
+            readSource.activate()
+        }
+        readSource.cancel()
+        self.readSource = nil
+        readSourceActivated = false
+    }
+
+    private func cancelProcessSource() {
+        guard let processSource else { return }
+        if processSourceActivated == false {
+            processSourceActivated = true
+            processSource.activate()
+        }
+        processSource.cancel()
+        self.processSource = nil
+        processSourceActivated = false
+    }
+
     private func signalSession(_ stage: TeardownStage) {
         guard let sessionID else {
             pendingEvents.append(.sessionDrained)
             return
         }
-        let members = sessionMembers(sessionID: sessionID)
-        guard members.isEmpty == false else {
-            pendingEvents.append(.sessionDrained)
+        sessionPollStage = stage
+        sessionPollStageSignaled = false
+        installSessionPollSourceIfNeeded()
+        guard let members = sessionMembers(sessionID: sessionID) else {
             return
         }
+        if applySessionCensus(members, sessionID: sessionID) {
+            pendingEvents.append(.sessionDrained)
+        }
+    }
+
+    private func applySessionCensus(_ members: [pid_t], sessionID: pid_t) -> Bool {
+        guard members.isEmpty == false else {
+            cancelSessionPoll()
+            return true
+        }
+        guard sessionPollStageSignaled == false, let stage = sessionPollStage else { return false }
         let signal: Int32
         switch stage {
         case .hangup: signal = SIGHUP
@@ -436,18 +574,26 @@ public actor TerminalPTYHost {
             _ = kill(pid, signal)
             if stage != .kill { _ = kill(pid, SIGCONT) }
         }
+        sessionPollStageSignaled = true
+        return false
     }
 
-    private func sessionMembers(sessionID: pid_t) -> [pid_t] {
-        let estimatedCount = max(Int(proc_listallpids(nil, 0)), 256)
-        var pids = [pid_t](repeating: 0, count: estimatedCount + 64)
-        let count = pids.withUnsafeMutableBytes { buffer in
-            proc_listallpids(buffer.baseAddress, Int32(buffer.count))
+    private func sessionMembers(sessionID: pid_t) -> [pid_t]? {
+        var capacity = max(Int(proc_listallpids(nil, 0)), 256) + 64
+        for _ in 0..<3 {
+            var pids = [pid_t](repeating: 0, count: capacity)
+            let count = pids.withUnsafeMutableBytes { buffer in
+                proc_listallpids(buffer.baseAddress, Int32(buffer.count))
+            }
+            guard count >= 0 else { return nil }
+            if count < capacity {
+                return pids.prefix(Int(count)).filter { pid in
+                    pid > 0 && getsid(pid) == sessionID
+                }
+            }
+            capacity *= 2
         }
-        guard count > 0 else { return [] }
-        return pids.prefix(Int(count)).filter { pid in
-            pid > 0 && getsid(pid) == sessionID
-        }
+        return nil
     }
 
     private func scheduleGrace(_ stage: TeardownStage) {
@@ -455,7 +601,7 @@ public actor TerminalPTYHost {
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + .milliseconds(stage == .hangup ? 100 : 200))
         timer.setEventHandler { [weak self] in
-            self?.assumeIsolated { owner in owner.process(.graceElapsed(stage)) }
+            self?.assumeIsolated { owner in owner.graceTimerFired(stage) }
         }
         graceSource = timer
         timer.activate()
@@ -464,6 +610,49 @@ public actor TerminalPTYHost {
     private func cancelGrace() {
         graceSource?.cancel()
         graceSource = nil
+    }
+
+    private func graceTimerFired(_ stage: TeardownStage) {
+        guard recordSystemCallback() else { return }
+        process(.graceElapsed(stage))
+    }
+
+    private func installSessionPollSourceIfNeeded() {
+        guard sessionPollSource == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(
+            deadline: .now() + .milliseconds(10),
+            repeating: .milliseconds(10),
+            leeway: .milliseconds(2)
+        )
+        timer.setEventHandler { [weak self] in
+            self?.assumeIsolated { owner in owner.sessionPollFired() }
+        }
+        sessionPollSource = timer
+        timer.activate()
+    }
+
+    private func sessionPollFired() {
+        guard recordSystemCallback(), let sessionID else { return }
+        guard let members = sessionMembers(sessionID: sessionID) else { return }
+        if applySessionCensus(members, sessionID: sessionID) {
+            process(.sessionDrained)
+        }
+    }
+
+    private func cancelSessionPoll() {
+        sessionPollSource?.cancel()
+        sessionPollSource = nil
+        sessionPollStage = nil
+        sessionPollStageSignaled = false
+    }
+
+    private func recordSystemCallback() -> Bool {
+        guard teardownFinished == false else {
+            callbacksAfterTeardown += 1
+            return false
+        }
+        return true
     }
 
     private func report(_ result: PaneLifecycleResult) {
@@ -475,17 +664,22 @@ public actor TerminalPTYHost {
     }
 
     private func finishTeardown() {
+        guard teardownFinished == false else { return }
         spawnTask?.cancel()
         spawnTask = nil
         closeMaster()
         cancelGrace()
-        processSource?.cancel()
-        processSource = nil
+        cancelSessionPoll()
+        cancelProcessSource()
         leaderPID = nil
         sessionID = nil
         let waiters = outputWaiters
         outputWaiters.removeAll()
         for waiter in waiters { waiter.continuation.resume(returning: false) }
+        teardownFinished = true
+        let teardownWaiters = teardownWaiters
+        self.teardownWaiters.removeAll()
+        for waiter in teardownWaiters { waiter.resume() }
     }
 
     private func resumeOutputWaiters() {

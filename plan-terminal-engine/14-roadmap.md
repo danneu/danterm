@@ -93,12 +93,26 @@ mean.
     heading in all 31 selected libvterm files, including the early parser,
     encoding, Unicode, movement, and vttest-derived families.
 
-- [ ] **3. Integrate PTY process lifecycle**
-  - [ ] [PTY and process lifecycle](07-pty-process-lifecycle.md) proves launch,
+- [x] **3. Integrate PTY process lifecycle**
+  - [x] [PTY and process lifecycle](07-pty-process-lifecycle.md) proves launch,
     ordered IO, environment, resize, EOF, exit, cancellation, and teardown with
     controlled child processes.
-  - [ ] A headless pane can run a shell session without leaking resources or
+    Milestone 3 lifecycle judgment: `launchRecipeAndDuplexIO`,
+    `realSpawnCwdFallback`, `orderedResize`, `largeFragmentedOutput`,
+    `eofBeforeExit`, `exitBeforeEOFConverges`,
+    `teardownLadderCoversSessionAndPreservesSibling`,
+    `applicationTerminationClosesMultipleLivePanes`, and
+    `initialInputSeamPreservesBytesAndRecoveryEnvironment` prove the controlled
+    launch-through-teardown contract; the lifecycle trace and interleaving
+    suites pin the same decisions independently of the system adapter.
+  - [x] A headless pane can run a shell session without leaking resources or
     depending on rendering.
+    Milestone 3 headless judgment: `recordingRoundTrip` proves PTY output and
+    resize compose directly into `Terminal`, while
+    `rapidCloseStressLeavesNoResources` proves create/close and resize/close
+    races release descriptors, dispatch sources, child/session ownership, and
+    host lifetimes. The complete default `just test` gate passes headlessly;
+    `test-pty-external` adds opt-in ssh and tmux teardown evidence.
 
 - [ ] **4. Prove the interactive viability slice**
   - [ ] One Swift-engine pane launches zsh, renders a recognizable prompt, accepts

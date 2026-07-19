@@ -54,6 +54,13 @@ architecture.
   owner per pane interprets them outside DanTerm's top-level model.
 - Effectful boundaries separate deterministic policy from Apple-framework and
   PTY mechanisms wherever meaningful policy exists.
+- Each pane's PTY, process lifecycle, and terminal composition have one Swift
+  actor owner bound to a serial dispatch-queue executor; read-only consumers
+  receive `Sendable` terminal value snapshots.
+- PTY children launch through `posix_spawn` plus a tiny single-threaded
+  bootstrap that establishes the child session, controlling terminal,
+  foreground process group, standard streams, cwd, and final `execve` without
+  forking the multithreaded app process.
 - Correctness comes before rendering performance.
 - `TERM=xterm-256color` is the initial advertised identity; a DanTerm-owned
   capability manifest is the normative contract across supported terminfo

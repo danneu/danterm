@@ -6,8 +6,6 @@ silently.
 
 ## Architecture and concurrency
 
-- Which concurrency primitive realizes the required single ordered pane owner,
-  and how do read-only render snapshots cross safely into AppKit?
 - Which boundaries deserve separate packages versus internal targets?
 
 ## Protocol support matrix
@@ -27,8 +25,6 @@ silently.
 
 ## Runtime integration
 
-- Which macOS APIs best satisfy ordered PTY IO, cancellation, and lifetime
-  requirements?
 - What measurable latency and throughput thresholds define "interactive" for
   the correctness-first renderer?
 

@@ -56,6 +56,12 @@ test-ui:
 test-terminal-characterization:
     ./scripts/terminal-characterization.sh
 
+# Run opt-in PTY teardown proofs (requires tmux and passwordless localhost ssh).
+test-pty-external:
+    @command -v tmux >/dev/null || { echo "test-pty-external requires tmux on PATH"; exit 1; }
+    @/usr/bin/ssh -o BatchMode=yes -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no localhost true >/dev/null || { echo "test-pty-external requires Remote Login and passwordless localhost ssh"; exit 1; }
+    DANTERM_PTY_EXTERNAL=1 DANTERM_TMUX_PATH="$(command -v tmux)" swift test --package-path lib/TerminalPTY --filter TerminalPTYExternalTests
+
 # Run CLI smoke test (requires GUI access, jq, and DANTERM_CLI_TEST_ALLOW_APP_CONTROL=1)
 test-cli:
     ./scripts/tests/danterm-cli_test.sh

@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/wait.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -179,6 +180,98 @@ static int run_recording_probe(void) {
     return 0;
 }
 
+static void ignore_teardown_signals(void) {
+    signal(SIGHUP, SIG_IGN);
+    signal(SIGTERM, SIG_IGN);
+}
+
+static pid_t spawn_job(int separate_group, int stop, int resistant) {
+    pid_t child = fork();
+    if (child != 0) {
+        if (child > 0 && separate_group) {
+            setpgid(child, child);
+        }
+        return child;
+    }
+    if (separate_group) {
+        setpgid(0, 0);
+    }
+    if (resistant) {
+        ignore_teardown_signals();
+    }
+    if (stop) {
+        raise(SIGSTOP);
+    }
+    for (;;) {
+        pause();
+    }
+}
+
+static int run_teardown_probe(void) {
+    ignore_teardown_signals();
+    pid_t foreground = spawn_job(0, 0, 0);
+    pid_t background = spawn_job(1, 0, 0);
+    pid_t stopped = spawn_job(1, 1, 0);
+    pid_t resistant = spawn_job(1, 0, 1);
+    if (foreground < 0 || background < 0 || stopped < 0 || resistant < 0) {
+        return 80;
+    }
+    int status = 0;
+    if (waitpid(stopped, &status, WUNTRACED) != stopped || !WIFSTOPPED(status)) {
+        return 81;
+    }
+    printf("__LEADER__=%d\n", getpid());
+    printf("__FOREGROUND__=%d\n", foreground);
+    printf("__BACKGROUND__=%d\n", background);
+    printf("__STOPPED__=%d\n", stopped);
+    printf("__RESISTANT__=%d\n", resistant);
+    printf("__READY__\n");
+    fflush(stdout);
+    for (;;) {
+        pause();
+    }
+}
+
+static int run_hold_probe(void) {
+    printf("__PID__=%d\n", getpid());
+    printf("__READY__\n");
+    fflush(stdout);
+    for (;;) {
+        pause();
+    }
+}
+
+static int run_stalled_probe(void) {
+    ignore_teardown_signals();
+    printf("__READY__\n");
+    fflush(stdout);
+    for (;;) {
+        pause();
+    }
+}
+
+static int run_chatty_probe(void) {
+    ignore_teardown_signals();
+    signal(SIGPIPE, SIG_IGN);
+    printf("__READY__\n");
+    fflush(stdout);
+    uint8_t bytes[4096];
+    memset(bytes, 'c', sizeof(bytes));
+    while (write_all(STDOUT_FILENO, bytes, sizeof(bytes)) == 0) {
+    }
+    for (;;) {
+        pause();
+    }
+}
+
+static int run_initial_input_probe(const char *name) {
+    const char *restore_file = getenv("DANTERM_RESTORE_SCROLLBACK_FILE");
+    printf("__INITIAL_EXECUTED__=%s\n", name);
+    printf("__RESTORE_FILE__=%s\n", restore_file == NULL ? "" : restore_file);
+    fflush(stdout);
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 3) {
         return 64;
@@ -200,6 +293,21 @@ int main(int argc, char *argv[]) {
     }
     if (strcmp(argv[1], "recording") == 0) {
         return run_recording_probe();
+    }
+    if (strcmp(argv[1], "teardown") == 0) {
+        return run_teardown_probe();
+    }
+    if (strcmp(argv[1], "hold") == 0) {
+        return run_hold_probe();
+    }
+    if (strcmp(argv[1], "stalled") == 0) {
+        return run_stalled_probe();
+    }
+    if (strcmp(argv[1], "chatty") == 0) {
+        return run_chatty_probe();
+    }
+    if (strcmp(argv[1], "initial") == 0) {
+        return run_initial_input_probe(argv[2]);
     }
     return 65;
 }
