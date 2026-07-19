@@ -1,0 +1,253 @@
+// Neutral terminal recording decode, validation, and replay shared by corpus
+// tests and native PTY recordings without moving Foundation into TerminalCore.
+import Foundation
+import TerminalCore
+
+/// Errors reject malformed or unrecognized recordings before they can become evidence.
+public enum NeutralTerminalRecordingError: Error, Equatable, Sendable {
+    case invalidDimensions
+    case invalidHex(String)
+    case invalidProvenance(String)
+    case unsupportedEvent(String)
+}
+
+/// Source-aware evidence metadata lets imported fixtures and DanTerm captures share one schema.
+public struct NeutralTerminalProvenance: Codable, Equatable, Sendable {
+    /// Stable source discriminator used to apply the right evidence requirements.
+    public let source: String
+    /// Upstream source URL for imported evidence.
+    public let url: String?
+    /// Exact upstream revision for imported evidence.
+    public let pinnedCommit: String?
+    /// Upstream case name for imported evidence.
+    public let upstreamCase: String?
+    /// License identifier for imported evidence.
+    public let license: String?
+    /// Bundled license notice for imported evidence.
+    public let licenseNotice: String?
+    /// Deliberate semantic differences carried by imported evidence.
+    public let recordedDeviations: [String]
+    /// Capture owner for DanTerm-authored evidence.
+    public let author: String?
+    /// Behavioral test that produced a DanTerm recording.
+    public let test: String?
+
+    /// Creates DanTerm-owned provenance without pretending the capture has an upstream source.
+    public static func danTerm(test: String) -> Self {
+        Self(
+            source: "danterm",
+            url: nil,
+            pinnedCommit: nil,
+            upstreamCase: nil,
+            license: nil,
+            licenseNotice: nil,
+            recordedDeviations: [],
+            author: "DanTerm",
+            test: test
+        )
+    }
+
+    /// Creates a source record while preserving compatibility with existing neutral fixtures.
+    public init(
+        source: String,
+        url: String? = nil,
+        pinnedCommit: String? = nil,
+        upstreamCase: String? = nil,
+        license: String? = nil,
+        licenseNotice: String? = nil,
+        recordedDeviations: [String] = [],
+        author: String? = nil,
+        test: String? = nil
+    ) {
+        self.source = source
+        self.url = url
+        self.pinnedCommit = pinnedCommit
+        self.upstreamCase = upstreamCase
+        self.license = license
+        self.licenseNotice = licenseNotice
+        self.recordedDeviations = recordedDeviations
+        self.author = author
+        self.test = test
+    }
+
+    /// Rejects incomplete source claims while allowing each evidence source its own metadata.
+    public func validate() throws {
+        switch source {
+        case "libvterm":
+            guard url?.hasPrefix("https://github.com/neovim/libvterm/") == true,
+                  pinnedCommit?.isEmpty == false,
+                  upstreamCase?.isEmpty == false,
+                  license == "MIT",
+                  licenseNotice?.isEmpty == false
+            else {
+                throw NeutralTerminalRecordingError.invalidProvenance(source)
+            }
+        case "danterm":
+            guard author == "DanTerm", test?.isEmpty == false else {
+                throw NeutralTerminalRecordingError.invalidProvenance(source)
+            }
+        default:
+            throw NeutralTerminalRecordingError.invalidProvenance(source)
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case source, url, pinnedCommit, upstreamCase, license, licenseNotice
+        case recordedDeviations, author, test
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        source = try values.decode(String.self, forKey: .source)
+        url = try values.decodeIfPresent(String.self, forKey: .url)
+        pinnedCommit = try values.decodeIfPresent(String.self, forKey: .pinnedCommit)
+        upstreamCase = try values.decodeIfPresent(String.self, forKey: .upstreamCase)
+        license = try values.decodeIfPresent(String.self, forKey: .license)
+        licenseNotice = try values.decodeIfPresent(String.self, forKey: .licenseNotice)
+        recordedDeviations = try values.decodeIfPresent(
+            [String].self,
+            forKey: .recordedDeviations
+        ) ?? []
+        author = try values.decodeIfPresent(String.self, forKey: .author)
+        test = try values.decodeIfPresent(String.self, forKey: .test)
+    }
+}
+
+/// Initial character geometry needed to replay a recording without ambient pane state.
+public struct NeutralTerminalDimensions: Codable, Equatable, Sendable {
+    /// Character columns in the recorded geometry.
+    public let columns: Int
+    /// Character rows in the recorded geometry.
+    public let rows: Int
+
+    /// Keeps the recording schema independent from either host's dimension type.
+    public init(columns: Int, rows: Int) {
+        self.columns = columns
+        self.rows = rows
+    }
+}
+
+/// One owner-ordered terminal transition; checkpoints retain corpus expectation positions.
+public enum NeutralTerminalRecordingEvent: Equatable, Sendable {
+    case feed([UInt8])
+    case resize(columns: Int, rows: Int)
+    case checkpoint
+}
+
+extension NeutralTerminalRecordingEvent: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case type, text, hex, columns, rows
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try values.decode(String.self, forKey: .type)
+        switch type {
+        case "feed":
+            let text = try values.decodeIfPresent(String.self, forKey: .text)
+            let hex = try values.decodeIfPresent(String.self, forKey: .hex)
+            guard text == nil || hex == nil else {
+                throw NeutralTerminalRecordingError.invalidHex(hex ?? "")
+            }
+            if let text {
+                self = .feed(Array(text.utf8))
+            } else if let hex {
+                self = .feed(try Self.decodeHex(hex))
+            } else {
+                throw NeutralTerminalRecordingError.invalidHex("")
+            }
+        case "resize":
+            self = .resize(
+                columns: try values.decode(Int.self, forKey: .columns),
+                rows: try values.decode(Int.self, forKey: .rows)
+            )
+        case "expect":
+            self = .checkpoint
+        default:
+            throw NeutralTerminalRecordingError.unsupportedEvent(type)
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .feed(let bytes):
+            try values.encode("feed", forKey: .type)
+            try values.encode(bytes.map { String(format: "%02x", $0) }.joined(), forKey: .hex)
+        case .resize(let columns, let rows):
+            try values.encode("resize", forKey: .type)
+            try values.encode(columns, forKey: .columns)
+            try values.encode(rows, forKey: .rows)
+        case .checkpoint:
+            try values.encode("expect", forKey: .type)
+        }
+    }
+
+    private static func decodeHex(_ hex: String) throws -> [UInt8] {
+        let compact = hex.filter { $0.isWhitespace == false }
+        guard compact.count.isMultiple(of: 2) else {
+            throw NeutralTerminalRecordingError.invalidHex(hex)
+        }
+        return try stride(from: 0, to: compact.count, by: 2).map { offset in
+            let start = compact.index(compact.startIndex, offsetBy: offset)
+            let end = compact.index(start, offsetBy: 2)
+            guard let byte = UInt8(compact[start..<end], radix: 16) else {
+                throw NeutralTerminalRecordingError.invalidHex(hex)
+            }
+            return byte
+        }
+    }
+}
+
+/// Complete neutral evidence that can be serialized by a PTY test and replayed by core tests.
+public struct NeutralTerminalRecording: Codable, Equatable, Sendable {
+    /// Schema revision, currently fixed at one.
+    public let version: Int
+    /// Source-specific evidence metadata validated before replay.
+    public let provenance: NeutralTerminalProvenance
+    /// Geometry installed before the first recorded event.
+    public let initial: NeutralTerminalDimensions
+    /// Owner-ordered feeds, resizes, and optional corpus checkpoints.
+    public let events: [NeutralTerminalRecordingEvent]
+
+    /// Creates a complete recording that can cross package test boundaries.
+    public init(
+        version: Int = 1,
+        provenance: NeutralTerminalProvenance,
+        initial: NeutralTerminalDimensions,
+        events: [NeutralTerminalRecordingEvent]
+    ) {
+        self.version = version
+        self.provenance = provenance
+        self.initial = initial
+        self.events = events
+    }
+
+    /// Replays through TerminalCore and exposes each ordered checkpoint to corpus assertions.
+    public func replay(
+        inspect: (_ eventIndex: Int, _ terminal: Terminal) throws -> Void = { _, _ in }
+    ) throws -> Terminal {
+        guard version == 1,
+              let initialTerminal = Terminal(columns: initial.columns, rows: initial.rows)
+        else {
+            throw NeutralTerminalRecordingError.invalidDimensions
+        }
+        try provenance.validate()
+        var terminal = initialTerminal
+        for (index, event) in events.enumerated() {
+            switch event {
+            case .feed(let bytes):
+                terminal.feed(bytes)
+            case .resize(let columns, let rows):
+                guard columns >= 2, rows >= 1 else {
+                    throw NeutralTerminalRecordingError.invalidDimensions
+                }
+                terminal.resize(columns: columns, rows: rows)
+            case .checkpoint:
+                break
+            }
+            try inspect(index, terminal)
+        }
+        return terminal
+    }
+}

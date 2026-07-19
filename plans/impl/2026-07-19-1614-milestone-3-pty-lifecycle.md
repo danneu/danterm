@@ -107,20 +107,24 @@ swift test --package-path lib/TerminalPTY
 plus one opt-in recipe (working name `test-pty-external`) for the ssh and
 tmux teardown proofs, gated the way `test-terminal-characterization` is.
 
-### Resolved open question: spawn mechanism is posix_spawn
+### Resolved open question: spawn mechanism is posix_spawn plus bootstrap
 
 Recorded as decided (removes the runtime-integration open question in
-`plan-terminal-engine/15-open-questions.md`). The child is launched with
-`posix_spawn`, configured so it starts in a new session with the slave PTY
-as its controlling terminal, its process group in the foreground, its
-standard streams bound to the slave, no other inherited descriptors, reset
-signal dispositions and mask, login-form `argv[0]`, and an explicitly
-supplied environment (I6, pinned by PO3/PO4). Cwd fallback (requested
-directory if accessible, else home, else `/`) is parent-side deterministic
-policy resolved before spawn; a spawn failure attributable to the working
-directory returns to the reducer, which retries the next step of the chain.
-Rationale: no fork reasoning in a multithreaded Cocoa process, descriptor
-hygiene by construction, synchronous errno on spawn failure.
+`plan-terminal-engine/15-open-questions.md`). The app launches a tiny
+DanTerm-owned bootstrap executable with `posix_spawn`; that bootstrap performs
+the child-only `setsid`, `TIOCSCTTY`, foreground-process-group, standard-stream,
+cwd, and `execve` steps needed to start the shell. A close-on-exec status pipe
+reports bootstrap setup and exec failures synchronously to the spawn worker.
+The spawn attributes and bootstrap together reset signal dispositions and the
+mask, bind standard streams to the slave, inherit no unrelated descriptors,
+use login-form `argv[0]`, and supply the explicit environment (I6, pinned by
+PO3/PO4). Cwd fallback (requested directory if accessible, else home, else `/`)
+is parent-side deterministic policy resolved before spawn; a bootstrap failure
+attributable to the working directory returns to the reducer, which retries the
+next step of the chain. Rationale: macOS does not acquire a controlling terminal
+when the slave is merely opened, and the public `posix_spawn` file-action API has
+no `TIOCSCTTY` action. The bootstrap preserves the no-fork-in-the-app constraint,
+descriptor hygiene, and synchronous classified launch failures.
 
 ### Resolved open question: pane owner is an actor on a DispatchSerialQueue executor
 
@@ -154,7 +158,7 @@ categories (exact cases are discretion):
 
 | Commands out of the reducer | Interpreted by the host as |
 |---|---|
-| spawn(resolved spec: program, login argv, cwd, env, initial winsize) | openpty + posix_spawn |
+| spawn(resolved spec: program, login argv, cwd, env, initial winsize) | openpty + posix_spawn bootstrap |
 | write input(bytes) | write to master |
 | resize(cols, rows) | one ordered transition applying the new geometry to both the composed `Terminal` and the kernel winsize, notifying the child |
 | deliver output(bytes) | `Terminal.feed` + recording hook |
@@ -418,7 +422,9 @@ fixed" in `plan-terminal-engine/README.md`. Nothing else.
 ## Rejected ideas
 
 - RI1: fork/exec via a C shim -- async-signal-safety burden and manual fd
-  hygiene for no capability posix_spawn lacks here.
+  hygiene in the multithreaded app. The spawned bootstrap is different: it is
+  already a single-threaded child process when it performs `TIOCSCTTY` and
+  `execve`, which public `posix_spawn` actions cannot express on macOS.
 - RI2: `forkpty` -- same fork burden with less attribute control.
 - RI3: `@unchecked Sendable` class plus bare queue -- ownership unchecked by
   the compiler.
@@ -472,9 +478,18 @@ commit is green and failing-test-first.
 
 - [x] 1. Deterministic lifecycle reducer and pure launch-spec policy, with
   golden traces and the interleaving harness (PO1, PO2, PO4 pure half, PO12).
-- [ ] 2. Native macOS PTY owner with controlled children: launch, ordered
+- [x] 2. Native macOS PTY owner with controlled children: launch, ordered
   duplex IO, resize, EOF, self-exit convergence, headless composition, and
   the recording round-trip (PO3, PO4, PO5, PO6, PO11).
 - [ ] 3. Teardown ladder, race and leak proofs, liveness under a stalled and
   a chatty child, the initial-input seam, the opt-in external recipe, and
   docs closure (PO7, PO8, PO9, PO10, PO13, PO14).
+
+## Implementation notes
+
+- Slice 2 pivoted from a shell-only `POSIX_SPAWN_SETSID` recipe to a
+  `posix_spawn`ed bootstrap after the controlled-child tests showed that the
+  slave was not a controlling terminal and resize produced no `SIGWINCH`.
+  macOS `tty(4)` requires child-side `TIOCSCTTY`, while the public spawn file
+  actions expose no ioctl operation; the bootstrap and close-on-exec status
+  pipe preserve the plan's no-fork-in-the-app and classified-failure goals.

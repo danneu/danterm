@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.macOS(.v26)],
     products: [
         .library(name: "TerminalCore", targets: ["TerminalCore"]),
+        .library(name: "TerminalCoreRecording", targets: ["TerminalCoreRecording"]),
     ],
     targets: [
         .target(
@@ -13,9 +14,15 @@ let package = Package(
             path: "Sources/TerminalCore",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
+        .target(
+            name: "TerminalCoreRecording",
+            dependencies: ["TerminalCore"],
+            path: "Sources/TerminalCoreRecording",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         .testTarget(
             name: "TerminalCoreTests",
-            dependencies: ["TerminalCore"],
+            dependencies: ["TerminalCore", "TerminalCoreRecording"],
             path: "Tests/TerminalCoreTests",
             resources: [.copy("Fixtures")],
             swiftSettings: [.swiftLanguageMode(.v6)]

@@ -1,6 +1,7 @@
 // Runs provenance-bearing neutral terminal fixtures through every feed chunking mode.
 import Foundation
 import Testing
+import TerminalCoreRecording
 
 @testable import TerminalCore
 
@@ -12,18 +13,23 @@ struct TerminalFixtureTests {
         #expect(urls.isEmpty == false)
 
         for url in urls {
+            let data = try Data(contentsOf: url)
             let fixture = try JSONDecoder().decode(
                 ReplayFixture.self,
-                from: Data(contentsOf: url)
+                from: data
             )
-            try validateProvenance(fixture.provenance)
+            let recording = try JSONDecoder().decode(
+                NeutralTerminalRecording.self,
+                from: data
+            )
+            try validateProvenance(recording.provenance)
 
-            let authored = try run(fixture, strategy: .authored)
-            let bytewise = try run(fixture, strategy: .bytewise)
+            let authored = try run(recording, expectations: fixture.events, strategy: .authored)
+            let bytewise = try run(recording, expectations: fixture.events, strategy: .bytewise)
             #expect(bytewise == authored)
 
-            for strategy in splitStrategies(for: fixture) {
-                #expect(try run(fixture, strategy: strategy) == authored)
+            for strategy in splitStrategies(for: recording) {
+                #expect(try run(recording, expectations: fixture.events, strategy: strategy) == authored)
             }
         }
     }
@@ -81,19 +87,20 @@ struct TerminalFixtureTests {
         .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
-    private func validateProvenance(_ provenance: FixtureProvenance) throws {
+    private func validateProvenance(_ provenance: NeutralTerminalProvenance) throws {
+        try provenance.validate()
         #expect(provenance.source == "libvterm")
-        #expect(provenance.url.hasPrefix("https://github.com/neovim/libvterm/"))
+        #expect(provenance.url?.hasPrefix("https://github.com/neovim/libvterm/") == true)
         #expect(provenance.pinnedCommit == "934bc2fbf21800ac3458a499df8820ca5fb45fd3")
-        #expect(provenance.upstreamCase.isEmpty == false)
+        #expect(provenance.upstreamCase?.isEmpty == false)
         #expect(provenance.license == "MIT")
         #expect(provenance.licenseNotice == "LICENSE.libvterm.txt")
     }
 
-    private func splitStrategies(for fixture: ReplayFixture) -> [ChunkStrategy] {
+    private func splitStrategies(for fixture: NeutralTerminalRecording) -> [ChunkStrategy] {
         let exhaustiveThreshold = 64
         return fixture.events.enumerated().flatMap { eventIndex, event -> [ChunkStrategy] in
-            guard event.type == "feed", let bytes = try? event.feedBytes() else { return [] }
+            guard case .feed(let bytes) = event else { return [] }
             let offsets: [Int]
             if bytes.count <= exhaustiveThreshold {
                 offsets = Array(0...bytes.count)
@@ -104,17 +111,26 @@ struct TerminalFixtureTests {
         }
     }
 
-    private func run(_ fixture: ReplayFixture, strategy: ChunkStrategy) throws -> Terminal {
-        #expect(fixture.version == 1)
+    private func run(
+        _ fixture: NeutralTerminalRecording,
+        expectations: [FixtureEvent],
+        strategy: ChunkStrategy
+    ) throws -> Terminal {
+        if case .authored = strategy {
+            return try fixture.replay { eventIndex, terminal in
+                if case .checkpoint = fixture.events[eventIndex] {
+                    try assert(expectations[eventIndex].expectation, against: terminal)
+                }
+            }
+        }
         var terminal = try #require(Terminal(
             columns: fixture.initial.columns,
             rows: fixture.initial.rows
         ))
 
         for (eventIndex, event) in fixture.events.enumerated() {
-            switch event.type {
-            case "feed":
-                let bytes = try event.feedBytes()
+            switch event {
+            case .feed(let bytes):
                 switch strategy {
                 case .authored:
                     terminal.feed(bytes)
@@ -128,15 +144,10 @@ struct TerminalFixtureTests {
                 case .split:
                     terminal.feed(bytes)
                 }
-            case "resize":
-                terminal.resize(
-                    columns: try #require(event.columns),
-                    rows: try #require(event.rows)
-                )
-            case "expect":
-                try assert(event.expectation, against: terminal)
-            default:
-                throw FixtureError.unsupportedEvent(event.type)
+            case .resize(let columns, let rows):
+                terminal.resize(columns: columns, rows: rows)
+            case .checkpoint:
+                try assert(expectations[eventIndex].expectation, against: terminal)
             }
         }
         return terminal
@@ -490,66 +501,18 @@ private enum ChunkStrategy {
 }
 
 private enum FixtureError: Error {
-    case invalidHex(String)
     case invalidStyleToken(String)
-    case unsupportedEvent(String)
 }
 
 private struct ReplayFixture: Decodable {
-    let version: Int
-    let provenance: FixtureProvenance
-    let initial: FixtureDimensions
     let events: [FixtureEvent]
 }
 
-private struct FixtureProvenance: Decodable {
-    let source: String
-    let url: String
-    let pinnedCommit: String
-    let upstreamCase: String
-    let license: String
-    let licenseNotice: String
-    let recordedDeviations: [String]
-}
-
-private struct FixtureDimensions: Decodable {
-    let columns: Int
-    let rows: Int
-}
-
 private struct FixtureEvent: Decodable {
-    let type: String
-    let text: String?
-    let hex: String?
-    let columns: Int?
-    let rows: Int?
     let expectation: FixtureExpectation?
 
     private enum CodingKeys: String, CodingKey {
-        case type
-        case text
-        case hex
-        case columns
-        case rows
         case expectation = "expect"
-    }
-
-    func feedBytes() throws -> [UInt8] {
-        if let text {
-            guard hex == nil else { throw FixtureError.invalidHex(hex ?? "") }
-            return Array(text.utf8)
-        }
-        guard let hex else { throw FixtureError.invalidHex("") }
-        let compact = hex.filter { $0.isWhitespace == false }
-        guard compact.count.isMultiple(of: 2) else { throw FixtureError.invalidHex(hex) }
-        return try stride(from: 0, to: compact.count, by: 2).map { offset in
-            let start = compact.index(compact.startIndex, offsetBy: offset)
-            let end = compact.index(start, offsetBy: 2)
-            guard let byte = UInt8(compact[start..<end], radix: 16) else {
-                throw FixtureError.invalidHex(hex)
-            }
-            return byte
-        }
     }
 }
 
