@@ -2,19 +2,23 @@
 // and the stable DanTerm TerminalSession boundary live here and nowhere else.
 import Cocoa
 import DanTermProtocol
+#if !DANTERM_UI_TEST
 import PaneLifecycle
 import TerminalPaneSession
 import TerminalRenderExecution
 import TerminalRenderPlanning
+#endif
 
 /// Adapts one headless Swift terminal controller into DanTerm's AppKit pane contract.
 final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession {
     private let controller: TerminalPaneSessionController
     private let callbackGate = TerminalSessionCallbackGate()
+    private var wheelAccumulator = TerminalWheelAccumulator()
     private var markedText = NSMutableAttributedString()
     private var keyTextAccumulator: [String]?
     private var currentMetrics: TerminalRenderMetrics?
     private var publishedFrame: (plan: RenderFramePlan, metrics: TerminalRenderMetrics)?
+    private var lastEmittedState: TerminalSessionState?
     private var isTornDown = false
 
     weak var paneWrapper: PaneWrapperView?
@@ -29,10 +33,16 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         set { callbackGate.stateObserver = newValue }
     }
     var state: TerminalSessionState {
-        TerminalSessionState(
-            scrollbarEnabled: false,
+        let viewport = controller.viewportState
+        let projection = viewport.projection
+        return TerminalSessionState(
+            scrollbarEnabled: viewport.isScrollbarEnabled,
             cellHeight: currentMetrics?.cellSize.height ?? 0,
-            scrollPosition: nil
+            scrollPosition: TerminalScrollPosition(
+                total: UInt64(clamping: projection.totalRows),
+                offset: UInt64(clamping: projection.topRow),
+                length: UInt64(clamping: projection.windowRows)
+            )
         )
     }
     var hasSelection: Bool { false }
@@ -52,6 +62,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
 
         controller.onPlan = { [weak self] plan in
             self?.publish(plan)
+        }
+        controller.onViewportStateChange = { [weak self] _ in
+            self?.emitStateIfNeeded()
         }
         controller.onSessionEnded = { [weak self] result in
             onSessionEnded?(result)
@@ -97,6 +110,16 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         let result = super.becomeFirstResponder()
         if result { callbackGate.emit(.becameFirstResponder) }
         return result
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard isTornDown == false else { return }
+        let rows = wheelAccumulator.consume(
+            delta: Double(event.scrollingDeltaY),
+            isPrecise: event.hasPreciseScrollingDeltas,
+            cellHeight: Double(state.cellHeight)
+        )
+        controller.sendWheel(rows: rows)
     }
 
     override func keyDown(with event: NSEvent) {
@@ -228,7 +251,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         return controller.readPrimaryHistoryText()
     }
 
-    func scroll(toRow row: Int) {}
+    func scroll(toRow row: Int) {
+        controller.scroll(toTopRow: row)
+    }
     func copySelection() {}
     func pasteClipboard() {}
 
@@ -284,9 +309,17 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
             if let plan = controller.currentPlan {
                 publishedFrame = (plan, metrics)
             }
-            callbackGate.emit(state)
+            emitStateIfNeeded()
             needsDisplay = true
         }
+    }
+
+    private func emitStateIfNeeded() {
+        guard isTornDown == false else { return }
+        let state = state
+        guard state != lastEmittedState else { return }
+        lastEmittedState = state
+        callbackGate.emit(state)
     }
 
     private func publish(_ plan: RenderFramePlan) {

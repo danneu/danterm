@@ -71,6 +71,7 @@ class TerminalView: NSView, TerminalSession {
     func endSearch() {}
     func readViewportText() -> String? { nil }
     func readFullHistoryText() -> String? { nil }
+    func readPrimaryHistoryText() -> String? { nil }
     func scroll(toRow row: Int) {}
     func requestClose() {}
     func setFocusBorder(_ focused: Bool, hasBell: Bool) {}

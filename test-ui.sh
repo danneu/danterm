@@ -40,6 +40,9 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/MenuCommandPolicy.swift" \
         "$SCRIPT_DIR/app/ClipboardWriteSurface.swift" \
         "$SCRIPT_DIR/app/TerminalBackend.swift" \
+        "$SCRIPT_DIR/lib/TerminalPTY/Sources/TerminalPaneSession/TerminalWheelAccumulator.swift" \
+        "$SCRIPT_DIR/tests-ui/SwiftTerminalSessionViewTestShim.swift" \
+        "$SCRIPT_DIR/app/SwiftTerminalSessionView.swift" \
         "$SCRIPT_DIR/app/PaneSplitView.swift" \
         "$SCRIPT_DIR/app/TodoInputView.swift" \
         "$SCRIPT_DIR/app/TodoRowView.swift" \
@@ -78,6 +81,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/tests-ui/RemoteThemePickerSheetTests.swift" \
         "$SCRIPT_DIR/tests-ui/PaneSplitViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/TerminalBackendBoundaryTests.swift" \
+        "$SCRIPT_DIR/tests-ui/SwiftTerminalSessionViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/AlertsPopoverViewTests.swift" \
         -framework Cocoa
 )

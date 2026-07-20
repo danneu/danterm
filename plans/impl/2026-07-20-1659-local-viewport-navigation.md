@@ -454,7 +454,7 @@ output and watch the view hold, drag the scrollbar knob, wheel-scroll `less`
 
 - [x] 1. Add core viewport navigation, anchoring, projections, and rendering
 - [x] 2. Route viewport intent through PTY ownership and capture/replay
-- [ ] 3. Wire Swift-pane wheel and scrollbar interaction
+- [x] 3. Wire Swift-pane wheel and scrollbar interaction
 
 ## Implementation notes
 
@@ -462,3 +462,5 @@ output and watch the view hold, drag the scrollbar knob, wheel-scroll `less`
   divide by cell height, and both modes share a fractional-row remainder.
 - Recordings encode one additive `viewport` event with an `action` and optional
   row value; capture appends it only when the owner command changes `Terminal`.
+- PO14 compiles the real Swift pane against UI-only terminal controller and
+  renderer shims, then synthesizes a line-unit wheel event without launching a PTY.

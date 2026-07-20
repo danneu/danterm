@@ -196,6 +196,10 @@ mean.
     projection boundaries, row-intersection invalidation, and eviction clamps.
     See the
     [implementation plan](../plans/impl/2026-07-20-1440-selection-search-logical-projection.md).
+  - [x] **Slice 5: Local viewport navigation and anchoring.** Adds stable
+    reflow-attached browsing, logical viewport reads, owner-routed wheel policy,
+    and native Swift-pane wheel and scrollbar interaction. See the
+    [implementation plan](../plans/impl/2026-07-20-1659-local-viewport-navigation.md).
   - [ ] [Terminal core](04-terminal-core.md) completes the accepted baseline control,
     screen, mode, style, query, and recovery behavior.
   - [ ] [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md) completes
