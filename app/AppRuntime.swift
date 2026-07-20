@@ -23,8 +23,8 @@ func scrollbackReplayDirectoryURL(fileManager: FileManager = .default) -> URL {
 }
 
 #if DANTERM_TERMINAL_CHARACTERIZATION
-/// Records boundary events emitted by the real Ghostty adapter so the opt-in
-/// characterization harness can assert callback conformance after rewiring.
+/// Records terminal boundary events so opt-in characterization harnesses can
+/// assert callback conformance without exposing backend details.
 @MainActor
 func recordTerminalCharacterizationEvent(_ event: TerminalSessionEvent) {
     let description: String
@@ -67,6 +67,22 @@ func recordTerminalCharacterizationEvent(_ event: TerminalBackendEvent) {
         description = "backend.quitRequested"
     }
     appendTerminalCharacterizationEvent(description)
+}
+
+/// Marks a complete frame reaching the visible Swift terminal view so harnesses
+/// can prove hidden and idle panes do not schedule rendering work.
+@MainActor
+func recordTerminalCharacterizationPlanDelivery() {
+    appendTerminalCharacterizationEvent("session.planDelivered")
+}
+
+/// Marks an effective pane visibility transition before it reaches the backend,
+/// giving harnesses an ordering fence for hidden-output and reveal assertions.
+@MainActor
+func recordTerminalCharacterizationVisibilityChange(paneId: PaneId, visible: Bool) {
+    appendTerminalCharacterizationEvent(
+        "session.visibilityChanged:\(paneId.rawValue.uuidString):\(visible)"
+    )
 }
 
 @MainActor
@@ -408,6 +424,9 @@ class AppRuntime {
         for (paneId, session) in surfaces {
             let visible = desired[paneId] ?? true
             if surfaceVisibility[paneId] != visible {
+                #if DANTERM_TERMINAL_CHARACTERIZATION
+                recordTerminalCharacterizationVisibilityChange(paneId: paneId, visible: visible)
+                #endif
                 session.setVisible(visible)
                 surfaceVisibility[paneId] = visible
             }

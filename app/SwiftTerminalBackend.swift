@@ -3,6 +3,9 @@
 import Cocoa
 import Darwin
 import PaneLifecycle
+#if DANTERM_TERMINAL_CHARACTERIZATION
+import TerminalCoreRecording
+#endif
 import TerminalPaneSession
 
 /// Constructs the Swift engine adapter selected by DANTERM_TERMINAL_BACKEND=swift.
@@ -17,6 +20,9 @@ final class SwiftTerminalBackend: TerminalBackend {
     private static let applicationExitTimeout: DispatchTimeInterval = .seconds(2)
 
     private let bootstrapExecutable: String
+    #if DANTERM_TERMINAL_CHARACTERIZATION
+    private let recordingDirectory: URL?
+    #endif
     private var activeHosts: [UUID: TerminalPaneTerminationHandle] = [:]
 
     var onEvent: ((TerminalBackendEvent) -> Void)?
@@ -32,6 +38,14 @@ final class SwiftTerminalBackend: TerminalBackend {
         bootstrapExecutable = bundle.bundleURL
             .appendingPathComponent("Contents/Helpers/PTYSessionBootstrap")
             .path
+        #if DANTERM_TERMINAL_CHARACTERIZATION
+        if let path = ProcessInfo.processInfo.environment["DANTERM_PTY_RECORDING_DIR"],
+           path.isEmpty == false {
+            recordingDirectory = URL(fileURLWithPath: path, isDirectory: true)
+        } else {
+            recordingDirectory = nil
+        }
+        #endif
     }
 
     func createSession(_ request: TerminalSessionRequest) -> (any TerminalSession)? {
@@ -46,10 +60,21 @@ final class SwiftTerminalBackend: TerminalBackend {
             request: launchRequest,
             facts: Self.launchFacts(requestedWorkingDirectory: request.workingDirectory)
         )
-        guard let controller = try? TerminalPaneSessionController(
-            configuration: configuration,
-            bootstrapExecutable: bootstrapExecutable
-        ) else {
+        let controller: TerminalPaneSessionController
+        do {
+            #if DANTERM_TERMINAL_CHARACTERIZATION
+            controller = try TerminalPaneSessionController(
+                configuration: configuration,
+                bootstrapExecutable: bootstrapExecutable,
+                captureTransitions: recordingDirectory != nil
+            )
+            #else
+            controller = try TerminalPaneSessionController(
+                configuration: configuration,
+                bootstrapExecutable: bootstrapExecutable
+            )
+            #endif
+        } catch {
             return nil
         }
 
@@ -58,7 +83,17 @@ final class SwiftTerminalBackend: TerminalBackend {
         controller.onTeardownCompleted = { [weak self] in
             self?.activeHosts.removeValue(forKey: id)
         }
+        #if DANTERM_TERMINAL_CHARACTERIZATION
+        return SwiftTerminalSessionView(
+            controller: controller,
+            onSessionEnded: { [weak self, weak controller] result in
+                guard case .exited = result, let self, let controller else { return }
+                self.writeRecording(from: controller, id: id)
+            }
+        )
+        #else
         return SwiftTerminalSessionView(controller: controller)
+        #endif
     }
 
     func setAppFocused(_ focused: Bool) {}
@@ -78,6 +113,31 @@ final class SwiftTerminalBackend: TerminalBackend {
         }
         _ = completion.wait(timeout: .now() + Self.applicationExitTimeout)
     }
+
+    #if DANTERM_TERMINAL_CHARACTERIZATION
+    /// Persists child-complete evidence before the close event can begin pane teardown.
+    private func writeRecording(from controller: TerminalPaneSessionController, id: UUID) {
+        guard let recordingDirectory,
+              let recording = controller.capturedRecording(test: "milestone-4-viability")
+        else { return }
+
+        do {
+            try FileManager.default.createDirectory(
+                at: recordingDirectory,
+                withIntermediateDirectories: true
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            var data = try encoder.encode(recording)
+            data.append(0x0A)
+            let url = recordingDirectory
+                .appendingPathComponent("pane-\(id.uuidString.lowercased()).json")
+            try data.write(to: url, options: .atomic)
+        } catch {
+            print("[characterization] Failed to write terminal recording: \(error)")
+        }
+    }
+    #endif
 
     private static func launchFacts(
         requestedWorkingDirectory: String?

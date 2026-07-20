@@ -25,7 +25,7 @@ printf '// import GhosttyKit\nimport GhosttyKitExtra\n' > "$TMP/denied/AppRuntim
 rm -rf "$TMP/allowed" "$TMP/denied"
 mkdir -p "$TMP/allowed" "$TMP/denied"
 for file in SwiftTerminalSessionView.swift SwiftTerminalBackend.swift; do
-    for module in PaneLifecycle TerminalCore TerminalPTYHost TerminalPaneSession TerminalRenderPlanning TerminalRenderExecution; do
+    for module in PaneLifecycle TerminalCore TerminalCoreRecording TerminalPTYHost TerminalPaneSession TerminalRenderPlanning TerminalRenderExecution; do
         printf 'import %s\n' "$module" > "$TMP/allowed/$file"
         "$LINT" "$TMP/allowed" >/dev/null \
             || fail "engine import $module should be allowed in $file"
@@ -35,6 +35,11 @@ done
 printf 'import Cocoa\nimport TerminalPaneSession\n' > "$TMP/denied/AppRuntime.swift"
 if "$LINT" "$TMP/denied" >/dev/null 2>&1; then
     fail "non-allowlisted engine import should fail"
+fi
+
+printf 'import Cocoa\nimport TerminalCoreRecording\n' > "$TMP/denied/AppRuntime.swift"
+if "$LINT" "$TMP/denied" >/dev/null 2>&1; then
+    fail "non-allowlisted recording import should fail"
 fi
 
 printf '// import TerminalCore\nimport TerminalCoreExtras\n' > "$TMP/denied/AppRuntime.swift"

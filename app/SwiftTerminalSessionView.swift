@@ -2,6 +2,7 @@
 // and the stable DanTerm TerminalSession boundary live here and nowhere else.
 import Cocoa
 import DanTermProtocol
+import PaneLifecycle
 import TerminalPaneSession
 import TerminalRenderExecution
 import TerminalRenderPlanning
@@ -38,7 +39,12 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
     override var acceptsFirstResponder: Bool { true }
     override var isFlipped: Bool { true }
 
-    init(controller: TerminalPaneSessionController) {
+    /// Installs the controller's sole end callback while preserving backend evidence
+    /// work ahead of the app's close request and any resulting pane teardown.
+    init(
+        controller: TerminalPaneSessionController,
+        onSessionEnded: ((PaneLifecycleResult) -> Void)? = nil
+    ) {
         self.controller = controller
         super.init(frame: .zero)
         wantsLayer = true
@@ -47,7 +53,8 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         controller.onPlan = { [weak self] plan in
             self?.publish(plan)
         }
-        controller.onSessionEnded = { [weak self] _ in
+        controller.onSessionEnded = { [weak self] result in
+            onSessionEnded?(result)
             self?.callbackGate.emit(.closeRequested)
         }
     }
@@ -279,6 +286,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
 
     private func publish(_ plan: RenderFramePlan) {
         guard isTornDown == false, let metrics = currentMetrics else { return }
+        #if DANTERM_TERMINAL_CHARACTERIZATION
+        recordTerminalCharacterizationPlanDelivery()
+        #endif
         publishedFrame = (plan, metrics)
         needsDisplay = true
     }

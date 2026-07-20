@@ -23,7 +23,7 @@ while IFS= read -r file; do
             continue
             ;;
     esac
-    if grep -nE '^[[:space:]]*(@[^[:space:]]+[[:space:]]+)?import[[:space:]]+(PaneLifecycle|TerminalCore|TerminalPTYHost|TerminalPaneSession|TerminalRenderPlanning|TerminalRenderExecution)([^[:alnum:]_]|$)' "$file"; then
+    if grep -nE '^[[:space:]]*(@[^[:space:]]+[[:space:]]+)?import[[:space:]]+(PaneLifecycle|TerminalCore|TerminalCoreRecording|TerminalPTYHost|TerminalPaneSession|TerminalRenderPlanning|TerminalRenderExecution)([^[:alnum:]_]|$)' "$file"; then
         echo "Swift terminal engine import outside adapter allowlist: $file" >&2
         failed=1
     fi

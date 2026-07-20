@@ -43,6 +43,7 @@ test:
     ./scripts/tests/core-purity-lint_test.sh
     ./scripts/terminal-backend-boundary-lint.sh
     ./scripts/tests/terminal-backend-boundary-lint_test.sh
+    ./scripts/tests/terminal-capture-api-gate_test.sh
     ./scripts/tests/load-ghostty-version_test.sh
     ./scripts/tests/build-lib-stale-guard_test.sh
     ./scripts/tests/build-lib-fetch_test.sh

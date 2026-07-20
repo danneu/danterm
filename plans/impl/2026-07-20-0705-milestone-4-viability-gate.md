@@ -259,7 +259,7 @@ the evidence doc before the roadmap boxes are checked.
 ## Commit progress
 
 - [x] 1. Add the pane-session capture seam (engine)
-- [ ] 2. Record viability sessions and scheduling traces (app, lint)
+- [x] 2. Record viability sessions and scheduling traces (app, lint)
 - [ ] 3. Add the terminal viability harness (script, justfile)
 - [ ] 4. Narrow fixes exposed by the workflow (conditional, repeatable)
 - [ ] 5. Replay the captured viability session headlessly (fixture, test)
