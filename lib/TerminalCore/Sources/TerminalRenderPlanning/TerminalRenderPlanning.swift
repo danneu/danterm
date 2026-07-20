@@ -224,7 +224,8 @@ public enum RenderDecorationKind: Equatable, Sendable {
     case strikethrough
 }
 
-/// Represents one maximal same-kind, same-color decoration span in cell coordinates.
+/// Represents one maximal same-decoration-set, same-color span without making
+/// simultaneous underline and strikethrough work overlap in the canonical plan.
 public struct RenderDecorationRun: Equatable, Sendable {
     /// Zero-based viewport row.
     public let row: Int
@@ -235,8 +236,8 @@ public struct RenderDecorationRun: Equatable, Sendable {
     /// Number of grid columns covered by the span.
     public let columnCount: Int
 
-    /// Decoration shape selected from semantic terminal attributes.
-    public let kind: RenderDecorationKind
+    /// Ordered decoration kinds selected from semantic terminal attributes.
+    public let kinds: [RenderDecorationKind]
 
     /// Concrete post-reverse and post-dim decoration color.
     public let color: RenderColor
@@ -245,13 +246,13 @@ public struct RenderDecorationRun: Equatable, Sendable {
         row: Int,
         startColumn: Int,
         columnCount: Int,
-        kind: RenderDecorationKind,
+        kinds: [RenderDecorationKind],
         color: RenderColor
     ) {
         self.row = row
         self.startColumn = startColumn
         self.columnCount = columnCount
-        self.kind = kind
+        self.kinds = kinds
         self.color = color
     }
 }

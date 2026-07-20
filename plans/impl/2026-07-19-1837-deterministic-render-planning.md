@@ -362,7 +362,7 @@ unfiltered, the new target's lint lines, and the lint self-test.
 
 - [x] 1. Enforce the render planner purity boundary
 - [x] 2. Add deterministic render values and color resolution
-- [ ] 3. Plan complete viewport frames with corpus-backed proofs
+- [x] 3. Plan complete viewport frames with corpus-backed proofs
 
 ## Implementation notes
 
@@ -371,3 +371,5 @@ unfiltered, the new target's lint lines, and the lint self-test.
 - Dim halves each post-reverse foreground RGB component using integer
   truncation, keeping the transform deterministic and independent of executor
   blending behavior.
+- Decoration runs carry a canonical ordered list of kinds, allowing underline
+  and strikethrough to coexist without overlapping spans in the run array.
