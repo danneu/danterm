@@ -35,7 +35,7 @@ struct Bitmap {
     let bytes: [UInt8]
 
     func pixel(x: Int, yFromTop: Int) -> Pixel {
-        let memoryRow = height - yFromTop - 1
+        let memoryRow = yFromTop
         let offset = (memoryRow * width + x) * 4
         return Pixel(
             red: bytes[offset],
@@ -68,6 +68,70 @@ struct Bitmap {
     }
 }
 
+final class BitmapSurface {
+    let width: Int
+    let height: Int
+    private(set) var context: CGContext?
+
+    private let data: UnsafeMutableRawPointer
+    private let byteCount: Int
+
+    init(size: RenderFrameSize, metrics: TerminalRenderMetrics) throws {
+        let pixelCount = size.pixelWidth.multipliedReportingOverflow(by: size.pixelHeight)
+        try #require(pixelCount.overflow == false)
+        let byteCount = pixelCount.partialValue.multipliedReportingOverflow(by: 4)
+        try #require(byteCount.overflow == false)
+
+        let allocatedData = UnsafeMutableRawPointer.allocate(
+            byteCount: byteCount.partialValue,
+            alignment: MemoryLayout<UInt32>.alignment
+        )
+        allocatedData.initializeMemory(
+            as: UInt8.self,
+            repeating: 0,
+            count: byteCount.partialValue
+        )
+
+        do {
+            let colorSpace = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+            let context = try #require(CGContext(
+                data: allocatedData,
+                width: size.pixelWidth,
+                height: size.pixelHeight,
+                bitsPerComponent: 8,
+                bytesPerRow: size.pixelWidth * 4,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                    | CGBitmapInfo.byteOrder32Big.rawValue
+            ))
+            context.translateBy(x: 0, y: CGFloat(size.pixelHeight))
+            context.scaleBy(x: metrics.displayScale, y: -metrics.displayScale)
+
+            width = size.pixelWidth
+            height = size.pixelHeight
+            self.byteCount = byteCount.partialValue
+            data = allocatedData
+            self.context = context
+        } catch {
+            allocatedData.deallocate()
+            throw error
+        }
+    }
+
+    deinit {
+        context = nil
+        data.deallocate()
+    }
+
+    func bitmap() -> Bitmap {
+        Bitmap(
+            width: width,
+            height: height,
+            bytes: Array(UnsafeRawBufferPointer(start: data, count: byteCount))
+        )
+    }
+}
+
 func cellRect(
     row: Int,
     column: Int,
@@ -82,38 +146,10 @@ func cellRect(
 
 func renderBitmap(plan: RenderFramePlan, metrics: TerminalRenderMetrics) throws -> Bitmap {
     let size = try #require(renderFrameSize(for: plan, metrics: metrics))
-    let pixelCount = size.pixelWidth.multipliedReportingOverflow(by: size.pixelHeight)
-    try #require(pixelCount.overflow == false)
-    let byteCount = pixelCount.partialValue.multipliedReportingOverflow(by: 4)
-    try #require(byteCount.overflow == false)
-    let bytesPerRow = size.pixelWidth * 4
-    let data = UnsafeMutableRawPointer.allocate(
-        byteCount: byteCount.partialValue,
-        alignment: MemoryLayout<UInt32>.alignment
-    )
-    defer { data.deallocate() }
-    data.initializeMemory(as: UInt8.self, repeating: 0, count: byteCount.partialValue)
-
-    let colorSpace = try #require(CGColorSpace(name: CGColorSpace.sRGB))
-    let context = try #require(CGContext(
-        data: data,
-        width: size.pixelWidth,
-        height: size.pixelHeight,
-        bitsPerComponent: 8,
-        bytesPerRow: bytesPerRow,
-        space: colorSpace,
-        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-            | CGBitmapInfo.byteOrder32Big.rawValue
-    ))
-    context.translateBy(x: 0, y: CGFloat(size.pixelHeight))
-    context.scaleBy(x: metrics.displayScale, y: -metrics.displayScale)
+    let surface = try BitmapSurface(size: size, metrics: metrics)
+    let context = try #require(surface.context)
     drawRenderFrame(plan, metrics: metrics, in: context)
-
-    return Bitmap(
-        width: size.pixelWidth,
-        height: size.pixelHeight,
-        bytes: Array(UnsafeRawBufferPointer(start: data, count: byteCount.partialValue))
-    )
+    return surface.bitmap()
 }
 
 func makePlan(

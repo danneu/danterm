@@ -75,13 +75,17 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
             CGFloat(cellHeightPixels) / displayScale
         )
         self.underlineThickness = CGFloat(underlinePixels) / displayScale
-        self.underlineOffset = min(
-            self.cellSize.height - self.underlineThickness,
-            max(0, self.baselineOffset - CTFontGetUnderlinePosition(font))
+        self.underlineOffset = pixelAlignedOffset(
+            self.baselineOffset - CTFontGetUnderlinePosition(font),
+            scale: displayScale,
+            cellPixels: cellHeightPixels,
+            thicknessPixels: underlinePixels
         )
-        self.strikethroughOffset = min(
-            self.cellSize.height - self.underlineThickness,
-            max(0, self.baselineOffset - CTFontGetXHeight(font) / 2)
+        self.strikethroughOffset = pixelAlignedOffset(
+            self.baselineOffset - CTFontGetXHeight(font) / 2,
+            scale: displayScale,
+            cellPixels: cellHeightPixels,
+            thicknessPixels: underlinePixels
         )
         self.baseFontName = appKitFont.fontName
         self.baseFontSize = fontSize
@@ -135,8 +139,8 @@ public func renderFrameSize(
     )
 }
 
-/// Executes planned backgrounds and independently shaped text cells while
-/// borrowing the caller's context without retaining or changing its state.
+/// Executes every planned layer in fixed order while borrowing the caller's
+/// context without retaining or changing its state.
 public func drawRenderFrame(
     _ plan: RenderFramePlan,
     metrics: TerminalRenderMetrics,
@@ -174,6 +178,12 @@ public func drawRenderFrame(
         metrics: metrics,
         colorSpace: colorSpace
     )
+    context.textMatrix = originalTextMatrix
+    context.drawDecorationRuns(
+        plan.decorationRuns,
+        metrics: metrics,
+        colorSpace: colorSpace
+    )
 }
 
 private func quantizedPixelCount(_ pointValue: CGFloat, scale: CGFloat) -> Int? {
@@ -185,6 +195,18 @@ private func quantizedPixelCount(_ pointValue: CGFloat, scale: CGFloat) -> Int? 
     let pixels = Int(rounded)
     guard pixels > 0, CGFloat(pixels) == rounded else { return nil }
     return pixels
+}
+
+/// Quantizes a decoration's top edge without allowing its thickness outside the row.
+private func pixelAlignedOffset(
+    _ pointValue: CGFloat,
+    scale: CGFloat,
+    cellPixels: Int,
+    thicknessPixels: Int
+) -> CGFloat {
+    let maximum = CGFloat(cellPixels - thicknessPixels)
+    let pixels = min(maximum, max(0, (pointValue * scale).rounded()))
+    return pixels / scale
 }
 
 private extension RenderColor {
@@ -269,17 +291,114 @@ private extension CGContext {
 
         saveGState()
         clip(to: cellRect)
-        // The caller's point space is top-left/y-down, but CoreText places its
-        // baseline in the context's bottom-relative text coordinate system.
+        // CoreText expects y-up text space, so reflect the glyph outlines while
+        // keeping the baseline measured down from the cell's top edge.
         textMatrix = CGAffineTransform(
             a: 1,
             b: 0,
             c: 0,
-            d: 1,
+            d: -1,
             tx: cellRect.minX,
-            ty: cellRect.maxY - metrics.baselineOffset
+            ty: cellRect.minY + metrics.baselineOffset
         )
         CTLineDraw(line, self)
         restoreGState()
+    }
+
+    func drawDecorationRuns(
+        _ runs: [RenderDecorationRun],
+        metrics: TerminalRenderMetrics,
+        colorSpace: CGColorSpace
+    ) {
+        for run in runs {
+            let runRect = CGRect(
+                x: CGFloat(run.startColumn) * metrics.cellSize.width,
+                y: CGFloat(run.row) * metrics.cellSize.height,
+                width: CGFloat(run.columnCount) * metrics.cellSize.width,
+                height: metrics.cellSize.height
+            )
+            saveGState()
+            clip(to: runRect)
+            setBlendMode(.copy)
+            setFillColor(run.color.cgColor(in: colorSpace))
+            setStrokeColor(run.color.cgColor(in: colorSpace))
+
+            for kind in run.kinds {
+                switch kind {
+                case .underlineSingle:
+                    fillDecorationBar(
+                        in: runRect,
+                        top: CGFloat(run.row) * metrics.cellSize.height
+                            + metrics.underlineOffset,
+                        thickness: metrics.underlineThickness
+                    )
+                case .underlineDouble:
+                    let upperOffset = metrics.underlineOffset
+                        - metrics.underlineThickness * 2
+                    fillDecorationBar(
+                        in: runRect,
+                        top: CGFloat(run.row) * metrics.cellSize.height + upperOffset,
+                        thickness: metrics.underlineThickness
+                    )
+                    fillDecorationBar(
+                        in: runRect,
+                        top: CGFloat(run.row) * metrics.cellSize.height
+                            + metrics.underlineOffset,
+                        thickness: metrics.underlineThickness
+                    )
+                case .underlineCurly:
+                    strokeCurlyUnderline(in: runRect, metrics: metrics)
+                case .strikethrough:
+                    fillDecorationBar(
+                        in: runRect,
+                        top: CGFloat(run.row) * metrics.cellSize.height
+                            + metrics.strikethroughOffset,
+                        thickness: metrics.underlineThickness
+                    )
+                }
+            }
+            restoreGState()
+        }
+    }
+
+    func fillDecorationBar(in runRect: CGRect, top: CGFloat, thickness: CGFloat) {
+        fill(CGRect(x: runRect.minX, y: top, width: runRect.width, height: thickness))
+    }
+
+    func strokeCurlyUnderline(in runRect: CGRect, metrics: TerminalRenderMetrics) {
+        let deviceStep = 1 / metrics.displayScale
+        let amplitude = max(metrics.underlineThickness, deviceStep)
+        let period = max(metrics.cellSize.width, deviceStep * 4)
+        let centerY = runRect.minY + metrics.underlineOffset - amplitude
+        let firstValue = (runRect.minX / deviceStep).rounded(.down)
+        let lastValue = (runRect.maxX / deviceStep).rounded(.up)
+        guard firstValue.isFinite, lastValue.isFinite,
+              firstValue >= 0, lastValue >= 0,
+              firstValue < CGFloat(Int.max), lastValue < CGFloat(Int.max)
+        else {
+            return
+        }
+        let firstResult = Int(firstValue).subtractingReportingOverflow(1)
+        let lastResult = Int(lastValue).addingReportingOverflow(1)
+        guard firstResult.overflow == false, lastResult.overflow == false else { return }
+        let firstSample = firstResult.partialValue
+        let lastSample = lastResult.partialValue
+        let path = CGMutablePath()
+
+        for sample in firstSample...lastSample {
+            let x = CGFloat(sample) * deviceStep
+            let y = centerY + amplitude * sin(2 * .pi * x / period)
+            if sample == firstSample {
+                path.move(to: CGPoint(x: x, y: y))
+            } else {
+                path.addLine(to: CGPoint(x: x, y: y))
+            }
+        }
+
+        addPath(path)
+        setLineWidth(metrics.underlineThickness)
+        setLineCap(.butt)
+        setLineJoin(.round)
+        strokePath()
     }
 }

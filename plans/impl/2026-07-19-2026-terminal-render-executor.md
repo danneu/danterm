@@ -408,4 +408,4 @@ executor landed outside the pure directories. PO10's one-time headless check
 
 - [x] 1. Establish pixel-quantized metrics, safe frame sizing, and background execution
 - [x] 2. Add per-cell CoreText shaping, traits, clipping, and orientation
-- [ ] 3. Add decorations and complete executor gate coverage
+- [x] 3. Add decorations and complete executor gate coverage

@@ -118,7 +118,7 @@ public struct RenderFramePlan: Equatable, Sendable {
     /// Underline and strikethrough spans in canonical row-major order.
     public let decorationRuns: [RenderDecorationRun]
 
-    /// Filled block to draw when cursor presentation is enabled.
+    /// Geometry metadata for the cursor block already baked into the frame's runs.
     public let cursor: RenderCursor?
 
     init(

@@ -30,6 +30,23 @@ struct BackgroundExecutionTests {
         }
     }
 
+    @Test("Background rows follow the same top-left grid as text")
+    func backgroundRowOrder() throws {
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
+        let plan = try makePlan(
+            input: "\u{1B}[41m  \u{1B}[2;1H\u{1B}[42m  ",
+            columns: 3,
+            rows: 2
+        )
+        let bitmap = try renderBitmap(plan: plan, metrics: metrics)
+        let x = metrics.cellWidthPixels / 2
+        let rowZeroY = metrics.cellHeightPixels / 2
+        let rowOneY = metrics.cellHeightPixels + rowZeroY
+
+        #expect(bitmap.pixel(x: x, yFromTop: rowZeroY) == Pixel(RenderTheme.dark.ansiColors[1]))
+        #expect(bitmap.pixel(x: x, yFromTop: rowOneY) == Pixel(RenderTheme.dark.ansiColors[2]))
+    }
+
     @Test("Drawing an overflowing frame leaves the context untouched")
     func overflowingFrameDoesNoWork() throws {
         let metrics = try #require(largestOverflowingMetrics())

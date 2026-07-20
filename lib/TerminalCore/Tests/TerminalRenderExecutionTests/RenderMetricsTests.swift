@@ -20,6 +20,11 @@ struct RenderMetricsTests {
         #expect(metrics.baselineOffset > 0)
         #expect(metrics.baselineOffset <= metrics.cellSize.height)
         #expect(metrics.underlineThickness >= 1 / scale)
+        #expect((metrics.underlineOffset * scale).rounded() == metrics.underlineOffset * scale)
+        #expect(
+            (metrics.strikethroughOffset * scale).rounded()
+                == metrics.strikethroughOffset * scale
+        )
     }
 
     @Test("Invalid and unrepresentable display scales refuse metrics")
