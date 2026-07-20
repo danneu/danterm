@@ -20,6 +20,15 @@ func expectValidGrid(
     _ terminal: Terminal,
     sourceLocation: SourceLocation = #_sourceLocation
 ) {
+    #expect(
+        terminal.scrollbackByteCount <= terminal.scrollbackBudgetBytes,
+        sourceLocation: sourceLocation
+    )
+    #expect(
+        terminal.scrollbackByteCount == terminal.recomputedScrollbackByteCount,
+        sourceLocation: sourceLocation
+    )
+
     let activeRows = inspectedViewportRows(of: terminal, sourceLocation: sourceLocation)
     expectValidStream(activeRows, sourceLocation: sourceLocation)
 

@@ -15,6 +15,84 @@ public struct Terminal: Equatable, Sendable {
         var isSoftWrapped = false
     }
 
+    /// Gives retained rows logical zero-based indices while front eviction stays amortized O(1).
+    private struct ScrollbackBuffer: Equatable, Sendable {
+        private var storage: [GridRow] = []
+        private var storageStart = 0
+
+        var count: Int { storage.count - storageStart }
+        var isEmpty: Bool { count == 0 }
+        var indices: Range<Int> { 0..<count }
+
+        init() {}
+
+        init<S: Sequence>(_ rows: S) where S.Element == GridRow {
+            storage = Array(rows)
+        }
+
+        subscript(position: Int) -> GridRow {
+            get {
+                precondition(indices.contains(position))
+                return storage[storageStart + position]
+            }
+            set {
+                precondition(indices.contains(position))
+                storage[storageStart + position] = newValue
+            }
+        }
+
+        mutating func append(_ row: GridRow) {
+            storage.append(row)
+        }
+
+        func asArray() -> [GridRow] {
+            Array(storage[storageStart...])
+        }
+
+        func suffix(from index: Int) -> [GridRow] {
+            precondition(indices.contains(index) || index == count)
+            return Array(storage[(storageStart + index)...])
+        }
+
+        mutating func removeFirst() -> GridRow {
+            precondition(isEmpty == false)
+            let row = storage[storageStart]
+            storageStart += 1
+            compactIfNeeded()
+            return row
+        }
+
+        mutating func removeLast(_ count: Int) {
+            precondition(count >= 0 && count <= self.count)
+            storage.removeLast(count)
+            if isEmpty {
+                storage.removeAll(keepingCapacity: true)
+                storageStart = 0
+            }
+        }
+
+        mutating func removeAll(keepingCapacity: Bool) {
+            storage.removeAll(keepingCapacity: keepingCapacity)
+            storageStart = 0
+        }
+
+        static func == (lhs: Self, rhs: Self) -> Bool {
+            guard lhs.count == rhs.count else { return false }
+            return lhs.indices.allSatisfy { lhs[$0] == rhs[$0] }
+        }
+
+        private mutating func compactIfNeeded() {
+            if storageStart == storage.count {
+                storage.removeAll(keepingCapacity: false)
+                storageStart = 0
+                return
+            }
+            guard storageStart >= 1_024, storageStart * 2 >= storage.count else { return }
+            storage = Array(storage[storageStart...])
+            storageStart = 0
+        }
+    }
+
     /// Tracks cursor coordinates without exposing storage indices.
     private struct CellPosition: Equatable, Sendable {
         var row: Int
@@ -92,7 +170,7 @@ public struct Terminal: Equatable, Sendable {
 
     private var columnCount: Int
     private var rowCount: Int
-    private var scrollbackRows: [GridRow] = []
+    private var scrollbackRows = ScrollbackBuffer()
     private var rows: [GridRow]
     private var inactivePrimaryScreen: InactivePrimaryScreen?
     private var scrollRegion: Range<Int>?
@@ -108,6 +186,17 @@ public struct Terminal: Equatable, Sendable {
     private var clusterContext: ClusterContext?
     private var inputStream = TerminalInputStream()
 
+    static let productionScrollbackBudgetBytes = 10_485_760
+
+    /// Makes the active bound visible to shared structural test assertions.
+    private(set) var scrollbackBudgetBytes: Int
+
+    /// Caches retained-row cost so the line-feed path never scans full history.
+    private(set) var scrollbackByteCount = 0
+
+    /// Records whether eviction severed the retained stream inside a logical line.
+    public private(set) var isHistoryHeadTruncated = false
+
     /// Exposes the semantic SGR pen without allowing callers to mutate terminal state.
     public private(set) var currentStyle = TerminalStyle()
 
@@ -120,9 +209,19 @@ public struct Terminal: Equatable, Sendable {
 
     /// Rejects dimensions that cannot represent all supported terminal cells.
     public init?(columns: Int, rows: Int) {
-        guard columns >= 2, rows >= 1 else { return nil }
+        self.init(
+            columns: columns,
+            rows: rows,
+            scrollbackBudgetBytes: Self.productionScrollbackBudgetBytes
+        )
+    }
+
+    /// Gives deterministic tests a small budget while production remains fixed at 10 MiB.
+    init?(columns: Int, rows: Int, scrollbackBudgetBytes: Int) {
+        guard columns >= 2, rows >= 1, scrollbackBudgetBytes >= 0 else { return nil }
         columnCount = columns
         rowCount = rows
+        self.scrollbackBudgetBytes = scrollbackBudgetBytes
         tabStops = Self.defaultTabStops(columns: columns)
         self.rows = (0..<rows).map { _ in
             GridRow(cells: (0..<columns).map { _ in GridCell() })
@@ -223,10 +322,30 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
+    /// Recomputes retained-row cost for coherence proofs without affecting enforcement.
+    var recomputedScrollbackByteCount: Int {
+        scrollbackRows.indices.reduce(0) {
+            $0 + Self.scrollbackByteCost(of: scrollbackRows[$1])
+        }
+    }
+
+    /// Exposes one canonical row cost so tests can pin the representation-neutral literals.
+    func scrollbackRowByteCost(at index: Int) -> Int? {
+        guard scrollbackRows.indices.contains(index) else { return nil }
+        return Self.scrollbackByteCost(of: scrollbackRows[index])
+    }
+
+    /// Creates the one-operation no-eviction oracle used to isolate eviction side effects.
+    func withUnlimitedScrollbackForTesting() -> Self {
+        var copy = self
+        copy.scrollbackBudgetBytes = .max
+        return copy
+    }
+
     /// Projects retained history and the viewport as logical text without a final newline.
     public var fullHistoryText: String {
         guard inactivePrimaryScreen != nil else { return primaryHistoryText }
-        var stream = scrollbackRows
+        var stream = scrollbackRows.asArray()
         if let last = stream.indices.last {
             stream[last].isSoftWrapped = false
         }
@@ -237,7 +356,7 @@ public struct Terminal: Equatable, Sendable {
     /// Projects retained primary-screen history for recovery and export consumers.
     public var primaryHistoryText: String {
         let primaryRows = inactivePrimaryScreen?.rows ?? rows
-        return projectedHistoryText(from: scrollbackRows + primaryRows)
+        return projectedHistoryText(from: scrollbackRows.asArray() + primaryRows)
     }
 
     private func projectedHistoryText(from stream: [GridRow]) -> String {
@@ -253,6 +372,32 @@ public struct Terminal: Equatable, Sendable {
             }
         }
         return result
+    }
+
+    private static func scrollbackByteCost(of row: GridRow) -> Int {
+        16 + row.cells.reduce(0) { total, cell in
+            total + 32 + 8 * cell.scalars.count
+        }
+    }
+
+    private mutating func appendToScrollback<S: Sequence>(_ newRows: S)
+    where S.Element == GridRow {
+        for row in newRows {
+            scrollbackRows.append(row)
+            scrollbackByteCount += Self.scrollbackByteCost(of: row)
+        }
+    }
+
+    private mutating func enforceScrollbackBudget() {
+        var lastEvicted: GridRow?
+        while scrollbackByteCount > scrollbackBudgetBytes {
+            let evicted = scrollbackRows.removeFirst()
+            scrollbackByteCount -= Self.scrollbackByteCost(of: evicted)
+            lastEvicted = evicted
+        }
+        if let lastEvicted {
+            isHistoryHeadTruncated = lastEvicted.isSoftWrapped
+        }
     }
 
     /// Projects cell roles, row wraps, and cursor state without exposing mutable storage.
@@ -395,13 +540,14 @@ public struct Terminal: Equatable, Sendable {
 
             let displacedCount = rows.count - newRowCount
             if displacedCount > 0 {
-                scrollbackRows.append(contentsOf: rows.prefix(displacedCount))
+                appendToScrollback(rows.prefix(displacedCount))
                 rows.removeFirst(displacedCount)
                 if cursor.row < displacedCount {
                     cursor.row = 0
                 } else {
                     cursor.row -= displacedCount
                 }
+                enforceScrollbackBudget()
             }
         } else {
             let addedCount = newRowCount - rowCount
@@ -410,7 +556,10 @@ public struct Terminal: Equatable, Sendable {
                 pulledCount = min(addedCount, scrollbackRows.count)
                 if pulledCount > 0 {
                     let split = scrollbackRows.count - pulledCount
-                    let pulled = Array(scrollbackRows[split...])
+                    let pulled = scrollbackRows.suffix(from: split)
+                    scrollbackByteCount -= pulled.reduce(0) {
+                        $0 + Self.scrollbackByteCost(of: $1)
+                    }
                     scrollbackRows.removeLast(pulledCount)
                     rows.insert(contentsOf: pulled, at: 0)
                     cursor.row += pulledCount
@@ -427,7 +576,7 @@ public struct Terminal: Equatable, Sendable {
         let oldColumnCount = columnCount
         let oldBottomDistance = rowCount - 1 - cursor.row
         let oldCursorGlobalRow = scrollbackRows.count + cursor.row
-        let fullStream = scrollbackRows + rows
+        let fullStream = scrollbackRows.asArray() + rows
         let lastContentRow = fullStream.lastIndex(where: rowContainsContent) ?? 0
         let retainedLastRow = max(oldCursorGlobalRow, lastContentRow)
         let sourceRows = Array(fullStream[...retainedLastRow])
@@ -511,7 +660,8 @@ public struct Terminal: Equatable, Sendable {
         }
 
         let viewportStart = rebuiltRows.count - rowCount
-        scrollbackRows = Array(rebuiltRows[..<viewportStart])
+        scrollbackRows = ScrollbackBuffer(rebuiltRows[..<viewportStart])
+        scrollbackByteCount = recomputedScrollbackByteCount
         rows = Array(rebuiltRows[viewportStart...])
         columnCount = newColumnCount
         cursor = CellPosition(
@@ -519,6 +669,7 @@ public struct Terminal: Equatable, Sendable {
             column: destination.column
         )
         isPendingWrap = destination.isPendingWrap
+        enforceScrollbackBudget()
     }
 
     private func reconstructLogicalLines(
@@ -1128,6 +1279,8 @@ public struct Terminal: Equatable, Sendable {
             clearPendingMotionState()
         case 3:
             scrollbackRows.removeAll(keepingCapacity: true)
+            scrollbackByteCount = 0
+            isHistoryHeadTruncated = false
             clearPendingMotionState()
         default:
             return
@@ -1758,7 +1911,7 @@ public struct Terminal: Equatable, Sendable {
         let style = backgroundEraseStyle
 
         if delta < 0, pushesToScrollback {
-            scrollbackRows.append(contentsOf: sourceRows.prefix(amount))
+            appendToScrollback(sourceRows.prefix(amount))
         } else {
             severWrapClaim(before: range.lowerBound, replacementStyle: style)
         }
@@ -1778,6 +1931,9 @@ public struct Terminal: Equatable, Sendable {
                 ? range.lowerBound + survivingCount - 1
                 : range.upperBound - 1
             severWrapClaim(at: lastSurvivor, replacementStyle: style)
+        }
+        if delta < 0, pushesToScrollback {
+            enforceScrollbackBudget()
         }
     }
 

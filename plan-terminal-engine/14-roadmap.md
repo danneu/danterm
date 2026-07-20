@@ -183,6 +183,10 @@ mean.
     resize with independent primary reflow, active and primary history
     projections, recovery routing, and neutral libvterm fixtures. See the
     [implementation plan](../plans/impl/2026-07-20-1014-alternate-screen-resize-semantics.md).
+  - [x] **Slice 2: 10 MiB scrollback budget and eviction.** Adds deterministic
+    retained-row accounting, amortized oldest-first eviction, truncated-head
+    metadata, and enforcement across scrolling and primary resize. See the
+    [implementation plan](../plans/impl/2026-07-20-1146-scrollback-budget-eviction.md).
   - [ ] [Terminal core](04-terminal-core.md) completes the accepted baseline control,
     screen, mode, style, query, and recovery behavior.
   - [ ] [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md) completes
