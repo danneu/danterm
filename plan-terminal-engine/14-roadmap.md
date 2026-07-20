@@ -114,20 +114,39 @@ mean.
     host lifetimes. The complete default `just test` gate passes headlessly;
     `test-pty-external` adds opt-in ssh and tmux teardown evidence.
 
-- [ ] **4. Prove the interactive viability slice**
-  - [ ] One Swift-engine pane launches zsh, renders a recognizable prompt, accepts
+- [x] **4. Prove the interactive viability slice**
+  - [x] One Swift-engine pane launches zsh, renders a recognizable prompt, accepts
     ordinary and dead-key-composed text, displays the required foundational
     Unicode cases, runs `ls`, `cat`, and `less`, and resizes with basic reflow.
-  - [ ] Shell exit and pane closure release resources; idle and sleep/wake behavior
+    Slice 4 judgment: this gate closes. `just test-terminal-viability` exercises
+    the complete live zsh/input/Unicode/command/reflow path, and the visual
+    observations and run artifacts are recorded in
+    [Milestone 4 interactive viability evidence](../docs/evidence/2026-07-20-milestone-4-viability.md).
+  - [x] Shell exit and pane closure release resources; idle and sleep/wake behavior
     satisfy the experiment gate in
     [Migration and app boundary](02-migration-and-boundary.md).
-  - [ ] The slice is reproducible and its terminal-core behavior has deterministic
+    Slice 4 judgment: this gate closes. The viability recipe proves both pane
+    exit paths, teardown, hidden/reveal ordering, idle CPU, and power assertions;
+    `TerminalPaneSessionControllerTests.hiddenOutputAndReveal`,
+    `applicationTerminationHandlesLiveAndMidCloseHosts`, and the evidence
+    record pin the headless and real sleep/wake legs.
+  - [x] The slice is reproducible and its terminal-core behavior has deterministic
     proof at the lowest practical layer.
-  - [ ] Selected external recordings from
+    Slice 4 judgment: this gate closes. The opt-in recipe preserves every run's
+    artifacts, `DanTermRecordingFixtureTests.milestone4ViabilityRecording`
+    replays the first complete app capture in the default gate, and the named
+    controller and lifecycle tests in the evidence record pin lower-layer
+    contracts.
+  - [x] Selected external recordings from
     [External terminal test research](../docs/research/1-external-tests.md)
     replay through the headless core and interactive slice; any optional
     differential or vttest experiment improves diagnostic evidence without
     becoming an unrecorded viability dependency.
+    Slice 4 judgment: this gate closes. `TerminalFixtureTests.replayFixtures`
+    proves the selected corpus headlessly, while `just test-terminal-viability`
+    feeds `state-movecursor.json` through a live pane and asserts its pane-read
+    text equals the headless replay; the exact artifacts are indexed by the
+    evidence record.
 
 - [ ] **5. Make the experiment decision**
   - [ ] Evidence from the viability slice records whether the architecture is

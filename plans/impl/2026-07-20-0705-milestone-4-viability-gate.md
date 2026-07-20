@@ -263,7 +263,7 @@ the evidence doc before the roadmap boxes are checked.
 - [x] 3. Add the terminal viability harness (script, justfile)
 - [x] 4. Narrow fixes exposed by the workflow (conditional, repeatable)
 - [x] 5. Replay the captured viability session headlessly (fixture, test)
-- [ ] 6. Record milestone 4 evidence and close the gate (docs, roadmap)
+- [x] 6. Record milestone 4 evidence and close the gate (docs, roadmap)
 
 ## Implementation notes
 
