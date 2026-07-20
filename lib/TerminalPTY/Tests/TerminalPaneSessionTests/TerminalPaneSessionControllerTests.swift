@@ -11,6 +11,116 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct TerminalPaneSessionControllerTests {
+    @Test("cursor visibility and synchronized updates gate complete frame planning", .timeLimit(.minutes(1)))
+    func presentationProjectionAndSynchronizedGating() async throws {
+        // Intent: the controller projects cursor visibility, suppresses intermediate
+        //   synchronized frames, and plans the complete state once synchronization ends.
+        // Why it exists: hardcoded cursor visibility and planning every 2026 update
+        //   violate both terminal presentation semantics and the idle-work contract.
+        // Scenario: a visible TUI hides its cursor, batches two updates, then commits them.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(
+                command: "exec \(try probeExecutable()) sync \"$0\""
+            )
+        )
+        var plans: [RenderFramePlan] = []
+        controller.onPlan = { plans.append($0) }
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        controller.synchronizeState()
+        let baselinePlanCount = plans.count
+
+        controller.sendText("first\n")
+        #expect(await host.waitForOutput(containing: Array("__SYNC_A__".utf8)))
+        controller.synchronizeState()
+        #expect(host.fencedSnapshot().presentation.isSynchronizedOutputActive)
+        let countDuringSynchronization = plans.count
+        #expect(countDuringSynchronization == baselinePlanCount)
+        #expect(controller.readViewportText().contains("__SYNC_A__"))
+        #expect(controller.readFullHistoryText().contains("__SYNC_A__"))
+
+        controller.sendText("second\n")
+        #expect(await host.waitForOutput(containing: Array("__SYNC_B__".utf8)))
+        controller.synchronizeState()
+        #expect(host.fencedSnapshot().presentation.isSynchronizedOutputActive)
+        #expect(plans.count == countDuringSynchronization)
+
+        controller.sendText("commit\n")
+        #expect(await host.waitForOutput(containing: Array("__SYNC_DONE__".utf8)))
+        controller.synchronizeState()
+        #expect(plans.count == countDuringSynchronization + 1)
+        let finalTerminal = host.fencedSnapshot()
+        let expectedPlan = planFrame(
+            for: finalTerminal,
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: finalTerminal.presentation.isCursorVisible
+            )
+        )
+        #expect(try #require(plans.last) == expectedPlan)
+
+        controller.tearDown()
+        await host.close()
+    }
+
+    @Test("child exit permanently releases synchronized planning for visible and hidden panes", .timeLimit(.minutes(1)))
+    func childExitReleasesSynchronizedGating() async throws {
+        // Intent: child exit exposes the terminal's final state even when the child
+        //   leaves synchronized updates active, immediately or after a hidden reveal.
+        // Why it exists: otherwise a crashed TUI can strand its last output forever.
+        // Scenario: visible and background commands set 2026, print their last marker,
+        //   and exit without resetting the mode.
+        let visibleHost = try makeHost()
+        let visible = TerminalPaneSessionController(
+            host: visibleHost,
+            launchInput: makeLaunchInput(
+                command: "exec \(try probeExecutable()) sync-exit \"$0\""
+            )
+        )
+        var visiblePlans: [RenderFramePlan] = []
+        let visibleResults = AsyncStream<PaneLifecycleResult>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        var visibleResultIterator = visibleResults.stream.makeAsyncIterator()
+        visible.onPlan = { visiblePlans.append($0) }
+        visible.onSessionEnded = { visibleResults.continuation.yield($0) }
+        #expect(await visibleHost.waitForResult() == .exited(.exited(0)))
+        #expect(await visibleResultIterator.next() == .exited(.exited(0)))
+        visible.synchronizeState()
+        #expect(try #require(visiblePlans.last).projectedText.contains("__SYNC_FINAL__"))
+
+        let hiddenHost = try makeHost()
+        let hidden = TerminalPaneSessionController(
+            host: hiddenHost,
+            launchInput: makeLaunchInput(
+                command: "exec \(try probeExecutable()) sync-exit \"$0\""
+            ),
+            isVisible: false
+        )
+        var hiddenPlans: [RenderFramePlan] = []
+        let hiddenResults = AsyncStream<PaneLifecycleResult>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        var hiddenResultIterator = hiddenResults.stream.makeAsyncIterator()
+        hidden.onPlan = { hiddenPlans.append($0) }
+        hidden.onSessionEnded = { hiddenResults.continuation.yield($0) }
+        #expect(await hiddenHost.waitForResult() == .exited(.exited(0)))
+        #expect(await hiddenResultIterator.next() == .exited(.exited(0)))
+        hidden.synchronizeState()
+        #expect(hiddenPlans.isEmpty)
+        #expect(hidden.readViewportText().contains("__SYNC_FINAL__"))
+
+        hidden.setVisible(true)
+        #expect(hiddenPlans.count == 1)
+        #expect(try #require(hiddenPlans.first).projectedText.contains("__SYNC_FINAL__"))
+
+        visible.tearDown()
+        hidden.tearDown()
+        await visibleHost.close()
+        await hiddenHost.close()
+    }
+
     @Test("a stalled consumer conflates a burst and plans the final state", .timeLimit(.minutes(1)))
     func burstConflatesToFinalPlan() async throws {
         // Intent: a main-actor consumer stalled during a write burst eventually

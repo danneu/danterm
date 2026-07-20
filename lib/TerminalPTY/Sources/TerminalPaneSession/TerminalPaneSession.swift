@@ -17,6 +17,7 @@ public final class TerminalPaneSessionController {
     private var lastSubmittedDimensions: TerminalDimensions
     private var isVisible: Bool
     private var isTornDown = false
+    private var didChildExit = false
     private var didEmitSessionEnded = false
     private var completedRecordingEvents: [NeutralTerminalRecordingEvent]?
 
@@ -212,6 +213,9 @@ public final class TerminalPaneSessionController {
         transitions: [TerminalPTYAppliedTransition]?
     ) {
         cachedTerminal = snapshot
+        if case .some(.exited) = result {
+            didChildExit = true
+        }
         if isVisible { planIfNeeded(snapshot) }
         if let result, didEmitSessionEnded == false {
             didEmitSessionEnded = true
@@ -238,9 +242,14 @@ public final class TerminalPaneSessionController {
 
     private func planIfNeeded(_ terminal: Terminal) {
         guard terminal != lastPlannedTerminal else { return }
+        let presentation = terminal.presentation
+        guard presentation.isSynchronizedOutputActive == false || didChildExit else { return }
         let plan = planFrame(
             for: terminal,
-            presentation: RenderPresentation(theme: .dark, isCursorVisible: true)
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: presentation.isCursorVisible
+            )
         )
         lastPlannedTerminal = terminal
         currentPlan = plan

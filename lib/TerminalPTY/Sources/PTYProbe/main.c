@@ -272,6 +272,46 @@ static int run_initial_input_probe(const char *name) {
     return 0;
 }
 
+static int disable_input_echo(void) {
+    struct termios attributes;
+    if (tcgetattr(STDIN_FILENO, &attributes) < 0) {
+        return -1;
+    }
+    attributes.c_lflag &= (tcflag_t)~ECHO;
+    return tcsetattr(STDIN_FILENO, TCSANOW, &attributes);
+}
+
+static int run_synchronized_output_probe(void) {
+    char input[16];
+    if (disable_input_echo() < 0) {
+        return 82;
+    }
+    printf("__READY__\n");
+    fflush(stdout);
+    if (fgets(input, sizeof(input), stdin) == NULL) {
+        return 83;
+    }
+    printf("\033[?25l\033[?2026h__SYNC_A__");
+    fflush(stdout);
+    if (fgets(input, sizeof(input), stdin) == NULL) {
+        return 84;
+    }
+    printf("__SYNC_B__");
+    fflush(stdout);
+    if (fgets(input, sizeof(input), stdin) == NULL) {
+        return 85;
+    }
+    printf("\033[?2026l__SYNC_DONE__");
+    fflush(stdout);
+    return 0;
+}
+
+static int run_synchronized_exit_probe(void) {
+    printf("\033[?2026h__SYNC_FINAL__");
+    fflush(stdout);
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 3) {
         return 64;
@@ -308,6 +348,12 @@ int main(int argc, char *argv[]) {
     }
     if (strcmp(argv[1], "initial") == 0) {
         return run_initial_input_probe(argv[2]);
+    }
+    if (strcmp(argv[1], "sync") == 0) {
+        return run_synchronized_output_probe();
+    }
+    if (strcmp(argv[1], "sync-exit") == 0) {
+        return run_synchronized_exit_probe();
     }
     return 65;
 }

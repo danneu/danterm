@@ -105,6 +105,9 @@ public struct Terminal: Equatable, Sendable {
         var style = TerminalStyle()
         var isPendingWrap = false
         var isOriginMode = false
+        var isCursorVisible = true
+        var cursorShape = TerminalCursorShape.block
+        var isCursorBlinking = false
     }
 
     /// Keeps REP independent from later cursor movement and grid replacement.
@@ -180,6 +183,10 @@ public struct Terminal: Equatable, Sendable {
     private var isLineFeedNewLineMode = false
     private var isOriginMode = false
     private var isAutoWrapMode = true
+    private var isCursorVisible = true
+    private var cursorShape = TerminalCursorShape.block
+    private var isCursorBlinking = false
+    private var isSynchronizedOutputActive = false
     private var tabStops: Set<Int>
     private var savedCursor = SavedCursorState()
     private var lastPrintedCluster: LastPrintedCluster?
@@ -199,6 +206,16 @@ public struct Terminal: Equatable, Sendable {
 
     /// Exposes the semantic SGR pen without allowing callers to mutate terminal state.
     public private(set) var currentStyle = TerminalStyle()
+
+    /// Projects application-controlled presentation state for render scheduling and drawing.
+    public var presentation: TerminalPresentation {
+        TerminalPresentation(
+            isCursorVisible: isCursorVisible,
+            cursorShape: cursorShape,
+            isCursorBlinking: isCursorBlinking,
+            isSynchronizedOutputActive: isSynchronizedOutputActive
+        )
+    }
 
     private var backgroundEraseStyle: TerminalStyle {
         TerminalStyle(
@@ -898,6 +915,11 @@ public struct Terminal: Equatable, Sendable {
             }
             return
         }
+        if sequence.intermediates == [0x20] {
+            guard sequence.final == 0x71, sequence.parameters.count <= 1 else { return }
+            applyCursorStyle(sequence.parameters.first ?? 0)
+            return
+        }
         guard sequence.intermediates.isEmpty else { return }
 
         switch sequence.final {
@@ -1025,6 +1047,10 @@ public struct Terminal: Equatable, Sendable {
             case 7:
                 isAutoWrapMode = enabled
                 shouldClearPendingMotion = true
+            case 25:
+                isCursorVisible = enabled
+            case 2026:
+                isSynchronizedOutputActive = enabled
             case 1048:
                 if shouldClearPendingMotion {
                     clearPendingMotionState()
@@ -1059,6 +1085,31 @@ public struct Terminal: Equatable, Sendable {
         }
         if shouldClearPendingMotion {
             clearPendingMotionState()
+        }
+    }
+
+    private mutating func applyCursorStyle(_ parameter: UInt16) {
+        switch parameter {
+        case 0, 1:
+            cursorShape = .block
+            isCursorBlinking = true
+        case 2:
+            cursorShape = .block
+            isCursorBlinking = false
+        case 3:
+            cursorShape = .underline
+            isCursorBlinking = true
+        case 4:
+            cursorShape = .underline
+            isCursorBlinking = false
+        case 5:
+            cursorShape = .bar
+            isCursorBlinking = true
+        case 6:
+            cursorShape = .bar
+            isCursorBlinking = false
+        default:
+            break
         }
     }
 
@@ -1421,7 +1472,10 @@ public struct Terminal: Equatable, Sendable {
             position: cursor,
             style: currentStyle,
             isPendingWrap: isPendingWrap,
-            isOriginMode: isOriginMode
+            isOriginMode: isOriginMode,
+            isCursorVisible: isCursorVisible,
+            cursorShape: cursorShape,
+            isCursorBlinking: isCursorBlinking
         )
     }
 
@@ -1434,6 +1488,9 @@ public struct Terminal: Equatable, Sendable {
         )
         movePositionOffWideTail(&cursor, in: rows)
         currentStyle = savedCursor.style
+        isCursorVisible = savedCursor.isCursorVisible
+        cursorShape = savedCursor.cursorShape
+        isCursorBlinking = savedCursor.isCursorBlinking
         clusterContext = nil
         isPendingWrap = savedCursor.isPendingWrap
             && isAutoWrapMode
@@ -1532,6 +1589,10 @@ public struct Terminal: Equatable, Sendable {
         isLineFeedNewLineMode = false
         isOriginMode = false
         isAutoWrapMode = true
+        isCursorVisible = true
+        cursorShape = .block
+        isCursorBlinking = false
+        isSynchronizedOutputActive = false
         tabStops = Self.defaultTabStops(columns: columnCount)
         currentStyle = TerminalStyle()
     }
