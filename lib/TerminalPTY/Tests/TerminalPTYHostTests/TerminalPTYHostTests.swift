@@ -223,13 +223,7 @@ struct TerminalPTYHostTests {
         let recording = NeutralTerminalRecording(
             provenance: .danTerm(test: "pty-query-replay"),
             initial: .init(columns: 80, rows: 24),
-            events: (await host.transitions()).map { transition in
-                switch transition {
-                case .feed(let bytes): .feed(bytes)
-                case .resize(let dimensions):
-                    .resize(columns: dimensions.columns, rows: dimensions.rows)
-                }
-            }
+            events: (await host.transitions()).map(\.recordingEvent)
         )
 
         #expect(try recording.replay() == (await host.snapshot()))
@@ -361,13 +355,7 @@ struct TerminalPTYHostTests {
         let recording = NeutralTerminalRecording(
             provenance: .danTerm(test: "pty-output-resize-output"),
             initial: .init(columns: 80, rows: 24),
-            events: transitions.map { transition in
-                switch transition {
-                case .feed(let bytes): .feed(bytes)
-                case .resize(let dimensions):
-                    .resize(columns: dimensions.columns, rows: dimensions.rows)
-                }
-            }
+            events: transitions.map(\.recordingEvent)
         )
         let recorder = PTYRecordingRecorder(recording: recording)
         let encoded = try recorder.encoded()
@@ -602,6 +590,164 @@ struct TerminalPTYHostTests {
             #expect((await host.resourceSnapshot()).isReleased)
         }
     }
+
+    @Test("primary wheel intent scrolls locally without writing child bytes", .timeLimit(.minutes(1)))
+    func primaryWheelRoutesLocally() async throws {
+        // Intent: route a wheel step using the authoritative screen selected on the host queue.
+        // Why it exists: deciding from a lagging session snapshot can emit arrows on primary.
+        // Scenario: the user wheels upward through retained shell output while the child waits.
+        let host = try makeHost()
+        await host.start(makeLaunchInput(command: try scrollbackCommand()))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let writeBaseline = await host.inputWrites().count
+
+        host.sendWheel(.init(
+            rowDelta: -3,
+            alternateScreenStepBytes: [0x1B, 0x5B, 0x41]
+        ))
+        let snapshot = host.fencedSnapshot()
+
+        #expect(snapshot.scrollProjection.isFollowing == false)
+        #expect(snapshot.scrollProjection.topRow == snapshot.scrollbackRowCount - 3)
+        #expect(await host.inputWrites().count == writeBaseline)
+
+        await host.close()
+        host.scrollToBottom()
+        _ = host.fencedSnapshot()
+        #expect((await host.resourceSnapshot()).isReleased)
+    }
+
+    @Test("alternate wheel intent writes counted arrows without local navigation", .timeLimit(.minutes(1)))
+    func alternateWheelRoutesToChild() async throws {
+        // Intent: select the alternate-screen arrow arm exactly once on the owner queue.
+        // Why it exists: wheel routing outside the owner can swallow input during a 1049 race.
+        // Scenario: the user wheels upward three rows while a full-screen application is active.
+        let host = try makeHost()
+        let command = "printf '\\033[?1049h'; exec \(try probeExecutable()) hold \"$0\""
+        await host.start(makeLaunchInput(command: command))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let writeBaseline = await host.inputWrites().count
+        let up = [UInt8]([0x1B, 0x5B, 0x41])
+
+        host.sendWheel(.init(rowDelta: -3, alternateScreenStepBytes: up))
+        let snapshot = host.fencedSnapshot()
+        let writes = await host.inputWrites()
+
+        #expect(snapshot.isAlternateScreenActive)
+        #expect(snapshot.scrollProjection.isFollowing)
+        #expect(Array(writes.dropFirst(writeBaseline)) == [up + up + up])
+
+        await host.close()
+    }
+
+    @Test("wheel races with 1049 transitions use exactly the screen seen by the owner", .timeLimit(.minutes(1)))
+    func wheelTransitionRaceUsesOwnerScreen() async throws {
+        // Intent: prove both race directions resolve on the shared FIFO instead of a caller snapshot.
+        // Why it exists: a primary-to-alt race can leak arrows, while alt-to-primary can swallow them.
+        // Scenario: wheel intent is queued immediately after commands that enter and leave alt screen.
+        let host = try makeHost()
+        let command = "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done"
+        await host.start(makeLaunchInput(command: command))
+        while host.fencedSnapshot().fullHistoryText.contains("line-39") == false {
+            await Task.yield()
+        }
+        let up = [UInt8]([0x1B, 0x5B, 0x41])
+        let down = [UInt8]([0x1B, 0x5B, 0x42])
+
+        let enter = Array("printf '\\033[?1049h'\n".utf8)
+        let enterWriteBaseline = await host.inputWrites().count
+        host.send(enter)
+        host.sendWheel(.init(rowDelta: -1, alternateScreenStepBytes: up))
+        _ = host.fencedSnapshot()
+        #expect(Array((await host.inputWrites()).dropFirst(enterWriteBaseline)) == [enter])
+        #expect((await host.transitions()).contains(.scrollByRows(-1)))
+        while host.fencedSnapshot().isAlternateScreenActive == false {
+            await Task.yield()
+        }
+
+        let exit = Array("printf '\\033[?1049l'\n".utf8)
+        let exitWriteBaseline = await host.inputWrites().count
+        host.send(exit)
+        host.sendWheel(.init(rowDelta: 2, alternateScreenStepBytes: down))
+        _ = host.fencedSnapshot()
+        #expect(Array((await host.inputWrites()).dropFirst(exitWriteBaseline)) == [
+            exit,
+            down + down,
+        ])
+        while host.fencedSnapshot().isAlternateScreenActive {
+            await Task.yield()
+        }
+
+        await host.close()
+    }
+
+    @Test("user input snaps browsing to bottom and capture replays the transition", .timeLimit(.minutes(1)))
+    func userInputSnapCaptureEquality() async throws {
+        // Intent: record the local snap before the user write without classifying replies as input.
+        // Why it exists: a non-echoing child cannot reconstruct this viewport mutation from output.
+        // Scenario: the user scrolls up, types into a waiting process, and captures the pane.
+        let host = try makeHost()
+        await host.start(makeLaunchInput(command: try scrollbackCommand(disableEcho: true)))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        host.scroll(byRows: -4)
+        #expect(host.fencedSnapshot().scrollProjection.isFollowing == false)
+
+        host.send(Array("typed".utf8))
+        let transitions = await host.transitions()
+        let snapshot = host.fencedSnapshot()
+        let recording = NeutralTerminalRecording(
+            provenance: .danTerm(test: "input-snap"),
+            initial: .init(columns: 80, rows: 24),
+            events: transitions.map(\.recordingEvent)
+        )
+
+        #expect(snapshot.scrollProjection.isFollowing)
+        #expect(transitions.contains(.scrollToBottom))
+        #expect(try recording.replay() == snapshot)
+
+        await host.close()
+    }
+
+    @Test("scrollbar commands clamp on the owner queue and emit updates only for changes", .timeLimit(.minutes(1)))
+    func ownerScrollbarCommandsClampAndDedupe() async throws {
+        let host = try makeHost(captureTransitions: false)
+        await host.start(makeLaunchInput(command: try scrollbackCommand()))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let baseline = (await host.resourceSnapshot()).emittedUpdateSignalCount
+
+        host.scroll(toTopRow: -100)
+        let top = host.fencedSnapshot()
+        let afterChange = (await host.resourceSnapshot()).emittedUpdateSignalCount
+        host.scroll(toTopRow: -100)
+        _ = host.fencedSnapshot()
+
+        #expect(top.scrollProjection.topRow == 0)
+        #expect(top.scrollProjection.isFollowing == false)
+        #expect(afterChange == baseline + 1)
+        #expect((await host.resourceSnapshot()).emittedUpdateSignalCount == afterChange)
+
+        host.scrollToBottom()
+        #expect(host.fencedSnapshot().scrollProjection.isFollowing)
+        await host.close()
+    }
+}
+
+private extension TerminalPTYAppliedTransition {
+    var recordingEvent: NeutralTerminalRecordingEvent {
+        switch self {
+        case .feed(let bytes): .feed(bytes)
+        case .resize(let dimensions):
+            .resize(columns: dimensions.columns, rows: dimensions.rows)
+        case .scrollByRows(let rows): .viewport(.byRows(rows))
+        case .scrollToTopRow(let row): .viewport(.toTopRow(row))
+        case .scrollToBottom: .viewport(.toBottom)
+        }
+    }
+}
+
+private func scrollbackCommand(disableEcho: Bool = false) throws -> String {
+    let echoPolicy = disableEcho ? "stty -echo; " : ""
+    return "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done; \(echoPolicy)exec \(try probeExecutable()) hold \"$0\""
 }
 
 private func makeHost(captureTransitions: Bool = true) throws -> TerminalPTYHost {

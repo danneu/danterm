@@ -80,6 +80,12 @@ struct DanTermRecordingFixtureTests {
                 }
             case .resize(let columns, let rows):
                 terminal.resize(columns: columns, rows: rows)
+            case .viewport(let navigation):
+                switch navigation {
+                case .byRows(let rows): terminal.scroll(byRows: rows)
+                case .toTopRow(let row): terminal.scroll(toTopRow: row)
+                case .toBottom: terminal.scrollToBottom()
+                }
             case .checkpoint:
                 break
             }

@@ -453,5 +453,12 @@ output and watch the view hold, drag the scrollbar knob, wheel-scroll `less`
 ## Commit progress
 
 - [x] 1. Add core viewport navigation, anchoring, projections, and rendering
-- [ ] 2. Route viewport intent through PTY ownership and capture/replay
+- [x] 2. Route viewport intent through PTY ownership and capture/replay
 - [ ] 3. Wire Swift-pane wheel and scrollbar interaction
+
+## Implementation notes
+
+- Line-based wheel deltas normalize at three rows per unit; precise deltas
+  divide by cell height, and both modes share a fractional-row remainder.
+- Recordings encode one additive `viewport` event with an `action` and optional
+  row value; capture appends it only when the owner command changes `Terminal`.

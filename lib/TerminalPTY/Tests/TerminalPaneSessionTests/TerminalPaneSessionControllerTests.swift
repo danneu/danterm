@@ -531,6 +531,178 @@ struct TerminalPaneSessionControllerTests {
         #expect(completionCount == 1)
         #expect((await host.resourceSnapshot()).isReleased)
     }
+
+    @Test("viewport state emits on change only and pane reads use logical window text", .timeLimit(.minutes(1)))
+    func viewportStateEmissionAndRead() async throws {
+        // Intent: expose one deduplicated, AppKit-free viewport state alongside logical pane text.
+        // Why it exists: commit-time scrollbar chrome must not poll or serialize padded grid rows.
+        // Scenario: a pane scrolls through retained output, repeats the same target, then enters alt.
+        let host = try makeHost()
+        let command = "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done; printf '__OUTPUT_DONE__\\n'"
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: command)
+        )
+        while controller.readFullHistoryText().contains("line-39") == false {
+            await Task.yield()
+            controller.synchronizeState()
+        }
+        var states: [TerminalPaneViewportState] = []
+        var plans: [RenderFramePlan] = []
+        controller.onViewportStateChange = { states.append($0) }
+        controller.onPlan = { plans.append($0) }
+
+        controller.scroll(byRows: -3)
+        controller.synchronizeState()
+        let scrolled = controller.viewportState
+        let emissionCount = states.count
+        let planCount = plans.count
+        controller.scroll(toTopRow: scrolled.projection.topRow)
+        controller.synchronizeState()
+
+        #expect(scrolled.isScrollbarEnabled)
+        #expect(scrolled.projection.isFollowing == false)
+        #expect(emissionCount == 1)
+        #expect(states.count == emissionCount)
+        #expect(planCount == 1)
+        #expect(plans.count == planCount)
+        #expect(controller.readViewportText() == host.fencedSnapshot().viewportText)
+        #expect(controller.readViewportText() != host.fencedSnapshot().screenText)
+
+        controller.sendText("printf '\\033[?1049h__ALT_STATE__'\n")
+        while host.fencedSnapshot().isAlternateScreenActive == false {
+            await Task.yield()
+        }
+        controller.synchronizeState()
+        #expect(controller.viewportState.isScrollbarEnabled == false)
+        #expect(states.last?.isScrollbarEnabled == false)
+
+        controller.tearDown()
+        await host.close()
+    }
+
+    @Test("text key and encoded input each snap browsing to live output", .timeLimit(.minutes(1)))
+    func everyUserInputPathSnapsViewport() async throws {
+        let host = try makeHost(captureTransitions: false)
+        let command = "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done; stty -echo; exec \(try probeExecutable()) hold \"$0\""
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: command)
+        )
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+
+        controller.scroll(byRows: -2)
+        controller.synchronizeState()
+        controller.sendText("text")
+        #expect(host.fencedSnapshot().scrollProjection.isFollowing)
+
+        controller.scroll(byRows: -2)
+        controller.synchronizeState()
+        controller.sendKey(.up, modifiers: [])
+        #expect(host.fencedSnapshot().scrollProjection.isFollowing)
+
+        controller.scroll(byRows: -2)
+        controller.synchronizeState()
+        controller.send([0x78])
+        #expect(host.fencedSnapshot().scrollProjection.isFollowing)
+
+        controller.tearDown()
+        await host.close()
+    }
+
+    @Test("session wheel intent carries fixed-table arrows for alternate fallback", .timeLimit(.minutes(1)))
+    func sessionWheelCarriesEncodedArrows() async throws {
+        let host = try makeHost()
+        let command = "printf '\\033[?1049h'; exec \(try probeExecutable()) hold \"$0\""
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: command)
+        )
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let baseline = await host.inputWrites().count
+
+        controller.sendWheel(rows: -2)
+        _ = host.fencedSnapshot()
+
+        let up = try #require(encodeTerminalKey(.up, modifiers: []))
+        #expect(Array((await host.inputWrites()).dropFirst(baseline)) == [up + up])
+
+        controller.tearDown()
+        await host.close()
+    }
+
+    @Test("captured controller navigation replays to its exact terminal", .timeLimit(.minutes(1)))
+    func controllerNavigationCaptureEquality() async throws {
+        // Intent: preserve owner-ordered viewport mutations through controller capture and replay.
+        // Why it exists: input snap is local state that a non-echoing child cannot reconstruct.
+        // Scenario: a captured pane scrolls away, types to return live, then exits normally.
+        let command = "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done; read ignored; exit"
+        let controller = try TerminalPaneSessionController(
+            configuration: .init(
+                initialDimensions: .init(columns: 80, rows: 24),
+                launchInput: makeLaunchInput(command: command)
+            ),
+            bootstrapExecutable: bootstrapExecutable(),
+            captureTransitions: true
+        )
+        let results = AsyncStream<PaneLifecycleResult>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        var iterator = results.stream.makeAsyncIterator()
+        controller.onSessionEnded = { results.continuation.yield($0) }
+        controller.synchronizeState()
+        while controller.readFullHistoryText().contains("line-39") == false {
+            await Task.yield()
+            controller.synchronizeState()
+        }
+
+        controller.scroll(byRows: -5)
+        controller.synchronizeState()
+        controller.sendText("continue\n")
+        #expect(await iterator.next() == .exited(.exited(0)))
+        controller.synchronizeState()
+
+        let recording = try #require(controller.capturedRecording(test: "viewport-controller"))
+        #expect(recording.events.contains(.viewport(.byRows(-5))))
+        #expect(recording.events.contains(.viewport(.toBottom)))
+        #expect(try recording.replay() == controller.terminalSnapshot())
+
+        controller.tearDown()
+        await controller.terminationHandle.terminateForApplicationExit()
+    }
+
+    @Test("wheel-rate navigation and sustained output converge without retaining owners", .timeLimit(.minutes(1)))
+    func navigationOutputStressConverges() async throws {
+        // Intent: interleave owner submissions, snapshot copies, and replanning at wheel-like rates.
+        // Why it exists: this path previously exposed a copy-time crash and teardown retention.
+        // Scenario: a streaming command runs while the user rapidly moves through its viewport.
+        weak var releasedController: TerminalPaneSessionController?
+        weak var releasedHost: TerminalPTYHost?
+        do {
+            let host = try makeHost(captureTransitions: false)
+            releasedHost = host
+            let controller = TerminalPaneSessionController(
+                host: host,
+                launchInput: makeLaunchInput(command: "printf '__READY__\\n'")
+            )
+            releasedController = controller
+            #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+
+            controller.sendText("i=0; while [ $i -lt 200 ]; do printf 'stress-%s\\n' \"$i\"; i=$((i+1)); done; printf '__STRESS_DONE__\\n'; exit\n")
+            for index in 0..<300 {
+                controller.scroll(byRows: index.isMultiple(of: 2) ? -1 : 1)
+            }
+            #expect(await host.waitForResult() == .exited(.exited(0)))
+            controller.synchronizeState()
+            #expect(try #require(controller.currentPlan).projectedText.contains("__STRESS_DONE__"))
+
+            controller.tearDown()
+            await host.close()
+            #expect((await host.resourceSnapshot()).isReleased)
+        }
+        #expect(releasedController == nil)
+        #expect(releasedHost == nil)
+    }
 }
 
 private func makeHost(captureTransitions: Bool = true) throws -> TerminalPTYHost {

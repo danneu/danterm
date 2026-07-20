@@ -40,6 +40,36 @@ struct TerminalPaneSessionPolicyTests {
         #expect(encodeTerminalKey(.returnKey, modifiers: .option) == [0x0D])
     }
 
+    @Test("precise wheel deltas accumulate row fractions in both directions")
+    func preciseWheelAccumulation() {
+        var accumulator = TerminalWheelAccumulator()
+
+        #expect(accumulator.consume(delta: 4, isPrecise: true, cellHeight: 10) == 0)
+        #expect(accumulator.consume(delta: 7, isPrecise: true, cellHeight: 10) == -1)
+        #expect(accumulator.consume(delta: -5, isPrecise: true, cellHeight: 10) == 0)
+        #expect(accumulator.consume(delta: -7, isPrecise: true, cellHeight: 10) == 1)
+    }
+
+    @Test("line wheel deltas use the pinned scale and preserve remainder")
+    func lineWheelScaling() {
+        var accumulator = TerminalWheelAccumulator(lineRowsPerUnit: 3)
+
+        #expect(accumulator.consume(delta: 0.5, isPrecise: false, cellHeight: 0) == -1)
+        #expect(accumulator.consume(delta: 0.5, isPrecise: false, cellHeight: 0) == -2)
+        #expect(accumulator.consume(delta: -1, isPrecise: false, cellHeight: 0) == 3)
+    }
+
+    @Test("wheel normalization rejects invalid geometry and treats momentum as ordinary deltas")
+    func wheelNormalizationGuards() {
+        var direct = TerminalWheelAccumulator()
+        var momentum = TerminalWheelAccumulator()
+
+        #expect(direct.consume(delta: 15, isPrecise: true, cellHeight: 10) == -1)
+        #expect(momentum.consume(delta: 15, isPrecise: true, cellHeight: 10) == -1)
+        #expect(direct.consume(delta: 1, isPrecise: true, cellHeight: 0) == 0)
+        #expect(direct.consume(delta: .infinity, isPrecise: false, cellHeight: 10) == 0)
+    }
+
     @Test("grid sizing floors each axis and clamps to terminal minima")
     func gridSizingFloorsAndClamps() {
         #expect(terminalGridDimensions(

@@ -127,16 +127,24 @@ public struct NeutralTerminalDimensions: Codable, Equatable, Sendable {
     }
 }
 
+/// Describes local viewport mutations that must replay even when the child emits no bytes.
+public enum NeutralTerminalViewportNavigation: Equatable, Sendable {
+    case byRows(Int)
+    case toTopRow(Int)
+    case toBottom
+}
+
 /// One owner-ordered terminal transition; checkpoints retain corpus expectation positions.
 public enum NeutralTerminalRecordingEvent: Equatable, Sendable {
     case feed([UInt8])
     case resize(columns: Int, rows: Int)
+    case viewport(NeutralTerminalViewportNavigation)
     case checkpoint
 }
 
 extension NeutralTerminalRecordingEvent: Codable {
     private enum CodingKeys: String, CodingKey {
-        case type, text, hex, columns, rows
+        case type, text, hex, columns, rows, action
     }
 
     public init(from decoder: any Decoder) throws {
@@ -161,6 +169,18 @@ extension NeutralTerminalRecordingEvent: Codable {
                 columns: try values.decode(Int.self, forKey: .columns),
                 rows: try values.decode(Int.self, forKey: .rows)
             )
+        case "viewport":
+            let action = try values.decode(String.self, forKey: .action)
+            switch action {
+            case "byRows":
+                self = .viewport(.byRows(try values.decode(Int.self, forKey: .rows)))
+            case "toTopRow":
+                self = .viewport(.toTopRow(try values.decode(Int.self, forKey: .rows)))
+            case "toBottom":
+                self = .viewport(.toBottom)
+            default:
+                throw NeutralTerminalRecordingError.unsupportedEvent("viewport.\(action)")
+            }
         case "expect":
             self = .checkpoint
         default:
@@ -178,6 +198,18 @@ extension NeutralTerminalRecordingEvent: Codable {
             try values.encode("resize", forKey: .type)
             try values.encode(columns, forKey: .columns)
             try values.encode(rows, forKey: .rows)
+        case .viewport(let navigation):
+            try values.encode("viewport", forKey: .type)
+            switch navigation {
+            case .byRows(let rows):
+                try values.encode("byRows", forKey: .action)
+                try values.encode(rows, forKey: .rows)
+            case .toTopRow(let row):
+                try values.encode("toTopRow", forKey: .action)
+                try values.encode(row, forKey: .rows)
+            case .toBottom:
+                try values.encode("toBottom", forKey: .action)
+            }
         case .checkpoint:
             try values.encode("expect", forKey: .type)
         }
@@ -207,7 +239,7 @@ public struct NeutralTerminalRecording: Codable, Equatable, Sendable {
     public let provenance: NeutralTerminalProvenance
     /// Geometry installed before the first recorded event.
     public let initial: NeutralTerminalDimensions
-    /// Owner-ordered feeds, resizes, and optional corpus checkpoints.
+    /// Owner-ordered terminal mutations and optional corpus checkpoints.
     public let events: [NeutralTerminalRecordingEvent]
 
     /// Creates a complete recording that can cross package test boundaries.
@@ -244,6 +276,12 @@ public struct NeutralTerminalRecording: Codable, Equatable, Sendable {
                     throw NeutralTerminalRecordingError.invalidDimensions
                 }
                 terminal.resize(columns: columns, rows: rows)
+            case .viewport(let navigation):
+                switch navigation {
+                case .byRows(let rows): terminal.scroll(byRows: rows)
+                case .toTopRow(let row): terminal.scroll(toTopRow: row)
+                case .toBottom: terminal.scrollToBottom()
+                }
             case .checkpoint:
                 break
             }

@@ -14,6 +14,23 @@ public enum TerminalPTYHostError: Error, Equatable, Sendable {
 package enum TerminalPTYAppliedTransition: Equatable, Sendable {
     case feed([UInt8])
     case resize(TerminalDimensions)
+    case scrollByRows(Int)
+    case scrollToTopRow(Int)
+    case scrollToBottom
+}
+
+/// Carries row direction plus session-encoded fallback bytes to the authoritative screen owner.
+public struct TerminalWheelIntent: Equatable, Sendable {
+    /// Signed local navigation, where negative rows move toward retained history.
+    public let rowDelta: Int
+    /// One encoded Up or Down key step, selected by the session for alternate-screen fallback.
+    public let alternateScreenStepBytes: [UInt8]
+
+    /// Keeps input encoding outside the host while leaving screen routing exclusively inside it.
+    public init(rowDelta: Int, alternateScreenStepBytes: [UInt8]) {
+        self.rowDelta = rowDelta
+        self.alternateScreenStepBytes = alternateScreenStepBytes
+    }
 }
 
 /// Test-support view of input and resize effects applied on the shared owner queue.
@@ -163,8 +180,12 @@ public actor TerminalPTYHost {
 
     /// Enqueues user bytes directly on the owner queue without an ordering-opaque Task.
     nonisolated public func send(_ bytes: [UInt8]) {
+        guard bytes.isEmpty == false else { return }
         queue.async { [weak self] in
-            self?.assumeIsolated { owner in owner.process(.sendInput(bytes)) }
+            self?.assumeIsolated { owner in
+                owner.applyViewportNavigation(.scrollToBottom, publishUpdate: false)
+                owner.process(.sendInput(bytes))
+            }
         }
     }
 
@@ -172,6 +193,41 @@ public actor TerminalPTYHost {
     nonisolated public func resize(_ dimensions: TerminalDimensions) {
         queue.async { [weak self] in
             self?.assumeIsolated { owner in owner.process(.resize(dimensions)) }
+        }
+    }
+
+    /// Enqueues relative local navigation on the same FIFO as child output and resize.
+    nonisolated public func scroll(byRows rowDelta: Int) {
+        queue.async { [weak self] in
+            self?.assumeIsolated { owner in
+                owner.applyViewportNavigation(.scrollByRows(rowDelta), publishUpdate: true)
+            }
+        }
+    }
+
+    /// Enqueues absolute scrollbar navigation in current-stream row coordinates.
+    nonisolated public func scroll(toTopRow row: Int) {
+        queue.async { [weak self] in
+            self?.assumeIsolated { owner in
+                owner.applyViewportNavigation(.scrollToTopRow(row), publishUpdate: true)
+            }
+        }
+    }
+
+    /// Enqueues an explicit return to live-bottom follow.
+    nonisolated public func scrollToBottom() {
+        queue.async { [weak self] in
+            self?.assumeIsolated { owner in
+                owner.applyViewportNavigation(.scrollToBottom, publishUpdate: true)
+            }
+        }
+    }
+
+    /// Routes wheel rows against the active screen at the point the owner executes the intent.
+    nonisolated public func sendWheel(_ intent: TerminalWheelIntent) {
+        guard intent.rowDelta != 0 else { return }
+        queue.async { [weak self] in
+            self?.assumeIsolated { owner in owner.applyWheel(intent) }
         }
     }
 
@@ -301,6 +357,47 @@ public actor TerminalPTYHost {
                 execute(command)
             }
         }
+    }
+
+    private func applyWheel(_ intent: TerminalWheelIntent) {
+        guard teardownFinished == false else { return }
+        if terminal.isAlternateScreenActive {
+            let count = intent.rowDelta.magnitude
+            guard intent.alternateScreenStepBytes.isEmpty == false,
+                  count <= UInt(Int.max),
+                  intent.alternateScreenStepBytes.count
+                    .multipliedReportingOverflow(by: Int(count)).overflow == false
+            else {
+                return
+            }
+            var bytes: [UInt8] = []
+            bytes.reserveCapacity(intent.alternateScreenStepBytes.count * Int(count))
+            for _ in 0..<count {
+                bytes.append(contentsOf: intent.alternateScreenStepBytes)
+            }
+            process(.sendInput(bytes))
+        } else {
+            applyViewportNavigation(.scrollByRows(intent.rowDelta), publishUpdate: true)
+        }
+    }
+
+    private func applyViewportNavigation(
+        _ navigation: TerminalPTYAppliedTransition,
+        publishUpdate: Bool
+    ) {
+        guard teardownFinished == false else { return }
+        let previousTerminal = terminal
+        switch navigation {
+        case .scrollByRows(let rows): terminal.scroll(byRows: rows)
+        case .scrollToTopRow(let row): terminal.scroll(toTopRow: row)
+        case .scrollToBottom: terminal.scrollToBottom()
+        case .feed, .resize: return
+        }
+        if terminal != previousTerminal {
+            markUpdatePending()
+            if captureTransitions { appliedTransitions.append(navigation) }
+        }
+        if publishUpdate { publishPendingUpdate() }
     }
 
     private func execute(_ command: PaneLifecycleCommand) {

@@ -6,6 +6,20 @@ import TerminalCoreRecording
 import TerminalPTYHost
 import TerminalRenderPlanning
 
+/// Gives the AppKit adapter a deduplicated scrollbar projection without exposing Terminal storage.
+public struct TerminalPaneViewportState: Equatable, Sendable {
+    /// False while an alternate screen owns the live grid and primary history stays hidden.
+    public let isScrollbarEnabled: Bool
+    /// Current reflowed row extent and selected local window.
+    public let projection: TerminalScrollProjection
+
+    /// Creates one complete state emitted atomically with the cached terminal snapshot.
+    public init(isScrollbarEnabled: Bool, projection: TerminalScrollProjection) {
+        self.isScrollbarEnabled = isScrollbarEnabled
+        self.projection = projection
+    }
+}
+
 /// Owns one headless terminal pane while keeping host bytes and actor state behind the adapter.
 @MainActor
 public final class TerminalPaneSessionController {
@@ -20,6 +34,7 @@ public final class TerminalPaneSessionController {
     private var didChildExit = false
     private var didEmitSessionEnded = false
     private var completedRecordingEvents: [NeutralTerminalRecordingEvent]?
+    private var lastEmittedViewportState: TerminalPaneViewportState?
 
     /// Process-lifetime access retained by the backend until this host finishes teardown.
     public let terminationHandle: TerminalPaneTerminationHandle
@@ -29,6 +44,9 @@ public final class TerminalPaneSessionController {
 
     /// Receives the first child-originated lifecycle result on the main actor.
     public var onSessionEnded: ((PaneLifecycleResult) -> Void)?
+
+    /// Receives scrollbar-relevant state only when its projection or screen availability changes.
+    public var onViewportStateChange: ((TerminalPaneViewportState) -> Void)?
 
     /// Releases the backend registry entry only after this host's native teardown completes.
     public var onTeardownCompleted: (@MainActor @Sendable () -> Void)?
@@ -92,6 +110,7 @@ public final class TerminalPaneSessionController {
         lastPlannedTerminal = cachedTerminal
         lastSubmittedDimensions = launchInput.initialDimensions
         self.isVisible = isVisible
+        lastEmittedViewportState = viewportState
 
         host.submitStart(launchInput)
         consumeTask = Task { [weak self, host] in
@@ -130,6 +149,32 @@ public final class TerminalPaneSessionController {
         send(bytes)
     }
 
+    /// Submits signed local row navigation through the host's ordered owner queue.
+    public func scroll(byRows rowDelta: Int) {
+        guard isTornDown == false, rowDelta != 0 else { return }
+        host.scroll(byRows: rowDelta)
+    }
+
+    /// Submits a scrollbar top row through the same ordering boundary as output and resize.
+    public func scroll(toTopRow row: Int) {
+        guard isTornDown == false else { return }
+        host.scroll(toTopRow: row)
+    }
+
+    /// Returns the local viewport to live-bottom follow.
+    public func scrollToBottom() {
+        guard isTornDown == false else { return }
+        host.scrollToBottom()
+    }
+
+    /// Carries fixed-table arrow bytes with semantic wheel rows for owner-side screen routing.
+    public func sendWheel(rows: Int) {
+        guard isTornDown == false, rows != 0 else { return }
+        let key: TerminalInputKey = rows < 0 ? .up : .down
+        guard let bytes = encodeTerminalKey(key, modifiers: []) else { return }
+        host.sendWheel(.init(rowDelta: rows, alternateScreenStepBytes: bytes))
+    }
+
     /// Submits each distinct valid grid once, preserving its order relative to input.
     public func setGridDimensions(_ dimensions: TerminalDimensions) {
         guard isTornDown == false, dimensions != lastSubmittedDimensions else { return }
@@ -153,7 +198,15 @@ public final class TerminalPaneSessionController {
 
     /// Returns the latest cached viewport without crossing the host actor boundary.
     public func readViewportText() -> String {
-        cachedTerminal.screenText
+        cachedTerminal.viewportText
+    }
+
+    /// Exposes the newest cached row extent and alternate-screen scrollbar availability.
+    public var viewportState: TerminalPaneViewportState {
+        TerminalPaneViewportState(
+            isScrollbarEnabled: cachedTerminal.isAlternateScreenActive == false,
+            projection: cachedTerminal.scrollProjection
+        )
     }
 
     /// Returns the latest cached history without crossing the host actor boundary.
@@ -196,6 +249,7 @@ public final class TerminalPaneSessionController {
         isTornDown = true
         onPlan = nil
         onSessionEnded = nil
+        onViewportStateChange = nil
         let onTeardownCompleted = takeTeardownCompletion()
         consumeTask?.cancel()
         consumeTask = nil
@@ -213,6 +267,7 @@ public final class TerminalPaneSessionController {
         transitions: [TerminalPTYAppliedTransition]?
     ) {
         cachedTerminal = snapshot
+        emitViewportStateIfNeeded()
         if case .some(.exited) = result {
             didChildExit = true
         }
@@ -226,12 +281,30 @@ public final class TerminalPaneSessionController {
                         .feed(bytes)
                     case .resize(let dimensions):
                         .resize(columns: dimensions.columns, rows: dimensions.rows)
+                    case .scrollByRows(let rows):
+                        .viewport(.byRows(rows))
+                    case .scrollToTopRow(let row):
+                        .viewport(.toTopRow(row))
+                    case .scrollToBottom:
+                        .viewport(.toBottom)
                     }
                 }
             }
             takeTeardownCompletion()?()
             onSessionEnded?(result)
         }
+    }
+
+    private func emitViewportStateIfNeeded() {
+        let state = viewportState
+        guard state != lastEmittedViewportState else { return }
+        lastEmittedViewportState = state
+        onViewportStateChange?(state)
+    }
+
+    /// Test support for whole-value recording equality after a synchronization fence.
+    package func terminalSnapshot() -> Terminal {
+        cachedTerminal
     }
 
     private func takeTeardownCompletion() -> (@MainActor @Sendable () -> Void)? {
