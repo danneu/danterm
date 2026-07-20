@@ -1,6 +1,7 @@
-// Real-PTY session tests for conflated planning, visibility, exit, and teardown.
+// Real-PTY session tests for planning, visibility, capture, exit, and teardown.
 import Foundation
 import PaneLifecycle
+import TerminalCoreRecording
 import TerminalRenderPlanning
 import Testing
 @testable import TerminalPTYHost
@@ -73,6 +74,7 @@ struct TerminalPaneSessionControllerTests {
 
         #expect(planCount == 0)
         #expect(results == [.launchFailed(.invalidDimensions)])
+        #expect(controller.capturedRecording(test: "launch-failure") == nil)
         controller.tearDown()
         await host.close()
     }
@@ -227,6 +229,102 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
+    @Test("child session end exposes one replayable DanTerm recording", .timeLimit(.minutes(1)))
+    func childSessionEndExposesRecording() async throws {
+        // Intent: an enabled controller captures the exact owner-ordered output
+        //   and resize transitions that produced its final synchronous read.
+        // Why it exists: the viability harness needs a recording at child end,
+        //   including for the last pane that remains modeled until app quit.
+        // Scenario: a shell prints before and after a resize, then exits normally;
+        //   the harness extracts and replays that completed pane session.
+        let launchInput = makeLaunchInput(
+            command: "printf '__CAPTURE_READY__\\n'; read ignored"
+        )
+        let controller = try TerminalPaneSessionController(
+            configuration: .init(
+                initialDimensions: launchInput.initialDimensions,
+                launchInput: launchInput
+            ),
+            bootstrapExecutable: bootstrapExecutable(),
+            captureTransitions: true
+        )
+        let plans = AsyncStream<RenderFramePlan>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        var planIterator = plans.stream.makeAsyncIterator()
+        let results = AsyncStream<PaneLifecycleResult>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        var resultIterator = results.stream.makeAsyncIterator()
+        controller.onPlan = { plans.continuation.yield($0) }
+        controller.onSessionEnded = { results.continuation.yield($0) }
+        controller.synchronizeState()
+        var readyPlan = controller.currentPlan
+        while readyPlan?.projectedText.contains("__CAPTURE_READY__") != true {
+            readyPlan = await planIterator.next()
+        }
+
+        controller.setGridDimensions(.init(columns: 96, rows: 28))
+        controller.sendText("continue\nprintf '__CAPTURE_FINAL__\\n'\nexit\n")
+        #expect(await resultIterator.next() == .exited(.exited(0)))
+        controller.synchronizeState()
+
+        let recording = try #require(controller.capturedRecording(test: "viability-pane"))
+        let replayed = try recording.replay()
+        #expect(recording.provenance == .danTerm(test: "viability-pane"))
+        #expect(replayed.geometry.columns == 96)
+        #expect(replayed.geometry.rows.count == 28)
+        #expect(replayed.fullHistoryText == controller.readFullHistoryText())
+
+        controller.tearDown()
+        await controller.terminationHandle.terminateForApplicationExit()
+    }
+
+    @Test("tearing down a live child never exposes a recording", .timeLimit(.minutes(1)))
+    func liveChildTeardownDoesNotExposeRecording() async throws {
+        // Intent: recording eligibility follows child-originated session end,
+        //   not controller teardown or the host's bounded close completion.
+        // Why it exists: capture-on-teardown would mislabel killed partial sessions
+        //   and still miss the last pane, which is retained through quit confirmation.
+        // Scenario: the user closes a pane while its interactive shell is still live.
+        let host = try makeHost(captureTransitions: true)
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
+        )
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+
+        controller.tearDown()
+        await host.close()
+
+        #expect(controller.capturedRecording(test: "torn-down-pane") == nil)
+    }
+
+    @Test("capture disabled remains behaviorally inert", .timeLimit(.minutes(1)))
+    func captureDisabledExposesNoRecording() async throws {
+        // Intent: the default controller path completes a normal session without
+        //   retaining or exposing recording transitions.
+        // Why it exists: capture is characterization-only product surface and must
+        //   not change the default engine's lifetime or output behavior.
+        // Scenario: a normal non-characterization pane prints a marker and exits.
+        let host = try makeHost(captureTransitions: false)
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "printf '__CAPTURE_OFF__\\n'; exit")
+        )
+        let results = AsyncStream<PaneLifecycleResult>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        var resultIterator = results.stream.makeAsyncIterator()
+        controller.onSessionEnded = { results.continuation.yield($0) }
+
+        #expect(await resultIterator.next() == .exited(.exited(0)))
+        controller.synchronizeState()
+        #expect(controller.readFullHistoryText().contains("__CAPTURE_OFF__"))
+        #expect(controller.capturedRecording(test: "capture-disabled") == nil)
+
+        controller.tearDown()
+        await host.close()
+    }
+
     @Test("teardown fences the cached terminal before ending consumption", .timeLimit(.minutes(1)))
     func teardownFencesCachedTerminal() async throws {
         // Intent: synchronous teardown preserves every terminal mutation already
@@ -315,11 +413,11 @@ struct TerminalPaneSessionControllerTests {
     }
 }
 
-private func makeHost() throws -> TerminalPTYHost {
+private func makeHost(captureTransitions: Bool = true) throws -> TerminalPTYHost {
     try TerminalPTYHost(
         initialDimensions: .init(columns: 80, rows: 24),
         bootstrapExecutable: bootstrapExecutable(),
-        captureTransitions: true
+        captureTransitions: captureTransitions
     )
 }
 

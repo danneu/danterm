@@ -11,7 +11,7 @@ public enum TerminalPTYHostError: Error, Equatable, Sendable {
 }
 
 /// Test-support view of the exact output/resize order applied to TerminalCore.
-enum TerminalPTYAppliedTransition: Equatable, Sendable {
+package enum TerminalPTYAppliedTransition: Equatable, Sendable {
     case feed([UInt8])
     case resize(TerminalDimensions)
 }
@@ -58,7 +58,7 @@ public actor TerminalPTYHost {
     private var reducer = PaneLifecycleReducer()
     private var terminal: Terminal
     private let initialDimensions: TerminalDimensions
-    private let captureTransitions: Bool
+    package nonisolated let captureTransitions: Bool
     private let bootstrapExecutable: String
     private let updateContinuation: AsyncStream<Void>.Continuation
 
@@ -119,7 +119,7 @@ public actor TerminalPTYHost {
         )
     }
 
-    init(
+    package init(
         initialDimensions: TerminalDimensions,
         bootstrapExecutable: String,
         captureTransitions: Bool
@@ -237,7 +237,7 @@ public actor TerminalPTYHost {
     }
 
     /// Returns the exact TerminalCore mutation order for neutral recording tests.
-    func transitions() -> [TerminalPTYAppliedTransition] {
+    package func transitions() -> [TerminalPTYAppliedTransition] {
         appliedTransitions
     }
 
