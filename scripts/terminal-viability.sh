@@ -50,6 +50,12 @@ current_input_source() {
     defaults read com.apple.HIToolbox AppleCurrentKeyboardLayoutInputSourceID 2>/dev/null || true
 }
 
+current_modifier_flags() {
+    osascript -l JavaScript -e \
+        'ObjC.import("CoreGraphics"); $.CGEventSourceFlagsState($.kCGEventSourceStateHIDSystemState).toString()' \
+        2>/dev/null || true
+}
+
 terminate_owned_pid() {
     local pid="${1:-}"
     [[ "$pid" =~ ^[0-9]+$ ]] || return 0
@@ -66,6 +72,22 @@ terminate_owned_pid() {
     done
     kill -KILL "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
+}
+
+make_short_runtime_alias() {
+    local target="$1"
+    local alias_path
+    alias_path="$(mktemp -d /private/tmp/dtv.XXXXXX)"
+    rmdir "$alias_path"
+    ln -s "$target" "$alias_path"
+    printf '%s\n' "$alias_path"
+}
+
+assert_unix_socket_path_fits() {
+    local path="$1"
+    local byte_count
+    byte_count="$(LC_ALL=C printf '%s' "$path" | wc -c | tr -d ' ')"
+    (( byte_count < 104 ))
 }
 
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
@@ -99,6 +121,16 @@ case "$INPUT_SOURCE" in
         ;;
 esac
 
+MODIFIER_FLAGS="$(current_modifier_flags)"
+if [[ ! "$MODIFIER_FLAGS" =~ ^[0-9]+$ ]]; then
+    echo "Terminal viability could not read the current keyboard modifier state." >&2
+    exit 1
+fi
+if (( MODIFIER_FLAGS & 65536 )); then
+    echo "Caps Lock must be off for terminal viability's lowercase keyboard evidence." >&2
+    exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 EXTERNAL_FIXTURE="$REPO_ROOT/lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/libvterm/state-movecursor.json"
@@ -107,13 +139,15 @@ EXTERNAL_ROWS="$(jq -er '.initial.rows' "$EXTERNAL_FIXTURE")"
 BUILD_PATH="$REPO_ROOT/.build/terminal-viability-swiftpm"
 RUNS_ROOT="$REPO_ROOT/.build/terminal-viability-runs"
 RUN_ROOT="$RUNS_ROOT/$(date +%Y-%m-%d-%H%M%S)-$$"
+mkdir -p "$RUN_ROOT"
+RUNTIME_ROOT="$(make_short_runtime_alias "$RUN_ROOT")"
 RUN_MARKER="$RUN_ROOT/.danterm-terminal-viability-run"
 CAPTURE_DIRECTORY="$RUN_ROOT/artifacts"
 RECORDING_DIRECTORY="$CAPTURE_DIRECTORY/recordings"
 CORPUS_DIRECTORY="$RUN_ROOT/corpus"
-ISOLATED_HOME="$RUN_ROOT/home"
-ISOLATED_TMP="$RUN_ROOT/tmp"
-ISOLATED_ZDOTDIR="$RUN_ROOT/zdotdir"
+ISOLATED_HOME="$RUNTIME_ROOT/home"
+ISOLATED_TMP="$RUNTIME_ROOT/tmp"
+ISOLATED_ZDOTDIR="$RUNTIME_ROOT/zdotdir"
 APP_PATH="$RUN_ROOT/$VIABILITY_APP_NAME.app"
 APP_LOG="$CAPTURE_DIRECTORY/app.log"
 PATH_PROBE="$CAPTURE_DIRECTORY/path-probe.json"
@@ -129,6 +163,9 @@ cleanup() {
     local status=$?
     trap - EXIT INT TERM
     terminate_owned_pid "$APP_PID"
+    if [[ -L "$RUNTIME_ROOT" ]]; then
+        unlink "$RUNTIME_ROOT"
+    fi
     printf '%s\n' "$status" >"$CAPTURE_DIRECTORY/exit-status.txt"
     if [[ $status -eq 0 ]]; then
         echo "Terminal viability artifacts: $CAPTURE_DIRECTORY"
@@ -138,6 +175,12 @@ cleanup() {
     exit "$status"
 }
 trap cleanup EXIT INT TERM
+
+assert_unix_socket_path_fits \
+    "$ISOLATED_HOME/Library/Caches/$VIABILITY_BUNDLE_ID/control.sock" || {
+    echo "Terminal viability runtime root exceeds the Unix socket path budget." >&2
+    exit 1
+}
 
 cat >"$ISOLATED_ZDOTDIR/.zshenv" <<'EOF'
 export PATH=/usr/bin:/bin:/usr/sbin:/sbin
@@ -342,6 +385,9 @@ wait_for_pane() {
 }
 wait_for_pane
 PRIMARY_PANE_ID="$PANE_ID"
+PRIMARY_GROUP_ID="$(jq -er \
+    '.selectedTabId as $tab | .groups[] | select(any(.tabs[]; .id == $tab)) | .id' \
+    "$CAPTURE_DIRECTORY/last-model.json")"
 PRIMARY_EVENT_ID="$(printf '%s' "$PRIMARY_PANE_ID" | tr '[:lower:]' '[:upper:]')"
 
 wait_for_pane_marker() {
@@ -403,31 +449,33 @@ send_command_and_wait() {
     wait_for_pane_marker "$pane_id" "$marker"
 }
 
-has_descendant_command() {
-    local parent="$1"
-    local expected="$2"
-    local child command
-    while read -r child; do
-        [[ -n "$child" ]] || continue
-        command="$(ps -p "$child" -o comm= 2>/dev/null | xargs)"
-        if [[ "$command" == "$expected" ]] || has_descendant_command "$child" "$expected"; then
-            return 0
-        fi
-    done < <(pgrep -P "$parent" 2>/dev/null || true)
-    return 1
-}
-
-wait_for_descendant_command() {
-    local parent="$1"
+wait_for_process_command() {
+    local pid="$1"
     local expected="$2"
     local deadline=$((SECONDS + VIABILITY_TIMEOUT_SECONDS))
-    while ! has_descendant_command "$parent" "$expected"; do
+    local command
+    while true; do
+        command="$(ps -p "$pid" -o comm= 2>/dev/null | xargs)"
+        [[ "$command" == "$expected" ]] && return 0
         if (( SECONDS >= deadline )); then
-            echo "Timed out waiting for foreground process: $expected" >&2
+            echo "Timed out waiting for process $pid to become $expected; found ${command:-none}." >&2
             return 1
         fi
         sleep 0.05
     done
+}
+
+assert_process_descends_from() {
+    local pid="$1"
+    local ancestor="$2"
+    local parent
+    while [[ "$pid" =~ ^[0-9]+$ ]] && [[ "$pid" -gt 1 ]]; do
+        [[ "$pid" -eq "$ancestor" ]] && return 0
+        parent="$(ps -p "$pid" -o ppid= 2>/dev/null | xargs)"
+        [[ "$parent" =~ ^[0-9]+$ ]] || return 1
+        pid="$parent"
+    done
+    return 1
 }
 
 window_size() {
@@ -514,6 +562,8 @@ capture_region() {
 }
 
 wait_for_pane_marker "$PRIMARY_PANE_ID" "DANTERM-VIABILITY>" substring
+"$CLI" pane input --pane "$PRIMARY_PANE_ID" -- C-c
+wait_for_pane_marker "$PRIMARY_PANE_ID" "DANTERM-VIABILITY>" substring
 
 osascript - "$APP_PID" <<'APPLESCRIPT' >/dev/null
 on run argv
@@ -542,14 +592,29 @@ wait_for_pane_marker "$PRIMARY_PANE_ID" "SPANISH: niño, acción, corazón"
 wait_for_pane_marker "$PRIMARY_PANE_ID" "CHINESE: 你好世界"
 
 "$CLI" pane input --pane "$PRIMARY_PANE_ID" --literal -- "printf 'EDIT:righX\\n'"
-"$CLI" pane input --pane "$PRIMARY_PANE_ID" -- Left Backspace
+"$CLI" pane input --pane "$PRIMARY_PANE_ID" -- Left Left Left Backspace
 "$CLI" pane input --pane "$PRIMARY_PANE_ID" --literal -- t
 "$CLI" pane input --pane "$PRIMARY_PANE_ID" -- Enter
 wait_for_pane_marker "$PRIMARY_PANE_ID" "EDIT:right"
 
-"$CLI" pane input --pane "$PRIMARY_PANE_ID" --literal -- "sleep 30"
+FOREGROUND_PID_FILE="$RUN_ROOT/foreground-sleep.pid"
+printf -v foreground_pid_argument '%q' "$FOREGROUND_PID_FILE"
+"$CLI" pane input --pane "$PRIMARY_PANE_ID" --literal -- \
+    "/bin/sh -c 'echo \$\$ > $foreground_pid_argument; exec /bin/sleep 30'"
 "$CLI" pane input --pane "$PRIMARY_PANE_ID" -- Enter
-wait_for_descendant_command "$APP_PID" "/bin/sleep"
+wait_for_file "$FOREGROUND_PID_FILE" "the foreground sleep PID"
+FOREGROUND_SLEEP_PID="$(cat "$FOREGROUND_PID_FILE")"
+[[ "$FOREGROUND_SLEEP_PID" =~ ^[0-9]+$ ]] || {
+    echo "Foreground sleep wrote an invalid PID: $FOREGROUND_SLEEP_PID" >&2
+    exit 1
+}
+wait_for_process_command "$FOREGROUND_SLEEP_PID" "/bin/sleep"
+assert_process_descends_from "$FOREGROUND_SLEEP_PID" "$APP_PID" || {
+    echo "Foreground sleep was not a descendant of the viability app." >&2
+    exit 1
+}
+ps -p "$FOREGROUND_SLEEP_PID" -o pid=,ppid=,pgid=,comm=,command= \
+    >"$CAPTURE_DIRECTORY/foreground-process.txt"
 "$CLI" pane input --pane "$PRIMARY_PANE_ID" -- C-c
 send_command_and_wait "$PRIMARY_PANE_ID" "echo JOB-CTRL-C" "JOB-CTRL-C"
 send_command_and_wait "$PRIMARY_PANE_ID" \
@@ -589,7 +654,7 @@ cmp -s "$CAPTURE_DIRECTORY/reflow-narrow.txt" "$CAPTURE_DIRECTORY/reflow-wide.tx
 cmp -s "$CAPTURE_DIRECTORY/reflow-narrow.txt" "$CAPTURE_DIRECTORY/reflow-narrow-again.txt" \
     || { echo "Marker-bounded history changed after narrowing again." >&2; exit 1; }
 
-SECOND_TAB_JSON="$("$CLI" tab new --foreground)"
+SECOND_TAB_JSON="$("$CLI" tab new --group "$PRIMARY_GROUP_ID" --foreground)"
 SECOND_PANE_ID="$(printf '%s\n' "$SECOND_TAB_JSON" | jq -er '.tab.focusedPaneId')"
 wait_for_pane_marker "$SECOND_PANE_ID" "DANTERM-VIABILITY>" substring
 hidden_event="session.visibilityChanged:$PRIMARY_EVENT_ID:false"

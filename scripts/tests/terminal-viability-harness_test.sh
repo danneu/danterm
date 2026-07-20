@@ -71,9 +71,47 @@ fi
 grep -qF 'U.S./ABC input source' "$TEST_ROOT/non-us.err" \
     || fail "input-source refusal omitted its prerequisite"
 
+cat >"$fake_bin/defaults" <<'EOF'
+#!/usr/bin/env bash
+printf 'com.apple.keylayout.US\n'
+EOF
+cat >"$fake_bin/osascript" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+    *kCGEventSourceStateHIDSystemState*) printf '65536\n' ;;
+    *) printf '0\n' ;;
+esac
+EOF
+chmod +x "$fake_bin/defaults" "$fake_bin/osascript"
+rm -f "$TEST_ROOT/swift-ran"
+if DANTERM_TERMINAL_ENGINE_TEST_ALLOW_APP_CONTROL=1 \
+    PATH="$fake_bin:/usr/bin:/bin:/usr/sbin:/sbin" "$HARNESS" \
+    >"$TEST_ROOT/caps-lock.out" 2>"$TEST_ROOT/caps-lock.err"; then
+    fail "script accepted Caps Lock before lowercase keyboard evidence"
+fi
+[[ ! -e "$TEST_ROOT/swift-ran" ]] || fail "build ran before the Caps Lock refusal"
+grep -qF 'Caps Lock must be off' "$TEST_ROOT/caps-lock.err" \
+    || fail "Caps Lock refusal omitted its prerequisite"
+
 # The path is resolved from SCRIPT_DIR at runtime.
 # shellcheck disable=SC1090,SC1091
 source "$HARNESS"
+
+archive_root="$TEST_ROOT/preserved-run"
+mkdir -p "$archive_root"
+runtime_root="$(make_short_runtime_alias "$archive_root")"
+[[ -L "$runtime_root" ]] || fail "runtime root is not a symlink"
+[[ "$(/usr/bin/python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$runtime_root")" == \
+    "$(/usr/bin/python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$archive_root")" ]] \
+    || fail "runtime root does not resolve to the preserved run"
+socket_path="$runtime_root/home/Library/Caches/com.danneu.danterm-terminal-viability/control.sock"
+assert_unix_socket_path_fits "$socket_path" \
+    || fail "short runtime root still exceeds the Unix socket path budget"
+long_socket_path="$TEST_ROOT/$(printf 'x%.0s' $(seq 1 104))"
+if assert_unix_socket_path_fits "$long_socket_path"; then
+    fail "overlong Unix socket path was accepted"
+fi
+unlink "$runtime_root"
 
 markers="$TEST_ROOT/markers.txt"
 cat >"$markers" <<'EOF'

@@ -261,6 +261,16 @@ the evidence doc before the roadmap boxes are checked.
 - [x] 1. Add the pane-session capture seam (engine)
 - [x] 2. Record viability sessions and scheduling traces (app, lint)
 - [x] 3. Add the terminal viability harness (script, justfile)
-- [ ] 4. Narrow fixes exposed by the workflow (conditional, repeatable)
+- [x] 4. Narrow fixes exposed by the workflow (conditional, repeatable)
 - [ ] 5. Replay the captured viability session headlessly (fixture, test)
 - [ ] 6. Record milestone 4 evidence and close the gate (docs, roadmap)
+
+## Implementation notes
+
+- The preserved repository run path exceeds macOS's Unix-domain socket limit,
+  so the harness reaches it through a short `/private/tmp` symlink and verifies
+  that every resolved runtime path remains inside the preserved run root.
+- Lowercase and dead-key evidence now requires Caps Lock to be off according to
+  the HID system state, excluding synthetic combined-session modifier state.
+- The foreground job writes its PID immediately before `exec /bin/sleep`; the
+  harness verifies that exact process and its ancestry before sending Ctrl-C.
