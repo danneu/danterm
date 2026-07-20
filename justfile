@@ -6,7 +6,7 @@ default:
 
 # Remove build artifacts
 clean:
-    rm -rf .spm-build .build
+    rm -rf .spm-build .build lib/DanTermProtocol/.build lib/DanTermCore/.build lib/DanTermSupport/.build lib/TerminalCore/.build lib/TerminalPTY/.build
 
 # Clone/fetch Ghostty source for reference (no xcframework build).
 fetch-ghostty:
@@ -30,7 +30,7 @@ test:
     swift test --package-path lib/DanTermProtocol --filter DanTermProtocolTests
     swift test --package-path lib/DanTermCore
     swift test --package-path lib/TerminalCore
-    swift test --package-path lib/TerminalPTY
+    ./scripts/test-terminal-pty.sh
     swift test --package-path lib/DanTermSupport
     ./scripts/core-purity-lint.sh
     ./scripts/core-purity-lint.sh lib/TerminalCore/Sources/TerminalCore
@@ -51,6 +51,7 @@ test:
     ./scripts/tests/danterm-cli-connect-errors_test.sh
     ./scripts/tests/terminal-characterization-harness_test.sh
     ./scripts/tests/terminal-viability-harness_test.sh
+    ./scripts/tests/test-terminal-pty_test.sh
 
 # Run UI tests (AppKit, requires display)
 test-ui:
