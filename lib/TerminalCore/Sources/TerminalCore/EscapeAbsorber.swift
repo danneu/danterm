@@ -4,7 +4,14 @@
 enum EscapeEvent: Equatable, Sendable {
     case execute(UInt8)
     case escape(UInt8)
+    case escapeSequence(EscapeSequence)
     case csi(CSISequence)
+}
+
+/// Preserves an ESC intermediate and final when terminal dispatch depends on both.
+struct EscapeSequence: Equatable, Sendable {
+    let intermediates: [UInt8]
+    let final: UInt8
 }
 
 /// Preserves the syntactic CSI payload needed by terminal dispatch without interpreting it.
@@ -130,8 +137,10 @@ struct EscapeAbsorber: Equatable, Sendable {
             case 0x20...0x2F:
                 collectIntermediate(byte)
             case 0x30...0x7E:
+                let sequence = EscapeSequence(intermediates: intermediates, final: byte)
                 clearCollection()
                 state = .ground
+                return .escapeSequence(sequence)
             default:
                 break
             }

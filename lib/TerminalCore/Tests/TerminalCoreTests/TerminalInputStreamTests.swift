@@ -191,6 +191,17 @@ struct TerminalInputStreamTests {
         ])
     }
 
+    @Test("ESC intermediates remain available to terminal dispatch")
+    func escapeIntermediatesSurface() {
+        var stream = TerminalInputStream()
+
+        let actions = stream.feed(Array("\u{1B}#8".utf8))
+
+        #expect(actions == [
+            .escapeSequence(EscapeSequence(intermediates: [0x23], final: 0x38)),
+        ])
+    }
+
     @Test(
         "raw C1 anywhere transitions apply only while absorbing a sequence",
         arguments: [

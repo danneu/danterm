@@ -191,6 +191,11 @@ mean.
     synchronized frame gating, ordered DA/status/cursor/mode replies, PTY routing,
     and pinned query/save conformance fixtures. See the
     [implementation plan](../plans/impl/2026-07-20-1248-terminal-presentation-sync-modes.md).
+  - [x] **Slice 4: Selection and search over the logical projection.** Adds
+    engine-owned linear selection, literal history search, reflow-attached
+    projection boundaries, row-intersection invalidation, and eviction clamps.
+    See the
+    [implementation plan](../plans/impl/2026-07-20-1440-selection-search-logical-projection.md).
   - [ ] [Terminal core](04-terminal-core.md) completes the accepted baseline control,
     screen, mode, style, query, and recovery behavior.
   - [ ] [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md) completes

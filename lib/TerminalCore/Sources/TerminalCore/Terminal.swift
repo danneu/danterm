@@ -1,5 +1,35 @@
 // Pure headless terminal reduction: byte ingestion, grid mutation, controls, and inspection.
 
+/// Addresses a projection boundary in the current scrollback-plus-viewport stream.
+public struct TerminalTextPosition: Equatable, Sendable {
+    /// Counts from the oldest retained scrollback row through the viewport.
+    public var row: Int
+
+    /// Addresses a boundary before, between, or after cells in the row.
+    public var column: Int
+
+    /// Creates a current-stream coordinate for selection or range inspection.
+    public init(row: Int, column: Int) {
+        self.row = row
+        self.column = column
+    }
+}
+
+/// Exposes a half-open logical-text range without tying callers to grid storage.
+public struct TerminalTextRange: Equatable, Sendable {
+    /// Marks the included projection boundary.
+    public var start: TerminalTextPosition
+
+    /// Marks the excluded projection boundary.
+    public var end: TerminalTextPosition
+
+    /// Creates a half-open range from two current-stream boundaries.
+    public init(start: TerminalTextPosition, end: TerminalTextPosition) {
+        self.start = start
+        self.end = end
+    }
+}
+
 /// Reduces terminal bytes into deterministic value-semantic screen state without IO.
 public struct Terminal: Equatable, Sendable {
     /// Keeps scalar storage and wide-cell roles together for invariant-preserving mutation.
@@ -99,6 +129,43 @@ public struct Terminal: Equatable, Sendable {
         var column: Int
     }
 
+    /// Keeps inspection state stable while rows migrate between viewport and scrollback.
+    private struct TextAnchor: Equatable, Comparable, Sendable {
+        var row: Int
+        var column: Int
+
+        static func < (lhs: Self, rhs: Self) -> Bool {
+            lhs.row < rhs.row || (lhs.row == rhs.row && lhs.column < rhs.column)
+        }
+    }
+
+    /// Represents a half-open selection or match in absolute retained-row coordinates.
+    private struct TextAnchorRange: Equatable, Sendable {
+        var start: TextAnchor
+        var end: TextAnchor
+    }
+
+    /// Stores only the active query and occurrence so navigation always rescans live text.
+    private struct SearchState: Equatable, Sendable {
+        var query: String
+        var range: TextAnchorRange
+    }
+
+    /// Couples one atomic projected unit to the boundaries that can select it.
+    private struct ProjectionUnit {
+        var scalars: [Unicode.Scalar]
+        var start: TextAnchor
+        var end: TextAnchor
+        var isHardBoundary: Bool
+    }
+
+    /// Reuses cursor reflow keys and logical-line boundaries for inspection anchors.
+    private enum ReflowTextAttachment {
+        case cell(key: Int, width: Int, usesStart: Bool)
+        case lineStart(Int)
+        case lineEnd(Int)
+    }
+
     /// Keeps the one DECSC slot independent from live cursor and mode mutation.
     private struct SavedCursorState: Equatable, Sendable {
         var position = CellPosition(row: 0, column: 0)
@@ -193,6 +260,9 @@ public struct Terminal: Equatable, Sendable {
     private var clusterContext: ClusterContext?
     private var inputStream = TerminalInputStream()
     private var replyBytes: [UInt8] = []
+    private var evictedRowCount = 0
+    private var selection: TextAnchorRange?
+    private var search: SearchState?
 
     static let productionScrollbackBudgetBytes = 10_485_760
 
@@ -268,6 +338,8 @@ public struct Terminal: Equatable, Sendable {
                 execute(control)
             case let .escape(final):
                 dispatchEscape(final)
+            case let .escapeSequence(sequence):
+                dispatchEscape(sequence)
             case let .csi(sequence):
                 dispatchCSI(sequence)
             }
@@ -278,6 +350,10 @@ public struct Terminal: Equatable, Sendable {
     public mutating func resize(columns: Int, rows: Int) {
         guard columns >= 2, rows >= 1 else { return }
         guard columns != columnCount || rows != rowCount else { return }
+
+        if inactivePrimaryScreen != nil {
+            clearInspection()
+        }
 
         let oldColumnCount = columnCount
         scrollRegion = nil
@@ -312,6 +388,7 @@ public struct Terminal: Equatable, Sendable {
         }
 
         clampCursorStateToActiveGrid()
+        clampSelectionToRetainedStream()
         clusterContext = nil
     }
 
@@ -389,19 +466,426 @@ public struct Terminal: Equatable, Sendable {
         return projectedHistoryText(from: scrollbackRows.asArray() + primaryRows)
     }
 
+    /// Returns the current half-open selection endpoints in stream coordinates.
+    public var selectionRange: TerminalTextRange? {
+        selection.flatMap(publicRange)
+    }
+
+    /// Serializes the selected projection units, preserving an intentionally empty selection.
+    public var selectedText: String? {
+        guard let selection else { return nil }
+        return text(in: selection)
+    }
+
+    /// Returns the current half-open search occurrence in stream coordinates.
+    public var activeSearchMatchRange: TerminalTextRange? {
+        search.flatMap { publicRange($0.range) }
+    }
+
+    /// Selects both endpoint cells after clamping them into the active stream.
+    public mutating func setSelection(
+        from: TerminalTextPosition,
+        to: TerminalTextPosition
+    ) {
+        let first = normalizedCellPosition(from)
+        let second = normalizedCellPosition(to)
+        let ordered = positionPrecedes(first, second) ? (first, second) : (second, first)
+        selection = TextAnchorRange(
+            start: anchor(before: ordered.0),
+            end: anchor(after: ordered.1)
+        )
+    }
+
+    /// Clears only the local selection, leaving an active search untouched.
+    public mutating func clearSelection() {
+        selection = nil
+    }
+
+    /// Selects the newest literal match, or clears search state when none exists.
+    @discardableResult
+    public mutating func beginSearch(_ query: String) -> Bool {
+        guard query.isEmpty == false, let match = searchMatches(for: query).last else {
+            search = nil
+            return false
+        }
+        search = SearchState(query: query, range: match)
+        return true
+    }
+
+    /// Moves to the next older match without wrapping or disturbing an end match.
+    @discardableResult
+    public mutating func searchNext() -> Bool {
+        guard let search else { return false }
+        let matches = searchMatches(for: search.query)
+        guard let current = matches.firstIndex(of: search.range), current > 0 else {
+            return false
+        }
+        self.search?.range = matches[current - 1]
+        return true
+    }
+
+    /// Moves to the previous newer match without wrapping or disturbing an end match.
+    @discardableResult
+    public mutating func searchPrevious() -> Bool {
+        guard let search else { return false }
+        let matches = searchMatches(for: search.query)
+        guard let current = matches.firstIndex(of: search.range), current + 1 < matches.count else {
+            return false
+        }
+        self.search?.range = matches[current + 1]
+        return true
+    }
+
+    /// Clears the query and its active occurrence together.
+    public mutating func clearSearch() {
+        search = nil
+    }
+
     private func projectedHistoryText(from stream: [GridRow]) -> String {
+        var result = ""
+        forEachProjectionUnit(from: stream, absoluteBase: 0) { unit in
+            result.unicodeScalars.append(contentsOf: unit.scalars)
+        }
+        return result
+    }
+
+    private func activeProjectionRows() -> [GridRow] {
+        var stream = scrollbackRows.asArray()
+        if inactivePrimaryScreen != nil, let last = stream.indices.last {
+            stream[last].isSoftWrapped = false
+        }
+        stream.append(contentsOf: rows)
+        return stream
+    }
+
+    private func projectionUnits() -> [ProjectionUnit] {
+        projectionUnits(from: activeProjectionRows(), absoluteBase: evictedRowCount)
+    }
+
+    private func projectionUnits(
+        from stream: [GridRow],
+        absoluteBase: Int
+    ) -> [ProjectionUnit] {
+        var units: [ProjectionUnit] = []
+        forEachProjectionUnit(from: stream, absoluteBase: absoluteBase) {
+            units.append($0)
+        }
+        return units
+    }
+
+    private func forEachProjectionUnit(
+        from stream: [GridRow],
+        absoluteBase: Int,
+        _ body: (ProjectionUnit) -> Void
+    ) {
         guard let lastContentRow = stream.lastIndex(where: rowContainsContent) else {
-            return ""
+            return
         }
 
+        for rowIndex in 0...lastContentRow {
+            let row = stream[rowIndex]
+            let end = projectedCellEnd(in: row)
+            var column = 0
+            while column < end {
+                let cell = row.cells[column]
+                let width = cell.kind == .wideHead ? 2 : 1
+                let scalars: [Unicode.Scalar]?
+                switch cell.kind {
+                case .narrow, .wideHead:
+                    scalars = cell.scalars
+                case .padding:
+                    scalars = [" "]
+                case .wideTail, .spacerHead:
+                    scalars = nil
+                }
+                if let scalars {
+                    body(ProjectionUnit(
+                        scalars: scalars,
+                        start: TextAnchor(row: absoluteBase + rowIndex, column: column),
+                        end: TextAnchor(row: absoluteBase + rowIndex, column: column + width),
+                        isHardBoundary: false
+                    ))
+                }
+                column += width
+            }
+            if rowIndex < lastContentRow, row.isSoftWrapped == false {
+                body(ProjectionUnit(
+                    scalars: ["\n"],
+                    start: TextAnchor(row: absoluteBase + rowIndex, column: end),
+                    end: TextAnchor(row: absoluteBase + rowIndex + 1, column: 0),
+                    isHardBoundary: true
+                ))
+            }
+        }
+    }
+
+    private func projectedCellEnd(in row: GridRow) -> Int {
+        row.isSoftWrapped ? row.cells.endIndex : retainedContentEnd(in: row)
+    }
+
+    private func text(in range: TextAnchorRange) -> String {
         var result = ""
-        for index in 0...lastContentRow {
-            appendProjectedText(from: stream[index], to: &result)
-            if index < lastContentRow, stream[index].isSoftWrapped == false {
-                result.append("\n")
+        forEachProjectionUnit(
+            from: activeProjectionRows(),
+            absoluteBase: evictedRowCount
+        ) { unit in
+            if unit.start >= range.start && unit.end <= range.end {
+                result.unicodeScalars.append(contentsOf: unit.scalars)
             }
         }
         return result
+    }
+
+    private func publicRange(_ range: TextAnchorRange) -> TerminalTextRange? {
+        let base = evictedRowCount
+        let streamCount = scrollbackRows.count + rows.count
+        guard range.start.row >= base,
+              range.end.row >= base,
+              range.start.row < base + streamCount,
+              range.end.row < base + streamCount
+        else { return nil }
+        return TerminalTextRange(
+            start: TerminalTextPosition(row: range.start.row - base, column: range.start.column),
+            end: TerminalTextPosition(row: range.end.row - base, column: range.end.column)
+        )
+    }
+
+    private func normalizedCellPosition(_ position: TerminalTextPosition) -> CellPosition {
+        let stream = activeProjectionRows()
+        let row = min(max(position.row, 0), stream.count - 1)
+        var column = min(max(position.column, 0), columnCount - 1)
+        if stream[row].cells[column].kind == .wideTail {
+            column = max(0, column - 1)
+        }
+        return CellPosition(row: row, column: column)
+    }
+
+    private func positionPrecedes(_ lhs: CellPosition, _ rhs: CellPosition) -> Bool {
+        lhs.row < rhs.row || (lhs.row == rhs.row && lhs.column <= rhs.column)
+    }
+
+    private func anchor(before position: CellPosition) -> TextAnchor {
+        TextAnchor(row: evictedRowCount + position.row, column: position.column)
+    }
+
+    private func anchor(after position: CellPosition) -> TextAnchor {
+        let stream = activeProjectionRows()
+        let width = stream[position.row].cells[position.column].kind == .wideHead ? 2 : 1
+        return TextAnchor(
+            row: evictedRowCount + position.row,
+            column: min(columnCount, position.column + width)
+        )
+    }
+
+    private func searchMatches(for query: String) -> [TextAnchorRange] {
+        let queryScalars = Array(query.unicodeScalars)
+        guard queryScalars.isEmpty == false else { return [] }
+        let units = projectionUnits()
+        var matches: [TextAnchorRange] = []
+
+        for startIndex in units.indices {
+            var candidate: [Unicode.Scalar] = []
+            var endIndex = startIndex
+            while endIndex < units.endIndex, candidate.count < queryScalars.count {
+                candidate.append(contentsOf: units[endIndex].scalars)
+                endIndex += 1
+            }
+            guard candidate.count == queryScalars.count,
+                  asciiFoldedEqual(candidate, queryScalars)
+            else { continue }
+            matches.append(TextAnchorRange(
+                start: units[startIndex].start,
+                end: units[endIndex - 1].end
+            ))
+        }
+        return matches
+    }
+
+    private func asciiFoldedEqual(
+        _ lhs: [Unicode.Scalar],
+        _ rhs: [Unicode.Scalar]
+    ) -> Bool {
+        zip(lhs, rhs).allSatisfy { asciiFold($0) == asciiFold($1) }
+    }
+
+    private func asciiFold(_ scalar: Unicode.Scalar) -> UInt32 {
+        let value = scalar.value
+        return value >= 0x41 && value <= 0x5A ? value + 0x20 : value
+    }
+
+    private func attachments(
+        for range: TextAnchorRange,
+        in units: [ProjectionUnit],
+        rowMetadata: [ReflowRowMetadata],
+        oldColumnCount: Int
+    ) -> (start: ReflowTextAttachment, end: ReflowTextAttachment) {
+        (
+            attachment(
+                for: range.start,
+                prefersStart: true,
+                in: units,
+                rowMetadata: rowMetadata,
+                oldColumnCount: oldColumnCount
+            ),
+            attachment(
+                for: range.end,
+                prefersStart: false,
+                in: units,
+                rowMetadata: rowMetadata,
+                oldColumnCount: oldColumnCount
+            )
+        )
+    }
+
+    private func attachment(
+        for anchor: TextAnchor,
+        prefersStart: Bool,
+        in units: [ProjectionUnit],
+        rowMetadata: [ReflowRowMetadata],
+        oldColumnCount: Int
+    ) -> ReflowTextAttachment {
+        if prefersStart, let unit = units.first(where: { $0.start == anchor }) {
+            return attachment(
+                for: unit,
+                usesStart: true,
+                rowMetadata: rowMetadata,
+                oldColumnCount: oldColumnCount
+            )
+        }
+        if let unit = units.first(where: { $0.end == anchor }) {
+            return attachment(
+                for: unit,
+                usesStart: false,
+                rowMetadata: rowMetadata,
+                oldColumnCount: oldColumnCount
+            )
+        }
+        if let unit = units.first(where: { $0.start >= anchor }) {
+            return attachment(
+                for: unit,
+                usesStart: true,
+                rowMetadata: rowMetadata,
+                oldColumnCount: oldColumnCount
+            )
+        }
+        return .lineEnd(rowMetadata.last?.line ?? 0)
+    }
+
+    private func attachment(
+        for unit: ProjectionUnit,
+        usesStart: Bool,
+        rowMetadata: [ReflowRowMetadata],
+        oldColumnCount: Int
+    ) -> ReflowTextAttachment {
+        let sourceRow = unit.start.row - evictedRowCount
+        if unit.isHardBoundary {
+            return usesStart
+                ? .lineEnd(rowMetadata[sourceRow].line)
+                : .lineStart(rowMetadata[sourceRow + 1].line)
+        }
+        return .cell(
+            key: sourceKey(
+                row: sourceRow,
+                column: unit.start.column,
+                columns: oldColumnCount
+            ),
+            width: unit.end.column - unit.start.column,
+            usesStart: usesStart
+        )
+    }
+
+    private func textDestination(
+        for attachment: ReflowTextAttachment,
+        lineIndex: Int,
+        packed: PackedReflowLine,
+        baseRow: Int
+    ) -> TextAnchor? {
+        switch attachment {
+        case let .cell(key, width, usesStart):
+            guard let destination = packed.cellDestinations[key] else { return nil }
+            return TextAnchor(
+                row: evictedRowCount + baseRow + destination.row,
+                column: destination.column + (usesStart ? 0 : width)
+            )
+        case let .lineStart(line) where line == lineIndex:
+            return TextAnchor(row: evictedRowCount + baseRow, column: 0)
+        case let .lineEnd(line) where line == lineIndex:
+            return TextAnchor(
+                row: evictedRowCount + baseRow + packed.contentEnd.row,
+                column: packed.contentEnd.column
+            )
+        default:
+            return nil
+        }
+    }
+
+    private mutating func clearInspection() {
+        selection = nil
+        search = nil
+    }
+
+    private mutating func invalidateInspection(inViewportRows range: Range<Int>) {
+        guard range.isEmpty == false, selection != nil || search != nil else { return }
+        let lower = evictedRowCount + scrollbackRows.count + range.lowerBound
+        let upper = evictedRowCount + scrollbackRows.count + range.upperBound - 1
+        invalidateInspection(inAbsoluteRows: lower...upper)
+    }
+
+    private mutating func invalidateInspection(inScrollbackRow row: Int) {
+        guard selection != nil || search != nil else { return }
+        let absoluteRow = evictedRowCount + row
+        invalidateInspection(inAbsoluteRows: absoluteRow...absoluteRow)
+    }
+
+    private mutating func invalidateInspection(inAbsoluteRows rows: ClosedRange<Int>) {
+        if let selection, range(selection, intersects: rows) {
+            self.selection = nil
+        }
+        if let search, range(search.range, intersects: rows) {
+            self.search = nil
+        }
+    }
+
+    private func range(
+        _ range: TextAnchorRange,
+        intersects rows: ClosedRange<Int>
+    ) -> Bool {
+        let lastIncludedRow = range.end.column == 0 && range.end.row > range.start.row
+            ? range.end.row - 1
+            : range.end.row
+        return range.start.row <= rows.upperBound && lastIncludedRow >= rows.lowerBound
+    }
+
+    private mutating func clampSelectionToRetainedStream() {
+        guard var selection else { return }
+        selection.start.column = min(max(selection.start.column, 0), columnCount)
+        selection.end.column = min(max(selection.end.column, 0), columnCount)
+        let lastRow = evictedRowCount + scrollbackRows.count + rows.count - 1
+        let lastAnchor = TextAnchor(row: lastRow, column: projectedCellEnd(in: rows.last!))
+        if selection.start > lastAnchor {
+            selection.start = lastAnchor
+        }
+        if selection.end > lastAnchor {
+            selection.end = lastAnchor
+        }
+        self.selection = selection
+    }
+
+    private mutating func handleEviction(of rowCount: Int) {
+        guard rowCount > 0 else { return }
+        evictedRowCount += rowCount
+        let firstRetained = TextAnchor(row: evictedRowCount, column: 0)
+        if var selection {
+            if selection.end <= firstRetained {
+                self.selection = nil
+            } else {
+                selection.start = max(selection.start, firstRetained)
+                self.selection = selection
+            }
+        }
+        if let search, search.range.start < firstRetained {
+            self.search = nil
+        }
     }
 
     private static func scrollbackByteCost(of row: GridRow) -> Int {
@@ -420,14 +904,17 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func enforceScrollbackBudget() {
         var lastEvicted: GridRow?
+        var evictedCount = 0
         while scrollbackByteCount > scrollbackBudgetBytes {
             let evicted = scrollbackRows.removeFirst()
             scrollbackByteCount -= Self.scrollbackByteCost(of: evicted)
             lastEvicted = evicted
+            evictedCount += 1
         }
         if let lastEvicted {
             isHistoryHeadTruncated = lastEvicted.isSoftWrapped
         }
+        handleEviction(of: evictedCount)
     }
 
     /// Projects cell roles, row wraps, and cursor state without exposing mutable storage.
@@ -479,6 +966,8 @@ public struct Terminal: Equatable, Sendable {
             upper += 1
         }
         upper = min(upper, columnCount)
+
+        invalidateInspection(inViewportRows: row..<(row + 1))
 
         let style = backgroundEraseStyle
         for column in lower..<upper {
@@ -603,6 +1092,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func resizeWidth(to newColumnCount: Int) {
+        let oldUnits = projectionUnits()
         let oldColumnCount = columnCount
         let oldBottomDistance = rowCount - 1 - cursor.row
         let oldCursorGlobalRow = scrollbackRows.count + cursor.row
@@ -616,9 +1106,33 @@ public struct Terminal: Equatable, Sendable {
             viewportTopGlobalRow: scrollbackRows.count,
             oldColumnCount: oldColumnCount
         )
+        let selectionAttachments: (
+            start: ReflowTextAttachment,
+            end: ReflowTextAttachment
+        )? = selection.flatMap { selection in
+            guard oldUnits.isEmpty == false else { return nil }
+            return attachments(
+                for: selection,
+                in: oldUnits,
+                rowMetadata: reconstruction.rowMetadata,
+                oldColumnCount: oldColumnCount
+            )
+        }
+        let searchAttachments = search.map {
+            attachments(
+                for: $0.range,
+                in: oldUnits,
+                rowMetadata: reconstruction.rowMetadata,
+                oldColumnCount: oldColumnCount
+            )
+        }
 
         var rebuiltRows: [GridRow] = []
         var cursorDestination: ReflowDestination?
+        var selectionStartDestination: TextAnchor?
+        var selectionEndDestination: TextAnchor?
+        var searchStartDestination: TextAnchor?
+        var searchEndDestination: TextAnchor?
         var viewportTopDestinationRow = 0
         for (lineIndex, line) in reconstruction.lines.enumerated() {
             let packed = pack(line: line, columns: newColumnCount)
@@ -668,6 +1182,34 @@ public struct Terminal: Equatable, Sendable {
             default:
                 break
             }
+            if let selectionAttachments {
+                selectionStartDestination = selectionStartDestination ?? textDestination(
+                    for: selectionAttachments.start,
+                    lineIndex: lineIndex,
+                    packed: packed,
+                    baseRow: baseRow
+                )
+                selectionEndDestination = selectionEndDestination ?? textDestination(
+                    for: selectionAttachments.end,
+                    lineIndex: lineIndex,
+                    packed: packed,
+                    baseRow: baseRow
+                )
+            }
+            if let searchAttachments {
+                searchStartDestination = searchStartDestination ?? textDestination(
+                    for: searchAttachments.start,
+                    lineIndex: lineIndex,
+                    packed: packed,
+                    baseRow: baseRow
+                )
+                searchEndDestination = searchEndDestination ?? textDestination(
+                    for: searchAttachments.end,
+                    lineIndex: lineIndex,
+                    packed: packed,
+                    baseRow: baseRow
+                )
+            }
             rebuiltRows.append(contentsOf: packed.rows)
         }
 
@@ -699,6 +1241,20 @@ public struct Terminal: Equatable, Sendable {
             column: destination.column
         )
         isPendingWrap = destination.isPendingWrap
+        if selectionAttachments != nil {
+            if let start = selectionStartDestination, let end = selectionEndDestination {
+                selection = TextAnchorRange(start: min(start, end), end: max(start, end))
+            } else {
+                selection = nil
+            }
+        }
+        if searchAttachments != nil {
+            if let start = searchStartDestination, let end = searchEndDestination {
+                search?.range = TextAnchorRange(start: min(start, end), end: max(start, end))
+            } else {
+                search = nil
+            }
+        }
         enforceScrollbackBudget()
     }
 
@@ -712,7 +1268,8 @@ public struct Terminal: Equatable, Sendable {
         anchor: ReflowCursorAnchor,
         cursorLine: Int,
         viewportTopLine: Int,
-        viewportTopKey: Int?
+        viewportTopKey: Int?,
+        rowMetadata: [ReflowRowMetadata]
     ) {
         var lines: [ReflowLine] = []
         var currentLine = ReflowLine()
@@ -826,7 +1383,8 @@ public struct Terminal: Equatable, Sendable {
             anchor,
             cursorMetadata.line,
             viewportTopMetadata.line,
-            viewportTopMetadata.firstSourceKey
+            viewportTopMetadata.firstSourceKey,
+            metadata
         )
     }
 
@@ -1419,9 +1977,11 @@ public struct Terminal: Equatable, Sendable {
             }
             clearPendingMotionState()
         case 3:
+            let evictedCount = scrollbackRows.count
             scrollbackRows.removeAll(keepingCapacity: true)
             scrollbackByteCount = 0
             isHistoryHeadTruncated = false
+            handleEviction(of: evictedCount)
             clearPendingMotionState()
         default:
             return
@@ -1499,6 +2059,17 @@ public struct Terminal: Equatable, Sendable {
         default:
             break
         }
+    }
+
+    private mutating func dispatchEscape(_ sequence: EscapeSequence) {
+        guard sequence.intermediates == [0x23], sequence.final == 0x38 else { return }
+        invalidateInspection(inViewportRows: rows.indices)
+        for row in rows.indices {
+            rows[row] = GridRow(cells: (0..<columnCount).map { _ in
+                GridCell(kind: .narrow, scalars: ["E"], style: currentStyle)
+            })
+        }
+        clearPendingMotionState()
     }
 
     private mutating func execute(_ control: UInt8) {
@@ -1589,6 +2160,7 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func switchAlternateScreen(enabled: Bool) {
         if enabled {
+            clearInspection()
             if inactivePrimaryScreen == nil {
                 inactivePrimaryScreen = InactivePrimaryScreen(
                     rows: rows,
@@ -1600,6 +2172,7 @@ public struct Terminal: Equatable, Sendable {
                 makeBlankRow(columns: columnCount, style: backgroundEraseStyle)
             }
         } else if let primary = inactivePrimaryScreen {
+            clearInspection()
             rows = primary.rows
             inactivePrimaryScreen = nil
         }
@@ -1608,6 +2181,7 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func selectPrimaryScreen() {
         guard let primary = inactivePrimaryScreen else { return }
+        clearInspection()
         rows = primary.rows
         inactivePrimaryScreen = nil
     }
@@ -1660,6 +2234,8 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func hardReset() {
+        clearInspection()
+        evictedRowCount = 0
         selectPrimaryScreen()
         resetControlState()
         cursor = CellPosition(row: 0, column: 0)
@@ -1697,6 +2273,7 @@ public struct Terminal: Equatable, Sendable {
         guard properties.cellWidth != .zero else { return }
 
         if isPendingWrap {
+            invalidateInspection(inViewportRows: cursor.row..<(cursor.row + 1))
             softWrap()
         }
 
@@ -1747,6 +2324,7 @@ public struct Terminal: Equatable, Sendable {
             clusterContext = nil
             return false
         }
+        invalidateInspection(inViewportRows: target.row..<(target.row + 1))
         switch desiredClusterWidth(for: scalar, baseScalar: baseScalar) {
         case .wide where rows[target.row].cells[target.column].kind == .narrow:
             target = upgradeClusterToWide(at: target)
@@ -1805,6 +2383,7 @@ public struct Terminal: Equatable, Sendable {
                 advanceToNextRow(preservingWrapClaim: true)
                 cursor.column = 0
                 destination = cursor
+                invalidateInspection(inViewportRows: destination.row..<(destination.row + 1))
                 clearCellAndPair(row: destination.row, column: 0, clearsPreviousSpacer: false)
                 clearCellAndPair(row: destination.row, column: 1, clearsPreviousSpacer: false)
             } else {
@@ -1847,6 +2426,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func printNarrow(_ scalar: Unicode.Scalar) {
+        invalidateInspection(inViewportRows: cursor.row..<(cursor.row + 1))
         if isInsertMode {
             moveAndFillCells(
                 in: cursor.column..<columnCount,
@@ -1870,6 +2450,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func printWide(_ scalar: Unicode.Scalar) {
+        invalidateInspection(inViewportRows: cursor.row..<(cursor.row + 1))
         var preservesWrappedSpacer = false
         if cursor.column == columnCount - 1 {
             if isAutoWrapMode {
@@ -1887,6 +2468,8 @@ public struct Terminal: Equatable, Sendable {
                 cursor.column = columnCount - 2
             }
         }
+
+        invalidateInspection(inViewportRows: cursor.row..<(cursor.row + 1))
 
         if isInsertMode {
             moveAndFillCells(
@@ -1954,7 +2537,8 @@ public struct Terminal: Equatable, Sendable {
                 in: region,
                 by: -1,
                 pushesToScrollback: scrollRegion == nil && inactivePrimaryScreen == nil,
-                preservesTrailingWrap: preservingWrapClaim
+                preservesTrailingWrap: preservingWrapClaim,
+                invalidatesInspection: false
             )
         } else if cursor.row < rowCount - 1 {
             cursor.row += 1
@@ -2054,9 +2638,13 @@ public struct Terminal: Equatable, Sendable {
         in range: Range<Int>,
         by delta: Int,
         pushesToScrollback: Bool,
-        preservesTrailingWrap: Bool = false
+        preservesTrailingWrap: Bool = false,
+        invalidatesInspection: Bool = true
     ) {
         guard range.isEmpty == false, delta != 0 else { return }
+        if invalidatesInspection {
+            invalidateInspection(inViewportRows: range)
+        }
         let amount = min(abs(delta), range.count)
         let sourceRows = Array(rows[range])
         let style = backgroundEraseStyle
@@ -2096,6 +2684,7 @@ public struct Terminal: Equatable, Sendable {
         by delta: Int
     ) {
         guard range.isEmpty == false, delta != 0 else { return }
+        invalidateInspection(inViewportRows: row..<(row + 1))
         let amount = min(abs(delta), range.count)
         let sourceCells = Array(rows[row].cells[range])
         let style = backgroundEraseStyle
@@ -2162,6 +2751,10 @@ public struct Terminal: Equatable, Sendable {
         replacementStyle: TerminalStyle
     ) {
         guard rows.indices.contains(row) else { return }
+        guard rows[row].isSoftWrapped
+            || rows[row].cells[columnCount - 1].kind == .spacerHead
+        else { return }
+        invalidateInspection(inViewportRows: row..<(row + 1))
         rows[row].isSoftWrapped = false
         if rows[row].cells[columnCount - 1].kind == .spacerHead {
             rows[row].cells[columnCount - 1] = GridCell(style: replacementStyle)
@@ -2172,6 +2765,10 @@ public struct Terminal: Equatable, Sendable {
         at row: Int,
         replacementStyle: TerminalStyle
     ) {
+        guard scrollbackRows[row].isSoftWrapped
+            || scrollbackRows[row].cells[columnCount - 1].kind == .spacerHead
+        else { return }
+        invalidateInspection(inScrollbackRow: row)
         scrollbackRows[row].isSoftWrapped = false
         if scrollbackRows[row].cells[columnCount - 1].kind == .spacerHead {
             scrollbackRows[row].cells[columnCount - 1] = GridCell(style: replacementStyle)
@@ -2180,8 +2777,12 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func restoreWrapClaimBeforeCursor() {
         if cursor.row > 0 {
+            guard rows[cursor.row - 1].isSoftWrapped == false else { return }
+            invalidateInspection(inViewportRows: (cursor.row - 1)..<cursor.row)
             rows[cursor.row - 1].isSoftWrapped = true
         } else if inactivePrimaryScreen == nil, let last = scrollbackRows.indices.last {
+            guard scrollbackRows[last].isSoftWrapped == false else { return }
+            invalidateInspection(inScrollbackRow: last)
             scrollbackRows[last].isSoftWrapped = true
         }
     }
@@ -2189,25 +2790,6 @@ public struct Terminal: Equatable, Sendable {
     private func rowContainsContent(_ row: GridRow) -> Bool {
         row.cells.contains { cell in
             cell.kind == .narrow || cell.kind == .wideHead
-        }
-    }
-
-    private func appendProjectedText(from row: GridRow, to result: inout String) {
-        let end = row.isSoftWrapped
-            ? row.cells.endIndex
-            : (row.cells.lastIndex { cell in
-                cell.kind == .narrow || cell.kind == .wideHead
-            }.map { $0 + 1 } ?? row.cells.startIndex)
-
-        for cell in row.cells[..<end] {
-            switch cell.kind {
-            case .narrow, .wideHead:
-                result.unicodeScalars.append(contentsOf: cell.scalars)
-            case .padding:
-                result.append(" ")
-            case .wideTail, .spacerHead:
-                break
-            }
         }
     }
 
@@ -2249,12 +2831,14 @@ public struct Terminal: Equatable, Sendable {
     ) {
         guard column <= 1 else { return }
         if row > 0, rows[row - 1].cells[columnCount - 1].kind == .spacerHead {
+            invalidateInspection(inViewportRows: (row - 1)..<row)
             rows[row - 1].cells[columnCount - 1] = GridCell(style: replacementStyle)
         } else if row == 0,
                   inactivePrimaryScreen == nil,
                   let last = scrollbackRows.indices.last,
                   scrollbackRows[last].cells[columnCount - 1].kind == .spacerHead
         {
+            invalidateInspection(inScrollbackRow: last)
             scrollbackRows[last].cells[columnCount - 1] = GridCell(style: replacementStyle)
         }
     }
