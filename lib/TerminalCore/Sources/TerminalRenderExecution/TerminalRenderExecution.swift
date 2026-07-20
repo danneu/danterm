@@ -32,14 +32,16 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
     public let strikethroughOffset: CGFloat
 
     let baseFontName: String
+    let baseFontSize: CGFloat
     let unquantizedLineHeight: CGFloat
 
     /// Returns nil when scale or any derived cell dimension cannot be represented safely.
     public init?(displayScale: CGFloat) {
         guard displayScale.isFinite, displayScale > 0 else { return nil }
 
-        let appKitFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-        let font = CTFontCreateWithName(appKitFont.fontName as CFString, 13, nil)
+        let fontSize: CGFloat = 13
+        let appKitFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        let font = CTFontCreateWithName(appKitFont.fontName as CFString, fontSize, nil)
         var character = UniChar(0x004D)
         var glyph = CGGlyph()
         guard CTFontGetGlyphsForCharacters(font, &character, &glyph, 1) else { return nil }
@@ -82,6 +84,7 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
             max(0, self.baselineOffset - CTFontGetXHeight(font) / 2)
         )
         self.baseFontName = appKitFont.fontName
+        self.baseFontSize = fontSize
         self.unquantizedLineHeight = lineHeight
     }
 }
@@ -132,8 +135,8 @@ public func renderFrameSize(
     )
 }
 
-/// Executes the opaque frame clear and planned background spans while borrowing
-/// the caller's context without retaining or changing its graphics state.
+/// Executes planned backgrounds and independently shaped text cells while
+/// borrowing the caller's context without retaining or changing its state.
 public func drawRenderFrame(
     _ plan: RenderFramePlan,
     metrics: TerminalRenderMetrics,
@@ -165,6 +168,12 @@ public func drawRenderFrame(
             height: metrics.cellSize.height
         ))
     }
+
+    context.drawTextRuns(
+        plan.textRuns,
+        metrics: metrics,
+        colorSpace: colorSpace
+    )
 }
 
 private func quantizedPixelCount(_ pointValue: CGFloat, scale: CGFloat) -> Int? {
@@ -189,5 +198,88 @@ private extension RenderColor {
                 1,
             ]
         )!
+    }
+}
+
+private extension TerminalRenderMetrics {
+    func font(bold: Bool, italic: Bool) -> CTFont {
+        let regular = CTFontCreateWithName(baseFontName as CFString, baseFontSize, nil)
+        var traits: CTFontSymbolicTraits = []
+        if bold { traits.insert(.boldTrait) }
+        if italic { traits.insert(.italicTrait) }
+        guard traits.isEmpty == false else { return regular }
+        return CTFontCreateCopyWithSymbolicTraits(
+            regular,
+            0,
+            nil,
+            traits,
+            [.boldTrait, .italicTrait]
+        ) ?? regular
+    }
+}
+
+private extension CGContext {
+    func drawTextRuns(
+        _ runs: [RenderTextRun],
+        metrics: TerminalRenderMetrics,
+        colorSpace: CGColorSpace
+    ) {
+        setBlendMode(.normal)
+        for run in runs {
+            let font = metrics.font(bold: run.bold, italic: run.italic)
+            let attributes: [NSAttributedString.Key: Any] = [
+                kCTFontAttributeName as NSAttributedString.Key: font,
+                kCTForegroundColorAttributeName as NSAttributedString.Key:
+                    run.foreground.cgColor(in: colorSpace),
+                kCTLigatureAttributeName as NSAttributedString.Key: 0,
+            ]
+            var column = run.startColumn
+            for cell in run.cells {
+                drawTextCell(
+                    cell,
+                    row: run.row,
+                    column: column,
+                    attributes: attributes,
+                    metrics: metrics
+                )
+                column += cell.columnWidth
+            }
+        }
+    }
+
+    func drawTextCell(
+        _ cell: RenderTextCell,
+        row: Int,
+        column: Int,
+        attributes: [NSAttributedString.Key: Any],
+        metrics: TerminalRenderMetrics
+    ) {
+        let cellRect = CGRect(
+            x: CGFloat(column) * metrics.cellSize.width,
+            y: CGFloat(row) * metrics.cellSize.height,
+            width: CGFloat(cell.columnWidth) * metrics.cellSize.width,
+            height: metrics.cellSize.height
+        )
+        var scalarView = String.UnicodeScalarView()
+        scalarView.append(contentsOf: cell.scalars)
+        let line = CTLineCreateWithAttributedString(NSAttributedString(
+            string: String(scalarView),
+            attributes: attributes
+        ))
+
+        saveGState()
+        clip(to: cellRect)
+        // The caller's point space is top-left/y-down, but CoreText places its
+        // baseline in the context's bottom-relative text coordinate system.
+        textMatrix = CGAffineTransform(
+            a: 1,
+            b: 0,
+            c: 0,
+            d: 1,
+            tx: cellRect.minX,
+            ty: cellRect.maxY - metrics.baselineOffset
+        )
+        CTLineDraw(line, self)
+        restoreGState()
     }
 }
