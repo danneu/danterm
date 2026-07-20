@@ -868,8 +868,8 @@
         },
         {
           "name": "Altscreen",
-          "disposition": "out-of-scope",
-          "rationale": "Alternate-screen behavior is deferred to Milestone 6."
+          "disposition": "adopted",
+          "rationale": "screen-altscreen.json reproduces the upstream bytes and public screen assertions; libvterm's alternate-buffer opt-in has no DanTerm analog because the alternate screen is always available."
         }
       ]
     },
@@ -914,8 +914,8 @@
         },
         {
           "name": "Resize can operate on altscreen",
-          "disposition": "out-of-scope",
-          "rationale": "No alternate screen exists in Milestone 2; alternate-screen resize is deferred to Milestone 6."
+          "disposition": "adapted",
+          "rationale": "resize-altscreen.json reduces the dimensions while retaining the upstream reflow-off, no-scrollback-callback resize and both active-screen assertions."
         }
       ]
     },

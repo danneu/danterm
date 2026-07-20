@@ -178,6 +178,11 @@ mean.
     evaluate-or-drop point during Milestone 6.
 
 - [ ] **6. Complete required terminal behavior and interaction**
+  - [x] **Slice 1: Alternate screen and resize semantics.** Adds DEC 1047/1049
+    screen switching, transient alternate-grid isolation, rectangular alternate
+    resize with independent primary reflow, active and primary history
+    projections, recovery routing, and neutral libvterm fixtures. See the
+    [implementation plan](../plans/impl/2026-07-20-1014-alternate-screen-resize-semantics.md).
   - [ ] [Terminal core](04-terminal-core.md) completes the accepted baseline control,
     screen, mode, style, query, and recovery behavior.
   - [ ] [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md) completes

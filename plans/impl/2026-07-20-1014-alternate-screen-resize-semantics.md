@@ -459,4 +459,4 @@ requires an upstream case).
 
 - [x] 1. Route recovery and export through a primary-history read
 - [x] 2. Implement alternate-screen state, resize semantics, projections, and native proofs
-- [ ] 3. Adopt alternate-screen fixtures and record the roadmap slice
+- [x] 3. Adopt alternate-screen fixtures and record the roadmap slice
