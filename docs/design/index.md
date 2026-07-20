@@ -36,3 +36,4 @@ Default statuses are:
 - [2026-05-28: Pure Core Compiled Same-Module via Symlink, Tested via Nested Package](2026-05-28-core-module-via-symlink.md)
 - [2026-05-28: Pure Core / Portable Support / Platform Runtime: a Purity-Enforced Three-Layer Split](2026-05-28-pure-core-support-split.md)
 - [2026-06-09: AppKit / Ghostty Lifetime Safety](2026-06-09-appkit-lifetime-safety.md)
+- [2026-07-20: Terminal Engine Experiment Decision (Milestone 5)](2026-07-20-terminal-engine-experiment-decision.md)

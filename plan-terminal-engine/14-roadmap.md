@@ -148,17 +148,34 @@ mean.
     text equals the headless replay; the exact artifacts are indexed by the
     evidence record.
 
-- [ ] **5. Make the experiment decision**
-  - [ ] Evidence from the viability slice records whether the architecture is
+- [x] **5. Make the experiment decision**
+  - [x] Evidence from the viability slice records whether the architecture is
     pleasant to extend and whether Unicode/reflow, PTY ownership, rendering,
     concurrency, lifecycle, and power behavior are tractable.
-  - [ ] Explicitly choose to abandon the experiment, continue it, retain only
+    Milestone 5 judgment: this gate closes. The
+    [experiment decision record](../docs/design/2026-07-20-terminal-engine-experiment-decision.md)
+    evaluates each area against the Milestone 2-4 proof and the preserved
+    viability run, finds all six tractable, and records that Milestones 2-4
+    extended the architecture in sequential green slices without reworking
+    lower-layer contracts.
+  - [x] Explicitly choose to abandon the experiment, continue it, retain only
     independently useful infrastructure, or commit to the remaining replacement
     roadmap.
-  - [ ] Decision evidence records what the staged corpora and tools in
+    Milestone 5 judgment: the decision record chooses to continue the
+    experiment into Milestone 6 without committing to replacement cutover;
+    the remaining risks it lists are the Milestone 6-9 work, and the
+    replacement gate is unchanged.
+  - [x] Decision evidence records what the staged corpora and tools in
     [External terminal test research](../docs/research/1-external-tests.md)
     revealed about architecture, diagnostic quality, and the value of retaining
     differential testing.
+    Milestone 5 judgment: the decision record answers the research note's
+    four testability questions: live failures reduce to the neutral
+    byte-replay runner, public logical snapshots diagnosed the slice without
+    pixel output, the pinned libvterm manifest absorbed all contract
+    differences as seven declared deviations without private coupling, and
+    differential replay showed no demonstrated value yet and gets an explicit
+    evaluate-or-drop point during Milestone 6.
 
 - [ ] **6. Complete required terminal behavior and interaction**
   - [ ] [Terminal core](04-terminal-core.md) completes the accepted baseline control,
