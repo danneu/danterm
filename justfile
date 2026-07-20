@@ -50,6 +50,7 @@ test:
     ./scripts/tests/build-lib-contract_test.sh
     ./scripts/tests/danterm-cli-connect-errors_test.sh
     ./scripts/tests/terminal-characterization-harness_test.sh
+    ./scripts/tests/terminal-viability-harness_test.sh
 
 # Run UI tests (AppKit, requires display)
 test-ui:
@@ -58,6 +59,10 @@ test-ui:
 # Run opt-in real-Ghostty pane-read and recovery characterization (requires GUI + Accessibility)
 test-terminal-characterization:
     ./scripts/terminal-characterization.sh
+
+# Run the opt-in Swift terminal viability gate (requires GUI + Accessibility)
+test-terminal-viability:
+    ./scripts/terminal-viability.sh
 
 # Run opt-in PTY teardown proofs (requires tmux and passwordless localhost ssh).
 test-pty-external:
