@@ -185,10 +185,10 @@ struct TerminalModeTests {
         let inertSequences = [
             "\u{1B}[h",
             "\u{1B}[99h",
-            "\u{1B}[?25$p",
+            "\u{1B}[?25;26$p",
             "\u{1B}[?2004h",
             "\u{1B}[4!q",
-            "\u{1B}[?6$p",
+            "\u{1B}[?6;7$p",
         ]
         for sequence in inertSequences {
             var terminal = try #require(Terminal(columns: 2, rows: 2))

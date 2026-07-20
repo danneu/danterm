@@ -170,6 +170,71 @@ struct TerminalPTYHostTests {
         await host.close()
     }
 
+    @Test("query replies precede later user input without causing render updates", .timeLimit(.minutes(1)))
+    func queryReplyOrderingAndCapture() async throws {
+        // Intent: route core-generated CPR bytes back through the PTY before later user input.
+        // Why it exists: reducer routing can reorder replies, misclassify them as user input,
+        //   or wake rendering for a query that does not change terminal presentation state.
+        // Scenario: a child waits for CPR, while the user submits bytes only after its query.
+        let host = try makeHost()
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) query \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__QUERY_READY__".utf8)))
+        var updates = host.updates.makeAsyncIterator()
+        while await updates.next() != nil {
+            if (await host.snapshot()).screenText.contains("__QUERY_READY__") { break }
+        }
+        let signalsBeforeQuery = (await host.resourceSnapshot()).emittedUpdateSignalCount
+        let inputBaseline = await host.inputWrites().count
+
+        host.send(Array("query\n".utf8))
+        #expect(await host.waitForOutput(containing: Array("\u{1B}[6n".utf8)))
+        #expect((await host.resourceSnapshot()).emittedUpdateSignalCount == signalsBeforeQuery)
+        host.send(Array("USER".utf8))
+
+        let result = await host.waitForResult()
+        let output = String(decoding: await host.outputBytes(), as: UTF8.self)
+        let replies = await host.replyWrites()
+        let inputs = await host.inputWrites()
+        #expect(result == .exited(.exited(0)), "result: \(String(describing: result))")
+        #expect(output.contains("__QUERY_OK__"), "output: \(output.debugDescription)")
+        #expect(replies == [Array("\u{1B}[1;1R".utf8)], "replies: \(replies)")
+        #expect(
+            Array(inputs.dropFirst(inputBaseline))
+                == [Array("query\n".utf8), Array("USER".utf8)],
+            "inputs: \(inputs)"
+        )
+        #expect((await host.snapshot()).pendingReplyBytes.isEmpty)
+    }
+
+    @Test("query-bearing capture replays to the drained live terminal", .timeLimit(.minutes(1)))
+    func queryCaptureReplayEquality() async throws {
+        let host = try makeHost()
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) query \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__QUERY_READY__".utf8)))
+        host.send(Array("query\n".utf8))
+        #expect(await host.waitForOutput(containing: Array("\u{1B}[6n".utf8)))
+        host.send(Array("USER".utf8))
+        #expect(await host.waitForResult() == .exited(.exited(0)))
+
+        let recording = NeutralTerminalRecording(
+            provenance: .danTerm(test: "pty-query-replay"),
+            initial: .init(columns: 80, rows: 24),
+            events: (await host.transitions()).map { transition in
+                switch transition {
+                case .feed(let bytes): .feed(bytes)
+                case .resize(let dimensions):
+                    .resize(columns: dimensions.columns, rows: dimensions.rows)
+                }
+            }
+        )
+
+        #expect(try recording.replay() == (await host.snapshot()))
+    }
+
     @Test("a late update consumer receives one conflated final state before termination", .timeLimit(.minutes(1)))
     func lateUpdateConsumerReceivesFinalState() async throws {
         // Intent: a stalled consumer receives the newest state once and can then

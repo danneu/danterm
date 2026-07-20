@@ -281,6 +281,17 @@ static int disable_input_echo(void) {
     return tcsetattr(STDIN_FILENO, TCSANOW, &attributes);
 }
 
+static int disable_input_echo_and_canonical(void) {
+    struct termios attributes;
+    if (tcgetattr(STDIN_FILENO, &attributes) < 0) {
+        return -1;
+    }
+    attributes.c_lflag &= (tcflag_t)~(ECHO | ICANON);
+    attributes.c_cc[VMIN] = 1;
+    attributes.c_cc[VTIME] = 0;
+    return tcsetattr(STDIN_FILENO, TCSANOW, &attributes);
+}
+
 static int run_synchronized_output_probe(void) {
     char input[16];
     if (disable_input_echo() < 0) {
@@ -308,6 +319,49 @@ static int run_synchronized_output_probe(void) {
 
 static int run_synchronized_exit_probe(void) {
     printf("\033[?2026h__SYNC_FINAL__");
+    fflush(stdout);
+    return 0;
+}
+
+static int read_exact(uint8_t *bytes, size_t count) {
+    size_t offset = 0;
+    while (offset < count) {
+        ssize_t result = read(STDIN_FILENO, bytes + offset, count - offset);
+        if (result > 0) {
+            offset += (size_t)result;
+        } else if (result < 0 && errno == EINTR) {
+            continue;
+        } else {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int run_query_probe(void) {
+    uint8_t trigger[6];
+    uint8_t observed[10];
+    const uint8_t expected[] = "\033[1;1RUSER";
+    if (disable_input_echo_and_canonical() < 0) {
+        return 86;
+    }
+    printf("__QUERY_READY__\n\033[H");
+    fflush(stdout);
+    if (read_exact(trigger, sizeof(trigger)) < 0) {
+        return 87;
+    }
+    if (memcmp(trigger, "query\n", sizeof(trigger)) != 0) {
+        return 88;
+    }
+    printf("\033[6n");
+    fflush(stdout);
+    if (read_exact(observed, sizeof(observed)) < 0) {
+        return 89;
+    }
+    if (memcmp(observed, expected, sizeof(observed)) != 0) {
+        return 90;
+    }
+    printf("__QUERY_OK__\n");
     fflush(stdout);
     return 0;
 }
@@ -354,6 +408,9 @@ int main(int argc, char *argv[]) {
     }
     if (strcmp(argv[1], "sync-exit") == 0) {
         return run_synchronized_exit_probe();
+    }
+    if (strcmp(argv[1], "query") == 0) {
+        return run_query_probe();
     }
     return 65;
 }

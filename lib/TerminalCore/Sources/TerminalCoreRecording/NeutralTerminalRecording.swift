@@ -238,6 +238,7 @@ public struct NeutralTerminalRecording: Codable, Equatable, Sendable {
             switch event {
             case .feed(let bytes):
                 terminal.feed(bytes)
+                _ = terminal.drainReplyBytes()
             case .resize(let columns, let rows):
                 guard columns >= 2, rows >= 1 else {
                     throw NeutralTerminalRecordingError.invalidDimensions

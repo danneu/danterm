@@ -223,7 +223,7 @@ struct CSIParserTests {
 
     @Test("surfaced but uninterpreted CSI leaves terminal state bit-identical")
     func uninterpretedDispatchIsNoOp() throws {
-        for sequence in ["\u{1B}[?2026$p", "\u{1B}[9z"] {
+        for sequence in ["\u{1B}[?2026;25$p", "\u{1B}[9z"] {
             var terminal = try #require(Terminal(columns: 2, rows: 2))
             terminal.feed(Array("AB".utf8))
             let expected = terminal

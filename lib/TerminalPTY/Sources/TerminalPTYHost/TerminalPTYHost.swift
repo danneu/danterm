@@ -90,6 +90,7 @@ public actor TerminalPTYHost {
     private var appliedTransitions: [TerminalPTYAppliedTransition] = []
     private var capturedSubmittedTransitions: [TerminalPTYSubmittedTransition] = []
     private var capturedInputWrites: [[UInt8]] = []
+    private var capturedReplyWrites: [[UInt8]] = []
     private var outputWaiters: [OutputWaiter] = []
     private var reportedResult: PaneLifecycleResult?
     private var resultWaiters: [CheckedContinuation<PaneLifecycleResult?, Never>] = []
@@ -244,6 +245,11 @@ public actor TerminalPTYHost {
     /// Returns the reducer-emitted writes before nonblocking partial IO splits them.
     func inputWrites() -> [[UInt8]] {
         capturedInputWrites
+    }
+
+    /// Returns core-generated writes separately from user-originated input evidence.
+    func replyWrites() -> [[UInt8]] {
+        capturedReplyWrites
     }
 
     /// Returns the shared-queue order of applied input and resize effects.
@@ -545,6 +551,13 @@ public actor TerminalPTYHost {
     private func applyOutput(_ bytes: [UInt8]) {
         let previousTerminal = terminal
         terminal.feed(bytes)
+        let replies = terminal.drainReplyBytes()
+        if replies.isEmpty == false {
+            if captureTransitions {
+                capturedReplyWrites.append(replies)
+            }
+            enqueueInput(replies)
+        }
         if terminal != previousTerminal { markUpdatePending() }
         recentOutput.append(contentsOf: bytes)
         if recentOutput.count > 64 * 1024 {

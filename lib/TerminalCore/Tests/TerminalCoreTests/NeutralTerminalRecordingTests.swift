@@ -28,4 +28,21 @@ struct NeutralTerminalRecordingTests {
         #expect(replayed.geometry.rows.count == 3)
         #expect(replayed.screenText.contains("after"))
     }
+
+    @Test("recording replay drains core replies after every feed")
+    func replayDrainsReplies() throws {
+        let recording = NeutralTerminalRecording(
+            provenance: .danTerm(test: "query-output"),
+            initial: NeutralTerminalDimensions(columns: 8, rows: 2),
+            events: [
+                .feed(Array("\u{1B}[6n".utf8)),
+                .feed(Array("visible".utf8)),
+            ]
+        )
+
+        let replayed = try recording.replay()
+
+        #expect(replayed.pendingReplyBytes.isEmpty)
+        #expect(replayed.screenText.contains("visible"))
+    }
 }

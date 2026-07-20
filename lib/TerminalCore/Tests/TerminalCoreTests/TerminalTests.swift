@@ -400,9 +400,18 @@ struct TerminalTests {
             Array("\u{1B}[20h\u{1B}[20l".utf8),
             Array("\u{1B}[?6h\u{1B}[?6l".utf8),
             Array("\u{1B}[?7l\u{1B}[?7h".utf8),
+            Array("\u{1B}[?25l\u{1B}[?25h".utf8),
+            Array("\u{1B}[?2026h\u{1B}[?2026l".utf8),
+            Array("\u{1B}[3 q\u{1B}[6 q".utf8),
             Array("\u{1B}[?1047h\u{1B}[?1047l".utf8),
             Array("\u{1B}[?1048h\u{1B}[?1048l".utf8),
             Array("\u{1B}[?1049h\u{1B}[?1049l".utf8),
+        ]
+        let queryFragments = [
+            Array("\u{1B}[c\u{1B}[5n\u{1B}[6n".utf8),
+            Array("\u{1B}[?5n\u{1B}[?6n".utf8),
+            Array("\u{1B}[4$p\u{1B}[20$p".utf8),
+            Array("\u{1B}[?25$p\u{1B}[?1049$p\u{1B}[?2026$p".utf8),
         ]
         let tabAndSaveFragments = [
             Array("\u{1B}H\u{1B}[3g".utf8),
@@ -420,12 +429,14 @@ struct TerminalTests {
             Array("\u{1B}[?1049h".utf8),
         ]
         let alphabet = byteAlphabet + sgrFragments + sliceSixFragments + modeFragments
-            + tabAndSaveFragments + repeatAndResetFragments + resizeFragments
+            + queryFragments + tabAndSaveFragments + repeatAndResetFragments
+            + resizeFragments
         for seed in UInt64(1)...256 {
             var generator = Generator(state: seed)
             var terminal = try #require(Terminal(columns: 7, rows: 3))
             for fragment in sgrFragments + sliceSixFragments + modeFragments
-                + tabAndSaveFragments + repeatAndResetFragments + resizeFragments
+                + queryFragments + tabAndSaveFragments + repeatAndResetFragments
+                + resizeFragments
                 + (0..<256).map({ _ in
                 alphabet[Int(generator.next()) % alphabet.count]
             }) {

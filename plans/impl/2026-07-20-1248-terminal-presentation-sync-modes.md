@@ -490,7 +490,7 @@ and return.
   cursor visibility, shape/blink, mode 2026, saved-cursor and reset behavior,
   the presentation projection, session suppression and termination release,
   and their PO5-PO8 proofs.
-- [ ] 2. Add core query replies and ordered PTY routing: the reply buffer,
+- [x] 2. Add core query replies and ordered PTY routing: the reply buffer,
   DA/DSR/CPR/DECCPR/DECRQM handling, host routing and capture classification,
   recording replay drain, and their PO2-PO4, PO9, PO9a, and PO11 proofs. The
   buffer's entry into `Terminal ==`, the host drain, and the replay drain land
