@@ -223,6 +223,11 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         return controller.readFullHistoryText()
     }
 
+    func readPrimaryHistoryText() -> String? {
+        controller.synchronizeState()
+        return controller.readPrimaryHistoryText()
+    }
+
     func scroll(toRow row: Int) {}
     func copySelection() {}
     func pasteClipboard() {}

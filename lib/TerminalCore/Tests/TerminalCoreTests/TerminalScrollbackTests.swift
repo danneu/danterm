@@ -103,4 +103,13 @@ struct TerminalScrollbackTests {
         #expect(terminal.scrollbackRowCount == 1)
         #expect(terminal.fullHistoryText == "\n\nA")
     }
+
+    @Test("primary-history text matches full history while the primary screen is active")
+    func primaryHistoryMatchesFullHistory() throws {
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("ABCDE\r\nFG".utf8))
+
+        #expect(terminal.primaryHistoryText == terminal.fullHistoryText)
+        #expect(terminal.primaryHistoryText == "ABCDE\nFG")
+    }
 }

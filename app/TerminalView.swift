@@ -890,6 +890,10 @@ extension TerminalView {
         readSurfaceRegion(GHOSTTY_POINT_SCREEN)
     }
 
+    func readPrimaryHistoryText() -> String? {
+        readFullHistoryText()
+    }
+
     func scroll(toRow row: Int) {
         guard let surface else { return }
         sendBindingAction(surface, "scroll_to_row:\(row)")

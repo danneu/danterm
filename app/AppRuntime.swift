@@ -897,7 +897,7 @@ class AppRuntime {
     private func scrollbackByPaneId() -> [PaneId: String] {
         var result: [PaneId: String] = [:]
         for (paneId, session) in surfaces {
-            guard let rawText = session.readFullHistoryText(),
+            guard let rawText = session.readPrimaryHistoryText(),
                   let scrollback = truncateScrollback(rawText) else {
                 continue
             }

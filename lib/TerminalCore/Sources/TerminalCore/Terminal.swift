@@ -192,7 +192,15 @@ public struct Terminal: Equatable, Sendable {
 
     /// Projects retained history and the viewport as logical text without a final newline.
     public var fullHistoryText: String {
-        let stream = scrollbackRows + rows
+        primaryHistoryText
+    }
+
+    /// Projects retained primary-screen history for recovery and export consumers.
+    public var primaryHistoryText: String {
+        projectedHistoryText(from: scrollbackRows + rows)
+    }
+
+    private func projectedHistoryText(from stream: [GridRow]) -> String {
         guard let lastContentRow = stream.lastIndex(where: rowContainsContent) else {
             return ""
         }

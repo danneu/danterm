@@ -101,7 +101,9 @@ struct TerminalPaneSessionControllerTests {
         controller.synchronizeState()
 
         #expect(plans.isEmpty)
-        #expect(controller.readFullHistoryText().contains("__HIDDEN_OUTPUT__"))
+        let fullHistory = controller.readFullHistoryText()
+        #expect(fullHistory.contains("__HIDDEN_OUTPUT__"))
+        #expect(controller.readPrimaryHistoryText() == fullHistory)
         controller.setVisible(true)
         #expect(plans.count == 1)
         #expect(plans[0].projectedText.contains("__HIDDEN_OUTPUT__"))

@@ -160,6 +160,11 @@ public final class TerminalPaneSessionController {
         cachedTerminal.fullHistoryText
     }
 
+    /// Returns primary-screen history for persistence consumers that exclude transient screens.
+    public func readPrimaryHistoryText() -> String {
+        cachedTerminal.primaryHistoryText
+    }
+
     /// Returns completed child-session evidence without making capture a default app surface.
     #if DANTERM_TERMINAL_CHARACTERIZATION
     public func capturedRecording(test: String) -> NeutralTerminalRecording? {

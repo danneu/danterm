@@ -83,6 +83,8 @@ protocol TerminalSession: AnyObject {
     func endSearch()
     func readViewportText() -> String?
     func readFullHistoryText() -> String?
+    /// Reads persistent primary history without changing pane-read active-screen semantics.
+    func readPrimaryHistoryText() -> String?
     func scroll(toRow row: Int)
     func copySelection()
     func pasteClipboard()
