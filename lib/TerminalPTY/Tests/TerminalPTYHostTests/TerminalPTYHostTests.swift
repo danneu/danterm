@@ -20,7 +20,7 @@ struct TerminalPTYHostTests {
 
         await host.start(makeLaunchInput(command: command))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
-        await host.send(Array("ordered-input\n".utf8))
+        host.send(Array("ordered-input\n".utf8))
         let result = await host.waitForResult()
         let output = String(decoding: await host.outputBytes(), as: UTF8.self)
 
@@ -54,7 +54,7 @@ struct TerminalPTYHostTests {
 
         await host.start(input)
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
-        await host.send(Array("fallback\n".utf8))
+        host.send(Array("fallback\n".utf8))
         #expect(await host.waitForResult() == .exited(.exited(7)))
 
         let output = String(decoding: await host.outputBytes(), as: UTF8.self)
@@ -73,15 +73,164 @@ struct TerminalPTYHostTests {
 
         await host.start(makeLaunchInput(command: command))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
-        await host.resize(.init(columns: 100, rows: 31))
+        host.resize(.init(columns: 100, rows: 31))
         let snapshot = await host.snapshot()
-        await host.send(Array("done\n".utf8))
+        host.send(Array("done\n".utf8))
         #expect(await host.waitForResult() == .exited(.exited(0)))
         let output = String(decoding: await host.outputBytes(), as: UTF8.self)
 
         #expect(snapshot.geometry.columns == 100)
         #expect(snapshot.geometry.rows.count == 31)
         #expect(output.contains("__WINCH__=31 100"))
+    }
+
+    @Test("synchronous input and resize submissions preserve their shared FIFO order", .timeLimit(.minutes(1)))
+    @MainActor
+    func synchronousSubmissionOrder() async throws {
+        // Intent: input and resize calls made from one synchronous context enter
+        //   the owner in exactly the order the caller submitted them.
+        // Why it exists: separate unstructured Tasks can reorder input and grid
+        //   changes even though each actor method is individually serialized.
+        // Scenario: a pane sends bytes, resizes, then sends the completing line
+        //   while a live child waits for that line.
+        let host = try makeHost()
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) recording \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__BEFORE_RESIZE__".utf8)))
+        let submissionBaseline = await host.submittedTransitions().count
+
+        host.send(Array("prefix-".utf8))
+        host.resize(.init(columns: 96, rows: 28))
+        host.send(Array("continue\n".utf8))
+
+        #expect(await host.waitForResult() == .exited(.exited(0)))
+        #expect(Array((await host.submittedTransitions()).dropFirst(submissionBaseline)) == [
+            .input(Array("prefix-".utf8)),
+            .resize(.init(columns: 96, rows: 28)),
+            .input(Array("continue\n".utf8)),
+        ])
+
+        host.send(Array("after-teardown".utf8))
+        host.resize(.init(columns: 120, rows: 40))
+        #expect(await host.submittedTransitions().count == submissionBaseline + 3)
+    }
+
+    @Test("updates cover output, resize, and a later result without polling", .timeLimit(.minutes(1)))
+    func updateSignalResignalsAfterConsumerPull() async throws {
+        // Intent: each newly applied state after a consumer pull makes another
+        //   update observable, including resize and the final lifecycle result.
+        // Why it exists: a naive conflation flag can lose the re-signal race or
+        //   finish the stream before its final result token is delivered.
+        // Scenario: a pane renders its prompt, resizes, accepts a command, and
+        //   then observes child exit through the same event-driven stream.
+        let host = try makeHost()
+        var updates = host.updates.makeAsyncIterator()
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) resize \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        #expect(await updates.next() != nil)
+
+        host.resize(.init(columns: 100, rows: 31))
+        var observedResize = false
+        while let _ = await updates.next() {
+            let snapshot = await host.snapshot()
+            if snapshot.geometry.columns == 100, snapshot.geometry.rows.count == 31 {
+                observedResize = true
+                break
+            }
+        }
+        #expect(observedResize)
+
+        host.send(Array("done\n".utf8))
+        var observedResult: PaneLifecycleResult?
+        while let _ = await updates.next() {
+            observedResult = await host.result()
+            if observedResult != nil { break }
+        }
+        #expect(observedResult == .exited(.exited(0)))
+        while await updates.next() != nil {}
+        #expect((await host.resourceSnapshot()).updateSignalsAfterTermination == 0)
+    }
+
+    @Test("an unchanged terminal emits no update work", .timeLimit(.minutes(1)))
+    func unchangedTerminalEmitsNoUpdate() async throws {
+        let host = try makeHost(captureTransitions: false)
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let signalsBefore = (await host.resourceSnapshot()).emittedUpdateSignalCount
+
+        host.resize(.init(columns: 80, rows: 24))
+        _ = await host.snapshot()
+
+        #expect((await host.resourceSnapshot()).emittedUpdateSignalCount == signalsBefore)
+        await host.close()
+    }
+
+    @Test("a late update consumer receives one conflated final state before termination", .timeLimit(.minutes(1)))
+    func lateUpdateConsumerReceivesFinalState() async throws {
+        // Intent: a stalled consumer receives the newest state once and can then
+        //   observe clean stream termination and the in-band child result.
+        // Why it exists: finishing an AsyncStream before yielding its final token
+        //   drops the only wakeup that can carry the last output into recovery.
+        // Scenario: a child writes a fragmented burst and exits before the pane's
+        //   update consumer begins reading.
+        let host = try makeHost()
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) fragmented \"$0\""
+        ))
+        #expect(await host.waitForResult() == .exited(.exited(0)))
+
+        var updates = host.updates.makeAsyncIterator()
+        #expect(await updates.next() != nil)
+        #expect(await updates.next() == nil)
+        #expect(await host.result() == .exited(.exited(0)))
+        #expect((await host.snapshot()).fullHistoryText.contains("__FRAGMENTED_DONE__"))
+        #expect((await host.resourceSnapshot()).updateSignalsAfterTermination == 0)
+    }
+
+    @Test("a result-only drain emits its final update token", .timeLimit(.minutes(1)))
+    func resultOnlyDrainEmitsFinalUpdate() async throws {
+        let host = try makeHost(captureTransitions: false)
+        var input = makeLaunchInput(command: "")
+        input.initialDimensions = .init(columns: 0, rows: 0)
+
+        await host.start(input)
+        #expect(await host.waitForResult() == .launchFailed(.invalidDimensions))
+
+        var updates = host.updates.makeAsyncIterator()
+        #expect(await updates.next() != nil)
+        #expect(await updates.next() == nil)
+        #expect((await host.resourceSnapshot()).emittedUpdateSignalCount == 1)
+    }
+
+    @Test("closing a live pane resolves result waiters with nil", .timeLimit(.minutes(1)))
+    func closeWithoutChildResultResumesWaiter() async throws {
+        // Intent: teardown completion resumes every result waiter even when no
+        //   product-level child result exists.
+        // Why it exists: the old set-once result path stranded its continuation
+        //   forever and retained a user-closed pane host.
+        // Scenario: a user closes a pane while its shell is still running.
+        weak var releasedHost: TerminalPTYHost?
+        do {
+            let host = try makeHost(captureTransitions: false)
+            releasedHost = host
+            await host.start(makeLaunchInput(
+                command: "exec \(try probeExecutable()) hold \"$0\""
+            ))
+            #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+
+            async let result = host.waitForResult()
+            await host.close()
+
+            #expect(await result == nil)
+            #expect(await host.result() == nil)
+            #expect((await host.resourceSnapshot()).isReleased)
+        }
+        #expect(releasedHost == nil)
     }
 
     @Test("large fragmented output is delivered in byte order before exit", .timeLimit(.minutes(1)))
@@ -139,8 +288,8 @@ struct TerminalPTYHostTests {
             command: "exec \(try probeExecutable()) recording \"$0\""
         ))
         #expect(await host.waitForOutput(containing: Array("__BEFORE_RESIZE__".utf8)))
-        await host.resize(.init(columns: 96, rows: 28))
-        await host.send(Array("continue\n".utf8))
+        host.resize(.init(columns: 96, rows: 28))
+        host.send(Array("continue\n".utf8))
         #expect(await host.waitForResult() == .exited(.exited(0)))
 
         let transitions = await host.transitions()
@@ -246,7 +395,7 @@ struct TerminalPTYHostTests {
                 } else {
                     await withTaskGroup(of: Void.self) { group in
                         group.addTask {
-                            await host.resize(.init(columns: 81 + iteration, rows: 25))
+                            host.resize(.init(columns: 81 + iteration, rows: 25))
                         }
                         group.addTask { await host.close() }
                     }
@@ -284,7 +433,7 @@ struct TerminalPTYHostTests {
             #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         }
 
-        await stalled.send([UInt8](repeating: 65, count: 4 * 1024 * 1024))
+        stalled.send([UInt8](repeating: 65, count: 4 * 1024 * 1024))
         #expect((await stalled.resourceSnapshot()).pendingInputByteCount > 0)
 
         let clock = ContinuousClock()
@@ -371,7 +520,7 @@ struct TerminalPTYHostTests {
             if case .restorePrefill = testCase.source {
                 #expect(await host.waitForOutput(containing: Array(testCase.command.utf8)))
                 #expect(await host.inputWrites() == [Array(testCase.expectedWrite.utf8)])
-                await host.send(Array("\n".utf8))
+                host.send(Array("\n".utf8))
             }
             #expect(await host.waitForResult() == .exited(.exited(0)))
 

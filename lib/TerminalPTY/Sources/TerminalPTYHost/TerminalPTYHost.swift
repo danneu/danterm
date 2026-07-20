@@ -16,6 +16,12 @@ enum TerminalPTYAppliedTransition: Equatable, Sendable {
     case resize(TerminalDimensions)
 }
 
+/// Test-support view of input and resize effects applied on the shared owner queue.
+enum TerminalPTYSubmittedTransition: Equatable, Sendable {
+    case input([UInt8])
+    case resize(TerminalDimensions)
+}
+
 /// Test-support census of resources that must be absent once teardown returns.
 struct TerminalPTYResourceSnapshot: Equatable, Sendable {
     let hasOpenMaster: Bool
@@ -25,6 +31,8 @@ struct TerminalPTYResourceSnapshot: Equatable, Sendable {
     let hasSession: Bool
     let pendingInputByteCount: Int
     let callbacksAfterTeardown: Int
+    let emittedUpdateSignalCount: Int
+    let updateSignalsAfterTermination: Int
 
     var isReleased: Bool {
         hasOpenMaster == false
@@ -34,6 +42,7 @@ struct TerminalPTYResourceSnapshot: Equatable, Sendable {
             && hasSession == false
             && pendingInputByteCount == 0
             && callbacksAfterTeardown == 0
+            && updateSignalsAfterTermination == 0
     }
 }
 
@@ -51,6 +60,10 @@ public actor TerminalPTYHost {
     private let initialDimensions: TerminalDimensions
     private let captureTransitions: Bool
     private let bootstrapExecutable: String
+    private let updateContinuation: AsyncStream<Void>.Continuation
+
+    /// Conflates terminal and lifecycle changes into one pull-driven wakeup channel.
+    nonisolated public let updates: AsyncStream<Void>
 
     private var masterFD: Int32 = -1
     private var leaderPID: pid_t?
@@ -75,13 +88,19 @@ public actor TerminalPTYHost {
     private var recentOutput: [UInt8] = []
     private var capturedOutput: [UInt8] = []
     private var appliedTransitions: [TerminalPTYAppliedTransition] = []
+    private var capturedSubmittedTransitions: [TerminalPTYSubmittedTransition] = []
     private var capturedInputWrites: [[UInt8]] = []
     private var outputWaiters: [OutputWaiter] = []
     private var reportedResult: PaneLifecycleResult?
-    private var resultWaiters: [CheckedContinuation<PaneLifecycleResult, Never>] = []
+    private var resultWaiters: [CheckedContinuation<PaneLifecycleResult?, Never>] = []
     private var teardownFinished = false
     private var teardownWaiters: [CheckedContinuation<Void, Never>] = []
     private var callbacksAfterTeardown = 0
+    private var updatePending = false
+    private var shouldFinishUpdates = false
+    private var updateSignalFinished = false
+    private var emittedUpdateSignalCount = 0
+    private var updateSignalsAfterTermination = 0
 
     /// Binds Swift actor jobs to the FIFO queue that also delivers every system callback.
     nonisolated public var unownedExecutor: UnownedSerialExecutor {
@@ -112,6 +131,11 @@ public actor TerminalPTYHost {
             throw TerminalPTYHostError.invalidDimensions
         }
         queue = DispatchSerialQueue(label: "com.danneu.danterm.terminal-pty-host")
+        let updateChannel = AsyncStream<Void>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        updates = updateChannel.stream
+        updateContinuation = updateChannel.continuation
         self.terminal = terminal
         self.initialDimensions = initialDimensions
         self.bootstrapExecutable = bootstrapExecutable
@@ -129,14 +153,18 @@ public actor TerminalPTYHost {
         process(.start(input))
     }
 
-    /// Serializes user bytes behind every previously observed owner event.
-    public func send(_ bytes: [UInt8]) {
-        process(.sendInput(bytes))
+    /// Enqueues user bytes directly on the owner queue without an ordering-opaque Task.
+    nonisolated public func send(_ bytes: [UInt8]) {
+        queue.async { [weak self] in
+            self?.assumeIsolated { owner in owner.process(.sendInput(bytes)) }
+        }
     }
 
-    /// Applies child and TerminalCore geometry as one owner-ordered transition.
-    public func resize(_ dimensions: TerminalDimensions) {
-        process(.resize(dimensions))
+    /// Enqueues geometry on the same FIFO as input so caller order is preserved jointly.
+    nonisolated public func resize(_ dimensions: TerminalDimensions) {
+        queue.async { [weak self] in
+            self?.assumeIsolated { owner in owner.process(.resize(dimensions)) }
+        }
     }
 
     /// Closes one pane and returns only after its owned process session is gone.
@@ -156,9 +184,15 @@ public actor TerminalPTYHost {
         terminal
     }
 
-    /// Suspends until reducer cleanup reports the child's product-level result.
-    public func waitForResult() async -> PaneLifecycleResult {
+    /// Returns the reported child result without waiting for future lifecycle work.
+    public func result() -> PaneLifecycleResult? {
+        reportedResult
+    }
+
+    /// Suspends until teardown, returning nil when no child result was produced.
+    public func waitForResult() async -> PaneLifecycleResult? {
         if let reportedResult { return reportedResult }
+        if teardownFinished { return nil }
         return await withCheckedContinuation { continuation in
             resultWaiters.append(continuation)
         }
@@ -188,6 +222,11 @@ public actor TerminalPTYHost {
         capturedInputWrites
     }
 
+    /// Returns the shared-queue order of applied input and resize effects.
+    func submittedTransitions() -> [TerminalPTYSubmittedTransition] {
+        capturedSubmittedTransitions
+    }
+
     /// Exposes an ownership census without leaking mutable descriptors or sources.
     func resourceSnapshot() -> TerminalPTYResourceSnapshot {
         TerminalPTYResourceSnapshot(
@@ -203,7 +242,9 @@ public actor TerminalPTYHost {
             hasLeader: leaderPID != nil,
             hasSession: sessionID != nil,
             pendingInputByteCount: max(pendingInput.count - pendingInputOffset, 0),
-            callbacksAfterTeardown: callbacksAfterTeardown
+            callbacksAfterTeardown: callbacksAfterTeardown,
+            emittedUpdateSignalCount: emittedUpdateSignalCount,
+            updateSignalsAfterTermination: updateSignalsAfterTermination
         )
     }
 
@@ -218,7 +259,10 @@ public actor TerminalPTYHost {
         pendingEvents.append(event)
         guard isReducing == false else { return }
         isReducing = true
-        defer { isReducing = false }
+        defer {
+            publishPendingUpdate()
+            isReducing = false
+        }
 
         while pendingEvents.isEmpty == false {
             let next = pendingEvents.removeFirst()
@@ -236,7 +280,10 @@ public actor TerminalPTYHost {
         case .activateIO:
             activateIO()
         case .writeInput(let bytes):
-            if captureTransitions { capturedInputWrites.append(bytes) }
+            if captureTransitions {
+                capturedInputWrites.append(bytes)
+                capturedSubmittedTransitions.append(.input(bytes))
+            }
             enqueueInput(bytes)
         case .resize(let dimensions):
             applyResize(dimensions)
@@ -472,7 +519,9 @@ public actor TerminalPTYHost {
     }
 
     private func applyOutput(_ bytes: [UInt8]) {
+        let previousTerminal = terminal
         terminal.feed(bytes)
+        if terminal != previousTerminal { markUpdatePending() }
         recentOutput.append(contentsOf: bytes)
         if recentOutput.count > 64 * 1024 {
             recentOutput.removeFirst(recentOutput.count - 64 * 1024)
@@ -493,8 +542,13 @@ public actor TerminalPTYHost {
             ws_ypixel: 0
         )
         guard ioctl(masterFD, TIOCSWINSZ, &size) == 0 else { return }
+        let previousTerminal = terminal
         terminal.resize(columns: dimensions.columns, rows: dimensions.rows)
-        if captureTransitions { appliedTransitions.append(.resize(dimensions)) }
+        if terminal != previousTerminal { markUpdatePending() }
+        if captureTransitions {
+            appliedTransitions.append(.resize(dimensions))
+            capturedSubmittedTransitions.append(.resize(dimensions))
+        }
     }
 
     private func reapLeader() {
@@ -658,6 +712,7 @@ public actor TerminalPTYHost {
     private func report(_ result: PaneLifecycleResult) {
         guard reportedResult == nil else { return }
         reportedResult = result
+        markUpdatePending()
         let waiters = resultWaiters
         resultWaiters.removeAll()
         for waiter in waiters { waiter.resume(returning: result) }
@@ -676,7 +731,31 @@ public actor TerminalPTYHost {
         let waiters = outputWaiters
         outputWaiters.removeAll()
         for waiter in waiters { waiter.continuation.resume(returning: false) }
+        let resultWaiters = resultWaiters
+        self.resultWaiters.removeAll()
+        for waiter in resultWaiters { waiter.resume(returning: nil) }
         teardownFinished = true
+        shouldFinishUpdates = true
+    }
+
+    private func markUpdatePending() {
+        guard updateSignalFinished == false else {
+            updateSignalsAfterTermination += 1
+            return
+        }
+        updatePending = true
+    }
+
+    private func publishPendingUpdate() {
+        if updatePending {
+            updatePending = false
+            updateContinuation.yield()
+            emittedUpdateSignalCount += 1
+        }
+        guard shouldFinishUpdates else { return }
+        shouldFinishUpdates = false
+        updateContinuation.finish()
+        updateSignalFinished = true
         let teardownWaiters = teardownWaiters
         self.teardownWaiters.removeAll()
         for waiter in teardownWaiters { waiter.resume() }
