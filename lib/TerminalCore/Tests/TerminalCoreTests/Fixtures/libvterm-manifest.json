@@ -128,12 +128,12 @@
         {
           "name": "DECRQSS on DECSTBM",
           "disposition": "out-of-scope",
-          "rationale": "DECRQSS query replies are deferred beyond this Milestone 2 slice."
+          "rationale": "DCS-carried DECRQSS replies remain deferred because the parser absorbs DCS bodies."
         },
         {
           "name": "DECRQSS on DECSLRM",
           "disposition": "out-of-scope",
-          "rationale": "DECRQSS query replies and horizontal margins are both deferred."
+          "rationale": "DCS-carried DECRQSS replies and horizontal margins are both deferred."
         },
         {
           "name": "Setting invalid DECSLRM with !DECVSSM is still rejected",
@@ -339,7 +339,7 @@
         {
           "name": "DECRQSS on DECSCA",
           "disposition": "out-of-scope",
-          "rationale": "DECSCA and DECRQSS query replies are deferred."
+          "rationale": "DECSCA and DCS-carried DECRQSS replies are deferred."
         },
         {
           "name": "ICH move+erase emuation",
@@ -524,8 +524,8 @@
         },
         {
           "name": "DECRQM on DECOM",
-          "disposition": "out-of-scope",
-          "rationale": "Query replies are deferred until the terminal engine has an output channel."
+          "disposition": "adopted",
+          "rationale": "state-mode.json asserts the exact set and reset DECRQM replies for origin mode."
         },
         {
           "name": "Origin mode with DECSLRM",
@@ -633,23 +633,41 @@
         {
           "name": "Change state",
           "disposition": "adapted",
-          "rationale": "state-save.json still feeds DECSCUSR and requires it to remain inert while dropping unsupported cursor appearance callbacks."
+          "rationale": "state-save.json asserts DECSCUSR's steady-underline appearance alongside the upstream cursor and pen changes."
         },
         {
           "name": "Restore",
           "disposition": "adapted",
-          "rationale": "state-save.json asserts restored cursor and pen while omitting unsupported visibility, blink, and shape properties."
+          "rationale": "state-save.json asserts restored cursor, pen, visibility, shape, and blink, adapting libvterm's blinking-block default to DanTerm's steady-block default."
         },
         {
           "name": "Save/restore using DECSC/DECRC",
           "disposition": "adapted",
-          "rationale": "state-save.json adopts the ESC aliases while omitting unsupported cursor appearance properties."
+          "rationale": "state-save.json adopts the ESC aliases and asserts visibility, shape, and blink restoration."
         },
         {
           "name": "Save twice, restore twice happens on both edge transitions",
           "disposition": "adapted",
-          "rationale": "state-save.json pins single-slot overwrite and repeatable restore while omitting unsupported cursor appearance properties."
+          "rationale": "state-save.json pins single-slot overwrite and repeatable restore for position and explicitly selected appearance."
         }
+      ]
+    },
+    {
+      "path": "t/26state_query.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        { "name": "DA", "disposition": "adopted", "rationale": "state-query.json asserts the pinned primary DA reply byte-for-byte." },
+        { "name": "XTVERSION", "disposition": "out-of-scope", "rationale": "Identity and version policy is deferred to Milestone 7." },
+        { "name": "DSR", "disposition": "adopted", "rationale": "state-query.json asserts the pinned operating-status reply byte-for-byte." },
+        { "name": "CPR", "disposition": "adopted", "rationale": "state-query.json asserts both pinned cursor-position replies byte-for-byte." },
+        { "name": "DECCPR", "disposition": "adopted", "rationale": "state-query.json asserts the pinned DEC-private cursor-position reply byte-for-byte." },
+        { "name": "DECRQSS on DECSCUSR", "disposition": "out-of-scope", "rationale": "DCS-carried DECRQSS replies remain deferred because the parser absorbs DCS bodies." },
+        { "name": "DECRQSS on SGR", "disposition": "out-of-scope", "rationale": "DCS-carried DECRQSS replies remain deferred because the parser absorbs DCS bodies." },
+        { "name": "DECRQSS on SGR ANSI colours", "disposition": "out-of-scope", "rationale": "DCS-carried DECRQSS replies remain deferred because the parser absorbs DCS bodies." },
+        { "name": "DECRQSS on SGR ANSI hi-bright colours", "disposition": "out-of-scope", "rationale": "DCS-carried DECRQSS replies remain deferred because the parser absorbs DCS bodies." },
+        { "name": "DECRQSS on SGR 256-palette colours", "disposition": "out-of-scope", "rationale": "DCS-carried DECRQSS replies remain deferred because the parser absorbs DCS bodies." },
+        { "name": "DECRQSS on SGR RGB8 colours", "disposition": "out-of-scope", "rationale": "DCS-carried DECRQSS replies remain deferred because the parser absorbs DCS bodies." },
+        { "name": "S8C1T on DSR", "disposition": "out-of-scope", "rationale": "8-bit C1 reply encoding is unsupported; ESC SP G remains an absorbed no-op." }
       ]
     },
     {

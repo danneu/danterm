@@ -495,7 +495,7 @@ and return.
   recording replay drain, and their PO2-PO4, PO9, PO9a, and PO11 proofs. The
   buffer's entry into `Terminal ==`, the host drain, and the replay drain land
   together so capture/replay equality is never broken between commits.
-- [ ] 3. Adopt query and cursor-state conformance fixtures: fixture expectation
+- [x] 3. Adopt query and cursor-state conformance fixtures: fixture expectation
   support, adopted libvterm query/save cases, manifest and rationale updates,
   PO10, and the roadmap entry.
 

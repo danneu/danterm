@@ -16,6 +16,7 @@
       "type": "expect",
       "expect": {
         "cursor": { "row": 1, "column": 1, "pendingWrap": false },
+        "cursorPresentation": { "isVisible": true, "shape": "block", "isBlinking": false },
         "currentStyle": { "foreground": "default", "background": "default", "attributes": ["bold"], "underline": "none" }
       }
     },
@@ -25,6 +26,7 @@
       "type": "expect",
       "expect": {
         "cursor": { "row": 4, "column": 4, "pendingWrap": false },
+        "cursorPresentation": { "isVisible": true, "shape": "underline", "isBlinking": false },
         "currentStyle": { "foreground": "default", "background": "default", "attributes": [], "underline": "single" }
       }
     },
@@ -33,14 +35,15 @@
       "type": "expect",
       "expect": {
         "cursor": { "row": 1, "column": 1, "pendingWrap": false },
+        "cursorPresentation": { "isVisible": true, "shape": "block", "isBlinking": false },
         "currentStyle": { "foreground": "default", "background": "default", "attributes": ["bold"], "underline": "none" }
       }
     },
-    { "type": "feed", "text": "\u001b[2;2H\u001b7\u001b[5;5H\u001b8" },
-    { "type": "expect", "expect": { "cursor": { "row": 1, "column": 1, "pendingWrap": false } } },
-    { "type": "feed", "text": "\u001b[2;10H\u001b[?1048h\u001b[6;10H\u001b[?1048h\u001b[H\u001b[?1048l" },
-    { "type": "expect", "expect": { "cursor": { "row": 5, "column": 9, "pendingWrap": false } } },
+    { "type": "feed", "text": "\u001b[2;2H\u001b[?25l\u001b[6 q\u001b7\u001b[5;5H\u001b[?25h\u001b[2 q\u001b8" },
+    { "type": "expect", "expect": { "cursor": { "row": 1, "column": 1, "pendingWrap": false }, "cursorPresentation": { "isVisible": false, "shape": "bar", "isBlinking": false } } },
+    { "type": "feed", "text": "\u001b[2;10H\u001b[?25h\u001b[3 q\u001b[?1048h\u001b[6;10H\u001b[?25l\u001b[6 q\u001b[?1048h\u001b[H\u001b[?1048l" },
+    { "type": "expect", "expect": { "cursor": { "row": 5, "column": 9, "pendingWrap": false }, "cursorPresentation": { "isVisible": false, "shape": "bar", "isBlinking": false } } },
     { "type": "feed", "text": "\u001b[H\u001b[?1048l" },
-    { "type": "expect", "expect": { "cursor": { "row": 5, "column": 9, "pendingWrap": false } } }
+    { "type": "expect", "expect": { "cursor": { "row": 5, "column": 9, "pendingWrap": false }, "cursorPresentation": { "isVisible": false, "shape": "bar", "isBlinking": false } } }
   ]
 }

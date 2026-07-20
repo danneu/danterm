@@ -34,10 +34,10 @@ struct TerminalFixtureTests {
         }
     }
 
-    @Test("libvterm manifest classifies every case from the thirty-one selected source files")
+    @Test("libvterm manifest classifies every case from the thirty-two selected source files")
     func libvtermManifestCoverage() throws {
         // Intent: pin the adoption ledger to every upstream case heading in
-        //   the thirty-one source files selected through the current engine slices.
+        //   the thirty-two source files selected through the current engine slices.
         // Why it exists: fixtures alone make deferred, superseded, and
         //   deliberately incompatible cases disappear from review.
         // Scenario: the pinned libvterm corpus is upgraded or the neutral
@@ -116,45 +116,61 @@ struct TerminalFixtureTests {
         expectations: [FixtureEvent],
         strategy: ChunkStrategy
     ) throws -> Terminal {
-        if case .authored = strategy {
-            return try fixture.replay { eventIndex, terminal in
-                if case .checkpoint = fixture.events[eventIndex] {
-                    try assert(expectations[eventIndex].expectation, against: terminal)
-                }
-            }
-        }
         var terminal = try #require(Terminal(
             columns: fixture.initial.columns,
             rows: fixture.initial.rows
         ))
+        var replyBytes: [UInt8] = []
+
+        func feed(_ bytes: [UInt8]) {
+            terminal.feed(bytes)
+            replyBytes.append(contentsOf: terminal.drainReplyBytes())
+        }
 
         for (eventIndex, event) in fixture.events.enumerated() {
             switch event {
             case .feed(let bytes):
                 switch strategy {
                 case .authored:
-                    terminal.feed(bytes)
+                    feed(bytes)
                 case .bytewise:
                     for byte in bytes {
-                        terminal.feed([byte])
+                        feed([byte])
                     }
                 case let .split(selectedEvent, offset) where selectedEvent == eventIndex:
-                    terminal.feed(Array(bytes[..<offset]))
-                    terminal.feed(Array(bytes[offset...]))
+                    feed(Array(bytes[..<offset]))
+                    feed(Array(bytes[offset...]))
                 case .split:
-                    terminal.feed(bytes)
+                    feed(bytes)
                 }
             case .resize(let columns, let rows):
                 terminal.resize(columns: columns, rows: rows)
             case .checkpoint:
-                try assert(expectations[eventIndex].expectation, against: terminal)
+                try assert(
+                    expectations[eventIndex].expectation,
+                    against: terminal,
+                    replyBytes: replyBytes
+                )
+                replyBytes.removeAll(keepingCapacity: true)
             }
         }
         return terminal
     }
 
-    private func assert(_ expectation: FixtureExpectation?, against terminal: Terminal) throws {
+    private func assert(
+        _ expectation: FixtureExpectation?,
+        against terminal: Terminal,
+        replyBytes: [UInt8]
+    ) throws {
         let expectation = try #require(expectation)
+        if let expectedReplyBytes = expectation.replyBytes {
+            #expect(replyBytes == expectedReplyBytes)
+        }
+        if let presentation = expectation.cursorPresentation {
+            #expect(terminal.presentation.isCursorVisible == presentation.isVisible)
+            #expect(terminal.presentation.isCursorBlinking == presentation.isBlinking)
+            #expect(terminal.presentation.cursorShape == (try presentation.terminalShape()))
+        }
         if let currentStyle = expectation.currentStyle {
             #expect(terminal.currentStyle == (try currentStyle.terminalStyle()))
         }
@@ -351,6 +367,20 @@ struct TerminalFixtureTests {
             "Save/restore using DECSC/DECRC",
             "Save twice, restore twice happens on both edge transitions",
         ],
+        "t/26state_query.test": [
+            "DA",
+            "XTVERSION",
+            "DSR",
+            "CPR",
+            "DECCPR",
+            "DECRQSS on DECSCUSR",
+            "DECRQSS on SGR",
+            "DECRQSS on SGR ANSI colours",
+            "DECRQSS on SGR ANSI hi-bright colours",
+            "DECRQSS on SGR 256-palette colours",
+            "DECRQSS on SGR RGB8 colours",
+            "S8C1T on DSR",
+        ],
         "t/27state_reset.test": [
             "RIS homes cursor",
             "RIS cancels scrolling region",
@@ -502,6 +532,7 @@ private enum ChunkStrategy {
 
 private enum FixtureError: Error {
     case invalidStyleToken(String)
+    case invalidCursorShape(String)
 }
 
 private struct ReplayFixture: Decodable {
@@ -517,6 +548,8 @@ private struct FixtureEvent: Decodable {
 }
 
 private struct FixtureExpectation: Decodable {
+    let replyBytes: [UInt8]?
+    let cursorPresentation: FixtureCursorPresentation?
     let viewportText: String?
     let cellKinds: [[String]]?
     let softWraps: [Bool]?
@@ -527,6 +560,22 @@ private struct FixtureExpectation: Decodable {
     let currentStyle: FixtureStyle?
     let cellStyles: [FixtureCellStyle]?
     let cellScalars: [FixtureCellScalars]?
+}
+
+/// Keeps cursor appearance expectations renderer-independent and source-neutral.
+private struct FixtureCursorPresentation: Decodable {
+    let isVisible: Bool
+    let shape: String
+    let isBlinking: Bool
+
+    func terminalShape() throws -> TerminalCursorShape {
+        switch shape {
+        case "block": .block
+        case "underline": .underline
+        case "bar": .bar
+        default: throw FixtureError.invalidCursorShape(shape)
+        }
+    }
 }
 
 private struct FixtureCursor: Decodable {

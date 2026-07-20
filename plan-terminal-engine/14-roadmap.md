@@ -187,6 +187,10 @@ mean.
     retained-row accounting, amortized oldest-first eviction, truncated-head
     metadata, and enforcement across scrolling and primary resize. See the
     [implementation plan](../plans/impl/2026-07-20-1146-scrollback-budget-eviction.md).
+  - [x] **Slice 3: Core queries and presentation modes.** Adds cursor appearance,
+    synchronized frame gating, ordered DA/status/cursor/mode replies, PTY routing,
+    and pinned query/save conformance fixtures. See the
+    [implementation plan](../plans/impl/2026-07-20-1248-terminal-presentation-sync-modes.md).
   - [ ] [Terminal core](04-terminal-core.md) completes the accepted baseline control,
     screen, mode, style, query, and recovery behavior.
   - [ ] [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md) completes
