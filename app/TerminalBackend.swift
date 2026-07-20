@@ -102,4 +102,11 @@ protocol TerminalBackend: AnyObject {
     func createSession(_ request: TerminalSessionRequest) -> (any TerminalSession)?
     func setAppFocused(_ focused: Bool)
     func reloadConfig()
+    /// Runs the backend's bounded process teardown after the final checkpoint is captured.
+    func terminateForApplicationExit()
+}
+
+extension TerminalBackend {
+    /// Gives backends a final synchronous process-lifetime teardown hook during orderly exit.
+    func terminateForApplicationExit() {}
 }

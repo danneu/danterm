@@ -250,6 +250,69 @@ struct TerminalPaneSessionControllerTests {
         #expect(controller.readFullHistoryText().contains("__FINAL_CHECKPOINT__"))
         await host.close()
     }
+
+    @Test("application termination reaches live and already-closing pane hosts", .timeLimit(.minutes(1)))
+    func applicationTerminationHandlesLiveAndMidCloseHosts() async throws {
+        // Intent: backend-owned termination handles cover every native host until
+        //   teardown completes, including one whose ordinary close is in flight.
+        // Why it exists: dropping a host from the backend registry at tearDown()
+        //   would let app termination leave that pane's process ladder unfinished.
+        // Scenario: the app quits while one shell is live and another pane has
+        //   just begun closing; both must release their complete process sessions.
+        let liveHost = try makeHost()
+        let closingHost = try makeHost()
+        let liveController = TerminalPaneSessionController(
+            host: liveHost,
+            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
+        )
+        let closingController = TerminalPaneSessionController(
+            host: closingHost,
+            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
+        )
+        let handles = [liveController.terminationHandle, closingController.terminationHandle]
+        #expect(await liveHost.waitForOutput(containing: Array("__READY__".utf8)))
+        #expect(await closingHost.waitForOutput(containing: Array("__READY__".utf8)))
+
+        closingController.tearDown()
+        await withTaskGroup(of: Void.self) { group in
+            for handle in handles {
+                group.addTask { await handle.terminateForApplicationExit() }
+            }
+        }
+
+        #expect((await liveHost.resourceSnapshot()).isReleased)
+        #expect((await closingHost.resourceSnapshot()).isReleased)
+        liveController.tearDown()
+    }
+
+    @Test("teardown completion fires backend registry cleanup exactly once", .timeLimit(.minutes(1)))
+    func teardownCompletionFiresOnce() async throws {
+        // Intent: a pane teardown publishes one completion after native resources
+        //   are released, even when tearDown() is called repeatedly.
+        // Why it exists: early registry removal loses mid-close hosts, while repeat
+        //   removal callbacks make backend ownership state race-prone.
+        // Scenario: repeated reconciler cleanup calls close one live shell pane.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
+        )
+        let completions = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        var iterator = completions.stream.makeAsyncIterator()
+        var completionCount = 0
+        controller.onTeardownCompleted = {
+            completionCount += 1
+            completions.continuation.yield()
+        }
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+
+        controller.tearDown()
+        controller.tearDown()
+        _ = await iterator.next()
+
+        #expect(completionCount == 1)
+        #expect((await host.resourceSnapshot()).isReleased)
+    }
 }
 
 private func makeHost() throws -> TerminalPTYHost {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Restrict GhosttyKit imports to the linked Ghostty adapter and process entry point.
+# Restrict linked terminal implementations to their dedicated app adapter files.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TARGET="${1:-$SCRIPT_DIR/../app}"
@@ -13,6 +13,18 @@ while IFS= read -r file; do
     esac
     if grep -nE '^[[:space:]]*(@[^[:space:]]+[[:space:]]+)?import[[:space:]]+GhosttyKit([^[:alnum:]_]|$)' "$file"; then
         echo "GhosttyKit import outside terminal adapter allowlist: $file" >&2
+        failed=1
+    fi
+done < <(find "$TARGET" -name '*.swift' -type f -print)
+
+while IFS= read -r file; do
+    case "$(basename "$file")" in
+        SwiftTerminalSessionView.swift|SwiftTerminalBackend.swift)
+            continue
+            ;;
+    esac
+    if grep -nE '^[[:space:]]*(@[^[:space:]]+[[:space:]]+)?import[[:space:]]+(PaneLifecycle|TerminalCore|TerminalPTYHost|TerminalPaneSession|TerminalRenderPlanning|TerminalRenderExecution)([^[:alnum:]_]|$)' "$file"; then
+        echo "Swift terminal engine import outside adapter allowlist: $file" >&2
         failed=1
     fi
 done < <(find "$TARGET" -name '*.swift' -type f -print)

@@ -9,6 +9,10 @@ let package = Package(
         .executable(name: "DanTermCLI", targets: ["DanTermCLI"]),
         .library(name: "DanTermProtocol", targets: ["DanTermProtocol"]),
     ],
+    dependencies: [
+        .package(path: "lib/TerminalCore"),
+        .package(path: "lib/TerminalPTY"),
+    ],
     targets: [
         .binaryTarget(
             name: "GhosttyKit",
@@ -23,7 +27,14 @@ let package = Package(
         ),
         .executableTarget(
             name: "DanTerm",
-            dependencies: ["GhosttyKit", "DanTermProtocol"],
+            dependencies: [
+                "GhosttyKit",
+                "DanTermProtocol",
+                .product(name: "PaneLifecycle", package: "TerminalPTY"),
+                .product(name: "TerminalPaneSession", package: "TerminalPTY"),
+                .product(name: "TerminalRenderPlanning", package: "TerminalCore"),
+                .product(name: "TerminalRenderExecution", package: "TerminalCore"),
+            ],
             path: "app",
             exclude: ["Info.plist"],
             swiftSettings: [

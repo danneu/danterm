@@ -39,7 +39,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         case .ghostty:
             terminalBackend = makeGhosttyBackend()
         case .swift:
-            fatalError("DANTERM_TERMINAL_BACKEND=swift is not implemented")
+            terminalBackend = makeSwiftTerminalBackend()
         }
         guard terminalBackend.isReady else {
             print("Failed to create terminal backend")
@@ -747,6 +747,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     func applicationWillTerminate(_ notification: Notification) {
         runtime?.stopIpcServer()
         runtime?.performEnrichedCheckpoint(async: false)
+        terminalBackend?.terminateForApplicationExit()
         deleteSessionLockFile()
     }
 

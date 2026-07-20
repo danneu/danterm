@@ -22,6 +22,14 @@ fi
 echo "Compiling..."
 swift build --package-path "$SCRIPT_DIR" --build-path "$SCRIPT_DIR/.spm-build"
 BIN_PATH=$(swift build --package-path "$SCRIPT_DIR" --build-path "$SCRIPT_DIR/.spm-build" --show-bin-path)
+swift build \
+    --package-path "$LIB_DIR/TerminalPTY" \
+    --build-path "$SCRIPT_DIR/.spm-build/TerminalPTY" \
+    --product PTYSessionBootstrap
+BOOTSTRAP_BIN_PATH=$(swift build \
+    --package-path "$LIB_DIR/TerminalPTY" \
+    --build-path "$SCRIPT_DIR/.spm-build/TerminalPTY" \
+    --show-bin-path)
 
 # Build app bundle
 rm -rf "$APP_PATH"
@@ -30,6 +38,8 @@ cp "$BIN_PATH/DanTerm" "$APP_PATH/Contents/MacOS/DanTerm Dev"
 mkdir -p "$APP_PATH/Contents/Helpers"
 cp "$BIN_PATH/DanTermCLI" "$APP_PATH/Contents/Helpers/danterm"
 chmod +x "$APP_PATH/Contents/Helpers/danterm"
+cp "$BOOTSTRAP_BIN_PATH/PTYSessionBootstrap" "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
+chmod +x "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
 
 cp "$SRC_DIR/Info.plist" "$APP_PATH/Contents/"
 mkdir -p "$APP_PATH/Contents/Resources"

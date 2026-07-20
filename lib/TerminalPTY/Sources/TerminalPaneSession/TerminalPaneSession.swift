@@ -17,11 +17,17 @@ public final class TerminalPaneSessionController {
     private var isTornDown = false
     private var didEmitSessionEnded = false
 
+    /// Process-lifetime access retained by the backend until this host finishes teardown.
+    public let terminationHandle: TerminalPaneTerminationHandle
+
     /// Receives complete immutable frames on the main actor while the pane is visible.
     public var onPlan: ((RenderFramePlan) -> Void)?
 
     /// Receives the first child-originated lifecycle result on the main actor.
     public var onSessionEnded: ((PaneLifecycleResult) -> Void)?
+
+    /// Releases the backend registry entry only after this host's native teardown completes.
+    public var onTeardownCompleted: (@MainActor @Sendable () -> Void)?
 
     /// The latest complete plan delivered for the visible pane, retained for scale-only redraws.
     public private(set) var currentPlan: RenderFramePlan?
@@ -45,6 +51,7 @@ public final class TerminalPaneSessionController {
         isVisible: Bool = true
     ) {
         self.host = host
+        terminationHandle = TerminalPaneTerminationHandle(host: host)
         cachedTerminal = host.fencedSnapshot()
         lastPlannedTerminal = cachedTerminal
         lastSubmittedDimensions = launchInput.initialDimensions
@@ -117,12 +124,14 @@ public final class TerminalPaneSessionController {
         isTornDown = true
         onPlan = nil
         onSessionEnded = nil
+        let onTeardownCompleted = takeTeardownCompletion()
         consumeTask?.cancel()
         consumeTask = nil
 
         let host = host
         Task.detached {
             await host.close()
+            await onTeardownCompleted?()
         }
     }
 
@@ -131,8 +140,15 @@ public final class TerminalPaneSessionController {
         if isVisible { planIfNeeded(snapshot) }
         if let result, didEmitSessionEnded == false {
             didEmitSessionEnded = true
+            takeTeardownCompletion()?()
             onSessionEnded?(result)
         }
+    }
+
+    private func takeTeardownCompletion() -> (@MainActor @Sendable () -> Void)? {
+        let completion = onTeardownCompleted
+        onTeardownCompleted = nil
+        return completion
     }
 
     private func planIfNeeded(_ terminal: Terminal) {

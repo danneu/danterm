@@ -464,7 +464,7 @@ PO12 manual checklist is the view-layer bar, recorded when the slice closes.
 
 - [x] 1. Add ordered host submission and lifecycle update signaling
 - [x] 2. Add the headless terminal pane session controller
-- [ ] 3. Integrate Swift terminal sessions into the app and development build
+- [x] 3. Integrate Swift terminal sessions into the app and development build
 
 ## Implementation notes
 
@@ -473,3 +473,8 @@ PO12 manual checklist is the view-layer bar, recorded when the slice closes.
 - Controller teardown refreshes its cache through a synchronous owner-queue fence;
   `synchronizeState()` provides the corresponding synchronous fence for orderly app
   checkpoints before teardown begins.
+- The Swift backend registry retains Sendable host termination handles rather than pane
+  controllers; registry removal occurs only after native teardown, and the orderly-exit
+  hook waits up to two seconds for all remaining handles concurrently.
+- The AppKit adapter uses Swift 6.2's `isolated deinit` so deallocation follows the same
+  synchronous callback-gate and controller teardown path as explicit pane removal.
