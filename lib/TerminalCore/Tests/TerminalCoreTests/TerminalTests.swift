@@ -400,6 +400,9 @@ struct TerminalTests {
             Array("\u{1B}[20h\u{1B}[20l".utf8),
             Array("\u{1B}[?6h\u{1B}[?6l".utf8),
             Array("\u{1B}[?7l\u{1B}[?7h".utf8),
+            Array("\u{1B}[?1047h\u{1B}[?1047l".utf8),
+            Array("\u{1B}[?1048h\u{1B}[?1048l".utf8),
+            Array("\u{1B}[?1049h\u{1B}[?1049l".utf8),
         ]
         let tabAndSaveFragments = [
             Array("\u{1B}H\u{1B}[3g".utf8),
@@ -412,16 +415,26 @@ struct TerminalTests {
             Array("\u{1B}c".utf8),
             Array("\u{1B}[!p".utf8),
         ]
+        let resizeFragments = [
+            Array("\u{1B}[?1047h".utf8),
+            Array("\u{1B}[?1049h".utf8),
+        ]
         let alphabet = byteAlphabet + sgrFragments + sliceSixFragments + modeFragments
-            + tabAndSaveFragments + repeatAndResetFragments
+            + tabAndSaveFragments + repeatAndResetFragments + resizeFragments
         for seed in UInt64(1)...256 {
             var generator = Generator(state: seed)
             var terminal = try #require(Terminal(columns: 7, rows: 3))
             for fragment in sgrFragments + sliceSixFragments + modeFragments
-                + tabAndSaveFragments + repeatAndResetFragments + (0..<256).map({ _ in
+                + tabAndSaveFragments + repeatAndResetFragments + resizeFragments
+                + (0..<256).map({ _ in
                 alphabet[Int(generator.next()) % alphabet.count]
             }) {
                 terminal.feed(fragment)
+                if resizeFragments.contains(fragment) {
+                    let columns = 2 + Int(generator.next()) % 8
+                    let rows = 1 + Int(generator.next()) % 5
+                    terminal.resize(columns: columns, rows: rows)
+                }
             }
             terminal.feed([0x18, 0x7C])
 

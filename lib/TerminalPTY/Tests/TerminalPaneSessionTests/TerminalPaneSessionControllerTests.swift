@@ -81,11 +81,12 @@ struct TerminalPaneSessionControllerTests {
 
     @Test("hidden output refreshes reads and reveal plans once", .timeLimit(.minutes(1)))
     func hiddenOutputAndReveal() async throws {
-        // Intent: hidden panes keep their inspection cache current without
-        //   planning, then reveal one complete frame for all accumulated output.
-        // Why it exists: suspending consumption while hidden loses recovery text;
-        //   planning while hidden violates the event-driven power contract.
-        // Scenario: a background tab receives shell output and is selected later.
+        // Intent: hidden panes keep inspection reads current without planning,
+        //   reveal once, and preserve primary recovery text behind an alternate frame.
+        // Why it exists: suspended consumption loses recovery text, hidden planning
+        //   wastes power, and conflating full with primary history persists TUI output.
+        // Scenario: a background tab receives output, is selected, then opens a
+        //   full-screen terminal application.
         let host = try makeHost()
         let controller = TerminalPaneSessionController(
             host: host,
@@ -109,6 +110,13 @@ struct TerminalPaneSessionControllerTests {
         #expect(plans[0].projectedText.contains("__HIDDEN_OUTPUT__"))
         controller.setVisible(true)
         #expect(plans.count == 1)
+
+        controller.sendText("printf '\\033[?1047h__ALT_%s__' FRAME\n")
+        #expect(await host.waitForOutput(containing: Array("__ALT_FRAME__".utf8)))
+        controller.synchronizeState()
+        #expect(controller.readFullHistoryText().contains("__ALT_FRAME__"))
+        #expect(controller.readPrimaryHistoryText().contains("__HIDDEN_OUTPUT__"))
+        #expect(controller.readPrimaryHistoryText().contains("__ALT_FRAME__") == false)
 
         controller.tearDown()
         await host.close()

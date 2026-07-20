@@ -1,6 +1,6 @@
 // Pure headless terminal reduction: byte ingestion, grid mutation, controls, and inspection.
 
-/// Reduces terminal bytes into deterministic value-semantic primary-screen state without IO.
+/// Reduces terminal bytes into deterministic value-semantic screen state without IO.
 public struct Terminal: Equatable, Sendable {
     /// Keeps scalar storage and wide-cell roles together for invariant-preserving mutation.
     private struct GridCell: Equatable, Sendable {
@@ -40,6 +40,13 @@ public struct Terminal: Equatable, Sendable {
         var target: CellPosition
         var previousScalar: Unicode.Scalar
         var breakState = GraphemeBreakState()
+    }
+
+    /// Retains primary cells and their private reflow anchor while the alternate grid is active.
+    private struct InactivePrimaryScreen: Equatable, Sendable {
+        var rows: [GridRow]
+        var resizeCursor: CellPosition
+        var isResizePendingWrap: Bool
     }
 
     /// Carries one atomic cell unit and the old coordinates that must follow it.
@@ -87,6 +94,7 @@ public struct Terminal: Equatable, Sendable {
     private var rowCount: Int
     private var scrollbackRows: [GridRow] = []
     private var rows: [GridRow]
+    private var inactivePrimaryScreen: InactivePrimaryScreen?
     private var scrollRegion: Range<Int>?
     private var cursor = CellPosition(row: 0, column: 0)
     private var isPendingWrap = false
@@ -137,19 +145,44 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    /// Resizes the primary screen while preserving its logical history and cursor attachment.
+    /// Resizes each screen by its contract while keeping the active cursor valid.
     public mutating func resize(columns: Int, rows: Int) {
         guard columns >= 2, rows >= 1 else { return }
         guard columns != columnCount || rows != rowCount else { return }
 
+        let oldColumnCount = columnCount
         scrollRegion = nil
-        if rows != rowCount {
-            resizeHeight(to: rows)
+        if columns != oldColumnCount {
+            resizeTabStops(from: oldColumnCount, to: columns)
         }
-        if columns != columnCount {
-            resizeTabStops(from: columnCount, to: columns)
-            resizeWidth(to: columns)
+
+        if var primary = inactivePrimaryScreen {
+            let alternateRows = self.rows
+            let liveCursor = cursor
+            let livePendingWrap = isPendingWrap
+
+            self.rows = primary.rows
+            cursor = primary.resizeCursor
+            isPendingWrap = primary.isResizePendingWrap
+            resizePrimaryScreen(columns: columns, rows: rows)
+            primary.rows = self.rows
+            primary.resizeCursor = cursor
+            primary.isResizePendingWrap = isPendingWrap
+
+            self.rows = resizedRectangle(
+                alternateRows,
+                columns: columns,
+                rows: rows,
+                clearsSoftWrap: columns != oldColumnCount
+            )
+            cursor = liveCursor
+            isPendingWrap = livePendingWrap
+            inactivePrimaryScreen = primary
+        } else {
+            resizePrimaryScreen(columns: columns, rows: rows)
         }
+
+        clampCursorStateToActiveGrid()
         clusterContext = nil
     }
 
@@ -192,12 +225,19 @@ public struct Terminal: Equatable, Sendable {
 
     /// Projects retained history and the viewport as logical text without a final newline.
     public var fullHistoryText: String {
-        primaryHistoryText
+        guard inactivePrimaryScreen != nil else { return primaryHistoryText }
+        var stream = scrollbackRows
+        if let last = stream.indices.last {
+            stream[last].isSoftWrapped = false
+        }
+        stream.append(contentsOf: rows)
+        return projectedHistoryText(from: stream)
     }
 
     /// Projects retained primary-screen history for recovery and export consumers.
     public var primaryHistoryText: String {
-        projectedHistoryText(from: scrollbackRows + rows)
+        let primaryRows = inactivePrimaryScreen?.rows ?? rows
+        return projectedHistoryText(from: scrollbackRows + primaryRows)
     }
 
     private func projectedHistoryText(from stream: [GridRow]) -> String {
@@ -270,6 +310,76 @@ public struct Terminal: Equatable, Sendable {
             clearCellAndPair(row: row, column: column, replacementStyle: style)
         }
         clusterContext = nil
+    }
+
+    private mutating func resizePrimaryScreen(columns: Int, rows: Int) {
+        if rows != rowCount {
+            resizeHeight(to: rows)
+        }
+        if columns != columnCount {
+            resizeWidth(to: columns)
+        }
+    }
+
+    private func resizedRectangle(
+        _ sourceRows: [GridRow],
+        columns: Int,
+        rows: Int,
+        clearsSoftWrap: Bool
+    ) -> [GridRow] {
+        (0..<rows).map { rowIndex in
+            guard sourceRows.indices.contains(rowIndex) else {
+                return makeBlankRow(columns: columns)
+            }
+
+            let source = sourceRows[rowIndex]
+            var cells = Array(source.cells.prefix(columns))
+            if cells.count < columns {
+                cells.append(contentsOf: (cells.count..<columns).map { _ in GridCell() })
+            }
+            let keepsContinuation = sourceRows.indices.contains(rowIndex + 1)
+                && rowIndex + 1 < rows
+            let clearsRowWrap = clearsSoftWrap
+                || (source.isSoftWrapped && keepsContinuation == false)
+            let preservesSpacer = clearsRowWrap == false
+                && keepsContinuation
+                && sourceRows[rowIndex + 1].cells.first?.kind == .wideHead
+            repairClippedCells(&cells, clearsSpacers: preservesSpacer == false)
+            return GridRow(
+                cells: cells,
+                isSoftWrapped: clearsRowWrap ? false : source.isSoftWrapped
+            )
+        }
+    }
+
+    private func repairClippedCells(_ cells: inout [GridCell], clearsSpacers: Bool) {
+        var invalidColumns: [Int] = []
+        for column in cells.indices {
+            switch cells[column].kind {
+            case .wideHead:
+                if column + 1 >= cells.count || cells[column + 1].kind != .wideTail {
+                    invalidColumns.append(column)
+                }
+            case .wideTail:
+                if column == 0 || cells[column - 1].kind != .wideHead {
+                    invalidColumns.append(column)
+                }
+            case .spacerHead:
+                if clearsSpacers {
+                    invalidColumns.append(column)
+                }
+            case .padding, .narrow:
+                break
+            }
+        }
+
+        for column in invalidColumns {
+            cells[column] = clippedBlank(replacing: cells[column])
+        }
+    }
+
+    private func clippedBlank(replacing cell: GridCell) -> GridCell {
+        GridCell(style: TerminalStyle(background: cell.style.background))
     }
 
     private mutating func resizeHeight(to newRowCount: Int) {
@@ -774,6 +884,24 @@ public struct Terminal: Equatable, Sendable {
                 } else {
                     restoreCursor()
                 }
+            case 1047:
+                if shouldClearPendingMotion {
+                    clearPendingMotionState()
+                    shouldClearPendingMotion = false
+                }
+                switchAlternateScreen(enabled: enabled)
+            case 1049:
+                if shouldClearPendingMotion {
+                    clearPendingMotionState()
+                    shouldClearPendingMotion = false
+                }
+                if enabled {
+                    saveCursor()
+                    switchAlternateScreen(enabled: true)
+                } else {
+                    switchAlternateScreen(enabled: false)
+                    restoreCursor()
+                }
             default:
                 continue
             }
@@ -1151,11 +1279,59 @@ public struct Terminal: Equatable, Sendable {
             row: min(max(savedCursor.position.row, rowRange.lowerBound), rowRange.upperBound - 1),
             column: min(max(savedCursor.position.column, 0), columnCount - 1)
         )
+        movePositionOffWideTail(&cursor, in: rows)
         currentStyle = savedCursor.style
         clusterContext = nil
         isPendingWrap = savedCursor.isPendingWrap
             && isAutoWrapMode
             && cursor.column == columnCount - 1
+    }
+
+    private mutating func switchAlternateScreen(enabled: Bool) {
+        if enabled {
+            if inactivePrimaryScreen == nil {
+                inactivePrimaryScreen = InactivePrimaryScreen(
+                    rows: rows,
+                    resizeCursor: cursor,
+                    isResizePendingWrap: isPendingWrap
+                )
+            }
+            rows = (0..<rowCount).map { _ in
+                makeBlankRow(columns: columnCount, style: backgroundEraseStyle)
+            }
+        } else if let primary = inactivePrimaryScreen {
+            rows = primary.rows
+            inactivePrimaryScreen = nil
+        }
+        clearPendingMotionState()
+    }
+
+    private mutating func selectPrimaryScreen() {
+        guard let primary = inactivePrimaryScreen else { return }
+        rows = primary.rows
+        inactivePrimaryScreen = nil
+    }
+
+    private mutating func clampCursorStateToActiveGrid() {
+        clampPosition(&cursor, in: rows)
+        clampPosition(&savedCursor.position, in: rows)
+        isPendingWrap = isPendingWrap
+            && isAutoWrapMode
+            && cursor.column == columnCount - 1
+    }
+
+    private func clampPosition(_ position: inout CellPosition, in grid: [GridRow]) {
+        position.row = min(max(position.row, 0), rowCount - 1)
+        position.column = min(max(position.column, 0), columnCount - 1)
+        movePositionOffWideTail(&position, in: grid)
+    }
+
+    private func movePositionOffWideTail(_ position: inout CellPosition, in grid: [GridRow]) {
+        guard grid.indices.contains(position.row),
+              grid[position.row].cells.indices.contains(position.column),
+              grid[position.row].cells[position.column].kind == .wideTail
+        else { return }
+        position.column = max(0, position.column - 1)
     }
 
     private mutating func repeatLastPrintedCluster(_ parameters: [UInt16]) {
@@ -1178,11 +1354,13 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func softReset() {
+        selectPrimaryScreen()
         resetControlState()
         clearPendingMotionState()
     }
 
     private mutating func hardReset() {
+        selectPrimaryScreen()
         resetControlState()
         cursor = CellPosition(row: 0, column: 0)
         clearPendingMotionState()
@@ -1471,7 +1649,7 @@ public struct Terminal: Equatable, Sendable {
             moveAndFillRows(
                 in: region,
                 by: -1,
-                pushesToScrollback: scrollRegion == nil,
+                pushesToScrollback: scrollRegion == nil && inactivePrimaryScreen == nil,
                 preservesTrailingWrap: preservingWrapClaim
             )
         } else if cursor.row < rowCount - 1 {
@@ -1508,7 +1686,7 @@ public struct Terminal: Equatable, Sendable {
         moveAndFillRows(
             in: activeScrollRegion,
             by: -amount,
-            pushesToScrollback: scrollRegion == nil
+            pushesToScrollback: scrollRegion == nil && inactivePrimaryScreen == nil
         )
     }
 
@@ -1667,7 +1845,7 @@ public struct Terminal: Equatable, Sendable {
     ) {
         if row > 0 {
             severWrapClaim(at: row - 1, replacementStyle: replacementStyle)
-        } else if let last = scrollbackRows.indices.last {
+        } else if inactivePrimaryScreen == nil, let last = scrollbackRows.indices.last {
             severScrollbackWrapClaim(at: last, replacementStyle: replacementStyle)
         }
     }
@@ -1696,7 +1874,7 @@ public struct Terminal: Equatable, Sendable {
     private mutating func restoreWrapClaimBeforeCursor() {
         if cursor.row > 0 {
             rows[cursor.row - 1].isSoftWrapped = true
-        } else if let last = scrollbackRows.indices.last {
+        } else if inactivePrimaryScreen == nil, let last = scrollbackRows.indices.last {
             scrollbackRows[last].isSoftWrapped = true
         }
     }
@@ -1766,6 +1944,7 @@ public struct Terminal: Equatable, Sendable {
         if row > 0, rows[row - 1].cells[columnCount - 1].kind == .spacerHead {
             rows[row - 1].cells[columnCount - 1] = GridCell(style: replacementStyle)
         } else if row == 0,
+                  inactivePrimaryScreen == nil,
                   let last = scrollbackRows.indices.last,
                   scrollbackRows[last].cells[columnCount - 1].kind == .spacerHead
         {

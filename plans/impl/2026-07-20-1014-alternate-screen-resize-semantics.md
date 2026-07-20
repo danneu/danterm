@@ -458,5 +458,5 @@ requires an upstream case).
 ## Commit progress
 
 - [x] 1. Route recovery and export through a primary-history read
-- [ ] 2. Implement alternate-screen state, resize semantics, projections, and native proofs
+- [x] 2. Implement alternate-screen state, resize semantics, projections, and native proofs
 - [ ] 3. Adopt alternate-screen fixtures and record the roadmap slice

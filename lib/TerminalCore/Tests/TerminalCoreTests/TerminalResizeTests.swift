@@ -183,7 +183,7 @@ struct TerminalResizeTests {
         tail.feed(Array("ab\u{754C}c".utf8))
         tail.moveCursor(row: 0, column: 3)
         tail.resize(columns: 3, rows: 3)
-        #expect(tail.geometry.cursor == TerminalCursor(row: 1, column: 1, isPendingWrap: false))
+        #expect(tail.geometry.cursor == TerminalCursor(row: 1, column: 0, isPendingWrap: false))
 
         var head = try #require(Terminal(columns: 6, rows: 3))
         head.feed(Array("ab\u{754C}c".utf8))
