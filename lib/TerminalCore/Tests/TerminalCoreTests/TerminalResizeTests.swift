@@ -9,7 +9,7 @@ struct TerminalResizeTests {
         var terminal = try #require(Terminal(columns: 4, rows: 2))
         terminal.feed(Array("abcdefghijkl".utf8))
         #expect(terminal.scrollbackRowCount == 1)
-        #expect(terminal.geometry.cursor.isPendingWrap)
+        #expect(terminal.geometry.cursor?.isPendingWrap == true)
         let original = terminal
 
         terminal.resize(columns: 4, rows: 2)
@@ -121,7 +121,7 @@ struct TerminalResizeTests {
         bottom.resize(columns: 4, rows: 4)
         #expect(bottom.scrollbackRowCount == 0)
         #expect(bottom.screenText == "a   \nb   \nc   \nd   ")
-        #expect(bottom.geometry.cursor.row == 3)
+        #expect(bottom.geometry.cursor?.row == 3)
 
         var aboveBottom = try #require(Terminal(columns: 4, rows: 2))
         aboveBottom.feed(Array("a\r\nb\r\nc\r\nd".utf8))
@@ -129,7 +129,7 @@ struct TerminalResizeTests {
         aboveBottom.resize(columns: 4, rows: 4)
         #expect(aboveBottom.scrollbackRowCount == 2)
         #expect(aboveBottom.screenText == "c   \nd   \n    \n    ")
-        #expect(aboveBottom.geometry.cursor.row == 0)
+        #expect(aboveBottom.geometry.cursor?.row == 0)
     }
 
     @Test("height transfer preserves wrap flags and does not accrete filler blanks")
@@ -163,7 +163,7 @@ struct TerminalResizeTests {
         terminal.feed(Array("abcd\r\nefgh\r\nijkl".utf8))
         terminal.moveCursor(row: 0, column: 3)
         terminal.feed(Array("Z".utf8))
-        #expect(terminal.geometry.cursor.isPendingWrap)
+        #expect(terminal.geometry.cursor?.isPendingWrap == true)
 
         terminal.resize(columns: 4, rows: 1)
 
@@ -235,7 +235,7 @@ struct TerminalResizeTests {
         var empty = try #require(Terminal(columns: 6, rows: 2))
         empty.moveCursor(row: 0, column: 5)
         empty.resize(columns: 3, rows: 2)
-        #expect(empty.geometry.cursor.column == 2)
+        #expect(empty.geometry.cursor?.column == 2)
     }
 
     @Test("pending-wrap boundary anchors become interior or remain pending at a row end")
@@ -272,13 +272,13 @@ struct TerminalResizeTests {
         //   row when the viewport narrows from six columns to three.
         var terminal = try #require(Terminal(columns: 6, rows: 4))
         terminal.feed(Array("abcdef\r\nghijkl\r\nm".utf8))
-        #expect(terminal.geometry.cursor.row == 2)
+        #expect(terminal.geometry.cursor?.row == 2)
 
         terminal.resize(columns: 3, rows: 4)
 
         #expect(terminal.scrollbackRowCount == 1)
         #expect(terminal.screenText == "def\nghi\njkl\nm  ")
-        #expect(terminal.geometry.cursor.row == 3)
+        #expect(terminal.geometry.cursor?.row == 3)
     }
 
     @Test("post-clear shrink keeps history out and overflow shrink moves only top rows")

@@ -166,7 +166,7 @@ struct RenderFramePlanningTests {
 
         var pendingTerminal = try #require(Terminal(columns: 2, rows: 1))
         feed("AB", to: &pendingTerminal)
-        try #require(pendingTerminal.geometry.cursor.isPendingWrap)
+        #expect(pendingTerminal.geometry.cursor?.isPendingWrap == true)
         let pendingWrap = planFrame(
             for: pendingTerminal,
             presentation: RenderPresentation(theme: .dark, isCursorVisible: true)

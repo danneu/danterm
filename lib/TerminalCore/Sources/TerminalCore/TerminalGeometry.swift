@@ -30,6 +30,29 @@ public struct TerminalScrollbackRow: Equatable, Sendable {
     public let isSoftWrapped: Bool
 }
 
+/// Describes the local visual-row window without exposing the anchor used to preserve it.
+public struct TerminalScrollProjection: Equatable, Sendable {
+    /// Number of currently reflowed rows in the active screen's stream.
+    public let totalRows: Int
+
+    /// Zero-based current-stream row displayed at the top of the window.
+    public let topRow: Int
+
+    /// Number of visual rows displayed by the window.
+    public let windowRows: Int
+
+    /// True when output and reflow should keep the live grid at the bottom of the window.
+    public let isFollowing: Bool
+
+    /// Creates a value suitable for scrollbar state and deterministic assertions.
+    public init(totalRows: Int, topRow: Int, windowRows: Int, isFollowing: Bool) {
+        self.totalRows = totalRows
+        self.topRow = topRow
+        self.windowRows = windowRows
+        self.isFollowing = isFollowing
+    }
+}
+
 /// Describes a cursor position together with VT100 deferred-wrap state.
 public struct TerminalCursor: Equatable, Sendable {
     /// Zero-based viewport row.
@@ -72,6 +95,6 @@ public struct TerminalGeometry: Equatable, Sendable {
     /// Viewport rows in top-to-bottom order.
     public let rows: [TerminalRowGeometry]
 
-    /// Current cursor and deferred-wrap state.
-    public let cursor: TerminalCursor
+    /// Current cursor when its live-grid row intersects the selected window.
+    public let cursor: TerminalCursor?
 }

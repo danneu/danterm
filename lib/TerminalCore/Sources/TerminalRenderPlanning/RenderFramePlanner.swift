@@ -74,8 +74,7 @@ private struct FramePlanner {
     }
 
     private func normalizedCursor(in geometry: TerminalGeometry) -> CursorSpan? {
-        guard presentation.isCursorVisible else { return nil }
-        let cursor = geometry.cursor
+        guard presentation.isCursorVisible, let cursor = geometry.cursor else { return nil }
         guard geometry.rows.indices.contains(cursor.row),
               geometry.rows[cursor.row].cells.indices.contains(cursor.column)
         else {

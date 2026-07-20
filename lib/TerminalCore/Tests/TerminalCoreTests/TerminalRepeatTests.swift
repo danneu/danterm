@@ -41,7 +41,7 @@ struct TerminalRepeatTests {
             .wideHead, .wideTail, .wideHead, .wideTail, .wideHead, .wideTail,
         ])
         #expect(upgraded.cell(row: 0, column: 4)?.scalars == ["#", "\u{FE0F}"])
-        #expect(upgraded.geometry.cursor.isPendingWrap)
+        #expect(upgraded.geometry.cursor?.isPendingWrap == true)
         expectValidGrid(narrow)
         expectValidGrid(wide)
         expectValidGrid(upgraded)

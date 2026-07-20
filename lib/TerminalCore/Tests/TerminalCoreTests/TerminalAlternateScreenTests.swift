@@ -39,7 +39,7 @@ struct TerminalAlternateScreenTests {
     func mode1049OrderingAndRedundantOperations() throws {
         var terminal = try #require(Terminal(columns: 4, rows: 2))
         terminal.feed(Array("AB\u{1B}[?1049h".utf8))
-        #expect(terminal.geometry.cursor.isPendingWrap == false)
+        #expect(terminal.geometry.cursor?.isPendingWrap == false)
 
         terminal.feed(Array("\u{1B}[1;3HX\u{1B}[?1049h".utf8))
         #expect(terminal.screenText == "    \n    ")
@@ -53,7 +53,7 @@ struct TerminalAlternateScreenTests {
 
         var pending = try #require(Terminal(columns: 2, rows: 2))
         pending.feed(Array("AB\u{1B}[?1049h\u{1B}[?1049l".utf8))
-        #expect(pending.geometry.cursor.isPendingWrap)
+        #expect(pending.geometry.cursor?.isPendingWrap == true)
         pending.feed(Array("X".utf8))
         #expect(pending.screenText == "AB\nX ")
     }
@@ -92,7 +92,7 @@ struct TerminalAlternateScreenTests {
 
         var tabs = try #require(Terminal(columns: 10, rows: 2))
         tabs.feed(Array("\u{1B}[3g\u{1B}[1;4H\u{1B}H\r\u{1B}[?1047h\t".utf8))
-        #expect(tabs.geometry.cursor.column == 3)
+        #expect(tabs.geometry.cursor?.column == 3)
 
         var autoWrap = try #require(Terminal(columns: 3, rows: 2))
         autoWrap.feed(Array("\u{1B}[?7l\u{1B}[?1047hABCD".utf8))
@@ -100,7 +100,7 @@ struct TerminalAlternateScreenTests {
 
         var marginsAndOrigin = try #require(Terminal(columns: 5, rows: 4))
         marginsAndOrigin.feed(Array("\u{1B}[2;3r\u{1B}[?6h\u{1B}[?1047h\u{1B}[1;1H".utf8))
-        #expect(marginsAndOrigin.geometry.cursor.row == 1)
+        #expect(marginsAndOrigin.geometry.cursor?.row == 1)
 
         var saved = try #require(Terminal(columns: 5, rows: 3))
         saved.feed(Array("\u{1B}[2;4H\u{1B}7\u{1B}[?1047h\u{1B}[1;1H\u{1B}[?1047l\u{1B}8".utf8))
@@ -193,15 +193,15 @@ struct TerminalAlternateScreenTests {
         terminal.feed(Array("\u{1B}[2;3r\u{1B}[?6h".utf8))
         terminal.resize(columns: 5, rows: 4)
         terminal.feed(Array("\u{1B}[1;1H".utf8))
-        #expect(terminal.geometry.cursor.row == 0)
+        #expect(terminal.geometry.cursor?.row == 0)
 
         terminal.feed(Array("\u{1B}[?1047l\u{1B}[?1048l".utf8))
-        #expect(terminal.geometry.cursor.column == 1)
+        #expect(terminal.geometry.cursor?.column == 1)
 
         var restore = try #require(Terminal(columns: 4, rows: 2))
         restore.moveCursor(row: 0, column: 2)
         restore.feed(Array("\u{1B}[?1048h\u{1B}[1;2H\u{754C}\u{1B}[?1048l".utf8))
-        #expect(restore.geometry.cursor.column == 1)
+        #expect(restore.geometry.cursor?.column == 1)
     }
 
     @Test("inactive primary resize is content-equivalent to resizing before alt entry")

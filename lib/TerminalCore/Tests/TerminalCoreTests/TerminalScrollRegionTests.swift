@@ -91,9 +91,9 @@ struct TerminalScrollRegionTests {
         #expect(reverse.scrollbackRowCount == 0)
 
         reverse.feed(Array("\u{1B}[4;2H\u{1B}M".utf8))
-        #expect(reverse.geometry.cursor.row == 2)
+        #expect(reverse.geometry.cursor?.row == 2)
         reverse.feed(Array("\u{1B}[1;2H\u{1B}M".utf8))
-        #expect(reverse.geometry.cursor.row == 0)
+        #expect(reverse.geometry.cursor?.row == 0)
     }
 
     @Test("SU and SD clamp counts, ignore cursor location, and apply strict history policy")
@@ -222,7 +222,7 @@ struct TerminalScrollRegionTests {
         var pending = try #require(Terminal(columns: 2, rows: 2))
         pending.feed(Array("AB".utf8))
         pending.feed(Array("\u{1B}[S".utf8))
-        #expect(pending.geometry.cursor.isPendingWrap == false)
+        #expect(pending.geometry.cursor?.isPendingWrap == false)
 
         var cluster = try #require(Terminal(columns: 3, rows: 1))
         cluster.feed(Array("A\u{200D}".utf8))
@@ -250,7 +250,7 @@ struct TerminalScrollRegionTests {
         sameSize.resize(columns: 4, rows: 4)
         #expect(sameSize == expected)
         sameSize.feed(Array("\u{1B}[3;1H\n".utf8))
-        #expect(sameSize.geometry.cursor.row == 2)
+        #expect(sameSize.geometry.cursor?.row == 2)
         #expect(sameSize.scrollbackRowCount == 0)
 
         var resized = try #require(Terminal(columns: 4, rows: 4))

@@ -145,6 +145,12 @@ public struct Terminal: Equatable, Sendable {
         var end: TextAnchor
     }
 
+    /// Keeps bottom-follow policy explicit when a browsing anchor becomes bottom-aligned.
+    private enum ViewportState: Equatable, Sendable {
+        case following
+        case browsing(top: TextAnchor)
+    }
+
     /// Stores only the active query and occurrence so navigation always rescans live text.
     private struct SearchState: Equatable, Sendable {
         var query: String
@@ -263,6 +269,7 @@ public struct Terminal: Equatable, Sendable {
     private var evictedRowCount = 0
     private var selection: TextAnchorRange?
     private var search: SearchState?
+    private var viewportState = ViewportState.following
 
     static let productionScrollbackBudgetBytes = 10_485_760
 
@@ -392,9 +399,9 @@ public struct Terminal: Equatable, Sendable {
         clusterContext = nil
     }
 
-    /// Renders the current viewport as unstyled text, representing padding as spaces.
+    /// Renders the selected local window as unstyled text, representing padding as spaces.
     public var screenText: String {
-        rows.map { row in
+        presentedRows.map { row in
             var result = ""
             for cell in row.cells {
                 switch cell.kind {
@@ -410,6 +417,72 @@ public struct Terminal: Equatable, Sendable {
             }
             return result
         }.joined(separator: "\n")
+    }
+
+    /// Projects the local window as logical text without soft-wrap separators or padding.
+    public var viewportText: String {
+        projectedHistoryText(from: presentedRows)
+    }
+
+    /// Exposes the current visual-row extent and window for scrollbar and inspection consumers.
+    public var scrollProjection: TerminalScrollProjection {
+        if inactivePrimaryScreen != nil {
+            return TerminalScrollProjection(
+                totalRows: rowCount,
+                topRow: 0,
+                windowRows: rowCount,
+                isFollowing: true
+            )
+        }
+        let totalRows = scrollbackRows.count + rows.count
+        let maximumTop = max(0, totalRows - rowCount)
+        let topRow: Int
+        let isFollowing: Bool
+        switch viewportState {
+        case .following:
+            topRow = maximumTop
+            isFollowing = true
+        case let .browsing(anchor):
+            topRow = min(max(anchor.row - evictedRowCount, 0), maximumTop)
+            isFollowing = false
+        }
+        return TerminalScrollProjection(
+            totalRows: totalRows,
+            topRow: topRow,
+            windowRows: rowCount,
+            isFollowing: isFollowing
+        )
+    }
+
+    /// Moves the local window by signed visual rows; positive values move toward live output.
+    public mutating func scroll(byRows rowDelta: Int) {
+        guard inactivePrimaryScreen == nil else { return }
+        let current = scrollProjection.topRow
+        let addition = current.addingReportingOverflow(rowDelta)
+        let target = addition.overflow
+            ? (rowDelta < 0 ? Int.min : Int.max)
+            : addition.partialValue
+        scroll(toTopRow: target)
+    }
+
+    /// Selects a top visual row in current-stream coordinates, clamping to a complete window.
+    public mutating func scroll(toTopRow requestedRow: Int) {
+        guard inactivePrimaryScreen == nil else { return }
+        let maximumTop = max(0, scrollbackRows.count + rows.count - rowCount)
+        let topRow = min(max(requestedRow, 0), maximumTop)
+        if topRow == maximumTop {
+            viewportState = .following
+        } else {
+            viewportState = .browsing(
+                top: TextAnchor(row: evictedRowCount + topRow, column: 0)
+            )
+        }
+    }
+
+    /// Returns local presentation to live-bottom follow without changing terminal content.
+    public mutating func scrollToBottom() {
+        guard inactivePrimaryScreen == nil else { return }
+        viewportState = .following
     }
 
     /// Returns retained primary rows in oldest-first order.
@@ -509,6 +582,7 @@ public struct Terminal: Equatable, Sendable {
             return false
         }
         search = SearchState(query: query, range: match)
+        revealSearchMatchIfNeeded()
         return true
     }
 
@@ -521,6 +595,7 @@ public struct Terminal: Equatable, Sendable {
             return false
         }
         self.search?.range = matches[current - 1]
+        revealSearchMatchIfNeeded()
         return true
     }
 
@@ -533,6 +608,7 @@ public struct Terminal: Equatable, Sendable {
             return false
         }
         self.search?.range = matches[current + 1]
+        revealSearchMatchIfNeeded()
         return true
     }
 
@@ -547,6 +623,47 @@ public struct Terminal: Equatable, Sendable {
             result.unicodeScalars.append(contentsOf: unit.scalars)
         }
         return result
+    }
+
+    private var presentedRows: [GridRow] {
+        let topRow = scrollProjection.topRow
+        return (topRow..<(topRow + rowCount)).map { index in
+            guard let row = viewportStreamRow(at: index) else {
+                preconditionFailure("viewport projection exceeded the active stream")
+            }
+            return row
+        }
+    }
+
+    private func viewportStreamRow(at index: Int) -> GridRow? {
+        guard index >= 0 else { return nil }
+        if inactivePrimaryScreen != nil {
+            return rows.indices.contains(index) ? rows[index] : nil
+        }
+        if scrollbackRows.indices.contains(index) {
+            return scrollbackRows[index]
+        }
+        let liveIndex = index - scrollbackRows.count
+        return rows.indices.contains(liveIndex) ? rows[liveIndex] : nil
+    }
+
+    private mutating func revealSearchMatchIfNeeded() {
+        guard inactivePrimaryScreen == nil, let match = search?.range else { return }
+        let projection = scrollProjection
+        let top = evictedRowCount + projection.topRow
+        let target: Int
+        if match.start.row < top {
+            target = match.start.row
+        } else if match.start.row >= top + projection.windowRows {
+            target = match.start.row - projection.windowRows + 1
+        } else {
+            return
+        }
+        let maximumTop = evictedRowCount + max(0, projection.totalRows - projection.windowRows)
+        viewportState = .browsing(top: TextAnchor(
+            row: min(max(target, evictedRowCount), maximumTop),
+            column: 0
+        ))
     }
 
     private func activeProjectionRows() -> [GridRow] {
@@ -822,6 +939,7 @@ public struct Terminal: Equatable, Sendable {
     private mutating func clearInspection() {
         selection = nil
         search = nil
+        viewportState = .following
     }
 
     private mutating func invalidateInspection(inViewportRows range: Range<Int>) {
@@ -886,6 +1004,19 @@ public struct Terminal: Equatable, Sendable {
         if let search, search.range.start < firstRetained {
             self.search = nil
         }
+        if case let .browsing(anchor) = viewportState, anchor < firstRetained {
+            viewportState = .browsing(top: firstRetained)
+        }
+        clampViewportAnchorToRetainedStream()
+    }
+
+    private mutating func clampViewportAnchorToRetainedStream() {
+        guard case let .browsing(anchor) = viewportState else { return }
+        let maximumTop = evictedRowCount + max(0, scrollbackRows.count + rows.count - rowCount)
+        viewportState = .browsing(top: TextAnchor(
+            row: min(max(anchor.row, evictedRowCount), maximumTop),
+            column: 0
+        ))
     }
 
     private static func scrollbackByteCost(of row: GridRow) -> Int {
@@ -919,28 +1050,41 @@ public struct Terminal: Equatable, Sendable {
 
     /// Projects cell roles, row wraps, and cursor state without exposing mutable storage.
     public var geometry: TerminalGeometry {
-        TerminalGeometry(
+        let projection = scrollProjection
+        let windowRows = presentedRows
+        let cursorStreamRow = inactivePrimaryScreen == nil
+            ? scrollbackRows.count + cursor.row
+            : cursor.row
+        let cursorWindowRow = cursorStreamRow - projection.topRow
+        return TerminalGeometry(
             columns: columnCount,
-            rows: rows.map { row in
+            rows: windowRows.map { row in
                 TerminalRowGeometry(
                     cells: row.cells.map { TerminalCellGeometry(kind: $0.kind) },
                     isSoftWrapped: row.isSoftWrapped
                 )
             },
-            cursor: TerminalCursor(
-                row: cursor.row,
-                column: cursor.column,
-                isPendingWrap: isPendingWrap
-            )
+            cursor: windowRows.indices.contains(cursorWindowRow)
+                ? TerminalCursor(
+                    row: cursorWindowRow,
+                    column: cursor.column,
+                    isPendingWrap: isPendingWrap
+                )
+                : nil
         )
     }
 
     /// Returns scalar-exact content for a valid viewport coordinate.
     public func cell(row: Int, column: Int) -> TerminalCell? {
-        guard rows.indices.contains(row), self.rows[row].cells.indices.contains(column) else {
+        let streamRow = scrollProjection.topRow + row
+        guard row >= 0,
+              row < rowCount,
+              let windowRow = viewportStreamRow(at: streamRow),
+              windowRow.cells.indices.contains(column)
+        else {
             return nil
         }
-        let cell = rows[row].cells[column]
+        let cell = windowRow.cells[column]
         return TerminalCell(kind: cell.kind, scalars: cell.scalars, style: cell.style)
     }
 
@@ -1089,6 +1233,7 @@ public struct Terminal: Equatable, Sendable {
             })
         }
         rowCount = newRowCount
+        clampViewportAnchorToRetainedStream()
     }
 
     private mutating func resizeWidth(to newColumnCount: Int) {
@@ -1098,7 +1243,20 @@ public struct Terminal: Equatable, Sendable {
         let oldCursorGlobalRow = scrollbackRows.count + cursor.row
         let fullStream = scrollbackRows.asArray() + rows
         let lastContentRow = fullStream.lastIndex(where: rowContainsContent) ?? 0
-        let retainedLastRow = max(oldCursorGlobalRow, lastContentRow)
+        let browsingSourceGlobalRow: Int?
+        if case let .browsing(anchor) = viewportState {
+            browsingSourceGlobalRow = min(
+                max(anchor.row - evictedRowCount, 0),
+                fullStream.count - 1
+            )
+        } else {
+            browsingSourceGlobalRow = nil
+        }
+        let retainedLastRow = max(
+            oldCursorGlobalRow,
+            lastContentRow,
+            browsingSourceGlobalRow ?? 0
+        )
         let sourceRows = Array(fullStream[...retainedLastRow])
         let reconstruction = reconstructLogicalLines(
             from: sourceRows,
@@ -1134,6 +1292,7 @@ public struct Terminal: Equatable, Sendable {
         var searchStartDestination: TextAnchor?
         var searchEndDestination: TextAnchor?
         var viewportTopDestinationRow = 0
+        var browsingTopDestinationRow: Int?
         for (lineIndex, line) in reconstruction.lines.enumerated() {
             let packed = pack(line: line, columns: newColumnCount)
             let baseRow = rebuiltRows.count
@@ -1145,6 +1304,18 @@ public struct Terminal: Equatable, Sendable {
                     viewportTopDestinationRow = baseRow + local.row
                 } else {
                     viewportTopDestinationRow = baseRow
+                }
+            }
+            if let browsingSourceGlobalRow {
+                let metadata = reconstruction.rowMetadata[browsingSourceGlobalRow]
+                if lineIndex == metadata.line {
+                    if let key = metadata.firstSourceKey,
+                       let local = packed.cellDestinations[key]
+                    {
+                        browsingTopDestinationRow = baseRow + local.row
+                    } else {
+                        browsingTopDestinationRow = baseRow
+                    }
                 }
             }
 
@@ -1255,7 +1426,14 @@ public struct Terminal: Equatable, Sendable {
                 search = nil
             }
         }
+        if let browsingTopDestinationRow {
+            viewportState = .browsing(top: TextAnchor(
+                row: evictedRowCount + browsingTopDestinationRow,
+                column: 0
+            ))
+        }
         enforceScrollbackBudget()
+        clampViewportAnchorToRetainedStream()
     }
 
     private func reconstructLogicalLines(

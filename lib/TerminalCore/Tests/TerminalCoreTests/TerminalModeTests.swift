@@ -97,15 +97,15 @@ struct TerminalModeTests {
         #expect(terminal.geometry.cursor == TerminalCursor(row: 4, column: 0, isPendingWrap: false))
         terminal.feed(Array("\u{1B}[3;3H".utf8))
         terminal.feed(Array("\u{1B}[10A".utf8))
-        #expect(terminal.geometry.cursor.row == 4)
+        #expect(terminal.geometry.cursor?.row == 4)
         terminal.feed(Array("\u{1B}[20B".utf8))
-        #expect(terminal.geometry.cursor.row == 14)
+        #expect(terminal.geometry.cursor?.row == 14)
         terminal.feed(Array("\u{1B}[1d".utf8))
         #expect(terminal.geometry.cursor == TerminalCursor(row: 4, column: 2, isPendingWrap: false))
         terminal.feed(Array("\u{1B}[20B".utf8))
-        #expect(terminal.geometry.cursor.row == 14)
+        #expect(terminal.geometry.cursor?.row == 14)
         terminal.feed(Array("\u{1B}[99k".utf8))
-        #expect(terminal.geometry.cursor.row == 4)
+        #expect(terminal.geometry.cursor?.row == 4)
         terminal.feed(Array("\u{1B}[99E".utf8))
         #expect(terminal.geometry.cursor == TerminalCursor(row: 14, column: 0, isPendingWrap: false))
         terminal.feed(Array("\u{1B}[99F".utf8))
@@ -124,13 +124,13 @@ struct TerminalModeTests {
         var terminal = try #require(Terminal(columns: 3, rows: 5))
         terminal.feed(Array("\u{1B}[2;4r\u{1B}[?6h\u{1B}[99BABCDEF".utf8))
 
-        #expect(terminal.geometry.cursor.row == 3)
+        #expect(terminal.geometry.cursor?.row == 3)
         #expect(terminal.geometry.rows[0].cells.allSatisfy { $0.kind == .padding })
         #expect(terminal.geometry.rows[4].cells.allSatisfy { $0.kind == .padding })
         expectValidGrid(terminal)
 
         terminal.feed(Array("\u{1B}M".utf8))
-        #expect((1..<4).contains(terminal.geometry.cursor.row))
+        #expect(terminal.geometry.cursor.map { (1..<4).contains($0.row) } == true)
         expectValidGrid(terminal)
     }
 
@@ -149,7 +149,7 @@ struct TerminalModeTests {
         var disarmed = try #require(Terminal(columns: 3, rows: 2))
         disarmed.feed(Array("ABC\u{1B}[?7lD".utf8))
         #expect(disarmed.screenText == "ABD\n   ")
-        #expect(disarmed.geometry.cursor.isPendingWrap == false)
+        #expect(disarmed.geometry.cursor?.isPendingWrap == false)
 
         narrow.feed(Array("\u{1B}[?7hEF".utf8))
         #expect(narrow.screenText == "ABE\nF  ")
@@ -200,7 +200,7 @@ struct TerminalModeTests {
 
         var pending = try #require(Terminal(columns: 2, rows: 2))
         pending.feed(Array("AB\u{1B}[4;99;20h".utf8))
-        #expect(pending.geometry.cursor.isPendingWrap == false)
+        #expect(pending.geometry.cursor?.isPendingWrap == false)
 
         var cluster = try #require(Terminal(columns: 3, rows: 1))
         cluster.feed(Array("A\u{200D}\u{1B}[?7h\u{0301}".utf8))

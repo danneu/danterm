@@ -164,7 +164,7 @@ struct CSICursorMovementTests {
         terminal.feed(Array(sequence.utf8))
         terminal.feed(Array("\u{0301}".utf8))
 
-        #expect(terminal.geometry.cursor.isPendingWrap == false)
+        #expect(terminal.geometry.cursor?.isPendingWrap == false)
         #expect(terminal.cell(row: 0, column: 1)?.scalars == ["B"])
         #expect(terminal.geometry.rows[0].isSoftWrapped == false)
     }

@@ -83,7 +83,7 @@ struct TerminalTests {
 
         var pending = try #require(Terminal(columns: 2, rows: 2))
         pending.feed(Array("AB\u{0301}".utf8))
-        #expect(pending.geometry.cursor.isPendingWrap)
+        #expect(pending.geometry.cursor?.isPendingWrap == true)
         #expect(pending.cell(row: 0, column: 1)?.scalars == ["B", "\u{0301}"])
         #expect(pending.geometry.rows[0].isSoftWrapped == false)
     }
@@ -106,11 +106,11 @@ struct TerminalTests {
         terminal.feed(Array("ABC".utf8))
 
         terminal.feed([0x0D])
-        #expect(terminal.geometry.cursor.column == 0)
+        #expect(terminal.geometry.cursor?.column == 0)
         terminal.feed([0x09])
-        #expect(terminal.geometry.cursor.column == 8)
+        #expect(terminal.geometry.cursor?.column == 8)
         terminal.feed([0x08])
-        #expect(terminal.geometry.cursor.column == 7)
+        #expect(terminal.geometry.cursor?.column == 7)
         terminal.feed([0x0A])
         #expect(terminal.geometry.cursor == TerminalCursor(row: 1, column: 7, isPendingWrap: false))
         terminal.feed([0x0B, 0x0C])
@@ -125,11 +125,11 @@ struct TerminalTests {
         terminal.moveCursor(row: 0, column: 1)
 
         terminal.feed([control])
-        #expect(terminal.geometry.cursor.row == 1)
+        #expect(terminal.geometry.cursor?.row == 1)
         #expect(terminal.geometry.rows[0].isSoftWrapped)
 
         terminal.feed([control])
-        #expect(terminal.geometry.cursor.row == 1)
+        #expect(terminal.geometry.cursor?.row == 1)
         #expect(terminal.geometry.rows[0].isSoftWrapped == false)
         #expect(terminal.cell(row: 0, column: 0)?.scalars == ["C"])
     }
@@ -140,7 +140,7 @@ struct TerminalTests {
             var terminal = try #require(Terminal(columns: 2, rows: 2))
             terminal.feed(Array("AB".utf8))
             terminal.feed([control])
-            #expect(terminal.geometry.cursor.isPendingWrap == false)
+            #expect(terminal.geometry.cursor?.isPendingWrap == false)
         }
 
         var tab = try #require(Terminal(columns: 2, rows: 2))
@@ -170,7 +170,7 @@ struct TerminalTests {
 
         terminal.feed([0x08])
 
-        #expect(terminal.geometry.cursor.column == 1)
+        #expect(terminal.geometry.cursor?.column == 1)
         #expect(terminal.geometry.rows[0].cells.map(\.kind) == [.wideHead, .wideTail, .padding, .padding])
     }
 
@@ -189,9 +189,9 @@ struct TerminalTests {
         var terminal = try #require(Terminal(columns: 12, rows: 1))
 
         terminal.feed([0x09])
-        #expect(terminal.geometry.cursor.column == 8)
+        #expect(terminal.geometry.cursor?.column == 8)
         terminal.feed([0x09])
-        #expect(terminal.geometry.cursor.column == 11)
+        #expect(terminal.geometry.cursor?.column == 11)
         #expect(terminal.geometry.rows[0].cells.allSatisfy { $0.kind == .padding })
     }
 

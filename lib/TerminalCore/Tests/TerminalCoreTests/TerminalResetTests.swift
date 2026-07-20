@@ -17,7 +17,7 @@ struct TerminalResetTests {
         terminal.feed(Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ12345".utf8))
         terminal.feed(Array("\u{1B}[31m\u{1B}7Z\u{200D}\u{1B}[2;3r\u{1B}[4;20h\u{1B}[?6h\u{1B}[?7l\u{1B}[3g\u{1B}H".utf8))
         let screen = terminal.screenText
-        let cursor = terminal.geometry.cursor
+        let cursor = try #require(terminal.geometry.cursor)
         let history = (0..<terminal.scrollbackRowCount).compactMap(terminal.scrollbackRow(at:))
 
         terminal.feed(Array("\u{1B}[!p".utf8))
@@ -36,12 +36,12 @@ struct TerminalResetTests {
 
         var tabProbe = terminal
         tabProbe.feed(Array("\r\t".utf8))
-        #expect(tabProbe.geometry.cursor.column == 8)
+        #expect(tabProbe.geometry.cursor?.column == 8)
 
         var lineFeedProbe = terminal
         lineFeedProbe.moveCursor(row: 0, column: 4)
         lineFeedProbe.feed(Array("\n".utf8))
-        #expect(lineFeedProbe.geometry.cursor.column == 4)
+        #expect(lineFeedProbe.geometry.cursor?.column == 4)
 
         var insertProbe = terminal
         insertProbe.moveCursor(row: 0, column: 0)
@@ -51,7 +51,7 @@ struct TerminalResetTests {
         var autoWrapProbe = terminal
         autoWrapProbe.moveCursor(row: 0, column: 9)
         autoWrapProbe.feed(Array("X".utf8))
-        #expect(autoWrapProbe.geometry.cursor.isPendingWrap)
+        #expect(autoWrapProbe.geometry.cursor?.isPendingWrap == true)
 
         var regionProbe = terminal
         let historyCount = regionProbe.scrollbackRowCount
@@ -61,7 +61,7 @@ struct TerminalResetTests {
 
         var originProbe = terminal
         originProbe.feed(Array("\u{1B}[2;3r\u{1B}[1;1H".utf8))
-        #expect(originProbe.geometry.cursor.row == 0)
+        #expect(originProbe.geometry.cursor?.row == 0)
 
         var slotProbe = terminal
         slotProbe.feed(Array("\u{1B}8".utf8))
@@ -111,7 +111,7 @@ struct TerminalResetTests {
 
         var tabProbe = terminal
         tabProbe.feed(Array("\t".utf8))
-        #expect(tabProbe.geometry.cursor.column == 8)
+        #expect(tabProbe.geometry.cursor?.column == 8)
 
         var slotProbe = terminal
         slotProbe.feed(Array("\u{1B}8".utf8))
@@ -124,12 +124,12 @@ struct TerminalResetTests {
         var lineFeedProbe = terminal
         lineFeedProbe.moveCursor(row: 0, column: 4)
         lineFeedProbe.feed(Array("\n".utf8))
-        #expect(lineFeedProbe.geometry.cursor.column == 4)
+        #expect(lineFeedProbe.geometry.cursor?.column == 4)
 
         var autoWrapProbe = terminal
         autoWrapProbe.moveCursor(row: 0, column: 9)
         autoWrapProbe.feed(Array("X".utf8))
-        #expect(autoWrapProbe.geometry.cursor.isPendingWrap)
+        #expect(autoWrapProbe.geometry.cursor?.isPendingWrap == true)
 
         var regionProbe = terminal
         regionProbe.moveCursor(row: 2, column: 0)
@@ -138,7 +138,7 @@ struct TerminalResetTests {
 
         var originProbe = terminal
         originProbe.feed(Array("\u{1B}[2;3r\u{1B}[1;1H".utf8))
-        #expect(originProbe.geometry.cursor.row == 0)
+        #expect(originProbe.geometry.cursor?.row == 0)
 
         var wideSeam = try #require(Terminal(columns: 3, rows: 2))
         wideSeam.moveCursor(row: 0, column: 2)
@@ -162,7 +162,7 @@ struct TerminalResetTests {
 
         var pending = try #require(Terminal(columns: 3, rows: 2))
         pending.feed(Array("ABC\u{1B}[!p".utf8))
-        #expect(pending.geometry.cursor.isPendingWrap == false)
+        #expect(pending.geometry.cursor?.isPendingWrap == false)
 
         var cluster = try #require(Terminal(columns: 3, rows: 1))
         cluster.feed(Array("A\u{200D}\u{1B}[!p\u{0301}".utf8))

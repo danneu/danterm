@@ -29,11 +29,14 @@ func expectValidGrid(
         sourceLocation: sourceLocation
     )
 
-    let activeRows = inspectedViewportRows(of: terminal, sourceLocation: sourceLocation)
+    var liveTerminal = terminal
+    liveTerminal.scrollToBottom()
+    let activeRows = inspectedViewportRows(of: liveTerminal, sourceLocation: sourceLocation)
     expectValidStream(activeRows, sourceLocation: sourceLocation)
 
     var primary = terminal
     primary.feed(Array("\u{1B}[?1047l".utf8))
+    primary.scrollToBottom()
     var primaryRows: [(cells: [TerminalCell], isSoftWrapped: Bool)] =
         (0..<primary.scrollbackRowCount).compactMap { index in
         guard let row = primary.scrollbackRow(at: index) else {

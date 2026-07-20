@@ -220,7 +220,7 @@ struct TerminalEditingTests {
             var pending = try #require(Terminal(columns: 2, rows: 2))
             pending.feed(Array("AB".utf8))
             pending.feed(Array(sequence.utf8))
-            #expect(pending.geometry.cursor.isPendingWrap == false)
+            #expect(pending.geometry.cursor?.isPendingWrap == false)
             expectValidGrid(pending)
         }
 

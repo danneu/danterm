@@ -26,8 +26,8 @@ struct TerminalSavedCursorTests {
         #expect(terminal.currentStyle == TerminalStyle(foreground: .indexed(1), bold: true))
 
         terminal.feed(Array("B".utf8))
-        #expect(terminal.geometry.cursor.row == 3)
-        #expect(terminal.geometry.cursor.column == 1)
+        #expect(terminal.geometry.cursor?.row == 3)
+        #expect(terminal.geometry.cursor?.column == 1)
         #expect(terminal.cell(row: 3, column: 0)?.scalars == ["B"])
         expectValidGrid(terminal)
     }
@@ -81,7 +81,7 @@ struct TerminalSavedCursorTests {
         #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 0, isPendingWrap: false))
         #expect(terminal.currentStyle == TerminalStyle())
         terminal.feed(Array("\u{1B}[1;1H".utf8))
-        #expect(terminal.geometry.cursor.row == 0)
+        #expect(terminal.geometry.cursor?.row == 0)
     }
 
     @Test("restore reclamps saved state and re-arms pending wrap only at an active edge")
@@ -118,7 +118,7 @@ struct TerminalSavedCursorTests {
         #expect(oneChunk == bytewise)
         #expect(oneChunk.geometry.cursor == TerminalCursor(row: 1, column: 0, isPendingWrap: false))
         oneChunk.feed(Array("\u{1B}[1;1H".utf8))
-        #expect(oneChunk.geometry.cursor.row == 1)
+        #expect(oneChunk.geometry.cursor?.row == 1)
     }
 
     @Test(

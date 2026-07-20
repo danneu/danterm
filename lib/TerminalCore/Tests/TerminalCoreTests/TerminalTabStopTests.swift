@@ -15,18 +15,18 @@ struct TerminalTabStopTests {
 
         terminal.moveCursor(row: 0, column: 0)
         terminal.feed([0x09])
-        #expect(terminal.geometry.cursor.column == 3)
+        #expect(terminal.geometry.cursor?.column == 3)
         terminal.feed([0x09])
-        #expect(terminal.geometry.cursor.column == 5)
+        #expect(terminal.geometry.cursor?.column == 5)
         terminal.feed(Array("\u{1B}[g".utf8))
         terminal.moveCursor(row: 0, column: 3)
         terminal.feed([0x09])
-        #expect(terminal.geometry.cursor.column == 8)
+        #expect(terminal.geometry.cursor?.column == 8)
 
         terminal.feed(Array("\u{1B}[3g".utf8))
         terminal.moveCursor(row: 0, column: 0)
         terminal.feed([0x09])
-        #expect(terminal.geometry.cursor.column == 11)
+        #expect(terminal.geometry.cursor?.column == 11)
         #expect(terminal.geometry.rows[0].cells.allSatisfy { $0.kind == .padding })
     }
 
@@ -44,7 +44,7 @@ struct TerminalTabStopTests {
             var terminal = try #require(Terminal(columns: 2, rows: 2))
             terminal.feed(Array("AB".utf8))
             terminal.feed(Array(sequence.utf8))
-            #expect(terminal.geometry.cursor.isPendingWrap == false)
+            #expect(terminal.geometry.cursor?.isPendingWrap == false)
         }
     }
 
@@ -102,7 +102,7 @@ struct TerminalTabStopTests {
         terminal.feed(Array(sequence.utf8))
         terminal.feed(Array("\u{0301}".utf8))
 
-        #expect(terminal.geometry.cursor.isPendingWrap == false)
+        #expect(terminal.geometry.cursor?.isPendingWrap == false)
         #expect(terminal.cell(row: 0, column: 19)?.scalars == ["A"])
         #expect(terminal.geometry.rows[0].isSoftWrapped == false)
     }
@@ -124,11 +124,11 @@ struct TerminalTabStopTests {
         terminal.resize(columns: 20, rows: 2)
         terminal.moveCursor(row: 0, column: 0)
         terminal.feed([0x09])
-        #expect(terminal.geometry.cursor.column == 3)
+        #expect(terminal.geometry.cursor?.column == 3)
         terminal.feed(Array("\u{1B}[g".utf8))
         terminal.moveCursor(row: 0, column: 0)
         terminal.feed([0x09])
-        #expect(terminal.geometry.cursor.column == 16)
+        #expect(terminal.geometry.cursor?.column == 16)
         terminal.moveCursor(row: 0, column: 17)
         terminal.feed(Array("\u{1B}H".utf8))
 
@@ -136,9 +136,9 @@ struct TerminalTabStopTests {
         terminal.resize(columns: 20, rows: 2)
         terminal.moveCursor(row: 0, column: 0)
         terminal.feed([0x09])
-        #expect(terminal.geometry.cursor.column == 16)
+        #expect(terminal.geometry.cursor?.column == 16)
         terminal.feed([0x09])
-        #expect(terminal.geometry.cursor.column == 19)
+        #expect(terminal.geometry.cursor?.column == 19)
     }
 
     @Test("tab stops participate in terminal equality")

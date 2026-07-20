@@ -140,7 +140,7 @@ struct CSIEraseTests {
         #expect(terminal.scrollbackRowCount == 0)
         #expect(terminal.geometry == expectedGeometry)
         #expect(terminal.currentStyle == expectedStyle)
-        #expect(terminal.geometry.cursor.isPendingWrap == false)
+        #expect(terminal.geometry.cursor?.isPendingWrap == false)
         terminal.feed(Array("\u{1B}[S".utf8))
         #expect(terminal.scrollbackRowCount == 0)
         expectValidGrid(terminal)
@@ -236,7 +236,7 @@ struct CSIEraseTests {
             var terminal = try #require(Terminal(columns: 2, rows: 2))
             terminal.feed(Array("AB".utf8))
             terminal.feed(Array(sequence.utf8))
-            #expect(terminal.geometry.cursor.isPendingWrap == false)
+            #expect(terminal.geometry.cursor?.isPendingWrap == false)
             expectValidGrid(terminal)
         }
 
