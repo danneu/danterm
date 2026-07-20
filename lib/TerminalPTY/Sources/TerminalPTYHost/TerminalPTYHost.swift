@@ -153,6 +153,13 @@ public actor TerminalPTYHost {
         process(.start(input))
     }
 
+    /// Enqueues launch before synchronous pane submissions without requiring a Task hop.
+    nonisolated public func submitStart(_ input: LaunchPolicyInput) {
+        queue.async { [weak self] in
+            self?.assumeIsolated { owner in owner.start(input) }
+        }
+    }
+
     /// Enqueues user bytes directly on the owner queue without an ordering-opaque Task.
     nonisolated public func send(_ bytes: [UInt8]) {
         queue.async { [weak self] in
@@ -182,6 +189,23 @@ public actor TerminalPTYHost {
     /// Returns a Sendable value copy that cannot mutate owner state.
     public func snapshot() -> Terminal {
         terminal
+    }
+
+    /// Fences earlier owner-queue work for synchronous session recovery reads.
+    nonisolated public func fencedSnapshot() -> Terminal {
+        queue.sync {
+            assumeIsolated { owner in owner.terminal }
+        }
+    }
+
+    /// Starts close and returns its final accepted terminal state in one owner-queue fence.
+    nonisolated public func beginCloseAndSnapshot() -> Terminal {
+        queue.sync {
+            assumeIsolated { owner in
+                owner.process(.requestClose)
+                return owner.terminal
+            }
+        }
     }
 
     /// Returns the reported child result without waiting for future lifecycle work.

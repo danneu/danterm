@@ -463,5 +463,13 @@ PO12 manual checklist is the view-layer bar, recorded when the slice closes.
 ## Commit progress
 
 - [x] 1. Add ordered host submission and lifecycle update signaling
-- [ ] 2. Add the headless terminal pane session controller
+- [x] 2. Add the headless terminal pane session controller
 - [ ] 3. Integrate Swift terminal sessions into the app and development build
+
+## Implementation notes
+
+- The synchronous session constructor uses a FIFO `submitStart` host entry point so
+  launch is structurally ordered before the first input or layout submission.
+- Controller teardown refreshes its cache through a synchronous owner-queue fence;
+  `synchronizeState()` provides the corresponding synchronous fence for orderly app
+  checkpoints before teardown begins.
