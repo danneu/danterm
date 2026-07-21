@@ -236,6 +236,12 @@ mean.
     output before the final clean-exit checkpoint. Ghostty alone retains the
     temporary periodic fallback. See the
     [Milestone 6 closure plan](../plans/impl/2026-07-21-1544-milestone-6-closure-audit.md).
+  - [x] **Slice 14: Headless inspection/recovery characterization replay.**
+    Reuses the real-Ghostty corpus as the single source of terminal bytes,
+    resize checkpoints, and expected projections, proving exact Swift parity
+    across primary reflow and recovery while documenting one adjudicated
+    alternate-screen cursor-placement divergence. See the
+    [Milestone 6 closure plan](../plans/impl/2026-07-21-1544-milestone-6-closure-audit.md).
   - [x] [Terminal core](04-terminal-core.md) completes the accepted baseline control,
     screen, mode, style, query, and recovery behavior.
     Closure-audit judgment: controls, primary and alternate screens, modes,
@@ -258,16 +264,17 @@ mean.
     viewport-offset and interaction state. Audit judgment: existing
     `resizePreservesBrowsingAnchor`, `outputPreservesBrowsingAnchorAndContent`,
     and `evictionClampsBrowsingAnchor` tests cover resize, output, and eviction.
-  - [ ] [Inspection, search, and recovery](06-inspection-recovery.md) preserves the
+  - [x] [Inspection, search, and recovery](06-inspection-recovery.md) preserves the
     characterized viewport/full-history, logical-line, selection, search, pane
     read, export, recovery text, and event-driven recovery-freshness behavior
     across reflow.
     Closure-audit judgment: logical projection and invalidation, selection,
     search, pane reads, persistence limits, and primary-history capture while
     alternate screen is active are already covered. Slice 13 closes
-    event-driven Swift enriched-checkpoint freshness. Remaining work is
-    headless replay of the checked-in Ghostty inspection/recovery
-    characterization corpus.
+    event-driven Swift enriched-checkpoint freshness. Slice 14 replays the
+    checked-in Ghostty characterization through TerminalCore at 56/90/56
+    columns and across alternate-screen entry/exit, with the only mismatch
+    adjudicated in favor of TerminalCore's reflow-attached cursor contract.
   - [ ] [Input and interaction](08-input-interaction.md) and
     [Renderer](09-renderer.md) provide an interactive pane with macOS text
     composition, terminal keys, mouse reporting, selection, safe paste,

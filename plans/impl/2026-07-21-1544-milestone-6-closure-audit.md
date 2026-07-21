@@ -93,6 +93,9 @@ The final roadmap state is:
   56/90/56 widths, while alternate screen is active, and after returning to
   primary.
 - Preserve the corpus's exact inputs, resize sequence, and provenance.
+- Treat Ghostty as characterization evidence rather than an infallible
+  specification: adjudicate any mismatch against DanTerm's contracts and keep
+  a documented, executable exception when TerminalCore's behavior is intended.
 
 ### Chinese IME composition
 
@@ -198,7 +201,9 @@ The final roadmap state is:
 - A runtime/owner integration test races output with quit and proves the
   mutation source is fenced and drained before the final enriched checkpoint.
 - The Ghostty characterization replay proves identical Swift viewport and
-  primary-history text across resize and alternate-screen transitions.
+  primary-history text across resize and alternate-screen transitions, except
+  for divergences explicitly adjudicated against DanTerm's behavioral
+  contracts and retained as executable known issues.
 - The AppKit UI suite proves multi-stage Chinese marked text commits through
   the text path without encoded key bytes.
 - Fixture tests prove exact libvterm and Alacritty inventory, pinned provenance,
@@ -234,7 +239,7 @@ The final roadmap state is:
   replace periodic Swift enriched checkpoints with the deterministic 10-minute
   attempt bound and retry-to-success policy, retain the scoped Ghostty fallback,
   prove mutation classification, and fence output before the final checkpoint.
-- [ ] **Commit 4 -- `test(recovery): replay Ghostty characterization in Swift`**:
+- [x] **Commit 4 -- `test(recovery): replay Ghostty characterization in Swift`**:
   make the checked-in characterization corpus replayable headlessly, prove
   viewport/primary-history equivalence across resize and alternate screen, and
   check the inspection/recovery gate.
@@ -264,3 +269,9 @@ The final roadmap state is:
   candidates and AppRuntime retains timer, capture, and disk ownership. This
   preserves the terminal-backend boundary lint as well as the core/runtime
   determinism seam.
+- Commit 4 keeps the Ghostty fixture as evidence rather than an infallible
+  specification. Exact headless replay found one alternate-screen viewport
+  mismatch after 56/90/56 reflow: Ghostty carried the cursor to column 8 while
+  TerminalCore kept it attached to the end of `CORPUS-END` at column 10. The
+  replay retains that exact comparison as a known issue and favors the existing
+  TerminalCore cursor-attachment contract.

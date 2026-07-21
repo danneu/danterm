@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Controlled PTY child for Ghostty text and recovery characterization."""
 
+import json
 import os
 import pathlib
 import select
@@ -10,24 +11,13 @@ import termios
 
 
 STATE_DIRECTORY = pathlib.Path(sys.argv[1])
-HISTORY_CORPUS = b"".join(f"HISTORY-{index:02d}\r\n".encode("ascii") for index in range(1, 46))
-PRIMARY_CORPUS = b"\x1b[3J\x1b[2J\x1b[H" + HISTORY_CORPUS + (
-    b"\x1b]2;boundary-title\x07"
-    b"\x1b]7;file://localhost/tmp/boundary-cwd\x07"
-    b"\x07"
-    b"\x1b]9;boundary-notification\x07"
-    b"\x1b]9;4;1;42\x07"
-    b"HARD-BOUNDARY-A\r\nHARD-BOUNDARY-B\r\n"
-    b"WRITTEN-SPACES:[  lead middle  trail  ]  \r\n"
-    b"EMPTY-BEFORE\r\n\r\nEMPTY-AFTER\r\n"
-    b"SPANISH: ni\xc3\xb1o, acci\xc3\xb3n, coraz\xc3\xb3n\r\n"
-    b"CHINESE: \xe4\xbd\xa0\xe5\xa5\xbd\xe4\xb8\x96\xe7\x95\x8c\r\n"
-    b"EMOJI: \xf0\x9f\x99\x82 \xf0\x9f\x9a\x80\r\n"
-    b"LONG-LOGICAL:abcdefghijklmnopqrstuvwxyz-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789-end\r\n"
-    b"CORPUS-END"
-)
-ALTERNATE_CORPUS = b"\x1b[?1049hALT-TRANSIENT\r\nALT-WRITTEN-SPACES:[  x  ]  "
-RETURN_TO_PRIMARY = b"\x1b[?1049l\r\nRETURNED-PRIMARY"
+FIXTURE_PATH = pathlib.Path(sys.argv[2])
+with FIXTURE_PATH.open(encoding="utf-8") as fixture_file:
+    REPLAY_EVENTS = json.load(fixture_file)["replay"]["events"]
+REPLAY_FEEDS = [bytes.fromhex(event["hex"]) for event in REPLAY_EVENTS if event["type"] == "feed"]
+if len(REPLAY_FEEDS) != 3:
+    raise ValueError("Characterization replay must contain primary, alternate, and return feeds")
+PRIMARY_CORPUS, ALTERNATE_CORPUS, RETURN_TO_PRIMARY = REPLAY_FEEDS
 
 
 def write_state(name: str, content: str = "ready\n") -> None:

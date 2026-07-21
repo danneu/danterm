@@ -4,8 +4,6 @@ set -euo pipefail
 
 CHARACTERIZATION_BUNDLE_ID="com.danneu.danterm-terminal-characterization"
 CHARACTERIZATION_APP_NAME="DanTerm Terminal Characterization"
-CHARACTERIZATION_NARROW_COLUMNS=56
-CHARACTERIZATION_WIDE_COLUMNS=90
 CHARACTERIZATION_TIMEOUT_SECONDS=20
 
 path_is_within() {
@@ -125,7 +123,7 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-FIXTURE="$REPO_ROOT/fixtures/terminal-characterization/ghostty-inspection-recovery.json"
+FIXTURE="$REPO_ROOT/lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/ghostty/inspection-recovery.json"
 BUILD_PATH="$REPO_ROOT/.build/terminal-characterization-swiftpm"
 FAILURE_ROOT="$REPO_ROOT/.build/terminal-characterization-failures"
 RUN_ROOT="$(mktemp -d "/tmp/dtc.XXXXXX")"
@@ -179,6 +177,9 @@ for command in jq swift plutil codesign osascript; do
     }
 done
 
+CHARACTERIZATION_NARROW_COLUMNS="$(jq -er '.widths.narrow' "$FIXTURE")"
+CHARACTERIZATION_WIDE_COLUMNS="$(jq -er '.widths.wide' "$FIXTURE")"
+
 if [[ ! -d "$REPO_ROOT/lib/GhosttyKit.xcframework" ]]; then
     echo "GhosttyKit.xcframework is missing; run ./build-lib.sh once." >&2
     exit 1
@@ -220,7 +221,7 @@ cp "$SCRIPT_DIR/terminal-characterization-driver.py" "$RUN_ROOT/driver.py"
 chmod +x "$RUN_ROOT/driver.py"
 mkdir -p "$ISOLATED_HOME/.config/ghostty"
 cat >"$ISOLATED_HOME/.config/ghostty/config" <<EOF
-command = direct:/usr/bin/python3 $RUN_ROOT/driver.py $STATE_DIRECTORY
+command = direct:/usr/bin/python3 $RUN_ROOT/driver.py $STATE_DIRECTORY $FIXTURE
 shell-integration = none
 wait-after-command = true
 font-family = Menlo
@@ -587,10 +588,11 @@ ENRICHED_CHECKPOINT="$RECOVERY_PATH/last-enriched.json"
 jq -j '.model.groups[].tabs[].rootNode | .. | objects | select(.type? == "leaf") | .pane.scrollback // empty' \
     "$ENRICHED_CHECKPOINT" >"$CAPTURE_DIRECTORY/enriched-scrollback.txt"
 
-divergences='[]'
+divergences="$(jq -c '.divergencesFromTerminalEngineContract' "$FIXTURE")"
 append_divergence() {
     local message="$1"
-    divergences="$(jq -cn --argjson prior "$divergences" --arg message "$message" '$prior + [$message]')"
+    divergences="$(jq -cn --argjson prior "$divergences" --arg message "$message" \
+        '$prior | if index($message) then . else . + [$message] end')"
 }
 
 if ! cmp -s "$CAPTURE_DIRECTORY/narrow/full-over-limit.txt" "$CAPTURE_DIRECTORY/wide/full-over-limit.txt"; then
@@ -644,6 +646,7 @@ fi
 
 ACTUAL_FIXTURE="$CAPTURE_DIRECTORY/ghostty-inspection-recovery.json"
 jq -nS \
+    --slurpfile expected "$FIXTURE" \
     --argjson narrowColumns "$CHARACTERIZATION_NARROW_COLUMNS" \
     --argjson wideColumns "$CHARACTERIZATION_WIDE_COLUMNS" \
     --rawfile narrowSize "$CAPTURE_DIRECTORY/narrow/pty-size.txt" \
@@ -676,7 +679,8 @@ jq -nS \
             returnedPrimaryFull: $returnedFull,
             enrichedScrollback: $enrichedScrollback
         },
-        divergencesFromTerminalEngineContract: $divergences
+        divergencesFromTerminalEngineContract: $divergences,
+        replay: $expected[0].replay
     }' >"$ACTUAL_FIXTURE"
 
 FAILURE_DIRECTORY="$FAILURE_ROOT/$(date +%Y-%m-%d-%H%M%S)-$$"
