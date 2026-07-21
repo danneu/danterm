@@ -1,6 +1,7 @@
 // Real-PTY session tests for planning, visibility, capture, exit, and teardown.
 import Foundation
 import PaneLifecycle
+import TerminalCore
 import TerminalCoreRecording
 import TerminalRenderPlanning
 import Testing
@@ -11,6 +12,82 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct TerminalPaneSessionControllerTests {
+    @Test("visible creation retains one full frame and repeat synchronization is idle")
+    func visibleCreationRetainsInitialFrame() async throws {
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec sleep 30")
+        )
+        var frames: [TerminalPaneFrame] = []
+        controller.onFrame = { frames.append($0) }
+
+        #expect(controller.currentPlan != nil)
+        #expect(controller.currentDamage == .full)
+        controller.synchronizeState()
+        controller.synchronizeState()
+        #expect(frames.isEmpty)
+
+        controller.tearDown()
+        await host.close()
+    }
+
+    @Test("hidden creation defers one full frame until first reveal")
+    func hiddenCreationDefersInitialFrame() async throws {
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec sleep 30"),
+            isVisible: false
+        )
+        var frames: [TerminalPaneFrame] = []
+        controller.onFrame = { frames.append($0) }
+
+        #expect(controller.currentPlan == nil)
+        controller.setVisible(true)
+        controller.setVisible(true)
+
+        #expect(frames.count == 1)
+        #expect(frames.first?.damage == .full)
+        controller.tearDown()
+        await host.close()
+    }
+
+    @Test("synchronized output unions suppressed damage into its published frame", .timeLimit(.minutes(1)))
+    func synchronizedOutputAccumulatesDamage() async throws {
+        // Intent: damage from every DEC 2026-suppressed state reaches the first
+        //   frame published after synchronization ends.
+        // Why it exists: draining on each owner read can otherwise discard damage
+        //   before the pane session is permitted to publish a frame.
+        // Scenario: a TUI renders two synchronized updates and then commits the batch.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) sync \"$0\"")
+        )
+        var frames: [TerminalPaneFrame] = []
+        controller.onFrame = { frames.append($0) }
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        controller.synchronizeState()
+
+        controller.sendText("first\n")
+        #expect(await host.waitForOutput(containing: Array("__SYNC_A__".utf8)))
+        controller.synchronizeState()
+        controller.sendText("second\n")
+        #expect(await host.waitForOutput(containing: Array("__SYNC_B__".utf8)))
+        controller.synchronizeState()
+        let countDuringSynchronization = frames.count
+
+        controller.sendText("commit\n")
+        #expect(await host.waitForOutput(containing: Array("__SYNC_DONE__".utf8)))
+        controller.synchronizeState()
+
+        #expect(frames.count == countDuringSynchronization + 1)
+        #expect(frames.last?.damage != TerminalDamage.none)
+        controller.tearDown()
+        await host.close()
+    }
+
     @Test("cursor visibility and synchronized updates gate complete frame planning", .timeLimit(.minutes(1)))
     func presentationProjectionAndSynchronizedGating() async throws {
         // Intent: the controller projects cursor visibility, suppresses intermediate
@@ -738,7 +815,11 @@ struct TerminalPaneSessionControllerTests {
         #expect(shiftDownClickCounts.contains(1))
         #expect(shiftDownClickCounts.contains(2))
         #expect(shiftDownClickCounts.contains(3))
-        #expect(try recording.replay() == controller.terminalSnapshot())
+        var replayed = try recording.replay()
+        _ = replayed.drainDamage()
+        var consumed = controller.terminalSnapshot()
+        _ = consumed.drainDamage()
+        #expect(replayed == consumed)
 
         controller.tearDown()
         await controller.terminationHandle.terminateForApplicationExit()

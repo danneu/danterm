@@ -254,7 +254,7 @@ live pane still renders output, selection, browsing, and resize correctly
 ## Commit progress
 
 - [x] 1. feat(engine): add bounded logical damage accumulation
-- [ ] 2. feat(pty): carry damage through gated pane commits
+- [x] 2. feat(pty): carry damage through gated pane commits
 - [ ] 3. feat(renderer): redraw only damaged terminal rows
 - [ ] 4. test(engine): adopt damage fixtures and close roadmap gates
 
@@ -264,3 +264,7 @@ live pane still renders output, selection, browsing, and resize correctly
   cursor, selection, and viewport snapshots around parser actions. A full
   visible-grid snapshot per action preserved correctness but made sustained PTY
   output scale with viewport size per character and violated the timing suite.
+- The pane session publishes damage through a new frame callback while retaining
+  the plan-only callback until the renderer slice moves the AppKit consumer.
+  This keeps the PTY commit independently buildable without prematurely changing
+  view invalidation behavior.

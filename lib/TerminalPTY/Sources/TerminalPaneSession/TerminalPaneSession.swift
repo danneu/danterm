@@ -20,6 +20,19 @@ public struct TerminalPaneViewportState: Equatable, Sendable {
     }
 }
 
+/// Publishes a complete retained plan with the bounded damage that triggered its display pass.
+public struct TerminalPaneFrame: Equatable, Sendable {
+    /// Complete retained rendering state, independent of the damage optimization.
+    public let plan: RenderFramePlan
+    /// Coalesced redraw work since the previous published frame.
+    public let damage: TerminalDamage
+
+    public init(plan: RenderFramePlan, damage: TerminalDamage) {
+        self.plan = plan
+        self.damage = damage
+    }
+}
+
 /// Owns one headless terminal pane while keeping host bytes and actor state behind the adapter.
 @MainActor
 public final class TerminalPaneSessionController {
@@ -28,6 +41,7 @@ public final class TerminalPaneSessionController {
     private var cachedTerminal: Terminal
     private let initialDimensions: TerminalDimensions
     private var lastPlannedTerminal: Terminal?
+    private var pendingDamage = TerminalDamage.none
     private var lastSubmittedDimensions: TerminalDimensions
     private var isVisible: Bool
     private var isTornDown = false
@@ -41,6 +55,9 @@ public final class TerminalPaneSessionController {
 
     /// Receives complete immutable frames on the main actor while the pane is visible.
     public var onPlan: ((RenderFramePlan) -> Void)?
+
+    /// Receives the same complete frame paired with its coalesced logical damage.
+    public var onFrame: ((TerminalPaneFrame) -> Void)?
 
     /// Receives the first child-originated lifecycle result on the main actor.
     public var onSessionEnded: ((PaneLifecycleResult) -> Void)?
@@ -56,6 +73,9 @@ public final class TerminalPaneSessionController {
 
     /// The latest complete plan delivered for the visible pane, retained for scale-only redraws.
     public private(set) var currentPlan: RenderFramePlan?
+
+    /// Damage paired with `currentPlan` at its most recent publication.
+    public private(set) var currentDamage: TerminalDamage?
 
     /// Creates and starts the sole PTY host owned by this pane controller.
     public convenience init(
@@ -108,12 +128,15 @@ public final class TerminalPaneSessionController {
     ) {
         self.host = host
         terminationHandle = TerminalPaneTerminationHandle(host: host)
-        cachedTerminal = host.fencedSnapshot()
+        let initialFrameState = host.fencedFrameState()
+        cachedTerminal = initialFrameState.terminal
         initialDimensions = launchInput.initialDimensions
-        lastPlannedTerminal = cachedTerminal
+        pendingDamage = initialFrameState.damage
         lastSubmittedDimensions = launchInput.initialDimensions
         self.isVisible = isVisible
         lastEmittedViewportState = viewportState
+
+        if isVisible { planIfNeeded(cachedTerminal) }
 
         host.submitStart(launchInput)
         consumeTask = Task { [weak self, host] in
@@ -128,9 +151,9 @@ public final class TerminalPaneSessionController {
                 } else {
                     transitions = nil
                 }
-                let snapshot = await host.snapshot()
+                let frameState = await host.frameState()
                 guard let self, self.isTornDown == false else { break }
-                self.consume(snapshot: snapshot, result: result, transitions: transitions)
+                self.consume(frameState: frameState, result: result, transitions: transitions)
             }
         }
     }
@@ -217,7 +240,7 @@ public final class TerminalPaneSessionController {
     /// Fences host work and applies the newest state before a synchronous checkpoint read.
     public func synchronizeState() {
         guard isTornDown == false else { return }
-        consume(snapshot: host.fencedSnapshot(), result: nil, transitions: nil)
+        consume(frameState: host.fencedFrameState(), result: nil, transitions: nil)
     }
 
     /// Returns the latest cached viewport without crossing the host actor boundary.
@@ -251,7 +274,7 @@ public final class TerminalPaneSessionController {
     /// Fences pending pointer work, refreshes cached state, and returns finalized selection text.
     public func readSelectedTextSynchronizing() -> String? {
         guard isTornDown == false else { return nil }
-        consume(snapshot: host.fencedSnapshot(), result: nil, transitions: nil)
+        consume(frameState: host.fencedFrameState(), result: nil, transitions: nil)
         return cachedTerminal.selectedText
     }
 
@@ -295,6 +318,7 @@ public final class TerminalPaneSessionController {
         cachedTerminal = host.beginCloseAndSnapshot()
         isTornDown = true
         onPlan = nil
+        onFrame = nil
         onSessionEnded = nil
         onViewportStateChange = nil
         onPaneMenu = nil
@@ -310,16 +334,17 @@ public final class TerminalPaneSessionController {
     }
 
     private func consume(
-        snapshot: Terminal,
+        frameState: TerminalPTYFrameState,
         result: PaneLifecycleResult?,
         transitions: [TerminalPTYAppliedTransition]?
     ) {
-        cachedTerminal = snapshot
+        cachedTerminal = frameState.terminal
+        pendingDamage.formUnion(frameState.damage)
         emitViewportStateIfNeeded()
         if case .some(.exited) = result {
             didChildExit = true
         }
-        if isVisible { planIfNeeded(snapshot) }
+        if isVisible { planIfNeeded(frameState.terminal) }
         if let result, didEmitSessionEnded == false {
             didEmitSessionEnded = true
             if let transitions {
@@ -411,6 +436,10 @@ public final class TerminalPaneSessionController {
         )
         lastPlannedTerminal = terminal
         currentPlan = plan
+        currentDamage = pendingDamage
+        let frame = TerminalPaneFrame(plan: plan, damage: pendingDamage)
+        pendingDamage = .none
+        onFrame?(frame)
         onPlan?(plan)
     }
 }

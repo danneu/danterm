@@ -10,6 +10,20 @@ public enum TerminalPTYHostError: Error, Equatable, Sendable {
     case invalidDimensions
 }
 
+/// Carries one immutable terminal value with the damage drained for its frame consumer.
+public struct TerminalPTYFrameState: Equatable, Sendable {
+    /// The newest owner state after its accumulator has been drained.
+    public let terminal: Terminal
+    /// All redraw work accumulated since the previous frame-state read.
+    public let damage: TerminalDamage
+
+    /// Keeps the drained accumulator separate so terminal equality remains presentation-based.
+    public init(terminal: Terminal, damage: TerminalDamage) {
+        self.terminal = terminal
+        self.damage = damage
+    }
+}
+
 /// Test-support view of owner-ordered terminal, input, and viewport transitions.
 package enum TerminalPTYAppliedTransition: Equatable, Sendable {
     case feed([UInt8])
@@ -279,11 +293,28 @@ public actor TerminalPTYHost {
         terminal
     }
 
+    /// Drains render damage while returning the newest immutable terminal value.
+    public func frameState() -> TerminalPTYFrameState {
+        drainedFrameState()
+    }
+
     /// Fences earlier owner-queue work for synchronous session recovery reads.
     nonisolated public func fencedSnapshot() -> Terminal {
         queue.sync {
             assumeIsolated { owner in owner.terminal }
         }
+    }
+
+    /// Fences earlier owner work and drains exactly the damage accumulated through that fence.
+    nonisolated public func fencedFrameState() -> TerminalPTYFrameState {
+        queue.sync {
+            assumeIsolated { owner in owner.drainedFrameState() }
+        }
+    }
+
+    private func drainedFrameState() -> TerminalPTYFrameState {
+        let damage = terminal.drainDamage()
+        return TerminalPTYFrameState(terminal: terminal, damage: damage)
     }
 
     /// Starts close and returns its final accepted terminal state in one owner-queue fence.

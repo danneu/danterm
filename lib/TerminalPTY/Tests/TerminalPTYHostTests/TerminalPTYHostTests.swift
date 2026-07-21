@@ -10,6 +10,19 @@ import TerminalCoreRecording
 /// Exercises the native owner only through real PTYs and controlled child behavior.
 @Suite(.serialized)
 struct TerminalPTYHostTests {
+    @Test("frame-state reads drain damage without changing ordinary snapshots")
+    func frameStateReadsDrainDamage() async throws {
+        let host = try makeHost(captureTransitions: false)
+
+        let first = host.fencedFrameState()
+        let second = host.fencedFrameState()
+
+        #expect(first.damage == .full)
+        #expect(second.damage == .none)
+        #expect(await host.snapshot() == second.terminal)
+        await host.close()
+    }
+
     @Test("controlled login shell observes PTY ownership, cwd, environment, IO, and exit", .timeLimit(.minutes(1)))
     func launchRecipeAndDuplexIO() async throws {
         let host = try TerminalPTYHost(
