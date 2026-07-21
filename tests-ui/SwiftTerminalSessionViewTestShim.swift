@@ -183,6 +183,7 @@ final class TerminalPaneSessionController {
     var onViewportStateChange: ((TerminalPaneViewportState) -> Void)?
     var onPaneMenu: ((TerminalViewportCell) -> Void)?
     var onOpenLink: ((TerminalHyperlink) -> Void)?
+    var onPrimaryHistoryMutation: ((String) -> Void)?
     var currentPlan: RenderFramePlan?
     var viewportState: TerminalPaneViewportState
     private(set) var scrolledTopRows: [Int] = []
@@ -257,6 +258,7 @@ final class TerminalPaneSessionController {
     }
     func scroll(toTopRow row: Int) { scrolledTopRows.append(row) }
     func setVisible(_ visible: Bool) {}
+    func fenceForApplicationExit() {}
     func synchronizeState() {}
     func readViewportText() -> String { "" }
     func readFullHistoryText() -> String { "" }

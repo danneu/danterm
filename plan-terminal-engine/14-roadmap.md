@@ -242,6 +242,11 @@ mean.
     across primary reflow and recovery while documenting one adjudicated
     alternate-screen cursor-placement divergence. See the
     [Milestone 6 closure plan](../plans/impl/2026-07-21-1544-milestone-6-closure-audit.md).
+  - [x] **Slice 15: Multi-stage Chinese IME composition.** Proves successive
+    native marked-text replacements remain local and only the final Chinese
+    commit reaches the terminal text path, without terminal key-encoded bytes.
+    See the
+    [Milestone 6 closure plan](../plans/impl/2026-07-21-1544-milestone-6-closure-audit.md).
   - [x] [Terminal core](04-terminal-core.md) completes the accepted baseline control,
     screen, mode, style, query, and recovery behavior.
     Closure-audit judgment: controls, primary and alternate screens, modes,
@@ -282,8 +287,8 @@ mean.
     fallback, colors, cursor behavior, and correct display scaling.
     Closure-audit judgment: keyboard, mouse, paste, OSC 52, links, colors,
     cursor shapes, damage, font fallback, display scaling, and the native text
-    composition seam are covered. Remaining work is the named multi-stage
-    Chinese IME scenario and renderer cursor blinking.
+    composition seam are covered. Slice 15 adds the named multi-stage Chinese
+    IME proof. Renderer cursor blinking is the only remaining work.
   - [x] Logical damage and full redraw produce the same visible state. Slice 8
     proves every neutral event by retained-plan overlay and styled output at the
     executor-pixel seam, including resize and alternate-screen cases.

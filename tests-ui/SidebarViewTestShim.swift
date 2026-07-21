@@ -46,6 +46,7 @@ class TerminalView: NSView, TerminalSession {
     var state = TerminalSessionState(scrollbarEnabled: true, cellHeight: 0, scrollPosition: nil)
     weak var stateObserver: (any TerminalSessionStateObserver)?
     var onEvent: ((TerminalSessionEvent) -> Void)?
+    var onPrimaryHistoryMutation: ((String) -> Void)?
 
     func copySelection() {
         performedActions.append("copySelection")
@@ -75,6 +76,7 @@ class TerminalView: NSView, TerminalSession {
     func scroll(toRow row: Int) {}
     func requestClose() {}
     func setFocusBorder(_ focused: Bool, hasBell: Bool) {}
+    func fenceForApplicationExit() {}
     func tearDown() {}
 }
 

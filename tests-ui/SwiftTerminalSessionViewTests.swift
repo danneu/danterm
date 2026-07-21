@@ -422,6 +422,46 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(controller.inputBytes.isEmpty, "composition leaked into terminal key encoding")
     }
 
+    uiTest("multi-stage Chinese IME commits only final text through native input") {
+        // Intent: successive Chinese IME marked-text replacements stay local until AppKit
+        //   commits the final candidate through the native text-input callback.
+        // Why it exists: partial candidates or their backing key events must not reach the PTY,
+        //   and the final commit must not also be encoded as a terminal key.
+        // Scenario: Pinyin input advances through "n", "ni", and a selected Chinese candidate
+        //   before AppKit commits the two-character phrase.
+        let controller = TerminalPaneSessionController()
+        controller.inputModes.kittyKeyboardFlags = 1
+        let pane = SwiftTerminalSessionView(controller: controller)
+        let notFound = NSRange(location: NSNotFound, length: 0)
+
+        pane.setMarkedText(
+            "n",
+            selectedRange: .init(location: 1, length: 0),
+            replacementRange: notFound
+        )
+        pane.setMarkedText(
+            "ni",
+            selectedRange: .init(location: 2, length: 0),
+            replacementRange: notFound
+        )
+        pane.setMarkedText(
+            "\u{4F60}",
+            selectedRange: .init(location: 1, length: 0),
+            replacementRange: notFound
+        )
+
+        try uiExpect(controller.textInputs.isEmpty, "marked text escaped before commit")
+        try uiExpect(controller.inputBytes.isEmpty, "marked text used terminal key encoding")
+
+        pane.insertText("\u{4F60}\u{597D}", replacementRange: notFound)
+
+        try uiExpect(controller.textInputs == ["\u{4F60}\u{597D}"],
+                     "Chinese IME commit did not use the text path exactly once")
+        try uiExpect(controller.inputBytes.isEmpty,
+                     "Chinese IME commit leaked into terminal key encoding")
+        try uiExpect(pane.hasMarkedText() == false, "committed IME text remained marked")
+    }
+
     uiTest("control punctuation and function keys normalize into core bytes") {
         // Intent: layout-derived Control punctuation and function keys retain semantic identity.
         // Why it exists: AppKit mutates Control characters and represents function keys as PUA text.

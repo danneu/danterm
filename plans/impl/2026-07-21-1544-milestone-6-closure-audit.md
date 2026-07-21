@@ -243,7 +243,7 @@ The final roadmap state is:
   make the checked-in characterization corpus replayable headlessly, prove
   viewport/primary-history equivalence across resize and alternate screen, and
   check the inspection/recovery gate.
-- [ ] **Commit 5 -- `test(ui): cover multi-stage Chinese IME composition`**: add
+- [x] **Commit 5 -- `test(ui): cover multi-stage Chinese IME composition`**: add
   the marked-text/commit UI scenario and update the input/renderer judgment so
   blinking is its only remaining item.
 - [ ] **Commit 6 -- `test(fixtures): complete libvterm milestone 6 dispositions`**:
@@ -275,3 +275,7 @@ The final roadmap state is:
   TerminalCore kept it attached to the end of `CORPUS-END` at column 10. The
   replay retains that exact comparison as a known issue and favors the existing
   TerminalCore cursor-attachment contract.
+- Commit 5 also restores UI-harness conformance with the recovery protocol
+  added in Commit 3. The production Swift view already forwarded primary-history
+  mutations and the application-exit fence, but both UI shims lacked those
+  members, preventing `just test-ui` from compiling before the IME proof ran.
