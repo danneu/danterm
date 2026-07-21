@@ -17,9 +17,9 @@ in [Inspection, search, and recovery](06-inspection-recovery.md). Recovery work
 coalesces while content is changing and stops once the latest mutation is
 durable; a clean terminal has no repeating checkpoint timer.
 
-Visibility, focus, activation, damage, and cursor-blink demand feed a
-deterministic scheduling policy. AppKit performs the resulting scheduling and
-drawing actions; system callbacks do not decide terminal semantics.
+Visibility, focus, activation, and damage feed a deterministic scheduling
+policy. AppKit performs the resulting scheduling and drawing actions; system
+callbacks do not decide terminal semantics.
 
 The initial power contract is:
 
@@ -29,8 +29,8 @@ The initial power contract is:
 - background PTY output is consumed and parsed without drawing
 - sleep/wake resumes IO and redraws current state correctly
 - idle CPU is effectively zero
-- the only initial periodic visual behavior is application-requested cursor
-  blinking while its pane is visible and focused and DanTerm is active
+- no initial periodic visual behavior; application-requested cursor blinking is
+  a deferred post-milestone enhancement
 
 Correctness takes priority over peak rendering throughput for the initial
 CoreText/CoreGraphics renderer. Heavy visible output must still keep the app
@@ -55,8 +55,7 @@ responsive and use bounded queues.
 
 ## Proof obligations
 
-- An unchanged focused terminal without requested cursor blinking performs no
-  recurring engine or recovery work.
+- An unchanged focused terminal performs no recurring engine or recovery work.
 - Hidden panes receiving output update their logical state while producing no
   draw calls.
 - A revealed pane displays the same final state as one rendered continuously.

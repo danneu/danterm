@@ -177,7 +177,7 @@ mean.
     differential replay showed no demonstrated value yet and gets an explicit
     evaluate-or-drop point during Milestone 6.
 
-- [ ] **6. Complete required terminal behavior and interaction**
+- [x] **6. Complete required terminal behavior and interaction**
   - [x] **Slice 1: Alternate screen and resize semantics.** Adds DEC 1047/1049
     screen switching, transient alternate-grid isolation, rectangular alternate
     resize with independent primary reflow, active and primary history
@@ -296,7 +296,7 @@ mean.
     checked-in Ghostty characterization through TerminalCore at 56/90/56
     columns and across alternate-screen entry/exit, with the only mismatch
     adjudicated in favor of TerminalCore's reflow-attached cursor contract.
-  - [ ] [Input and interaction](08-input-interaction.md) and
+  - [x] [Input and interaction](08-input-interaction.md) and
     [Renderer](09-renderer.md) provide an interactive pane with macOS text
     composition, terminal keys, mouse reporting, selection, safe paste,
     local wheel/scrollbar history navigation, clipboard writes, links, font
@@ -304,7 +304,8 @@ mean.
     Closure-audit judgment: keyboard, mouse, paste, OSC 52, links, colors,
     cursor shapes, damage, font fallback, display scaling, and the native text
     composition seam are covered. Slice 15 adds the named multi-stage Chinese
-    IME proof. Renderer cursor blinking is the only remaining work.
+    IME proof. Timed cursor blinking is a post-milestone enhancement and does
+    not gate the initial replacement.
   - [x] Logical damage and full redraw produce the same visible state. Slice 8
     proves every neutral event by retained-plan overlay and styled output at the
     executor-pixel seam, including resize and alternate-screen cases.
@@ -359,6 +360,14 @@ mean.
     depends on Ghostty.
   - [ ] The Swift engine is the sole terminal backend and the full DanTerm test gate
     remains green.
+
+## Deferred post-milestone work
+
+- [ ] **Application-requested cursor blinking.** Blink-capable DECSCUSR variants
+  currently retain their semantic blink preference but render steadily. Add
+  timed presentation after the replacement milestones, covering focus,
+  visibility, app activation, teardown, redraw equivalence, and quiescent timer
+  ownership. This enhancement does not gate Milestone 6 or Ghostty replacement.
 
 ## Direction
 

@@ -25,7 +25,8 @@ Initial presentation defaults are:
 - one baked-in dark theme
 - 16-color, 256-color, and RGB color support
 - a steady block cursor by default
-- application-requested cursor shape and blinking
+- application-requested cursor shapes; blink variants render steadily until
+  the deferred post-milestone enhancement lands
 - selection, hyperlink, underline-style, and other supported cell decoration
 - Retina-correct geometry
 
@@ -37,8 +38,6 @@ Metal is a possible later renderer, not an initial dependency.
 - Font fallback changes glyph choice without changing grid geometry.
 - Damage outside the visible pane causes no drawing work.
 - A newly visible pane can produce a complete frame from current terminal state.
-- Application-requested cursor blinking runs only while the pane is visible and
-  focused and DanTerm is active.
 - Renderer teardown leaves no timer, display callback, or AppKit message aimed
   at a deallocated object.
 - Identical snapshots and explicit presentation inputs produce identical
@@ -55,8 +54,6 @@ Metal is a possible later renderer, not an initial dependency.
   changes, produces the same final frame as a full redraw.
 - Hiding and revealing a pane suppresses hidden drawing and then restores a
   complete correct frame.
-- Cursor blinking starts and stops with visibility, focus, activation, and
-  teardown.
 
 ## Non-goals
 

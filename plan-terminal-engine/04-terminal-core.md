@@ -22,7 +22,8 @@ extension behavior required by the product contract, including:
 - saved cursor and terminal modes
 - 16-color, 256-color, and RGB presentation attributes
 - bold, dim, italic, underline styles and color, reverse, hidden, and strike
-- cursor style and application-requested blinking
+- cursor style and the application-requested blink preference consumed by
+  presentation policy
 - synchronized updates
 - device, cursor, and mode queries needed for feature detection
 
