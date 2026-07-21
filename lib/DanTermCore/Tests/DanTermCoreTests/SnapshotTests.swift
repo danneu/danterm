@@ -865,6 +865,30 @@ import DanTermProtocol
         #expect(recoveryReplayText(scrollback: pane.scrollback, agentSession: pane.agentSession) == nil)
     }
 
+    @Test("cwd reset checkpoints and restores as nil")
+    func cwdResetCheckpointsAndRestoresAsNil() throws {
+        // Intent: an explicit cwd reset removes the live value and serializes
+        //   no empty-path substitute, so restore also has a nil cwd.
+        // Why it exists: pins reset semantics across the persistence boundary.
+        // Scenario: a shell reports a cwd, then clears it before DanTerm writes
+        //   and reloads the next checkpoint.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        update(&model, .surfaceCwd(paneId: paneId, cwd: "/tmp/project"))
+
+        let commands = update(&model, .surfaceCwd(paneId: paneId, cwd: nil))
+        let snapshot = toSnapshot(model, home: "/Users/testhome")
+        let restored = try #require(validateAndBuild(snapshot))
+        let paneSnapshot = try #require(allPaneSnapshots(snapshot).first)
+
+        #expect(commands.contains { if case .scheduleCheckpoint = $0 { true } else { false } })
+        #expect(model.pane(paneId)?.cwd == nil)
+        #expect(paneSnapshot.cwd == nil)
+        #expect(paneSnapshot.launch?.cwd == nil)
+        #expect(restored.pane(paneId)?.cwd == nil)
+    }
+
     @Test("snapshot round-trip preserves tab todos")
     func snapshotRoundTripPreservesTabTodos() {
         // Intent: tab-level todos (TabTodos popover items) round-trip

@@ -6,8 +6,8 @@ engine implemented for DanTerm in Swift and Apple frameworks.
 The plan is intentionally a set of component contracts rather than one large
 implementation script. A claim belongs here only when changing it would alter
 observable behavior, an invariant, or the architectural direction. Exact types,
-file layouts, algorithms, and commit sequences remain implementation discretion
-until a later design decision makes them load-bearing.
+file layouts, and algorithms remain implementation discretion until a later
+design decision makes them load-bearing.
 
 ## Desired outcome
 

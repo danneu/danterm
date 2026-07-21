@@ -321,7 +321,7 @@ mean.
     the other researched sources.
 
 - [ ] **7. Reach shell and baseline application compatibility**
-  - [ ] **Slice 1: Bounded title, cwd, bell, and legacy-event isolation.** Add
+  - [x] **Slice 1: Bounded title, cwd, bell, and legacy-event isolation.** Add
     OSC 0/2 title semantics, local-host OSC 7 with cwd reset, BEL alerts, bounded
     pane-scoped delivery, and temporary recognition that carries current
     authenticated shell payloads as private events rather than titles. See the

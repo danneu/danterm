@@ -5,6 +5,13 @@ enum PaneLifecycleResult {
     case exited
 }
 
+enum TerminalSemanticEvent {
+    case title(String)
+    case workingDirectory(String?)
+    case bell
+    case legacyPrivateShell(String)
+}
+
 struct RenderColor: Equatable {
     let red: UInt8
     let green: UInt8
@@ -179,6 +186,7 @@ struct TerminalCellSize {
 final class TerminalPaneSessionController {
     var onFrame: ((TerminalPaneFrame) -> Void)?
     var onClipboardWrite: ((String) -> Void)?
+    var onSemanticEvents: (([TerminalSemanticEvent]) -> Void)?
     var onSessionEnded: ((PaneLifecycleResult) -> Void)?
     var onViewportStateChange: ((TerminalPaneViewportState) -> Void)?
     var onPaneMenu: ((TerminalViewportCell) -> Void)?
@@ -266,6 +274,7 @@ final class TerminalPaneSessionController {
     func setGridDimensions(_ dimensions: TerminalDimensions) {}
     func tearDown() {
         onOpenLink = nil
+        onSemanticEvents = nil
     }
 
     func emitViewportState(_ state: TerminalPaneViewportState) {

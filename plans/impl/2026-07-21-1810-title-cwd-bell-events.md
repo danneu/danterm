@@ -176,4 +176,4 @@ preserved. The explicitly excluded follow-on work remains open.
 
 - [x] 1. Add bounded deterministic TerminalCore semantic events
 - [x] 2. Deliver semantic events through pane session lifecycle
-- [ ] 3. Enforce semantic event bounds in DanTerm model and runtime
+- [x] 3. Enforce semantic event bounds in DanTerm model and runtime
