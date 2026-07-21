@@ -481,7 +481,7 @@ select and Copy pastes elsewhere.
 ## Commit progress
 
 - [x] 1. `feat(engine): add mouse tracking modes and report encoding`
-- [ ] 2. `feat(engine): add pure mouse and wheel interaction policy`
+- [x] 2. `feat(engine): add pure mouse and wheel interaction policy`
 - [ ] 3. `test(engine): adapt neutral mouse fixtures and replay`
 - [ ] 4. `feat(renderer): render terminal selections`
 - [ ] 5. `feat(pty): route mouse and wheel input through the pane owner`

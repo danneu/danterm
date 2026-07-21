@@ -597,6 +597,73 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
+    /// Applies an already-computed half-open selection unit without losing wrap boundaries.
+    public mutating func setSelection(_ range: TerminalTextRange) {
+        let ordered = textPositionPrecedes(range.start, range.end)
+            ? (range.start, range.end)
+            : (range.end, range.start)
+        selection = TextAnchorRange(
+            start: normalizedSelectionBoundary(ordered.0, isEnd: false),
+            end: normalizedSelectionBoundary(ordered.1, isEnd: true)
+        )
+    }
+
+    /// Returns the maximal same-class word unit used by native double-click selection.
+    public func wordRange(at position: TerminalTextPosition) -> TerminalTextRange {
+        let units = projectionUnits()
+        guard let target = nearestTextUnitIndex(to: position, in: units) else {
+            return emptyRange(at: position)
+        }
+        let targetClass = wordClass(of: units[target])
+        var lower = target
+        var upper = target
+        while lower > units.startIndex {
+            let candidate = units.index(before: lower)
+            guard units[candidate].isHardBoundary == false,
+                  wordClass(of: units[candidate]) == targetClass
+            else { break }
+            lower = candidate
+        }
+        while upper < units.index(before: units.endIndex) {
+            let candidate = units.index(after: upper)
+            guard units[candidate].isHardBoundary == false,
+                  wordClass(of: units[candidate]) == targetClass
+            else { break }
+            upper = candidate
+        }
+        return publicRange(TextAnchorRange(
+            start: units[lower].start,
+            end: units[upper].end
+        )) ?? emptyRange(at: position)
+    }
+
+    /// Returns one logical line across all soft-wrapped visual rows for triple-click selection.
+    public func logicalLineRange(at position: TerminalTextPosition) -> TerminalTextRange {
+        let stream = activeProjectionRows()
+        let target = min(max(position.row, 0), stream.count - 1)
+        var first = target
+        var last = target
+        while first > stream.startIndex, stream[first - 1].isSoftWrapped {
+            first -= 1
+        }
+        while last < stream.index(before: stream.endIndex), stream[last].isSoftWrapped {
+            last += 1
+        }
+        return TerminalTextRange(
+            start: TerminalTextPosition(row: first, column: 0),
+            end: TerminalTextPosition(row: last, column: projectedCellEnd(in: stream[last]))
+        )
+    }
+
+    /// Gives character-granular pointer policy the same grapheme and wide-cell atomicity as selection.
+    func characterRange(at position: TerminalTextPosition) -> TerminalTextRange {
+        let cell = normalizedCellPosition(position)
+        return publicRange(TextAnchorRange(
+            start: anchor(before: cell),
+            end: anchor(after: cell)
+        )) ?? emptyRange(at: position)
+    }
+
     /// Clears only the local selection, leaving an active search untouched.
     public mutating func clearSelection() {
         selection = nil
@@ -803,6 +870,85 @@ public struct Terminal: Equatable, Sendable {
             column = max(0, column - 1)
         }
         return CellPosition(row: row, column: column)
+    }
+
+    private func normalizedBoundaryPosition(_ position: TerminalTextPosition) -> TextAnchor {
+        let stream = activeProjectionRows()
+        let row = min(max(position.row, 0), stream.count - 1)
+        let column = min(max(position.column, 0), columnCount)
+        return TextAnchor(row: evictedRowCount + row, column: column)
+    }
+
+    private func normalizedSelectionBoundary(
+        _ position: TerminalTextPosition,
+        isEnd: Bool
+    ) -> TextAnchor {
+        let stream = activeProjectionRows()
+        let row = min(max(position.row, 0), stream.count - 1)
+        if isEnd {
+            guard position.column > 0 else {
+                return TextAnchor(row: evictedRowCount + row, column: 0)
+            }
+            let cell = normalizedCellPosition(TerminalTextPosition(
+                row: row,
+                column: position.column - 1
+            ))
+            return anchor(after: cell)
+        }
+        guard position.column < columnCount else {
+            return TextAnchor(row: evictedRowCount + row, column: columnCount)
+        }
+        let cell = normalizedCellPosition(TerminalTextPosition(
+            row: row,
+            column: position.column
+        ))
+        return anchor(before: cell)
+    }
+
+    private func nearestTextUnitIndex(
+        to position: TerminalTextPosition,
+        in units: [ProjectionUnit]
+    ) -> Int? {
+        let textIndices = units.indices.filter { units[$0].isHardBoundary == false }
+        guard let first = textIndices.first else { return nil }
+        let target = normalizedBoundaryPosition(position)
+        if let containing = textIndices.first(where: {
+            units[$0].start <= target && target < units[$0].end
+        }) {
+            return containing
+        }
+        return textIndices.last(where: { units[$0].start <= target }) ?? first
+    }
+
+    private func emptyRange(at position: TerminalTextPosition) -> TerminalTextRange {
+        let boundary = normalizedBoundaryPosition(position)
+        let publicPosition = TerminalTextPosition(
+            row: boundary.row - evictedRowCount,
+            column: boundary.column
+        )
+        return TerminalTextRange(start: publicPosition, end: publicPosition)
+    }
+
+    private func wordClass(of unit: ProjectionUnit) -> Int {
+        if unit.scalars.allSatisfy({ $0.properties.isWhitespace }) { return 0 }
+        if unit.scalars.allSatisfy({ scalar in
+            let value = scalar.value
+            return value >= 0x80
+                || value == 0x5F
+                || (0x30...0x39).contains(value)
+                || (0x41...0x5A).contains(value)
+                || (0x61...0x7A).contains(value)
+        }) {
+            return 1
+        }
+        return 2
+    }
+
+    private func textPositionPrecedes(
+        _ lhs: TerminalTextPosition,
+        _ rhs: TerminalTextPosition
+    ) -> Bool {
+        lhs.row < rhs.row || (lhs.row == rhs.row && lhs.column <= rhs.column)
     }
 
     private func positionPrecedes(_ lhs: CellPosition, _ rhs: CellPosition) -> Bool {

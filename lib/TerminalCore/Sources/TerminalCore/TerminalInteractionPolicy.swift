@@ -1,0 +1,587 @@
+// Deterministic pointer ownership, local selection, wheel routing, and point normalization.
+
+/// Identifies a valid zero-based cell in the displayed terminal viewport.
+public struct TerminalViewportCell: Equatable, Sendable {
+    /// Horizontal grid coordinate.
+    public let column: Int
+    /// Vertical grid coordinate.
+    public let row: Int
+
+    /// Creates a normalized cell value for cross-layer input forwarding.
+    public init(column: Int, row: Int) {
+        self.column = column
+        self.row = row
+    }
+}
+
+/// Keeps point-space coordinates explicit without importing CoreGraphics into TerminalCore.
+public struct TerminalPoint: Equatable, Sendable {
+    /// Horizontal point coordinate in a flipped terminal view.
+    public let x: Double
+    /// Vertical point coordinate in a flipped terminal view.
+    public let y: Double
+
+    /// Creates unchecked geometry that `terminalCell` validates as one unit.
+    public init(x: Double, y: Double) {
+        self.x = x
+        self.y = y
+    }
+}
+
+/// Keeps point-space cell dimensions independent from platform geometry types.
+public struct TerminalCellSize: Equatable, Sendable {
+    /// Horizontal cell extent in points.
+    public let width: Double
+    /// Vertical cell extent in points.
+    public let height: Double
+
+    /// Creates unchecked geometry that `terminalCell` validates as one unit.
+    public init(width: Double, height: Double) {
+        self.width = width
+        self.height = height
+    }
+}
+
+/// Floors a flipped-view point into the grid and clamps it to a valid viewport cell.
+public func terminalCell(
+    at point: TerminalPoint,
+    cellSize: TerminalCellSize,
+    columns: Int,
+    rows: Int
+) -> TerminalViewportCell? {
+    guard point.x.isFinite, point.y.isFinite,
+          cellSize.width.isFinite, cellSize.height.isFinite,
+          cellSize.width > 0, cellSize.height > 0,
+          columns > 0, rows > 0
+    else { return nil }
+
+    let column = (point.x / cellSize.width).rounded(.down)
+    let row = (point.y / cellSize.height).rounded(.down)
+    guard column.isFinite, row.isFinite,
+          column > Double(Int.min), column < Double(Int.max),
+          row > Double(Int.min), row < Double(Int.max)
+    else { return nil }
+    return TerminalViewportCell(
+        column: min(max(Int(column), 0), columns - 1),
+        row: min(max(Int(row), 0), rows - 1)
+    )
+}
+
+/// One platform-neutral pointer transition delivered to serialized interaction policy.
+public enum TerminalPointerEvent: Equatable, Sendable {
+    case down(
+        TerminalMouseButton,
+        column: Int,
+        row: Int,
+        modifiers: TerminalKeyModifiers = [],
+        clickCount: Int = 1
+    )
+    case up(
+        TerminalMouseButton,
+        column: Int,
+        row: Int,
+        modifiers: TerminalKeyModifiers = []
+    )
+    case move(column: Int, row: Int, modifiers: TerminalKeyModifiers = [])
+}
+
+/// Names the sole arm that consumed a normalized pointer transition.
+public enum TerminalPointerConsumption: Equatable, Sendable {
+    case report
+    case selection
+    case paneMenu
+    case ignored
+}
+
+/// Describes the owner-side selection mutation computed by pointer policy.
+public enum TerminalSelectionMutation: Equatable, Sendable {
+    case clear
+    case set(TerminalTextRange)
+}
+
+/// Returns all effects of one pointer decision without performing IO or framework calls.
+public struct TerminalPointerDecision: Equatable, Sendable {
+    /// Identifies the one policy arm that owned the event.
+    public let consumption: TerminalPointerConsumption
+    /// Contains child input only for the report arm.
+    public let inputBytes: [UInt8]
+    /// Carries a local selection update for the selection arm.
+    public let selectionMutation: TerminalSelectionMutation?
+    /// Requests the pane menu only after an uncaptured right-button release.
+    public let paneMenuCell: TerminalViewportCell?
+}
+
+/// Marks normalized wheel lifecycle so direct scrolling and momentum share one route.
+public enum TerminalWheelPhase: Equatable, Sendable {
+    case began
+    case changed
+    case ended
+    case momentumBegan
+    case momentumChanged
+    case momentumEnded
+    case standalone
+}
+
+/// Carries fractional vertical wheel motion and the metadata that determines its action.
+public struct TerminalWheelEvent: Equatable, Sendable {
+    /// Signed rows, where negative motion navigates toward retained history.
+    public let rowDelta: Double
+    /// Zero-based pointed viewport column.
+    public let column: Int
+    /// Zero-based pointed viewport row.
+    public let row: Int
+    /// Modifier snapshot used at gesture routing and report encoding time.
+    public let modifiers: TerminalKeyModifiers
+    /// Normalized direct or momentum lifecycle boundary.
+    public let phase: TerminalWheelPhase
+
+    /// Creates one normalized wheel sample; phase-less ticks are standalone gestures.
+    public init(
+        rowDelta: Double,
+        column: Int,
+        row: Int,
+        modifiers: TerminalKeyModifiers = [],
+        phase: TerminalWheelPhase = .standalone
+    ) {
+        self.rowDelta = rowDelta
+        self.column = column
+        self.row = row
+        self.modifiers = modifiers
+        self.phase = phase
+    }
+}
+
+/// Names the latched destination chosen for one wheel gesture.
+public enum TerminalWheelRoute: Equatable, Sendable {
+    case localViewport
+    case mouseReport
+    case alternateScreen
+}
+
+/// Returns deterministic wheel bytes or local navigation after route-specific quantization.
+public struct TerminalWheelDecision: Equatable, Sendable {
+    /// Route selected at gesture start or independently for a standalone tick.
+    public let route: TerminalWheelRoute
+    /// Contains mouse reports or alternate-screen arrow input, never local scroll bytes.
+    public let inputBytes: [UInt8]
+    /// Contains primary-screen local navigation, with zero for either input route.
+    public let localRowDelta: Int
+}
+
+private enum PointerOwnership: Equatable, Sendable {
+    case report
+    case selection
+    case paneMenu
+    case ignored
+}
+
+private enum SelectionGranularity: Equatable, Sendable {
+    case character
+    case word
+    case line
+}
+
+private struct SelectionDrag: Equatable, Sendable {
+    var anchor: TerminalTextRange
+    var granularity: SelectionGranularity
+    var hasExtended = false
+}
+
+private enum WheelMetadata: Equatable, Sendable {
+    case localViewport(isAlternateScreenActive: Bool)
+    case mouseReport(
+        column: Int,
+        row: Int,
+        modifiers: TerminalKeyModifiers,
+        trackingEnabled: Bool,
+        sgr: Bool
+    )
+    case alternateScreen(applicationCursorKeys: Bool)
+}
+
+private struct WheelRemainder: Equatable, Sendable {
+    var rows = 0.0
+    var metadata: WheelMetadata?
+}
+
+/// Owns explicit gesture latches and fractional history shared by live and replay policy.
+public struct TerminalInteractionState: Equatable, Sendable {
+    fileprivate var mouseTracker = TerminalMouseTracker()
+    fileprivate var pointerOwners: [PointerOwnership?] = [nil, nil, nil]
+    fileprivate var selectionDrag: SelectionDrag?
+    fileprivate var activeWheelRoute: TerminalWheelRoute?
+    fileprivate var localWheel = WheelRemainder()
+    fileprivate var reportWheel = WheelRemainder()
+    fileprivate var alternateWheel = WheelRemainder()
+
+    /// Creates empty interaction history with no owned gestures or fractional motion.
+    public init() {}
+}
+
+/// Chooses and advances exactly one pointer arm against authoritative terminal state.
+public func decideTerminalPointer(
+    _ event: TerminalPointerEvent,
+    terminal: Terminal,
+    state: inout TerminalInteractionState
+) -> TerminalPointerDecision {
+    let modes = terminal.inputModes
+    switch event {
+    case let .down(button, column, row, modifiers, clickCount):
+        let reportBytes = encodeTerminalMouse(
+            .down(button, column: column, row: row, modifiers: modifiers),
+            tracker: &state.mouseTracker,
+            modes: modes
+        )
+        if let existingOwner = state.pointerOwners[button.rawValue] {
+            return pointerDecision(
+                pointerConsumption(for: existingOwner),
+                bytes: existingOwner == .report ? reportBytes : []
+            )
+        }
+        let owner = pointerOwner(
+            button: button,
+            modifiers: modifiers,
+            tracking: modes.mouseTracking
+        )
+        state.pointerOwners[button.rawValue] = owner
+        return pointerDownDecision(
+            owner: owner,
+            button: button,
+            column: column,
+            row: row,
+            clickCount: clickCount,
+            terminal: terminal,
+            reportBytes: reportBytes,
+            state: &state
+        )
+
+    case let .up(button, column, row, modifiers):
+        let reportBytes = encodeTerminalMouse(
+            .up(button, column: column, row: row, modifiers: modifiers),
+            tracker: &state.mouseTracker,
+            modes: modes
+        )
+        let owner = state.pointerOwners[button.rawValue] ?? .ignored
+        state.pointerOwners[button.rawValue] = nil
+        if button == .left { state.selectionDrag = nil }
+        switch owner {
+        case .report:
+            return pointerDecision(.report, bytes: reportBytes)
+        case .selection:
+            return pointerDecision(.selection)
+        case .paneMenu:
+            return TerminalPointerDecision(
+                consumption: .paneMenu,
+                inputBytes: [],
+                selectionMutation: nil,
+                paneMenuCell: .init(column: column, row: row)
+            )
+        case .ignored:
+            return pointerDecision(.ignored)
+        }
+
+    case let .move(column, row, modifiers):
+        let reportBytes = encodeTerminalMouse(
+            .move(column: column, row: row, modifiers: modifiers),
+            tracker: &state.mouseTracker,
+            modes: modes
+        )
+        if var drag = state.selectionDrag,
+           state.pointerOwners[TerminalMouseButton.left.rawValue] == .selection {
+            let current = selectionUnit(
+                at: streamPosition(column: column, row: row, terminal: terminal),
+                granularity: drag.granularity,
+                terminal: terminal
+            )
+            if current != drag.anchor {
+                drag.hasExtended = true
+                state.selectionDrag = drag
+            } else if drag.granularity == .character, drag.hasExtended == false {
+                return pointerDecision(.selection)
+            }
+            return TerminalPointerDecision(
+                consumption: .selection,
+                inputBytes: [],
+                selectionMutation: .set(union(drag.anchor, current)),
+                paneMenuCell: nil
+            )
+        }
+        if state.pointerOwners.contains(where: { $0 == .report }) {
+            return pointerDecision(.report, bytes: reportBytes)
+        }
+        if state.pointerOwners.contains(where: { $0 == .paneMenu }) {
+            return pointerDecision(.paneMenu)
+        }
+        if modes.mouseTracking == .anyMotion {
+            return pointerDecision(.report, bytes: reportBytes)
+        }
+        return pointerDecision(.ignored)
+    }
+}
+
+/// Routes and quantizes one wheel sample while preserving gesture ownership through momentum.
+public func decideTerminalWheel(
+    _ event: TerminalWheelEvent,
+    terminal: Terminal,
+    state: inout TerminalInteractionState
+) -> TerminalWheelDecision {
+    let freshRoute = wheelRoute(for: event, terminal: terminal)
+    let route: TerminalWheelRoute
+    switch event.phase {
+    case .began:
+        route = freshRoute
+        state.activeWheelRoute = route
+        resetWheelRemainder(for: route, state: &state)
+    case .changed, .ended, .momentumBegan, .momentumChanged, .momentumEnded:
+        route = state.activeWheelRoute ?? freshRoute
+    case .standalone:
+        route = freshRoute
+    }
+
+    let metadata = wheelMetadata(for: route, event: event, terminal: terminal)
+    let rows = consumeWheelRows(
+        event.rowDelta,
+        metadata: metadata,
+        route: route,
+        state: &state
+    )
+    let decision = wheelDecision(
+        route: route,
+        rows: rows,
+        event: event,
+        terminal: terminal,
+        state: &state
+    )
+    if event.phase == .momentumEnded {
+        state.activeWheelRoute = nil
+        resetWheelRemainder(for: route, state: &state)
+    }
+    return decision
+}
+
+private func pointerOwner(
+    button: TerminalMouseButton,
+    modifiers: TerminalKeyModifiers,
+    tracking: TerminalMouseTrackingMode
+) -> PointerOwnership {
+    let usesLocalArm = modifiers.contains(.shift) || tracking == .off
+    guard usesLocalArm else { return .report }
+    switch button {
+    case .left: return .selection
+    case .right: return .paneMenu
+    case .middle: return .ignored
+    }
+}
+
+private func pointerDownDecision(
+    owner: PointerOwnership,
+    button: TerminalMouseButton,
+    column: Int,
+    row: Int,
+    clickCount: Int,
+    terminal: Terminal,
+    reportBytes: [UInt8],
+    state: inout TerminalInteractionState
+) -> TerminalPointerDecision {
+    switch owner {
+    case .report:
+        return pointerDecision(.report, bytes: reportBytes)
+    case .paneMenu:
+        return pointerDecision(.paneMenu)
+    case .ignored:
+        return pointerDecision(.ignored)
+    case .selection:
+        guard button == .left else { return pointerDecision(.ignored) }
+        let granularity: SelectionGranularity = clickCount <= 1
+            ? .character
+            : (clickCount == 2 ? .word : .line)
+        let anchor = selectionUnit(
+            at: streamPosition(column: column, row: row, terminal: terminal),
+            granularity: granularity,
+            terminal: terminal
+        )
+        state.selectionDrag = SelectionDrag(anchor: anchor, granularity: granularity)
+        return TerminalPointerDecision(
+            consumption: .selection,
+            inputBytes: [],
+            selectionMutation: granularity == .character ? .clear : .set(anchor),
+            paneMenuCell: nil
+        )
+    }
+}
+
+private func pointerDecision(
+    _ consumption: TerminalPointerConsumption,
+    bytes: [UInt8] = []
+) -> TerminalPointerDecision {
+    TerminalPointerDecision(
+        consumption: consumption,
+        inputBytes: bytes,
+        selectionMutation: nil,
+        paneMenuCell: nil
+    )
+}
+
+private func streamPosition(column: Int, row: Int, terminal: Terminal) -> TerminalTextPosition {
+    TerminalTextPosition(
+        row: terminal.scrollProjection.topRow + row,
+        column: column
+    )
+}
+
+private func selectionUnit(
+    at position: TerminalTextPosition,
+    granularity: SelectionGranularity,
+    terminal: Terminal
+) -> TerminalTextRange {
+    switch granularity {
+    case .character: terminal.characterRange(at: position)
+    case .word: terminal.wordRange(at: position)
+    case .line: terminal.logicalLineRange(at: position)
+    }
+}
+
+private func union(_ lhs: TerminalTextRange, _ rhs: TerminalTextRange) -> TerminalTextRange {
+    TerminalTextRange(
+        start: positionLessThan(rhs.start, lhs.start) ? rhs.start : lhs.start,
+        end: positionLessThan(lhs.end, rhs.end) ? rhs.end : lhs.end
+    )
+}
+
+private func positionLessThan(_ lhs: TerminalTextPosition, _ rhs: TerminalTextPosition) -> Bool {
+    lhs.row < rhs.row || (lhs.row == rhs.row && lhs.column < rhs.column)
+}
+
+private func wheelRoute(for event: TerminalWheelEvent, terminal: Terminal) -> TerminalWheelRoute {
+    if event.modifiers.contains(.shift) { return .localViewport }
+    if terminal.inputModes.mouseTracking != .off { return .mouseReport }
+    return terminal.isAlternateScreenActive ? .alternateScreen : .localViewport
+}
+
+private func wheelMetadata(
+    for route: TerminalWheelRoute,
+    event: TerminalWheelEvent,
+    terminal: Terminal
+) -> WheelMetadata {
+    switch route {
+    case .localViewport:
+        return .localViewport(isAlternateScreenActive: terminal.isAlternateScreenActive)
+    case .mouseReport:
+        return .mouseReport(
+            column: event.column,
+            row: event.row,
+            modifiers: event.modifiers,
+            trackingEnabled: terminal.inputModes.mouseTracking != .off,
+            sgr: terminal.inputModes.sgrMouseEncoding
+        )
+    case .alternateScreen:
+        return .alternateScreen(
+            applicationCursorKeys: terminal.inputModes.applicationCursorKeys
+        )
+    }
+}
+
+private func pointerConsumption(for owner: PointerOwnership) -> TerminalPointerConsumption {
+    switch owner {
+    case .report: .report
+    case .selection: .selection
+    case .paneMenu: .paneMenu
+    case .ignored: .ignored
+    }
+}
+
+private func consumeWheelRows(
+    _ delta: Double,
+    metadata: WheelMetadata,
+    route: TerminalWheelRoute,
+    state: inout TerminalInteractionState
+) -> Int {
+    guard delta.isFinite else { return 0 }
+    var remainder = wheelRemainder(for: route, state: state)
+    if remainder.metadata != metadata {
+        remainder.rows = 0
+        remainder.metadata = metadata
+    }
+    let total = remainder.rows + delta
+    guard total > Double(Int.min), total < Double(Int.max) else {
+        remainder.rows = 0
+        setWheelRemainder(remainder, for: route, state: &state)
+        return 0
+    }
+    let rows = Int(total.rounded(.towardZero))
+    remainder.rows = total - Double(rows)
+    setWheelRemainder(remainder, for: route, state: &state)
+    return rows
+}
+
+private func wheelDecision(
+    route: TerminalWheelRoute,
+    rows: Int,
+    event: TerminalWheelEvent,
+    terminal: Terminal,
+    state: inout TerminalInteractionState
+) -> TerminalWheelDecision {
+    guard rows != 0 else {
+        return TerminalWheelDecision(route: route, inputBytes: [], localRowDelta: 0)
+    }
+    switch route {
+    case .localViewport:
+        return TerminalWheelDecision(
+            route: route,
+            inputBytes: [],
+            localRowDelta: terminal.isAlternateScreenActive ? 0 : rows
+        )
+    case .mouseReport:
+        let direction = rows < 0 ? TerminalMouseWheelDirection.up : .down
+        var bytes: [UInt8] = []
+        for _ in 0..<rows.magnitude {
+            bytes.append(contentsOf: encodeTerminalMouse(
+                .wheel(
+                    direction,
+                    column: event.column,
+                    row: event.row,
+                    modifiers: event.modifiers
+                ),
+                tracker: &state.mouseTracker,
+                modes: terminal.inputModes
+            ))
+        }
+        return TerminalWheelDecision(route: route, inputBytes: bytes, localRowDelta: 0)
+    case .alternateScreen:
+        let key = rows < 0 ? TerminalInputKey.up : .down
+        let step = encodeTerminalKey(key, modifiers: [], modes: terminal.inputModes)
+        var bytes: [UInt8] = []
+        for _ in 0..<rows.magnitude { bytes.append(contentsOf: step) }
+        return TerminalWheelDecision(route: route, inputBytes: bytes, localRowDelta: 0)
+    }
+}
+
+private func wheelRemainder(
+    for route: TerminalWheelRoute,
+    state: TerminalInteractionState
+) -> WheelRemainder {
+    switch route {
+    case .localViewport: state.localWheel
+    case .mouseReport: state.reportWheel
+    case .alternateScreen: state.alternateWheel
+    }
+}
+
+private func setWheelRemainder(
+    _ remainder: WheelRemainder,
+    for route: TerminalWheelRoute,
+    state: inout TerminalInteractionState
+) {
+    switch route {
+    case .localViewport: state.localWheel = remainder
+    case .mouseReport: state.reportWheel = remainder
+    case .alternateScreen: state.alternateWheel = remainder
+    }
+}
+
+private func resetWheelRemainder(
+    for route: TerminalWheelRoute,
+    state: inout TerminalInteractionState
+) {
+    setWheelRemainder(WheelRemainder(), for: route, state: &state)
+}
