@@ -231,7 +231,9 @@ working login (`~/.codex/auth.json` for Codex), and `jq` for Claude's production
 hook. Claude defaults to `haiku`; set `DANTERM_CLAUDE_MODEL` to override it.
 Codex uses its configured default model unless `DANTERM_CODEX_MODEL` is set.
 `DANTERM_AGENT_NOTIFICATION_TIMEOUT` changes the per-scenario timeout in
-seconds. Set `DANTERM_KEEP_AGENT_NOTIFICATION_ARTIFACTS=1` to retain successful
+seconds. `DANTERM_AGENT_NOTIFICATION_GRACE` changes the post-event wait for a
+terminal notification (5 seconds by default). Set
+`DANTERM_KEEP_AGENT_NOTIFICATION_ARTIFACTS=1` to retain successful
 captures, or `DANTERM_AGENT_NOTIFICATION_ARTIFACTS=/private/tmp` to choose the
 temporary-artifact parent. Failures always preserve sanitized hook payloads and
 raw PTY captures and print their location.
@@ -251,6 +253,30 @@ notifications = ["agent-turn-complete", "approval-requested", "plan-mode-prompt"
 notification_method = "osc9"
 notification_condition = "always"
 ```
+
+The table below is both the notification policy and the latest live
+compatibility result. "Pass" means the CLI produced exactly one terminal
+notification at the required point; completion notifications are deliberately
+deferred until the root turn genuinely finishes.
+
+| Scenario | Required behavior | Claude 2.1.216: DanTerm hook (OSC 777) | Codex 0.144.6: native TUI (OSC 9) |
+| --- | --- | --- | --- |
+| Root completes | Notify once after root `Stop` | Pass | Pass |
+| Root asks a direct question | Notify while blocked, before root `Stop` | Pass: `AskUserQuestion` | Pass: `plan-mode-prompt` |
+| Root requests tool approval | Notify while blocked | Pass: `PermissionRequest` | Pass: `approval-requested` |
+| Root receives MCP elicitation | Notify while the form is blocked | Pass: `Elicitation` | Pass: native approval dialog |
+| Subagent completes | Stay silent for `SubagentStop`; notify once after later root completion | Pass | Pass |
+| Subagent requests approval | Notify while the subagent is blocked | Pass: identified `PermissionRequest` | Known gap: dialog and identified event appear, but no OSC 9 |
+| Subagent receives MCP elicitation | Notify while the subagent form is blocked | Pass: identified MCP call plus `Elicitation` | Known gap: dialog and identified events appear, but no OSC 9 |
+| Root parks on background work | Stay silent while parked; notify after genuine root completion | Pass | Not covered; Claude-only compatibility case |
+
+These results were captured by the live suite on July 21, 2026. Re-run it after
+upgrading either CLI rather than treating the version-specific gaps as
+permanent. The Codex root-question fixture enables
+`features.default_mode_request_user_input` only in its isolated test config so
+it can exercise the same `plan-mode-prompt` notification used by Plan mode.
+The flag controls tool availability, not notification delivery, and is not
+required in the notification configuration above.
 
 ### Claude session recovery hook
 
