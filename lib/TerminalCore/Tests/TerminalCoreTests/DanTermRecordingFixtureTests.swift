@@ -39,7 +39,7 @@ struct DanTermRecordingFixtureTests {
                 let before = terminal
                 emitted.append(contentsOf: encodeTerminalFocus(focused: focused, modes: terminal.inputModes))
                 #expect(terminal == before)
-            case .resize, .viewport, .checkpoint:
+            case .mouse, .resize, .viewport, .checkpoint:
                 break
             }
         }
@@ -118,7 +118,7 @@ struct DanTermRecordingFixtureTests {
                     terminal.feed(Array(bytes[..<midpoint]))
                     terminal.feed(Array(bytes[midpoint...]))
                 }
-            case .input, .paste, .focus:
+            case .input, .paste, .focus, .mouse:
                 break
             case .resize(let columns, let rows):
                 terminal.resize(columns: columns, rows: rows)

@@ -75,6 +75,93 @@ struct NeutralTerminalRecordingTests {
         #expect(replayed.scrollProjection.isFollowing == false)
     }
 
+    @Test("mouse input round-trips and replay applies multi-click local selection")
+    func mouseSelectionRoundTrip() throws {
+        let mouse = NeutralTerminalMouseEvent(
+            action: .down,
+            button: 1,
+            column: 1,
+            row: 0,
+            modifiers: [.shift],
+            clickCount: 2
+        )
+        let recording = NeutralTerminalRecording(
+            provenance: .danTerm(test: "mouse-selection"),
+            initial: NeutralTerminalDimensions(columns: 12, rows: 2),
+            events: [
+                .feed(Array("hello world\u{1B}[?1000h".utf8)),
+                .mouse(mouse),
+                .mouse(NeutralTerminalMouseEvent(
+                    action: .up,
+                    button: 1,
+                    column: 1,
+                    row: 0,
+                    modifiers: [.shift]
+                )),
+            ]
+        )
+
+        let encoded = try JSONEncoder().encode(recording)
+        let decoded = try JSONDecoder().decode(NeutralTerminalRecording.self, from: encoded)
+        let replayed = try decoded.replay()
+
+        #expect(decoded == recording)
+        #expect(decoded.events[1] == .mouse(mouse))
+        #expect(replayed.selectedText == "hello")
+    }
+
+    @Test("captured mouse reports are discarded without mutating replayed terminal state")
+    func capturedMouseReplayIsTransparent() throws {
+        let recording = NeutralTerminalRecording(
+            provenance: .danTerm(test: "captured-mouse"),
+            initial: NeutralTerminalDimensions(columns: 8, rows: 2),
+            events: [
+                .feed(Array("text\u{1B}[?1000;1006h".utf8)),
+                .mouse(NeutralTerminalMouseEvent(
+                    action: .down,
+                    button: 1,
+                    column: 2,
+                    row: 1,
+                    clickCount: 3
+                )),
+                .mouse(NeutralTerminalMouseEvent(
+                    action: .up,
+                    button: 1,
+                    column: 2,
+                    row: 1
+                )),
+            ]
+        )
+        var expected = try #require(Terminal(columns: 8, rows: 2))
+        expected.feed(Array("text\u{1B}[?1000;1006h".utf8))
+
+        let replayed = try recording.replay()
+
+        #expect(replayed == expected)
+        #expect(replayed.selectionRange == nil)
+    }
+
+    @Test("neutral mouse buttons preserve upstream wheel directions")
+    func mouseWheelButtonsRoundTrip() throws {
+        let recording = NeutralTerminalRecording(
+            provenance: .danTerm(test: "mouse-wheel-buttons"),
+            initial: NeutralTerminalDimensions(columns: 8, rows: 2),
+            events: (4...7).map { button in
+                .mouse(NeutralTerminalMouseEvent(
+                    action: .down,
+                    button: button,
+                    column: 3,
+                    row: 1
+                ))
+            }
+        )
+
+        let encoded = try JSONEncoder().encode(recording)
+        let decoded = try JSONDecoder().decode(NeutralTerminalRecording.self, from: encoded)
+
+        #expect(decoded == recording)
+    }
+
     @Test("legacy recordings decode without viewport events")
     func legacyRecordingCompatibility() throws {
         let data = Data(#"""

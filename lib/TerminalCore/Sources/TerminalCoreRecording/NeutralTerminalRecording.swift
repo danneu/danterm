@@ -134,12 +134,53 @@ public enum NeutralTerminalViewportNavigation: Equatable, Sendable {
     case toBottom
 }
 
+/// Names the pointer transition recorded independently from a native event framework.
+public enum NeutralTerminalMouseAction: String, Equatable, Sendable {
+    case down
+    case up
+    case move
+}
+
+/// Preserves normalized pointer input and libvterm's button 4-7 wheel vocabulary.
+public struct NeutralTerminalMouseEvent: Equatable, Sendable {
+    /// Pointer transition represented by this event.
+    public let action: NeutralTerminalMouseAction
+    /// One-based terminal button number, absent for motion.
+    public let button: Int?
+    /// Zero-based pointed viewport column.
+    public let column: Int
+    /// Zero-based pointed viewport row.
+    public let row: Int
+    /// Modifier snapshot forwarded with the transition.
+    public let modifiers: TerminalKeyModifiers
+    /// Native click count retained for local selection granularity.
+    public let clickCount: Int
+
+    /// Creates one normalized event suitable for capture or adapted fixtures.
+    public init(
+        action: NeutralTerminalMouseAction,
+        button: Int? = nil,
+        column: Int,
+        row: Int,
+        modifiers: TerminalKeyModifiers = [],
+        clickCount: Int = 1
+    ) {
+        self.action = action
+        self.button = button
+        self.column = column
+        self.row = row
+        self.modifiers = modifiers
+        self.clickCount = clickCount
+    }
+}
+
 /// One owner-ordered terminal transition; checkpoints retain corpus expectation positions.
 public enum NeutralTerminalRecordingEvent: Equatable, Sendable {
     case feed([UInt8])
     case input(key: TerminalInputKey, modifiers: TerminalKeyModifiers)
     case paste(String)
     case focus(Bool)
+    case mouse(NeutralTerminalMouseEvent)
     case resize(columns: Int, rows: Int)
     case viewport(NeutralTerminalViewportNavigation)
     case checkpoint
@@ -148,6 +189,7 @@ public enum NeutralTerminalRecordingEvent: Equatable, Sendable {
 extension NeutralTerminalRecordingEvent: Codable {
     private enum CodingKeys: String, CodingKey {
         case type, text, hex, columns, rows, action, key, scalar, modifiers, focused
+        case button, column, row, clickCount
     }
 
     public init(from decoder: any Decoder) throws {
@@ -186,6 +228,26 @@ extension NeutralTerminalRecordingEvent: Codable {
             self = .paste(try values.decode(String.self, forKey: .text))
         case "focus":
             self = .focus(try values.decode(Bool.self, forKey: .focused))
+        case "mouse":
+            guard let action = NeutralTerminalMouseAction(
+                rawValue: try values.decode(String.self, forKey: .action)
+            ) else {
+                throw NeutralTerminalRecordingError.unsupportedEvent("mouse.action")
+            }
+            let button = try values.decodeIfPresent(Int.self, forKey: .button)
+            guard action == .move ? button == nil : button.map({ (1...7).contains($0) }) == true else {
+                throw NeutralTerminalRecordingError.unsupportedEvent("mouse.button")
+            }
+            self = .mouse(NeutralTerminalMouseEvent(
+                action: action,
+                button: button,
+                column: try values.decode(Int.self, forKey: .column),
+                row: try values.decode(Int.self, forKey: .row),
+                modifiers: try Self.decodeModifiers(
+                    try values.decodeIfPresent([String].self, forKey: .modifiers) ?? []
+                ),
+                clickCount: try values.decodeIfPresent(Int.self, forKey: .clickCount) ?? 1
+            ))
         case "viewport":
             let action = try values.decode(String.self, forKey: .action)
             switch action {
@@ -223,6 +285,14 @@ extension NeutralTerminalRecordingEvent: Codable {
         case .focus(let focused):
             try values.encode("focus", forKey: .type)
             try values.encode(focused, forKey: .focused)
+        case .mouse(let mouse):
+            try values.encode("mouse", forKey: .type)
+            try values.encode(mouse.action.rawValue, forKey: .action)
+            try values.encodeIfPresent(mouse.button, forKey: .button)
+            try values.encode(mouse.column, forKey: .column)
+            try values.encode(mouse.row, forKey: .row)
+            try values.encode(Self.encodeModifiers(mouse.modifiers), forKey: .modifiers)
+            try values.encode(mouse.clickCount, forKey: .clickCount)
         case .resize(let columns, let rows):
             try values.encode("resize", forKey: .type)
             try values.encode(columns, forKey: .columns)
@@ -318,6 +388,69 @@ extension NeutralTerminalRecordingEvent: Codable {
     ]
 }
 
+/// Replays one neutral mouse event through the shared policy and applies only local selection.
+public func applyNeutralTerminalMouse(
+    _ mouse: NeutralTerminalMouseEvent,
+    terminal: inout Terminal,
+    interactionState: inout TerminalInteractionState
+) -> [UInt8] {
+    if let direction = neutralWheelDirection(for: mouse) {
+        guard mouse.action == .down else { return [] }
+        return decideTerminalMouseWheelReport(
+            direction,
+            column: mouse.column,
+            row: mouse.row,
+            modifiers: mouse.modifiers,
+            terminal: terminal,
+            state: &interactionState
+        )
+    }
+
+    guard let event = neutralPointerEvent(for: mouse) else { return [] }
+    let decision = decideTerminalPointer(event, terminal: terminal, state: &interactionState)
+    switch decision.selectionMutation {
+    case .clear:
+        terminal.clearSelection()
+    case .set(let range):
+        terminal.setSelection(range)
+    case nil:
+        break
+    }
+    return decision.inputBytes
+}
+
+private func neutralPointerEvent(for mouse: NeutralTerminalMouseEvent) -> TerminalPointerEvent? {
+    let button = mouse.button.flatMap { TerminalMouseButton(rawValue: $0 - 1) }
+    switch mouse.action {
+    case .down:
+        guard let button else { return nil }
+        return .down(
+            button,
+            column: mouse.column,
+            row: mouse.row,
+            modifiers: mouse.modifiers,
+            clickCount: mouse.clickCount
+        )
+    case .up:
+        guard let button else { return nil }
+        return .up(
+            button,
+            column: mouse.column,
+            row: mouse.row,
+            modifiers: mouse.modifiers
+        )
+    case .move:
+        return .move(column: mouse.column, row: mouse.row, modifiers: mouse.modifiers)
+    }
+}
+
+private func neutralWheelDirection(
+    for mouse: NeutralTerminalMouseEvent
+) -> TerminalMouseWheelDirection? {
+    guard let button = mouse.button else { return nil }
+    return TerminalMouseWheelDirection(rawValue: button + 60)
+}
+
 /// Complete neutral evidence that can be serialized by a PTY test and replayed by core tests.
 public struct NeutralTerminalRecording: Codable, Equatable, Sendable {
     /// Schema revision, currently fixed at one.
@@ -353,6 +486,7 @@ public struct NeutralTerminalRecording: Codable, Equatable, Sendable {
         }
         try provenance.validate()
         var terminal = initialTerminal
+        var interactionState = TerminalInteractionState()
         for (index, event) in events.enumerated() {
             switch event {
             case .feed(let bytes):
@@ -360,6 +494,12 @@ public struct NeutralTerminalRecording: Codable, Equatable, Sendable {
                 _ = terminal.drainReplyBytes()
             case .input, .paste, .focus:
                 break
+            case .mouse(let mouse):
+                _ = applyNeutralTerminalMouse(
+                    mouse,
+                    terminal: &terminal,
+                    interactionState: &interactionState
+                )
             case .resize(let columns, let rows):
                 guard columns >= 2, rows >= 1 else {
                     throw NeutralTerminalRecordingError.invalidDimensions

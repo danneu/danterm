@@ -34,10 +34,10 @@ struct TerminalFixtureTests {
         }
     }
 
-    @Test("libvterm manifest classifies every case from the thirty-three selected source files")
+    @Test("libvterm manifest classifies every case from the thirty-four selected source files")
     func libvtermManifestCoverage() throws {
         // Intent: pin the adoption ledger to every upstream case heading in
-        //   the thirty-two source files selected through the current engine slices.
+        //   the thirty-four source files selected through the current engine slices.
         // Why it exists: fixtures alone make deferred, superseded, and
         //   deliberately incompatible cases disappear from review.
         // Scenario: the pinned libvterm corpus is upgraded or the neutral
@@ -65,6 +65,7 @@ struct TerminalFixtureTests {
             "DanTerm retains grapheme scalars exactly instead of truncating after five combining marks.",
             "DanTerm follows VT500 string states: C0 is absorbed inside strings and BEL terminates only OSC.",
             "DanTerm emits strict xterm legacy encodings where pinned libvterm emits unsolicited fixterms CSI-u for modified letters, Space, and Tab.",
+            "DanTerm reports DECRQM 0 for unsupported UTF-8 1005 and rxvt 1015 mouse encodings instead of libvterm's reset-state 2.",
         ])
         #expect(Set(manifest.files.map(\.path)) == Set(Self.expectedCases.keys))
         for file in manifest.files {
@@ -121,6 +122,7 @@ struct TerminalFixtureTests {
             columns: fixture.initial.columns,
             rows: fixture.initial.rows
         ))
+        var interactionState = TerminalInteractionState()
         var replyBytes: [UInt8] = []
         var inputBytes: [UInt8] = []
 
@@ -155,6 +157,12 @@ struct TerminalFixtureTests {
                 inputBytes.append(contentsOf: encodeTerminalPaste(text, modes: terminal.inputModes))
             case .focus(let focused):
                 inputBytes.append(contentsOf: encodeTerminalFocus(focused: focused, modes: terminal.inputModes))
+            case .mouse(let mouse):
+                inputBytes.append(contentsOf: applyNeutralTerminalMouse(
+                    mouse,
+                    terminal: &terminal,
+                    interactionState: &interactionState
+                ))
             case .resize(let columns, let rows):
                 terminal.resize(columns: columns, rows: rows)
             case .viewport(let navigation):
@@ -253,6 +261,31 @@ struct TerminalFixtureTests {
     }
 
     private static let expectedCases: [String: Set<String>] = [
+        "t/17state_mouse.test": [
+            "DECRQM on with mouse off",
+            "Mouse in simple button report mode",
+            "Press 1",
+            "Release 1",
+            "Ctrl-Press 1",
+            "Button 2",
+            "Position",
+            "Wheel events",
+            "DECRQM on mouse button mode",
+            "Drag events",
+            "DECRQM on mouse drag mode",
+            "Non-drag motion events",
+            "DECRQM on mouse motion mode",
+            "Bounds checking",
+            "DECRQM on standard encoding mode",
+            "UTF-8 extended encoding mode",
+            "DECRQM on UTF-8 extended encoding mode",
+            "SGR extended encoding mode",
+            "DECRQM on SGR extended encoding mode",
+            "rxvt extended encoding mode",
+            "DECRQM on rxvt extended encoding mode",
+            "Mouse disabled reports nothing",
+            "DECSM can set multiple modes at once",
+        ],
         "t/02parser.test": [
             "Basic text",
             "C0",

@@ -359,6 +359,22 @@ public func decideTerminalWheel(
     return decision
 }
 
+/// Encodes a discrete protocol wheel button against the interaction state's shared tracker.
+public func decideTerminalMouseWheelReport(
+    _ direction: TerminalMouseWheelDirection,
+    column: Int,
+    row: Int,
+    modifiers: TerminalKeyModifiers = [],
+    terminal: Terminal,
+    state: inout TerminalInteractionState
+) -> [UInt8] {
+    encodeTerminalMouse(
+        .wheel(direction, column: column, row: row, modifiers: modifiers),
+        tracker: &state.mouseTracker,
+        modes: terminal.inputModes
+    )
+}
+
 private func pointerOwner(
     button: TerminalMouseButton,
     modifiers: TerminalKeyModifiers,

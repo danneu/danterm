@@ -11,9 +11,39 @@
     "Raw ground-state C1 bytes and UTF-8 encodings beyond U+10FFFF are replaced by U+FFFD using maximal-subpart recovery.",
     "DanTerm retains grapheme scalars exactly instead of truncating after five combining marks.",
     "DanTerm follows VT500 string states: C0 is absorbed inside strings and BEL terminates only OSC.",
-    "DanTerm emits strict xterm legacy encodings where pinned libvterm emits unsolicited fixterms CSI-u for modified letters, Space, and Tab."
+    "DanTerm emits strict xterm legacy encodings where pinned libvterm emits unsolicited fixterms CSI-u for modified letters, Space, and Tab.",
+    "DanTerm reports DECRQM 0 for unsupported UTF-8 1005 and rxvt 1015 mouse encodings instead of libvterm's reset-state 2."
   ],
   "files": [
+    {
+      "path": "t/17state_mouse.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        { "name": "DECRQM on with mouse off", "disposition": "adopted", "rationale": "state-mouse.json pins reset replies for all three mutually exclusive tracking modes." },
+        { "name": "Mouse in simple button report mode", "disposition": "adopted", "rationale": "state-mouse.json enables mode 1000 before exercising its X10 reports." },
+        { "name": "Press 1", "disposition": "adopted", "rationale": "state-mouse.json emits the exact X10 left-button press at the origin." },
+        { "name": "Release 1", "disposition": "adopted", "rationale": "state-mouse.json emits the exact legacy release code at the origin." },
+        { "name": "Ctrl-Press 1", "disposition": "adopted", "rationale": "state-mouse.json preserves the Control modifier bit on press and release." },
+        { "name": "Button 2", "disposition": "adopted", "rationale": "state-mouse.json maps the upstream one-based button 2 to the middle-button report." },
+        { "name": "Position", "disposition": "adopted", "rationale": "state-mouse.json preserves the pointed row and column in press and release bytes." },
+        { "name": "Wheel events", "disposition": "adopted", "rationale": "state-mouse.json retains repeatable upstream buttons 4 through 7 as all four wheel directions." },
+        { "name": "DECRQM on mouse button mode", "disposition": "adopted", "rationale": "state-mouse.json pins exact active-mode status after DECSET 1000." },
+        { "name": "Drag events", "disposition": "adopted", "rationale": "state-mouse.json covers held-button motion, release, idle motion, and same-cell suppression under 1002." },
+        { "name": "DECRQM on mouse drag mode", "disposition": "adopted", "rationale": "state-mouse.json pins exact active-mode status after DECSET 1002." },
+        { "name": "Non-drag motion events", "disposition": "adopted", "rationale": "state-mouse.json emits a no-button motion report after 1003 replaces drag mode." },
+        { "name": "DECRQM on mouse motion mode", "disposition": "adopted", "rationale": "state-mouse.json pins exact active-mode status after DECSET 1003." },
+        { "name": "Bounds checking", "disposition": "adopted", "rationale": "state-mouse.json pins legacy coordinate bytes to 0xff for motion, press, and release." },
+        { "name": "DECRQM on standard encoding mode", "disposition": "adapted", "rationale": "state-mouse.json keeps 1006 reset while unsupported 1005 and 1015 answer unrecognized status 0." },
+        { "name": "UTF-8 extended encoding mode", "disposition": "out-of-scope", "rationale": "UTF-8 mouse encoding 1005 is deliberately unsupported in favor of SGR." },
+        { "name": "DECRQM on UTF-8 extended encoding mode", "disposition": "adapted", "rationale": "state-mouse.json proves DECSET 1005 remains inert and its DECRQM reply remains 0." },
+        { "name": "SGR extended encoding mode", "disposition": "adopted", "rationale": "state-mouse.json pins large-coordinate SGR press and button-preserving release bytes." },
+        { "name": "DECRQM on SGR extended encoding mode", "disposition": "adapted", "rationale": "state-mouse.json pins 1006 set while unsupported neighboring encodings answer 0." },
+        { "name": "rxvt extended encoding mode", "disposition": "out-of-scope", "rationale": "rxvt mouse encoding 1015 is deliberately unsupported in favor of SGR." },
+        { "name": "DECRQM on rxvt extended encoding mode", "disposition": "adapted", "rationale": "state-mouse.json proves DECSET 1015 remains inert and its DECRQM reply remains 0." },
+        { "name": "Mouse disabled reports nothing", "disposition": "adopted", "rationale": "state-mouse.json advances mouse history while reset tracking emits no child input." },
+        { "name": "DECSM can set multiple modes at once", "disposition": "adopted", "rationale": "state-mouse.json derives an SGR drag-mode report from one multi-parameter DECSET." }
+      ]
+    },
     {
       "path": "t/02parser.test",
       "licenseNotice": "LICENSE.libvterm.txt",
