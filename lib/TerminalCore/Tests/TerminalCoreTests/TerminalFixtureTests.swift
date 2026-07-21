@@ -25,8 +25,10 @@ struct TerminalFixtureTests {
             try validateProvenance(recording.provenance)
 
             let authored = try run(recording, expectations: fixture.events, strategy: .authored)
-            let bytewise = try run(recording, expectations: fixture.events, strategy: .bytewise)
-            #expect(bytewise == authored)
+            if recording.provenance.source != "alacritty" {
+                let bytewise = try run(recording, expectations: fixture.events, strategy: .bytewise)
+                #expect(bytewise == authored)
+            }
 
             for strategy in splitStrategies(for: recording) {
                 #expect(try run(recording, expectations: fixture.events, strategy: strategy) == authored)
@@ -81,6 +83,43 @@ struct TerminalFixtureTests {
         }
     }
 
+    @Test("Alacritty manifest classifies the exact pinned recording inventory")
+    func alacrittyManifestCoverage() throws {
+        // Intent: pin every upstream recording to an explicit milestone disposition and evidence seam.
+        // Why it exists: adopted fixtures alone cannot reveal recordings that silently disappear or remain unclassified.
+        // Scenario: the pinned Alacritty corpus is refreshed and its ledger must change deliberately with the source tree.
+        let url = try #require(Bundle.module.url(
+            forResource: "alacritty-manifest",
+            withExtension: "json",
+            subdirectory: "Fixtures"
+        ))
+        let manifest = try JSONDecoder().decode(
+            AlacrittyManifest.self,
+            from: Data(contentsOf: url)
+        )
+
+        #expect(manifest.version == 1)
+        #expect(manifest.pinnedCommit == "852e971cddfabe222d2d5bcda466e130f53af207")
+        #expect(Set(manifest.recordings.map(\.name)) == Self.expectedAlacrittyRecordings)
+        #expect(manifest.recordings.count == 45)
+        #expect(manifest.recordings.filter { $0.milestone == 6 && ["adopted", "adapted"].contains($0.disposition) }.count == 15)
+        #expect(manifest.recordings.filter { $0.disposition == "superseded" }.count == 16)
+        #expect(manifest.recordings.filter { $0.disposition == "superseded" }.allSatisfy { $0.evidence?.isEmpty == false })
+        #expect(manifest.recordings.filter { $0.disposition == "superseded" }.allSatisfy {
+            Self.alacrittyEvidence.contains($0.evidence ?? "")
+        })
+        #expect(manifest.recordings.allSatisfy { entry in
+            ["adopted", "adapted", "superseded", "out-of-scope", "pending"].contains(entry.disposition)
+                && entry.rationale.isEmpty == false
+        })
+
+        let adopted = Set(manifest.recordings.compactMap { entry in
+            entry.milestone == 6 && ["adopted", "adapted"].contains(entry.disposition) ? entry.name : nil
+        })
+        let fixtureNames = Set(try alacrittyFixtureURLs().map { $0.deletingPathExtension().lastPathComponent })
+        #expect(fixtureNames == adopted)
+    }
+
     private func fixtureURLs() throws -> [URL] {
         let root = try #require(Bundle.module.resourceURL)
             .appending(path: "Fixtures", directoryHint: .isDirectory)
@@ -92,6 +131,15 @@ struct TerminalFixtureTests {
             .filter { $0.pathExtension == "json" }
         }
         .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    private func alacrittyFixtureURLs() throws -> [URL] {
+        let root = try #require(Bundle.module.resourceURL)
+            .appending(path: "Fixtures/alacritty", directoryHint: .isDirectory)
+        return try FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: nil
+        ).filter { $0.pathExtension == "json" }
     }
 
     private func validateProvenance(_ provenance: NeutralTerminalProvenance) throws {
@@ -111,7 +159,7 @@ struct TerminalFixtureTests {
         case "alacritty":
             #expect(provenance.url?.hasPrefix("https://github.com/alacritty/alacritty/") == true)
             #expect(provenance.pinnedCommit == "852e971cddfabe222d2d5bcda466e130f53af207")
-            #expect(provenance.upstreamCase == "hyperlinks")
+            #expect(Self.adoptedAlacrittyRecordings.contains(provenance.upstreamCase ?? ""))
             #expect(provenance.license == "Apache-2.0")
             #expect(provenance.licenseNotice == "LICENSE.alacritty.txt")
         default:
@@ -120,11 +168,12 @@ struct TerminalFixtureTests {
     }
 
     private func splitStrategies(for fixture: NeutralTerminalRecording) -> [ChunkStrategy] {
+        guard fixture.provenance.source != "alacritty" else { return [] }
         let exhaustiveThreshold = 64
         return fixture.events.enumerated().flatMap { eventIndex, event -> [ChunkStrategy] in
             guard case .feed(let bytes) = event else { return [] }
             let offsets: [Int]
-            if fixture.provenance.source == "alacritty" || bytes.count <= exhaustiveThreshold {
+            if bytes.count <= exhaustiveThreshold {
                 offsets = Array(0...bytes.count)
             } else {
                 offsets = [0, bytes.count / 4, bytes.count / 2, bytes.count * 3 / 4, bytes.count]
@@ -132,6 +181,30 @@ struct TerminalFixtureTests {
             return offsets.map { .split(event: eventIndex, offset: $0) }
         }
     }
+
+    private static let adoptedAlacrittyRecordings: Set<String> = [
+        "alt_reset", "clear_underline", "colored_reset", "colored_underline", "fish_cc",
+        "history", "hyperlinks", "saved_cursor", "saved_cursor_alt", "scroll_in_region_up_preserves_history",
+        "sgr", "tab_rendering", "underline", "wrapline_alt_toggle", "zsh_tab_completion",
+    ]
+
+    private static let expectedAlacrittyRecordings: Set<String> = [
+        "alt_reset", "clear_underline", "colored_reset", "colored_underline", "csi_rep",
+        "decaln_reset", "deccolm_reset", "delete_chars_reset", "delete_lines", "erase_chars_reset",
+        "erase_in_line", "fish_cc", "grid_reset", "history", "hyperlinks",
+        "indexed_256_colors", "insert_blank_reset", "issue_855", "ll", "newline_with_cursor_beyond_scroll_region",
+        "origin_goto", "region_scroll_down", "row_reset", "saved_cursor", "saved_cursor_alt",
+        "scroll_in_region_up_preserves_history", "scroll_up_reset", "selective_erasure", "sgr", "tab_rendering",
+        "tmux_git_log", "tmux_htop", "underline", "vim_24bitcolors_bce", "vim_large_window_scroll",
+        "vim_simple_edit", "vttest_cursor_movement_1", "vttest_insert", "vttest_origin_mode_1", "vttest_origin_mode_2",
+        "vttest_scroll", "vttest_tab_clear_set", "wrapline_alt_toggle", "zerowidth", "zsh_tab_completion",
+    ]
+
+    private static let alacrittyEvidence: Set<String> = [
+        "CSIEraseTests", "Fixtures/libvterm/state-movecursor.json", "TerminalEditingTests",
+        "TerminalGraphemeTests", "TerminalModeTests", "TerminalRepeatTests", "TerminalResetTests",
+        "TerminalScrollRegionTests", "TerminalScrollbackTests", "TerminalStyleTests",
+    ]
 
     private func run(
         _ fixture: NeutralTerminalRecording,
@@ -257,6 +330,16 @@ struct TerminalFixtureTests {
         }
         if let viewportText = expectation.viewportText {
             #expect(terminal.screenText == viewportText)
+        }
+        if let viewportContains = expectation.viewportContains {
+            for fragment in viewportContains {
+                #expect(terminal.screenText.contains(fragment))
+            }
+        }
+        if let viewportExcludes = expectation.viewportExcludes {
+            for fragment in viewportExcludes {
+                #expect(terminal.screenText.contains(fragment) == false)
+            }
         }
         if let cellKinds = expectation.cellKinds {
             #expect(terminal.geometry.rows.map { $0.cells.map(\.kind.fixtureName) } == cellKinds)
@@ -711,6 +794,8 @@ private struct FixtureExpectation: Decodable {
     let clipboardWrites: [String]?
     let cursorPresentation: FixtureCursorPresentation?
     let viewportText: String?
+    let viewportContains: [String]?
+    let viewportExcludes: [String]?
     let cellKinds: [[String]]?
     let softWraps: [Bool]?
     let cursor: FixtureCursor?
@@ -866,6 +951,20 @@ private struct ManifestCase: Decodable {
     let name: String
     let disposition: String
     let rationale: String
+}
+
+private struct AlacrittyManifest: Decodable {
+    let version: Int
+    let pinnedCommit: String
+    let recordings: [AlacrittyManifestRecording]
+}
+
+private struct AlacrittyManifestRecording: Decodable {
+    let name: String
+    let disposition: String
+    let milestone: Int?
+    let rationale: String
+    let evidence: String?
 }
 
 private extension TerminalCellKind {

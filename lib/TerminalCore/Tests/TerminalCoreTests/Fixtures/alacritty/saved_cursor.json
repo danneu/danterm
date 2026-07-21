@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "alacritty",
+    "url": "https://github.com/alacritty/alacritty/blob/852e971cddfabe222d2d5bcda466e130f53af207/alacritty_terminal/tests/ref/saved_cursor/alacritty.recording",
+    "pinnedCommit": "852e971cddfabe222d2d5bcda466e130f53af207",
+    "upstreamCase": "saved_cursor",
+    "license": "Apache-2.0",
+    "licenseNotice": "LICENSE.alacritty.txt",
+    "recordedDeviations": [
+      "DanTerm ignores unpromised legacy G0 character-set state during cursor restore."
+    ]
+  },
+  "initial": {
+    "columns": 139,
+    "rows": 35
+  },
+  "events": [
+    {
+      "type": "feed",
+      "hex": "5b756e646561646c65656368406172636868712073617665645f637572736f725d24206563686f202d6520225c6537205c6528302074657374205c653820787878220d0a1b37201b28302074657374201b38207878780d0a5b756e646561646c65656368406172636868712073617665645f637572736f725d24206563686f202d6520225c655b3f3130343968205c6528302074657374205c655b3f313034396c20787878220d0a1b5b3f3130343968201b28302074657374201b5b3f313034396c207878780d0a5b756e646561646c65656368406172636868712073617665645f637572736f725d24206563686f202d6520225c6537205c652830205c655b3f31303439682074657374205c655b3f313034396c205c653820787878220d0a1b37201b2830201b5b3f31303439682074657374201b5b3f313034396c201b38207878780d0a5b756e646561646c65656368406172636868712073617665645f637572736f725d2420657869740d0a657869740d0a"
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportContains": [
+          " xxxst",
+          "   xxx",
+          "[undeadleech@archhq saved_cursor]$ exit"
+        ],
+        "viewportExcludes": [
+          "\u23bd\u251c",
+          "\u2502\u2502\u2502"
+        ]
+      }
+    }
+  ]
+}

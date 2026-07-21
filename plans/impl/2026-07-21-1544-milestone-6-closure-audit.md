@@ -249,7 +249,7 @@ The final roadmap state is:
 - [x] **Commit 6 -- `test(fixtures): complete libvterm milestone 6 dispositions`**:
   add the five file dispositions, refresh DECSCA rationale, and extend manifest
   inventory validation.
-- [ ] **Commit 7 -- `test(fixtures): adopt milestone 6 Alacritty recordings`**:
+- [x] **Commit 7 -- `test(fixtures): adopt milestone 6 Alacritty recordings`**:
   classify all 45 recordings, ingest and validate all 15 Milestone 6 cases,
   map every superseded case to existing behavioral evidence, preserve future
   milestone assignments, and expand provenance validation.
