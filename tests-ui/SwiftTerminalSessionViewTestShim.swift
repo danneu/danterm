@@ -93,6 +93,16 @@ struct TerminalViewportCell: Equatable {
     let row: Int
 }
 
+struct TerminalHyperlink: Equatable {
+    let uri: String
+    let explicitId: String?
+
+    init(uri: String, explicitId: String? = nil) {
+        self.uri = uri
+        self.explicitId = explicitId
+    }
+}
+
 enum TerminalPointerEvent: Equatable {
     case down(
         TerminalMouseButton,
@@ -172,6 +182,7 @@ final class TerminalPaneSessionController {
     var onSessionEnded: ((PaneLifecycleResult) -> Void)?
     var onViewportStateChange: ((TerminalPaneViewportState) -> Void)?
     var onPaneMenu: ((TerminalViewportCell) -> Void)?
+    var onOpenLink: ((TerminalHyperlink) -> Void)?
     var currentPlan: RenderFramePlan?
     var viewportState: TerminalPaneViewportState
     private(set) var scrolledTopRows: [Int] = []
@@ -181,9 +192,14 @@ final class TerminalPaneSessionController {
     private(set) var pointerEvents: [TerminalPointerEvent] = []
     private(set) var wheelEvents: [TerminalWheelEvent] = []
     private(set) var synchronizedSelectionReads = 0
+    private(set) var linkInteractionCancellations = 0
     var allowsPaneMenu = true
     var cachedHasSelection = false
     var selectedTextOnFence: String?
+    var hoveredLinkForCommandMove: TerminalHyperlink?
+    var linkForCommandClick: TerminalHyperlink?
+    private var cachedHoveredLink: TerminalHyperlink?
+    private var linkClickArmed = false
     var inputModes = TerminalInputModes.default
 
     init(viewportState: TerminalPaneViewportState = .init(
@@ -211,7 +227,28 @@ final class TerminalPaneSessionController {
         if allowsPaneMenu, case let .up(.right, column, row, _) = event {
             onPaneMenu?(.init(column: column, row: row))
         }
+        switch event {
+        case let .move(_, _, modifiers):
+            cachedHoveredLink = modifiers.contains(.command) ? hoveredLinkForCommandMove : nil
+            emitFrame()
+        case let .down(.left, _, _, modifiers, _):
+            linkClickArmed = modifiers.contains(.command) && linkForCommandClick != nil
+        case let .up(.left, _, _, modifiers):
+            if linkClickArmed, modifiers.contains(.command), let linkForCommandClick {
+                onOpenLink?(linkForCommandClick)
+            }
+            linkClickArmed = false
+        default:
+            break
+        }
     }
+    func cancelLinkInteraction() {
+        linkInteractionCancellations += 1
+        cachedHoveredLink = nil
+        linkClickArmed = false
+        emitFrame()
+    }
+    func readHoveredLink() -> TerminalHyperlink? { cachedHoveredLink }
     var hasSelection: Bool { cachedHasSelection }
     func readSelectedTextSynchronizing() -> String? {
         synchronizedSelectionReads += 1
@@ -225,7 +262,9 @@ final class TerminalPaneSessionController {
     func readFullHistoryText() -> String { "" }
     func readPrimaryHistoryText() -> String { "" }
     func setGridDimensions(_ dimensions: TerminalDimensions) {}
-    func tearDown() {}
+    func tearDown() {
+        onOpenLink = nil
+    }
 
     func emitViewportState(_ state: TerminalPaneViewportState) {
         viewportState = state
@@ -234,5 +273,19 @@ final class TerminalPaneSessionController {
 
     func emitClipboardWrite(_ text: String) {
         onClipboardWrite?(text)
+    }
+
+    func emitFrameForTest() {
+        emitFrame()
+    }
+
+    func emitHoveredLinkForTest(_ link: TerminalHyperlink) {
+        cachedHoveredLink = link
+        emitFrame()
+    }
+
+    private func emitFrame() {
+        let plan = currentPlan ?? RenderFramePlan(defaultBackground: RenderTheme.dark.defaultBackground)
+        onFrame?(.init(plan: plan, damage: .init(isFull: true)))
     }
 }

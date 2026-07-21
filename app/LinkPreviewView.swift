@@ -1,4 +1,4 @@
-// Passive URL preview pill shown over a terminal pane during libghostty link hover.
+// Passive URL preview pill shown over a terminal pane during link hover.
 import Cocoa
 
 /// Small value type that keeps link-preview frame math independent of AppKit view state.
@@ -22,7 +22,7 @@ func linkPreviewFrame(side: LinkPreviewSide, fittingSize: NSSize, containerWidth
 }
 
 /// Terminal-owned chrome for hovered link destinations, deliberately non-interactive
-/// so pointer events continue through to libghostty.
+/// so pointer events continue through to the terminal surface.
 class LinkPreviewView: NSView {
     private static let padding: CGFloat = 5
     private static let cornerRadius: CGFloat = 9

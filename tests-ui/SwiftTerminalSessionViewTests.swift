@@ -72,6 +72,8 @@ func swiftTerminalSessionViewTests() {
             .move(column: 3, row: 3, modifiers: [.shift]),
             .up(.left, column: 9, row: 9, modifiers: [.shift]),
         ], "pointer normalization diverged: \(controller.pointerEvents)")
+        try uiExpect(controller.linkInteractionCancellations == 1,
+                     "out-of-bounds release did not cancel link interaction first")
     }
 
     uiTest("wheel direct and momentum phases reach the owner unchanged") {
@@ -211,6 +213,8 @@ func swiftTerminalSessionViewTests() {
 
         try uiExpect(pane.trackingAreas.contains { $0.options.contains(.mouseMoved) },
                      "pane installed no mouse-move tracking area")
+        try uiExpect(pane.trackingAreas.contains { $0.options.contains(.mouseEnteredAndExited) },
+                     "pane installed no pointer-entry/exit tracking area")
         pane.mouseMoved(with: try makeMouseEvent(
             type: .mouseMoved,
             location: .init(x: 17, y: 125),
@@ -219,6 +223,154 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(controller.pointerEvents == [
             .move(column: 2, row: 2, modifiers: [.alt]),
         ], "mouse move did not reach the owner adapter")
+    }
+
+    uiTest("Cmd-click forwards Command and opens only boundary-valid web URLs") {
+        // Intent: AppKit forwards Command intent to owner policy, then independently validates
+        //   the click-time target before invoking the injected system opener.
+        // Why it exists: terminal output must not reach file or custom URL handlers even if
+        //   engine validation regresses or a malformed target crosses the owner boundary.
+        // Scenario: a user Cmd-clicks links with valid HTTP(S), unsafe, and malformed targets.
+        let controller = TerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+        var opened: [URL] = []
+        pane.linkOpener = { url in
+            opened.append(url)
+            return true
+        }
+
+        let down = try makeMouseEvent(
+            type: .leftMouseDown,
+            location: .init(x: 17, y: 125),
+            modifiers: [.command]
+        )
+        let up = try makeMouseEvent(
+            type: .leftMouseUp,
+            location: .init(x: 17, y: 125),
+            modifiers: [.command]
+        )
+        for target in [
+            "http://example.com/path",
+            "https://example.com/path",
+            "HtTpS://example.com/path",
+            "file:///etc/hosts",
+            "javascript:alert(1)",
+            "http:path",
+            "http://",
+            "http://example.com:0/path",
+            "http://example.com:65536/path",
+            "http://[/path",
+        ] {
+            controller.linkForCommandClick = .init(uri: target)
+            pane.mouseDown(with: down)
+            pane.mouseUp(with: up)
+        }
+
+        try uiExpect(
+            controller.pointerEvents.first == .down(
+                .left,
+                column: 2,
+                row: 2,
+                modifiers: [.command],
+                clickCount: 1
+            ),
+            "Cmd-down lost Command intent"
+        )
+        try uiExpect(
+            controller.pointerEvents.dropFirst().first == .up(
+                .left,
+                column: 2,
+                row: 2,
+                modifiers: [.command]
+            ),
+            "Cmd-up lost Command intent"
+        )
+        try uiExpect(opened.map(\.absoluteString) == [
+            "http://example.com/path",
+            "https://example.com/path",
+            "HtTpS://example.com/path",
+        ], "unsafe or malformed target crossed the opener boundary: \(opened)")
+    }
+
+    uiTest("Cmd flags changes replay the stationary pointer and update link chrome") {
+        // Intent: pressing and releasing Command without moving refreshes owner hover and native
+        //   chrome at the last terminal position.
+        // Why it exists: AppKit does not emit mouseMoved merely because modifier flags changed.
+        // Scenario: the pointer rests over a web link while the user presses and releases Cmd.
+        let controller = TerminalPaneSessionController()
+        controller.hoveredLinkForCommandMove = .init(uri: "https://example.com/stationary")
+        let pane = makeMountedPane(controller: controller)
+        pane.mouseMoved(with: try makeMouseEvent(
+            type: .mouseMoved,
+            location: .init(x: 17, y: 125)
+        ))
+
+        pane.flagsChanged(with: try makeFlagsChangedEvent(keyCode: 55, modifiers: [.command]))
+
+        try uiExpect(controller.pointerEvents.suffix(2) == [
+            .move(column: 2, row: 2),
+            .move(column: 2, row: 2, modifiers: [.command]),
+        ], "Cmd press did not replay the last pointer cell")
+        let preview = pane.subviews.compactMap { $0 as? LinkPreviewView }.first
+        try uiExpect(preview?.isHidden == false, "hover did not show the URL pill")
+        try uiExpect(
+            preview?.label.stringValue == "https://example.com/stationary",
+            "URL pill did not show the hovered target"
+        )
+        try uiExpect(NSCursor.current == .pointingHand, "hover did not install pointing-hand cursor")
+
+        pane.flagsChanged(with: try makeFlagsChangedEvent(keyCode: 55, modifiers: []))
+
+        try uiExpect(controller.pointerEvents.last == .move(column: 2, row: 2),
+                     "Cmd release did not replay the last pointer cell")
+        try uiExpect(preview?.isHidden == true, "Cmd release did not hide the URL pill")
+
+        NSCursor.crosshair.set()
+        controller.emitFrameForTest()
+        try uiExpect(NSCursor.current == .crosshair,
+                     "an unrelated render frame overwrote the current cursor")
+    }
+
+    uiTest("pointer exit clears hover and cancels a pending link click") {
+        // Intent: leaving the viewport clears presentation and invalidates the owner-side arm.
+        // Why it exists: a later release must not activate a link whose gesture left the pane.
+        // Scenario: the user Cmd-presses a link, leaves the pane, then releases over the old cell.
+        let controller = TerminalPaneSessionController()
+        let link = TerminalHyperlink(uri: "https://example.com/exit")
+        controller.hoveredLinkForCommandMove = link
+        controller.linkForCommandClick = link
+        let pane = makeMountedPane(controller: controller)
+        var opened: [URL] = []
+        pane.linkOpener = { url in opened.append(url); return true }
+
+        pane.mouseMoved(with: try makeMouseEvent(
+            type: .mouseMoved,
+            location: .init(x: 17, y: 125),
+            modifiers: [.command]
+        ))
+        pane.mouseDown(with: try makeMouseEvent(
+            type: .leftMouseDown,
+            location: .init(x: 17, y: 125),
+            modifiers: [.command]
+        ))
+        pane.mouseExited(with: try makePointerExitEvent(
+            location: .init(x: 81, y: 125),
+            modifiers: [.command]
+        ))
+        pane.mouseUp(with: try makeMouseEvent(
+            type: .leftMouseUp,
+            location: .init(x: 17, y: 125),
+            modifiers: [.command]
+        ))
+
+        try uiExpect(controller.linkInteractionCancellations == 1,
+                     "pointer exit did not reach owner cancellation")
+        try uiExpect(opened.isEmpty, "release after exit opened \(opened)")
+        let preview = pane.subviews.compactMap { $0 as? LinkPreviewView }.first
+        try uiExpect(preview?.isHidden == true, "pointer exit left the URL pill visible")
+
+        controller.emitHoveredLinkForTest(link)
+        try uiExpect(preview?.isHidden == true, "a stale owner frame restored hover after exit")
     }
 
     uiTest("pane maps viewport state and scrollbar commands through the controller") {
@@ -427,6 +579,26 @@ private func makeMouseEvent(
     return event
 }
 
+private func makePointerExitEvent(
+    location: NSPoint,
+    modifiers: NSEvent.ModifierFlags = []
+) throws -> NSEvent {
+    guard let event = NSEvent.enterExitEvent(
+        with: .mouseExited,
+        location: location,
+        modifierFlags: modifiers,
+        timestamp: 1,
+        windowNumber: 0,
+        context: nil,
+        eventNumber: 1,
+        trackingNumber: 1,
+        userData: nil
+    ) else {
+        throw UITestFailure(message: "could not synthesize mouseExited")
+    }
+    return event
+}
+
 private func cgEventFlags(_ modifiers: NSEvent.ModifierFlags) -> CGEventFlags {
     var flags: CGEventFlags = []
     if modifiers.contains(.shift) { flags.insert(.maskShift) }
@@ -483,6 +655,27 @@ private func makeKeyEvent(
         keyCode: keyCode
     ) else {
         throw UITestFailure(message: "could not synthesize keyCode \(keyCode)")
+    }
+    return event
+}
+
+private func makeFlagsChangedEvent(
+    keyCode: UInt16,
+    modifiers: NSEvent.ModifierFlags
+) throws -> NSEvent {
+    guard let event = NSEvent.keyEvent(
+        with: .flagsChanged,
+        location: .zero,
+        modifierFlags: modifiers,
+        timestamp: 1,
+        windowNumber: 0,
+        context: nil,
+        characters: "",
+        charactersIgnoringModifiers: "",
+        isARepeat: false,
+        keyCode: keyCode
+    ) else {
+        throw UITestFailure(message: "could not synthesize flagsChanged for keyCode \(keyCode)")
     }
     return event
 }

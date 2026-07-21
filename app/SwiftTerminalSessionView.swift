@@ -21,6 +21,10 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
     private var currentDimensions: TerminalDimensions?
     private var controlClickIsActive = false
     private var mouseTrackingArea: NSTrackingArea?
+    private var lastPointerLocationInWindow: NSPoint?
+    private var isPointerInside = false
+    private var hoveredLink: TerminalHyperlink?
+    private var linkPreview: LinkPreviewView?
     private var publishedFrame: (plan: RenderFramePlan, metrics: TerminalRenderMetrics)?
     private var lastEmittedState: TerminalSessionState?
     private var lastForwardedFocus = false
@@ -31,6 +35,8 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
     var selectionPasteboard = NSPasteboard.general
     /// Lets the UI harness observe owner-approved menu timing without entering AppKit menu tracking.
     var paneMenuHandler: ((TerminalViewportCell) -> Void)?
+    /// Defaults approved web links to the workspace while keeping UI tests free of external effects.
+    var linkOpener: ((URL) -> Bool)? = { NSWorkspace.shared.open($0) }
 
     var hostView: NSView { self }
     var onEvent: ((TerminalSessionEvent) -> Void)? {
@@ -81,6 +87,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         controller.onPaneMenu = { [weak self] cell in
             self?.showPaneMenu(at: cell)
         }
+        controller.onOpenLink = { [weak self] link in
+            self?.openLink(link)
+        }
         controller.onSessionEnded = { [weak self] result in
             onSessionEnded?(result)
             self?.callbackGate.emit(.closeRequested)
@@ -111,6 +120,16 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         synchronizeGeometry()
     }
 
+    override func layout() {
+        super.layout()
+        linkPreview?.layoutPill(in: bounds)
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: hoveredLink == nil ? .arrow : .pointingHand)
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         synchronizeGeometry()
@@ -128,7 +147,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         super.updateTrackingAreas()
         let trackingArea = NSTrackingArea(
             rect: .zero,
-            options: [.mouseMoved, .inVisibleRect, .activeInKeyWindow],
+            options: [.mouseMoved, .mouseEnteredAndExited, .inVisibleRect, .activeInKeyWindow],
             owner: self,
             userInfo: nil
         )
@@ -199,6 +218,19 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         forwardPointerMove(event)
     }
 
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        forwardPointerMove(event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        lastPointerLocationInWindow = nil
+        isPointerInside = false
+        controller.cancelLinkInteraction()
+        updateHoveredLinkChrome(nil)
+    }
+
     override func mouseDragged(with event: NSEvent) {
         forwardPointerMove(event)
     }
@@ -209,6 +241,16 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
 
     override func otherMouseDragged(with event: NSEvent) {
         forwardPointerMove(event)
+    }
+
+    override func flagsChanged(with event: NSEvent) {
+        guard event.keyCode == 0x37 || event.keyCode == 0x36,
+              isPointerInside,
+              let location = lastPointerLocationInWindow
+        else {
+            return
+        }
+        forwardPointerMove(at: location, modifiers: event.modifierFlags)
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -398,6 +440,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         guard isTornDown == false else { return }
         isTornDown = true
         paneMenuHandler = nil
+        linkOpener = nil
+        isPointerInside = false
+        updateHoveredLinkChrome(nil)
         if let mouseTrackingArea {
             removeTrackingArea(mouseTrackingArea)
             self.mouseTrackingArea = nil
@@ -448,7 +493,12 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
     }
 
     private func publish(_ frame: TerminalPaneFrame) {
-        guard isTornDown == false, let metrics = currentMetrics else { return }
+        guard isTornDown == false else { return }
+        let hoveredLink = isPointerInside ? lastPointerLocationInWindow.flatMap { location in
+            pointerIsOutsideGrid(location) ? nil : controller.readHoveredLink()
+        } : nil
+        updateHoveredLinkChrome(hoveredLink)
+        guard let metrics = currentMetrics else { return }
         #if DANTERM_TERMINAL_CHARACTERIZATION
         recordTerminalCharacterizationPlanDelivery()
         #endif
@@ -474,8 +524,12 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
     }
 
     private func normalizedCell(for event: NSEvent) -> TerminalViewportCell? {
+        normalizedCell(at: event.locationInWindow)
+    }
+
+    private func normalizedCell(at locationInWindow: NSPoint) -> TerminalViewportCell? {
         guard let metrics = currentMetrics, let dimensions = currentDimensions else { return nil }
-        let point = convert(event.locationInWindow, from: nil)
+        let point = convert(locationInWindow, from: nil)
         return terminalCell(
             at: .init(x: Double(point.x), y: Double(point.y)),
             cellSize: .init(
@@ -489,6 +543,8 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
 
     private func forwardPointerDown(_ event: NSEvent, button: TerminalMouseButton) {
         guard isTornDown == false, let cell = normalizedCell(for: event) else { return }
+        lastPointerLocationInWindow = event.locationInWindow
+        isPointerInside = pointerIsOutsideGrid(event.locationInWindow) == false
         controller.sendPointer(.down(
             button,
             column: cell.column,
@@ -496,10 +552,18 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
             modifiers: Self.terminalModifiers(event.modifierFlags),
             clickCount: event.clickCount
         ))
+        if pointerIsOutsideGrid(event.locationInWindow) {
+            controller.cancelLinkInteraction()
+        }
     }
 
     private func forwardPointerUp(_ event: NSEvent, button: TerminalMouseButton) {
         guard isTornDown == false, let cell = normalizedCell(for: event) else { return }
+        lastPointerLocationInWindow = event.locationInWindow
+        if pointerIsOutsideGrid(event.locationInWindow) {
+            isPointerInside = false
+            controller.cancelLinkInteraction()
+        }
         controller.sendPointer(.up(
             button,
             column: cell.column,
@@ -509,12 +573,32 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
     }
 
     private func forwardPointerMove(_ event: NSEvent) {
-        guard isTornDown == false, let cell = normalizedCell(for: event) else { return }
+        lastPointerLocationInWindow = event.locationInWindow
+        isPointerInside = pointerIsOutsideGrid(event.locationInWindow) == false
+        forwardPointerMove(at: event.locationInWindow, modifiers: event.modifierFlags)
+    }
+
+    private func forwardPointerMove(
+        at locationInWindow: NSPoint,
+        modifiers: NSEvent.ModifierFlags
+    ) {
+        guard isTornDown == false, let cell = normalizedCell(at: locationInWindow) else { return }
         controller.sendPointer(.move(
             column: cell.column,
             row: cell.row,
-            modifiers: Self.terminalModifiers(event.modifierFlags)
+            modifiers: Self.terminalModifiers(modifiers)
         ))
+        if pointerIsOutsideGrid(locationInWindow) {
+            controller.cancelLinkInteraction()
+        }
+    }
+
+    private func pointerIsOutsideGrid(_ locationInWindow: NSPoint) -> Bool {
+        guard let metrics = currentMetrics, let dimensions = currentDimensions else { return true }
+        let point = convert(locationInWindow, from: nil)
+        return point.x < 0 || point.y < 0
+            || point.x >= CGFloat(dimensions.columns) * metrics.cellSize.width
+            || point.y >= CGFloat(dimensions.rows) * metrics.cellSize.height
     }
 
     private func showPaneMenu(at cell: TerminalViewportCell) {
@@ -530,6 +614,64 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
             y: (CGFloat(cell.row) + 1) * metrics.cellSize.height
         )
         menu.popUp(positioning: nil, at: point, in: self)
+    }
+
+    private func openLink(_ link: TerminalHyperlink) {
+        guard isTornDown == false,
+              let url = Self.safeWebURL(link.uri)
+        else {
+            return
+        }
+        _ = linkOpener?(url)
+    }
+
+    private func updateHoveredLinkChrome(_ link: TerminalHyperlink?) {
+        if link == hoveredLink {
+            if link != nil, let location = lastPointerLocationInWindow {
+                linkPreview?.pointerMoved(to: convert(location, from: nil), in: bounds)
+            }
+            return
+        }
+        hoveredLink = link
+        window?.invalidateCursorRects(for: self)
+        guard let link else {
+            linkPreview?.hide()
+            NSCursor.arrow.set()
+            return
+        }
+
+        let preview = ensureLinkPreview()
+        preview.show(url: link.uri)
+        preview.layoutPill(in: bounds)
+        if let location = lastPointerLocationInWindow {
+            preview.pointerMoved(to: convert(location, from: nil), in: bounds)
+        }
+        NSCursor.pointingHand.set()
+    }
+
+    private func ensureLinkPreview() -> LinkPreviewView {
+        if let linkPreview { return linkPreview }
+        let preview = LinkPreviewView()
+        addSubview(preview)
+        linkPreview = preview
+        return preview
+    }
+
+    private static func safeWebURL(_ raw: String) -> URL? {
+        guard raw.unicodeScalars.allSatisfy({ scalar in
+            CharacterSet.whitespacesAndNewlines.contains(scalar) == false
+                && CharacterSet.controlCharacters.contains(scalar) == false
+        }),
+            let components = URLComponents(string: raw),
+            let scheme = components.scheme?.lowercased(),
+            scheme == "http" || scheme == "https",
+            let host = components.host,
+            host.isEmpty == false,
+            components.port.map({ (1...65_535).contains($0) }) ?? true
+        else {
+            return nil
+        }
+        return components.url
     }
 
     private static func wheelPhase(for event: NSEvent) -> TerminalWheelPhase {
@@ -679,6 +821,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         if flags.contains(.shift) { modifiers.insert(.shift) }
         if flags.contains(.control) { modifiers.insert(.control) }
         if flags.contains(.option) { modifiers.insert(.alt) }
+        if flags.contains(.command) { modifiers.insert(.command) }
         return modifiers
     }
 
