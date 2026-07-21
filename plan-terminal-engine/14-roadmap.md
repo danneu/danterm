@@ -321,6 +321,17 @@ mean.
     the other researched sources.
 
 - [ ] **7. Reach shell and baseline application compatibility**
+  - [ ] **Slice 1: Bounded title, cwd, bell, and legacy-event isolation.** Add
+    OSC 0/2 title semantics, local-host OSC 7 with cwd reset, BEL alerts, bounded
+    pane-scoped delivery, and temporary recognition that carries current
+    authenticated shell payloads as private events rather than titles. See the
+    [slice plan](../plans/impl/2026-07-21-1810-title-cwd-bell-events.md).
+  - [ ] **Slice 2: Native shell-event protocol and legacy retirement.** Select a
+    non-title protocol for command text/boundaries and remote-session metadata,
+    migrate the zsh/bash/fish and SSH integration emitters, preserve typed bounded
+    authentication and existing model behavior, then delete `__DANTERM_EVT__` OSC 0
+    recognition, translation, and its follow-up visible-title workaround. Milestone
+    7 cannot close while both encodings remain supported.
   - [ ] zsh, bash, fish, ssh, fzf, more, and less complete the minimum workflows in
     [Testing and conformance](12-testing-conformance.md).
   - [ ] [Protocols and shell integration](10-protocols-shell-integration.md) proves

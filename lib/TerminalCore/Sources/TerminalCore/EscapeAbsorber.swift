@@ -56,6 +56,8 @@ struct EscapeAbsorber: Equatable, Sendable {
     private var hasParameterDigits = false
     private var oscPayload: [UInt8] = []
     private var oscPayloadOverflowed = false
+    private var oscUTF8ContinuationCount = 0
+    private var oscUTF8LeadByte: UInt8?
 
     /// Distinguishes raw sequence bytes from ground-state bytes that require UTF-8 decoding.
     var isGround: Bool { state == .ground }
@@ -68,6 +70,50 @@ struct EscapeAbsorber: Equatable, Sendable {
 
     /// Consumes one raw sequence byte and surfaces at most one control or CSI dispatch.
     mutating func consume(_ byte: UInt8) -> EscapeEvent? {
+        if state == .oscString {
+            if byte == 0x18 || byte == 0x1A {
+                clearCollection()
+                state = .ground
+                return .execute(byte)
+            }
+            if byte == 0x07 { return dispatchOSC() }
+            if byte == 0x1B {
+                state = .oscEscape
+                return nil
+            }
+            if oscUTF8ContinuationCount > 0, (0x80...0xBF).contains(byte) {
+                if oscUTF8LeadByte == 0xC2, byte == 0x9C {
+                    if oscPayload.last == 0xC2 { oscPayload.removeLast() }
+                    return dispatchOSC()
+                }
+                collectOSC(byte)
+                oscUTF8ContinuationCount -= 1
+                if oscUTF8ContinuationCount == 0 { oscUTF8LeadByte = nil }
+                return nil
+            }
+            if byte == 0x9C { return dispatchOSC() }
+            if (0x80...0x9F).contains(byte) {
+                clearCollection()
+                state = .ground
+                return .execute(byte)
+            }
+            if byte >= 0x20, byte != 0x7F {
+                collectOSC(byte)
+                switch byte {
+                case 0xC2...0xDF: oscUTF8ContinuationCount = 1; oscUTF8LeadByte = byte
+                case 0xE0...0xEF: oscUTF8ContinuationCount = 2; oscUTF8LeadByte = byte
+                case 0xF0...0xF4: oscUTF8ContinuationCount = 3; oscUTF8LeadByte = byte
+                default: oscUTF8ContinuationCount = 0; oscUTF8LeadByte = nil
+                }
+            }
+            return nil
+        }
+        if state == .oscEscape {
+            if byte == 0x5C { return dispatchOSC() }
+            clearCollection()
+            state = .escape
+            return consume(byte)
+        }
         switch byte {
         case 0x18, 0x1A:
             clearCollection()
@@ -284,22 +330,8 @@ struct EscapeAbsorber: Equatable, Sendable {
         case .dcsPassthrough, .dcsIgnore, .sosPmApcString:
             return nil
 
-        case .oscString:
-            if byte == 0x07 {
-                return dispatchOSC()
-            }
-            if (0x20...0x7E).contains(byte) || (0xA0...0xFF).contains(byte) {
-                collectOSC(byte)
-            }
-            return nil
-
-        case .oscEscape:
-            if byte == 0x5C {
-                return dispatchOSC()
-            }
-            clearCollection()
-            state = .escape
-            return consume(byte)
+        case .oscString, .oscEscape:
+            preconditionFailure("OSC states return before general control dispatch")
         }
     }
 
@@ -311,6 +343,8 @@ struct EscapeAbsorber: Equatable, Sendable {
         hasParameterDigits = false
         oscPayload.removeAll(keepingCapacity: true)
         oscPayloadOverflowed = false
+        oscUTF8ContinuationCount = 0
+        oscUTF8LeadByte = nil
     }
 
     private mutating func collectIntermediate(_ byte: UInt8) {

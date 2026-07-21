@@ -306,17 +306,31 @@ public struct Terminal: Equatable, Sendable {
     private var hyperlinkPen: Int?
     private var nextHyperlinkId = 1
     private var nextContentIdentity = 1
+    private var machineHostname: String?
+    private var currentWorkingDirectory: String?
+    private var titleUsesWorkingDirectory = false
+    private var pendingTitleEvent: PendingTerminalSemanticEvent?
+    private var pendingWorkingDirectoryEvent: PendingTerminalSemanticEvent?
+    private var pendingDiscreteEvents: [PendingTerminalSemanticEvent] = []
+    private var nextSemanticEventOrder: UInt64 = 0
 
     static let productionScrollbackBudgetBytes = 10_485_760
     static let kittyKeyboardStackDepth = 8
     static let maximumHyperlinkTargetBytes = 65_536
-    static let maximumHyperlinkMetadataBytes = 1_048_576
+    static let maximumTerminalMetadataBytes = 256 * 1_024
+    static let maximumSemanticValueBytes = 64 * 1_024
+    static let maximumDiscreteSemanticEvents = 100
 
     /// Exposes aggregate retained link cost to structural bound tests.
     var retainedHyperlinkMetadataBytes: Int {
         hyperlinkTargets.values.reduce(0) { $0 + hyperlinkByteCost($1) }
             + (hoveredLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0)
             + (armedLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0)
+    }
+
+    /// Exposes the shared hyperlink, interaction, and semantic retention cost to bound tests.
+    var retainedTerminalMetadataBytes: Int {
+        retainedHyperlinkMetadataBytes + retainedSemanticEventBytes
     }
 
     /// Exposes retained table cardinality for deduplication and sweep proofs.
@@ -370,12 +384,16 @@ public struct Terminal: Equatable, Sendable {
 
     /// Reports whether a frame consumer has redraw work or a completed semantic write to drain.
     public var hasPendingConsumerWork: Bool {
-        damage != .none || pendingClipboardWrite != nil
+        damage != .none || pendingClipboardWrite != nil || hasPendingSemanticEvents
     }
 
     /// Compares only the accumulators whose changes require a frame consumer wakeup.
     public func hasSamePendingConsumerWork(as other: Terminal) -> Bool {
-        damage == other.damage && pendingClipboardWrite == other.pendingClipboardWrite
+        damage == other.damage
+            && pendingClipboardWrite == other.pendingClipboardWrite
+            && pendingTitleEvent == other.pendingTitleEvent
+            && pendingWorkingDirectoryEvent == other.pendingWorkingDirectoryEvent
+            && pendingDiscreteEvents == other.pendingDiscreteEvents
     }
 
     /// Transfers all ordered terminal replies to one consumer without a parallel output path.
@@ -389,6 +407,18 @@ public struct Terminal: Equatable, Sendable {
     public mutating func drainPendingClipboardWrite() -> String? {
         defer { pendingClipboardWrite = nil }
         return pendingClipboardWrite
+    }
+
+    /// Transfers the retained semantic batch in terminal-stream order and clears its budget share.
+    public mutating func drainSemanticEvents() -> [TerminalSemanticEvent] {
+        var events = pendingDiscreteEvents
+        if let pendingTitleEvent { events.append(pendingTitleEvent) }
+        if let pendingWorkingDirectoryEvent { events.append(pendingWorkingDirectoryEvent) }
+        events.sort { $0.order < $1.order }
+        pendingTitleEvent = nil
+        pendingWorkingDirectoryEvent = nil
+        pendingDiscreteEvents.removeAll(keepingCapacity: true)
+        return events.map(\.event)
     }
 
     /// Transfers all accumulated logical redraw work to one frame consumer.
@@ -473,20 +503,27 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Rejects dimensions that cannot represent all supported terminal cells.
-    public init?(columns: Int, rows: Int) {
+    public init?(columns: Int, rows: Int, machineHostname: String? = nil) {
         self.init(
             columns: columns,
             rows: rows,
-            scrollbackBudgetBytes: Self.productionScrollbackBudgetBytes
+            scrollbackBudgetBytes: Self.productionScrollbackBudgetBytes,
+            machineHostname: machineHostname
         )
     }
 
     /// Gives deterministic tests a small budget while production remains fixed at 10 MiB.
-    init?(columns: Int, rows: Int, scrollbackBudgetBytes: Int) {
+    init?(
+        columns: Int,
+        rows: Int,
+        scrollbackBudgetBytes: Int,
+        machineHostname: String? = nil
+    ) {
         guard columns >= 2, rows >= 1, scrollbackBudgetBytes >= 0 else { return nil }
         columnCount = columns
         rowCount = rows
         self.scrollbackBudgetBytes = scrollbackBudgetBytes
+        self.machineHostname = machineHostname
         tabStops = Self.defaultTabStops(columns: columns)
         self.rows = (0..<rows).map { _ in
             GridRow(cells: (0..<columns).map { _ in GridCell() })
@@ -501,7 +538,11 @@ public struct Terminal: Equatable, Sendable {
             case let .print(scalar):
                 print(scalar)
             case let .execute(control):
-                execute(control)
+                if control == 0x07 {
+                    admitDiscreteSemanticEvent(.bell)
+                } else {
+                    execute(control)
+                }
             case let .escape(final):
                 dispatchEscape(final)
             case let .escapeSequence(sequence):
@@ -520,12 +561,148 @@ public struct Terminal: Equatable, Sendable {
               let selector = parseOSCSelector(payload[..<selectorEnd])
         else { return }
         switch selector {
+        case 0, 2:
+            dispatchTitle(payload, selectorEnd: selectorEnd)
+        case 7:
+            dispatchOSC7(payload, selectorEnd: selectorEnd)
         case 8:
             dispatchOSC8(payload, selectorEnd: selectorEnd)
         case 52:
             dispatchOSC52(payload, selectorEnd: selectorEnd)
         default:
             break
+        }
+    }
+
+    private var hasPendingSemanticEvents: Bool {
+        pendingTitleEvent != nil
+            || pendingWorkingDirectoryEvent != nil
+            || pendingDiscreteEvents.isEmpty == false
+    }
+
+    private var retainedSemanticEventBytes: Int {
+        (pendingTitleEvent?.byteCost ?? 0)
+            + (pendingWorkingDirectoryEvent?.byteCost ?? 0)
+            + pendingDiscreteEvents.reduce(0) { $0 + $1.byteCost }
+    }
+
+    private mutating func dispatchTitle(_ payload: [UInt8], selectorEnd: Int) {
+        let valueBytes = Array(payload[payload.index(after: selectorEnd)...])
+        guard valueBytes.count <= Self.maximumSemanticValueBytes,
+              let value = strictlyDecodedUTF8(valueBytes)
+        else { return }
+        if value.hasPrefix("__DANTERM_EVT__:") {
+            admitDiscreteSemanticEvent(.legacyPrivateShell(value))
+            return
+        }
+        titleUsesWorkingDirectory = value.isEmpty
+        pendingTitleEvent = admittedCoalescedSemanticEvent(
+            .title(value.isEmpty ? currentWorkingDirectory ?? "" : value),
+            replacing: pendingTitleEvent
+        )
+    }
+
+    private mutating func dispatchOSC7(_ payload: [UInt8], selectorEnd: Int) {
+        let valueBytes = Array(payload[payload.index(after: selectorEnd)...])
+        guard valueBytes.count <= Self.maximumSemanticValueBytes else { return }
+        let cwd: String?
+        if valueBytes.isEmpty {
+            cwd = nil
+        } else {
+            guard let parsed = localFilePath(from: valueBytes) else { return }
+            cwd = parsed
+        }
+        currentWorkingDirectory = cwd
+        pendingWorkingDirectoryEvent = admittedCoalescedSemanticEvent(
+            .workingDirectory(cwd),
+            replacing: pendingWorkingDirectoryEvent
+        )
+        if titleUsesWorkingDirectory {
+            pendingTitleEvent = admittedCoalescedSemanticEvent(
+                .title(cwd ?? ""),
+                replacing: pendingTitleEvent
+            )
+        }
+    }
+
+    private mutating func admitDiscreteSemanticEvent(_ event: TerminalSemanticEvent) {
+        guard pendingDiscreteEvents.count < Self.maximumDiscreteSemanticEvents else { return }
+        let candidate = PendingTerminalSemanticEvent(order: nextSemanticEventOrder, event: event)
+        guard canAdmitSemanticBytes(candidate.byteCost) else { return }
+        nextSemanticEventOrder &+= 1
+        pendingDiscreteEvents.append(candidate)
+    }
+
+    private mutating func admittedCoalescedSemanticEvent(
+        _ event: TerminalSemanticEvent,
+        replacing existing: PendingTerminalSemanticEvent?
+    ) -> PendingTerminalSemanticEvent? {
+        let candidate = PendingTerminalSemanticEvent(order: nextSemanticEventOrder, event: event)
+        let releasedBytes = existing?.byteCost ?? 0
+        if retainedTerminalMetadataBytes - releasedBytes + candidate.byteCost
+            > Self.maximumTerminalMetadataBytes
+        {
+            reclaimDeadHyperlinkTargets()
+        }
+        guard retainedTerminalMetadataBytes - releasedBytes + candidate.byteCost
+                <= Self.maximumTerminalMetadataBytes
+        else { return existing }
+        nextSemanticEventOrder &+= 1
+        return candidate
+    }
+
+    private mutating func canAdmitSemanticBytes(_ byteCount: Int) -> Bool {
+        if retainedTerminalMetadataBytes + byteCount > Self.maximumTerminalMetadataBytes {
+            reclaimDeadHyperlinkTargets()
+        }
+        return retainedTerminalMetadataBytes + byteCount <= Self.maximumTerminalMetadataBytes
+    }
+
+    private func strictlyDecodedUTF8(_ bytes: [UInt8]) -> String? {
+        let value = String(decoding: bytes, as: UTF8.self)
+        return Array(value.utf8) == bytes ? value : nil
+    }
+
+    private func localFilePath(from bytes: [UInt8]) -> String? {
+        let prefix = Array("file://".utf8)
+        guard bytes.starts(with: prefix),
+              let slash = bytes[prefix.count...].firstIndex(of: 0x2F)
+        else { return nil }
+        let hostBytes = Array(bytes[prefix.count..<slash])
+        guard let host = strictlyDecodedUTF8(hostBytes),
+              host == "localhost" || (machineHostname != nil && host == machineHostname)
+        else { return nil }
+        guard let decodedPathBytes = percentDecoded(Array(bytes[slash...])),
+              let path = strictlyDecodedUTF8(decodedPathBytes)
+        else { return nil }
+        return path
+    }
+
+    private func percentDecoded(_ bytes: [UInt8]) -> [UInt8]? {
+        var result: [UInt8] = []
+        var index = 0
+        while index < bytes.count {
+            if bytes[index] != 0x25 {
+                result.append(bytes[index])
+                index += 1
+                continue
+            }
+            guard index + 2 < bytes.count,
+                  let high = hexadecimalValue(bytes[index + 1]),
+                  let low = hexadecimalValue(bytes[index + 2])
+            else { return nil }
+            result.append(high * 16 + low)
+            index += 3
+        }
+        return result
+    }
+
+    private func hexadecimalValue(_ byte: UInt8) -> UInt8? {
+        switch byte {
+        case 0x30...0x39: byte - 0x30
+        case 0x41...0x46: byte - 0x41 + 10
+        case 0x61...0x66: byte - 0x61 + 10
+        default: nil
         }
     }
 
@@ -561,13 +738,15 @@ public struct Terminal: Equatable, Sendable {
         let interactionCost = (hoveredLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0)
             + (armedLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0)
         if candidateTargets.values.reduce(0, { $0 + hyperlinkByteCost($1) })
-            + interactionCost + hyperlinkByteCost(target) > Self.maximumHyperlinkMetadataBytes
+            + interactionCost + retainedSemanticEventBytes + hyperlinkByteCost(target)
+                > Self.maximumTerminalMetadataBytes
         {
             let live = liveHyperlinkIds()
             candidateTargets = candidateTargets.filter { live.contains($0.key) }
         }
         guard candidateTargets.values.reduce(0, { $0 + hyperlinkByteCost($1) })
-            + interactionCost + hyperlinkByteCost(target) <= Self.maximumHyperlinkMetadataBytes
+            + interactionCost + retainedSemanticEventBytes + hyperlinkByteCost(target)
+                <= Self.maximumTerminalMetadataBytes
         else { return }
 
         let id = nextHyperlinkId
@@ -605,6 +784,11 @@ public struct Terminal: Equatable, Sendable {
         if let inactivePrimaryScreen { collect(inactivePrimaryScreen.rows, into: &live) }
         if let hyperlinkPen { live.insert(hyperlinkPen) }
         return live
+    }
+
+    private mutating func reclaimDeadHyperlinkTargets() {
+        let live = liveHyperlinkIds()
+        hyperlinkTargets = hyperlinkTargets.filter { live.contains($0.key) }
     }
 
     private mutating func dispatchOSC52(_ payload: [UInt8], selectorEnd: Int) {
@@ -934,15 +1118,15 @@ public struct Terminal: Equatable, Sendable {
         var candidateTargets = hyperlinkTargets
         let armCost = armedLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0
         let retainedCost = candidateTargets.values.reduce(0) { $0 + hyperlinkByteCost($1) }
-        if retainedCost + armCost + hyperlinkByteCost(link.hyperlink)
-            > Self.maximumHyperlinkMetadataBytes
+        if retainedCost + armCost + retainedSemanticEventBytes + hyperlinkByteCost(link.hyperlink)
+            > Self.maximumTerminalMetadataBytes
         {
             let live = liveHyperlinkIds()
             candidateTargets = candidateTargets.filter { live.contains($0.key) }
         }
         let candidateCost = candidateTargets.values.reduce(0) { $0 + hyperlinkByteCost($1) }
-        guard candidateCost + armCost + hyperlinkByteCost(link.hyperlink)
-            <= Self.maximumHyperlinkMetadataBytes
+        guard candidateCost + armCost + retainedSemanticEventBytes + hyperlinkByteCost(link.hyperlink)
+            <= Self.maximumTerminalMetadataBytes
         else { return false }
 
         let ordered = textPositionPrecedes(link.range.start, link.range.end)
@@ -969,15 +1153,15 @@ public struct Terminal: Equatable, Sendable {
         var candidateTargets = hyperlinkTargets
         let hoverCost = hoveredLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0
         if candidateTargets.values.reduce(0, { $0 + hyperlinkByteCost($1) })
-            + hoverCost + hyperlinkByteCost(link.hyperlink)
-            > Self.maximumHyperlinkMetadataBytes
+            + hoverCost + retainedSemanticEventBytes + hyperlinkByteCost(link.hyperlink)
+            > Self.maximumTerminalMetadataBytes
         {
             let live = liveHyperlinkIds()
             candidateTargets = candidateTargets.filter { live.contains($0.key) }
         }
         return candidateTargets.values.reduce(0, { $0 + hyperlinkByteCost($1) })
-            + hoverCost + hyperlinkByteCost(link.hyperlink)
-            <= Self.maximumHyperlinkMetadataBytes
+            + hoverCost + retainedSemanticEventBytes + hyperlinkByteCost(link.hyperlink)
+            <= Self.maximumTerminalMetadataBytes
     }
 
     /// Atomically reserves a validated originating run for click-time revalidation.
@@ -987,8 +1171,8 @@ public struct Terminal: Equatable, Sendable {
         var candidateTargets = hyperlinkTargets
         let hoverCost = hoveredLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0
         if candidateTargets.values.reduce(0, { $0 + hyperlinkByteCost($1) })
-            + hoverCost + hyperlinkByteCost(link.hyperlink)
-            > Self.maximumHyperlinkMetadataBytes
+            + hoverCost + retainedSemanticEventBytes + hyperlinkByteCost(link.hyperlink)
+            > Self.maximumTerminalMetadataBytes
         {
             let live = liveHyperlinkIds()
             candidateTargets = candidateTargets.filter { live.contains($0.key) }

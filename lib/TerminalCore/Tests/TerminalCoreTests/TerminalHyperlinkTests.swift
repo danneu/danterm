@@ -88,29 +88,28 @@ struct TerminalHyperlinkTests {
         //   candidate when the live table still cannot fit it.
         // Why it exists: a mark-and-sweep performed directly on live state could delete old
         //   metadata even though the OSC 8 open itself must be apply-none.
-        // Scenario: a pane sits just below 1 MiB, one old cell is overwritten, and another
+        // Scenario: a pane sits just below 256 KiB, one old cell is overwritten, and another
         //   maximum-sized target arrives before enough dead metadata exists to admit it.
         var terminal = Terminal(columns: 20, rows: 1)!
-        let retainedLength = 61_500
-        for index in 0..<17 {
+        let retainedLength = 65_500
+        for index in 0..<4 {
             let prefix = "https://\(index).test/"
             terminal.feed(osc8(uri: prefix + String(repeating: "a", count: retainedLength - prefix.utf8.count)))
             terminal.feed(Array("x".utf8))
         }
-        #expect(terminal.retainedHyperlinkMetadataBytes == 17 * retainedLength)
+        #expect(terminal.retainedHyperlinkMetadataBytes == 4 * retainedLength)
 
         terminal.feed(osc8(uri: ""))
-        terminal.feed(Array("\u{1B}[1;1Hy".utf8))
         let baseline = terminal
         let maximum = "https://candidate.test/"
             + String(repeating: "b", count: 65_536 - "https://candidate.test/".utf8.count)
         terminal.feed(osc8(uri: maximum))
         #expect(terminal == baseline)
 
-        terminal.feed(Array("\u{1B}[1;2Hz".utf8))
+        terminal.feed(Array("\u{1B}[1;1Hy".utf8))
         terminal.feed(osc8(uri: maximum))
-        #expect(terminal.retainedHyperlinkCount == 16)
-        #expect(terminal.retainedHyperlinkMetadataBytes <= 1_048_576)
+        #expect(terminal.retainedHyperlinkCount == 4)
+        #expect(terminal.retainedHyperlinkMetadataBytes <= 256 * 1_024)
     }
 
     @Test("SGR preserves the link pen while resets and blank-producing operations clear links")

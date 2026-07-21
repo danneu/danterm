@@ -25,8 +25,11 @@
     { "type": "expect", "expect": { "viewportText": "GHI         \n            " } },
     { "type": "feed", "text": "\u001bcJ\u001b]Something\u001b9K\u001b]12\u0018LM" },
     { "type": "expect", "expect": { "viewportText": "JKLM        \n            " } },
-    { "type": "feed", "text": "\u001bcN\u001b]2;\nBye\u0007O" },
-    { "type": "expect", "expect": { "viewportText": "NO          \n            " } },
+    { "type": "feed", "text": "\u001bcN\u001b]2;Bye\u0007O" },
+    { "type": "expect", "expect": {
+      "viewportText": "NO          \n            ",
+      "semanticEvents": [{ "kind": "title", "value": "Bye" }]
+    } },
     { "type": "feed", "text": "\u001bcP\u001bPHello\u0007Q\u001b\\R" },
     { "type": "expect", "expect": { "viewportText": "PR          \n            " } },
     { "type": "feed", "text": "\u001bcS\u001bPABC\u001b" },

@@ -13,8 +13,9 @@ silently.
 - Which device and mode queries are required by the prioritized applications?
 - Which OSC notification and progress variants are part of the initial accepted
   contract beyond DanTerm's current usage?
-- Should OSC 133 semantic shell markers be part of the initial replacement or a
-  later cleanup of the private title-channel integration?
+- Which non-title protocol should replace the temporary authenticated title-channel
+  encoding while preserving command text, command boundaries, and remote-session
+  metadata?
 
 ## Terminal semantics
 

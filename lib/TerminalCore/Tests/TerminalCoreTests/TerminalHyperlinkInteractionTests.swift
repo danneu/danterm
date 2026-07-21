@@ -64,7 +64,7 @@ struct TerminalHyperlinkInteractionTests {
         // Scenario: a nearly full table refuses hover, then two overwritten links make room.
         var terminal = try #require(Terminal(columns: 70_000, rows: 1))
         let retainedLength = 61_500
-        for index in 0..<16 {
+        for index in 0..<4 {
             let prefix = "https://\(index).test/"
             let uri = prefix + String(
                 repeating: "a",
@@ -76,19 +76,19 @@ struct TerminalHyperlinkInteractionTests {
         let detectedURI = "https://detected.test/"
             + String(repeating: "b", count: 65_536 - "https://detected.test/".utf8.count)
         terminal.feed(Array((" " + detectedURI).utf8))
-        let detected = try #require(terminal.activatableLink(at: .init(row: 0, column: 100)))
+        let detected = try #require(terminal.activatableLink(at: .init(row: 0, column: 10)))
 
         let refused = terminal.setHoveredLink(detected)
         #expect(refused == false)
         #expect(terminal.hoveredLink == nil)
-        #expect(terminal.retainedHyperlinkMetadataBytes == 16 * retainedLength)
+        #expect(terminal.retainedHyperlinkMetadataBytes == 4 * retainedLength)
 
         terminal.feed(Array("\u{1B}[1;1Hyz".utf8))
         let admitted = terminal.setHoveredLink(detected)
         #expect(admitted)
         let armed = terminal.setArmedLink(detected)
         #expect(armed)
-        #expect(terminal.retainedHyperlinkMetadataBytes <= 1_048_576)
+        #expect(terminal.retainedHyperlinkMetadataBytes <= 256 * 1_024)
         #expect(terminal.armedLink == detected)
     }
 

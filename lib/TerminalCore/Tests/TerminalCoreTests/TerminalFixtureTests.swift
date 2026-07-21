@@ -219,6 +219,7 @@ struct TerminalFixtureTests {
         var replyBytes: [UInt8] = []
         var inputBytes: [UInt8] = []
         var clipboardWrites: [String] = []
+        var semanticEvents: [TerminalSemanticEvent] = []
 
         func feed(_ bytes: [UInt8]) {
             terminal.feed(bytes)
@@ -226,6 +227,7 @@ struct TerminalFixtureTests {
             if let write = terminal.drainPendingClipboardWrite() {
                 clipboardWrites.append(write)
             }
+            semanticEvents.append(contentsOf: terminal.drainSemanticEvents())
         }
 
         for (eventIndex, event) in fixture.events.enumerated() {
@@ -274,11 +276,13 @@ struct TerminalFixtureTests {
                     against: terminal,
                     replyBytes: replyBytes,
                     inputBytes: inputBytes,
-                    clipboardWrites: clipboardWrites
+                    clipboardWrites: clipboardWrites,
+                    semanticEvents: semanticEvents
                 )
                 replyBytes.removeAll(keepingCapacity: true)
                 inputBytes.removeAll(keepingCapacity: true)
                 clipboardWrites.removeAll(keepingCapacity: true)
+                semanticEvents.removeAll(keepingCapacity: true)
             }
         }
         return terminal
@@ -289,7 +293,8 @@ struct TerminalFixtureTests {
         against terminal: Terminal,
         replyBytes: [UInt8],
         inputBytes: [UInt8],
-        clipboardWrites: [String]
+        clipboardWrites: [String],
+        semanticEvents: [TerminalSemanticEvent]
     ) throws {
         let expectation = try #require(expectation)
         if let expectedReplyBytes = expectation.replyBytes {
@@ -300,6 +305,9 @@ struct TerminalFixtureTests {
         }
         if let expectedClipboardWrites = expectation.clipboardWrites {
             #expect(clipboardWrites == expectedClipboardWrites)
+        }
+        if let expectedSemanticEvents = expectation.semanticEvents {
+            #expect(semanticEvents == expectedSemanticEvents.map(\.terminalEvent))
         }
         if let presentation = expectation.cursorPresentation {
             #expect(terminal.presentation.isCursorVisible == presentation.isVisible)
@@ -792,6 +800,7 @@ private struct FixtureExpectation: Decodable {
     let replyBytes: [UInt8]?
     let inputBytes: [UInt8]?
     let clipboardWrites: [String]?
+    let semanticEvents: [FixtureSemanticEvent]?
     let cursorPresentation: FixtureCursorPresentation?
     let viewportText: String?
     let viewportContains: [String]?
@@ -806,6 +815,21 @@ private struct FixtureExpectation: Decodable {
     let cellStyles: [FixtureCellStyle]?
     let cellScalars: [FixtureCellScalars]?
     let cellHyperlinks: [FixtureCellHyperlink]?
+}
+
+private struct FixtureSemanticEvent: Decodable {
+    let kind: String
+    let value: String?
+
+    var terminalEvent: TerminalSemanticEvent {
+        switch kind {
+        case "title": .title(value ?? "")
+        case "cwd": .workingDirectory(value)
+        case "bell": .bell
+        case "legacy": .legacyPrivateShell(value ?? "")
+        default: preconditionFailure("Unknown semantic fixture event: \(kind)")
+        }
+    }
 }
 
 /// Keeps cursor appearance expectations renderer-independent and source-neutral.

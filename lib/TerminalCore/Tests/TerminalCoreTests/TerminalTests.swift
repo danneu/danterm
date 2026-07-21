@@ -150,7 +150,7 @@ struct TerminalTests {
         #expect(tab == expectedTab)
 
         let ignored: [UInt8] = [
-            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
             0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
             0x18, 0x19, 0x1A, 0x1C, 0x1D, 0x1E, 0x1F, 0x7F,
         ]
@@ -161,6 +161,12 @@ struct TerminalTests {
             terminal.feed([control])
             #expect(terminal == expected)
         }
+
+        var bell = try #require(Terminal(columns: 2, rows: 2))
+        bell.feed(Array("AB".utf8))
+        bell.feed([0x07])
+        #expect(bell.geometry.cursor?.isPendingWrap == true)
+        #expect(bell.drainSemanticEvents() == [.bell])
     }
 
     @Test("backspace may land on a wide tail without erasing")

@@ -40,10 +40,13 @@ compatibility target, including:
 - synchronized updates
 - legacy xterm and Kitty keyboard negotiation
 
-The initial replacement preserves DanTerm's authenticated title-channel shell
-events. The engine reports ordinary title events and the existing pure DanTerm
-translator continues recognizing command and remote-session payloads. Redesigning
-that private integration is separate future work.
+The first semantic-event slice preserves DanTerm's authenticated title-channel shell
+hooks as a temporary wire-compatibility shim. The engine recognizes those prefixed
+OSC 0 payloads before ordinary title handling, reports them as distinct private
+events, and never applies or coalesces them as terminal titles. A follow-on retirement
+slice selects a non-title shell-event protocol, migrates the hooks, and deletes both
+the OSC 0 compatibility recognition and legacy translator before the replacement gate
+can close.
 
 BEL emits DanTerm's existing pane-scoped bell event. The initial engine never
 plays an audible bell. Existing alert suppression and admitted-event
@@ -73,6 +76,8 @@ and progress values coalesce to their newest complete value; other excess events
 are dropped as complete pane-scoped units rather than creating an unbounded
 model or adapter backlog. Reaching a downstream limit does not retain a second
 unbounded copy or prevent later valid terminal input from being processed.
+Component sub-budgets must sum to the 1 MiB aggregate; no retention layer receives
+an independent 1 MiB allowance.
 
 When a sequence exceeds its limit, the engine applies none of that sequence,
 consumes through normal termination or cancellation without retaining the
@@ -106,6 +111,9 @@ implements the outer capabilities tmux consumes.
   mouse, links, clipboard writes, focus, and synchronized updates.
 - Existing DanTerm shell hooks continue driving command and remote-session model
   behavior through the new backend.
+- Before the replacement gate closes, migrated shell hooks drive the same behavior
+  without encoding private directives as titles, and legacy OSC 0 payloads are no
+  longer recognized.
 - Within the resource policy, notification and progress protocols produce the
   same pane-scoped DanTerm behavior as the current app; overload follows the
   explicit coalescing and drop contract.
@@ -124,11 +132,14 @@ implements the outer capabilities tmux consumes.
 - Initial `TERM=danterm`: remote hosts would need a custom terminfo entry before
   ordinary applications could rely on it.
 - Ghostty terminal identity or protocol compatibility as a goal.
-- Redesigning DanTerm's private shell-event channel in the terminal replacement
-  critical path.
+- Redesigning DanTerm's private shell-event channel in the first title/cwd/bell
+  slice; that slice isolates the legacy encoding, and a follow-on retirement slice
+  removes it deliberately.
 
 ## Implementation discretion
 
 - Additional harmless protocols may be supported when required by the accepted
   application matrix.
-- The eventual replacement for DanTerm's private title-channel events.
+- The exact non-title shell-event wire protocol is reserved for the follow-on
+  retirement plan; choosing it must preserve command text, remote metadata,
+  authentication policy, and bounded typed delivery.
