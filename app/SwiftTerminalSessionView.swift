@@ -69,8 +69,8 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         wantsLayer = true
         layer?.backgroundColor = Self.cgColor(RenderTheme.dark.defaultBackground)
 
-        controller.onPlan = { [weak self] plan in
-            self?.publish(plan)
+        controller.onFrame = { [weak self] frame in
+            self?.publish(frame)
         }
         controller.onViewportStateChange = { [weak self] _ in
             self?.emitStateIfNeeded()
@@ -440,13 +440,24 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         callbackGate.emit(state)
     }
 
-    private func publish(_ plan: RenderFramePlan) {
+    private func publish(_ frame: TerminalPaneFrame) {
         guard isTornDown == false, let metrics = currentMetrics else { return }
         #if DANTERM_TERMINAL_CHARACTERIZATION
         recordTerminalCharacterizationPlanDelivery()
         #endif
-        publishedFrame = (plan, metrics)
-        needsDisplay = true
+        publishedFrame = (frame.plan, metrics)
+        if frame.damage.isFull {
+            needsDisplay = true
+        } else {
+            for row in frame.damage.rows where frame.plan.rows > row {
+                setNeedsDisplay(NSRect(
+                    x: 0,
+                    y: CGFloat(row) * metrics.cellSize.height,
+                    width: CGFloat(frame.plan.columns) * metrics.cellSize.width,
+                    height: metrics.cellSize.height
+                ))
+            }
+        }
     }
 
     private func forwardFocusIfChanged(_ focused: Bool) {

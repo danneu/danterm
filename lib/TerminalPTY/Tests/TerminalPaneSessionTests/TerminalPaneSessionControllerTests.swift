@@ -103,7 +103,7 @@ struct TerminalPaneSessionControllerTests {
             )
         )
         var plans: [RenderFramePlan] = []
-        controller.onPlan = { plans.append($0) }
+        controller.onFrame = { plans.append($0.plan) }
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         controller.synchronizeState()
         let baselinePlanCount = plans.count
@@ -160,7 +160,7 @@ struct TerminalPaneSessionControllerTests {
             bufferingPolicy: .bufferingNewest(1)
         )
         var visibleResultIterator = visibleResults.stream.makeAsyncIterator()
-        visible.onPlan = { visiblePlans.append($0) }
+        visible.onFrame = { visiblePlans.append($0.plan) }
         visible.onSessionEnded = { visibleResults.continuation.yield($0) }
         #expect(await visibleHost.waitForResult() == .exited(.exited(0)))
         #expect(await visibleResultIterator.next() == .exited(.exited(0)))
@@ -180,7 +180,7 @@ struct TerminalPaneSessionControllerTests {
             bufferingPolicy: .bufferingNewest(1)
         )
         var hiddenResultIterator = hiddenResults.stream.makeAsyncIterator()
-        hidden.onPlan = { hiddenPlans.append($0) }
+        hidden.onFrame = { hiddenPlans.append($0.plan) }
         hidden.onSessionEnded = { hiddenResults.continuation.yield($0) }
         #expect(await hiddenHost.waitForResult() == .exited(.exited(0)))
         #expect(await hiddenResultIterator.next() == .exited(.exited(0)))
@@ -212,7 +212,7 @@ struct TerminalPaneSessionControllerTests {
             launchInput: makeLaunchInput(command: "printf '__READY__\\n'")
         )
         var plans: [RenderFramePlan] = []
-        controller.onPlan = { plans.append($0) }
+        controller.onFrame = { plans.append($0.plan) }
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         controller.synchronizeState()
         let baseline = plans.count
@@ -248,7 +248,7 @@ struct TerminalPaneSessionControllerTests {
             bufferingPolicy: .bufferingNewest(1)
         )
         var resultIterator = resultChannel.stream.makeAsyncIterator()
-        controller.onPlan = { _ in planCount += 1 }
+        controller.onFrame = { _ in planCount += 1 }
         controller.onSessionEnded = {
             results.append($0)
             resultChannel.continuation.yield($0)
@@ -281,7 +281,7 @@ struct TerminalPaneSessionControllerTests {
             isVisible: false
         )
         var plans: [RenderFramePlan] = []
-        controller.onPlan = { plans.append($0) }
+        controller.onFrame = { plans.append($0.plan) }
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
 
         controller.sendText("printf '__HIDDEN_OUTPUT__\\n'\n")
@@ -451,7 +451,7 @@ struct TerminalPaneSessionControllerTests {
             bufferingPolicy: .bufferingNewest(1)
         )
         var resultIterator = results.stream.makeAsyncIterator()
-        controller.onPlan = { plans.continuation.yield($0) }
+        controller.onFrame = { plans.continuation.yield($0.plan) }
         controller.onSessionEnded = { results.continuation.yield($0) }
         controller.synchronizeState()
         var readyPlan = controller.currentPlan
@@ -627,7 +627,7 @@ struct TerminalPaneSessionControllerTests {
         var states: [TerminalPaneViewportState] = []
         var plans: [RenderFramePlan] = []
         controller.onViewportStateChange = { states.append($0) }
-        controller.onPlan = { plans.append($0) }
+        controller.onFrame = { plans.append($0.plan) }
 
         controller.scroll(byRows: -3)
         controller.synchronizeState()

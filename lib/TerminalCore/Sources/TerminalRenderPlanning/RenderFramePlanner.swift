@@ -11,6 +11,26 @@ public func planFrame(
     FramePlanner(terminal: terminal, presentation: presentation).plan()
 }
 
+/// Narrows a complete retained frame to the visible rows a damage pass must draw.
+public func clipFramePlan(
+    _ plan: RenderFramePlan,
+    to damage: TerminalDamage
+) -> RenderFramePlan {
+    guard damage.isFull == false else { return plan }
+    let rows = damage.rows.filter { plan.rows > $0 }
+    return RenderFramePlan(
+        columns: plan.columns,
+        rows: plan.rows,
+        defaultBackground: plan.defaultBackground,
+        selectionBackground: plan.selectionBackground,
+        backgroundRuns: plan.backgroundRuns.filter { rows.contains($0.row) },
+        selectionRuns: plan.selectionRuns.filter { rows.contains($0.row) },
+        textRuns: plan.textRuns.filter { rows.contains($0.row) },
+        decorationRuns: plan.decorationRuns.filter { rows.contains($0.row) },
+        cursor: plan.cursor.flatMap { rows.contains($0.row) ? $0 : nil }
+    )
+}
+
 /// Keeps one inspected cell's role, content, and resolved presentation together
 /// while independent frame layers are derived from the same viewport pass.
 private struct PlannedCell {

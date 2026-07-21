@@ -152,6 +152,31 @@ func renderBitmap(plan: RenderFramePlan, metrics: TerminalRenderMetrics) throws 
     return surface.bitmap()
 }
 
+func renderIncrementalBitmap(
+    previous: RenderFramePlan,
+    current: RenderFramePlan,
+    damage: TerminalDamage,
+    metrics: TerminalRenderMetrics
+) throws -> Bitmap {
+    let size = try #require(renderFrameSize(for: current, metrics: metrics))
+    let surface = try BitmapSurface(size: size, metrics: metrics)
+    let context = try #require(surface.context)
+    drawRenderFrame(previous, metrics: metrics, in: context)
+    context.saveGState()
+    for row in damage.rows where current.rows > row {
+        context.addRect(CGRect(
+            x: 0,
+            y: CGFloat(row) * metrics.cellSize.height,
+            width: size.pointSize.width,
+            height: metrics.cellSize.height
+        ))
+    }
+    context.clip()
+    drawRenderFrame(clipFramePlan(current, to: damage), metrics: metrics, in: context)
+    context.restoreGState()
+    return surface.bitmap()
+}
+
 func makePlan(
     input: String,
     columns: Int,

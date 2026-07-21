@@ -2,10 +2,36 @@
 import CoreGraphics
 import Testing
 
+import TerminalCore
 import TerminalRenderExecution
 import TerminalRenderPlanning
 
 struct ExecutorContractTests {
+    @Test("Damage-row redraw is pixel-identical to a fresh full frame")
+    func damageRedrawMatchesFullFrame() throws {
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
+        var terminal = try #require(Terminal(columns: 5, rows: 3))
+        terminal.feed(Array("old\r\nkeep\r\nlast".utf8))
+        let presentation = RenderPresentation(theme: .dark, isCursorVisible: false)
+        let previous = planFrame(for: terminal, presentation: presentation)
+
+        _ = terminal.drainDamage()
+        terminal.feed(Array("\u{1B}[2;1H\u{1B}[41;37;4mNEW".utf8))
+        let damage = terminal.drainDamage()
+        let current = planFrame(for: terminal, presentation: presentation)
+
+        let incremental = try renderIncrementalBitmap(
+            previous: previous,
+            current: current,
+            damage: damage,
+            metrics: metrics
+        )
+        let full = try renderBitmap(plan: current, metrics: metrics)
+
+        #expect(damage == TerminalDamage(rows: [1, 2]))
+        #expect(incremental.bytes == full.bytes)
+    }
+
     @Test("Rendering styled fallback content cannot alter regular-face metrics")
     func renderingDoesNotAlterMetrics() throws {
         let before = try #require(TerminalRenderMetrics(displayScale: 2))

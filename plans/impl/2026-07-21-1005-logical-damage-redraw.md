@@ -255,7 +255,7 @@ live pane still renders output, selection, browsing, and resize correctly
 
 - [x] 1. feat(engine): add bounded logical damage accumulation
 - [x] 2. feat(pty): carry damage through gated pane commits
-- [ ] 3. feat(renderer): redraw only damaged terminal rows
+- [x] 3. feat(renderer): redraw only damaged terminal rows
 - [ ] 4. test(engine): adopt damage fixtures and close roadmap gates
 
 ## Implementation notes

@@ -53,10 +53,7 @@ public final class TerminalPaneSessionController {
     /// Process-lifetime access retained by the backend until this host finishes teardown.
     public let terminationHandle: TerminalPaneTerminationHandle
 
-    /// Receives complete immutable frames on the main actor while the pane is visible.
-    public var onPlan: ((RenderFramePlan) -> Void)?
-
-    /// Receives the same complete frame paired with its coalesced logical damage.
+    /// Receives complete retained frames with coalesced logical damage on the main actor.
     public var onFrame: ((TerminalPaneFrame) -> Void)?
 
     /// Receives the first child-originated lifecycle result on the main actor.
@@ -317,7 +314,6 @@ public final class TerminalPaneSessionController {
         guard isTornDown == false else { return }
         cachedTerminal = host.beginCloseAndSnapshot()
         isTornDown = true
-        onPlan = nil
         onFrame = nil
         onSessionEnded = nil
         onViewportStateChange = nil
@@ -440,6 +436,5 @@ public final class TerminalPaneSessionController {
         let frame = TerminalPaneFrame(plan: plan, damage: pendingDamage)
         pendingDamage = .none
         onFrame?(frame)
-        onPlan?(plan)
     }
 }

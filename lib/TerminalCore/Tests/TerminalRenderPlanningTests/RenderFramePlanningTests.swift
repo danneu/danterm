@@ -5,6 +5,30 @@ import TerminalCore
 @testable import TerminalRenderPlanning
 
 struct RenderFramePlanningTests {
+    @Test("Damage clipping keeps only visible damaged rows and preserves full plans")
+    func damageClipping() throws {
+        var terminal = try #require(Terminal(columns: 4, rows: 3))
+        feed("A\r\n\u{1B}[41mB\r\n\u{1B}[4mC", to: &terminal)
+        let plan = planFrame(
+            for: terminal,
+            presentation: RenderPresentation(theme: .dark, isCursorVisible: true)
+        )
+
+        let damage = TerminalDamage(rows: [-1, 1, 5])
+        let first = clipFramePlan(plan, to: damage)
+        let second = clipFramePlan(plan, to: damage)
+
+        #expect(first == second)
+        #expect(first.backgroundRuns.allSatisfy { $0.row == 1 })
+        #expect(first.selectionRuns.allSatisfy { $0.row == 1 })
+        #expect(first.textRuns.allSatisfy { $0.row == 1 })
+        #expect(first.decorationRuns.allSatisfy { $0.row == 1 })
+        #expect(first.cursor == nil)
+        #expect(clipFramePlan(plan, to: .full) == plan)
+        #expect(clipFramePlan(plan, to: .none).backgroundRuns.isEmpty)
+        #expect(clipFramePlan(plan, to: .none).textRuns.isEmpty)
+    }
+
     @Test("Frame planning preserves exact glyph payloads and canonical split keys")
     func textRunContentAndSplitting() throws {
         var terminal = try #require(Terminal(columns: 10, rows: 1))
