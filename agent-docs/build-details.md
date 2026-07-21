@@ -1,10 +1,10 @@
 # Build details
 
 Reference for the DanTerm build pipeline. Read when touching `build-lib.sh`,
-the dev/release Swift build scripts, or the xcframework linker setup. The
-build recipes `just build` and `just build-run` wrap the scripts described
-here; `just release` is a separate inline tag/push recipe in the `Justfile`
-that's covered by the `## Boundaries` rule in `AGENTS.md`.
+the dev/release Swift build scripts, or the xcframework linker setup. The dev
+build recipes in the `Justfile` wrap the scripts described here; `just release`
+is a separate inline tag/push recipe that's covered by the `## Boundaries` rule
+in `AGENTS.md`.
 
 ## build-lib.sh
 
@@ -22,9 +22,12 @@ that's covered by the `## Boundaries` rule in `AGENTS.md`.
 Build scripts use `swift build` via `Package.swift`, the single source of
 truth for Swift sources, framework dependencies, and linker flags.
 
-- `dev-build.sh` -- debug mode (fast incremental rebuilds), dev icons, dev
-  bundle ID, installs to `~/Applications`. Wrapped by `just build` and `just
-  build-run`.
+- `dev-build.sh` -- debug mode by default (fast incremental rebuilds), or
+  SwiftPM release mode with `--release`. Both modes use dev icons, the dev
+  bundle ID, development signing, and install to `~/Applications`. Wrapped by
+  `just build` / `just build-run` for debug and `just build-optimized` / `just
+  build-run-optimized` for optimized dev builds. The optimized variants are
+  not production releases and do not publish anything.
 - `build-app.sh` -- release mode (`--configuration release`, applies `-O`),
   production icons, optional `--version` stamping. Called by CI and release
   workflows.

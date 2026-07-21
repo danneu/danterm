@@ -48,6 +48,7 @@ test:
     ./scripts/tests/build-lib-stale-guard_test.sh
     ./scripts/tests/build-lib-fetch_test.sh
     ./scripts/tests/build-lib-contract_test.sh
+    ./scripts/tests/dev-build-configuration-contract_test.sh
     ./scripts/tests/danterm-cli-connect-errors_test.sh
     ./scripts/tests/terminal-characterization-harness_test.sh
     ./scripts/tests/terminal-viability-harness_test.sh
@@ -84,9 +85,17 @@ test-cli:
 build:
     ./dev-build.sh
 
+# Build an optimized local dev app to .build/DanTerm Dev.app
+build-optimized:
+    ./dev-build.sh --release
+
 # Build, install to ~/Applications, and run DanTerm Dev
 build-run:
     ./dev-build-run.sh
+
+# Build an optimized DanTerm Dev app, install it, and run it
+build-run-optimized:
+    ./dev-build-run.sh --release
 
 # Show current version
 version:

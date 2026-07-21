@@ -260,7 +260,9 @@ the first Swift build. Re-run only when the pinned Ghostty version changes.
 
 - `just build` -- compile to `.build/DanTerm Dev.app` and install to `~/Applications/DanTerm Dev.app`. Dev bundle ID `com.danneu.danterm-dev` runs side-by-side with production `DanTerm.app`.
 - `just build-run` -- same as `just build`, then launch the installed app.
-- `just test` -- local gate: protocol XCTest + core Swift Testing + DanTermSupport Swift Testing + core-purity lint (pure + portable profiles) + five shell self-tests (`core-purity-lint_test.sh`, `load-ghostty-version_test.sh`, `build-lib-stale-guard_test.sh`, `build-lib-fetch_test.sh`, `build-lib-contract_test.sh`).
+- `just build-optimized` -- compile the same `DanTerm Dev.app` identity with SwiftPM's release configuration and install it. This is an optimized dev build, not a production release or publish operation.
+- `just build-run-optimized` -- same as `just build-optimized`, then launch the installed app.
+- `just test` -- local gate: protocol XCTest + core Swift Testing + DanTermSupport Swift Testing + core-purity lint (pure + portable profiles) + shell contract self-tests, including the dev-build configuration contract.
 - `just test-ui` -- automated AppKit UI harness: compiles and runs the XCTest UI suite (split-view geometry, sidebar selection/badges, todo-input sizing) and self-reports pass/fail. Kept out of the `just test` gate because it needs a WindowServer connection -- it fails headless (e.g. CI) but runs fine from any shell in a logged-in GUI session, including an agent's.
 
 Targeted core runs: `swift test --package-path lib/DanTermCore`, optionally with `--filter CheckpointTests`. Protocol-only: `swift test --package-path lib/DanTermProtocol --filter DanTermProtocolTests`.

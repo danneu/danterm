@@ -643,6 +643,14 @@ The dev loop is to make changes and `just build-run` to try them out.
 - `just build` or `bash ./dev-build.sh` to build a local dev app to
   ".build/DanTerm Dev.app" and copy to "~/Applications/DanTerm Dev.app".
 - `just build-run` or `bash ./dev-build-run.sh` to build + run it.
+- `just build-optimized` or `bash ./dev-build.sh --release` to build the same
+  dev app with SwiftPM's release configuration.
+- `just build-run-optimized` or `bash ./dev-build-run.sh --release` to build
+  and run that optimized dev app.
+
+The optimized commands retain the `DanTerm Dev.app` name, dev bundle ID,
+development signing, install path, and selected terminal backend. They do not
+create a production release or publish anything.
 
 I don't remember why, but there was some benefit to running the app from the macOS applications folder during dev.
 

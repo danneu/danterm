@@ -5,6 +5,31 @@
 #
 set -euo pipefail
 
+SWIFT_CONFIGURATION=""
+case "$#" in
+    0) ;;
+    1)
+        if [ "$1" = "--release" ]; then
+            SWIFT_CONFIGURATION="release"
+        else
+            echo "Usage: $0 [--release]" >&2
+            exit 2
+        fi
+        ;;
+    *)
+        echo "Usage: $0 [--release]" >&2
+        exit 2
+        ;;
+esac
+
+swift_build() {
+    if [ -n "$SWIFT_CONFIGURATION" ]; then
+        swift build "$@" --configuration "$SWIFT_CONFIGURATION"
+    else
+        swift build "$@"
+    fi
+}
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$SCRIPT_DIR/.build"
 APP_PATH="$BUILD_DIR/DanTerm Dev.app"
@@ -20,13 +45,14 @@ fi
 
 # Build with SwiftPM (incremental — only recompiles changed files).
 echo "Compiling..."
-swift build --package-path "$SCRIPT_DIR" --build-path "$SCRIPT_DIR/.spm-build"
-BIN_PATH=$(swift build --package-path "$SCRIPT_DIR" --build-path "$SCRIPT_DIR/.spm-build" --show-bin-path)
-swift build \
+swift_build --package-path "$SCRIPT_DIR" --build-path "$SCRIPT_DIR/.spm-build"
+BIN_PATH=$(swift_build --package-path "$SCRIPT_DIR" --build-path "$SCRIPT_DIR/.spm-build" \
+    --show-bin-path)
+swift_build \
     --package-path "$LIB_DIR/TerminalPTY" \
     --build-path "$SCRIPT_DIR/.spm-build/TerminalPTY" \
     --product PTYSessionBootstrap
-BOOTSTRAP_BIN_PATH=$(swift build \
+BOOTSTRAP_BIN_PATH=$(swift_build \
     --package-path "$LIB_DIR/TerminalPTY" \
     --build-path "$SCRIPT_DIR/.spm-build/TerminalPTY" \
     --show-bin-path)

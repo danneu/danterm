@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 INSTALL_APP="$HOME/Applications/DanTerm Dev.app"
 
 # Build
-"$SCRIPT_DIR/dev-build.sh"
+"$SCRIPT_DIR/dev-build.sh" "$@"
 
 # Kill previous instance
 killall "DanTerm Dev" 2>/dev/null || true
