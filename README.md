@@ -214,6 +214,44 @@ somewhere on your machine and point the command at that file.
 DanTerm turns OSC 777 and OSC 9 messages into a macOS notification that, when
 clicked, will take you to the originating pane.
 
+### Live agent notification compatibility tests
+
+An opt-in macOS-oriented suite launches the installed, authenticated Claude and
+Codex CLIs in fresh PTYs and isolated temporary configuration:
+
+```sh
+just test-agent-notifications-live          # both CLIs
+just test-agent-notifications-live claude
+just test-agent-notifications-live codex
+```
+
+The suite uses network access and model quota and is intentionally outside CI
+and the normal `just test` gate. It requires the selected binaries on `PATH`, a
+working login (`~/.codex/auth.json` for Codex), and `jq` for Claude's production
+hook. Claude defaults to `haiku`; set `DANTERM_CLAUDE_MODEL` to override it.
+Codex uses its configured default model unless `DANTERM_CODEX_MODEL` is set.
+`DANTERM_AGENT_NOTIFICATION_TIMEOUT` changes the per-scenario timeout in
+seconds. Set `DANTERM_KEEP_AGENT_NOTIFICATION_ARTIFACTS=1` to retain successful
+captures, or `DANTERM_AGENT_NOTIFICATION_ARTIFACTS=/private/tmp` to choose the
+temporary-artifact parent. Failures always preserve sanitized hook payloads and
+raw PTY captures and print their location.
+
+Claude is tested through DanTerm's production notification hook, which returns
+OSC 777 via `terminalSequence`. Codex deliberately has no DanTerm notification
+hook: the suite configures its native TUI path for `agent-turn-complete`,
+`approval-requested`, and `plan-mode-prompt`, with OSC 9 and the condition set
+to `always`. Every scenario runs in a fresh process so completion and blocked
+input notifications cannot be confused with an earlier lifecycle event.
+
+The equivalent Codex configuration is:
+
+```toml
+[tui]
+notifications = ["agent-turn-complete", "approval-requested", "plan-mode-prompt"]
+notification_method = "osc9"
+notification_condition = "always"
+```
+
 ### Claude session recovery hook
 
 DanTerm can also show a per-pane Claude session indicator and persist a crash

@@ -52,10 +52,15 @@ test:
     ./scripts/tests/terminal-characterization-harness_test.sh
     ./scripts/tests/terminal-viability-harness_test.sh
     ./scripts/tests/test-terminal-pty_test.sh
+    ./scripts/tests/agent-notifications-live_test.py
 
 # Run UI tests (AppKit, requires display)
 test-ui:
     ./test-ui.sh
+
+# Run opt-in live Claude/Codex notification compatibility tests (authenticated, quota-using).
+test-agent-notifications-live agent="all":
+    ./scripts/agent-notifications-live.py {{agent}}
 
 # Run opt-in real-Ghostty pane-read and recovery characterization (requires GUI + Accessibility)
 test-terminal-characterization:
