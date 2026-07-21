@@ -458,7 +458,7 @@
         { "name": "UTF-8 combining chars", "disposition": "adopted", "rationale": "state-putglyph.json adopts the combined scalar sequence in one public cell." },
         { "name": "Combining across buffers", "disposition": "adopted", "rationale": "state-putglyph.json adopts combining attachment across authored feed boundaries." },
         { "name": "Spare combining chars get truncated", "disposition": "adapted", "rationale": "state-putglyph.json retains all ten marks because DanTerm is scalar-exact rather than truncating at five." },
-        { "name": "DECSCA protected", "disposition": "out-of-scope", "rationale": "DECSCA and selective erase protection are deferred beyond Milestone 2." }
+        { "name": "DECSCA protected", "disposition": "out-of-scope", "rationale": "DECSCA and selective erase are not in DanTerm's declared support matrix." }
       ]
     },
     {
@@ -1120,6 +1120,74 @@
           "disposition": "adapted",
           "rationale": "scrollback-pushline.json replaces callback timing with exact retained cells and soft-wrap identity at each scroll-off boundary."
         }
+      ]
+    },
+    {
+      "path": "t/18state_termprops.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        { "name": "Cursor visibility", "disposition": "out-of-scope", "rationale": "Terminal-property callback and mode-query policy remain assigned to Milestone 7." },
+        { "name": "Cursor blink", "disposition": "out-of-scope", "rationale": "Cursor blinking and its terminal-property callback remain assigned to Milestone 7." },
+        { "name": "Cursor shape", "disposition": "out-of-scope", "rationale": "The libvterm terminal-property callback contract remains assigned to Milestone 7." },
+        { "name": "Title", "disposition": "out-of-scope", "rationale": "Title protocol and terminal-property policy remain assigned to Milestone 7." },
+        { "name": "Title split write", "disposition": "out-of-scope", "rationale": "Title protocol and terminal-property policy remain assigned to Milestone 7." }
+      ]
+    },
+    {
+      "path": "t/28state_dbl_wh.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        { "name": "Single Width, Single Height", "disposition": "out-of-scope", "rationale": "This file belongs to the unpromised DEC double-width/double-height line family." },
+        { "name": "Double Width, Single Height", "disposition": "out-of-scope", "rationale": "DEC double-width lines are not in DanTerm's declared support matrix." },
+        { "name": "Double Height", "disposition": "out-of-scope", "rationale": "DEC double-height lines are not in DanTerm's declared support matrix." },
+        { "name": "Double Width scrolling", "disposition": "out-of-scope", "rationale": "DEC double-width line scrolling is not in DanTerm's declared support matrix." }
+      ]
+    },
+    {
+      "path": "t/29state_fallback.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        { "name": "Unrecognised control", "disposition": "superseded", "rationale": "Native parser recovery tests cover unsupported controls without adopting libvterm's fallback callback API." },
+        { "name": "Unrecognised CSI", "disposition": "superseded", "rationale": "Native unknown-CSI recovery tests prove bounded ignore and recovery through later valid input." },
+        { "name": "Unrecognised OSC", "disposition": "superseded", "rationale": "Native malformed and unknown OSC tests prove termination and recovery through public terminal state." },
+        { "name": "Unrecognised DCS", "disposition": "superseded", "rationale": "Native control-string recovery tests prove unknown DCS absorption without adopting callback topology." },
+        { "name": "Unrecognised APC", "disposition": "superseded", "rationale": "Native control-string recovery tests prove unknown APC absorption without adopting callback topology." },
+        { "name": "Unrecognised PM", "disposition": "superseded", "rationale": "Native control-string recovery tests prove unknown PM absorption without adopting callback topology." },
+        { "name": "Unrecognised SOS", "disposition": "superseded", "rationale": "Native control-string recovery tests prove unknown SOS absorption without adopting callback topology." }
+      ]
+    },
+    {
+      "path": "t/65screen_protect.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        { "name": "Selective erase", "disposition": "out-of-scope", "rationale": "DECSCA and selective erase are not in DanTerm's declared support matrix." },
+        { "name": "Non-selective erase", "disposition": "out-of-scope", "rationale": "This case belongs to the DECSCA/selective-erase fixture family, which is not in DanTerm's declared support matrix." }
+      ]
+    },
+    {
+      "path": "t/66screen_extent.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        { "name": "Bold extent", "disposition": "out-of-scope", "rationale": "Attribute extent is a libvterm query API; DanTerm covers cell-style behavior through public cell and render-plan seams." }
+      ]
+    },
+    {
+      "path": "t/67screen_dbl_wh.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        { "name": "Single Width, Single Height", "disposition": "out-of-scope", "rationale": "This file belongs to the unpromised DEC double-width/double-height line family." },
+        { "name": "Double Width, Single Height", "disposition": "out-of-scope", "rationale": "DEC double-width lines are not in DanTerm's declared support matrix." },
+        { "name": "Double Height", "disposition": "out-of-scope", "rationale": "DEC double-height lines are not in DanTerm's declared support matrix." },
+        { "name": "Late change", "disposition": "out-of-scope", "rationale": "Late DEC line-size changes are not in DanTerm's declared support matrix." },
+        { "name": "DWL doesn't spill over on scroll", "disposition": "out-of-scope", "rationale": "DEC double-width line scrolling is not in DanTerm's declared support matrix." }
+      ]
+    },
+    {
+      "path": "t/68screen_termprops.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        { "name": "Cursor visibility", "disposition": "out-of-scope", "rationale": "Screen terminal-property callback policy remains assigned to Milestone 7." },
+        { "name": "Title", "disposition": "out-of-scope", "rationale": "Title protocol and screen terminal-property policy remain assigned to Milestone 7." }
       ]
     },
     {

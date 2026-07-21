@@ -34,10 +34,10 @@ struct TerminalFixtureTests {
         }
     }
 
-    @Test("libvterm manifest classifies every case from the thirty-six selected source files")
+    @Test("libvterm manifest classifies every case from the forty-three selected source files")
     func libvtermManifestCoverage() throws {
         // Intent: pin the adoption ledger to every upstream case heading in
-        //   the thirty-six source files selected through the current engine slices.
+        //   the forty-three source files selected through the current engine slices.
         // Why it exists: fixtures alone make deferred, superseded, and
         //   deliberately incompatible cases disappear from review.
         // Scenario: the pinned libvterm corpus is upgraded or the neutral
@@ -410,6 +410,17 @@ struct TerminalFixtureTests {
             "Combining across buffers", "Spare combining chars get truncated",
             "DECSCA protected",
         ],
+        "t/18state_termprops.test": [
+            "Cursor visibility", "Cursor blink", "Cursor shape", "Title", "Title split write",
+        ],
+        "t/28state_dbl_wh.test": [
+            "Single Width, Single Height", "Double Width, Single Height",
+            "Double Height", "Double Width scrolling",
+        ],
+        "t/29state_fallback.test": [
+            "Unrecognised control", "Unrecognised CSI", "Unrecognised OSC",
+            "Unrecognised DCS", "Unrecognised APC", "Unrecognised PM", "Unrecognised SOS",
+        ],
         "t/11state_movecursor.test": [
             "Implicit", "Backspace", "Horizontal Tab", "Carriage Return", "Linefeed",
             "Backspace bounded by lefthand edge", "Backspace cancels phantom",
@@ -651,6 +662,13 @@ struct TerminalFixtureTests {
             "DECSCNM xors reverse for entire screen",
             "Set default colours",
         ],
+        "t/65screen_protect.test": ["Selective erase", "Non-selective erase"],
+        "t/66screen_extent.test": ["Bold extent"],
+        "t/67screen_dbl_wh.test": [
+            "Single Width, Single Height", "Double Width, Single Height",
+            "Double Height", "Late change", "DWL doesn't spill over on scroll",
+        ],
+        "t/68screen_termprops.test": ["Cursor visibility", "Title"],
         "t/69screen_pushline.test": [
             "Spillover text marks continuation on second line",
             "Continuation mark sent to sb_pushline",

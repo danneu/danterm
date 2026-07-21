@@ -246,7 +246,7 @@ The final roadmap state is:
 - [x] **Commit 5 -- `test(ui): cover multi-stage Chinese IME composition`**: add
   the marked-text/commit UI scenario and update the input/renderer judgment so
   blinking is its only remaining item.
-- [ ] **Commit 6 -- `test(fixtures): complete libvterm milestone 6 dispositions`**:
+- [x] **Commit 6 -- `test(fixtures): complete libvterm milestone 6 dispositions`**:
   add the five file dispositions, refresh DECSCA rationale, and extend manifest
   inventory validation.
 - [ ] **Commit 7 -- `test(fixtures): adopt milestone 6 Alacritty recordings`**:
