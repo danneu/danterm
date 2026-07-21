@@ -10,6 +10,7 @@ struct ResolvedCellStyle: Equatable, Sendable {
     let bold: Bool
     let italic: Bool
     let underline: TerminalUnderlineStyle
+    let underlineColor: RenderColor
     let hidden: Bool
     let strikethrough: Bool
 }
@@ -38,6 +39,13 @@ func resolveCellStyle(_ style: TerminalStyle, theme: RenderTheme) -> ResolvedCel
             blue: foreground.blue / 2
         )
     }
+    let underlineColor = style.underlineColor == .default
+        ? foreground
+        : resolveColor(
+            style.underlineColor,
+            defaultColor: foreground,
+            theme: theme
+        )
 
     return ResolvedCellStyle(
         foreground: foreground,
@@ -45,6 +53,7 @@ func resolveCellStyle(_ style: TerminalStyle, theme: RenderTheme) -> ResolvedCel
         bold: style.bold,
         italic: style.italic,
         underline: style.underline,
+        underlineColor: underlineColor,
         hidden: style.hidden,
         strikethrough: style.strikethrough
     )

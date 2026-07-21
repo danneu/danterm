@@ -3124,8 +3124,12 @@ public struct Terminal: Equatable, Sendable {
                     in: sequence.parameters,
                     selectorIndex: index + 1
                 )
-                if parameter != 58, let color = result.color {
-                    set(color: color, foreground: parameter == 38)
+                if let color = result.color {
+                    if parameter == 58 {
+                        currentStyle.underlineColor = color
+                    } else {
+                        set(color: color, foreground: parameter == 38)
+                    }
                 }
                 index = result.nextIndex
             } else {
@@ -3146,12 +3150,20 @@ public struct Terminal: Equatable, Sendable {
                 currentStyle.underline = .double
             case 3:
                 currentStyle.underline = .curly
+            case 4:
+                currentStyle.underline = .dotted
+            case 5:
+                currentStyle.underline = .dashed
             default:
                 currentStyle.underline = .single
             }
         case 38, 48, 58:
-            if leading != 58, let color = colonColor(in: group) {
-                set(color: color, foreground: leading == 38)
+            if let color = colonColor(in: group) {
+                if leading == 58 {
+                    currentStyle.underlineColor = color
+                } else {
+                    set(color: color, foreground: leading == 38)
+                }
             }
         default:
             applySimpleSGR(leading)
@@ -3199,6 +3211,8 @@ public struct Terminal: Equatable, Sendable {
             currentStyle.background = .indexed(UInt8(parameter - 40))
         case 49:
             currentStyle.background = .default
+        case 59:
+            currentStyle.underlineColor = .default
         case 90...97:
             currentStyle.foreground = .indexed(UInt8(parameter - 90 + 8))
         case 100...107:

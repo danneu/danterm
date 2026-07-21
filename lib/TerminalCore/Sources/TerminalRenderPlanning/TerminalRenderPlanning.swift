@@ -263,6 +263,8 @@ public enum RenderDecorationKind: Equatable, Sendable {
     case underlineSingle
     case underlineDouble
     case underlineCurly
+    case underlineDotted
+    case underlineDashed
     case strikethrough
 }
 
@@ -281,21 +283,26 @@ public struct RenderDecorationRun: Equatable, Sendable {
     /// Ordered decoration kinds selected from semantic terminal attributes.
     public let kinds: [RenderDecorationKind]
 
-    /// Concrete post-reverse and post-dim decoration color.
+    /// Resolved underline color, or the effective foreground when no underline exists.
     public let color: RenderColor
+
+    /// Foreground-derived color used only when strikethrough shares the run.
+    public let strikethroughColor: RenderColor
 
     init(
         row: Int,
         startColumn: Int,
         columnCount: Int,
         kinds: [RenderDecorationKind],
-        color: RenderColor
+        color: RenderColor,
+        strikethroughColor: RenderColor? = nil
     ) {
         self.row = row
         self.startColumn = startColumn
         self.columnCount = columnCount
         self.kinds = kinds
         self.color = color
+        self.strikethroughColor = strikethroughColor ?? color
     }
 }
 

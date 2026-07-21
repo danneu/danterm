@@ -20,7 +20,10 @@ struct ExecutorContractTests {
         let previous = planFrame(for: terminal, presentation: presentation)
 
         _ = terminal.drainDamage()
-        terminal.feed(Array("\u{1B}[2;1H\u{1B}[41;37;4mNEW".utf8))
+        terminal.feed(Array(
+            "\u{1B}[2;1H\u{1B}[41;37;4:4;58:5:2mNEW"
+                .appending("\r\n\u{1B}[4:5;58:2:1:2:3mEND").utf8
+        ))
         let damage = terminal.drainDamage()
         let current = planFrame(for: terminal, presentation: presentation)
 

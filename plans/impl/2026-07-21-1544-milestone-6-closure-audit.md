@@ -226,7 +226,7 @@ The final roadmap state is:
 - [x] **Commit 1 -- `docs(plan): audit milestone 6 closure gates`**: add the
   checked Slice 11 entry, check the already-proven Unicode gate, cite named
   existing evidence, and annotate every remaining gate with its exact gaps.
-- [ ] **Commit 2 -- `feat(terminal): render semantic underline styles and colors`**:
+- [x] **Commit 2 -- `feat(terminal): render semantic underline styles and colors`**:
   add dotted/dashed shapes and SGR 58/59 color through semantic state, saved
   state, cells, render planning, pixels, and behavioral tests; then check the
   terminal-core gate.
@@ -252,3 +252,10 @@ The final roadmap state is:
   the conditional-source and differential-replay adjudications, check the
   external-dispositions gate, add the completed roadmap slice entries, and
   leave Milestone 6 explicitly open only for renderer cursor blinking.
+
+## Implementation notes
+
+- Commit 2 keeps underline and strikethrough in one canonical decoration run
+  while carrying their resolved colors independently. This preserves the
+  non-overlapping plan invariant when an explicit underline color coexists with
+  a foreground-colored strikethrough.

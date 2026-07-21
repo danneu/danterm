@@ -46,6 +46,8 @@ struct TerminalStyleTests {
             ("\u{1B}[4:1m", .single),
             ("\u{1B}[4:2m", .double),
             ("\u{1B}[4:3m", .curly),
+            ("\u{1B}[4:4m", .dotted),
+            ("\u{1B}[4:5m", .dashed),
             ("\u{1B}[4:99m", .single),
             ("\u{1B}[21m", .double),
         ] {
@@ -100,18 +102,51 @@ struct TerminalStyleTests {
         #expect(terminal.currentStyle.background == .indexed(255))
     }
 
-    @Test("SGR underline colors are consumed without changing stored style")
-    func underlineColorsAreDiscarded() throws {
+    @Test("SGR underline colors stay independent through shape resets and full reset")
+    func underlineColors() throws {
         var terminal = try #require(Terminal(columns: 2, rows: 1))
-        terminal.feed(Array("\u{1B}[31m".utf8))
-        let red = terminal.currentStyle
-
-        terminal.feed(Array("\u{1B}[58;2;1;2;3;1m".utf8))
-        #expect(terminal.currentStyle.foreground == red.foreground)
+        terminal.feed(Array("\u{1B}[31;4;58;2;1;2;3;1m".utf8))
+        #expect(terminal.currentStyle.underlineColor == .rgb(red: 1, green: 2, blue: 3))
         #expect(terminal.currentStyle.bold)
 
-        terminal.feed(Array("\u{1B}[22;58:5:100;59m".utf8))
-        #expect(terminal.currentStyle == red)
+        terminal.feed(Array("\u{1B}[24;58:5:100m".utf8))
+        #expect(terminal.currentStyle.underline == .none)
+        #expect(terminal.currentStyle.underlineColor == .indexed(100))
+
+        terminal.feed(Array("\u{1B}[4:5;59m".utf8))
+        #expect(terminal.currentStyle.underline == .dashed)
+        #expect(terminal.currentStyle.underlineColor == .default)
+
+        terminal.feed(Array("\u{1B}[58:2::4:5:6m".utf8))
+        #expect(terminal.currentStyle.underlineColor == .rgb(red: 4, green: 5, blue: 6))
+        terminal.feed(Array("\u{1B}[0m".utf8))
+        #expect(terminal.currentStyle == TerminalStyle())
+    }
+
+    @Test("Underline color survives cells saved cursor reflow and malformed recovery")
+    func underlineColorRetention() throws {
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("\u{1B}[4:4;58:5:42mA\u{1B}7\u{1B}[59mB".utf8))
+
+        let styled = TerminalStyle(
+            underline: .dotted,
+            underlineColor: .indexed(42)
+        )
+        #expect(terminal.cell(row: 0, column: 0)?.style == styled)
+        #expect(terminal.cell(row: 0, column: 1)?.style.underlineColor == .default)
+        terminal.feed(Array("\u{1B}8C".utf8))
+        #expect(terminal.cell(row: 0, column: 1)?.style == styled)
+
+        terminal.resize(columns: 2, rows: 2)
+        #expect(terminal.geometry.rows.indices.contains { row in
+            terminal.geometry.rows[row].cells.indices.contains { column in
+                terminal.cell(row: row, column: column)?.style == styled
+            }
+        })
+
+        terminal.feed(Array("\u{1B}[58:2:1:2;4:5m".utf8))
+        #expect(terminal.currentStyle.underline == .dashed)
+        #expect(terminal.currentStyle.underlineColor == .indexed(42))
     }
 
     @Test("malformed and unknown SGR groups recover for later live parameters")

@@ -110,7 +110,8 @@ struct RenderFramePlanningTests {
         feed(
             "\u{1B}[38;2;100;80;60;48;2;20;40;60;7;2;4mA"
                 + "\u{1B}[0;21mB\u{1B}[24m\u{1B}[4:3mC"
-                + "\u{1B}[24;9mD\u{1B}[4mE",
+                + "\u{1B}[24;9mD\u{1B}[4mE\u{1B}[4:4;58:5:1mF"
+                + "\u{1B}[4:5;58:2:1:2:3mG",
             to: &terminal
         )
 
@@ -124,17 +125,23 @@ struct RenderFramePlanningTests {
         )
 
         try #require(plan.textRuns.count == 2)
-        #expect(plan.textRuns[1].cells.count == 4)
+        #expect(plan.textRuns[1].cells.count == 6)
         #expect(plan.decorationRuns.map(\.kinds) == [
             [.underlineSingle],
             [.underlineDouble],
             [.underlineCurly],
             [.strikethrough],
             [.underlineSingle, .strikethrough],
+            [.underlineDotted, .strikethrough],
+            [.underlineDashed, .strikethrough],
         ])
-        #expect(plan.decorationRuns.map(\.startColumn) == [0, 1, 2, 3, 4])
+        #expect(plan.decorationRuns.map(\.startColumn) == [0, 1, 2, 3, 4, 5, 6])
         let firstDecoration = try #require(plan.decorationRuns.first)
         #expect(firstDecoration.color == RenderColor(red: 10, green: 20, blue: 30))
+        #expect(plan.decorationRuns[5].color == RenderTheme.dark.ansiColors[1])
+        #expect(plan.decorationRuns[6].color == RenderColor(red: 1, green: 2, blue: 3))
+        #expect(plan.decorationRuns[5].strikethroughColor == RenderTheme.dark.defaultForeground)
+        #expect(plan.decorationRuns[6].strikethroughColor == RenderTheme.dark.defaultForeground)
         assertCanonical(plan)
     }
 

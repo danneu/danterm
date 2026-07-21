@@ -13,6 +13,8 @@ public enum TerminalUnderlineStyle: Equatable, Sendable {
     case single
     case double
     case curly
+    case dotted
+    case dashed
 }
 
 /// Captures semantic SGR presentation state without resolving renderer policy.
@@ -32,8 +34,11 @@ public struct TerminalStyle: Equatable, Sendable {
     /// Italic records presentation intent without selecting a font.
     public internal(set) var italic: Bool
 
-    /// Underline shape is semantic; underline color is outside the current contract.
+    /// Underline shape remains semantic until render planning.
     public internal(set) var underline: TerminalUnderlineStyle
+
+    /// Underline color remains independent from foreground and renderer palette policy.
+    public internal(set) var underlineColor: TerminalColor
 
     /// Reverse is retained as an attribute rather than eagerly swapping colors.
     public internal(set) var reverse: Bool
@@ -52,6 +57,7 @@ public struct TerminalStyle: Equatable, Sendable {
         dim: Bool = false,
         italic: Bool = false,
         underline: TerminalUnderlineStyle = .none,
+        underlineColor: TerminalColor = .default,
         reverse: Bool = false,
         hidden: Bool = false,
         strikethrough: Bool = false
@@ -62,6 +68,7 @@ public struct TerminalStyle: Equatable, Sendable {
         self.dim = dim
         self.italic = italic
         self.underline = underline
+        self.underlineColor = underlineColor
         self.reverse = reverse
         self.hidden = hidden
         self.strikethrough = strikethrough

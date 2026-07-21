@@ -402,7 +402,12 @@ private extension CGContext {
                     )
                 case .underlineCurly:
                     strokeCurlyUnderline(in: runRect, metrics: metrics)
+                case .underlineDotted:
+                    fillPatternedUnderline(in: runRect, metrics: metrics, dashPixels: 1)
+                case .underlineDashed:
+                    fillPatternedUnderline(in: runRect, metrics: metrics, dashPixels: 3)
                 case .strikethrough:
+                    setFillColor(run.strikethroughColor.cgColor(in: colorSpace))
                     fillDecorationBar(
                         in: runRect,
                         top: CGFloat(run.row) * metrics.cellSize.height
@@ -417,6 +422,35 @@ private extension CGContext {
 
     func fillDecorationBar(in runRect: CGRect, top: CGFloat, thickness: CGFloat) {
         fill(CGRect(x: runRect.minX, y: top, width: runRect.width, height: thickness))
+    }
+
+    func fillPatternedUnderline(
+        in runRect: CGRect,
+        metrics: TerminalRenderMetrics,
+        dashPixels: Int
+    ) {
+        let pixel = 1 / metrics.displayScale
+        let dashWidth = CGFloat(dashPixels) * pixel
+        let period = CGFloat(dashPixels + 2) * pixel
+        let firstIndex = Int((runRect.minX / period).rounded(.down))
+        let lastIndex = Int((runRect.maxX / period).rounded(.up))
+        let top = CGFloat(runRect.minY) + metrics.underlineOffset
+        for index in firstIndex...lastIndex {
+            let start = CGFloat(index) * period
+            let clippedStart = max(start, runRect.minX)
+            let clippedEnd = min(start + dashWidth, runRect.maxX)
+            guard clippedStart < clippedEnd else { continue }
+            fillDecorationBar(
+                in: CGRect(
+                    x: clippedStart,
+                    y: runRect.minY,
+                    width: clippedEnd - clippedStart,
+                    height: runRect.height
+                ),
+                top: top,
+                thickness: metrics.underlineThickness
+            )
+        }
     }
 
     func strokeCurlyUnderline(in runRect: CGRect, metrics: TerminalRenderMetrics) {

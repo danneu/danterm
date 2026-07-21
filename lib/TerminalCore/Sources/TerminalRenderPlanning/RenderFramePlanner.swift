@@ -67,6 +67,7 @@ private struct DecorationCandidate {
     let column: Int
     let kinds: [RenderDecorationKind]
     let color: RenderColor
+    let strikethroughColor: RenderColor
 }
 
 /// Owns only one call's transient traversal state, preserving a stateless public
@@ -171,6 +172,7 @@ private struct FramePlanner {
                         bold: style.bold,
                         italic: style.italic,
                         underline: .single,
+                        underlineColor: style.foreground,
                         hidden: style.hidden,
                         strikethrough: style.strikethrough
                     )
@@ -183,6 +185,7 @@ private struct FramePlanner {
                         bold: style.bold,
                         italic: style.italic,
                         underline: style.underline,
+                        underlineColor: presentation.theme.cursorText,
                         hidden: style.hidden,
                         strikethrough: style.strikethrough
                     )
@@ -343,7 +346,10 @@ private struct FramePlanner {
                 return DecorationCandidate(
                     column: column,
                     kinds: kinds,
-                    color: cell.style.foreground
+                    color: cell.style.underline == .none
+                        ? cell.style.foreground
+                        : cell.style.underlineColor,
+                    strikethroughColor: cell.style.foreground
                 )
             }
 
@@ -352,14 +358,16 @@ private struct FramePlanner {
                 if let run = current,
                    candidate.column == run.startColumn + run.columnCount,
                    candidate.kinds == run.kinds,
-                   candidate.color == run.color
+                   candidate.color == run.color,
+                   candidate.strikethroughColor == run.strikethroughColor
                 {
                     current = RenderDecorationRun(
                         row: row,
                         startColumn: run.startColumn,
                         columnCount: run.columnCount + 1,
                         kinds: run.kinds,
-                        color: run.color
+                        color: run.color,
+                        strikethroughColor: run.strikethroughColor
                     )
                 } else {
                     if let current { result.append(current) }
@@ -368,7 +376,8 @@ private struct FramePlanner {
                         startColumn: candidate.column,
                         columnCount: 1,
                         kinds: candidate.kinds,
-                        color: candidate.color
+                        color: candidate.color,
+                        strikethroughColor: candidate.strikethroughColor
                     )
                 }
             }
@@ -388,6 +397,10 @@ private struct FramePlanner {
             result.append(.underlineDouble)
         case .curly:
             result.append(.underlineCurly)
+        case .dotted:
+            result.append(.underlineDotted)
+        case .dashed:
+            result.append(.underlineDashed)
         }
         if style.strikethrough {
             result.append(.strikethrough)

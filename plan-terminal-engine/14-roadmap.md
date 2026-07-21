@@ -226,14 +226,18 @@ mean.
     block, underline, and bar shapes through semantic snapshots, render plans,
     damage-aware execution, and pixel containment proofs. See the
     [implementation plan](../plans/impl/2026-07-21-1433-milestone-6-cursor-behavior.md).
-  - [ ] [Terminal core](04-terminal-core.md) completes the accepted baseline control,
+  - [x] **Slice 12: Semantic underline styles and colors.** Adds dotted and
+    dashed shapes plus SGR 58/59 color through terminal state, saved state,
+    cells, reflow, render planning, and scale-aware pixel execution. See the
+    [Milestone 6 closure plan](../plans/impl/2026-07-21-1544-milestone-6-closure-audit.md).
+  - [x] [Terminal core](04-terminal-core.md) completes the accepted baseline control,
     screen, mode, style, query, and recovery behavior.
     Closure-audit judgment: controls, primary and alternate screens, modes,
     queries, parser recovery, resets, synchronized output, and cursor
     presentation state are covered by the terminal, CSI, mode, query,
-    presentation, reset, saved-cursor, and cursor-rendering suites. The only
-    remaining work is dotted and dashed underline shapes plus semantic SGR
-    58/59 underline color.
+    presentation, reset, saved-cursor, and cursor-rendering suites. Slice 12
+    closes the remaining style work with semantic and rendered proofs for every
+    underline shape and SGR 58/59 color.
   - [x] [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md) completes
     selection/search/viewport anchors, primary- and alternate-screen resize
     behavior, and the fixed 10 MiB scrollback contract.

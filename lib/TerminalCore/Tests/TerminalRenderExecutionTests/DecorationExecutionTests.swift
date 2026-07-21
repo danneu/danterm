@@ -6,6 +6,28 @@ import TerminalRenderExecution
 import TerminalRenderPlanning
 
 struct DecorationExecutionTests {
+    @Test("Dotted and dashed underlines are distinct and contained", arguments: [1.0, 1.5, 2.0])
+    func patternedUnderlineGeometry(scale: CGFloat) throws {
+        let metrics = try #require(TerminalRenderMetrics(displayScale: scale))
+        let dotted = try renderBitmap(
+            plan: makePlan(input: "\u{1B}[31;4:4m   ", columns: 4, rows: 2),
+            metrics: metrics
+        )
+        let dashed = try renderBitmap(
+            plan: makePlan(input: "\u{1B}[31;4:5m   ", columns: 4, rows: 2),
+            metrics: metrics
+        )
+        let span = cellRect(row: 0, column: 0, columnCount: 3, metrics: metrics)
+        let dottedMask = inkMask(in: span, bitmap: dotted)
+        let dashedMask = inkMask(in: span, bitmap: dashed)
+
+        #expect(dottedMask != dashedMask)
+        #expect(dotted.inkCount(in: span) > 0)
+        #expect(dashed.inkCount(in: span) > dotted.inkCount(in: span))
+        #expect(dotted.inkCount(in: cellRect(row: 1, column: 0, columnCount: 3, metrics: metrics)) == 0)
+        #expect(dashed.inkCount(in: cellRect(row: 1, column: 0, columnCount: 3, metrics: metrics)) == 0)
+    }
+
     @Test(
         "Straight decorations occupy their pixel-snapped bands",
         arguments: [

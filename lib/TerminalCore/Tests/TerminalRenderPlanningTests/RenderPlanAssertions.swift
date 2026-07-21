@@ -102,7 +102,8 @@ func assertCanonical(
                     || run.startColumn != previousDecoration.startColumn
                         + previousDecoration.columnCount
                     || run.kinds != previousDecoration.kinds
-                    || run.color != previousDecoration.color,
+                    || run.color != previousDecoration.color
+                    || run.strikethroughColor != previousDecoration.strikethroughColor,
                 sourceLocation: sourceLocation
             )
         }
