@@ -601,10 +601,7 @@ struct TerminalPTYHostTests {
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let writeBaseline = await host.inputWrites().count
 
-        host.sendWheel(.init(
-            rowDelta: -3,
-            alternateScreenStepBytes: [0x1B, 0x5B, 0x41]
-        ))
+        host.sendWheel(.init(rowDelta: -3))
         let snapshot = host.fencedSnapshot()
 
         #expect(snapshot.scrollProjection.isFollowing == false)
@@ -623,13 +620,13 @@ struct TerminalPTYHostTests {
         // Why it exists: wheel routing outside the owner can swallow input during a 1049 race.
         // Scenario: the user wheels upward three rows while a full-screen application is active.
         let host = try makeHost()
-        let command = "printf '\\033[?1049h'; exec \(try probeExecutable()) hold \"$0\""
+        let command = "printf '\\033[?1h\\033[?1049h'; exec \(try probeExecutable()) hold \"$0\""
         await host.start(makeLaunchInput(command: command))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let writeBaseline = await host.inputWrites().count
-        let up = [UInt8]([0x1B, 0x5B, 0x41])
+        let up = [UInt8]([0x1B, 0x4F, 0x41])
 
-        host.sendWheel(.init(rowDelta: -3, alternateScreenStepBytes: up))
+        host.sendWheel(.init(rowDelta: -3))
         let snapshot = host.fencedSnapshot()
         let writes = await host.inputWrites()
 
@@ -637,6 +634,71 @@ struct TerminalPTYHostTests {
         #expect(snapshot.scrollProjection.isFollowing)
         #expect(Array(writes.dropFirst(writeBaseline)) == [up + up + up])
 
+        await host.close()
+    }
+
+    @Test("owner encodes key paste and focus from modes applied by earlier output", .timeLimit(.minutes(1)))
+    func semanticInputUsesAuthoritativeModes() async throws {
+        // Intent: read child-controlled modes, encode semantic input, and write it in one owner turn.
+        // Why it exists: a controller-side mode mirror can lag immediately after a child mode change.
+        // Scenario: a TUI enables DECCKM, bracketed paste, and focus reporting before accepting input.
+        let host = try makeHost()
+        let command = "stty -echo; printf '\\033[?1h\\033[?2004h\\033[?1004h'; exec \(try probeExecutable()) hold \"$0\""
+        await host.start(makeLaunchInput(command: command))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let baseline = await host.inputWrites().count
+        let snapshotBeforeFocus = await host.snapshot()
+
+        host.sendKey(.up, modifiers: [])
+        host.sendPaste("one\ntwo")
+        host.sendFocus(true)
+        _ = host.fencedSnapshot()
+
+        #expect(Array((await host.inputWrites()).dropFirst(baseline)) == [
+            Array("\u{1B}OA".utf8),
+            Array("\u{1B}[200~one\ntwo\u{1B}[201~".utf8),
+            Array("\u{1B}[I".utf8),
+        ])
+        #expect(await host.snapshot() == snapshotBeforeFocus)
+        await host.close()
+    }
+
+    @Test("empty safe paste and focus preserve a browsing viewport", .timeLimit(.minutes(1)))
+    func nonScrollingSemanticInputPreservesViewport() async throws {
+        let host = try makeHost()
+        await host.start(makeLaunchInput(command: try scrollbackCommand(disableEcho: true)))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        host.scroll(byRows: -3)
+        let browsing = host.fencedSnapshot()
+        let baseline = await host.inputWrites().count
+
+        host.sendPaste("\u{1B}\u{7F}\u{0080}")
+        host.sendFocus(true)
+        _ = host.fencedSnapshot()
+
+        #expect(await host.inputWrites().count == baseline)
+        #expect((await host.snapshot()).scrollProjection == browsing.scrollProjection)
+
+        host.sendPaste("safe")
+        #expect(host.fencedSnapshot().scrollProjection.isFollowing)
+        await host.close()
+    }
+
+    @Test("semantic input capture records normalized events in owner order", .timeLimit(.minutes(1)))
+    func semanticInputCaptureOrder() async throws {
+        let host = try makeHost()
+        await host.start(makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\""))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+
+        host.sendKey(.f5, modifiers: [.shift])
+        host.sendPaste("paste")
+        host.sendFocus(false)
+        _ = host.fencedSnapshot()
+
+        let events = (await host.transitions()).map(\.recordingEvent)
+        #expect(events.contains(.input(key: .f5, modifiers: [.shift])))
+        #expect(events.contains(.paste("paste")))
+        #expect(events.contains(.focus(false)))
         await host.close()
     }
 
@@ -651,13 +713,12 @@ struct TerminalPTYHostTests {
         while host.fencedSnapshot().fullHistoryText.contains("line-39") == false {
             await Task.yield()
         }
-        let up = [UInt8]([0x1B, 0x5B, 0x41])
         let down = [UInt8]([0x1B, 0x5B, 0x42])
 
         let enter = Array("printf '\\033[?1049h'\n".utf8)
         let enterWriteBaseline = await host.inputWrites().count
         host.send(enter)
-        host.sendWheel(.init(rowDelta: -1, alternateScreenStepBytes: up))
+        host.sendWheel(.init(rowDelta: -1))
         _ = host.fencedSnapshot()
         #expect(Array((await host.inputWrites()).dropFirst(enterWriteBaseline)) == [enter])
         #expect((await host.transitions()).contains(.scrollByRows(-1)))
@@ -668,7 +729,7 @@ struct TerminalPTYHostTests {
         let exit = Array("printf '\\033[?1049l'\n".utf8)
         let exitWriteBaseline = await host.inputWrites().count
         host.send(exit)
-        host.sendWheel(.init(rowDelta: 2, alternateScreenStepBytes: down))
+        host.sendWheel(.init(rowDelta: 2))
         _ = host.fencedSnapshot()
         #expect(Array((await host.inputWrites()).dropFirst(exitWriteBaseline)) == [
             exit,
@@ -736,6 +797,9 @@ private extension TerminalPTYAppliedTransition {
     var recordingEvent: NeutralTerminalRecordingEvent {
         switch self {
         case .feed(let bytes): .feed(bytes)
+        case .input(let key, let modifiers): .input(key: key, modifiers: modifiers)
+        case .paste(let text): .paste(text)
+        case .focus(let focused): .focus(focused)
         case .resize(let dimensions):
             .resize(columns: dimensions.columns, rows: dimensions.rows)
         case .scrollByRows(let rows): .viewport(.byRows(rows))

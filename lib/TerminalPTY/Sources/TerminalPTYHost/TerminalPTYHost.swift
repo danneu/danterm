@@ -10,26 +10,25 @@ public enum TerminalPTYHostError: Error, Equatable, Sendable {
     case invalidDimensions
 }
 
-/// Test-support view of the exact output/resize order applied to TerminalCore.
+/// Test-support view of owner-ordered terminal, input, and viewport transitions.
 package enum TerminalPTYAppliedTransition: Equatable, Sendable {
     case feed([UInt8])
+    case input(key: TerminalInputKey, modifiers: TerminalKeyModifiers)
+    case paste(String)
+    case focus(Bool)
     case resize(TerminalDimensions)
     case scrollByRows(Int)
     case scrollToTopRow(Int)
     case scrollToBottom
 }
 
-/// Carries row direction plus session-encoded fallback bytes to the authoritative screen owner.
+/// Carries semantic wheel rows so the owner can select screen routing and cursor mode atomically.
 public struct TerminalWheelIntent: Equatable, Sendable {
     /// Signed local navigation, where negative rows move toward retained history.
     public let rowDelta: Int
-    /// One encoded Up or Down key step, selected by the session for alternate-screen fallback.
-    public let alternateScreenStepBytes: [UInt8]
-
-    /// Keeps input encoding outside the host while leaving screen routing exclusively inside it.
-    public init(rowDelta: Int, alternateScreenStepBytes: [UInt8]) {
+    /// Leaves both screen selection and mode-aware arrow encoding to the serialized owner.
+    public init(rowDelta: Int) {
         self.rowDelta = rowDelta
-        self.alternateScreenStepBytes = alternateScreenStepBytes
     }
 }
 
@@ -186,6 +185,30 @@ public actor TerminalPTYHost {
                 owner.applyViewportNavigation(.scrollToBottom, publishUpdate: false)
                 owner.process(.sendInput(bytes))
             }
+        }
+    }
+
+    /// Enqueues a normalized key so mode read, encoding, viewport snap, and write stay atomic.
+    nonisolated public func sendKey(
+        _ key: TerminalInputKey,
+        modifiers: TerminalKeyModifiers
+    ) {
+        queue.async { [weak self] in
+            self?.assumeIsolated { owner in owner.applyKey(key, modifiers: modifiers) }
+        }
+    }
+
+    /// Enqueues unsanitized text for owner-side safe-paste policy and atomic marker generation.
+    nonisolated public func sendPaste(_ text: String) {
+        queue.async { [weak self] in
+            self?.assumeIsolated { owner in owner.applyPaste(text) }
+        }
+    }
+
+    /// Enqueues semantic pane focus for authoritative mode gating without viewport movement.
+    nonisolated public func sendFocus(_ focused: Bool) {
+        queue.async { [weak self] in
+            self?.assumeIsolated { owner in owner.applyFocus(focused) }
         }
     }
 
@@ -363,22 +386,49 @@ public actor TerminalPTYHost {
         guard teardownFinished == false else { return }
         if terminal.isAlternateScreenActive {
             let count = intent.rowDelta.magnitude
-            guard intent.alternateScreenStepBytes.isEmpty == false,
+            let key: TerminalInputKey = intent.rowDelta < 0 ? .up : .down
+            let step = encodeTerminalKey(key, modifiers: [], modes: terminal.inputModes)
+            guard step.isEmpty == false,
                   count <= UInt(Int.max),
-                  intent.alternateScreenStepBytes.count
-                    .multipliedReportingOverflow(by: Int(count)).overflow == false
+                  step.count.multipliedReportingOverflow(by: Int(count)).overflow == false
             else {
                 return
             }
             var bytes: [UInt8] = []
-            bytes.reserveCapacity(intent.alternateScreenStepBytes.count * Int(count))
+            bytes.reserveCapacity(step.count * Int(count))
             for _ in 0..<count {
-                bytes.append(contentsOf: intent.alternateScreenStepBytes)
+                bytes.append(contentsOf: step)
             }
             process(.sendInput(bytes))
         } else {
             applyViewportNavigation(.scrollByRows(intent.rowDelta), publishUpdate: true)
         }
+    }
+
+    private func applyKey(_ key: TerminalInputKey, modifiers: TerminalKeyModifiers) {
+        guard teardownFinished == false else { return }
+        if captureTransitions { appliedTransitions.append(.input(key: key, modifiers: modifiers)) }
+        let bytes = encodeTerminalKey(key, modifiers: modifiers, modes: terminal.inputModes)
+        guard bytes.isEmpty == false else { return }
+        applyViewportNavigation(.scrollToBottom, publishUpdate: false)
+        process(.sendInput(bytes))
+    }
+
+    private func applyPaste(_ text: String) {
+        guard teardownFinished == false else { return }
+        if captureTransitions { appliedTransitions.append(.paste(text)) }
+        let bytes = encodeTerminalPaste(text, modes: terminal.inputModes)
+        guard bytes.isEmpty == false else { return }
+        applyViewportNavigation(.scrollToBottom, publishUpdate: false)
+        process(.sendInput(bytes))
+    }
+
+    private func applyFocus(_ focused: Bool) {
+        guard teardownFinished == false else { return }
+        if captureTransitions { appliedTransitions.append(.focus(focused)) }
+        let bytes = encodeTerminalFocus(focused: focused, modes: terminal.inputModes)
+        guard bytes.isEmpty == false else { return }
+        process(.sendInput(bytes))
     }
 
     private func applyViewportNavigation(
@@ -391,7 +441,7 @@ public actor TerminalPTYHost {
         case .scrollByRows(let rows): terminal.scroll(byRows: rows)
         case .scrollToTopRow(let row): terminal.scroll(toTopRow: row)
         case .scrollToBottom: terminal.scrollToBottom()
-        case .feed, .resize: return
+        case .feed, .input, .paste, .focus, .resize: return
         }
         if terminal != previousTerminal {
             markUpdatePending()

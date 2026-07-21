@@ -1,45 +1,10 @@
-// Pure fixtures for key encoding, grid sizing, and app-request launch assembly.
+// Pure fixtures for grid sizing and app-request launch assembly.
 import PaneLifecycle
 import Testing
 @testable import TerminalPaneSession
 
 /// Pins the pure policies the AppKit adapter will call without platform state.
 struct TerminalPaneSessionPolicyTests {
-    @Test("fixed special keys encode to their pinned byte sequences", arguments: [
-        (TerminalInputKey.returnKey, [0x0D]),
-        (.tab, [0x09]),
-        (.backspace, [0x7F]),
-        (.escape, [0x1B]),
-        (.up, [0x1B, 0x5B, 0x41]),
-        (.down, [0x1B, 0x5B, 0x42]),
-        (.right, [0x1B, 0x5B, 0x43]),
-        (.left, [0x1B, 0x5B, 0x44]),
-        (.home, [0x1B, 0x5B, 0x48]),
-        (.end, [0x1B, 0x5B, 0x46]),
-        (.pageUp, [0x1B, 0x5B, 0x35, 0x7E]),
-        (.pageDown, [0x1B, 0x5B, 0x36, 0x7E]),
-        (.deleteForward, [0x1B, 0x5B, 0x33, 0x7E]),
-    ] as [(TerminalInputKey, [UInt8])])
-    func specialKeyEncoding(testCase: (TerminalInputKey, [UInt8])) {
-        #expect(encodeTerminalKey(testCase.0, modifiers: []) == testCase.1)
-    }
-
-    @Test("Ctrl letters cover the full ASCII control range", arguments: Array(0..<26))
-    func controlLetterEncoding(offset: Int) throws {
-        let lowercase = try #require(Unicode.Scalar(97 + offset))
-        let uppercase = try #require(Unicode.Scalar(65 + offset))
-
-        #expect(encodeTerminalKey(.letter(lowercase), modifiers: .control) == [UInt8(offset + 1)])
-        #expect(encodeTerminalKey(.letter(uppercase), modifiers: .control) == [UInt8(offset + 1)])
-    }
-
-    @Test("letters without Control and non-letters remain unmapped")
-    func unmappedKeyEncoding() {
-        #expect(encodeTerminalKey(.letter("a"), modifiers: []) == nil)
-        #expect(encodeTerminalKey(.letter("1"), modifiers: .control) == nil)
-        #expect(encodeTerminalKey(.returnKey, modifiers: .option) == [0x0D])
-    }
-
     @Test("precise wheel deltas accumulate row fractions in both directions")
     func preciseWheelAccumulation() {
         var accumulator = TerminalWheelAccumulator()

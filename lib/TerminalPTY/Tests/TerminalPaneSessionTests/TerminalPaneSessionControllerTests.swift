@@ -610,8 +610,8 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
-    @Test("session wheel intent carries fixed-table arrows for alternate fallback", .timeLimit(.minutes(1)))
-    func sessionWheelCarriesEncodedArrows() async throws {
+    @Test("session wheel forwards semantic rows for alternate fallback", .timeLimit(.minutes(1)))
+    func sessionWheelForwardsSemanticRows() async throws {
         let host = try makeHost()
         let command = "printf '\\033[?1049h'; exec \(try probeExecutable()) hold \"$0\""
         let controller = TerminalPaneSessionController(
@@ -624,18 +624,18 @@ struct TerminalPaneSessionControllerTests {
         controller.sendWheel(rows: -2)
         _ = host.fencedSnapshot()
 
-        let up = try #require(encodeTerminalKey(.up, modifiers: []))
+        let up = [UInt8]([0x1B, 0x5B, 0x41])
         #expect(Array((await host.inputWrites()).dropFirst(baseline)) == [up + up])
 
         controller.tearDown()
         await host.close()
     }
 
-    @Test("captured controller navigation replays to its exact terminal", .timeLimit(.minutes(1)))
+    @Test("captured controller navigation and semantic input replay exactly", .timeLimit(.minutes(1)))
     func controllerNavigationCaptureEquality() async throws {
-        // Intent: preserve owner-ordered viewport mutations through controller capture and replay.
-        // Why it exists: input snap is local state that a non-echoing child cannot reconstruct.
-        // Scenario: a captured pane scrolls away, types to return live, then exits normally.
+        // Intent: preserve owner-ordered viewport and normalized input events through capture.
+        // Why it exists: input snaps and semantic events cannot be reconstructed from child output.
+        // Scenario: a pane scrolls away, receives key/paste/focus input, then exits normally.
         let command = "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done; read ignored; exit"
         let controller = try TerminalPaneSessionController(
             configuration: .init(
@@ -658,6 +658,9 @@ struct TerminalPaneSessionControllerTests {
 
         controller.scroll(byRows: -5)
         controller.synchronizeState()
+        controller.sendKey(.f5, modifiers: [.shift])
+        controller.sendPaste("paste")
+        controller.sendFocus(true)
         controller.sendText("continue\n")
         #expect(await iterator.next() == .exited(.exited(0)))
         controller.synchronizeState()
@@ -665,6 +668,9 @@ struct TerminalPaneSessionControllerTests {
         let recording = try #require(controller.capturedRecording(test: "viewport-controller"))
         #expect(recording.events.contains(.viewport(.byRows(-5))))
         #expect(recording.events.contains(.viewport(.toBottom)))
+        #expect(recording.events.contains(.input(key: .f5, modifiers: [.shift])))
+        #expect(recording.events.contains(.paste("paste")))
+        #expect(recording.events.contains(.focus(true)))
         #expect(try recording.replay() == controller.terminalSnapshot())
 
         controller.tearDown()

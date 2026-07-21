@@ -103,15 +103,23 @@ final class KeyTokensTests: XCTestCase {
         XCTAssertEqual(try parseKeyTokens(["F1a"]), [.text("F1a")])
     }
 
-    func testShiftPrefixThrowsBeforeBaseResolution() throws {
-        XCTAssertThrowsError(try parseKeyTokens(["S-Tab"])) { err in
-            XCTAssertEqual(err as? KeyTokenError, .unknownKey("S-Tab"))
-        }
+    func testShiftNamedKey() throws {
+        XCTAssertEqual(
+            try parseKeyTokens(["S-Tab"]),
+            [.key(.named(.tab), [.shift])]
+        )
     }
 
-    func testShiftAnywhereInChainThrows() throws {
-        XCTAssertThrowsError(try parseKeyTokens(["C-S-Up"])) { err in
-            XCTAssertEqual(err as? KeyTokenError, .unknownKey("C-S-Up"))
+    func testShiftAnywhereInNamedKeyChain() throws {
+        XCTAssertEqual(
+            try parseKeyTokens(["C-S-Up"]),
+            [.key(.named(.up), [.ctrl, .shift])]
+        )
+    }
+
+    func testShiftLetterRemainsRejected() throws {
+        XCTAssertThrowsError(try parseKeyTokens(["S-a"])) { err in
+            XCTAssertEqual(err as? KeyTokenError, .unknownKey("S-a"))
         }
     }
 

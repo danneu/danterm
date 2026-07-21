@@ -239,11 +239,12 @@ final class CLIParserTests: XCTestCase {
         //   inputEventToJSON; without asserting the payload, a bad `.letter` arm or a
         //   mis-wired call ships silently (the round-trip and classifier tests miss it).
         // Scenario: spec-first contract for the pane.input params["input"] array.
-        let cmd = try parseCLI(["pane", "input", "--pane", "P1", "--", "BSpace", "F12", "C-c"])
+        let cmd = try parseCLI(["pane", "input", "--pane", "P1", "--", "BSpace", "F12", "C-c", "S-Tab"])
         XCTAssertEqual(cmd.params["input"], .array([
             .object(["key": .string("BSpace")]),
             .object(["key": .string("F12")]),
             .object(["key": .string("c"), "mods": .array([.string("ctrl")])]),
+            .object(["key": .string("Tab"), "mods": .array([.string("shift")])]),
         ]))
     }
 

@@ -291,6 +291,8 @@ arg when spaces or newlines must be preserved.
   `Down`, `Left`, `Right`, `Home`, `End`, `PgUp`, `PgDn`, `Delete`, `F1`
   through `F12`.
 - `C-<x>` is Ctrl-x and `M-<x>` is Alt-x, such as `C-c`, `C-d`, and `M-b`.
+  `S-` is accepted on named keys, such as `S-Tab` and `C-S-Up`; shifted
+  letters such as `S-a` remain unsupported.
 - `--literal` disables key parsing. Every token after `--` is emitted as text.
   Each token is still a separate event; pass one quoted argument if you need
   spaces inside the literal text.

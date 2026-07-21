@@ -104,6 +104,8 @@ public struct KeyMods: OptionSet, Equatable {
 
     public static let ctrl = KeyMods(rawValue: 1 << 0)
     public static let alt  = KeyMods(rawValue: 1 << 1)
+    /// Preserves Shift on named keys whose terminal encoding distinguishes it.
+    public static let shift = KeyMods(rawValue: 1 << 2)
 
     // Decode from a wire `mods` array. Throws on unknown or non-string entries
     // so the IPC handler can surface "unknown mod <name>" / structural errors.
@@ -113,6 +115,7 @@ public struct KeyMods: OptionSet, Equatable {
             switch name {
             case "ctrl": mods.insert(.ctrl)
             case "alt":  mods.insert(.alt)
+            case "shift": mods.insert(.shift)
             default:
                 throw KeyModsDecodeError.unknown(name)
             }

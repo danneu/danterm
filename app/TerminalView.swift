@@ -978,6 +978,7 @@ extension TerminalView {
         var raw: UInt32 = GHOSTTY_MODS_NONE.rawValue
         if modifiers.contains(.ctrl) { raw |= GHOSTTY_MODS_CTRL.rawValue }
         if modifiers.contains(.alt) { raw |= GHOSTTY_MODS_ALT.rawValue }
+        if modifiers.contains(.shift) { raw |= GHOSTTY_MODS_SHIFT.rawValue }
         return ghostty_input_mods_e(raw)
     }
 }

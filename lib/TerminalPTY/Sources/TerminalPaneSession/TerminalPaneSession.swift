@@ -143,10 +143,22 @@ public final class TerminalPaneSessionController {
         host.send(bytes)
     }
 
-    /// Encodes and sends one key from the package-neutral input vocabulary when mapped.
+    /// Forwards one normalized key for atomic owner-side mode lookup and encoding.
     public func sendKey(_ key: TerminalInputKey, modifiers: TerminalKeyModifiers) {
-        guard let bytes = encodeTerminalKey(key, modifiers: modifiers) else { return }
-        send(bytes)
+        guard isTornDown == false else { return }
+        host.sendKey(key, modifiers: modifiers)
+    }
+
+    /// Forwards paste text so sanitizing and bracket-mode lookup occur on the owner queue.
+    public func sendPaste(_ text: String) {
+        guard isTornDown == false else { return }
+        host.sendPaste(text)
+    }
+
+    /// Forwards focus state so the owner gates its report against authoritative mode 1004.
+    public func sendFocus(_ focused: Bool) {
+        guard isTornDown == false else { return }
+        host.sendFocus(focused)
     }
 
     /// Submits signed local row navigation through the host's ordered owner queue.
@@ -167,12 +179,10 @@ public final class TerminalPaneSessionController {
         host.scrollToBottom()
     }
 
-    /// Carries fixed-table arrow bytes with semantic wheel rows for owner-side screen routing.
+    /// Carries semantic wheel rows for owner-side screen routing and cursor-mode encoding.
     public func sendWheel(rows: Int) {
         guard isTornDown == false, rows != 0 else { return }
-        let key: TerminalInputKey = rows < 0 ? .up : .down
-        guard let bytes = encodeTerminalKey(key, modifiers: []) else { return }
-        host.sendWheel(.init(rowDelta: rows, alternateScreenStepBytes: bytes))
+        host.sendWheel(.init(rowDelta: rows))
     }
 
     /// Submits each distinct valid grid once, preserving its order relative to input.
@@ -279,6 +289,12 @@ public final class TerminalPaneSessionController {
                     switch transition {
                     case .feed(let bytes):
                         .feed(bytes)
+                    case .input(let key, let modifiers):
+                        .input(key: key, modifiers: modifiers)
+                    case .paste(let text):
+                        .paste(text)
+                    case .focus(let focused):
+                        .focus(focused)
                     case .resize(let dimensions):
                         .resize(columns: dimensions.columns, rows: dimensions.rows)
                     case .scrollByRows(let rows):

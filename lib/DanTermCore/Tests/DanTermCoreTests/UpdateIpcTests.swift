@@ -2274,12 +2274,8 @@ import DanTermProtocol
             "message should mention unknown mod bogus, got: \(error.message)")
     }
 
-    @Test("pane.input shift mod is rejected")
-    func paneInputShiftModIsRejected() throws {
-        // Intent: shift as a modifier is rejected (use the bare key
-        //   instead).
-        // Why it exists: pins the named-mod exclusion of shift.
-        // Scenario: spec-first shift mod rejected.
+    @Test("pane.input shift mod reaches the named-key command")
+    func paneInputShiftModReachesNamedKeyCommand() throws {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
@@ -2296,10 +2292,12 @@ import DanTermProtocol
             ]),
             context: IpcRequestContext(paneId: paneId.rawValue.uuidString)
         )
-        let error = try requireIpcError(commands)
-        #expect(error.code == -32602)
-        #expect(error.message.contains("shift"),
-            "message should mention shift, got: \(error.message)")
+        #expect(commands.contains { command in
+            if case .sendInputKey(let target, .named(.tab), let modifiers) = command {
+                return target == paneId && modifiers == [.shift]
+            }
+            return false
+        })
     }
 
     @Test("pane.input explicit pane targets that pane regardless of context")

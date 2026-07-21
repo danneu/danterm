@@ -400,6 +400,7 @@ private func inputEventToJSON(_ event: InputEvent) -> JSONValue {
             var modNames: [JSONValue] = []
             if mods.contains(.ctrl) { modNames.append(.string("ctrl")) }
             if mods.contains(.alt)  { modNames.append(.string("alt")) }
+            if mods.contains(.shift) { modNames.append(.string("shift")) }
             object["mods"] = .array(modNames)
         }
         return .object(object)

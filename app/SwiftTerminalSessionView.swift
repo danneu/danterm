@@ -371,7 +371,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
             else {
                 return nil
             }
-            return .letter(scalar)
+            return .character(scalar)
         }
     }
 
@@ -379,7 +379,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         switch key {
         case .letter(let character):
             guard let scalar = character.lowercased().unicodeScalars.first else { return nil }
-            return .letter(scalar)
+            return .character(scalar)
         case .named(let name):
             switch name {
             case .enter: return .returnKey
@@ -395,8 +395,18 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
             case .pgUp: return .pageUp
             case .pgDn: return .pageDown
             case .delete: return .deleteForward
-            case .f1, .f2, .f3, .f4, .f5, .f6, .f7, .f8, .f9, .f10, .f11, .f12:
-                return nil
+            case .f1: return .f1
+            case .f2: return .f2
+            case .f3: return .f3
+            case .f4: return .f4
+            case .f5: return .f5
+            case .f6: return .f6
+            case .f7: return .f7
+            case .f8: return .f8
+            case .f9: return .f9
+            case .f10: return .f10
+            case .f11: return .f11
+            case .f12: return .f12
             }
         }
     }
@@ -405,15 +415,15 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         var modifiers: TerminalKeyModifiers = []
         if flags.contains(.shift) { modifiers.insert(.shift) }
         if flags.contains(.control) { modifiers.insert(.control) }
-        if flags.contains(.option) { modifiers.insert(.option) }
-        if flags.contains(.command) { modifiers.insert(.command) }
+        if flags.contains(.option) { modifiers.insert(.alt) }
         return modifiers
     }
 
     private static func terminalModifiers(_ modifiers: KeyMods) -> TerminalKeyModifiers {
         var result: TerminalKeyModifiers = []
         if modifiers.contains(.ctrl) { result.insert(.control) }
-        if modifiers.contains(.alt) { result.insert(.option) }
+        if modifiers.contains(.alt) { result.insert(.alt) }
+        if modifiers.contains(.shift) { result.insert(.shift) }
         return result
     }
 }
