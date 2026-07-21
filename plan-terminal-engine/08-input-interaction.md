@@ -24,6 +24,8 @@ The engine supports the legacy xterm key contract, application cursor/keypad
 modes, focus reporting, bracketed paste, and the Kitty keyboard protocol before
 becoming the default backend. Kitty behavior is opt-in through its protocol;
 legacy applications retain legacy key behavior.
+xterm `modifyOtherKeys` is deferred; its set and query sequences stay inert
+until a prioritized application workflow demonstrably requires it.
 
 macOS composition has precedence over every terminal keyboard mode. Option is
 never reinterpreted as terminal Alt while it is participating in composition;

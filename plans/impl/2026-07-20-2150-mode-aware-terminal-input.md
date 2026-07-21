@@ -442,4 +442,4 @@ nvim to see flag-1 negotiation; Cmd-V pastes.
 
 - [x] 1. Add pure mode-aware terminal input policy and conformance fixtures
 - [x] 2. Route normalized input atomically through PTY ownership and IPC adapters
-- [ ] 3. Wire AppKit input behavior and finish slice documentation and UI proof
+- [x] 3. Wire AppKit input behavior and finish slice documentation and UI proof

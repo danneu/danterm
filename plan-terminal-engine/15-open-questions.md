@@ -15,8 +15,6 @@ silently.
   contract beyond DanTerm's current usage?
 - Should OSC 133 semantic shell markers be part of the initial replacement or a
   later cleanup of the private title-channel integration?
-- Does the initial engine need xterm `modifyOtherKeys` in addition to legacy
-  keys and the Kitty keyboard protocol?
 
 ## Terminal semantics
 

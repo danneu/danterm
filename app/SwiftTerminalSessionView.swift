@@ -19,6 +19,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
     private var currentMetrics: TerminalRenderMetrics?
     private var publishedFrame: (plan: RenderFramePlan, metrics: TerminalRenderMetrics)?
     private var lastEmittedState: TerminalSessionState?
+    private var lastForwardedFocus = false
     private var isTornDown = false
 
     weak var paneWrapper: PaneWrapperView?
@@ -108,7 +109,16 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
 
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
-        if result { callbackGate.emit(.becameFirstResponder) }
+        if result {
+            forwardFocusIfChanged(true)
+            callbackGate.emit(.becameFirstResponder)
+        }
+        return result
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let result = super.resignFirstResponder()
+        if result { forwardFocusIfChanged(false) }
         return result
     }
 
@@ -127,12 +137,19 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         keyTextAccumulator = []
         defer { keyTextAccumulator = nil }
 
+        let markedTextBefore = hasMarkedText()
         interpretKeyEvents([event])
+        if markedTextBefore == false, hasMarkedText() == false,
+           Self.isKeypadKeyCode(event.keyCode), let key = Self.terminalKey(for: event) {
+            controller.sendKey(key, modifiers: Self.terminalModifiers(event.modifierFlags))
+            return
+        }
         if let texts = keyTextAccumulator, texts.isEmpty == false,
            texts.allSatisfy(Self.isCommittedTerminalText) {
             for text in texts { controller.sendText(text) }
             return
         }
+        guard markedTextBefore == false, hasMarkedText() == false else { return }
         guard let key = Self.terminalKey(for: event) else { return }
         controller.sendKey(key, modifiers: Self.terminalModifiers(event.modifierFlags))
     }
@@ -216,7 +233,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         controller.sendKey(key, modifiers: Self.terminalModifiers(modifiers))
     }
 
-    func setFocused(_ focused: Bool) {}
+    func setFocused(_ focused: Bool) {
+        forwardFocusIfChanged(focused)
+    }
 
     func setVisible(_ visible: Bool) {
         controller.setVisible(visible)
@@ -255,7 +274,16 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         controller.scroll(toTopRow: row)
     }
     func copySelection() {}
-    func pasteClipboard() {}
+
+    /// NSResponder: routes the standard Edit > Paste action through terminal paste policy.
+    @objc func paste(_ sender: Any?) {
+        pasteClipboard()
+    }
+
+    func pasteClipboard() {
+        guard let text = NSPasteboard.general.string(forType: .string) else { return }
+        controller.sendPaste(text)
+    }
 
     func requestClose() {
         callbackGate.emit(.closeRequested)
@@ -331,6 +359,12 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         needsDisplay = true
     }
 
+    private func forwardFocusIfChanged(_ focused: Bool) {
+        guard isTornDown == false, focused != lastForwardedFocus else { return }
+        lastForwardedFocus = focused
+        controller.sendFocus(focused)
+    }
+
     private static func cgColor(_ color: RenderColor) -> CGColor {
         CGColor(
             red: CGFloat(color.red) / 255,
@@ -359,19 +393,60 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         case 123: return .left
         case 115: return .home
         case 119: return .end
+        case 114: return .insert
         case 116: return .pageUp
         case 121: return .pageDown
         case 117: return .deleteForward
+        case 122: return .f1
+        case 120: return .f2
+        case 99: return .f3
+        case 118: return .f4
+        case 96: return .f5
+        case 97: return .f6
+        case 98: return .f7
+        case 100: return .f8
+        case 101: return .f9
+        case 109: return .f10
+        case 103: return .f11
+        case 111: return .f12
+        case 82: return .keypad0
+        case 83: return .keypad1
+        case 84: return .keypad2
+        case 85: return .keypad3
+        case 86: return .keypad4
+        case 87: return .keypad5
+        case 88: return .keypad6
+        case 89: return .keypad7
+        case 91: return .keypad8
+        case 92: return .keypad9
+        case 65: return .keypadDecimal
+        case 75: return .keypadDivide
+        case 67: return .keypadMultiply
+        case 78: return .keypadSubtract
+        case 69: return .keypadAdd
+        case 76: return .keypadEnter
+        case 81: return .keypadEqual
         default:
-            guard event.modifierFlags.contains(.control),
-                  let text = event.charactersIgnoringModifiers?.lowercased(),
+            guard event.modifierFlags.contains(.control) || event.modifierFlags.contains(.option),
+                  let text = event.characters(
+                      byApplyingModifiers: event.modifierFlags.intersection(.shift)
+                  )?.lowercased(),
                   text.unicodeScalars.count == 1,
                   let scalar = text.unicodeScalars.first,
-                  scalar.isASCII, CharacterSet.letters.contains(scalar)
+                  scalar.isASCII
             else {
                 return nil
             }
             return .character(scalar)
+        }
+    }
+
+    private static func isKeypadKeyCode(_ keyCode: UInt16) -> Bool {
+        switch keyCode {
+        case 65, 67, 69, 75, 76, 78, 81...89, 91, 92:
+            true
+        default:
+            false
         }
     }
 

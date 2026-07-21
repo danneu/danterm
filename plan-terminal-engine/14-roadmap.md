@@ -200,6 +200,11 @@ mean.
     reflow-attached browsing, logical viewport reads, owner-routed wheel policy,
     and native Swift-pane wheel and scrollbar interaction. See the
     [implementation plan](../plans/impl/2026-07-20-1659-local-viewport-navigation.md).
+  - [x] **Slice 6: Mode-aware keyboard, focus, and safe-paste input.** Adds
+    deterministic legacy and Kitty key encoding, authoritative owner-side mode
+    decisions, native composition precedence, safe paste, and focus reporting.
+    See the
+    [implementation plan](../plans/impl/2026-07-20-2150-mode-aware-terminal-input.md).
   - [ ] [Terminal core](04-terminal-core.md) completes the accepted baseline control,
     screen, mode, style, query, and recovery behavior.
   - [ ] [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md) completes

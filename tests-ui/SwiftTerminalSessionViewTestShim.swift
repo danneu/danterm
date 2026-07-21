@@ -57,32 +57,6 @@ func drawRenderFrame(
     in context: CGContext
 ) {}
 
-enum TerminalInputKey {
-    case returnKey
-    case tab
-    case backspace
-    case escape
-    case up
-    case down
-    case right
-    case left
-    case home
-    case end
-    case pageUp
-    case pageDown
-    case deleteForward
-    case letter(Unicode.Scalar)
-}
-
-struct TerminalKeyModifiers: OptionSet {
-    let rawValue: UInt8
-
-    static let shift = Self(rawValue: 1 << 0)
-    static let control = Self(rawValue: 1 << 1)
-    static let option = Self(rawValue: 1 << 2)
-    static let command = Self(rawValue: 1 << 3)
-}
-
 struct TerminalScrollProjection: Equatable {
     let totalRows: Int
     let topRow: Int
@@ -104,6 +78,10 @@ final class TerminalPaneSessionController {
     var viewportState: TerminalPaneViewportState
     private(set) var wheelRows: [Int] = []
     private(set) var scrolledTopRows: [Int] = []
+    private(set) var textInputs: [String] = []
+    private(set) var inputBytes: [[UInt8]] = []
+    private(set) var focusChanges: [Bool] = []
+    var inputModes = TerminalInputModes.default
 
     init(viewportState: TerminalPaneViewportState = .init(
         isScrollbarEnabled: true,
@@ -112,8 +90,18 @@ final class TerminalPaneSessionController {
         self.viewportState = viewportState
     }
 
-    func sendText(_ text: String) {}
-    func sendKey(_ key: TerminalInputKey, modifiers: TerminalKeyModifiers) {}
+    func sendText(_ text: String) { textInputs.append(text) }
+    func sendKey(_ key: TerminalInputKey, modifiers: TerminalKeyModifiers) {
+        inputBytes.append(encodeTerminalKey(key, modifiers: modifiers, modes: inputModes))
+    }
+    func sendPaste(_ text: String) {
+        inputBytes.append(encodeTerminalPaste(text, modes: inputModes))
+    }
+    func sendFocus(_ focused: Bool) {
+        focusChanges.append(focused)
+        let bytes = encodeTerminalFocus(focused: focused, modes: inputModes)
+        if bytes.isEmpty == false { inputBytes.append(bytes) }
+    }
     func sendWheel(rows: Int) { wheelRows.append(rows) }
     func scroll(toTopRow row: Int) { scrolledTopRows.append(row) }
     func setVisible(_ visible: Bool) {}
