@@ -37,6 +37,7 @@ public struct Terminal: Equatable, Sendable {
         var kind: TerminalCellKind = .padding
         var scalars: [Unicode.Scalar] = []
         var style = TerminalStyle()
+        var hyperlinkId: Int?
     }
 
     /// Moves soft-wrap identity with its cells during viewport scrolling.
@@ -290,9 +291,22 @@ public struct Terminal: Equatable, Sendable {
     private var search: SearchState?
     private var viewportState = ViewportState.following
     private var damage = TerminalDamage.full
+    private var hyperlinkTargets: [Int: TerminalHyperlink] = [:]
+    private var hyperlinkPen: Int?
+    private var nextHyperlinkId = 1
 
     static let productionScrollbackBudgetBytes = 10_485_760
     static let kittyKeyboardStackDepth = 8
+    static let maximumHyperlinkTargetBytes = 65_536
+    static let maximumHyperlinkMetadataBytes = 1_048_576
+
+    /// Exposes aggregate retained link cost to structural bound tests.
+    var retainedHyperlinkMetadataBytes: Int {
+        hyperlinkTargets.values.reduce(0) { $0 + hyperlinkByteCost($1) }
+    }
+
+    /// Exposes retained table cardinality for deduplication and sweep proofs.
+    var retainedHyperlinkCount: Int { hyperlinkTargets.count }
 
     /// Makes the active bound visible to shared structural test assertions.
     private(set) var scrollbackBudgetBytes: Int
@@ -484,8 +498,95 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func dispatchOSC(_ payload: [UInt8]) {
         guard let selectorEnd = payload.firstIndex(of: 0x3B), selectorEnd > payload.startIndex,
-              parseOSCSelector(payload[..<selectorEnd]) == 52
+              let selector = parseOSCSelector(payload[..<selectorEnd])
         else { return }
+        switch selector {
+        case 8:
+            dispatchOSC8(payload, selectorEnd: selectorEnd)
+        case 52:
+            dispatchOSC52(payload, selectorEnd: selectorEnd)
+        default:
+            break
+        }
+    }
+
+    private mutating func dispatchOSC8(_ payload: [UInt8], selectorEnd: Int) {
+        let paramsStart = payload.index(after: selectorEnd)
+        guard let paramsEnd = payload[paramsStart...].firstIndex(of: 0x3B) else { return }
+        let uriStart = payload.index(after: paramsEnd)
+        let uriBytes = Array(payload[uriStart...])
+        let uri = String(decoding: uriBytes, as: UTF8.self)
+        guard Array(uri.utf8) == uriBytes else { return }
+        if uri.isEmpty {
+            hyperlinkPen = nil
+            return
+        }
+
+        let paramsBytes = Array(payload[paramsStart..<paramsEnd])
+        let params = String(decoding: paramsBytes, as: UTF8.self)
+        let explicitId = Array(params.utf8) == paramsBytes ? osc8ExplicitId(in: params) : nil
+        let target = TerminalHyperlink(uri: uri, explicitId: explicitId)
+        guard hyperlinkByteCost(target) <= Self.maximumHyperlinkTargetBytes else { return }
+
+        if let hyperlinkPen, hyperlinkTargets[hyperlinkPen] == target { return }
+        if let explicitId,
+           let existing = hyperlinkTargets.first(where: {
+               $0.value.explicitId == explicitId && $0.value.uri == uri
+           })?.key
+        {
+            self.hyperlinkPen = existing
+            return
+        }
+
+        var candidateTargets = hyperlinkTargets
+        if candidateTargets.values.reduce(0, { $0 + hyperlinkByteCost($1) })
+            + hyperlinkByteCost(target) > Self.maximumHyperlinkMetadataBytes
+        {
+            let live = liveHyperlinkIds()
+            candidateTargets = candidateTargets.filter { live.contains($0.key) }
+        }
+        guard candidateTargets.values.reduce(0, { $0 + hyperlinkByteCost($1) })
+            + hyperlinkByteCost(target) <= Self.maximumHyperlinkMetadataBytes
+        else { return }
+
+        let id = nextHyperlinkId
+        candidateTargets[id] = target
+        hyperlinkTargets = candidateTargets
+        hyperlinkPen = id
+        nextHyperlinkId += 1
+    }
+
+    private func osc8ExplicitId(in params: String) -> String? {
+        for field in params.split(separator: ":", omittingEmptySubsequences: false) {
+            let pieces = field.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            if pieces.count == 2, pieces[0] == "id" {
+                return String(pieces[1])
+            }
+        }
+        return nil
+    }
+
+    private func hyperlinkByteCost(_ target: TerminalHyperlink) -> Int {
+        target.uri.utf8.count + (target.explicitId?.utf8.count ?? 0)
+    }
+
+    private func liveHyperlinkIds() -> Set<Int> {
+        var live = Set<Int>()
+        func collect(_ rows: [GridRow], into live: inout Set<Int>) {
+            for row in rows {
+                for cell in row.cells {
+                    if let id = cell.hyperlinkId { live.insert(id) }
+                }
+            }
+        }
+        collect(scrollbackRows.asArray(), into: &live)
+        collect(rows, into: &live)
+        if let inactivePrimaryScreen { collect(inactivePrimaryScreen.rows, into: &live) }
+        if let hyperlinkPen { live.insert(hyperlinkPen) }
+        return live
+    }
+
+    private mutating func dispatchOSC52(_ payload: [UInt8], selectorEnd: Int) {
         let fields = payload.index(after: selectorEnd)..<payload.endIndex
         guard let targetEnd = payload[fields].firstIndex(of: 0x3B) else { return }
         let target = payload[fields.lowerBound..<targetEnd]
@@ -736,7 +837,12 @@ public struct Terminal: Equatable, Sendable {
         let row = scrollbackRows[index]
         return TerminalScrollbackRow(
             cells: row.cells.map {
-                TerminalCell(kind: $0.kind, scalars: $0.scalars, style: $0.style)
+                TerminalCell(
+                    kind: $0.kind,
+                    scalars: $0.scalars,
+                    style: $0.style,
+                    hyperlink: $0.hyperlinkId.flatMap { hyperlinkTargets[$0] }
+                )
             },
             isSoftWrapped: row.isSoftWrapped
         )
@@ -878,6 +984,320 @@ public struct Terminal: Equatable, Sendable {
             start: anchor(before: cell),
             end: anchor(after: cell)
         )) ?? emptyRange(at: position)
+    }
+
+    /// Resolves explicit OSC 8 metadata or a detected URL through the HTTP(S) activation gate.
+    public func activatableLink(at position: TerminalTextPosition) -> TerminalResolvedLink? {
+        if let explicit = explicitLink(at: position) {
+            guard isActivatableHTTPLink(explicit.hyperlink.uri) else { return nil }
+            return explicit
+        }
+        return detectedLink(at: position)
+    }
+
+    private func explicitLink(at position: TerminalTextPosition) -> TerminalResolvedLink? {
+        let stream = activeProjectionRows()
+        guard stream.isEmpty == false else { return nil }
+        let row = min(max(position.row, 0), stream.count - 1)
+        let column = min(max(position.column, 0), columnCount - 1)
+        guard let id = stream[row].cells[column].hyperlinkId,
+              let target = hyperlinkTargets[id]
+        else { return nil }
+
+        var firstRow = row
+        var lastRow = row
+        while firstRow > 0, stream[firstRow - 1].isSoftWrapped { firstRow -= 1 }
+        while lastRow + 1 < stream.count, stream[lastRow].isSoftWrapped { lastRow += 1 }
+        var coordinates: [TerminalTextPosition] = []
+        for rowIndex in firstRow...lastRow {
+            for columnIndex in 0..<projectedCellEnd(in: stream[rowIndex]) {
+                coordinates.append(.init(row: rowIndex, column: columnIndex))
+            }
+        }
+        guard let targetIndex = coordinates.firstIndex(of: .init(row: row, column: column)) else {
+            return nil
+        }
+        var lower = targetIndex
+        var upper = targetIndex
+        while lower > 0 {
+            let candidate = coordinates[lower - 1]
+            guard stream[candidate.row].cells[candidate.column].hyperlinkId == id else { break }
+            lower -= 1
+        }
+        while upper + 1 < coordinates.count {
+            let candidate = coordinates[upper + 1]
+            guard stream[candidate.row].cells[candidate.column].hyperlinkId == id else { break }
+            upper += 1
+        }
+        let start = coordinates[lower]
+        let last = coordinates[upper]
+        return TerminalResolvedLink(
+            hyperlink: target,
+            range: TerminalTextRange(
+                start: start,
+                end: .init(row: last.row, column: last.column + 1)
+            )
+        )
+    }
+
+    private func detectedLink(at position: TerminalTextPosition) -> TerminalResolvedLink? {
+        let lineRange = logicalLineRange(at: position)
+        let absoluteBase = evictedRowCount
+        let stream = activeProjectionRows()
+        let rowRadius = Self.maximumHyperlinkTargetBytes / columnCount + 2
+        let targetRow = min(max(position.row, lineRange.start.row), lineRange.end.row)
+        let firstRow = max(lineRange.start.row, targetRow - rowRadius)
+        let lastRow = min(lineRange.end.row, targetRow + rowRadius)
+        let units = projectionUnits(
+            from: Array(stream[firstRow...lastRow]),
+            absoluteBase: absoluteBase + firstRow
+        ).filter { $0.isHardBoundary == false }
+        guard units.isEmpty == false else { return nil }
+        let absolutePosition = TextAnchor(
+            row: absoluteBase + min(max(position.row, lineRange.start.row), lineRange.end.row),
+            column: min(max(position.column, 0), columnCount - 1)
+        )
+        guard let targetUnit = units.firstIndex(where: {
+            $0.start <= absolutePosition && absolutePosition < $0.end
+        }) else { return nil }
+
+        var scalars: [Unicode.Scalar] = []
+        var scalarUnits: [Int] = []
+        for (unitIndex, unit) in units.enumerated() {
+            for scalar in unit.scalars {
+                scalars.append(scalar)
+                scalarUnits.append(unitIndex)
+            }
+        }
+        let targetScalars = scalarUnits.indices.filter { scalarUnits[$0] == targetUnit }
+        guard let targetScalar = targetScalars.first else { return nil }
+        let lowerWindow = max(0, targetScalar - Self.maximumHyperlinkTargetBytes)
+        let upperWindow = min(scalars.count, targetScalar + Self.maximumHyperlinkTargetBytes + 1)
+
+        for start in lowerWindow..<upperWindow where hasHTTPSPrefix(scalars, at: start) {
+            if start > lowerWindow, isURLBodyScalar(scalars[start - 1]) { continue }
+            var end = start
+            while end < upperWindow, isURLBodyScalar(scalars[end]) { end += 1 }
+            while end > start, isTrailingURLPunctuation(scalars[end - 1]) { end -= 1 }
+            guard end > start,
+                  scalarUnits[start...end - 1].contains(targetUnit)
+            else { continue }
+            var uri = String()
+            uri.unicodeScalars.append(contentsOf: scalars[start..<end])
+            guard uri.utf8.count <= Self.maximumHyperlinkTargetBytes,
+                  isActivatableHTTPLink(uri)
+            else { continue }
+            let firstUnit = units[scalarUnits[start]]
+            let lastUnit = units[scalarUnits[end - 1]]
+            return TerminalResolvedLink(
+                hyperlink: TerminalHyperlink(uri: uri),
+                range: TerminalTextRange(
+                    start: .init(
+                        row: firstUnit.start.row - absoluteBase,
+                        column: firstUnit.start.column
+                    ),
+                    end: .init(
+                        row: lastUnit.end.row - absoluteBase,
+                        column: lastUnit.end.column
+                    )
+                )
+            )
+        }
+        return nil
+    }
+
+    private func hasHTTPSPrefix(_ scalars: [Unicode.Scalar], at index: Int) -> Bool {
+        let http: [UInt32] = [0x68, 0x74, 0x74, 0x70]
+        guard index + 8 <= scalars.count else { return false }
+        for offset in http.indices {
+            let value = scalars[index + offset].value | 0x20
+            guard value == http[offset] else { return false }
+        }
+        var colon = index + 4
+        if scalars[colon].value | 0x20 == 0x73 { colon += 1 }
+        guard colon + 2 < scalars.count else { return false }
+        return scalars[colon].value == 0x3A
+            && scalars[colon + 1].value == 0x2F
+            && scalars[colon + 2].value == 0x2F
+    }
+
+    private func isURLBodyScalar(_ scalar: Unicode.Scalar) -> Bool {
+        let value = scalar.value
+        return value > 0x20 && value != 0x7F
+            && value != 0x22 && value != 0x27
+            && value != 0x28 && value != 0x3C && value != 0x3E
+            && value != 0x5B && value != 0x7B
+    }
+
+    private func isTrailingURLPunctuation(_ scalar: Unicode.Scalar) -> Bool {
+        [0x2C, 0x2E, 0x3B, 0x3A, 0x21, 0x3F, 0x29, 0x5D, 0x7D].contains(scalar.value)
+    }
+
+    private func isActivatableHTTPLink(_ uri: String) -> Bool {
+        let scalars = Array(uri.unicodeScalars)
+        guard scalars.allSatisfy({ $0.value > 0x20 && $0.value != 0x7F }),
+              let colon = scalars.firstIndex(where: { $0.value == 0x3A })
+        else { return false }
+        let scheme = String(String.UnicodeScalarView(scalars[..<colon])).lowercased()
+        guard scheme == "http" || scheme == "https",
+              colon + 2 < scalars.count,
+              scalars[colon + 1].value == 0x2F,
+              scalars[colon + 2].value == 0x2F
+        else { return false }
+        let authorityStart = colon + 3
+        let authorityEnd = scalars[authorityStart...].firstIndex(where: {
+            $0.value == 0x2F || $0.value == 0x3F || $0.value == 0x23
+        }) ?? scalars.endIndex
+        guard authorityStart < authorityEnd else { return false }
+        let authority = Array(scalars[authorityStart..<authorityEnd])
+        let at = authority.lastIndex(where: { $0.value == 0x40 })
+        if let at, isValidURIComponent(authority[..<at], allowsColon: true) == false {
+            return false
+        }
+        let hostPortStart = at.map { $0 + 1 } ?? 0
+        guard hostPortStart < authority.count else { return false }
+        let hostPort = Array(authority[hostPortStart...])
+        let port: ArraySlice<Unicode.Scalar>?
+        let host: ArraySlice<Unicode.Scalar>
+        let isBracketedHost: Bool
+        if hostPort.first?.value == 0x5B {
+            guard let close = hostPort.firstIndex(where: { $0.value == 0x5D }), close > 1 else {
+                return false
+            }
+            host = hostPort[1..<close]
+            isBracketedHost = true
+            if close + 1 < hostPort.count {
+                guard hostPort[close + 1].value == 0x3A else { return false }
+                port = hostPort[(close + 2)...]
+            } else {
+                port = nil
+            }
+        } else if let separator = hostPort.lastIndex(where: { $0.value == 0x3A }) {
+            guard hostPort[..<separator].allSatisfy({ $0.value != 0x3A }) else { return false }
+            host = hostPort[..<separator]
+            port = hostPort[(separator + 1)...]
+            isBracketedHost = false
+        } else {
+            host = hostPort[...]
+            port = nil
+            isBracketedHost = false
+        }
+        guard host.isEmpty == false,
+              isBracketedHost ? isValidIPLiteral(host) : isValidRegName(host)
+        else { return false }
+        if let port {
+            guard port.isEmpty == false,
+                  port.allSatisfy({ (0x30...0x39).contains($0.value) }),
+                  let value = Int(String(String.UnicodeScalarView(port))),
+                  (1...65_535).contains(value)
+            else { return false }
+        }
+        return true
+    }
+
+    private func isValidRegName(_ host: ArraySlice<Unicode.Scalar>) -> Bool {
+        isValidURIComponent(host, allowsColon: false)
+    }
+
+    private func isValidURIComponent(
+        _ scalars: ArraySlice<Unicode.Scalar>,
+        allowsColon: Bool
+    ) -> Bool {
+        let values = scalars.map(\.value)
+        var index = 0
+        while index < values.count {
+            let value = values[index]
+            if value == 0x25 {
+                guard index + 2 < values.count,
+                      isHexDigit(values[index + 1]),
+                      isHexDigit(values[index + 2])
+                else { return false }
+                index += 3
+                continue
+            }
+            guard isUnreservedOrSubDelimiter(value) || (allowsColon && value == 0x3A) else {
+                return false
+            }
+            index += 1
+        }
+        return true
+    }
+
+    private func isValidIPLiteral(_ host: ArraySlice<Unicode.Scalar>) -> Bool {
+        let value = String(String.UnicodeScalarView(host))
+        if value.first == "v" || value.first == "V" {
+            guard let dot = value.firstIndex(of: "."), dot > value.startIndex else { return false }
+            let version = value[value.index(after: value.startIndex)..<dot]
+            let address = value[value.index(after: dot)...]
+            return version.isEmpty == false
+                && version.unicodeScalars.allSatisfy { isHexDigit($0.value) }
+                && address.isEmpty == false
+                && address.unicodeScalars.allSatisfy {
+                    isUnreservedOrSubDelimiter($0.value) || $0.value == 0x3A
+                }
+        }
+        return isValidIPv6(value)
+    }
+
+    private func isValidIPv6(_ address: String) -> Bool {
+        guard address.isEmpty == false else { return false }
+        let characters = Array(address)
+        var compressionCount = 0
+        if characters.count >= 2 {
+            for index in 0..<(characters.count - 1)
+            where characters[index] == ":" && characters[index + 1] == ":"
+            {
+                compressionCount += 1
+            }
+        }
+        guard compressionCount <= 1 else { return false }
+        let isCompressed = compressionCount == 1
+        if isCompressed == false,
+           (characters.first == ":" || characters.last == ":")
+        {
+            return false
+        }
+        let pieces = address.split(separator: ":", omittingEmptySubsequences: true)
+        var groupCount = 0
+        for (index, piece) in pieces.enumerated() {
+            if piece.contains(".") {
+                guard index == pieces.count - 1, isValidIPv4(String(piece)) else { return false }
+                groupCount += 2
+            } else {
+                guard (1...4).contains(piece.count),
+                      piece.unicodeScalars.allSatisfy({ isHexDigit($0.value) })
+                else { return false }
+                groupCount += 1
+            }
+        }
+        if isCompressed {
+            return groupCount < 8
+        }
+        return groupCount == 8
+    }
+
+    private func isValidIPv4(_ address: String) -> Bool {
+        let pieces = address.split(separator: ".", omittingEmptySubsequences: false)
+        return pieces.count == 4 && pieces.allSatisfy { piece in
+            piece.isEmpty == false
+                && piece.unicodeScalars.allSatisfy { (0x30...0x39).contains($0.value) }
+                && Int(piece).map { (0...255).contains($0) } == true
+        }
+    }
+
+    private func isHexDigit(_ value: UInt32) -> Bool {
+        (0x30...0x39).contains(value)
+            || (0x41...0x46).contains(value)
+            || (0x61...0x66).contains(value)
+    }
+
+    private func isUnreservedOrSubDelimiter(_ value: UInt32) -> Bool {
+        return (0x30...0x39).contains(value)
+            || (0x41...0x5A).contains(value)
+            || (0x61...0x7A).contains(value)
+            || value == 0x2D || value == 0x2E || value == 0x5F || value == 0x7E
+            || [0x21, 0x24, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x3B, 0x3D]
+                .contains(value)
     }
 
     /// Clears only the local selection, leaving an active search untouched.
@@ -1498,7 +1918,12 @@ public struct Terminal: Equatable, Sendable {
             return nil
         }
         let cell = windowRow.cells[column]
-        return TerminalCell(kind: cell.kind, scalars: cell.scalars, style: cell.style)
+        return TerminalCell(
+            kind: cell.kind,
+            scalars: cell.scalars,
+            style: cell.style,
+            hyperlink: cell.hyperlinkId.flatMap { hyperlinkTargets[$0] }
+        )
     }
 
     /// Positions future parser actions while preserving the same cursor validity rules.
@@ -1903,7 +2328,12 @@ public struct Terminal: Equatable, Sendable {
                     currentLine.units.append(ReflowUnit(
                         cells: [
                             cell,
-                            GridCell(kind: .wideTail, scalars: [], style: cell.style),
+                            GridCell(
+                                kind: .wideTail,
+                                scalars: [],
+                                style: cell.style,
+                                hyperlinkId: cell.hyperlinkId
+                            ),
                         ],
                         sourceOffsets: sources
                     ))
@@ -2000,7 +2430,8 @@ public struct Terminal: Equatable, Sendable {
                 packedRows[row].cells[column] = GridCell(
                     kind: .spacerHead,
                     scalars: [],
-                    style: unit.cells[0].style
+                    style: unit.cells[0].style,
+                    hyperlinkId: unit.cells[0].hyperlinkId
                 )
                 packedRows[row].isSoftWrapped = true
                 packedRows.append(makeBlankRow(columns: columns))
@@ -2877,6 +3308,7 @@ public struct Terminal: Equatable, Sendable {
         damage = .full
         selectPrimaryScreen()
         resetControlState()
+        hyperlinkPen = nil
         clearPendingMotionState()
     }
 
@@ -2886,6 +3318,9 @@ public struct Terminal: Equatable, Sendable {
         evictedRowCount = 0
         selectPrimaryScreen()
         resetControlState()
+        hyperlinkPen = nil
+        hyperlinkTargets.removeAll(keepingCapacity: true)
+        nextHyperlinkId = 1
         cursor = CellPosition(row: 0, column: 0)
         clearPendingMotionState()
         lastPrintedCluster = nil
@@ -3071,6 +3506,7 @@ public struct Terminal: Equatable, Sendable {
     private mutating func upgradeClusterToWide(at target: CellPosition) -> CellPosition {
         let scalars = rows[target.row].cells[target.column].scalars
         let style = rows[target.row].cells[target.column].style
+        let hyperlinkId = rows[target.row].cells[target.column].hyperlinkId
         var destination = target
 
         if target.column == columnCount - 1 {
@@ -3079,7 +3515,8 @@ public struct Terminal: Equatable, Sendable {
                 rows[target.row].cells[target.column] = GridCell(
                     kind: .spacerHead,
                     scalars: [],
-                    style: style
+                    style: style,
+                    hyperlinkId: hyperlinkId
                 )
                 rows[target.row].isSoftWrapped = true
                 cursor = target
@@ -3102,12 +3539,14 @@ public struct Terminal: Equatable, Sendable {
         rows[destination.row].cells[destination.column] = GridCell(
             kind: .wideHead,
             scalars: scalars,
-            style: style
+            style: style,
+            hyperlinkId: hyperlinkId
         )
         rows[destination.row].cells[destination.column + 1] = GridCell(
             kind: .wideTail,
             scalars: [],
-            style: style
+            style: style,
+            hyperlinkId: hyperlinkId
         )
         advanceCursorPastWideCell(at: destination)
         return destination
@@ -3141,7 +3580,8 @@ public struct Terminal: Equatable, Sendable {
         rows[cursor.row].cells[cursor.column] = GridCell(
             kind: .narrow,
             scalars: [scalar],
-            style: currentStyle
+            style: currentStyle,
+            hyperlinkId: hyperlinkPen
         )
         clusterContext = ClusterContext(target: cursor, previousScalar: scalar)
 
@@ -3161,7 +3601,8 @@ public struct Terminal: Equatable, Sendable {
                 rows[cursor.row].cells[cursor.column] = GridCell(
                     kind: .spacerHead,
                     scalars: [],
-                    style: currentStyle
+                    style: currentStyle,
+                    hyperlinkId: hyperlinkPen
                 )
                 rows[cursor.row].isSoftWrapped = true
                 advanceToNextRow(preservingWrapClaim: true)
@@ -3195,12 +3636,14 @@ public struct Terminal: Equatable, Sendable {
         rows[cursor.row].cells[cursor.column] = GridCell(
             kind: .wideHead,
             scalars: [scalar],
-            style: currentStyle
+            style: currentStyle,
+            hyperlinkId: hyperlinkPen
         )
         rows[cursor.row].cells[cursor.column + 1] = GridCell(
             kind: .wideTail,
             scalars: [],
-            style: currentStyle
+            style: currentStyle,
+            hyperlinkId: hyperlinkPen
         )
         clusterContext = ClusterContext(target: cursor, previousScalar: scalar)
         advanceCursorPastWideCell(at: cursor)

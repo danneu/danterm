@@ -88,11 +88,19 @@ private func expectValidStream(
                         cells[column + 1].style == cells[column].style,
                         sourceLocation: sourceLocation
                     )
+                    #expect(
+                        cells[column + 1].hyperlink == cells[column].hyperlink,
+                        sourceLocation: sourceLocation
+                    )
                 }
             case .wideTail:
                 if column > 0 {
                     #expect(
                         cells[column - 1].style == cells[column].style,
+                        sourceLocation: sourceLocation
+                    )
+                    #expect(
+                        cells[column - 1].hyperlink == cells[column].hyperlink,
                         sourceLocation: sourceLocation
                     )
                 }
@@ -104,6 +112,10 @@ private func expectValidStream(
                     #expect(deferredHead.kind == .wideHead, sourceLocation: sourceLocation)
                     #expect(
                         deferredHead.style == cells[column].style,
+                        sourceLocation: sourceLocation
+                    )
+                    #expect(
+                        deferredHead.hyperlink == cells[column].hyperlink,
                         sourceLocation: sourceLocation
                     )
                 }

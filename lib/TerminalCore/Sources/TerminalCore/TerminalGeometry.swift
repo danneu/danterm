@@ -9,6 +9,36 @@ public enum TerminalCellKind: Equatable, Sendable {
     case spacerHead
 }
 
+/// Carries terminal-authored link metadata without granting it activation authority.
+public struct TerminalHyperlink: Equatable, Sendable {
+    /// Preserves the OSC 8 URI exactly as received after strict UTF-8 decoding.
+    public let uri: String
+
+    /// Preserves the optional OSC 8 `id` parameter used to join logical link regions.
+    public let explicitId: String?
+
+    /// Creates an inspection value shared by explicit cells and detected links.
+    public init(uri: String, explicitId: String? = nil) {
+        self.uri = uri
+        self.explicitId = explicitId
+    }
+}
+
+/// Couples a validated HTTP(S) target to the exact text run eligible for activation.
+public struct TerminalResolvedLink: Equatable, Sendable {
+    /// The validated target exposed to interaction policy and the AppKit boundary.
+    public let hyperlink: TerminalHyperlink
+
+    /// The contiguous explicit or detected run that must still match on pointer release.
+    public let range: TerminalTextRange
+
+    /// Creates a click-time validation token without retaining private grid identity.
+    public init(hyperlink: TerminalHyperlink, range: TerminalTextRange) {
+        self.hyperlink = hyperlink
+        self.range = range
+    }
+}
+
 /// Exposes one cell's scalar-exact content without leaking the grid representation.
 public struct TerminalCell: Equatable, Sendable {
     /// Describes whether the cell is content, padding, or part of a wide-cell invariant.
@@ -19,6 +49,22 @@ public struct TerminalCell: Equatable, Sendable {
 
     /// Retains semantic presentation for written content or background-color erase padding.
     public let style: TerminalStyle
+
+    /// Exposes retained OSC 8 metadata while leaving activation policy to `Terminal`.
+    public let hyperlink: TerminalHyperlink?
+
+    /// Creates a read-only inspection cell while keeping hyperlink absence source-compatible.
+    public init(
+        kind: TerminalCellKind,
+        scalars: [Unicode.Scalar],
+        style: TerminalStyle,
+        hyperlink: TerminalHyperlink? = nil
+    ) {
+        self.kind = kind
+        self.scalars = scalars
+        self.style = style
+        self.hyperlink = hyperlink
+    }
 }
 
 /// Preserves an off-screen primary row's exact cells and logical continuation identity.
