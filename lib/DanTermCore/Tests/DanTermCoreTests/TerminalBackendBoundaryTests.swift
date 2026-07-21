@@ -23,8 +23,18 @@ struct TerminalBackendBoundaryTests {
             if case .surfaceCwd(let id, let cwd) = $0 { return id == paneId && cwd == "/tmp" }
             return false
         }
+        assertSessionMessage(.cwdChanged(nil), paneId: paneId) {
+            if case .surfaceCwd(let id, let cwd) = $0 { return id == paneId && cwd == nil }
+            return false
+        }
         assertSessionMessage(.bell, paneId: paneId) {
             if case .surfaceBell(let id) = $0 { return id == paneId }
+            return false
+        }
+        assertSessionMessage(.legacyPrivateShell("__DANTERM_EVT__:token:CMD_END"), paneId: paneId) {
+            if case .surfaceTitle(let id, let title) = $0 {
+                return id == paneId && title == "__DANTERM_EVT__:token:CMD_END"
+            }
             return false
         }
         assertSessionMessage(.desktopNotification(title: "Build", body: "Done"), paneId: paneId) {

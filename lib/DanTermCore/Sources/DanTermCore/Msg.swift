@@ -95,7 +95,7 @@ enum Msg {
 
     // Ghostty callbacks
     case surfaceTitle(paneId: PaneId, title: String)
-    case surfaceCwd(paneId: PaneId, cwd: String)
+    case surfaceCwd(paneId: PaneId, cwd: String?)
     case surfaceBell(paneId: PaneId)
     case desktopNotification(paneId: PaneId, title: String, body: String)
     case surfaceProgress(paneId: PaneId, state: ProgressState?)

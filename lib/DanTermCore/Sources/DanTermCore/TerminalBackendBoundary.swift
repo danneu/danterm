@@ -4,8 +4,9 @@
 /// Product-level events one pane session may emit to DanTerm's model loop.
 enum TerminalSessionEvent: Equatable {
     case titleChanged(String)
-    case cwdChanged(String)
+    case cwdChanged(String?)
     case bell
+    case legacyPrivateShell(String)
     case desktopNotification(title: String, body: String)
     case progress(ProgressState?)
     case searchStarted(String)
@@ -51,6 +52,8 @@ func terminalMessage(for event: TerminalSessionEvent, paneId: PaneId) -> Msg {
         return .surfaceCwd(paneId: paneId, cwd: cwd)
     case .bell:
         return .surfaceBell(paneId: paneId)
+    case .legacyPrivateShell(let payload):
+        return .surfaceTitle(paneId: paneId, title: payload)
     case .desktopNotification(let title, let body):
         return .desktopNotification(paneId: paneId, title: title, body: body)
     case .progress(let state):

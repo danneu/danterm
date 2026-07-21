@@ -85,6 +85,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         controller.onClipboardWrite = { [weak self] text in
             self?.writeClipboard(text)
         }
+        controller.onSemanticEvents = { [weak self] events in
+            self?.publish(events)
+        }
         controller.onViewportStateChange = { [weak self] _ in
             self?.emitStateIfNeeded()
         }
@@ -457,6 +460,21 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         }
         callbackGate.tearDown()
         controller.tearDown()
+    }
+
+    private func publish(_ events: [TerminalSemanticEvent]) {
+        for event in events {
+            switch event {
+            case .title(let title):
+                callbackGate.emit(.titleChanged(title))
+            case .workingDirectory(let cwd):
+                callbackGate.emit(.cwdChanged(cwd))
+            case .bell:
+                callbackGate.emit(.bell)
+            case .legacyPrivateShell(let payload):
+                callbackGate.emit(.legacyPrivateShell(payload))
+            }
+        }
     }
 
     private func synchronizeGeometry() {

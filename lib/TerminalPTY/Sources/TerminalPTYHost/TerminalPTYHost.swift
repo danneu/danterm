@@ -18,12 +18,20 @@ public struct TerminalPTYFrameState: Equatable, Sendable {
     public let damage: TerminalDamage
     /// The newest completed OSC 52 write drained in the same owner transaction.
     public let clipboardWrite: String?
+    /// Ordered semantic output drained independently of render damage.
+    public let semanticEvents: [TerminalSemanticEvent]
 
     /// Keeps the drained accumulator separate so terminal equality remains presentation-based.
-    public init(terminal: Terminal, damage: TerminalDamage, clipboardWrite: String?) {
+    public init(
+        terminal: Terminal,
+        damage: TerminalDamage,
+        clipboardWrite: String?,
+        semanticEvents: [TerminalSemanticEvent]
+    ) {
         self.terminal = terminal
         self.damage = damage
         self.clipboardWrite = clipboardWrite
+        self.semanticEvents = semanticEvents
     }
 }
 
@@ -137,11 +145,13 @@ public actor TerminalPTYHost {
     /// Creates an owner before launch so every later mutation shares one executor.
     public init(
         initialDimensions: TerminalDimensions,
-        bootstrapExecutable: String
+        bootstrapExecutable: String,
+        machineHostname: String? = nil
     ) throws {
         try self.init(
             initialDimensions: initialDimensions,
             bootstrapExecutable: bootstrapExecutable,
+            machineHostname: machineHostname,
             captureTransitions: false
         )
     }
@@ -149,11 +159,13 @@ public actor TerminalPTYHost {
     package init(
         initialDimensions: TerminalDimensions,
         bootstrapExecutable: String,
+        machineHostname: String? = nil,
         captureTransitions: Bool
     ) throws {
         guard let terminal = Terminal(
             columns: initialDimensions.columns,
-            rows: initialDimensions.rows
+            rows: initialDimensions.rows,
+            machineHostname: machineHostname
         ) else {
             throw TerminalPTYHostError.invalidDimensions
         }
@@ -333,11 +345,13 @@ public actor TerminalPTYHost {
     private func drainedFrameState() -> TerminalPTYFrameState {
         let damage = terminal.drainDamage()
         let clipboardWrite = terminal.drainPendingClipboardWrite()
+        let semanticEvents = terminal.drainSemanticEvents()
         consumerWorkWasSignaled = false
         return TerminalPTYFrameState(
             terminal: terminal,
             damage: damage,
-            clipboardWrite: clipboardWrite
+            clipboardWrite: clipboardWrite,
+            semanticEvents: semanticEvents
         )
     }
 

@@ -67,12 +67,14 @@ final class SwiftTerminalBackend: TerminalBackend {
             controller = try TerminalPaneSessionController(
                 configuration: configuration,
                 bootstrapExecutable: bootstrapExecutable,
+                machineHostname: ProcessInfo.processInfo.hostName,
                 captureTransitions: recordingDirectory != nil
             )
             #else
             controller = try TerminalPaneSessionController(
                 configuration: configuration,
-                bootstrapExecutable: bootstrapExecutable
+                bootstrapExecutable: bootstrapExecutable,
+                machineHostname: ProcessInfo.processInfo.hostName
             )
             #endif
         } catch {

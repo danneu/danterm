@@ -12,6 +12,118 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct TerminalPaneSessionControllerTests {
+    @Test("semantic events bypass hidden and synchronized rendering gates", .timeLimit(.minutes(1)))
+    func semanticEventsBypassRenderingGates() async throws {
+        // Intent: deliver every semantic kind while both rendering gates suppress frames.
+        // Why it exists: terminal metadata must not wait for pane visibility or synchronized output.
+        // Scenario: a hidden child starts a synchronized update, then reports title, cwd, shell, and BEL.
+        let host = try makeHost()
+        let command = "printf '\\033[?2026h\\033]2;hidden-title\\007"
+            + "\\033]7;file://localhost/tmp/pane\\007"
+            + "\\033]0;__DANTERM_EVT__:token:CMD_END\\007\\007'; exec sleep 30"
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: command),
+            isVisible: false
+        )
+        let batches = AsyncStream<[TerminalSemanticEvent]>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        var iterator = batches.stream.makeAsyncIterator()
+        controller.onSemanticEvents = { batches.continuation.yield($0) }
+
+        #expect(await iterator.next() == [
+            .title("hidden-title"),
+            .workingDirectory("/tmp/pane"),
+            .legacyPrivateShell("__DANTERM_EVT__:token:CMD_END"),
+            .bell,
+        ])
+        #expect(controller.currentPlan == nil)
+
+        controller.tearDown()
+        await host.close()
+    }
+
+    @Test("natural exit delivers semantic events before session end", .timeLimit(.minutes(1)))
+    func naturalExitOrdersSemanticEventsBeforeEnd() async throws {
+        // Intent: publish output semantics before the same drain reports the child exit.
+        // Why it exists: closing the pane first would discard the child's final metadata callback.
+        // Scenario: a short-lived child writes its final title and exits immediately.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "printf '\\033]2;final-title\\007'; exit")
+        )
+        let callbacks = AsyncStream<String>.makeStream()
+        var iterator = callbacks.stream.makeAsyncIterator()
+        controller.onSemanticEvents = { events in
+            if events == [.title("final-title")] { callbacks.continuation.yield("semantic") }
+        }
+        controller.onSessionEnded = { _ in callbacks.continuation.yield("ended") }
+
+        #expect(await iterator.next() == "semantic")
+        #expect(await iterator.next() == "ended")
+
+        controller.tearDown()
+        await host.close()
+    }
+
+    @Test("explicit teardown discards pending semantic callbacks", .timeLimit(.minutes(1)))
+    func teardownDiscardsSemanticCallbacks() async throws {
+        // Intent: make explicit teardown synchronously close the semantic callback boundary.
+        // Why it exists: queued owner work must not message a removed pane or shorter-lived view.
+        // Scenario: the user closes a live pane before stale terminal input reaches its owner.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec sleep 30")
+        )
+        var events: [TerminalSemanticEvent] = []
+        controller.onSemanticEvents = { events.append(contentsOf: $0) }
+
+        controller.tearDown()
+        host.send(Array("printf '\\033]2;too-late\\007'\n".utf8))
+        await host.close()
+
+        #expect(events.isEmpty)
+        #expect(controller.onSemanticEvents == nil)
+    }
+
+    @Test("semantic callbacks remain isolated between pane controllers", .timeLimit(.minutes(1)))
+    func semanticCallbacksRemainPaneIsolated() async throws {
+        // Intent: each controller delivers only the semantics parsed by its own PTY owner.
+        // Why it exists: pane identity belongs to the adapter and cannot come from child output.
+        // Scenario: two panes concurrently publish distinct titles and bells.
+        let firstHost = try makeHost()
+        let secondHost = try makeHost()
+        let first = TerminalPaneSessionController(
+            host: firstHost,
+            launchInput: makeLaunchInput(command: "printf '\\033]2;first\\007'; exec sleep 30")
+        )
+        let second = TerminalPaneSessionController(
+            host: secondHost,
+            launchInput: makeLaunchInput(command: "printf '\\033]2;second\\007\\007'; exec sleep 30")
+        )
+        let firstEvents = AsyncStream<[TerminalSemanticEvent]>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        let secondEvents = AsyncStream<[TerminalSemanticEvent]>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        var firstIterator = firstEvents.stream.makeAsyncIterator()
+        var secondIterator = secondEvents.stream.makeAsyncIterator()
+        first.onSemanticEvents = { firstEvents.continuation.yield($0) }
+        second.onSemanticEvents = { secondEvents.continuation.yield($0) }
+
+        #expect(await firstIterator.next() == [.title("first")])
+        #expect(await secondIterator.next() == [.title("second"), .bell])
+
+        first.tearDown()
+        second.tearDown()
+        await firstHost.close()
+        await secondHost.close()
+    }
+
     @Test("recovery candidate callback excludes alternate content", .timeLimit(.minutes(1)))
     func recoveryMutationClassification() async throws {
         // Intent: publish primary candidates without ever substituting transient alternate content.

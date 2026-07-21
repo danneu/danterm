@@ -60,6 +60,9 @@ public final class TerminalPaneSessionController {
     /// Delivers completed clipboard writes before any visibility or render-planning gate.
     public var onClipboardWrite: ((String) -> Void)?
 
+    /// Delivers ordered terminal semantics before visibility, rendering, or exit callbacks.
+    public var onSemanticEvents: (([TerminalSemanticEvent]) -> Void)?
+
     /// Receives the first child-originated lifecycle result on the main actor.
     public var onSessionEnded: ((PaneLifecycleResult) -> Void)?
 
@@ -88,11 +91,13 @@ public final class TerminalPaneSessionController {
     public convenience init(
         configuration: TerminalPaneLaunchConfiguration,
         bootstrapExecutable: String,
-        isVisible: Bool = true
+        isVisible: Bool = true,
+        machineHostname: String? = nil
     ) throws {
         let host = try TerminalPTYHost(
             initialDimensions: configuration.initialDimensions,
-            bootstrapExecutable: bootstrapExecutable
+            bootstrapExecutable: bootstrapExecutable,
+            machineHostname: machineHostname
         )
         self.init(host: host, launchInput: configuration.launchInput, isVisible: isVisible)
     }
@@ -103,11 +108,13 @@ public final class TerminalPaneSessionController {
         configuration: TerminalPaneLaunchConfiguration,
         bootstrapExecutable: String,
         isVisible: Bool = true,
+        machineHostname: String? = nil,
         captureTransitions: Bool
     ) throws {
         let host = try TerminalPTYHost(
             initialDimensions: configuration.initialDimensions,
             bootstrapExecutable: bootstrapExecutable,
+            machineHostname: machineHostname,
             captureTransitions: captureTransitions
         )
         self.init(host: host, launchInput: configuration.launchInput, isVisible: isVisible)
@@ -117,11 +124,13 @@ public final class TerminalPaneSessionController {
         configuration: TerminalPaneLaunchConfiguration,
         bootstrapExecutable: String,
         isVisible: Bool = true,
+        machineHostname: String? = nil,
         captureTransitions: Bool
     ) throws {
         let host = try TerminalPTYHost(
             initialDimensions: configuration.initialDimensions,
             bootstrapExecutable: bootstrapExecutable,
+            machineHostname: machineHostname,
             captureTransitions: captureTransitions
         )
         self.init(host: host, launchInput: configuration.launchInput, isVisible: isVisible)
@@ -357,6 +366,7 @@ public final class TerminalPaneSessionController {
         isTornDown = true
         onFrame = nil
         onClipboardWrite = nil
+        onSemanticEvents = nil
         onSessionEnded = nil
         onViewportStateChange = nil
         onPrimaryHistoryMutation = nil
@@ -383,6 +393,9 @@ public final class TerminalPaneSessionController {
         pendingDamage.formUnion(frameState.damage)
         if let clipboardWrite = frameState.clipboardWrite {
             onClipboardWrite?(clipboardWrite)
+        }
+        if frameState.semanticEvents.isEmpty == false {
+            onSemanticEvents?(frameState.semanticEvents)
         }
         emitViewportStateIfNeeded()
         if case .some(.exited) = result {
