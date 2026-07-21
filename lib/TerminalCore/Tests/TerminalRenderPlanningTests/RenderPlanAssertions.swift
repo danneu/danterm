@@ -36,6 +36,24 @@ func assertCanonical(
         previousBackground = run
     }
 
+    var previousSelection: RenderSelectionRun?
+    for run in plan.selectionRuns {
+        #expect(run.row >= 0 && run.row < plan.rows, sourceLocation: sourceLocation)
+        #expect(run.startColumn >= 0, sourceLocation: sourceLocation)
+        #expect(run.columnCount > 0, sourceLocation: sourceLocation)
+        #expect(run.startColumn + run.columnCount <= plan.columns, sourceLocation: sourceLocation)
+        if let previousSelection {
+            #expect(
+                run.row > previousSelection.row
+                    || (run.row == previousSelection.row
+                        && run.startColumn >= previousSelection.startColumn
+                            + previousSelection.columnCount),
+                sourceLocation: sourceLocation
+            )
+        }
+        previousSelection = run
+    }
+
     var previousText: RenderTextRun?
     for run in plan.textRuns {
         let width = run.cells.reduce(0) { $0 + $1.columnWidth }

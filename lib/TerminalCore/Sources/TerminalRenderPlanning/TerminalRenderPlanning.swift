@@ -34,6 +34,9 @@ public struct RenderTheme: Equatable, Sendable {
     /// Background used both for semantic `.default` and the frame clear.
     public let defaultBackground: RenderColor
 
+    /// Background overlay used to distinguish the current local selection.
+    public let selectionBackground: RenderColor
+
     /// Filled-block cursor color applied before run coalescing.
     public let cursor: RenderColor
 
@@ -62,6 +65,7 @@ public struct RenderTheme: Equatable, Sendable {
         ],
         defaultForeground: RenderColor(red: 229, green: 229, blue: 229),
         defaultBackground: RenderColor(red: 0, green: 0, blue: 0),
+        selectionBackground: RenderColor(red: 56, green: 88, blue: 140),
         cursor: RenderColor(red: 229, green: 229, blue: 229),
         cursorText: RenderColor(red: 0, green: 0, blue: 0)
     )
@@ -70,12 +74,14 @@ public struct RenderTheme: Equatable, Sendable {
         ansiColors: [RenderColor],
         defaultForeground: RenderColor,
         defaultBackground: RenderColor,
+        selectionBackground: RenderColor,
         cursor: RenderColor,
         cursorText: RenderColor
     ) {
         self.ansiColors = ansiColors
         self.defaultForeground = defaultForeground
         self.defaultBackground = defaultBackground
+        self.selectionBackground = selectionBackground
         self.cursor = cursor
         self.cursorText = cursorText
     }
@@ -109,8 +115,14 @@ public struct RenderFramePlan: Equatable, Sendable {
     /// Concrete color used to clear the full viewport before drawing runs.
     public let defaultBackground: RenderColor
 
+    /// Concrete color used for every local-selection overlay span.
+    public let selectionBackground: RenderColor
+
     /// Non-default background spans in canonical row-major order.
     public let backgroundRuns: [RenderBackgroundRun]
+
+    /// Local-selection overlay spans in canonical row-major order.
+    public let selectionRuns: [RenderSelectionRun]
 
     /// Glyph-bearing spans in canonical row-major order.
     public let textRuns: [RenderTextRun]
@@ -125,7 +137,9 @@ public struct RenderFramePlan: Equatable, Sendable {
         columns: Int,
         rows: Int,
         defaultBackground: RenderColor,
+        selectionBackground: RenderColor,
         backgroundRuns: [RenderBackgroundRun],
+        selectionRuns: [RenderSelectionRun],
         textRuns: [RenderTextRun],
         decorationRuns: [RenderDecorationRun],
         cursor: RenderCursor?
@@ -133,10 +147,30 @@ public struct RenderFramePlan: Equatable, Sendable {
         self.columns = columns
         self.rows = rows
         self.defaultBackground = defaultBackground
+        self.selectionBackground = selectionBackground
         self.backgroundRuns = backgroundRuns
+        self.selectionRuns = selectionRuns
         self.textRuns = textRuns
         self.decorationRuns = decorationRuns
         self.cursor = cursor
+    }
+}
+
+/// Represents one viewport-row segment covered by the local selection overlay.
+public struct RenderSelectionRun: Equatable, Sendable {
+    /// Zero-based viewport row.
+    public let row: Int
+
+    /// Zero-based first column in the selected segment.
+    public let startColumn: Int
+
+    /// Number of selected grid columns in the segment.
+    public let columnCount: Int
+
+    init(row: Int, startColumn: Int, columnCount: Int) {
+        self.row = row
+        self.startColumn = startColumn
+        self.columnCount = columnCount
     }
 }
 

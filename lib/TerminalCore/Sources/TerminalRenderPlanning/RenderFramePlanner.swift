@@ -64,13 +64,49 @@ private struct FramePlanner {
             columns: geometry.columns,
             rows: geometry.rows.count,
             defaultBackground: presentation.theme.defaultBackground,
+            selectionBackground: presentation.theme.selectionBackground,
             backgroundRuns: backgroundRuns(cells),
+            selectionRuns: selectionRuns(
+                columns: geometry.columns,
+                rows: geometry.rows.count
+            ),
             textRuns: textRuns(cells),
             decorationRuns: decorationRuns(cells),
             cursor: cursorSpan.map {
                 RenderCursor(row: $0.row, column: $0.column, columnWidth: $0.columnWidth)
             }
         )
+    }
+
+    private func selectionRuns(columns: Int, rows: Int) -> [RenderSelectionRun] {
+        guard let selection = terminal.selectionRange,
+              selection.start != selection.end,
+              columns > 0,
+              rows > 0
+        else {
+            return []
+        }
+
+        let topRow = terminal.scrollProjection.topRow
+        let viewportRows = topRow..<(topRow + rows)
+        let firstRow = max(selection.start.row, viewportRows.lowerBound)
+        let lastRow = min(selection.end.row, viewportRows.upperBound - 1)
+        guard firstRow <= lastRow else { return [] }
+
+        var result: [RenderSelectionRun] = []
+        for streamRow in firstRow...lastRow {
+            let start = streamRow == selection.start.row ? selection.start.column : 0
+            let end = streamRow == selection.end.row ? selection.end.column : columns
+            let clampedStart = min(max(start, 0), columns)
+            let clampedEnd = min(max(end, 0), columns)
+            guard clampedStart < clampedEnd else { continue }
+            result.append(RenderSelectionRun(
+                row: streamRow - topRow,
+                startColumn: clampedStart,
+                columnCount: clampedEnd - clampedStart
+            ))
+        }
+        return result
     }
 
     private func normalizedCursor(in geometry: TerminalGeometry) -> CursorSpan? {
