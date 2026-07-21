@@ -258,6 +258,8 @@ public struct Terminal: Equatable, Sendable {
     private var isApplicationKeypadMode = false
     private var isFocusReportingMode = false
     private var isBracketedPasteMode = false
+    private var mouseTrackingMode = TerminalMouseTrackingMode.off
+    private var isSGRMouseEncodingMode = false
     private var isOriginMode = false
     private var isAutoWrapMode = true
     private var isCursorVisible = true
@@ -315,6 +317,8 @@ public struct Terminal: Equatable, Sendable {
             lineFeedNewLine: isLineFeedNewLineMode,
             focusReporting: isFocusReportingMode,
             bracketedPaste: isBracketedPasteMode,
+            mouseTracking: mouseTrackingMode,
+            sgrMouseEncoding: isSGRMouseEncodingMode,
             kittyKeyboardFlags: activeKittyKeyboardStack.last ?? 0
         )
     }
@@ -1868,6 +1872,14 @@ public struct Terminal: Equatable, Sendable {
             isCursorVisible ? 1 : 2
         case 1004:
             isFocusReportingMode ? 1 : 2
+        case 1000:
+            mouseTrackingMode == .click ? 1 : 2
+        case 1002:
+            mouseTrackingMode == .drag ? 1 : 2
+        case 1003:
+            mouseTrackingMode == .anyMotion ? 1 : 2
+        case 1006:
+            isSGRMouseEncodingMode ? 1 : 2
         case 1047, 1049:
             inactivePrimaryScreen == nil ? 2 : 1
         case 2026:
@@ -1930,6 +1942,14 @@ public struct Terminal: Equatable, Sendable {
                 isCursorVisible = enabled
             case 1004:
                 isFocusReportingMode = enabled
+            case 1000:
+                mouseTrackingMode = enabled ? .click : .off
+            case 1002:
+                mouseTrackingMode = enabled ? .drag : .off
+            case 1003:
+                mouseTrackingMode = enabled ? .anyMotion : .off
+            case 1006:
+                isSGRMouseEncodingMode = enabled
             case 2004:
                 isBracketedPasteMode = enabled
             case 2026:
@@ -2496,6 +2516,8 @@ public struct Terminal: Equatable, Sendable {
         isApplicationKeypadMode = false
         isFocusReportingMode = false
         isBracketedPasteMode = false
+        mouseTrackingMode = .off
+        isSGRMouseEncodingMode = false
         isOriginMode = false
         isAutoWrapMode = true
         isCursorVisible = true

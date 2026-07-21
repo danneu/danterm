@@ -1,4 +1,12 @@
-// Pure normalized-input policy for terminal keys, paste safety, and focus reporting.
+// Pure normalized-input policy for terminal keys, paste safety, focus, and mouse reporting.
+
+/// Child-selected mouse tracking behavior, represented as one exclusive mode.
+public enum TerminalMouseTrackingMode: Equatable, Sendable {
+    case off
+    case click
+    case drag
+    case anyMotion
+}
 
 /// Snapshot of child-controlled modes that can affect bytes sent back as user input.
 public struct TerminalInputModes: Equatable, Sendable {
@@ -12,6 +20,10 @@ public struct TerminalInputModes: Equatable, Sendable {
     public var focusReporting: Bool
     /// Enables safe-paste marker wrapping without newline normalization.
     public var bracketedPaste: Bool
+    /// Selects which mouse transitions the child receives.
+    public var mouseTracking: TerminalMouseTrackingMode
+    /// Selects SGR coordinates and release markers instead of legacy X10 bytes.
+    public var sgrMouseEncoding: Bool
     /// Contains only keyboard protocol flags DanTerm actually implements.
     public var kittyKeyboardFlags: UInt16
 
@@ -22,6 +34,8 @@ public struct TerminalInputModes: Equatable, Sendable {
         lineFeedNewLine: Bool = false,
         focusReporting: Bool = false,
         bracketedPaste: Bool = false,
+        mouseTracking: TerminalMouseTrackingMode = .off,
+        sgrMouseEncoding: Bool = false,
         kittyKeyboardFlags: UInt16 = 0
     ) {
         self.applicationCursorKeys = applicationCursorKeys
@@ -29,6 +43,8 @@ public struct TerminalInputModes: Equatable, Sendable {
         self.lineFeedNewLine = lineFeedNewLine
         self.focusReporting = focusReporting
         self.bracketedPaste = bracketedPaste
+        self.mouseTracking = mouseTracking
+        self.sgrMouseEncoding = sgrMouseEncoding
         self.kittyKeyboardFlags = kittyKeyboardFlags
     }
 
@@ -64,6 +80,49 @@ public struct TerminalKeyModifiers: OptionSet, Equatable, Sendable {
     public static let alt = Self(rawValue: 1 << 1)
     /// Selects control-byte or enhanced protocol forms.
     public static let control = Self(rawValue: 1 << 2)
+}
+
+/// The three stateful mouse buttons represented by terminal reporting protocols.
+public enum TerminalMouseButton: Int, Equatable, Sendable {
+    case left = 0
+    case middle = 1
+    case right = 2
+}
+
+/// Stateless wheel directions represented as terminal mouse buttons 4 through 7.
+public enum TerminalMouseWheelDirection: Int, Equatable, Sendable {
+    case up = 64
+    case down = 65
+    case left = 66
+    case right = 67
+}
+
+/// One encoder-level mouse transition carrying the pointed cell used in its report.
+public enum TerminalMouseReportEvent: Equatable, Sendable {
+    case move(column: Int, row: Int, modifiers: TerminalKeyModifiers = [])
+    case down(
+        TerminalMouseButton,
+        column: Int,
+        row: Int,
+        modifiers: TerminalKeyModifiers = []
+    )
+    case up(TerminalMouseButton, column: Int, row: Int, modifiers: TerminalKeyModifiers = [])
+    case wheel(
+        TerminalMouseWheelDirection,
+        column: Int,
+        row: Int,
+        modifiers: TerminalKeyModifiers = []
+    )
+}
+
+/// Explicit host-input history needed to suppress duplicate transitions and encode drag motion.
+public struct TerminalMouseTracker: Equatable, Sendable {
+    fileprivate var pressedButtons: UInt8 = 0
+    fileprivate var column = 0
+    fileprivate var row = 0
+
+    /// Creates tracker state at the protocol's initial cell with no held buttons.
+    public init() {}
 }
 
 /// Encodes one normalized key solely from its semantic identity, modifiers, and mode snapshot.
@@ -114,6 +173,107 @@ public func encodeTerminalPaste(_ text: String, modes: TerminalInputModes) -> [U
 public func encodeTerminalFocus(focused: Bool, modes: TerminalInputModes) -> [UInt8] {
     guard modes.focusReporting else { return [] }
     return Array((focused ? "\u{1B}[I" : "\u{1B}[O").utf8)
+}
+
+/// Advances explicit mouse state and emits one mode-gated X10 or SGR report.
+public func encodeTerminalMouse(
+    _ event: TerminalMouseReportEvent,
+    tracker: inout TerminalMouseTracker,
+    modes: TerminalInputModes
+) -> [UInt8] {
+    let code: Int
+    let isPressed: Bool
+    let modifiers: TerminalKeyModifiers
+
+    switch event {
+    case let .move(column, row, eventModifiers):
+        guard column != tracker.column || row != tracker.row else { return [] }
+        tracker.column = column
+        tracker.row = row
+        modifiers = eventModifiers
+
+        let heldButton = lowestPressedMouseButton(tracker.pressedButtons)
+        switch modes.mouseTracking {
+        case .drag where heldButton != nil, .anyMotion:
+            code = (heldButton?.rawValue ?? 3) + 32
+            isPressed = true
+        case .off, .click, .drag:
+            return []
+        }
+
+    case let .down(button, column, row, eventModifiers):
+        tracker.column = column
+        tracker.row = row
+        let mask = UInt8(1 << button.rawValue)
+        guard tracker.pressedButtons & mask == 0 else { return [] }
+        tracker.pressedButtons |= mask
+        guard modes.mouseTracking != .off else { return [] }
+        code = button.rawValue
+        isPressed = true
+        modifiers = eventModifiers
+
+    case let .up(button, column, row, eventModifiers):
+        tracker.column = column
+        tracker.row = row
+        let mask = UInt8(1 << button.rawValue)
+        guard tracker.pressedButtons & mask != 0 else { return [] }
+        tracker.pressedButtons &= ~mask
+        guard modes.mouseTracking != .off else { return [] }
+        code = button.rawValue
+        isPressed = false
+        modifiers = eventModifiers
+
+    case let .wheel(direction, column, row, eventModifiers):
+        tracker.column = column
+        tracker.row = row
+        guard modes.mouseTracking != .off else { return [] }
+        code = direction.rawValue
+        isPressed = true
+        modifiers = eventModifiers
+    }
+
+    return encodeMouseReport(
+        code: code | mouseModifierBits(modifiers),
+        isPressed: isPressed,
+        column: tracker.column,
+        row: tracker.row,
+        sgr: modes.sgrMouseEncoding
+    )
+}
+
+private func lowestPressedMouseButton(_ buttons: UInt8) -> TerminalMouseButton? {
+    for button in [TerminalMouseButton.left, .middle, .right] {
+        if buttons & UInt8(1 << button.rawValue) != 0 {
+            return button
+        }
+    }
+    return nil
+}
+
+private func mouseModifierBits(_ modifiers: TerminalKeyModifiers) -> Int {
+    (modifiers.contains(.shift) ? 4 : 0)
+        | (modifiers.contains(.alt) ? 8 : 0)
+        | (modifiers.contains(.control) ? 16 : 0)
+}
+
+private func encodeMouseReport(
+    code: Int,
+    isPressed: Bool,
+    column: Int,
+    row: Int,
+    sgr: Bool
+) -> [UInt8] {
+    if sgr {
+        return Array("\u{1B}[<\(code);\(column + 1);\(row + 1)\(isPressed ? "M" : "m")".utf8)
+    }
+
+    let legacyCode = isPressed ? code : 3 | (code & 0x1C)
+    return [
+        0x1B, 0x5B, 0x4D,
+        UInt8(clamping: legacyCode + 0x20),
+        UInt8(clamping: column + 0x21),
+        UInt8(clamping: row + 0x21),
+    ]
 }
 
 private func modifierParameter(_ modifiers: TerminalKeyModifiers) -> Int {
