@@ -602,7 +602,7 @@ struct TerminalPTYHostTests {
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let writeBaseline = await host.inputWrites().count
 
-        host.sendWheel(.init(rowDelta: -3))
+        host.sendWheel(.init(rowDelta: -3, column: 0, row: 0))
         let snapshot = host.fencedSnapshot()
 
         #expect(snapshot.scrollProjection.isFollowing == false)
@@ -627,7 +627,7 @@ struct TerminalPTYHostTests {
         let writeBaseline = await host.inputWrites().count
         let up = [UInt8]([0x1B, 0x4F, 0x41])
 
-        host.sendWheel(.init(rowDelta: -3))
+        host.sendWheel(.init(rowDelta: -3, column: 0, row: 0))
         let snapshot = host.fencedSnapshot()
         let writes = await host.inputWrites()
 
@@ -719,7 +719,7 @@ struct TerminalPTYHostTests {
         let enter = Array("printf '\\033[?1049h'\n".utf8)
         let enterWriteBaseline = await host.inputWrites().count
         host.send(enter)
-        host.sendWheel(.init(rowDelta: -1))
+        host.sendWheel(.init(rowDelta: -1, column: 0, row: 0))
         _ = host.fencedSnapshot()
         #expect(Array((await host.inputWrites()).dropFirst(enterWriteBaseline)) == [enter])
         #expect((await host.transitions()).contains(.scrollByRows(-1)))
@@ -730,7 +730,7 @@ struct TerminalPTYHostTests {
         let exit = Array("printf '\\033[?1049l'\n".utf8)
         let exitWriteBaseline = await host.inputWrites().count
         host.send(exit)
-        host.sendWheel(.init(rowDelta: 2))
+        host.sendWheel(.init(rowDelta: 2, column: 0, row: 0))
         _ = host.fencedSnapshot()
         #expect(Array((await host.inputWrites()).dropFirst(exitWriteBaseline)) == [
             exit,

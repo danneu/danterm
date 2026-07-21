@@ -4,6 +4,7 @@ import Cocoa
 import DanTermProtocol
 #if !DANTERM_UI_TEST
 import PaneLifecycle
+import TerminalCore
 import TerminalPaneSession
 import TerminalRenderExecution
 import TerminalRenderPlanning
@@ -13,16 +14,23 @@ import TerminalRenderPlanning
 final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession {
     private let controller: TerminalPaneSessionController
     private let callbackGate = TerminalSessionCallbackGate()
-    private var wheelAccumulator = TerminalWheelAccumulator()
+    private let wheelNormalizer = TerminalWheelNormalizer()
     private var markedText = NSMutableAttributedString()
     private var keyTextAccumulator: [String]?
     private var currentMetrics: TerminalRenderMetrics?
+    private var currentDimensions: TerminalDimensions?
+    private var controlClickIsActive = false
+    private var mouseTrackingArea: NSTrackingArea?
     private var publishedFrame: (plan: RenderFramePlan, metrics: TerminalRenderMetrics)?
     private var lastEmittedState: TerminalSessionState?
     private var lastForwardedFocus = false
     private var isTornDown = false
 
     weak var paneWrapper: PaneWrapperView?
+    /// Defaults explicit selection copies to the system pasteboard while keeping UI tests isolated.
+    var selectionPasteboard = NSPasteboard.general
+    /// Lets the UI harness observe owner-approved menu timing without entering AppKit menu tracking.
+    var paneMenuHandler: ((TerminalViewportCell) -> Void)?
 
     var hostView: NSView { self }
     var onEvent: ((TerminalSessionEvent) -> Void)? {
@@ -46,7 +54,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
             )
         )
     }
-    var hasSelection: Bool { false }
+    var hasSelection: Bool { controller.hasSelection }
     override var acceptsFirstResponder: Bool { true }
     override var isFlipped: Bool { true }
 
@@ -66,6 +74,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         }
         controller.onViewportStateChange = { [weak self] _ in
             self?.emitStateIfNeeded()
+        }
+        controller.onPaneMenu = { [weak self] cell in
+            self?.showPaneMenu(at: cell)
         }
         controller.onSessionEnded = { [weak self] result in
             onSessionEnded?(result)
@@ -107,6 +118,21 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         synchronizeGeometry()
     }
 
+    override func updateTrackingAreas() {
+        if let mouseTrackingArea {
+            removeTrackingArea(mouseTrackingArea)
+        }
+        super.updateTrackingAreas()
+        let trackingArea = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseMoved, .inVisibleRect, .activeInKeyWindow],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(trackingArea)
+        mouseTrackingArea = trackingArea
+    }
+
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
         if result {
@@ -123,13 +149,67 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
     }
 
     override func scrollWheel(with event: NSEvent) {
-        guard isTornDown == false else { return }
-        let rows = wheelAccumulator.consume(
-            delta: Double(event.scrollingDeltaY),
+        guard isTornDown == false, let cell = normalizedCell(for: event) else { return }
+        let rows = wheelNormalizer.rows(
+            delta: Self.verticalScrollDelta(for: event),
             isPrecise: event.hasPreciseScrollingDeltas,
             cellHeight: Double(state.cellHeight)
         )
-        controller.sendWheel(rows: rows)
+        controller.sendWheel(.init(
+            rowDelta: rows,
+            column: cell.column,
+            row: cell.row,
+            modifiers: Self.terminalModifiers(event.modifierFlags),
+            phase: Self.wheelPhase(for: event)
+        ))
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        controlClickIsActive = event.modifierFlags.contains(.control)
+        forwardPointerDown(event, button: controlClickIsActive ? .right : .left)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        forwardPointerUp(event, button: controlClickIsActive ? .right : .left)
+        controlClickIsActive = false
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        forwardPointerDown(event, button: .right)
+    }
+
+    override func rightMouseUp(with event: NSEvent) {
+        forwardPointerUp(event, button: .right)
+    }
+
+    override func otherMouseDown(with event: NSEvent) {
+        guard event.buttonNumber == 2 else { return }
+        forwardPointerDown(event, button: .middle)
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        guard event.buttonNumber == 2 else { return }
+        forwardPointerUp(event, button: .middle)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        forwardPointerMove(event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        forwardPointerMove(event)
+    }
+
+    override func rightMouseDragged(with event: NSEvent) {
+        forwardPointerMove(event)
+    }
+
+    override func otherMouseDragged(with event: NSEvent) {
+        forwardPointerMove(event)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        nil
     }
 
     override func keyDown(with event: NSEvent) {
@@ -273,7 +353,11 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
     func scroll(toRow row: Int) {
         controller.scroll(toTopRow: row)
     }
-    func copySelection() {}
+    func copySelection() {
+        guard let text = controller.readSelectedTextSynchronizing() else { return }
+        selectionPasteboard.clearContents()
+        selectionPasteboard.setString(text, forType: .string)
+    }
 
     /// NSResponder: routes the standard Edit > Paste action through terminal paste policy.
     @objc func paste(_ sender: Any?) {
@@ -306,6 +390,11 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
     func tearDown() {
         guard isTornDown == false else { return }
         isTornDown = true
+        paneMenuHandler = nil
+        if let mouseTrackingArea {
+            removeTrackingArea(mouseTrackingArea)
+            self.mouseTrackingArea = nil
+        }
         callbackGate.tearDown()
         controller.tearDown()
     }
@@ -328,6 +417,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
 
         let metricsChanged = metrics != currentMetrics
         currentMetrics = metrics
+        currentDimensions = dimensions
         controller.setGridDimensions(dimensions)
         if metricsChanged {
             CATransaction.begin()
@@ -363,6 +453,86 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         guard isTornDown == false, focused != lastForwardedFocus else { return }
         lastForwardedFocus = focused
         controller.sendFocus(focused)
+    }
+
+    private func normalizedCell(for event: NSEvent) -> TerminalViewportCell? {
+        guard let metrics = currentMetrics, let dimensions = currentDimensions else { return nil }
+        let point = convert(event.locationInWindow, from: nil)
+        return terminalCell(
+            at: .init(x: Double(point.x), y: Double(point.y)),
+            cellSize: .init(
+                width: Double(metrics.cellSize.width),
+                height: Double(metrics.cellSize.height)
+            ),
+            columns: dimensions.columns,
+            rows: dimensions.rows
+        )
+    }
+
+    private func forwardPointerDown(_ event: NSEvent, button: TerminalMouseButton) {
+        guard isTornDown == false, let cell = normalizedCell(for: event) else { return }
+        controller.sendPointer(.down(
+            button,
+            column: cell.column,
+            row: cell.row,
+            modifiers: Self.terminalModifiers(event.modifierFlags),
+            clickCount: event.clickCount
+        ))
+    }
+
+    private func forwardPointerUp(_ event: NSEvent, button: TerminalMouseButton) {
+        guard isTornDown == false, let cell = normalizedCell(for: event) else { return }
+        controller.sendPointer(.up(
+            button,
+            column: cell.column,
+            row: cell.row,
+            modifiers: Self.terminalModifiers(event.modifierFlags)
+        ))
+    }
+
+    private func forwardPointerMove(_ event: NSEvent) {
+        guard isTornDown == false, let cell = normalizedCell(for: event) else { return }
+        controller.sendPointer(.move(
+            column: cell.column,
+            row: cell.row,
+            modifiers: Self.terminalModifiers(event.modifierFlags)
+        ))
+    }
+
+    private func showPaneMenu(at cell: TerminalViewportCell) {
+        guard isTornDown == false else { return }
+        if let paneMenuHandler {
+            paneMenuHandler(cell)
+            return
+        }
+        guard let paneWrapper, let metrics = currentMetrics else { return }
+        let menu = paneWrapper.makePaneMenu(includeClipboard: true)
+        let point = NSPoint(
+            x: (CGFloat(cell.column) + 0.5) * metrics.cellSize.width,
+            y: (CGFloat(cell.row) + 1) * metrics.cellSize.height
+        )
+        menu.popUp(positioning: nil, at: point, in: self)
+    }
+
+    private static func wheelPhase(for event: NSEvent) -> TerminalWheelPhase {
+        if event.momentumPhase.contains(.began) { return .momentumBegan }
+        if event.momentumPhase.contains(.changed) { return .momentumChanged }
+        if event.momentumPhase.contains(.ended) || event.momentumPhase.contains(.cancelled) {
+            return .momentumEnded
+        }
+        if event.phase.contains(.began) { return .began }
+        if event.phase.contains(.changed) { return .changed }
+        if event.phase.contains(.ended) || event.phase.contains(.cancelled) { return .ended }
+        return .standalone
+    }
+
+    private static func verticalScrollDelta(for event: NSEvent) -> Double {
+        let vertical = Double(event.scrollingDeltaY)
+        // AppKit projects Shift-wheel line ticks onto the horizontal axis before dispatch.
+        if event.modifierFlags.contains(.shift), vertical == 0 {
+            return Double(event.scrollingDeltaX)
+        }
+        return vertical
     }
 
     private static func cgColor(_ color: RenderColor) -> CGColor {

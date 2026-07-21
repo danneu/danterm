@@ -621,7 +621,7 @@ struct TerminalPaneSessionControllerTests {
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let baseline = await host.inputWrites().count
 
-        controller.sendWheel(rows: -2)
+        controller.sendWheel(.init(rowDelta: -2, column: 0, row: 0))
         _ = host.fencedSnapshot()
 
         let up = [UInt8]([0x1B, 0x5B, 0x41])

@@ -41,7 +41,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/MenuCommandPolicy.swift" \
         "$SCRIPT_DIR/app/ClipboardWriteSurface.swift" \
         "$SCRIPT_DIR/app/TerminalBackend.swift" \
-        "$SCRIPT_DIR/lib/TerminalPTY/Sources/TerminalPaneSession/TerminalWheelAccumulator.swift" \
+        "$SCRIPT_DIR/lib/TerminalPTY/Sources/TerminalPaneSession/TerminalWheelNormalizer.swift" \
         "$SCRIPT_DIR/tests-ui/SwiftTerminalSessionViewTestShim.swift" \
         "$SCRIPT_DIR/app/SwiftTerminalSessionView.swift" \
         "$SCRIPT_DIR/app/PaneSplitView.swift" \

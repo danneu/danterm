@@ -485,4 +485,4 @@ select and Copy pastes elsewhere.
 - [x] 3. `test(engine): adapt neutral mouse fixtures and replay`
 - [x] 4. `feat(renderer): render terminal selections`
 - [x] 5. `feat(pty): route mouse and wheel input through the pane owner`
-- [ ] 6. `feat(app): add native mouse selection reporting and copy`
+- [x] 6. `feat(app): add native mouse selection reporting and copy`

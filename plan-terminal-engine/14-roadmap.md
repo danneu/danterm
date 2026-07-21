@@ -205,6 +205,11 @@ mean.
     decisions, native composition precedence, safe paste, and focus reporting.
     See the
     [implementation plan](../plans/impl/2026-07-20-2150-mode-aware-terminal-input.md).
+  - [x] **Slice 7: Mouse reporting, native selection, and explicit copy.** Adds
+    deterministic SGR mouse capture, owner-routed Shift overrides, selection
+    highlighting, native pointer and wheel gestures, and fenced clipboard copy.
+    See the
+    [implementation plan](../plans/impl/2026-07-21-0730-mouse-reporting-selection-copy.md).
   - [ ] [Terminal core](04-terminal-core.md) completes the accepted baseline control,
     screen, mode, style, query, and recovery behavior.
   - [ ] [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md) completes

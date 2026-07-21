@@ -23,16 +23,6 @@ package enum TerminalPTYAppliedTransition: Equatable, Sendable {
     case scrollToBottom
 }
 
-/// Carries semantic wheel rows so the owner can select screen routing and cursor mode atomically.
-public struct TerminalWheelIntent: Equatable, Sendable {
-    /// Signed local navigation, where negative rows move toward retained history.
-    public let rowDelta: Int
-    /// Leaves both screen selection and mode-aware arrow encoding to the serialized owner.
-    public init(rowDelta: Int) {
-        self.rowDelta = rowDelta
-    }
-}
-
 /// Test-support view of input and resize effects applied on the shared owner queue.
 enum TerminalPTYSubmittedTransition: Equatable, Sendable {
     case input([UInt8])
@@ -252,16 +242,6 @@ public actor TerminalPTYHost {
     nonisolated public func clearSelection() {
         queue.async { [weak self] in
             self?.assumeIsolated { owner in owner.applyClearSelection() }
-        }
-    }
-
-    /// Routes wheel rows against the active screen at the point the owner executes the intent.
-    nonisolated public func sendWheel(_ intent: TerminalWheelIntent) {
-        guard intent.rowDelta != 0 else { return }
-        queue.async { [weak self] in
-            self?.assumeIsolated { owner in
-                owner.applyWheel(.init(rowDelta: Double(intent.rowDelta), column: 0, row: 0))
-            }
         }
     }
 

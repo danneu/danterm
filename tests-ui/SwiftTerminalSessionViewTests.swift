@@ -1,32 +1,208 @@
-// UI-harness coverage for wheel consumption and scrollbar routing in the Swift pane.
+// UI-harness coverage for native pointer, wheel, copy, and scrollbar routing in the Swift pane.
 import Cocoa
 import CoreGraphics
+
+@MainActor private var retainedSwiftPaneWindows: [NSWindow] = []
 
 @MainActor
 func swiftTerminalSessionViewTests() {
     print("SwiftTerminalSessionView")
 
-    uiTest("mounted pane consumes one wheel event and forwards normalized rows once") {
+    uiTest("mounted pane forwards fractional wheel metadata once") {
         // Intent: the Swift pane converts a line wheel event into one owner-side row intent
         //   and terminates responder-chain handling at the pane.
         // Why it exists: the enclosing terminal scroll view forwards wheel events to the
         //   pane, so calling super would bounce the same event back through the scroll view.
         // Scenario: a user wheels upward by two line units over a mounted Swift pane.
         let controller = TerminalPaneSessionController()
-        let pane = SwiftTerminalSessionView(controller: controller)
+        let pane = makeMountedPane(controller: controller)
         let enclosingScrollView = WheelBounceSentinelScrollView()
-        let documentView = NSView()
-        enclosingScrollView.documentView = documentView
-        documentView.addSubview(pane)
-        let event = try makeScrollWheelEvent(units: .line, deltaY: 2)
+        pane.nextResponder = enclosingScrollView
+        let event = try makeScrollWheelEvent(
+            units: .line,
+            deltaY: 2,
+            location: .init(x: 17, y: 125),
+            modifiers: [.shift, .control],
+            phase: .began
+        )
 
         pane.scrollWheel(with: event)
 
-        try uiExpect(controller.wheelRows == [-6], "unexpected wheel rows: \(controller.wheelRows)")
+        try uiExpect(controller.wheelEvents == [
+            .init(
+                rowDelta: -6,
+                column: 2,
+                row: 0,
+                modifiers: [.shift, .control],
+                phase: .began
+            ),
+        ], "unexpected wheel event: \(controller.wheelEvents)")
         try uiExpect(
             enclosingScrollView.scrollWheelCalls == 0,
             "wheel event bounced to the enclosing scroll view"
         )
+    }
+
+    uiTest("pointer callbacks normalize cells buttons modifiers and click counts") {
+        // Intent: every native left-button transition becomes one platform-neutral pointer event.
+        // Why it exists: view-side routing or point-space forwarding would bypass owner policy.
+        // Scenario: a Shift-double-click drag crosses cells and releases beyond the viewport.
+        let controller = TerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+
+        pane.mouseDown(with: try makeMouseEvent(
+            type: .leftMouseDown,
+            location: .init(x: 17, y: 125),
+            modifiers: [.shift],
+            clickCount: 2
+        ))
+        pane.mouseDragged(with: try makeMouseEvent(
+            type: .leftMouseDragged,
+            location: .init(x: 31, y: 111),
+            modifiers: [.shift]
+        ))
+        pane.mouseUp(with: try makeMouseEvent(
+            type: .leftMouseUp,
+            location: .init(x: 200, y: -40),
+            modifiers: [.shift]
+        ))
+
+        try uiExpect(controller.pointerEvents == [
+            .down(.left, column: 2, row: 2, modifiers: [.shift], clickCount: 2),
+            .move(column: 3, row: 3, modifiers: [.shift]),
+            .up(.left, column: 9, row: 9, modifiers: [.shift]),
+        ], "pointer normalization diverged: \(controller.pointerEvents)")
+    }
+
+    uiTest("wheel direct and momentum phases reach the owner unchanged") {
+        // Intent: precise fractional motion and its direct/momentum lifecycle reach the owner.
+        // Why it exists: route latching and remainder ownership both depend on these boundaries.
+        // Scenario: a trackpad gesture ends its direct phase and continues with momentum.
+        let controller = TerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+
+        for phase in [NSEvent.Phase.began, .changed, .ended] {
+            pane.scrollWheel(with: try makeScrollWheelEvent(
+                units: .pixel,
+                deltaY: 4,
+                location: .init(x: 9, y: 143),
+                phase: phase
+            ))
+        }
+        for phase in [NSEvent.Phase.began, .changed, .ended] {
+            pane.scrollWheel(with: try makeScrollWheelEvent(
+                units: .pixel,
+                deltaY: 4,
+                location: .init(x: 9, y: 143),
+                momentumPhase: phase
+            ))
+        }
+
+        try uiExpect(controller.wheelEvents.map(\.phase) == [
+            .began, .changed, .ended, .momentumBegan, .momentumChanged, .momentumEnded,
+        ], "wheel phase normalization diverged: \(controller.wheelEvents)")
+        try uiExpect(controller.wheelEvents.allSatisfy { $0.rowDelta == -0.25 },
+                     "precise wheel motion was quantized in the view")
+    }
+
+    uiTest("automatic menus stay suppressed and owner menu requests arrive after right up") {
+        // Intent: only the serialized owner can authorize a terminal-surface context menu.
+        // Why it exists: AppKit's automatic down-time lookup races child mouse-capture modes.
+        // Scenario: an uncaptured right-click opens after up, then a captured click does not reopen.
+        let controller = TerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+        var menuCells: [TerminalViewportCell] = []
+        pane.paneMenuHandler = { menuCells.append($0) }
+        let down = try makeMouseEvent(type: .rightMouseDown, location: .init(x: 17, y: 125))
+        let up = try makeMouseEvent(type: .rightMouseUp, location: .init(x: 17, y: 125))
+
+        try uiExpect(pane.menu(for: down) == nil, "AppKit menu lookup was not suppressed")
+        pane.rightMouseDown(with: down)
+        try uiExpect(menuCells.isEmpty, "pane menu opened before button-up")
+        pane.rightMouseUp(with: up)
+        try uiExpect(menuCells == [.init(column: 2, row: 2)], "pane menu did not follow owner up")
+
+        controller.allowsPaneMenu = false
+        pane.rightMouseDown(with: down)
+        pane.rightMouseUp(with: up)
+        try uiExpect(menuCells.count == 1, "captured right-click reopened the dismissed menu")
+    }
+
+    uiTest("control click uses the owner right-button lifecycle") {
+        // Intent: macOS Control-click is normalized as a right-button gesture before owner policy.
+        // Why it exists: AppKit otherwise asks for a menu before delivering the mouse lifecycle.
+        // Scenario: a shell Control-click opens the pane menu only after its synthesized right up.
+        let controller = TerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+        var menuCells: [TerminalViewportCell] = []
+        pane.paneMenuHandler = { menuCells.append($0) }
+        let down = try makeMouseEvent(
+            type: .leftMouseDown,
+            location: .init(x: 9, y: 143),
+            modifiers: [.control]
+        )
+        let up = try makeMouseEvent(
+            type: .leftMouseUp,
+            location: .init(x: 9, y: 143),
+            modifiers: [.control]
+        )
+
+        try uiExpect(pane.menu(for: down) == nil, "control-click menu lookup was not suppressed")
+        pane.mouseDown(with: down)
+        pane.mouseUp(with: up)
+
+        try uiExpect(controller.pointerEvents == [
+            .down(.right, column: 1, row: 1, modifiers: [.control], clickCount: 1),
+            .up(.right, column: 1, row: 1, modifiers: [.control]),
+        ], "control-click escaped the right-button owner lifecycle")
+        try uiExpect(menuCells == [.init(column: 1, row: 1)], "control-click menu was not deferred")
+    }
+
+    uiTest("explicit copy fences selection and hasSelection stays cache-only") {
+        // Intent: Copy fences pending selection work while menu enablement reads only cached state.
+        // Why it exists: asynchronous drag consumption must not put stale text on the pasteboard.
+        // Scenario: a selection ends immediately before the user invokes Copy.
+        let controller = TerminalPaneSessionController()
+        controller.selectedTextOnFence = "alpha"
+        let pane = makeMountedPane(controller: controller)
+        let pasteboard = NSPasteboard(name: .init("danterm.swift-selection-test"))
+        pasteboard.clearContents()
+        pane.selectionPasteboard = pasteboard
+
+        try uiExpect(pane.hasSelection == false, "selection cache unexpectedly fenced the owner")
+        pane.mouseDown(with: try makeMouseEvent(
+            type: .leftMouseDown,
+            location: .init(x: 1, y: 159)
+        ))
+        pane.mouseUp(with: try makeMouseEvent(
+            type: .leftMouseUp,
+            location: .init(x: 17, y: 159)
+        ))
+        pane.copySelection()
+
+        try uiExpect(controller.synchronizedSelectionReads == 1, "copy did not fence the owner")
+        try uiExpect(pasteboard.string(forType: .string) == "alpha", "copy missed finalized text")
+        try uiExpect(pane.hasSelection, "cached selection did not refresh after fenced copy")
+    }
+
+    uiTest("tracking area delivers mouse moves to the normalized adapter") {
+        // Intent: the pane continuously forwards normalized hover motion without a mode mirror.
+        // Why it exists: any-motion capture can begin from child output between native callbacks.
+        // Scenario: an Option-modified pointer move lands over a visible terminal cell.
+        let controller = TerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+        pane.updateTrackingAreas()
+
+        try uiExpect(pane.trackingAreas.contains { $0.options.contains(.mouseMoved) },
+                     "pane installed no mouse-move tracking area")
+        pane.mouseMoved(with: try makeMouseEvent(
+            type: .mouseMoved,
+            location: .init(x: 17, y: 125),
+            modifiers: [.option]
+        ))
+        try uiExpect(controller.pointerEvents == [
+            .move(column: 2, row: 2, modifiers: [.alt]),
+        ], "mouse move did not reach the owner adapter")
     }
 
     uiTest("pane maps viewport state and scrollbar commands through the controller") {
@@ -184,7 +360,11 @@ private final class SwiftPaneStateObserver: TerminalSessionStateObserver {
 
 private func makeScrollWheelEvent(
     units: CGScrollEventUnit,
-    deltaY: Int32
+    deltaY: Int32,
+    location: CGPoint = .zero,
+    modifiers: NSEvent.ModifierFlags = [],
+    phase: NSEvent.Phase = [],
+    momentumPhase: NSEvent.Phase = []
 ) throws -> NSEvent {
     guard let cgEvent = CGEvent(
         scrollWheelEvent2Source: nil,
@@ -193,10 +373,80 @@ private func makeScrollWheelEvent(
         wheel1: deltaY,
         wheel2: 0,
         wheel3: 0
-    ), let event = NSEvent(cgEvent: cgEvent) else {
+    ) else {
         throw UITestFailure(message: "could not synthesize a wheel event")
     }
+    cgEvent.location = location
+    cgEvent.flags = cgEventFlags(modifiers)
+    cgEvent.setIntegerValueField(.scrollWheelEventScrollPhase, value: scrollPhaseCode(phase))
+    cgEvent.setIntegerValueField(
+        .scrollWheelEventMomentumPhase,
+        value: momentumPhaseCode(momentumPhase)
+    )
+    guard let event = NSEvent(cgEvent: cgEvent) else {
+        throw UITestFailure(message: "could not bridge a wheel event")
+    }
     return event
+}
+
+private func makeMouseEvent(
+    type: NSEvent.EventType,
+    location: NSPoint,
+    modifiers: NSEvent.ModifierFlags = [],
+    clickCount: Int = 1
+) throws -> NSEvent {
+    guard let event = NSEvent.mouseEvent(
+        with: type,
+        location: location,
+        modifierFlags: modifiers,
+        timestamp: 1,
+        windowNumber: 0,
+        context: nil,
+        eventNumber: 1,
+        clickCount: clickCount,
+        pressure: 1
+    ) else {
+        throw UITestFailure(message: "could not synthesize \(type)")
+    }
+    return event
+}
+
+private func cgEventFlags(_ modifiers: NSEvent.ModifierFlags) -> CGEventFlags {
+    var flags: CGEventFlags = []
+    if modifiers.contains(.shift) { flags.insert(.maskShift) }
+    if modifiers.contains(.control) { flags.insert(.maskControl) }
+    if modifiers.contains(.option) { flags.insert(.maskAlternate) }
+    return flags
+}
+
+private func scrollPhaseCode(_ phase: NSEvent.Phase) -> Int64 {
+    if phase.contains(.began) { return 1 }
+    if phase.contains(.changed) { return 2 }
+    if phase.contains(.ended) || phase.contains(.cancelled) { return 4 }
+    return 0
+}
+
+private func momentumPhaseCode(_ phase: NSEvent.Phase) -> Int64 {
+    if phase.contains(.began) { return 1 }
+    if phase.contains(.changed) { return 2 }
+    if phase.contains(.ended) || phase.contains(.cancelled) { return 3 }
+    return 0
+}
+
+@discardableResult
+@MainActor
+private func makeMountedPane(controller: TerminalPaneSessionController) -> SwiftTerminalSessionView {
+    let pane = SwiftTerminalSessionView(controller: controller)
+    pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+    mountInTestWindow(pane, frame: pane.frame)
+    return pane
+}
+
+@MainActor
+private func mountInTestWindow(_ view: NSView, frame: NSRect) {
+    let window = NSWindow(contentRect: frame, styleMask: [], backing: .buffered, defer: false)
+    window.contentView = view
+    retainedSwiftPaneWindows.append(window)
 }
 
 private func makeKeyEvent(

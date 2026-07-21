@@ -31,6 +31,7 @@ let package = Package(
                 "GhosttyKit",
                 "DanTermProtocol",
                 .product(name: "PaneLifecycle", package: "TerminalPTY"),
+                .product(name: "TerminalCore", package: "TerminalCore"),
                 .product(name: "TerminalCoreRecording", package: "TerminalCore"),
                 .product(name: "TerminalPaneSession", package: "TerminalPTY"),
                 .product(name: "TerminalRenderPlanning", package: "TerminalCore"),

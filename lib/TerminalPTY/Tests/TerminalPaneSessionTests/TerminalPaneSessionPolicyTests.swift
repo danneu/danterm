@@ -5,34 +5,29 @@ import Testing
 
 /// Pins the pure policies the AppKit adapter will call without platform state.
 struct TerminalPaneSessionPolicyTests {
-    @Test("precise wheel deltas accumulate row fractions in both directions")
-    func preciseWheelAccumulation() {
-        var accumulator = TerminalWheelAccumulator()
+    @Test("precise wheel deltas preserve fractional rows for owner-side quantization")
+    func preciseWheelNormalization() {
+        let normalizer = TerminalWheelNormalizer()
 
-        #expect(accumulator.consume(delta: 4, isPrecise: true, cellHeight: 10) == 0)
-        #expect(accumulator.consume(delta: 7, isPrecise: true, cellHeight: 10) == -1)
-        #expect(accumulator.consume(delta: -5, isPrecise: true, cellHeight: 10) == 0)
-        #expect(accumulator.consume(delta: -7, isPrecise: true, cellHeight: 10) == 1)
+        #expect(normalizer.rows(delta: 4, isPrecise: true, cellHeight: 10) == -0.4)
+        #expect(normalizer.rows(delta: -7, isPrecise: true, cellHeight: 10) == 0.7)
     }
 
-    @Test("line wheel deltas use the pinned scale and preserve remainder")
+    @Test("line wheel deltas use the pinned scale without retaining view-side remainder")
     func lineWheelScaling() {
-        var accumulator = TerminalWheelAccumulator(lineRowsPerUnit: 3)
+        let normalizer = TerminalWheelNormalizer(lineRowsPerUnit: 3)
 
-        #expect(accumulator.consume(delta: 0.5, isPrecise: false, cellHeight: 0) == -1)
-        #expect(accumulator.consume(delta: 0.5, isPrecise: false, cellHeight: 0) == -2)
-        #expect(accumulator.consume(delta: -1, isPrecise: false, cellHeight: 0) == 3)
+        #expect(normalizer.rows(delta: 0.5, isPrecise: false, cellHeight: 0) == -1.5)
+        #expect(normalizer.rows(delta: -1, isPrecise: false, cellHeight: 0) == 3)
     }
 
-    @Test("wheel normalization rejects invalid geometry and treats momentum as ordinary deltas")
+    @Test("wheel normalization rejects invalid geometry and non-finite deltas")
     func wheelNormalizationGuards() {
-        var direct = TerminalWheelAccumulator()
-        var momentum = TerminalWheelAccumulator()
+        let normalizer = TerminalWheelNormalizer()
 
-        #expect(direct.consume(delta: 15, isPrecise: true, cellHeight: 10) == -1)
-        #expect(momentum.consume(delta: 15, isPrecise: true, cellHeight: 10) == -1)
-        #expect(direct.consume(delta: 1, isPrecise: true, cellHeight: 0) == 0)
-        #expect(direct.consume(delta: .infinity, isPrecise: false, cellHeight: 10) == 0)
+        #expect(normalizer.rows(delta: 15, isPrecise: true, cellHeight: 10) == -1.5)
+        #expect(normalizer.rows(delta: 1, isPrecise: true, cellHeight: 0) == 0)
+        #expect(normalizer.rows(delta: .infinity, isPrecise: false, cellHeight: 10) == 0)
     }
 
     @Test("grid sizing floors each axis and clamps to terminal minima")

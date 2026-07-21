@@ -69,18 +69,101 @@ struct TerminalPaneViewportState: Equatable {
     let projection: TerminalScrollProjection
 }
 
+struct TerminalViewportCell: Equatable {
+    let column: Int
+    let row: Int
+}
+
+enum TerminalPointerEvent: Equatable {
+    case down(
+        TerminalMouseButton,
+        column: Int,
+        row: Int,
+        modifiers: TerminalKeyModifiers = [],
+        clickCount: Int = 1
+    )
+    case up(
+        TerminalMouseButton,
+        column: Int,
+        row: Int,
+        modifiers: TerminalKeyModifiers = []
+    )
+    case move(column: Int, row: Int, modifiers: TerminalKeyModifiers = [])
+}
+
+enum TerminalWheelPhase: Equatable {
+    case began
+    case changed
+    case ended
+    case momentumBegan
+    case momentumChanged
+    case momentumEnded
+    case standalone
+}
+
+struct TerminalWheelEvent: Equatable {
+    let rowDelta: Double
+    let column: Int
+    let row: Int
+    let modifiers: TerminalKeyModifiers
+    let phase: TerminalWheelPhase
+
+    init(
+        rowDelta: Double,
+        column: Int,
+        row: Int,
+        modifiers: TerminalKeyModifiers = [],
+        phase: TerminalWheelPhase = .standalone
+    ) {
+        self.rowDelta = rowDelta
+        self.column = column
+        self.row = row
+        self.modifiers = modifiers
+        self.phase = phase
+    }
+}
+
+func terminalCell(
+    at point: TerminalPoint,
+    cellSize: TerminalCellSize,
+    columns: Int,
+    rows: Int
+) -> TerminalViewportCell? {
+    guard cellSize.width > 0, cellSize.height > 0, columns > 0, rows > 0 else { return nil }
+    return TerminalViewportCell(
+        column: min(max(Int((point.x / cellSize.width).rounded(.down)), 0), columns - 1),
+        row: min(max(Int((point.y / cellSize.height).rounded(.down)), 0), rows - 1)
+    )
+}
+
+struct TerminalPoint {
+    let x: Double
+    let y: Double
+}
+
+struct TerminalCellSize {
+    let width: Double
+    let height: Double
+}
+
 @MainActor
 final class TerminalPaneSessionController {
     var onPlan: ((RenderFramePlan) -> Void)?
     var onSessionEnded: ((PaneLifecycleResult) -> Void)?
     var onViewportStateChange: ((TerminalPaneViewportState) -> Void)?
+    var onPaneMenu: ((TerminalViewportCell) -> Void)?
     var currentPlan: RenderFramePlan?
     var viewportState: TerminalPaneViewportState
-    private(set) var wheelRows: [Int] = []
     private(set) var scrolledTopRows: [Int] = []
     private(set) var textInputs: [String] = []
     private(set) var inputBytes: [[UInt8]] = []
     private(set) var focusChanges: [Bool] = []
+    private(set) var pointerEvents: [TerminalPointerEvent] = []
+    private(set) var wheelEvents: [TerminalWheelEvent] = []
+    private(set) var synchronizedSelectionReads = 0
+    var allowsPaneMenu = true
+    var cachedHasSelection = false
+    var selectedTextOnFence: String?
     var inputModes = TerminalInputModes.default
 
     init(viewportState: TerminalPaneViewportState = .init(
@@ -102,7 +185,19 @@ final class TerminalPaneSessionController {
         let bytes = encodeTerminalFocus(focused: focused, modes: inputModes)
         if bytes.isEmpty == false { inputBytes.append(bytes) }
     }
-    func sendWheel(rows: Int) { wheelRows.append(rows) }
+    func sendWheel(_ event: TerminalWheelEvent) { wheelEvents.append(event) }
+    func sendPointer(_ event: TerminalPointerEvent) {
+        pointerEvents.append(event)
+        if allowsPaneMenu, case let .up(.right, column, row, _) = event {
+            onPaneMenu?(.init(column: column, row: row))
+        }
+    }
+    var hasSelection: Bool { cachedHasSelection }
+    func readSelectedTextSynchronizing() -> String? {
+        synchronizedSelectionReads += 1
+        cachedHasSelection = selectedTextOnFence != nil
+        return selectedTextOnFence
+    }
     func scroll(toTopRow row: Int) { scrolledTopRows.append(row) }
     func setVisible(_ visible: Bool) {}
     func synchronizeState() {}

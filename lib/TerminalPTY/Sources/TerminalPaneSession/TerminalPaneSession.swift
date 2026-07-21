@@ -193,12 +193,6 @@ public final class TerminalPaneSessionController {
         host.scrollToBottom()
     }
 
-    /// Carries semantic wheel rows for owner-side screen routing and cursor-mode encoding.
-    public func sendWheel(rows: Int) {
-        guard isTornDown == false, rows != 0 else { return }
-        host.sendWheel(.init(rowDelta: rows))
-    }
-
     /// Forwards fractional wheel input and gesture boundaries for owner-side routing.
     public func sendWheel(_ event: TerminalWheelEvent) {
         guard isTornDown == false else { return }
