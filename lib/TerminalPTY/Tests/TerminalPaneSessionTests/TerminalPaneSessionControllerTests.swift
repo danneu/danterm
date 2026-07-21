@@ -53,6 +53,79 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
+    @Test("clipboard delivery bypasses hidden rendering and precedes frame publication", .timeLimit(.minutes(1)))
+    func clipboardDeliveryIsUngated() async throws {
+        // Intent: every drained write reaches the session callback before any frame from that consume.
+        // Why it exists: visibility and damage gates must not suppress grid-silent semantic effects.
+        // Scenario: a hidden pane receives a remote OSC 52 write and synchronously fences it.
+        let host = try makeHost()
+        let command = "printf '__READY__'; read ignored; printf '\\033]52;c;aGVsbG8=\\007'; exec sleep 30"
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: command),
+            isVisible: false
+        )
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        var events: [String] = []
+        controller.onClipboardWrite = { events.append("clipboard:\($0)") }
+        controller.onFrame = { _ in events.append("frame") }
+
+        controller.sendText("continue\n")
+        #expect(await host.waitForOutput(containing: Array("\u{1B}]52;c;aGVsbG8=\u{7}".utf8)))
+        controller.synchronizeState()
+        var yields = 0
+        while events.isEmpty, yields < 10_000 {
+            yields += 1
+            await Task.yield()
+        }
+
+        #expect(events == ["clipboard:hello"])
+        controller.synchronizeState()
+        #expect(events == ["clipboard:hello"])
+        controller.tearDown()
+        await host.close()
+    }
+
+    @Test("clipboard delivery bypasses synchronized-output frame suppression", .timeLimit(.minutes(1)))
+    func clipboardDeliveryBypassesSynchronizedOutput() async throws {
+        // Intent: DEC 2026 delays rendering without delaying a completed clipboard write.
+        // Why it exists: both channels share one consume, but only presentation is gateable.
+        // Scenario: a visible TUI writes OSC 52 inside a synchronized update, then commits it.
+        let host = try makeHost()
+        let command = "stty -echo; printf '\\137\\137READY\\137\\137'; read first; printf '\\033[?2026hSYNC\\033]52;c;aGVsbG8=\\007'; read second; printf '\\033[?2026l'; exec sleep 30"
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: command)
+        )
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        controller.synchronizeState()
+        var events: [String] = []
+        controller.onClipboardWrite = { events.append("clipboard:\($0)") }
+        controller.onFrame = { _ in events.append("frame") }
+
+        controller.sendText("first\n")
+        #expect(await host.waitForOutput(containing: Array("\u{1B}]52;c;aGVsbG8=\u{7}".utf8)))
+        controller.synchronizeState()
+        var yields = 0
+        while events.isEmpty, yields < 10_000 {
+            yields += 1
+            await Task.yield()
+        }
+        #expect(events == ["clipboard:hello"])
+
+        controller.sendText("second\n")
+        #expect(await host.waitForOutput(containing: Array("\u{1B}[?2026l".utf8)))
+        controller.synchronizeState()
+        yields = 0
+        while events.count < 2, yields < 10_000 {
+            yields += 1
+            await Task.yield()
+        }
+        #expect(events == ["clipboard:hello", "frame"])
+        controller.tearDown()
+        await host.close()
+    }
+
     @Test("synchronized output unions suppressed damage into its published frame", .timeLimit(.minutes(1)))
     func synchronizedOutputAccumulatesDamage() async throws {
         // Intent: damage from every DEC 2026-suppressed state reaches the first

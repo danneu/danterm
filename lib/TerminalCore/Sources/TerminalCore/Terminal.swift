@@ -282,6 +282,7 @@ public struct Terminal: Equatable, Sendable {
     private var clusterContext: ClusterContext?
     private var inputStream = TerminalInputStream()
     private var replyBytes: [UInt8] = []
+    private var pendingClipboardWrite: String?
     private var primaryKittyKeyboardStack: [UInt16] = []
     private var alternateKittyKeyboardStack: [UInt16] = []
     private var evictedRowCount = 0
@@ -339,11 +340,27 @@ public struct Terminal: Equatable, Sendable {
         replyBytes
     }
 
+    /// Reports whether a frame consumer has redraw work or a completed semantic write to drain.
+    public var hasPendingConsumerWork: Bool {
+        damage != .none || pendingClipboardWrite != nil
+    }
+
+    /// Compares only the accumulators whose changes require a frame consumer wakeup.
+    public func hasSamePendingConsumerWork(as other: Terminal) -> Bool {
+        damage == other.damage && pendingClipboardWrite == other.pendingClipboardWrite
+    }
+
     /// Transfers all ordered terminal replies to one consumer without a parallel output path.
     public mutating func drainReplyBytes() -> [UInt8] {
         let drained = replyBytes
         replyBytes.removeAll(keepingCapacity: true)
         return drained
+    }
+
+    /// Transfers the newest completed clipboard write while preserving empty-string clears.
+    public mutating func drainPendingClipboardWrite() -> String? {
+        defer { pendingClipboardWrite = nil }
+        return pendingClipboardWrite
     }
 
     /// Transfers all accumulated logical redraw work to one frame consumer.
@@ -458,8 +475,113 @@ public struct Terminal: Equatable, Sendable {
                 dispatchEscape(sequence)
             case let .csi(sequence):
                 dispatchCSI(sequence)
+            case let .osc(payload):
+                dispatchOSC(payload)
             }
             recordDamage(since: before)
+        }
+    }
+
+    private mutating func dispatchOSC(_ payload: [UInt8]) {
+        guard let selectorEnd = payload.firstIndex(of: 0x3B), selectorEnd > payload.startIndex,
+              parseOSCSelector(payload[..<selectorEnd]) == 52
+        else { return }
+        let fields = payload.index(after: selectorEnd)..<payload.endIndex
+        guard let targetEnd = payload[fields].firstIndex(of: 0x3B) else { return }
+        let target = payload[fields.lowerBound..<targetEnd]
+        guard target.allSatisfy({ byte in
+            byte == 0x63 || byte == 0x70 || byte == 0x71 || byte == 0x73
+                || (0x30...0x37).contains(byte)
+        }) else { return }
+        let dataStart = payload.index(after: targetEnd)
+        let encoded = payload[dataStart...]
+        guard encoded.elementsEqual([0x3F]) == false,
+              let decoded = decodeBase64(encoded, maximumByteCount: 1_048_576)
+        else { return }
+        let value = String(decoding: decoded, as: UTF8.self)
+        guard Array(value.utf8) == decoded else { return }
+        pendingClipboardWrite = value
+    }
+
+    private func parseOSCSelector(_ bytes: ArraySlice<UInt8>) -> Int? {
+        var value = 0
+        for byte in bytes {
+            guard (0x30...0x39).contains(byte) else { return nil }
+            let multiplied = value.multipliedReportingOverflow(by: 10)
+            guard multiplied.overflow == false else { return nil }
+            let added = multiplied.partialValue.addingReportingOverflow(Int(byte - 0x30))
+            guard added.overflow == false else { return nil }
+            value = added.partialValue
+        }
+        return value
+    }
+
+    private func decodeBase64(
+        _ encoded: ArraySlice<UInt8>,
+        maximumByteCount: Int
+    ) -> [UInt8]? {
+        guard encoded.count.isMultiple(of: 4) else { return nil }
+        var decoded: [UInt8] = []
+        decoded.reserveCapacity(min(maximumByteCount, encoded.count / 4 * 3))
+        var index = encoded.startIndex
+        while index < encoded.endIndex {
+            let aIndex = index
+            let bIndex = encoded.index(after: aIndex)
+            let cIndex = encoded.index(after: bIndex)
+            let dIndex = encoded.index(after: cIndex)
+            let next = encoded.index(after: dIndex)
+            guard let a = base64Value(encoded[aIndex]), let b = base64Value(encoded[bIndex]) else {
+                return nil
+            }
+            let cByte = encoded[cIndex]
+            let dByte = encoded[dIndex]
+            guard appendDecodedBase64Quartet(
+                a: a,
+                b: b,
+                cByte: cByte,
+                dByte: dByte,
+                isFinal: next == encoded.endIndex,
+                maximumByteCount: maximumByteCount,
+                to: &decoded
+            ) else { return nil }
+            index = next
+        }
+        return decoded
+    }
+
+    private func appendDecodedBase64Quartet(
+        a: UInt8,
+        b: UInt8,
+        cByte: UInt8,
+        dByte: UInt8,
+        isFinal: Bool,
+        maximumByteCount: Int,
+        to decoded: inout [UInt8]
+    ) -> Bool {
+        decoded.append((a << 2) | (b >> 4))
+        if cByte == 0x3D {
+            guard isFinal, dByte == 0x3D, b & 0x0F == 0 else { return false }
+        } else {
+            guard let c = base64Value(cByte) else { return false }
+            decoded.append((b << 4) | (c >> 2))
+            if dByte == 0x3D {
+                guard isFinal, c & 0x03 == 0 else { return false }
+            } else {
+                guard let d = base64Value(dByte) else { return false }
+                decoded.append((c << 6) | d)
+            }
+        }
+        return decoded.count <= maximumByteCount
+    }
+
+    private func base64Value(_ byte: UInt8) -> UInt8? {
+        switch byte {
+        case 0x41...0x5A: byte - 0x41
+        case 0x61...0x7A: byte - 0x61 + 26
+        case 0x30...0x39: byte - 0x30 + 52
+        case 0x2B: 62
+        case 0x2F: 63
+        default: nil
         }
     }
 

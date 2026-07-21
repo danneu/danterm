@@ -72,6 +72,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         controller.onFrame = { [weak self] frame in
             self?.publish(frame)
         }
+        controller.onClipboardWrite = { [weak self] text in
+            self?.writeClipboard(text)
+        }
         controller.onViewportStateChange = { [weak self] _ in
             self?.emitStateIfNeeded()
         }
@@ -355,6 +358,10 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
     }
     func copySelection() {
         guard let text = controller.readSelectedTextSynchronizing() else { return }
+        writeClipboard(text)
+    }
+
+    private func writeClipboard(_ text: String) {
         selectionPasteboard.clearContents()
         selectionPasteboard.setString(text, forType: .string)
     }

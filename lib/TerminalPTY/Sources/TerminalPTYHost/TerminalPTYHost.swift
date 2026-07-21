@@ -16,11 +16,14 @@ public struct TerminalPTYFrameState: Equatable, Sendable {
     public let terminal: Terminal
     /// All redraw work accumulated since the previous frame-state read.
     public let damage: TerminalDamage
+    /// The newest completed OSC 52 write drained in the same owner transaction.
+    public let clipboardWrite: String?
 
     /// Keeps the drained accumulator separate so terminal equality remains presentation-based.
-    public init(terminal: Terminal, damage: TerminalDamage) {
+    public init(terminal: Terminal, damage: TerminalDamage, clipboardWrite: String?) {
         self.terminal = terminal
         self.damage = damage
+        self.clipboardWrite = clipboardWrite
     }
 }
 
@@ -124,6 +127,7 @@ public actor TerminalPTYHost {
     private var updateSignalFinished = false
     private var emittedUpdateSignalCount = 0
     private var updateSignalsAfterTermination = 0
+    private var consumerWorkWasSignaled = false
 
     /// Binds Swift actor jobs to the FIFO queue that also delivers every system callback.
     nonisolated public var unownedExecutor: UnownedSerialExecutor {
@@ -314,7 +318,13 @@ public actor TerminalPTYHost {
 
     private func drainedFrameState() -> TerminalPTYFrameState {
         let damage = terminal.drainDamage()
-        return TerminalPTYFrameState(terminal: terminal, damage: damage)
+        let clipboardWrite = terminal.drainPendingClipboardWrite()
+        consumerWorkWasSignaled = false
+        return TerminalPTYFrameState(
+            terminal: terminal,
+            damage: damage,
+            clipboardWrite: clipboardWrite
+        )
     }
 
     /// Starts close and returns its final accepted terminal state in one owner-queue fence.
@@ -772,7 +782,12 @@ public actor TerminalPTYHost {
             }
             enqueueInput(replies)
         }
-        if terminal != previousTerminal { markUpdatePending() }
+        if terminal.hasPendingConsumerWork,
+           consumerWorkWasSignaled == false
+            || terminal.hasSamePendingConsumerWork(as: previousTerminal) == false
+        {
+            markUpdatePending()
+        }
         recentOutput.append(contentsOf: bytes)
         if recentOutput.count > 64 * 1024 {
             recentOutput.removeFirst(recentOutput.count - 64 * 1024)
@@ -995,6 +1010,9 @@ public actor TerminalPTYHost {
             return
         }
         updatePending = true
+        if terminal.hasPendingConsumerWork {
+            consumerWorkWasSignaled = true
+        }
     }
 
     private func publishPendingUpdate() {

@@ -34,10 +34,10 @@ struct TerminalFixtureTests {
         }
     }
 
-    @Test("libvterm manifest classifies every case from the thirty-five selected source files")
+    @Test("libvterm manifest classifies every case from the thirty-six selected source files")
     func libvtermManifestCoverage() throws {
         // Intent: pin the adoption ledger to every upstream case heading in
-        //   the thirty-five source files selected through the current engine slices.
+        //   the thirty-six source files selected through the current engine slices.
         // Why it exists: fixtures alone make deferred, superseded, and
         //   deliberately incompatible cases disappear from review.
         // Scenario: the pinned libvterm corpus is upgraded or the neutral
@@ -66,6 +66,9 @@ struct TerminalFixtureTests {
             "DanTerm follows VT500 string states: C0 is absorbed inside strings and BEL terminates only OSC.",
             "DanTerm emits strict xterm legacy encodings where pinned libvterm emits unsolicited fixterms CSI-u for modified letters, Space, and Tab.",
             "DanTerm reports DECRQM 0 for unsupported UTF-8 1005 and rxvt 1015 mouse encodings instead of libvterm's reset-state 2.",
+            "DanTerm emits one complete OSC 52 clipboard write at termination instead of streaming partial selection-set callbacks.",
+            "DanTerm rejects invalid OSC 52 base64 without clearing the clipboard.",
+            "DanTerm denies OSC 52 read queries without emitting clipboard contents.",
         ])
         #expect(Set(manifest.files.map(\.path)) == Set(Self.expectedCases.keys))
         for file in manifest.files {
@@ -125,10 +128,14 @@ struct TerminalFixtureTests {
         var interactionState = TerminalInteractionState()
         var replyBytes: [UInt8] = []
         var inputBytes: [UInt8] = []
+        var clipboardWrites: [String] = []
 
         func feed(_ bytes: [UInt8]) {
             terminal.feed(bytes)
             replyBytes.append(contentsOf: terminal.drainReplyBytes())
+            if let write = terminal.drainPendingClipboardWrite() {
+                clipboardWrites.append(write)
+            }
         }
 
         for (eventIndex, event) in fixture.events.enumerated() {
@@ -176,10 +183,12 @@ struct TerminalFixtureTests {
                     expectations[eventIndex].expectation,
                     against: terminal,
                     replyBytes: replyBytes,
-                    inputBytes: inputBytes
+                    inputBytes: inputBytes,
+                    clipboardWrites: clipboardWrites
                 )
                 replyBytes.removeAll(keepingCapacity: true)
                 inputBytes.removeAll(keepingCapacity: true)
+                clipboardWrites.removeAll(keepingCapacity: true)
             }
         }
         return terminal
@@ -189,7 +198,8 @@ struct TerminalFixtureTests {
         _ expectation: FixtureExpectation?,
         against terminal: Terminal,
         replyBytes: [UInt8],
-        inputBytes: [UInt8]
+        inputBytes: [UInt8],
+        clipboardWrites: [String]
     ) throws {
         let expectation = try #require(expectation)
         if let expectedReplyBytes = expectation.replyBytes {
@@ -197,6 +207,9 @@ struct TerminalFixtureTests {
         }
         if let expectedInputBytes = expectation.inputBytes {
             #expect(inputBytes == expectedInputBytes)
+        }
+        if let expectedClipboardWrites = expectation.clipboardWrites {
+            #expect(clipboardWrites == expectedClipboardWrites)
         }
         if let presentation = expectation.cursorPresentation {
             #expect(terminal.presentation.isCursorVisible == presentation.isVisible)
@@ -456,6 +469,24 @@ struct TerminalFixtureTests {
             "DECRQSS on SGR RGB8 colours",
             "S8C1T on DSR",
         ],
+        "t/40state_selection.test": [
+            "Set clipboard; final chunk len 4",
+            "Set clipboard; final chunk len 3",
+            "Set clipboard; final chunk len 2",
+            "Set clipboard; split between chunks",
+            "Set clipboard; split within chunk",
+            "Set clipboard; empty first chunk",
+            "Set clipboard; empty final chunk",
+            "Set clipboard; longer than buffer",
+            "Clear clipboard",
+            "Set invalid data clears and ignores",
+            "Query clipboard",
+            "Send clipboard; final chunk len 4",
+            "Send clipboard; final chunk len 3",
+            "Send clipboard; final chunk len 2",
+            "Send clipboard; split between chunks",
+            "Send clipboard; split within chunk",
+        ],
         "t/25state_input.test": [
             "Unmodified ASCII", "Ctrl modifier on ASCII letters",
             "Alt modifier on ASCII letters", "Ctrl-Alt modifier on ASCII letters",
@@ -635,6 +666,7 @@ private struct FixtureEvent: Decodable {
 private struct FixtureExpectation: Decodable {
     let replyBytes: [UInt8]?
     let inputBytes: [UInt8]?
+    let clipboardWrites: [String]?
     let cursorPresentation: FixtureCursorPresentation?
     let viewportText: String?
     let cellKinds: [[String]]?

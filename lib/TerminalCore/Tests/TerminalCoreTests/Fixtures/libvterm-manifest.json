@@ -12,9 +12,34 @@
     "DanTerm retains grapheme scalars exactly instead of truncating after five combining marks.",
     "DanTerm follows VT500 string states: C0 is absorbed inside strings and BEL terminates only OSC.",
     "DanTerm emits strict xterm legacy encodings where pinned libvterm emits unsolicited fixterms CSI-u for modified letters, Space, and Tab.",
-    "DanTerm reports DECRQM 0 for unsupported UTF-8 1005 and rxvt 1015 mouse encodings instead of libvterm's reset-state 2."
+    "DanTerm reports DECRQM 0 for unsupported UTF-8 1005 and rxvt 1015 mouse encodings instead of libvterm's reset-state 2.",
+    "DanTerm emits one complete OSC 52 clipboard write at termination instead of streaming partial selection-set callbacks.",
+    "DanTerm rejects invalid OSC 52 base64 without clearing the clipboard.",
+    "DanTerm denies OSC 52 read queries without emitting clipboard contents."
   ],
   "files": [
+    {
+      "path": "t/40state_selection.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        { "name": "Set clipboard; final chunk len 4", "disposition": "adopted", "rationale": "state-selection.json pins the complete decoded write." },
+        { "name": "Set clipboard; final chunk len 3", "disposition": "adopted", "rationale": "state-selection.json pins one-padding decoding." },
+        { "name": "Set clipboard; final chunk len 2", "disposition": "adopted", "rationale": "state-selection.json pins two-padding decoding including newline." },
+        { "name": "Set clipboard; split between chunks", "disposition": "adapted", "rationale": "state-selection.json emits no partial effect and one complete write at termination." },
+        { "name": "Set clipboard; split within chunk", "disposition": "adapted", "rationale": "state-selection.json emits no partial effect and one complete write at termination." },
+        { "name": "Set clipboard; empty first chunk", "disposition": "adapted", "rationale": "state-selection.json retains the incomplete sequence without an intermediate effect." },
+        { "name": "Set clipboard; empty final chunk", "disposition": "adapted", "rationale": "state-selection.json delays the complete write until ST." },
+        { "name": "Set clipboard; longer than buffer", "disposition": "adapted", "rationale": "state-selection.json produces one complete write rather than callback-sized fragments." },
+        { "name": "Clear clipboard", "disposition": "adopted", "rationale": "state-selection.json pins empty decoded data as a real clearing write." },
+        { "name": "Set invalid data clears and ignores", "disposition": "adapted", "rationale": "DanTerm rejects invalid base64 without applying libvterm's clearing effect." },
+        { "name": "Query clipboard", "disposition": "adapted", "rationale": "DanTerm silently denies reads with no write and no reply bytes." },
+        { "name": "Send clipboard; final chunk len 4", "disposition": "out-of-scope", "rationale": "OSC 52 reads and read replies are deliberately denied." },
+        { "name": "Send clipboard; final chunk len 3", "disposition": "out-of-scope", "rationale": "OSC 52 reads and read replies are deliberately denied." },
+        { "name": "Send clipboard; final chunk len 2", "disposition": "out-of-scope", "rationale": "OSC 52 reads and read replies are deliberately denied." },
+        { "name": "Send clipboard; split between chunks", "disposition": "out-of-scope", "rationale": "OSC 52 reads and read replies are deliberately denied." },
+        { "name": "Send clipboard; split within chunk", "disposition": "out-of-scope", "rationale": "OSC 52 reads and read replies are deliberately denied." }
+      ]
+    },
     {
       "path": "t/62screen_damage.test",
       "licenseNotice": "LICENSE.libvterm.txt",

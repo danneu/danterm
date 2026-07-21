@@ -492,6 +492,7 @@ public struct NeutralTerminalRecording: Codable, Equatable, Sendable {
             case .feed(let bytes):
                 terminal.feed(bytes)
                 _ = terminal.drainReplyBytes()
+                _ = terminal.drainPendingClipboardWrite()
             case .input, .paste, .focus:
                 break
             case .mouse(let mouse):

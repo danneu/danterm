@@ -187,8 +187,8 @@ struct CSIParserTests {
         }
     }
 
-    @Test("discarded string payload length does not change parser state")
-    func stringPayloadsRemainStateless() {
+    @Test("only OSC string payload length participates in parser state")
+    func onlyOSCPayloadsAreRetained() {
         let prefixes: [[UInt8]] = [
             [0x1B, 0x5D],
             [0x1B, 0x50, 0x71],
@@ -197,12 +197,12 @@ struct CSIParserTests {
             [0x1B, 0x5F],
         ]
 
-        for prefix in prefixes {
+        for (index, prefix) in prefixes.enumerated() {
             var one = TerminalInputStream()
             var many = TerminalInputStream()
             _ = one.feed(prefix + [0x78])
             _ = many.feed(prefix + Array(repeating: 0x78, count: 4096))
-            #expect(one == many)
+            #expect((one == many) == (index != 0))
         }
     }
 

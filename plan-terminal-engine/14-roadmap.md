@@ -214,6 +214,10 @@ mean.
     bounded core-owned row damage, gated pane accumulation, partial AppKit
     invalidation, and corpus-wide retained-plan equivalence. See the
     [implementation plan](../plans/impl/2026-07-21-1005-logical-damage-redraw.md).
+  - [x] **Slice 9: Bounded OSC 52 clipboard writes.** Adds bounded OSC
+    accumulation, strict write-only decoding, owner-drained newest-wins
+    delivery, and the direct AppKit pasteboard boundary. See the
+    [implementation plan](../plans/impl/2026-07-21-1123-bounded-osc-52-clipboard-writes.md).
   - [ ] [Terminal core](04-terminal-core.md) completes the accepted baseline control,
     screen, mode, style, query, and recovery behavior.
   - [ ] [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md) completes

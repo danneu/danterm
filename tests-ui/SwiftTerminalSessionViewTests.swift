@@ -185,6 +185,22 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(pane.hasSelection, "cached selection did not refresh after fenced copy")
     }
 
+    uiTest("OSC 52 writes and empty clears reach the injected pasteboard") {
+        // Intent: delivered terminal clipboard effects write only at the AppKit boundary.
+        // Why it exists: presentation gating and top-level model routing must not own OSC 52 data.
+        // Scenario: a remote program writes text, then clears the general clipboard selection.
+        let controller = TerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+        let pasteboard = NSPasteboard(name: .init("danterm.swift-osc52-test"))
+        pasteboard.clearContents()
+        pane.selectionPasteboard = pasteboard
+
+        controller.emitClipboardWrite("hello")
+        try uiExpect(pasteboard.string(forType: .string) == "hello", "OSC 52 write was lost")
+        controller.emitClipboardWrite("")
+        try uiExpect(pasteboard.string(forType: .string) == "", "empty OSC 52 did not clear")
+    }
+
     uiTest("tracking area delivers mouse moves to the normalized adapter") {
         // Intent: the pane continuously forwards normalized hover motion without a mode mirror.
         // Why it exists: any-motion capture can begin from child output between native callbacks.

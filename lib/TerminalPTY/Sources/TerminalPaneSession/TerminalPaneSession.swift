@@ -56,6 +56,9 @@ public final class TerminalPaneSessionController {
     /// Receives complete retained frames with coalesced logical damage on the main actor.
     public var onFrame: ((TerminalPaneFrame) -> Void)?
 
+    /// Delivers completed clipboard writes before any visibility or render-planning gate.
+    public var onClipboardWrite: ((String) -> Void)?
+
     /// Receives the first child-originated lifecycle result on the main actor.
     public var onSessionEnded: ((PaneLifecycleResult) -> Void)?
 
@@ -315,6 +318,7 @@ public final class TerminalPaneSessionController {
         cachedTerminal = host.beginCloseAndSnapshot()
         isTornDown = true
         onFrame = nil
+        onClipboardWrite = nil
         onSessionEnded = nil
         onViewportStateChange = nil
         onPaneMenu = nil
@@ -336,6 +340,9 @@ public final class TerminalPaneSessionController {
     ) {
         cachedTerminal = frameState.terminal
         pendingDamage.formUnion(frameState.damage)
+        if let clipboardWrite = frameState.clipboardWrite {
+            onClipboardWrite?(clipboardWrite)
+        }
         emitViewportStateIfNeeded()
         if case .some(.exited) = result {
             didChildExit = true
@@ -420,6 +427,7 @@ public final class TerminalPaneSessionController {
     }
 
     private func planIfNeeded(_ terminal: Terminal) {
+        guard pendingDamage != .none else { return }
         guard terminal != lastPlannedTerminal else { return }
         let presentation = terminal.presentation
         guard presentation.isSynchronizedOutputActive == false || didChildExit else { return }

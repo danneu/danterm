@@ -12,7 +12,7 @@ import TerminalCoreRecording
 struct TerminalPTYHostTests {
     @Test("frame-state reads drain damage without changing ordinary snapshots")
     func frameStateReadsDrainDamage() async throws {
-        let host = try makeHost(captureTransitions: false)
+        let host = try makeHost()
 
         let first = host.fencedFrameState()
         let second = host.fencedFrameState()
@@ -20,6 +20,61 @@ struct TerminalPTYHostTests {
         #expect(first.damage == .full)
         #expect(second.damage == .none)
         #expect(await host.snapshot() == second.terminal)
+        await host.close()
+    }
+
+    @Test("OSC 52 wakes and drains once without sending query data to the child", .timeLimit(.minutes(1)))
+    func clipboardWriteFrameStateAndReadDenial() async throws {
+        // Intent: owner framing drains completed clipboard writes independently from replies.
+        // Why it exists: grid-silent effects need a wakeup, while reads must never expose clipboard data.
+        // Scenario: a child writes OSC 52, asks to read it, and remains alive for inspection.
+        let host = try makeHost()
+        _ = host.fencedFrameState()
+        let command = "printf '__READY__'; sleep 0.1; printf '\\033]52;c;aGVsbG8=\\007\\033]52;c;?\\007'; exec sleep 30"
+        await host.start(makeLaunchInput(command: command))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        _ = host.fencedFrameState()
+
+        var clipboardWrite: String?
+        for await _ in host.updates {
+            let state = await host.frameState()
+            if state.clipboardWrite != nil {
+                clipboardWrite = state.clipboardWrite
+                break
+            }
+        }
+
+        #expect(clipboardWrite == "hello")
+        #expect(host.fencedFrameState().clipboardWrite == nil)
+        #expect(await host.replyWrites() == [])
+        await host.close()
+    }
+
+    @Test("incomplete OSC 52 stays idle until grid-silent termination", .timeLimit(.minutes(1)))
+    func incompleteClipboardWriteStaysIdle() async throws {
+        // Intent: retained OSC bytes alone produce neither a host wakeup nor a drained effect.
+        // Why it exists: whole-Terminal inequality includes parser state and is too broad for work.
+        // Scenario: a child splits one clipboard write across two temporally separate chunks.
+        let host = try makeHost(captureTransitions: false)
+        _ = host.fencedFrameState()
+        let command = "printf '\\137\\137READY\\137\\137'; sleep 0.2; printf '\\033]52;c;aGVs'; sleep 0.2; printf 'bG8=\\007'; exec sleep 30"
+        await host.start(makeLaunchInput(command: command))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        _ = host.fencedFrameState()
+        let baseline = (await host.resourceSnapshot()).emittedUpdateSignalCount
+
+        #expect(await host.waitForOutput(containing: Array("\u{1B}]52;c;aGVs".utf8)))
+        #expect((await host.resourceSnapshot()).emittedUpdateSignalCount == baseline)
+        let incomplete = host.fencedFrameState()
+        #expect(incomplete.damage == .none)
+        #expect(incomplete.clipboardWrite == nil)
+
+        #expect(await host.waitForOutput(containing: Array("bG8=\u{7}".utf8)))
+        #expect((await host.resourceSnapshot()).emittedUpdateSignalCount == baseline + 1)
+        let complete = host.fencedFrameState()
+        #expect(complete.damage == .none)
+        #expect(complete.clipboardWrite == "hello")
+        #expect(host.fencedFrameState().clipboardWrite == nil)
         await host.close()
     }
 

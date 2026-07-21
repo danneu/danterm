@@ -102,6 +102,8 @@ struct TerminalInputStreamTests {
             expected.append(csi)
         } else if bytes[1...].starts(with: [0x1B, 0x37]) {
             expected.append(.escape(0x37))
+        } else if bytes[1...].starts(with: [0x1B, 0x5D]) {
+            expected.append(.osc(Array("0;x".utf8)))
         } else if bytes.contains(0x5C) {
             expected.append(.escape(0x5C))
         }
@@ -129,7 +131,7 @@ struct TerminalInputStreamTests {
             0x42,
         ])
 
-        #expect(actions == [.print("A"), .print("B")])
+        #expect(actions == [.print("A"), .osc(Array("0;x".utf8)), .print("B")])
     }
 
     @Test("C0 controls execute inside ESC and CSI sequences")
@@ -169,7 +171,11 @@ struct TerminalInputStreamTests {
 
         let actions = stream.feed(bytes)
 
-        #expect(actions == [.escape(0x5C), .print("A")])
+        if bytes[1] == 0x5D {
+            #expect(actions == [.osc([0x78]), .print("A")])
+        } else {
+            #expect(actions == [.escape(0x5C), .print("A")])
+        }
     }
 
     @Test("bare ESC finals surface without interpreting their meaning")
@@ -218,7 +224,7 @@ struct TerminalInputStreamTests {
                     final: 0x6D
                 ))]
             ),
-            C1Fixture(bytes: [0x9D, 0x78, 0x07], actions: []),
+            C1Fixture(bytes: [0x9D, 0x78, 0x07], actions: [.osc([0x78])]),
             C1Fixture(bytes: [0x80], actions: [.execute(0x80)]),
             C1Fixture(bytes: [0x91], actions: [.execute(0x91)]),
             C1Fixture(bytes: [0x99], actions: [.execute(0x99)]),

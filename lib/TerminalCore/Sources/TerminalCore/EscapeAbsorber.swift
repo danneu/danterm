@@ -6,6 +6,7 @@ enum EscapeEvent: Equatable, Sendable {
     case escape(UInt8)
     case escapeSequence(EscapeSequence)
     case csi(CSISequence)
+    case osc([UInt8])
 }
 
 /// Preserves an ESC intermediate and final when terminal dispatch depends on both.
@@ -39,11 +40,13 @@ struct EscapeAbsorber: Equatable, Sendable {
         case dcsPassthrough
         case dcsIgnore
         case oscString
+        case oscEscape
         case sosPmApcString
     }
 
     private static let parameterCapacity = 24
     private static let intermediateCapacity = 4
+    private static let oscPayloadCapacity = 2 * 1_024 * 1_024
 
     private var state = State.ground
     private var parameters: [UInt16] = []
@@ -51,6 +54,8 @@ struct EscapeAbsorber: Equatable, Sendable {
     private var intermediates: [UInt8] = []
     private var parameterAccumulator: UInt16 = 0
     private var hasParameterDigits = false
+    private var oscPayload: [UInt8] = []
+    private var oscPayloadOverflowed = false
 
     /// Distinguishes raw sequence bytes from ground-state bytes that require UTF-8 decoding.
     var isGround: Bool { state == .ground }
@@ -73,10 +78,17 @@ struct EscapeAbsorber: Equatable, Sendable {
             state = .ground
             return .execute(byte)
         case 0x9C:
+            if state == .oscString || state == .oscEscape {
+                return dispatchOSC()
+            }
             clearCollection()
             state = .ground
             return nil
         case 0x1B:
+            if state == .oscString {
+                state = .oscEscape
+                return nil
+            }
             clearCollection()
             state = .escape
             return nil
@@ -274,10 +286,20 @@ struct EscapeAbsorber: Equatable, Sendable {
 
         case .oscString:
             if byte == 0x07 {
-                clearCollection()
-                state = .ground
+                return dispatchOSC()
+            }
+            if (0x20...0x7E).contains(byte) || (0xA0...0xFF).contains(byte) {
+                collectOSC(byte)
             }
             return nil
+
+        case .oscEscape:
+            if byte == 0x5C {
+                return dispatchOSC()
+            }
+            clearCollection()
+            state = .escape
+            return consume(byte)
         }
     }
 
@@ -287,6 +309,8 @@ struct EscapeAbsorber: Equatable, Sendable {
         intermediates.removeAll(keepingCapacity: true)
         parameterAccumulator = 0
         hasParameterDigits = false
+        oscPayload.removeAll(keepingCapacity: true)
+        oscPayloadOverflowed = false
     }
 
     private mutating func collectIntermediate(_ byte: UInt8) {
@@ -326,6 +350,22 @@ struct EscapeAbsorber: Equatable, Sendable {
             intermediates: intermediates,
             final: final
         ))
+    }
+
+    private mutating func collectOSC(_ byte: UInt8) {
+        guard oscPayloadOverflowed == false else { return }
+        guard oscPayload.count < Self.oscPayloadCapacity else {
+            oscPayloadOverflowed = true
+            return
+        }
+        oscPayload.append(byte)
+    }
+
+    private mutating func dispatchOSC() -> EscapeEvent? {
+        let event = oscPayloadOverflowed ? nil : EscapeEvent.osc(oscPayload)
+        clearCollection()
+        state = .ground
+        return event
     }
 
     private func isExecutableC0(_ byte: UInt8) -> Bool {

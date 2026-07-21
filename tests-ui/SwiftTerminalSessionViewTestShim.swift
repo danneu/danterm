@@ -18,6 +18,25 @@ struct RenderTheme {
 
 struct RenderFramePlan {
     let defaultBackground: RenderColor
+    let columns = 10
+    let rows = 10
+}
+
+struct TerminalDamage: Equatable {
+    let isFull: Bool
+    let rows: Set<Int>
+
+    init(isFull: Bool = false, rows: Set<Int> = []) {
+        self.isFull = isFull
+        self.rows = rows
+    }
+
+    static let none = TerminalDamage()
+}
+
+struct TerminalPaneFrame {
+    let plan: RenderFramePlan
+    let damage: TerminalDamage
 }
 
 struct TerminalDimensions: Equatable {
@@ -148,7 +167,8 @@ struct TerminalCellSize {
 
 @MainActor
 final class TerminalPaneSessionController {
-    var onPlan: ((RenderFramePlan) -> Void)?
+    var onFrame: ((TerminalPaneFrame) -> Void)?
+    var onClipboardWrite: ((String) -> Void)?
     var onSessionEnded: ((PaneLifecycleResult) -> Void)?
     var onViewportStateChange: ((TerminalPaneViewportState) -> Void)?
     var onPaneMenu: ((TerminalViewportCell) -> Void)?
@@ -210,5 +230,9 @@ final class TerminalPaneSessionController {
     func emitViewportState(_ state: TerminalPaneViewportState) {
         viewportState = state
         onViewportStateChange?(state)
+    }
+
+    func emitClipboardWrite(_ text: String) {
+        onClipboardWrite?(text)
     }
 }

@@ -7,6 +7,7 @@ enum TerminalStreamAction: Equatable, Sendable {
     case escape(UInt8)
     case escapeSequence(EscapeSequence)
     case csi(CSISequence)
+    case osc([UInt8])
 }
 
 /// Owns all pending ingestion state so feeds remain deterministic and value-semantic.
@@ -31,6 +32,8 @@ struct TerminalInputStream: Equatable, Sendable {
                     actions.append(.escapeSequence(sequence))
                 case let .csi(sequence):
                     actions.append(.csi(sequence))
+                case let .osc(payload):
+                    actions.append(.osc(payload))
                 }
             }
         }
