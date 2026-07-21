@@ -3114,6 +3114,7 @@ public struct Terminal: Equatable, Sendable {
     private mutating func advanceToNextRow(preservingWrapClaim: Bool = false) {
         let region = activeScrollRegion
         if cursor.row == region.upperBound - 1 {
+            damage.formUnion(TerminalDamage(rows: Set(region)))
             moveAndFillRows(
                 in: region,
                 by: -1,

@@ -16,6 +16,28 @@
   ],
   "files": [
     {
+      "path": "t/62screen_damage.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        { "name": "Putglyph", "disposition": "superseded", "rationale": "TerminalDamageTests pins row damage for printing while the corpus overlay property proves the public rendered result." },
+        { "name": "Erase", "disposition": "superseded", "rationale": "TerminalDamageTests pins bounded erase damage and existing erase fixtures pin the public cells." },
+        { "name": "Scroll damages entire line in two chunks", "disposition": "superseded", "rationale": "edit-characters.json pins insertion residue and every fixture event now proves damage-overlay equivalence without adopting callback chunks." },
+        { "name": "Scroll down damages entire screen in two chunks", "disposition": "superseded", "rationale": "scroll-up-down.json pins the public screen result and the corpus overlay property proves sufficient row damage." },
+        { "name": "Altscreen damages entire area", "disposition": "adapted", "rationale": "screen-damage.json pins complete damage-equivalent alternate-screen entry and exit through public plans and cells." },
+        { "name": "Scroll invokes moverect but not damage", "disposition": "out-of-scope", "rationale": "DanTerm deliberately redraws row damage and has no moverect or scroll-blit callback topology." },
+        { "name": "Merge to cells", "disposition": "out-of-scope", "rationale": "Cell-granular merge policy is narrower than DanTerm's deliberately row-granular damage vocabulary." },
+        { "name": "Merge entire rows", "disposition": "superseded", "rationale": "DanTerm's row damage is canonical by construction and TerminalDamageTests pins bounded union behavior." },
+        { "name": "Merge entire screen", "disposition": "out-of-scope", "rationale": "Selectable damage-merge modes are libvterm callback policy rather than public terminal behavior." },
+        { "name": "Merge entire screen with moverect", "disposition": "out-of-scope", "rationale": "Selectable screen merging and moverect callbacks are both outside DanTerm's retained-plan renderer contract." },
+        { "name": "Merge scroll", "disposition": "superseded", "rationale": "scroll-controls.json and the corpus overlay property pin scrolling content and sufficient bounded damage without callback ordering." },
+        { "name": "Merge scroll with damage", "disposition": "superseded", "rationale": "Existing scroll fixtures pin retained content while the corpus property composes row damage across each feed." },
+        { "name": "Merge scroll with damage past region", "disposition": "superseded", "rationale": "scroll-region-linefeed.json pins bounded-region residue and the corpus property proves its logical damage coverage." },
+        { "name": "Damage entirely outside scroll region", "disposition": "superseded", "rationale": "scroll-region fixtures retain content outside the region and the corpus proof detects any undamaged changed row." },
+        { "name": "Damage overlapping scroll region", "disposition": "superseded", "rationale": "The region edit fixtures plus corpus overlay equivalence provide a stronger public-state proof than callback rectangles." },
+        { "name": "Merge scroll*2 with damage", "disposition": "adapted", "rationale": "screen-damage.json preserves the DCH-plus-scroll screen residue while replacing moverect and callback merge assertions with public cells and plans." }
+      ]
+    },
+    {
       "path": "t/17state_mouse.test",
       "licenseNotice": "LICENSE.libvterm.txt",
       "cases": [

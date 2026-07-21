@@ -256,7 +256,7 @@ live pane still renders output, selection, browsing, and resize correctly
 - [x] 1. feat(engine): add bounded logical damage accumulation
 - [x] 2. feat(pty): carry damage through gated pane commits
 - [x] 3. feat(renderer): redraw only damaged terminal rows
-- [ ] 4. test(engine): adopt damage fixtures and close roadmap gates
+- [x] 4. test(engine): adopt damage fixtures and close roadmap gates
 
 ## Implementation notes
 
@@ -268,3 +268,6 @@ live pane still renders output, selection, browsing, and resize correctly
   the plan-only callback until the renderer slice moves the AppKit consumer.
   This keeps the PTY commit independently buildable without prematurely changing
   view invalidation behavior.
+- The corpus-wide overlay proof exposed line-feed scrolling as the one grid move
+  that intentionally bypassed inspection invalidation and therefore omitted its
+  moved rows from damage. The scroll path now records its active region directly.

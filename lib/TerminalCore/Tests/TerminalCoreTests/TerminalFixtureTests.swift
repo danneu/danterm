@@ -34,10 +34,10 @@ struct TerminalFixtureTests {
         }
     }
 
-    @Test("libvterm manifest classifies every case from the thirty-four selected source files")
+    @Test("libvterm manifest classifies every case from the thirty-five selected source files")
     func libvtermManifestCoverage() throws {
         // Intent: pin the adoption ledger to every upstream case heading in
-        //   the thirty-four source files selected through the current engine slices.
+        //   the thirty-five source files selected through the current engine slices.
         // Why it exists: fixtures alone make deferred, superseded, and
         //   deliberately incompatible cases disappear from review.
         // Scenario: the pinned libvterm corpus is upgraded or the neutral
@@ -261,6 +261,24 @@ struct TerminalFixtureTests {
     }
 
     private static let expectedCases: [String: Set<String>] = [
+        "t/62screen_damage.test": [
+            "Putglyph",
+            "Erase",
+            "Scroll damages entire line in two chunks",
+            "Scroll down damages entire screen in two chunks",
+            "Altscreen damages entire area",
+            "Scroll invokes moverect but not damage",
+            "Merge to cells",
+            "Merge entire rows",
+            "Merge entire screen",
+            "Merge entire screen with moverect",
+            "Merge scroll",
+            "Merge scroll with damage",
+            "Merge scroll with damage past region",
+            "Damage entirely outside scroll region",
+            "Damage overlapping scroll region",
+            "Merge scroll*2 with damage",
+        ],
         "t/17state_mouse.test": [
             "DECRQM on with mouse off",
             "Mouse in simple button report mode",

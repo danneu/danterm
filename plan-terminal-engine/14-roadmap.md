@@ -210,14 +210,20 @@ mean.
     highlighting, native pointer and wheel gestures, and fenced clipboard copy.
     See the
     [implementation plan](../plans/impl/2026-07-21-0730-mouse-reporting-selection-copy.md).
+  - [x] **Slice 8: Logical damage and damage-aware redraw equivalence.** Adds
+    bounded core-owned row damage, gated pane accumulation, partial AppKit
+    invalidation, and corpus-wide retained-plan equivalence. See the
+    [implementation plan](../plans/impl/2026-07-21-1005-logical-damage-redraw.md).
   - [ ] [Terminal core](04-terminal-core.md) completes the accepted baseline control,
     screen, mode, style, query, and recovery behavior.
   - [ ] [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md) completes
     selection/search/viewport anchors, primary- and alternate-screen resize
     behavior, and the fixed 10 MiB scrollback contract.
-  - [ ] Reflow preserves locally scrolled viewport anchoring across width and
+  - [x] Reflow preserves locally scrolled viewport anchoring across width and
     height changes once [Input and interaction](08-input-interaction.md) provides
-    viewport-offset and interaction state.
+    viewport-offset and interaction state. Audit judgment: existing
+    `resizePreservesBrowsingAnchor`, `outputPreservesBrowsingAnchorAndContent`,
+    and `evictionClampsBrowsingAnchor` tests cover resize, output, and eviction.
   - [ ] [Inspection, search, and recovery](06-inspection-recovery.md) preserves the
     characterized viewport/full-history, logical-line, selection, search, pane
     read, export, recovery text, and event-driven recovery-freshness behavior
@@ -227,7 +233,9 @@ mean.
     composition, terminal keys, mouse reporting, selection, safe paste,
     local wheel/scrollbar history navigation, clipboard writes, links, font
     fallback, colors, cursor behavior, and correct display scaling.
-  - [ ] Logical damage and full redraw produce the same visible state.
+  - [x] Logical damage and full redraw produce the same visible state. Slice 8
+    proves every neutral event by retained-plan overlay and styled output at the
+    executor-pixel seam, including resize and alternate-screen cases.
   - [ ] Every external case family assigned through Milestone 6 in
     [External terminal test research](../docs/research/1-external-tests.md) has
     an adopted, adapted, superseded, or out-of-scope disposition; every
