@@ -218,6 +218,10 @@ mean.
     accumulation, strict write-only decoding, owner-drained newest-wins
     delivery, and the direct AppKit pasteboard boundary. See the
     [implementation plan](../plans/impl/2026-07-21-1123-bounded-osc-52-clipboard-writes.md).
+  - [x] **Slice 10: OSC 8 hyperlinks and safe web links.** Adds bounded OSC 8
+    metadata, pure link resolution, Cmd-hover presentation, click-time safe
+    web activation, and neutral Alacritty hyperlink evidence. See the
+    [implementation plan](../plans/impl/2026-07-21-1243-osc8-hyperlinks-safe-web-links.md).
   - [ ] [Terminal core](04-terminal-core.md) completes the accepted baseline control,
     screen, mode, style, query, and recovery behavior.
   - [ ] [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md) completes

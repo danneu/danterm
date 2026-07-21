@@ -470,4 +470,10 @@ stream of distinct OSC 8 opens and confirm the pane stays responsive.
 - [x] 1. Add bounded OSC 8 hyperlink state and pure link resolution
 - [x] 2. Add hover, activation policy, renderer, and pane-owner plumbing
 - [x] 3. Add AppKit Cmd-hover and safe URL opening
-- [ ] 4. Add Alacritty hyperlink fixture provenance and roadmap entry
+- [x] 4. Add Alacritty hyperlink fixture provenance and roadmap entry
+
+## Follow Up
+
+- Audit the remaining Milestone 6 input/renderer and external case-family
+  closure bullets at `plan-terminal-engine/14-roadmap.md:239` and
+  `plan-terminal-engine/14-roadmap.md:247` now that the links slice has landed.

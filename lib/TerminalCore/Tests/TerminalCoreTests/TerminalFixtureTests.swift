@@ -83,23 +83,40 @@ struct TerminalFixtureTests {
 
     private func fixtureURLs() throws -> [URL] {
         let root = try #require(Bundle.module.resourceURL)
-            .appending(path: "Fixtures/libvterm", directoryHint: .isDirectory)
-        return try FileManager.default.contentsOfDirectory(
-            at: root,
-            includingPropertiesForKeys: nil
-        )
-        .filter { $0.pathExtension == "json" }
+            .appending(path: "Fixtures", directoryHint: .isDirectory)
+        return try ["libvterm", "alacritty"].flatMap { directory in
+            try FileManager.default.contentsOfDirectory(
+                at: root.appending(path: directory, directoryHint: .isDirectory),
+                includingPropertiesForKeys: nil
+            )
+            .filter { $0.pathExtension == "json" }
+        }
         .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
     private func validateProvenance(_ provenance: NeutralTerminalProvenance) throws {
         try provenance.validate()
-        #expect(provenance.source == "libvterm")
-        #expect(provenance.url?.hasPrefix("https://github.com/neovim/libvterm/") == true)
-        #expect(provenance.pinnedCommit == "934bc2fbf21800ac3458a499df8820ca5fb45fd3")
-        #expect(provenance.upstreamCase?.isEmpty == false)
-        #expect(provenance.license == "MIT")
-        #expect(provenance.licenseNotice == "LICENSE.libvterm.txt")
+        #expect(Bundle.module.url(
+            forResource: provenance.licenseNotice,
+            withExtension: nil,
+            subdirectory: "Fixtures"
+        ) != nil)
+        switch provenance.source {
+        case "libvterm":
+            #expect(provenance.url?.hasPrefix("https://github.com/neovim/libvterm/") == true)
+            #expect(provenance.pinnedCommit == "934bc2fbf21800ac3458a499df8820ca5fb45fd3")
+            #expect(provenance.upstreamCase?.isEmpty == false)
+            #expect(provenance.license == "MIT")
+            #expect(provenance.licenseNotice == "LICENSE.libvterm.txt")
+        case "alacritty":
+            #expect(provenance.url?.hasPrefix("https://github.com/alacritty/alacritty/") == true)
+            #expect(provenance.pinnedCommit == "852e971cddfabe222d2d5bcda466e130f53af207")
+            #expect(provenance.upstreamCase == "hyperlinks")
+            #expect(provenance.license == "Apache-2.0")
+            #expect(provenance.licenseNotice == "LICENSE.alacritty.txt")
+        default:
+            Issue.record("Unexpected external fixture source: \(provenance.source)")
+        }
     }
 
     private func splitStrategies(for fixture: NeutralTerminalRecording) -> [ChunkStrategy] {
@@ -107,7 +124,7 @@ struct TerminalFixtureTests {
         return fixture.events.enumerated().flatMap { eventIndex, event -> [ChunkStrategy] in
             guard case .feed(let bytes) = event else { return [] }
             let offsets: [Int]
-            if bytes.count <= exhaustiveThreshold {
+            if fixture.provenance.source == "alacritty" || bytes.count <= exhaustiveThreshold {
                 offsets = Array(0...bytes.count)
             } else {
                 offsets = [0, bytes.count / 4, bytes.count / 2, bytes.count * 3 / 4, bytes.count]
@@ -229,6 +246,13 @@ struct TerminalFixtureTests {
             for point in cellScalars {
                 let cell = try #require(terminal.cell(row: point.row, column: point.column))
                 #expect(cell.scalars == Array(point.scalars.unicodeScalars))
+            }
+        }
+        if let cellHyperlinks = expectation.cellHyperlinks {
+            for point in cellHyperlinks {
+                let cell = try #require(terminal.cell(row: point.row, column: point.column))
+                #expect(cell.hyperlink?.uri == point.hyperlink?.uri)
+                #expect(cell.hyperlink?.explicitId == point.hyperlink?.explicitId)
             }
         }
         if let viewportText = expectation.viewportText {
@@ -678,6 +702,7 @@ private struct FixtureExpectation: Decodable {
     let currentStyle: FixtureStyle?
     let cellStyles: [FixtureCellStyle]?
     let cellScalars: [FixtureCellScalars]?
+    let cellHyperlinks: [FixtureCellHyperlink]?
 }
 
 /// Keeps cursor appearance expectations renderer-independent and source-neutral.
@@ -723,6 +748,17 @@ private struct FixtureCellScalars: Decodable {
     let row: Int
     let column: Int
     let scalars: String
+}
+
+private struct FixtureCellHyperlink: Decodable {
+    let row: Int
+    let column: Int
+    let hyperlink: FixtureHyperlink?
+}
+
+private struct FixtureHyperlink: Decodable {
+    let uri: String
+    let explicitId: String?
 }
 
 private struct FixtureStyle: Decodable {

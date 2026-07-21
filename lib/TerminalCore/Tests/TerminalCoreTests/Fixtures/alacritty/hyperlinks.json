@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "alacritty",
+    "url": "https://github.com/alacritty/alacritty/blob/852e971cddfabe222d2d5bcda466e130f53af207/alacritty_terminal/tests/ref/hyperlinks/alacritty.recording",
+    "pinnedCommit": "852e971cddfabe222d2d5bcda466e130f53af207",
+    "upstreamCase": "hyperlinks",
+    "license": "Apache-2.0",
+    "licenseNotice": "LICENSE.alacritty.txt",
+    "recordedDeviations": [
+      "DanTerm does not save or restore the OSC 8 link pen with DECSC/DECRC.",
+      "DanTerm leaves anonymous OSC 8 links without a synthetic explicit id."
+    ]
+  },
+  "initial": { "columns": 140, "rows": 32 },
+  "events": [
+    {
+      "type": "feed",
+      "hex": "73682d352e32242063617420616c616372697474793f0820085f74697208200808200865726d696e616c2f74657374732f7265662f68797065726c696e6b732f616c616372697474792e7265636f7264696e670d0a1b5b3f323030346873682d352e3124201b5b376d7072696e746620275c655d383b3b68747470733a2f2f6578616d706c652e636f6d5c655c5c666f6f5c655d383b3b5c655c5c5c6e271b5b32376d0d1b5b431b5b431b5b431b5b431b5b431b5b431b5b431b5b437072696e746620275c655d383b3b68747470733a2f2f6578616d706c652e636f6d5c655c5c666f6f5c655d383b3b5c655c5c5c6e270d0d0a1b5b3f323030346c0d1b5d383b3b68747470733a2f2f6578616d706c652e636f6d1b5c666f6f1b5d383b3b1b5c0d0d0a1b5b3f323030346873682d352e3124201b5b376d7072696e746620275c655d383b3b68747470733a2f2f6578616d706c652e636f6d5c655c5c666f6f5c655d383b3b5c655c5c5c6e271b5b32376d0d1b5b431b5b431b5b431b5b431b5b431b5b431b5b431b5b437072696e746620275c655d383b3b68747470733a2f2f6578616d706c652e636f6d5c655c5c666f6f5c655d383b3b5c655c5c5c6e270d0d0a1b5b3f323030346c0d1b5d383b3b68747470733a2f2f6578616d706c652e636f6d1b5c666f6f1b5d383b3b1b5c0d0d0a1b5b3f323030346873682d352e3124201b5b376d7072696e746620275c655d383b69643d34323b68747470733a2f2f6578616d706c652e636f6d5c655c5c6261725c655d383b3b5c655c5c5c6e271b5b32376d0d1b5b431b5b431b5b431b5b431b5b431b5b431b5b431b5b437072696e746620275c655d383b69643d34323b68747470733a2f2f6578616d706c652e636f6d5c655c5c6261725c655d383b3b5c655c5c5c6e270d0d0a1b5b3f323030346c0d1b5d383b69643d34323b68747470733a2f2f6578616d706c652e636f6d1b5c6261721b5d383b3b1b5c0d0d0a1b5b3f323030346873682d352e3124201b5b376d7072696e746620275c655d383b69643d34323b68747470733a2f2f6578616d706c652e636f6d5c655c5c6261725c655d383b3b5c655c5c5c6e271b5b32376d0d1b5b431b5b431b5b431b5b431b5b431b5b431b5b431b5b437072696e746620275c655d383b69643d34323b68747470733a2f2f6578616d706c652e636f6d5c655c5c6261725c655d383b3b5c655c5c5c6e270d0d0a1b5b3f323030346c0d1b5d383b69643d34323b68747470733a2f2f6578616d706c652e636f6d1b5c6261721b5d383b3b1b5c0d0d0a1b5b3f323030346873682d352e3124201b5b3f323030346c0d0d0d0a657869740d0d0a73682d352e3224207072696e746620275c655d383b69643d68656c6c6f3b687474703a2f2f6578616d706c652e636f6d2f6e616f6865753b6e7461686f65755c655c5c546869732069732061206c696e6b5c655d383b69643d68656c6c6f3b5c655c5c5c6e270d0a1b5d383b69643d68656c6c6f3b687474703a2f2f6578616d706c652e636f6d2f6e616f6865753b6e7461686f65751b5c546869732069732061206c696e6b1b5d383b69643d68656c6c6f3b1b5c0d0a73682d352e322420657869740d0a"
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportText": "sh-5.2$ cat alacritty_terminal\/tests\/ref\/hyperlinks\/alacritty.recording                                                                     \nsh-5.1$ printf '\\e]8;;https:\/\/example.com\\e\\\\foo\\e]8;;\\e\\\\\\n'                                                                               \nfoo                                                                                                                                         \nsh-5.1$ printf '\\e]8;;https:\/\/example.com\\e\\\\foo\\e]8;;\\e\\\\\\n'                                                                               \nfoo                                                                                                                                         \nsh-5.1$ printf '\\e]8;id=42;https:\/\/example.com\\e\\\\bar\\e]8;;\\e\\\\\\n'                                                                          \nbar                                                                                                                                         \nsh-5.1$ printf '\\e]8;id=42;https:\/\/example.com\\e\\\\bar\\e]8;;\\e\\\\\\n'                                                                          \nbar                                                                                                                                         \nsh-5.1$                                                                                                                                     \nexit                                                                                                                                        \nsh-5.2$ printf '\\e]8;id=hello;http:\/\/example.com\/naoheu;ntahoeu\\e\\\\This is a link\\e]8;id=hello;\\e\\\\\\n'                                      \nThis is a link                                                                                                                              \nsh-5.2$ exit                                                                                                                                \n                                                                                                                                            \n                                                                                                                                            \n                                                                                                                                            \n                                                                                                                                            \n                                                                                                                                            \n                                                                                                                                            \n                                                                                                                                            \n                                                                                                                                            \n                                                                                                                                            \n                                                                                                                                            \n                                                                                                                                            \n                                                                                                                                            \n                                                                                                                                            \n                                                                                                                                            \n                                                                                                                                            \n                                                                                                                                            \n                                                                                                                                            \n                                                                                                                                            ",
+        "cellHyperlinks": [
+          { "row": 12, "column": 0, "hyperlink": { "uri": "http://example.com/naoheu;ntahoeu", "explicitId": "hello" } },
+          { "row": 12, "column": 1, "hyperlink": { "uri": "http://example.com/naoheu;ntahoeu", "explicitId": "hello" } },
+          { "row": 12, "column": 2, "hyperlink": { "uri": "http://example.com/naoheu;ntahoeu", "explicitId": "hello" } },
+          { "row": 12, "column": 3, "hyperlink": { "uri": "http://example.com/naoheu;ntahoeu", "explicitId": "hello" } },
+          { "row": 12, "column": 4, "hyperlink": { "uri": "http://example.com/naoheu;ntahoeu", "explicitId": "hello" } },
+          { "row": 12, "column": 5, "hyperlink": { "uri": "http://example.com/naoheu;ntahoeu", "explicitId": "hello" } },
+          { "row": 12, "column": 6, "hyperlink": { "uri": "http://example.com/naoheu;ntahoeu", "explicitId": "hello" } },
+          { "row": 12, "column": 7, "hyperlink": { "uri": "http://example.com/naoheu;ntahoeu", "explicitId": "hello" } },
+          { "row": 12, "column": 8, "hyperlink": { "uri": "http://example.com/naoheu;ntahoeu", "explicitId": "hello" } },
+          { "row": 12, "column": 9, "hyperlink": { "uri": "http://example.com/naoheu;ntahoeu", "explicitId": "hello" } },
+          { "row": 12, "column": 10, "hyperlink": { "uri": "http://example.com/naoheu;ntahoeu", "explicitId": "hello" } },
+          { "row": 12, "column": 11, "hyperlink": { "uri": "http://example.com/naoheu;ntahoeu", "explicitId": "hello" } },
+          { "row": 12, "column": 12, "hyperlink": { "uri": "http://example.com/naoheu;ntahoeu", "explicitId": "hello" } },
+          { "row": 12, "column": 13, "hyperlink": { "uri": "http://example.com/naoheu;ntahoeu", "explicitId": "hello" } },
+          { "row": 6, "column": 0, "hyperlink": { "uri": "https://example.com", "explicitId": "42" } },
+          { "row": 6, "column": 1, "hyperlink": { "uri": "https://example.com", "explicitId": "42" } },
+          { "row": 6, "column": 2, "hyperlink": { "uri": "https://example.com", "explicitId": "42" } },
+          { "row": 8, "column": 0, "hyperlink": { "uri": "https://example.com", "explicitId": "42" } },
+          { "row": 8, "column": 1, "hyperlink": { "uri": "https://example.com", "explicitId": "42" } },
+          { "row": 8, "column": 2, "hyperlink": { "uri": "https://example.com", "explicitId": "42" } },
+          { "row": 2, "column": 0, "hyperlink": { "uri": "https://example.com" } },
+          { "row": 2, "column": 1, "hyperlink": { "uri": "https://example.com" } },
+          { "row": 2, "column": 2, "hyperlink": { "uri": "https://example.com" } },
+          { "row": 4, "column": 0, "hyperlink": { "uri": "https://example.com" } },
+          { "row": 4, "column": 1, "hyperlink": { "uri": "https://example.com" } },
+          { "row": 4, "column": 2, "hyperlink": { "uri": "https://example.com" } },
+          { "row": 11, "column": 0, "hyperlink": null },
+          { "row": 5, "column": 0, "hyperlink": null },
+          { "row": 7, "column": 0, "hyperlink": null },
+          { "row": 1, "column": 0, "hyperlink": null },
+          { "row": 3, "column": 0, "hyperlink": null }
+        ]
+      }
+    }
+  ]
+}

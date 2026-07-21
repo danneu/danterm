@@ -82,6 +82,15 @@ public struct NeutralTerminalProvenance: Codable, Equatable, Sendable {
             else {
                 throw NeutralTerminalRecordingError.invalidProvenance(source)
             }
+        case "alacritty":
+            guard url?.hasPrefix("https://github.com/alacritty/alacritty/") == true,
+                  pinnedCommit?.isEmpty == false,
+                  upstreamCase?.isEmpty == false,
+                  license == "Apache-2.0",
+                  licenseNotice?.isEmpty == false
+            else {
+                throw NeutralTerminalRecordingError.invalidProvenance(source)
+            }
         case "danterm":
             guard author == "DanTerm", test?.isEmpty == false else {
                 throw NeutralTerminalRecordingError.invalidProvenance(source)

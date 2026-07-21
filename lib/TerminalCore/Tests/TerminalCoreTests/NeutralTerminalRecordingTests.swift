@@ -7,6 +7,20 @@ import TerminalCoreRecording
 
 /// Proves DanTerm-authored recordings use the same public replay path as corpus evidence.
 struct NeutralTerminalRecordingTests {
+    @Test("Alacritty provenance validates its pinned Apache-2.0 source")
+    func alacrittyProvenanceValidates() throws {
+        let provenance = NeutralTerminalProvenance(
+            source: "alacritty",
+            url: "https://github.com/alacritty/alacritty/blob/852e971cddfabe222d2d5bcda466e130f53af207/alacritty_terminal/tests/ref/hyperlinks/alacritty.recording",
+            pinnedCommit: "852e971cddfabe222d2d5bcda466e130f53af207",
+            upstreamCase: "hyperlinks",
+            license: "Apache-2.0",
+            licenseNotice: "LICENSE.alacritty.txt"
+        )
+
+        try provenance.validate()
+    }
+
     @Test("recording replay applies Cmd-hover and keeps Cmd-click local-only")
     func replayAppliesHoverWithoutOpening() throws {
         let recording = NeutralTerminalRecording(
