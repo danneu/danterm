@@ -12,6 +12,67 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct TerminalPaneSessionControllerTests {
+    @Test("recovery candidate callback excludes alternate content", .timeLimit(.minutes(1)))
+    func recoveryMutationClassification() async throws {
+        // Intent: publish primary candidates without ever substituting transient alternate content.
+        // Why it exists: the app classifies these candidates against its persisted projection.
+        // Scenario: a child changes cursor/presentation, visits alternate, then prints primary text.
+        let host = try makeHost()
+        let command = "stty -echo; printf '__READY__'; read ignored; "
+            + "printf '\\033[2;2H\\033[?25l\\033[?1049hALT\\033[?1049l'; "
+            + "read ignored; printf '__PRIMARY__'; exec sleep 30"
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: command)
+        )
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        controller.synchronizeState()
+        let baselineAltMentions = controller.readPrimaryHistoryText()
+            .components(separatedBy: "ALT")
+            .count
+        var candidates: [String] = []
+        controller.onPrimaryHistoryMutation = { candidates.append($0) }
+
+        controller.sendText("continue\n")
+        #expect(await host.waitForOutput(containing: Array("ALT".utf8)))
+        controller.synchronizeState()
+        #expect(candidates.allSatisfy {
+            $0.components(separatedBy: "ALT").count == baselineAltMentions
+        })
+
+        controller.sendText("continue\n")
+        #expect(await host.waitForOutput(containing: Array("__PRIMARY__".utf8)))
+        controller.synchronizeState()
+        #expect(candidates.last?.contains("__PRIMARY__") == true)
+
+        controller.tearDown()
+        await host.close()
+    }
+
+    @Test("application-exit fence drains accepted output before final recovery read", .timeLimit(.minutes(1)))
+    func applicationExitFenceDrainsAcceptedOutput() async throws {
+        // Intent: make the final cached recovery projection the owner-fenced terminal state.
+        // Why it exists: a quit racing already-accepted PTY output must not checkpoint stale text.
+        // Scenario: output reaches the native owner immediately before orderly app termination.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "stty -echo; printf '__READY__\\n'")
+        )
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+
+        controller.sendText("printf '__QUIT_RACE__'\n")
+        #expect(await host.waitForOutput(containing: Array("__QUIT_RACE__".utf8)))
+        controller.fenceForApplicationExit()
+        let finalHistory = controller.readPrimaryHistoryText()
+
+        #expect(finalHistory.contains("__QUIT_RACE__"))
+        controller.sendText("printf '__TOO_LATE__'\n")
+        controller.synchronizeState()
+        #expect(controller.readPrimaryHistoryText() == finalHistory)
+        await host.close()
+    }
+
     @Test("controller forwards one link open and exposes synchronized hover", .timeLimit(.minutes(1)))
     func controllerLinkPlumbing() async throws {
         // Intent: prove the main-actor adapter exposes hover and forwards one approved open.

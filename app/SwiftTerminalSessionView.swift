@@ -43,6 +43,10 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         get { callbackGate.onEvent }
         set { callbackGate.onEvent = newValue }
     }
+    var onPrimaryHistoryMutation: ((String) -> Void)? {
+        get { controller.onPrimaryHistoryMutation }
+        set { controller.onPrimaryHistoryMutation = newValue }
+    }
     weak var stateObserver: (any TerminalSessionStateObserver)? {
         get { callbackGate.stateObserver }
         set { callbackGate.stateObserver = newValue }
@@ -420,6 +424,10 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
 
     func requestClose() {
         callbackGate.emit(.closeRequested)
+    }
+
+    func fenceForApplicationExit() {
+        controller.fenceForApplicationExit()
     }
 
     func setFocusBorder(_ focused: Bool, hasBell: Bool) {

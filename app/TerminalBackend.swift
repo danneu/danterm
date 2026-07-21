@@ -3,6 +3,12 @@
 import Cocoa
 import DanTermProtocol
 
+/// Selects temporary Ghostty fallback polling or mutation-driven Swift recovery.
+enum TerminalRecoveryScheduling {
+    case periodicFallback
+    case eventDriven
+}
+
 /// Scrollbar position reported by a terminal session in logical terminal rows.
 struct TerminalScrollPosition: Equatable {
     let total: UInt64
@@ -65,6 +71,7 @@ protocol TerminalSession: AnyObject {
     var state: TerminalSessionState { get }
     var stateObserver: (any TerminalSessionStateObserver)? { get set }
     var onEvent: ((TerminalSessionEvent) -> Void)? { get set }
+    var onPrimaryHistoryMutation: ((String) -> Void)? { get set }
     var hasSelection: Bool { get }
 
     func sendText(_ text: String)
@@ -90,6 +97,8 @@ protocol TerminalSession: AnyObject {
     func pasteClipboard()
     func requestClose()
     func setFocusBorder(_ focused: Bool, hasBell: Bool)
+    /// Fences accepted terminal mutations before the final recovery capture.
+    func fenceForApplicationExit()
     func tearDown()
 }
 
@@ -100,6 +109,7 @@ protocol TerminalBackend: AnyObject {
     var onEvent: ((TerminalBackendEvent) -> Void)? { get set }
     var preferences: GhosttyPrefs { get }
     var configFilePath: String? { get }
+    var recoveryScheduling: TerminalRecoveryScheduling { get }
 
     func createSession(_ request: TerminalSessionRequest) -> (any TerminalSession)?
     func setAppFocused(_ focused: Bool)

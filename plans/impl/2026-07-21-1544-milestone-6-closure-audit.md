@@ -230,7 +230,7 @@ The final roadmap state is:
   add dotted/dashed shapes and SGR 58/59 color through semantic state, saved
   state, cells, render planning, pixels, and behavioral tests; then check the
   terminal-core gate.
-- [ ] **Commit 3 -- `feat(recovery): schedule Swift checkpoints from mutations`**:
+- [x] **Commit 3 -- `feat(recovery): schedule Swift checkpoints from mutations`**:
   replace periodic Swift enriched checkpoints with the deterministic 10-minute
   attempt bound and retry-to-success policy, retain the scoped Ghostty fallback,
   prove mutation classification, and fence output before the final checkpoint.
@@ -259,3 +259,8 @@ The final roadmap state is:
   while carrying their resolved colors independently. This preserves the
   non-overlapping plan invariant when an explicit underline color coexists with
   a foreground-colored strikethrough.
+- Commit 3 places the deterministic recovery scheduler in DanTermCore, the
+  app's pure policy layer, while TerminalPaneSession emits primary-history
+  candidates and AppRuntime retains timer, capture, and disk ownership. This
+  preserves the terminal-backend boundary lint as well as the core/runtime
+  determinism seam.

@@ -230,6 +230,12 @@ mean.
     dashed shapes plus SGR 58/59 color through terminal state, saved state,
     cells, reflow, render planning, and scale-aware pixel execution. See the
     [Milestone 6 closure plan](../plans/impl/2026-07-21-1544-milestone-6-closure-audit.md).
+  - [x] **Slice 13: Event-driven Swift enriched recovery.** Schedules bounded
+    checkpoint attempts from primary-history mutations, retries failed writes
+    to covering success, becomes quiescent when durable, and fences accepted
+    output before the final clean-exit checkpoint. Ghostty alone retains the
+    temporary periodic fallback. See the
+    [Milestone 6 closure plan](../plans/impl/2026-07-21-1544-milestone-6-closure-audit.md).
   - [x] [Terminal core](04-terminal-core.md) completes the accepted baseline control,
     screen, mode, style, query, and recovery behavior.
     Closure-audit judgment: controls, primary and alternate screens, modes,
@@ -258,9 +264,10 @@ mean.
     across reflow.
     Closure-audit judgment: logical projection and invalidation, selection,
     search, pane reads, persistence limits, and primary-history capture while
-    alternate screen is active are already covered. Remaining work is
-    event-driven Swift enriched-checkpoint freshness and headless replay of the
-    checked-in Ghostty inspection/recovery characterization corpus.
+    alternate screen is active are already covered. Slice 13 closes
+    event-driven Swift enriched-checkpoint freshness. Remaining work is
+    headless replay of the checked-in Ghostty inspection/recovery
+    characterization corpus.
   - [ ] [Input and interaction](08-input-interaction.md) and
     [Renderer](09-renderer.md) provide an interactive pane with macOS text
     composition, terminal keys, mouse reporting, selection, safe paste,

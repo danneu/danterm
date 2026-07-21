@@ -49,6 +49,7 @@ public final class TerminalPaneSessionController {
     private var didEmitSessionEnded = false
     private var completedRecordingEvents: [NeutralTerminalRecordingEvent]?
     private var lastEmittedViewportState: TerminalPaneViewportState?
+    private var lastPrimaryHistoryText: String
 
     /// Process-lifetime access retained by the backend until this host finishes teardown.
     public let terminationHandle: TerminalPaneTerminationHandle
@@ -64,6 +65,9 @@ public final class TerminalPaneSessionController {
 
     /// Receives scrollbar-relevant state only when its projection or screen availability changes.
     public var onViewportStateChange: ((TerminalPaneViewportState) -> Void)?
+
+    /// Reports primary-history candidates for the app's persistence projection classifier.
+    public var onPrimaryHistoryMutation: ((String) -> Void)?
 
     /// Receives an uncaptured pane-menu request only after its pointer gesture completes.
     public var onPaneMenu: ((TerminalViewportCell) -> Void)?
@@ -133,6 +137,7 @@ public final class TerminalPaneSessionController {
         terminationHandle = TerminalPaneTerminationHandle(host: host)
         let initialFrameState = host.fencedFrameState()
         cachedTerminal = initialFrameState.terminal
+        lastPrimaryHistoryText = initialFrameState.terminal.primaryHistoryText
         initialDimensions = launchInput.initialDimensions
         pendingDamage = initialFrameState.damage
         lastSubmittedDimensions = launchInput.initialDimensions
@@ -261,6 +266,16 @@ public final class TerminalPaneSessionController {
         consume(frameState: host.fencedFrameState(), result: nil, transitions: nil)
     }
 
+    /// Fences accepted owner work and freezes the recovery projection before app exit capture.
+    public func fenceForApplicationExit() {
+        guard isTornDown == false else { return }
+        cachedTerminal = host.beginCloseAndSnapshot()
+        emitPrimaryHistoryMutationIfNeeded()
+        isTornDown = true
+        consumeTask?.cancel()
+        consumeTask = nil
+    }
+
     /// Returns the latest cached viewport without crossing the host actor boundary.
     public func readViewportText() -> String {
         cachedTerminal.viewportText
@@ -344,6 +359,7 @@ public final class TerminalPaneSessionController {
         onClipboardWrite = nil
         onSessionEnded = nil
         onViewportStateChange = nil
+        onPrimaryHistoryMutation = nil
         onPaneMenu = nil
         onOpenLink = nil
         let onTeardownCompleted = takeTeardownCompletion()
@@ -363,6 +379,7 @@ public final class TerminalPaneSessionController {
         transitions: [TerminalPTYAppliedTransition]?
     ) {
         cachedTerminal = frameState.terminal
+        emitPrimaryHistoryMutationIfNeeded()
         pendingDamage.formUnion(frameState.damage)
         if let clipboardWrite = frameState.clipboardWrite {
             onClipboardWrite?(clipboardWrite)
@@ -401,6 +418,13 @@ public final class TerminalPaneSessionController {
             takeTeardownCompletion()?()
             onSessionEnded?(result)
         }
+    }
+
+    private func emitPrimaryHistoryMutationIfNeeded() {
+        let primaryHistoryText = cachedTerminal.primaryHistoryText
+        guard primaryHistoryText != lastPrimaryHistoryText else { return }
+        lastPrimaryHistoryText = primaryHistoryText
+        onPrimaryHistoryMutation?(primaryHistoryText)
     }
 
     private func emitViewportStateIfNeeded() {

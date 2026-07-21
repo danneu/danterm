@@ -281,3 +281,8 @@ func truncateScrollback(_ text: String, maxLines: Int = 4000, maxChars: Int = 40
 
   return result
 }
+
+/// Classifies terminal candidates through the exact projection persisted by enriched recovery.
+func enrichedRecoveryProjectionChanged(from previous: String, to current: String) -> Bool {
+    truncateScrollback(previous) != truncateScrollback(current)
+}

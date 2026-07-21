@@ -33,6 +33,7 @@ final class SwiftTerminalBackend: TerminalBackend {
         GhosttyPrefs(theme: nil, fontSize: nil)
     }
     var configFilePath: String? { nil }
+    var recoveryScheduling: TerminalRecoveryScheduling { .eventDriven }
 
     init(bundle: Bundle = .main) {
         bootstrapExecutable = bundle.bundleURL

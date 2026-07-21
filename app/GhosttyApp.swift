@@ -25,6 +25,7 @@ class GhosttyApp: TerminalBackend {
         )
     }
     var configFilePath: String? { Self.configFilePath() }
+    var recoveryScheduling: TerminalRecoveryScheduling { .periodicFallback }
 
     /// Read the scrollbar setting from any config. Returns true unless set to "never".
     static func readScrollbarEnabled(from config: ghostty_config_t?) -> Bool {

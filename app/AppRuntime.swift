@@ -157,11 +157,13 @@ class AppRuntime {
     // Session persistence uses two tiers of checkpoints:
     //   Light  — pure model serialization (no scrollback), written after a 2s debounce
     //            following any state-mutating Msg. Cheap and frequent.
-    //   Enriched — model + scrollback text read from live Ghostty surfaces, written on
-    //              a 10 min repeating timer and once at clean termination. Expensive but
-    //              gives full restore fidelity including terminal history.
+    //   Enriched -- model + primary history, mutation-driven for Swift and temporarily
+    //               periodic for Ghostty, plus one final synchronous clean-exit write.
     private let checkpointDebouncer = Debouncer(queue: .main)  // trailing debounce for light checkpoints
-    private var enrichedCheckpointTimer: DispatchSourceTimer?  // repeating timer for enriched checkpoints
+    private var enrichedCheckpointTimer: DispatchSourceTimer?  // one owned enriched-checkpoint timer
+    private var recoveryPolicy = RecoveryCheckpointPolicy(
+        window: UInt64(600 * NSEC_PER_SEC)
+    )
     private var checkpointPending = false                      // true while a debounced write is scheduled
     private var coalescedReconcileTimer: DispatchSourceTimer?   // rate-limited whole-model sweep
     // Serializes checkpoint writes and gives sync flushes one fence for pending async I/O.
@@ -866,10 +868,11 @@ class AppRuntime {
         }
     }
 
-    /// Start a repeating timer that writes enriched checkpoints (model +
-    /// scrollback from live surfaces). Called once from applicationDidFinishLaunching.
+    /// Starts the temporary repeating Ghostty fallback; Swift schedules from mutations.
     func startEnrichedCheckpointTimer() {
         enrichedCheckpointTimer?.cancel()
+        enrichedCheckpointTimer = nil
+        guard terminalBackend.recoveryScheduling == .periodicFallback else { return }
         let timer = DispatchSource.makeTimerSource(queue: .main)
         timer.schedule(
             deadline: .now() + Self.enrichedCheckpointInterval,
@@ -881,6 +884,56 @@ class AppRuntime {
         }
         timer.resume()
         enrichedCheckpointTimer = timer
+    }
+
+    /// Fences terminal owners before synchronously capturing the final enriched checkpoint.
+    func prepareRecoveryForApplicationExit() {
+        enrichedCheckpointTimer?.cancel()
+        enrichedCheckpointTimer = nil
+        for session in surfaces.values {
+            session.fenceForApplicationExit()
+        }
+        _ = recoveryPolicy.terminate()
+        performEnrichedCheckpoint(async: false)
+    }
+
+    private func notePrimaryHistoryMutation() {
+        guard terminalBackend.recoveryScheduling == .eventDriven else { return }
+        applyRecoveryAction(recoveryPolicy.mutation(at: DispatchTime.now().uptimeNanoseconds))
+    }
+
+    private func applyRecoveryAction(_ action: RecoveryCheckpointAction) {
+        switch action {
+        case .none:
+            break
+        case .schedule(let deadline):
+            enrichedCheckpointTimer?.cancel()
+            let timer = DispatchSource.makeTimerSource(queue: .main)
+            timer.schedule(deadline: DispatchTime(uptimeNanoseconds: deadline))
+            timer.setEventHandler { [weak self] in
+                guard let self else { return }
+                self.enrichedCheckpointTimer = nil
+                self.applyRecoveryAction(
+                    self.recoveryPolicy.deadlineReached(at: deadline)
+                )
+            }
+            timer.resume()
+            enrichedCheckpointTimer = timer
+        case .write(let revision):
+            performEnrichedCheckpoint(async: true) { [weak self] succeeded in
+                guard let self else { return }
+                self.applyRecoveryAction(
+                    self.recoveryPolicy.writeCompleted(
+                        revision: revision,
+                        succeeded: succeeded,
+                        at: DispatchTime.now().uptimeNanoseconds
+                    )
+                )
+            }
+        case .cancel:
+            enrichedCheckpointTimer?.cancel()
+            enrichedCheckpointTimer = nil
+        }
     }
 
     /// Write a light checkpoint: pure model serialization with scrollback: nil.
@@ -909,21 +962,44 @@ class AppRuntime {
     /// Write an enriched checkpoint: model snapshot + scrollback text read from
     /// each live Ghostty surface. Expensive but gives full restore fidelity.
     /// Called by the periodic timer and once at clean termination.
-    func performEnrichedCheckpoint(async: Bool) {
+    func performEnrichedCheckpoint(
+        async: Bool,
+        completion: ((Bool) -> Void)? = nil
+    ) {
         let enrichedSnapshot = graftScrollback(onto: toSnapshot(model), scrollbackByPaneId: scrollbackByPaneId())
-        writeCheckpoint(toInitFile(snapshot: enrichedSnapshot), to: enrichedCheckpointURL(), async: async)
+        writeCheckpoint(
+            toInitFile(snapshot: enrichedSnapshot),
+            to: enrichedCheckpointURL(),
+            async: async,
+            completion: completion
+        )
     }
 
     /// Encode and atomically write a checkpoint to the given URL.
     /// Uses .sortedKeys for stable output (no .prettyPrinted — this is a machine file).
-    private func writeCheckpoint(_ initFile: AppInitFile, to url: URL, async: Bool) {
+    private func writeCheckpoint(
+        _ initFile: AppInitFile,
+        to url: URL,
+        async: Bool,
+        completion: ((Bool) -> Void)? = nil
+    ) {
         let dir = recoveryDirectoryURL()
         let work = DispatchWorkItem {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
-            guard let data = try? encoder.encode(initFile) else { return }
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            try? data.write(to: url, options: .atomic)
+            let succeeded: Bool
+            do {
+                let data = try encoder.encode(initFile)
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                try data.write(to: url, options: .atomic)
+                succeeded = true
+            } catch {
+                succeeded = false
+            }
+            guard let completion else { return }
+            DispatchQueue.main.async {
+                completion(succeeded)
+            }
         }
 
         if async {
@@ -1248,6 +1324,19 @@ class AppRuntime {
             recordTerminalCharacterizationEvent(event)
             #endif
             self?.send(terminalMessage(for: event, paneId: paneId))
+        }
+        let initialRecoveryCandidate = session.readPrimaryHistoryText() ?? ""
+        var lastRecoveryCandidate = initialRecoveryCandidate
+        session.onPrimaryHistoryMutation = { [weak self] primaryHistoryText in
+            guard enrichedRecoveryProjectionChanged(
+                from: lastRecoveryCandidate,
+                to: primaryHistoryText
+            ) else { return }
+            lastRecoveryCandidate = primaryHistoryText
+            self?.notePrimaryHistoryMutation()
+        }
+        if truncateScrollback(initialRecoveryCandidate) != nil {
+            notePrimaryHistoryMutation()
         }
         return session
     }

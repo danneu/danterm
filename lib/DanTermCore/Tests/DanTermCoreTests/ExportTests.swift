@@ -642,6 +642,13 @@ import Testing
         #expect(truncateScrollback("  \n  \n  ") == nil, "whitespace should be nil")
     }
 
+    @Test("enriched recovery dirties only when the persisted projection changes")
+    func enrichedRecoveryMutationClassification() {
+        #expect(enrichedRecoveryProjectionChanged(from: "", to: "  \n ") == false)
+        #expect(enrichedRecoveryProjectionChanged(from: "shell", to: "shell\n\n  ") == false)
+        #expect(enrichedRecoveryProjectionChanged(from: "shell", to: "shell output") == true)
+    }
+
     @Test("truncateScrollback: text under limits gets trailing newline")
     func truncateScrollbackTextUnderLimitsGetsTrailingNewline() {
         // Intent: a multi-line input without a trailing newline acquires

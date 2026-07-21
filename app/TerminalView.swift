@@ -34,6 +34,7 @@ class TerminalView: NSView, NSTextInputClient, TerminalSession {
         get { callbackGate.onEvent }
         set { callbackGate.onEvent = newValue }
     }
+    var onPrimaryHistoryMutation: ((String) -> Void)?
     weak var stateObserver: (any TerminalSessionStateObserver)? {
         get { callbackGate.stateObserver }
         set { callbackGate.stateObserver = newValue }
@@ -911,6 +912,8 @@ extension TerminalView {
         guard let surface else { return }
         ghostty_surface_request_close(surface)
     }
+
+    func fenceForApplicationExit() {}
 
     func tearDown() {
         closeSurface()
