@@ -468,6 +468,6 @@ stream of distinct OSC 8 opens and confirm the pane stays responsive.
 ## Commit progress
 
 - [x] 1. Add bounded OSC 8 hyperlink state and pure link resolution
-- [ ] 2. Add hover, activation policy, renderer, and pane-owner plumbing
+- [x] 2. Add hover, activation policy, renderer, and pane-owner plumbing
 - [ ] 3. Add AppKit Cmd-hover and safe URL opening
 - [ ] 4. Add Alacritty hyperlink fixture provenance and roadmap entry

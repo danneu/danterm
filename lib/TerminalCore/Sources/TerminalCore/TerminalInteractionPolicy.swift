@@ -90,6 +90,7 @@ public enum TerminalPointerConsumption: Equatable, Sendable {
     case report
     case selection
     case paneMenu
+    case link
     case ignored
 }
 
@@ -97,6 +98,26 @@ public enum TerminalPointerConsumption: Equatable, Sendable {
 public enum TerminalSelectionMutation: Equatable, Sendable {
     case clear
     case set(TerminalTextRange)
+}
+
+/// Describes presentation-only hover work for the serialized terminal owner.
+public enum TerminalHoverMutation: Equatable, Sendable {
+    case clear
+    case set(TerminalResolvedLink)
+}
+
+/// Describes owner-side retention for the one run eligible at pointer release.
+public enum TerminalLinkArmMutation: Equatable, Sendable {
+    case clear
+    case set(TerminalResolvedLink)
+}
+
+/// Clears both interaction states that cannot survive a pointer exit.
+public struct TerminalLinkCancellation: Equatable, Sendable {
+    /// Removes presentation left by the last Cmd-modified move.
+    public let hoverMutation: TerminalHoverMutation
+    /// Removes the click reservation independently from other button owners.
+    public let armMutation: TerminalLinkArmMutation
 }
 
 /// Returns all effects of one pointer decision without performing IO or framework calls.
@@ -109,6 +130,12 @@ public struct TerminalPointerDecision: Equatable, Sendable {
     public let selectionMutation: TerminalSelectionMutation?
     /// Requests the pane menu only after an uncaptured right-button release.
     public let paneMenuCell: TerminalViewportCell?
+    /// Applies hover presentation independently from the event's byte-owning arm.
+    public let hoverMutation: TerminalHoverMutation?
+    /// Delivers a click-time-revalidated HTTP(S) target only on a matching link release.
+    public let openLink: TerminalHyperlink?
+    /// Reserves or clears the exact originating run under the terminal metadata cap.
+    public let armMutation: TerminalLinkArmMutation?
 }
 
 /// Marks normalized wheel lifecycle so direct scrolling and momentum share one route.
@@ -172,6 +199,7 @@ private enum PointerOwnership: Equatable, Sendable {
     case report
     case selection
     case paneMenu
+    case link
     case ignored
 }
 
@@ -227,6 +255,21 @@ public func decideTerminalPointer(
     let modes = terminal.inputModes
     switch event {
     case let .down(button, column, row, modifiers, clickCount):
+        if state.pointerOwners[button.rawValue] == nil,
+           button == .left,
+           modifiers.contains(.command),
+           isViewportPosition(column: column, row: row, terminal: terminal),
+           let link = terminal.activatableLink(at: streamPosition(
+               column: column, row: row, terminal: terminal
+           )),
+           terminal.canAdmitArmedLink(link)
+        {
+            state.pointerOwners[button.rawValue] = .link
+            return pointerDecision(
+                .link,
+                armMutation: .set(link)
+            )
+        }
         let reportBytes = encodeTerminalMouse(
             .down(button, column: column, row: row, modifiers: modifiers),
             tracker: &state.mouseTracker,
@@ -256,12 +299,41 @@ public func decideTerminalPointer(
         )
 
     case let .up(button, column, row, modifiers):
+        let owner = state.pointerOwners[button.rawValue] ?? .ignored
+        if owner == .link {
+            state.pointerOwners[button.rawValue] = nil
+            guard isViewportPosition(column: column, row: row, terminal: terminal) else {
+                return pointerDecision(
+                    .link,
+                    hoverMutation: .clear,
+                    armMutation: .clear
+                )
+            }
+            guard let link = terminal.activatableLink(at: streamPosition(
+                column: column, row: row, terminal: terminal
+            )), let armedLink = terminal.armedLink, link.matchesActivation(armedLink)
+            else {
+                return pointerDecision(
+                    .link,
+                    hoverMutation: .clear,
+                    armMutation: .clear
+                )
+            }
+            return TerminalPointerDecision(
+                consumption: .link,
+                inputBytes: [],
+                selectionMutation: nil,
+                paneMenuCell: nil,
+                hoverMutation: .clear,
+                openLink: link.hyperlink,
+                armMutation: .clear
+            )
+        }
         let reportBytes = encodeTerminalMouse(
             .up(button, column: column, row: row, modifiers: modifiers),
             tracker: &state.mouseTracker,
             modes: modes
         )
-        let owner = state.pointerOwners[button.rawValue] ?? .ignored
         state.pointerOwners[button.rawValue] = nil
         if button == .left { state.selectionDrag = nil }
         switch owner {
@@ -274,13 +346,33 @@ public func decideTerminalPointer(
                 consumption: .paneMenu,
                 inputBytes: [],
                 selectionMutation: nil,
-                paneMenuCell: .init(column: column, row: row)
+                paneMenuCell: .init(column: column, row: row),
+                hoverMutation: nil,
+                openLink: nil,
+                armMutation: nil
             )
+        case .link:
+            return pointerDecision(.link)
         case .ignored:
             return pointerDecision(.ignored)
         }
 
     case let .move(column, row, modifiers):
+        if state.pointerOwners.contains(where: { $0 == .link }) {
+            guard isViewportPosition(column: column, row: row, terminal: terminal) else {
+                return pointerDecision(
+                    .link,
+                    hoverMutation: .clear,
+                    armMutation: .clear
+                )
+            }
+            return pointerDecision(
+                .link,
+                hoverMutation: hoverMutation(
+                    column: column, row: row, modifiers: modifiers, terminal: terminal
+                )
+            )
+        }
         let reportBytes = encodeTerminalMouse(
             .move(column: column, row: row, modifiers: modifiers),
             tracker: &state.mouseTracker,
@@ -297,26 +389,47 @@ public func decideTerminalPointer(
                 drag.hasExtended = true
                 state.selectionDrag = drag
             } else if drag.granularity == .character, drag.hasExtended == false {
-                return pointerDecision(.selection)
+                return pointerDecision(
+                    .selection,
+                    hoverMutation: hoverMutation(
+                        column: column, row: row, modifiers: modifiers, terminal: terminal
+                    )
+                )
             }
             return TerminalPointerDecision(
                 consumption: .selection,
                 inputBytes: [],
                 selectionMutation: .set(union(drag.anchor, current)),
-                paneMenuCell: nil
+                paneMenuCell: nil,
+                hoverMutation: hoverMutation(
+                    column: column, row: row, modifiers: modifiers, terminal: terminal
+                ),
+                openLink: nil,
+                armMutation: nil
             )
         }
+        let hover = hoverMutation(
+            column: column, row: row, modifiers: modifiers, terminal: terminal
+        )
         if state.pointerOwners.contains(where: { $0 == .report }) {
-            return pointerDecision(.report, bytes: reportBytes)
+            return pointerDecision(.report, bytes: reportBytes, hoverMutation: hover)
         }
         if state.pointerOwners.contains(where: { $0 == .paneMenu }) {
-            return pointerDecision(.paneMenu)
+            return pointerDecision(.paneMenu, hoverMutation: hover)
         }
         if modes.mouseTracking == .anyMotion {
-            return pointerDecision(.report, bytes: reportBytes)
+            return pointerDecision(.report, bytes: reportBytes, hoverMutation: hover)
         }
-        return pointerDecision(.ignored)
+        return pointerDecision(.ignored, hoverMutation: hover)
     }
+}
+
+/// Invalidates only link-owned pointer state when the pointer leaves the terminal surface.
+public func cancelTerminalLinkInteraction(
+    state: inout TerminalInteractionState
+) -> TerminalLinkCancellation {
+    state.pointerOwners = state.pointerOwners.map { $0 == .link ? nil : $0 }
+    return TerminalLinkCancellation(hoverMutation: .clear, armMutation: .clear)
 }
 
 /// Routes and quantizes one wheel sample while preserving gesture ownership through momentum.
@@ -404,6 +517,8 @@ private func pointerDownDecision(
         return pointerDecision(.report, bytes: reportBytes)
     case .paneMenu:
         return pointerDecision(.paneMenu)
+    case .link:
+        return pointerDecision(.link)
     case .ignored:
         return pointerDecision(.ignored)
     case .selection:
@@ -421,21 +536,51 @@ private func pointerDownDecision(
             consumption: .selection,
             inputBytes: [],
             selectionMutation: granularity == .character ? .clear : .set(anchor),
-            paneMenuCell: nil
+            paneMenuCell: nil,
+            hoverMutation: nil,
+            openLink: nil,
+            armMutation: nil
         )
     }
 }
 
 private func pointerDecision(
     _ consumption: TerminalPointerConsumption,
-    bytes: [UInt8] = []
+    bytes: [UInt8] = [],
+    hoverMutation: TerminalHoverMutation? = nil,
+    armMutation: TerminalLinkArmMutation? = nil
 ) -> TerminalPointerDecision {
     TerminalPointerDecision(
         consumption: consumption,
         inputBytes: bytes,
         selectionMutation: nil,
-        paneMenuCell: nil
+        paneMenuCell: nil,
+        hoverMutation: hoverMutation,
+        openLink: nil,
+        armMutation: armMutation
     )
+}
+
+/// Resolves presentation independently so hover can coexist with any byte-owning arm.
+private func hoverMutation(
+    column: Int,
+    row: Int,
+    modifiers: TerminalKeyModifiers,
+    terminal: Terminal
+) -> TerminalHoverMutation {
+    guard modifiers.contains(.command),
+          isViewportPosition(column: column, row: row, terminal: terminal),
+          let link = terminal.activatableLink(at: streamPosition(
+              column: column, row: row, terminal: terminal
+          ))
+    else { return .clear }
+    return .set(link)
+}
+
+/// Rejects owner inputs that did not normalize to the terminal's current viewport.
+private func isViewportPosition(column: Int, row: Int, terminal: Terminal) -> Bool {
+    (0..<terminal.geometry.columns).contains(column)
+        && terminal.geometry.rows.indices.contains(row)
 }
 
 private func streamPosition(column: Int, row: Int, terminal: Terminal) -> TerminalTextPosition {
@@ -502,6 +647,7 @@ private func pointerConsumption(for owner: PointerOwnership) -> TerminalPointerC
     case .report: .report
     case .selection: .selection
     case .paneMenu: .paneMenu
+    case .link: .link
     case .ignored: .ignored
     }
 }

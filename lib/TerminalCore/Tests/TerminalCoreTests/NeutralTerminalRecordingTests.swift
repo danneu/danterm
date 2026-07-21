@@ -7,6 +7,57 @@ import TerminalCoreRecording
 
 /// Proves DanTerm-authored recordings use the same public replay path as corpus evidence.
 struct NeutralTerminalRecordingTests {
+    @Test("recording replay applies Cmd-hover and keeps Cmd-click local-only")
+    func replayAppliesHoverWithoutOpening() throws {
+        let recording = NeutralTerminalRecording(
+            provenance: .danTerm(test: "hover-replay"),
+            initial: .init(columns: 16, rows: 2),
+            events: [
+                .feed(Array("https://a.co".utf8)),
+                .mouse(.init(
+                    action: .move,
+                    column: 2,
+                    row: 0,
+                    modifiers: [.command]
+                )),
+            ]
+        )
+
+        let encoded = try JSONEncoder().encode(recording)
+        let decoded = try JSONDecoder().decode(NeutralTerminalRecording.self, from: encoded)
+        var replayed = try decoded.replay()
+
+        #expect(decoded == recording)
+        #expect(replayed.hoveredLink?.hyperlink.uri == "https://a.co")
+
+        var interactionState = TerminalInteractionState()
+        let downBytes = applyNeutralTerminalMouse(
+            .init(
+                action: .down,
+                button: 1,
+                column: 2,
+                row: 0,
+                modifiers: [.command]
+            ),
+            terminal: &replayed,
+            interactionState: &interactionState
+        )
+        let upBytes = applyNeutralTerminalMouse(
+            .init(
+                action: .up,
+                button: 1,
+                column: 2,
+                row: 0,
+                modifiers: [.command]
+            ),
+            terminal: &replayed,
+            interactionState: &interactionState
+        )
+        #expect(downBytes.isEmpty)
+        #expect(upBytes.isEmpty)
+        #expect(replayed.hoveredLink == nil)
+        #expect(replayed.armedLink == nil)
+    }
     @Test("DanTerm recordings encode, decode, and replay output around resize")
     func danTermRecordingRoundTrip() throws {
         let recording = NeutralTerminalRecording(

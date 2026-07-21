@@ -336,6 +336,7 @@ extension NeutralTerminalRecordingEvent: Codable {
             case "shift": modifiers.insert(.shift)
             case "alt": modifiers.insert(.alt)
             case "control": modifiers.insert(.control)
+            case "command": modifiers.insert(.command)
             default: throw NeutralTerminalRecordingError.unsupportedEvent("input.modifier.\(name)")
             }
         }
@@ -347,6 +348,7 @@ extension NeutralTerminalRecordingEvent: Codable {
         if modifiers.contains(.shift) { names.append("shift") }
         if modifiers.contains(.alt) { names.append("alt") }
         if modifiers.contains(.control) { names.append("control") }
+        if modifiers.contains(.command) { names.append("command") }
         return names
     }
 
@@ -413,6 +415,22 @@ public func applyNeutralTerminalMouse(
         terminal.clearSelection()
     case .set(let range):
         terminal.setSelection(range)
+    case nil:
+        break
+    }
+    switch decision.hoverMutation {
+    case .clear:
+        terminal.clearHoveredLink()
+    case .set(let link):
+        terminal.setHoveredLink(link)
+    case nil:
+        break
+    }
+    switch decision.armMutation {
+    case .clear:
+        terminal.clearArmedLink()
+    case .set(let link):
+        _ = terminal.setArmedLink(link)
     case nil:
         break
     }

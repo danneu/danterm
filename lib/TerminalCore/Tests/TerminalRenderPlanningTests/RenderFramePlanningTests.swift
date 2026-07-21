@@ -5,6 +5,34 @@ import TerminalCore
 @testable import TerminalRenderPlanning
 
 struct RenderFramePlanningTests {
+    @Test("Hovered links gain a single underline without replacing stronger decorations")
+    func hoveredLinkDecoration() throws {
+        var plain = try #require(Terminal(columns: 24, rows: 2))
+        feed("https://a.co", to: &plain)
+        let plainLink = try #require(plain.activatableLink(at: .init(row: 0, column: 2)))
+        let admittedPlain = plain.setHoveredLink(plainLink)
+        #expect(admittedPlain)
+        let plainPlan = invisiblePlan(plain)
+        #expect(plainPlan.decorationRuns == [
+            RenderDecorationRun(
+                row: 0,
+                startColumn: 0,
+                columnCount: 12,
+                kinds: [.underlineSingle],
+                color: RenderTheme.dark.defaultForeground
+            ),
+        ])
+
+        var decorated = try #require(Terminal(columns: 24, rows: 2))
+        feed("\u{1B}[4:3mhttps://a.co", to: &decorated)
+        let decoratedLink = try #require(decorated.activatableLink(at: .init(row: 0, column: 2)))
+        let admittedDecorated = decorated.setHoveredLink(decoratedLink)
+        #expect(admittedDecorated)
+        #expect(invisiblePlan(decorated).decorationRuns.map(\.kinds) == [[.underlineCurly]])
+
+        let clipped = clipFramePlan(plainPlan, to: TerminalDamage(rows: [1]))
+        #expect(clipped.decorationRuns.isEmpty)
+    }
     @Test("Damage clipping keeps only visible damaged rows and preserves full plans")
     func damageClipping() throws {
         var terminal = try #require(Terminal(columns: 4, rows: 3))

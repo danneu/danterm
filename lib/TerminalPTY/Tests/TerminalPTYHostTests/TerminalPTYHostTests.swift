@@ -10,6 +10,46 @@ import TerminalCoreRecording
 /// Exercises the native owner only through real PTYs and controlled child behavior.
 @Suite(.serialized)
 struct TerminalPTYHostTests {
+    @Test("Cmd link interaction publishes hover and opens once without PTY input", .timeLimit(.minutes(1)))
+    func linkInteractionEffectsStayLocal() async throws {
+        // Intent: prove the serialized owner applies hover/open effects without child bytes.
+        // Why it exists: link ownership must preempt mouse reporting at the PTY boundary.
+        // Scenario: a real child prints OSC 8 text, then receives a Cmd-hover and Cmd-click.
+        let host = try makeHost()
+        let command = "printf '\\033]8;;https://a.co\\007https://a.co\\033]8;;\\007'; exec \(try probeExecutable()) hold \"$0\""
+        await host.start(makeLaunchInput(command: command))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let screen = host.fencedSnapshot().screenText
+            .split(separator: "\n", omittingEmptySubsequences: false)
+        let row = try #require(screen.lastIndex(where: { $0.contains("https://a.co") }))
+        let target = try #require(screen[row].range(of: "https://a.co"))
+        let column = screen[row].distance(from: screen[row].startIndex, to: target.lowerBound)
+        let snapshot = host.fencedSnapshot()
+        _ = try #require(snapshot.activatableLink(at: .init(
+            row: snapshot.scrollProjection.topRow + row,
+            column: column + 2
+        )))
+        let baseline = await host.inputWrites().count
+        let opened = AsyncStream<TerminalHyperlink>.makeStream()
+        var iterator = opened.stream.makeAsyncIterator()
+
+        host.sendPointer(.move(column: column + 2, row: row, modifiers: [.command]))
+        _ = try #require(host.fencedSnapshot().hoveredLink)
+        host.sendPointer(
+            .down(.left, column: column + 2, row: row, modifiers: [.command]),
+            onOpenLink: { opened.continuation.yield($0) }
+        )
+        host.sendPointer(
+            .up(.left, column: column + 3, row: row, modifiers: [.command]),
+            onOpenLink: { opened.continuation.yield($0) }
+        )
+
+        #expect(await iterator.next()?.uri == "https://a.co")
+        #expect(await host.inputWrites().count == baseline)
+        host.cancelLinkInteraction()
+        #expect(host.fencedSnapshot().hoveredLink == nil)
+        await host.close()
+    }
     @Test("frame-state reads drain damage without changing ordinary snapshots")
     func frameStateReadsDrainDamage() async throws {
         let host = try makeHost()

@@ -38,6 +38,7 @@ public struct Terminal: Equatable, Sendable {
         var scalars: [Unicode.Scalar] = []
         var style = TerminalStyle()
         var hyperlinkId: Int?
+        var contentIdentity: Int?
     }
 
     /// Moves soft-wrap identity with its cells during viewport scrolling.
@@ -50,6 +51,7 @@ public struct Terminal: Equatable, Sendable {
     private struct DamageActionSnapshot {
         var cursor: TerminalCursor?
         var selection: TerminalTextRange?
+        var hoveredLink: TerminalResolvedLink?
         var topRow: Int
         var isFollowing: Bool
         var isAlternateScreenActive: Bool
@@ -166,6 +168,13 @@ public struct Terminal: Equatable, Sendable {
     private struct SearchState: Equatable, Sendable {
         var query: String
         var range: TextAnchorRange
+    }
+
+    /// Retains hover presentation against reflowable text anchors without storing platform state.
+    private struct InteractionLinkState: Equatable, Sendable {
+        var hyperlink: TerminalHyperlink
+        var range: TextAnchorRange
+        var activationIdentity: Int
     }
 
     /// Couples one atomic projected unit to the boundaries that can select it.
@@ -289,11 +298,14 @@ public struct Terminal: Equatable, Sendable {
     private var evictedRowCount = 0
     private var selection: TextAnchorRange?
     private var search: SearchState?
+    private var hoveredLinkState: InteractionLinkState?
+    private var armedLinkState: InteractionLinkState?
     private var viewportState = ViewportState.following
     private var damage = TerminalDamage.full
     private var hyperlinkTargets: [Int: TerminalHyperlink] = [:]
     private var hyperlinkPen: Int?
     private var nextHyperlinkId = 1
+    private var nextContentIdentity = 1
 
     static let productionScrollbackBudgetBytes = 10_485_760
     static let kittyKeyboardStackDepth = 8
@@ -303,6 +315,8 @@ public struct Terminal: Equatable, Sendable {
     /// Exposes aggregate retained link cost to structural bound tests.
     var retainedHyperlinkMetadataBytes: Int {
         hyperlinkTargets.values.reduce(0) { $0 + hyperlinkByteCost($1) }
+            + (hoveredLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0)
+            + (armedLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0)
     }
 
     /// Exposes retained table cardinality for deduplication and sweep proofs.
@@ -399,6 +413,7 @@ public struct Terminal: Equatable, Sendable {
                 )
                 : nil,
             selection: selectionRange,
+            hoveredLink: hoveredLink,
             topRow: projection.topRow,
             isFollowing: projection.isFollowing,
             isAlternateScreenActive: inactivePrimaryScreen != nil,
@@ -433,6 +448,10 @@ public struct Terminal: Equatable, Sendable {
         if before.selection != after.selection {
             changedRows.formUnion(damagedViewportRows(for: before.selection))
             changedRows.formUnion(damagedViewportRows(for: after.selection))
+        }
+        if before.hoveredLink != after.hoveredLink {
+            changedRows.formUnion(damagedViewportRows(for: before.hoveredLink?.range))
+            changedRows.formUnion(damagedViewportRows(for: after.hoveredLink?.range))
         }
         damage.formUnion(TerminalDamage(rows: changedRows))
     }
@@ -539,14 +558,16 @@ public struct Terminal: Equatable, Sendable {
         }
 
         var candidateTargets = hyperlinkTargets
+        let interactionCost = (hoveredLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0)
+            + (armedLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0)
         if candidateTargets.values.reduce(0, { $0 + hyperlinkByteCost($1) })
-            + hyperlinkByteCost(target) > Self.maximumHyperlinkMetadataBytes
+            + interactionCost + hyperlinkByteCost(target) > Self.maximumHyperlinkMetadataBytes
         {
             let live = liveHyperlinkIds()
             candidateTargets = candidateTargets.filter { live.contains($0.key) }
         }
         guard candidateTargets.values.reduce(0, { $0 + hyperlinkByteCost($1) })
-            + hyperlinkByteCost(target) <= Self.maximumHyperlinkMetadataBytes
+            + interactionCost + hyperlinkByteCost(target) <= Self.maximumHyperlinkMetadataBytes
         else { return }
 
         let id = nextHyperlinkId
@@ -890,6 +911,128 @@ public struct Terminal: Equatable, Sendable {
         selection.flatMap(publicRange)
     }
 
+    /// Returns the currently indicated HTTP(S) run in current retained-stream coordinates.
+    public var hoveredLink: TerminalResolvedLink? {
+        guard let hoveredLinkState, let range = publicRange(hoveredLinkState.range) else {
+            return nil
+        }
+        return TerminalResolvedLink(
+            hyperlink: hoveredLinkState.hyperlink,
+            range: range,
+            activationIdentity: hoveredLinkState.activationIdentity
+        )
+    }
+
+    /// Admits and anchors one resolved link for hover presentation within the shared metadata cap.
+    @discardableResult
+    public mutating func setHoveredLink(_ link: TerminalResolvedLink) -> Bool {
+        guard isActivatableHTTPLink(link.hyperlink.uri),
+              hyperlinkByteCost(link.hyperlink) <= Self.maximumHyperlinkTargetBytes
+        else { return false }
+
+        let before = damageActionSnapshot
+        var candidateTargets = hyperlinkTargets
+        let armCost = armedLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0
+        let retainedCost = candidateTargets.values.reduce(0) { $0 + hyperlinkByteCost($1) }
+        if retainedCost + armCost + hyperlinkByteCost(link.hyperlink)
+            > Self.maximumHyperlinkMetadataBytes
+        {
+            let live = liveHyperlinkIds()
+            candidateTargets = candidateTargets.filter { live.contains($0.key) }
+        }
+        let candidateCost = candidateTargets.values.reduce(0) { $0 + hyperlinkByteCost($1) }
+        guard candidateCost + armCost + hyperlinkByteCost(link.hyperlink)
+            <= Self.maximumHyperlinkMetadataBytes
+        else { return false }
+
+        let ordered = textPositionPrecedes(link.range.start, link.range.end)
+            ? (link.range.start, link.range.end)
+            : (link.range.end, link.range.start)
+        hyperlinkTargets = candidateTargets
+        hoveredLinkState = InteractionLinkState(
+            hyperlink: link.hyperlink,
+            range: TextAnchorRange(
+                start: normalizedSelectionBoundary(ordered.0, isEnd: false),
+                end: normalizedSelectionBoundary(ordered.1, isEnd: true)
+            ),
+            activationIdentity: link.activationIdentity
+        )
+        recordDamage(since: before)
+        return true
+    }
+
+    /// Reports whether the current table can atomically reserve one click target.
+    func canAdmitArmedLink(_ link: TerminalResolvedLink) -> Bool {
+        guard isActivatableHTTPLink(link.hyperlink.uri),
+              hyperlinkByteCost(link.hyperlink) <= Self.maximumHyperlinkTargetBytes
+        else { return false }
+        var candidateTargets = hyperlinkTargets
+        let hoverCost = hoveredLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0
+        if candidateTargets.values.reduce(0, { $0 + hyperlinkByteCost($1) })
+            + hoverCost + hyperlinkByteCost(link.hyperlink)
+            > Self.maximumHyperlinkMetadataBytes
+        {
+            let live = liveHyperlinkIds()
+            candidateTargets = candidateTargets.filter { live.contains($0.key) }
+        }
+        return candidateTargets.values.reduce(0, { $0 + hyperlinkByteCost($1) })
+            + hoverCost + hyperlinkByteCost(link.hyperlink)
+            <= Self.maximumHyperlinkMetadataBytes
+    }
+
+    /// Atomically reserves a validated originating run for click-time revalidation.
+    @discardableResult
+    public mutating func setArmedLink(_ link: TerminalResolvedLink) -> Bool {
+        guard canAdmitArmedLink(link) else { return false }
+        var candidateTargets = hyperlinkTargets
+        let hoverCost = hoveredLinkState.map { hyperlinkByteCost($0.hyperlink) } ?? 0
+        if candidateTargets.values.reduce(0, { $0 + hyperlinkByteCost($1) })
+            + hoverCost + hyperlinkByteCost(link.hyperlink)
+            > Self.maximumHyperlinkMetadataBytes
+        {
+            let live = liveHyperlinkIds()
+            candidateTargets = candidateTargets.filter { live.contains($0.key) }
+        }
+        let ordered = textPositionPrecedes(link.range.start, link.range.end)
+            ? (link.range.start, link.range.end)
+            : (link.range.end, link.range.start)
+        hyperlinkTargets = candidateTargets
+        armedLinkState = InteractionLinkState(
+            hyperlink: link.hyperlink,
+            range: TextAnchorRange(
+                start: normalizedSelectionBoundary(ordered.0, isEnd: false),
+                end: normalizedSelectionBoundary(ordered.1, isEnd: true)
+            ),
+            activationIdentity: link.activationIdentity
+        )
+        return true
+    }
+
+    /// Clears the retained click reservation without affecting hover presentation.
+    public mutating func clearArmedLink() {
+        armedLinkState = nil
+    }
+
+    /// Reconstructs the current click reservation for release-time identity comparison.
+    var armedLink: TerminalResolvedLink? {
+        guard let armedLinkState, let range = publicRange(armedLinkState.range) else {
+            return nil
+        }
+        return TerminalResolvedLink(
+            hyperlink: armedLinkState.hyperlink,
+            range: range,
+            activationIdentity: armedLinkState.activationIdentity
+        )
+    }
+
+    /// Clears hyperlink presentation without changing terminal text or selection.
+    public mutating func clearHoveredLink() {
+        guard hoveredLinkState != nil else { return }
+        let before = damageActionSnapshot
+        hoveredLinkState = nil
+        recordDamage(since: before)
+    }
+
     /// Serializes the selected projection units, preserving an intentionally empty selection.
     public var selectedText: String? {
         guard let selection else { return nil }
@@ -1036,6 +1179,13 @@ public struct Terminal: Equatable, Sendable {
             range: TerminalTextRange(
                 start: start,
                 end: .init(row: last.row, column: last.column + 1)
+            ),
+            activationIdentity: activationIdentity(
+                in: TerminalTextRange(
+                    start: start,
+                    end: .init(row: last.row, column: last.column + 1)
+                ),
+                stream: stream
             )
         )
     }
@@ -1100,6 +1250,19 @@ public struct Terminal: Equatable, Sendable {
                         row: lastUnit.end.row - absoluteBase,
                         column: lastUnit.end.column
                     )
+                ),
+                activationIdentity: activationIdentity(
+                    in: TerminalTextRange(
+                        start: .init(
+                            row: firstUnit.start.row - absoluteBase,
+                            column: firstUnit.start.column
+                        ),
+                        end: .init(
+                            row: lastUnit.end.row - absoluteBase,
+                            column: lastUnit.end.column
+                        )
+                    ),
+                    stream: stream
                 )
             )
         }
@@ -1127,6 +1290,22 @@ public struct Terminal: Equatable, Sendable {
             && value != 0x22 && value != 0x27
             && value != 0x28 && value != 0x3C && value != 0x3E
             && value != 0x5B && value != 0x7B
+    }
+
+    private func activationIdentity(
+        in range: TerminalTextRange,
+        stream: [GridRow]
+    ) -> Int {
+        guard range.start.row <= range.end.row else { return 0 }
+        var identity = 0
+        for row in range.start.row...range.end.row where stream.indices.contains(row) {
+            let start = row == range.start.row ? range.start.column : 0
+            let end = row == range.end.row ? range.end.column : columnCount
+            for column in max(0, start)..<min(columnCount, end) {
+                identity = max(identity, stream[row].cells[column].contentIdentity ?? 0)
+            }
+        }
+        return identity
     }
 
     private func isTrailingURLPunctuation(_ scalar: Unicode.Scalar) -> Bool {
@@ -1763,6 +1942,8 @@ public struct Terminal: Equatable, Sendable {
     private mutating func clearInspection() {
         selection = nil
         search = nil
+        hoveredLinkState = nil
+        armedLinkState = nil
         viewportState = .following
     }
 
@@ -1773,7 +1954,8 @@ public struct Terminal: Equatable, Sendable {
         } else {
             damage = .full
         }
-        guard selection != nil || search != nil else { return }
+        guard selection != nil || search != nil || hoveredLinkState != nil || armedLinkState != nil
+        else { return }
         let lower = evictedRowCount + scrollbackRows.count + range.lowerBound
         let upper = evictedRowCount + scrollbackRows.count + range.upperBound - 1
         invalidateInspection(inAbsoluteRows: lower...upper)
@@ -1783,7 +1965,8 @@ public struct Terminal: Equatable, Sendable {
         if viewportState != .following {
             damage = .full
         }
-        guard selection != nil || search != nil else { return }
+        guard selection != nil || search != nil || hoveredLinkState != nil || armedLinkState != nil
+        else { return }
         let absoluteRow = evictedRowCount + row
         invalidateInspection(inAbsoluteRows: absoluteRow...absoluteRow)
     }
@@ -1794,6 +1977,12 @@ public struct Terminal: Equatable, Sendable {
         }
         if let search, range(search.range, intersects: rows) {
             self.search = nil
+        }
+        if let hoveredLinkState, range(hoveredLinkState.range, intersects: rows) {
+            self.hoveredLinkState = nil
+        }
+        if let armedLinkState, range(armedLinkState.range, intersects: rows) {
+            self.armedLinkState = nil
         }
     }
 
@@ -1836,6 +2025,12 @@ public struct Terminal: Equatable, Sendable {
         }
         if let search, search.range.start < firstRetained {
             self.search = nil
+        }
+        if let hoveredLinkState, hoveredLinkState.range.start < firstRetained {
+            self.hoveredLinkState = nil
+        }
+        if let armedLinkState, armedLinkState.range.start < firstRetained {
+            self.armedLinkState = nil
         }
         if case let .browsing(anchor) = viewportState, anchor < firstRetained {
             viewportState = .browsing(top: firstRetained)
@@ -2122,6 +2317,22 @@ public struct Terminal: Equatable, Sendable {
                 oldColumnCount: oldColumnCount
             )
         }
+        let hoverAttachments = hoveredLinkState.map {
+            attachments(
+                for: $0.range,
+                in: oldUnits,
+                rowMetadata: reconstruction.rowMetadata,
+                oldColumnCount: oldColumnCount
+            )
+        }
+        let armAttachments = armedLinkState.map {
+            attachments(
+                for: $0.range,
+                in: oldUnits,
+                rowMetadata: reconstruction.rowMetadata,
+                oldColumnCount: oldColumnCount
+            )
+        }
 
         var rebuiltRows: [GridRow] = []
         var cursorDestination: ReflowDestination?
@@ -2129,6 +2340,10 @@ public struct Terminal: Equatable, Sendable {
         var selectionEndDestination: TextAnchor?
         var searchStartDestination: TextAnchor?
         var searchEndDestination: TextAnchor?
+        var hoverStartDestination: TextAnchor?
+        var hoverEndDestination: TextAnchor?
+        var armStartDestination: TextAnchor?
+        var armEndDestination: TextAnchor?
         var viewportTopDestinationRow = 0
         var browsingTopDestinationRow: Int?
         for (lineIndex, line) in reconstruction.lines.enumerated() {
@@ -2219,6 +2434,34 @@ public struct Terminal: Equatable, Sendable {
                     baseRow: baseRow
                 )
             }
+            if let hoverAttachments {
+                hoverStartDestination = hoverStartDestination ?? textDestination(
+                    for: hoverAttachments.start,
+                    lineIndex: lineIndex,
+                    packed: packed,
+                    baseRow: baseRow
+                )
+                hoverEndDestination = hoverEndDestination ?? textDestination(
+                    for: hoverAttachments.end,
+                    lineIndex: lineIndex,
+                    packed: packed,
+                    baseRow: baseRow
+                )
+            }
+            if let armAttachments {
+                armStartDestination = armStartDestination ?? textDestination(
+                    for: armAttachments.start,
+                    lineIndex: lineIndex,
+                    packed: packed,
+                    baseRow: baseRow
+                )
+                armEndDestination = armEndDestination ?? textDestination(
+                    for: armAttachments.end,
+                    lineIndex: lineIndex,
+                    packed: packed,
+                    baseRow: baseRow
+                )
+            }
             rebuiltRows.append(contentsOf: packed.rows)
         }
 
@@ -2262,6 +2505,26 @@ public struct Terminal: Equatable, Sendable {
                 search?.range = TextAnchorRange(start: min(start, end), end: max(start, end))
             } else {
                 search = nil
+            }
+        }
+        if hoverAttachments != nil {
+            if let start = hoverStartDestination, let end = hoverEndDestination {
+                hoveredLinkState?.range = TextAnchorRange(
+                    start: min(start, end),
+                    end: max(start, end)
+                )
+            } else {
+                hoveredLinkState = nil
+            }
+        }
+        if armAttachments != nil {
+            if let start = armStartDestination, let end = armEndDestination {
+                armedLinkState?.range = TextAnchorRange(
+                    start: min(start, end),
+                    end: max(start, end)
+                )
+            } else {
+                armedLinkState = nil
             }
         }
         if let browsingTopDestinationRow {
@@ -2332,7 +2595,8 @@ public struct Terminal: Equatable, Sendable {
                                 kind: .wideTail,
                                 scalars: [],
                                 style: cell.style,
-                                hyperlinkId: cell.hyperlinkId
+                                hyperlinkId: cell.hyperlinkId,
+                                contentIdentity: cell.contentIdentity
                             ),
                         ],
                         sourceOffsets: sources
@@ -2431,7 +2695,8 @@ public struct Terminal: Equatable, Sendable {
                     kind: .spacerHead,
                     scalars: [],
                     style: unit.cells[0].style,
-                    hyperlinkId: unit.cells[0].hyperlinkId
+                    hyperlinkId: unit.cells[0].hyperlinkId,
+                    contentIdentity: unit.cells[0].contentIdentity
                 )
                 packedRows[row].isSoftWrapped = true
                 packedRows.append(makeBlankRow(columns: columns))
@@ -3309,6 +3574,8 @@ public struct Terminal: Equatable, Sendable {
         selectPrimaryScreen()
         resetControlState()
         hyperlinkPen = nil
+        hoveredLinkState = nil
+        armedLinkState = nil
         clearPendingMotionState()
     }
 
@@ -3321,6 +3588,7 @@ public struct Terminal: Equatable, Sendable {
         hyperlinkPen = nil
         hyperlinkTargets.removeAll(keepingCapacity: true)
         nextHyperlinkId = 1
+        nextContentIdentity = 1
         cursor = CellPosition(row: 0, column: 0)
         clearPendingMotionState()
         lastPrintedCluster = nil
@@ -3507,6 +3775,7 @@ public struct Terminal: Equatable, Sendable {
         let scalars = rows[target.row].cells[target.column].scalars
         let style = rows[target.row].cells[target.column].style
         let hyperlinkId = rows[target.row].cells[target.column].hyperlinkId
+        let contentIdentity = rows[target.row].cells[target.column].contentIdentity
         var destination = target
 
         if target.column == columnCount - 1 {
@@ -3516,7 +3785,8 @@ public struct Terminal: Equatable, Sendable {
                     kind: .spacerHead,
                     scalars: [],
                     style: style,
-                    hyperlinkId: hyperlinkId
+                    hyperlinkId: hyperlinkId,
+                    contentIdentity: contentIdentity
                 )
                 rows[target.row].isSoftWrapped = true
                 cursor = target
@@ -3540,13 +3810,15 @@ public struct Terminal: Equatable, Sendable {
             kind: .wideHead,
             scalars: scalars,
             style: style,
-            hyperlinkId: hyperlinkId
+            hyperlinkId: hyperlinkId,
+            contentIdentity: contentIdentity
         )
         rows[destination.row].cells[destination.column + 1] = GridCell(
             kind: .wideTail,
             scalars: [],
             style: style,
-            hyperlinkId: hyperlinkId
+            hyperlinkId: hyperlinkId,
+            contentIdentity: contentIdentity
         )
         advanceCursorPastWideCell(at: destination)
         return destination
@@ -3568,6 +3840,8 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func printNarrow(_ scalar: Unicode.Scalar) {
+        let contentIdentity = nextContentIdentity
+        nextContentIdentity += 1
         invalidateInspection(inViewportRows: cursor.row..<(cursor.row + 1))
         if isInsertMode {
             moveAndFillCells(
@@ -3581,7 +3855,8 @@ public struct Terminal: Equatable, Sendable {
             kind: .narrow,
             scalars: [scalar],
             style: currentStyle,
-            hyperlinkId: hyperlinkPen
+            hyperlinkId: hyperlinkPen,
+            contentIdentity: contentIdentity
         )
         clusterContext = ClusterContext(target: cursor, previousScalar: scalar)
 
@@ -3593,6 +3868,8 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func printWide(_ scalar: Unicode.Scalar) {
+        let contentIdentity = nextContentIdentity
+        nextContentIdentity += 1
         invalidateInspection(inViewportRows: cursor.row..<(cursor.row + 1))
         var preservesWrappedSpacer = false
         if cursor.column == columnCount - 1 {
@@ -3602,7 +3879,8 @@ public struct Terminal: Equatable, Sendable {
                     kind: .spacerHead,
                     scalars: [],
                     style: currentStyle,
-                    hyperlinkId: hyperlinkPen
+                    hyperlinkId: hyperlinkPen,
+                    contentIdentity: contentIdentity
                 )
                 rows[cursor.row].isSoftWrapped = true
                 advanceToNextRow(preservingWrapClaim: true)
@@ -3637,13 +3915,15 @@ public struct Terminal: Equatable, Sendable {
             kind: .wideHead,
             scalars: [scalar],
             style: currentStyle,
-            hyperlinkId: hyperlinkPen
+            hyperlinkId: hyperlinkPen,
+            contentIdentity: contentIdentity
         )
         rows[cursor.row].cells[cursor.column + 1] = GridCell(
             kind: .wideTail,
             scalars: [],
             style: currentStyle,
-            hyperlinkId: hyperlinkPen
+            hyperlinkId: hyperlinkPen,
+            contentIdentity: contentIdentity
         )
         clusterContext = ClusterContext(target: cursor, previousScalar: scalar)
         advanceCursorPastWideCell(at: cursor)

@@ -80,6 +80,8 @@ public struct TerminalKeyModifiers: OptionSet, Equatable, Sendable {
     public static let alt = Self(rawValue: 1 << 1)
     /// Selects control-byte or enhanced protocol forms.
     public static let control = Self(rawValue: 1 << 2)
+    /// Carries platform Command intent for local policy while remaining terminal-byte inert.
+    public static let command = Self(rawValue: 1 << 3)
 }
 
 /// The three stateful mouse buttons represented by terminal reporting protocols.
@@ -131,10 +133,16 @@ public func encodeTerminalKey(
     modifiers: TerminalKeyModifiers,
     modes: TerminalInputModes
 ) -> [UInt8] {
+    let modifiers = protocolModifiers(modifiers)
     if modes.kittyKeyboardFlags != 0 {
         return encodeKittyKey(key, modifiers: modifiers)
     }
     return encodeLegacyKey(key, modifiers: modifiers, modes: modes)
+}
+
+/// Removes local-only modifier intent before any terminal protocol decision observes it.
+private func protocolModifiers(_ modifiers: TerminalKeyModifiers) -> TerminalKeyModifiers {
+    modifiers.intersection([.shift, .alt, .control])
 }
 
 /// Sanitizes paste text and applies bracket markers without permitting embedded control sequences.
@@ -190,7 +198,7 @@ public func encodeTerminalMouse(
         guard column != tracker.column || row != tracker.row else { return [] }
         tracker.column = column
         tracker.row = row
-        modifiers = eventModifiers
+        modifiers = protocolModifiers(eventModifiers)
 
         let heldButton = lowestPressedMouseButton(tracker.pressedButtons)
         switch modes.mouseTracking {
@@ -210,7 +218,7 @@ public func encodeTerminalMouse(
         guard modes.mouseTracking != .off else { return [] }
         code = button.rawValue
         isPressed = true
-        modifiers = eventModifiers
+        modifiers = protocolModifiers(eventModifiers)
 
     case let .up(button, column, row, eventModifiers):
         tracker.column = column
@@ -221,7 +229,7 @@ public func encodeTerminalMouse(
         guard modes.mouseTracking != .off else { return [] }
         code = button.rawValue
         isPressed = false
-        modifiers = eventModifiers
+        modifiers = protocolModifiers(eventModifiers)
 
     case let .wheel(direction, column, row, eventModifiers):
         tracker.column = column
@@ -229,7 +237,7 @@ public func encodeTerminalMouse(
         guard modes.mouseTracking != .off else { return [] }
         code = direction.rawValue
         isPressed = true
-        modifiers = eventModifiers
+        modifiers = protocolModifiers(eventModifiers)
     }
 
     return encodeMouseReport(

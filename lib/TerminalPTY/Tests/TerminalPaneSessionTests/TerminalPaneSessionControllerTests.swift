@@ -12,6 +12,51 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct TerminalPaneSessionControllerTests {
+    @Test("controller forwards one link open and exposes synchronized hover", .timeLimit(.minutes(1)))
+    func controllerLinkPlumbing() async throws {
+        // Intent: prove the main-actor adapter exposes hover and forwards one approved open.
+        // Why it exists: callback hops must respect teardown while cached snapshots stay current.
+        // Scenario: a visible pane hovers, activates, exits the surface, and tears down.
+        let host = try makeHost()
+        let command = "printf '\\033]8;;https://a.co\\007https://a.co\\033]8;;\\007'; exec \(try probeExecutable()) hold \"$0\""
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: command)
+        )
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        controller.synchronizeState()
+        let screen = controller.terminalSnapshot().screenText
+            .split(separator: "\n", omittingEmptySubsequences: false)
+        let row = try #require(screen.lastIndex(where: { $0.contains("https://a.co") }))
+        let target = try #require(screen[row].range(of: "https://a.co"))
+        let column = screen[row].distance(from: screen[row].startIndex, to: target.lowerBound)
+        let snapshot = controller.terminalSnapshot()
+        _ = try #require(snapshot.activatableLink(at: .init(
+            row: snapshot.scrollProjection.topRow + row,
+            column: column + 2
+        )))
+        let opened = AsyncStream<TerminalHyperlink>.makeStream()
+        var iterator = opened.stream.makeAsyncIterator()
+        controller.onOpenLink = { opened.continuation.yield($0) }
+
+        controller.sendPointer(.move(column: column + 2, row: row, modifiers: [.command]))
+        controller.synchronizeState()
+        #expect(try #require(controller.readHoveredLink()).uri == "https://a.co")
+        controller.sendPointer(.down(
+            .left, column: column + 2, row: row, modifiers: [.command]
+        ))
+        controller.sendPointer(.up(
+            .left, column: column + 3, row: row, modifiers: [.command]
+        ))
+        #expect(await iterator.next()?.uri == "https://a.co")
+
+        controller.cancelLinkInteraction()
+        controller.synchronizeState()
+        #expect(controller.readHoveredLink() == nil)
+        controller.tearDown()
+        #expect(controller.onOpenLink == nil)
+        await host.close()
+    }
     @Test("visible creation retains one full frame and repeat synchronization is idle")
     func visibleCreationRetainsInitialFrame() async throws {
         let host = try makeHost()

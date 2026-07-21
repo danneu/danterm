@@ -68,6 +68,9 @@ public final class TerminalPaneSessionController {
     /// Receives an uncaptured pane-menu request only after its pointer gesture completes.
     public var onPaneMenu: ((TerminalViewportCell) -> Void)?
 
+    /// Receives a click-time-revalidated HTTP(S) target on the main actor.
+    public var onOpenLink: ((TerminalHyperlink) -> Void)?
+
     /// Releases the backend registry entry only after this host's native teardown completes.
     public var onTeardownCompleted: (@MainActor @Sendable () -> Void)?
 
@@ -190,12 +193,27 @@ public final class TerminalPaneSessionController {
     /// Forwards normalized pointer input without mirroring child modes on the main actor.
     public func sendPointer(_ event: TerminalPointerEvent) {
         guard isTornDown == false else { return }
-        host.sendPointer(event) { [weak self] cell in
-            Task { @MainActor [weak self] in
-                guard let self, self.isTornDown == false else { return }
-                self.onPaneMenu?(cell)
+        host.sendPointer(
+            event,
+            onPaneMenu: { [weak self] cell in
+                Task { @MainActor [weak self] in
+                    guard let self, self.isTornDown == false else { return }
+                    self.onPaneMenu?(cell)
+                }
+            },
+            onOpenLink: { [weak self] link in
+                Task { @MainActor [weak self] in
+                    guard let self, self.isTornDown == false else { return }
+                    self.onOpenLink?(link)
+                }
             }
-        }
+        )
+    }
+
+    /// Clears hover and invalidates a pending link click after pointer exit or invalid geometry.
+    public func cancelLinkInteraction() {
+        guard isTornDown == false else { return }
+        host.cancelLinkInteraction()
     }
 
     /// Submits signed local row navigation through the host's ordered owner queue.
@@ -271,6 +289,11 @@ public final class TerminalPaneSessionController {
         cachedTerminal.selectedText
     }
 
+    /// Returns the currently hovered target from the latest asynchronously consumed snapshot.
+    public func readHoveredLink() -> TerminalHyperlink? {
+        cachedTerminal.hoveredLink?.hyperlink
+    }
+
     /// Fences pending pointer work, refreshes cached state, and returns finalized selection text.
     public func readSelectedTextSynchronizing() -> String? {
         guard isTornDown == false else { return nil }
@@ -322,6 +345,7 @@ public final class TerminalPaneSessionController {
         onSessionEnded = nil
         onViewportStateChange = nil
         onPaneMenu = nil
+        onOpenLink = nil
         let onTeardownCompleted = takeTeardownCompletion()
         consumeTask?.cancel()
         consumeTask = nil

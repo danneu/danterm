@@ -270,13 +270,27 @@ public actor TerminalPTYHost {
         }
     }
 
-    /// Enqueues a normalized pointer transition and returns owner-approved pane-menu actions.
+    /// Enqueues pointer input and returns only owner-approved local actions.
     nonisolated public func sendPointer(
         _ event: TerminalPointerEvent,
-        onPaneMenu: @escaping @Sendable (TerminalViewportCell) -> Void = { _ in }
+        onPaneMenu: @escaping @Sendable (TerminalViewportCell) -> Void = { _ in },
+        onOpenLink: @escaping @Sendable (TerminalHyperlink) -> Void = { _ in }
     ) {
         queue.async { [weak self] in
-            self?.assumeIsolated { owner in owner.applyPointer(event, onPaneMenu: onPaneMenu) }
+            self?.assumeIsolated { owner in
+                owner.applyPointer(
+                    event,
+                    onPaneMenu: onPaneMenu,
+                    onOpenLink: onOpenLink
+                )
+            }
+        }
+    }
+
+    /// Cancels link arming and hover on the same FIFO as pointer transitions.
+    nonisolated public func cancelLinkInteraction() {
+        queue.async { [weak self] in
+            self?.assumeIsolated { owner in owner.applyLinkCancellation() }
         }
     }
 
@@ -447,7 +461,8 @@ public actor TerminalPTYHost {
 
     private func applyPointer(
         _ event: TerminalPointerEvent,
-        onPaneMenu: @Sendable (TerminalViewportCell) -> Void
+        onPaneMenu: @Sendable (TerminalViewportCell) -> Void,
+        onOpenLink: @Sendable (TerminalHyperlink) -> Void
     ) {
         guard teardownFinished == false else { return }
         if captureTransitions { appliedTransitions.append(.mouse(event)) }
@@ -464,12 +479,50 @@ public actor TerminalPTYHost {
         case nil:
             break
         }
+        applyHoverMutation(decision.hoverMutation)
+        applyArmMutation(decision.armMutation)
         if terminal != previousTerminal {
             markUpdatePending()
             publishPendingUpdate()
         }
         if let cell = decision.paneMenuCell {
             onPaneMenu(cell)
+        }
+        if let link = decision.openLink {
+            onOpenLink(link)
+        }
+    }
+
+    private func applyLinkCancellation() {
+        guard teardownFinished == false else { return }
+        let previousTerminal = terminal
+        let cancellation = cancelTerminalLinkInteraction(state: &interactionState)
+        applyHoverMutation(cancellation.hoverMutation)
+        applyArmMutation(cancellation.armMutation)
+        guard terminal != previousTerminal else { return }
+        markUpdatePending()
+        publishPendingUpdate()
+    }
+
+    private func applyHoverMutation(_ mutation: TerminalHoverMutation?) {
+        switch mutation {
+        case .clear:
+            terminal.clearHoveredLink()
+        case .set(let link):
+            terminal.setHoveredLink(link)
+        case nil:
+            break
+        }
+    }
+
+    private func applyArmMutation(_ mutation: TerminalLinkArmMutation?) {
+        switch mutation {
+        case .clear:
+            terminal.clearArmedLink()
+        case .set(let link):
+            _ = terminal.setArmedLink(link)
+        case nil:
+            break
         }
     }
 

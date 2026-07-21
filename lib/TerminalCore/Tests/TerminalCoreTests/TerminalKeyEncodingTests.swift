@@ -5,6 +5,27 @@ import Testing
 
 /// Pins the normalized-key contract independently from AppKit and PTY ownership.
 struct TerminalKeyEncodingTests {
+    @Test("Command is byte-inert across legacy cursor keypad Kitty and mouse encodings")
+    func commandModifierIsByteInert() {
+        let command = TerminalKeyModifiers.command
+        #expect(encodeTerminalKey(.up, modifiers: command, modes: .init(applicationCursorKeys: true))
+            == encodeTerminalKey(.up, modifiers: [], modes: .init(applicationCursorKeys: true)))
+        #expect(encodeTerminalKey(.keypad1, modifiers: command, modes: .init(applicationKeypad: true))
+            == encodeTerminalKey(.keypad1, modifiers: [], modes: .init(applicationKeypad: true)))
+        #expect(encodeTerminalKey(.f5, modifiers: command, modes: .init(kittyKeyboardFlags: 1))
+            == encodeTerminalKey(.f5, modifiers: [], modes: .init(kittyKeyboardFlags: 1)))
+
+        var plainTracker = TerminalMouseTracker()
+        var commandTracker = TerminalMouseTracker()
+        let modes = TerminalInputModes(mouseTracking: .click, sgrMouseEncoding: true)
+        #expect(encodeTerminalMouse(
+            .down(.left, column: 2, row: 1), tracker: &plainTracker, modes: modes
+        ) == encodeTerminalMouse(
+            .down(.left, column: 2, row: 1, modifiers: command),
+            tracker: &commandTracker,
+            modes: modes
+        ))
+    }
     @Test("every legacy navigation and function key covers the full xterm modifier matrix")
     func completeLegacySpecialKeyMatrix() {
         let modifiers: [(TerminalKeyModifiers, Int)] = [

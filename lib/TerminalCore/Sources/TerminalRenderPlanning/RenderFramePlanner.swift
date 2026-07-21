@@ -158,6 +158,17 @@ private struct FramePlanner {
                 let inspected = terminal.cell(row: row, column: column)
                 let semanticStyle = inspected?.style ?? TerminalStyle()
                 var style = resolveCellStyle(semanticStyle, theme: presentation.theme)
+                if style.underline == .none, isHovered(row: row, column: column) {
+                    style = ResolvedCellStyle(
+                        foreground: style.foreground,
+                        background: style.background,
+                        bold: style.bold,
+                        italic: style.italic,
+                        underline: .single,
+                        hidden: style.hidden,
+                        strikethrough: style.strikethrough
+                    )
+                }
                 if cursorSpan?.contains(row: row, column: column) == true {
                     style = ResolvedCellStyle(
                         foreground: presentation.theme.cursorText,
@@ -176,6 +187,15 @@ private struct FramePlanner {
                 )
             }
         }
+    }
+
+    private func isHovered(row: Int, column: Int) -> Bool {
+        guard let range = terminal.hoveredLink?.range else { return false }
+        let streamRow = terminal.scrollProjection.topRow + row
+        guard range.start.row...range.end.row ~= streamRow else { return false }
+        let start = streamRow == range.start.row ? range.start.column : 0
+        let end = streamRow == range.end.row ? range.end.column : terminal.geometry.columns
+        return start..<end ~= column
     }
 
     private func backgroundRuns(_ rows: [[PlannedCell]]) -> [RenderBackgroundRun] {

@@ -382,6 +382,195 @@ struct TerminalInteractionPolicyTests {
         ) == nil)
     }
 
+    @Test("Cmd link ownership suppresses reports and revalidates the originating run")
+    func commandLinkArmLifecycle() throws {
+        var terminal = try #require(Terminal(columns: 24, rows: 2))
+        terminal.feed(Array("https://a.co https://a.co\u{1B}[?1003;1006h".utf8))
+        var state = TerminalInteractionState()
+
+        let down = decideTerminalPointer(
+            .down(.left, column: 2, row: 0, modifiers: [.command]),
+            terminal: terminal,
+            state: &state
+        )
+        #expect(down.consumption == .link)
+        #expect(down.inputBytes.isEmpty)
+        apply(down.armMutation, to: &terminal)
+
+        let drag = decideTerminalPointer(
+            .move(column: 5, row: 0, modifiers: [.command]),
+            terminal: terminal,
+            state: &state
+        )
+        #expect(drag.consumption == .link)
+        #expect(drag.inputBytes.isEmpty)
+
+        let wrongRun = decideTerminalPointer(
+            .up(.left, column: 15, row: 0, modifiers: [.command]),
+            terminal: terminal,
+            state: &state
+        )
+        #expect(wrongRun.openLink == nil)
+        #expect(wrongRun.hoverMutation == .clear)
+        apply(wrongRun.armMutation, to: &terminal)
+
+        let secondDown = decideTerminalPointer(
+            .down(.left, column: 2, row: 0, modifiers: [.command]),
+            terminal: terminal,
+            state: &state
+        )
+        apply(secondDown.armMutation, to: &terminal)
+        let open = decideTerminalPointer(
+            .up(.left, column: 3, row: 0, modifiers: [.command]),
+            terminal: terminal,
+            state: &state
+        )
+        #expect(open.openLink?.uri == "https://a.co")
+        #expect(open.inputBytes.isEmpty)
+        #expect(open.hoverMutation == .clear)
+    }
+
+    @Test("Cmd link ownership wins in every mouse tracking mode")
+    func commandLinkAcrossTrackingModes() throws {
+        let modeSequences = ["", "\u{1B}[?1000h", "\u{1B}[?1002h", "\u{1B}[?1003h"]
+        for sequence in modeSequences {
+            var terminal = try #require(Terminal(columns: 16, rows: 2))
+            terminal.feed(Array("https://a.co\(sequence)".utf8))
+            var state = TerminalInteractionState()
+
+            let down = decideTerminalPointer(
+                .down(.left, column: 2, row: 0, modifiers: [.command]),
+                terminal: terminal,
+                state: &state
+            )
+            apply(down.armMutation, to: &terminal)
+            let up = decideTerminalPointer(
+                .up(.left, column: 3, row: 0, modifiers: [.command]),
+                terminal: terminal,
+                state: &state
+            )
+
+            #expect(down.consumption == .link)
+            #expect(down.inputBytes.isEmpty)
+            #expect(up.openLink?.uri == "https://a.co")
+            #expect(up.inputBytes.isEmpty)
+        }
+    }
+
+    @Test("link release rejects a same-target run recreated after pointer down")
+    func linkArmTracksRunIdentity() throws {
+        // Intent: bind activation to the cells present at pointer down, not just URL and range.
+        // Why it exists: output can recreate identical visible text before pointer release.
+        // Scenario: a child overwrites one URL cell with the same scalar during a Cmd-click.
+        var terminal = try #require(Terminal(columns: 16, rows: 2))
+        terminal.feed(Array("https://a.co".utf8))
+        var state = TerminalInteractionState()
+        let down = decideTerminalPointer(
+            .down(.left, column: 2, row: 0, modifiers: [.command]),
+            terminal: terminal,
+            state: &state
+        )
+        apply(down.armMutation, to: &terminal)
+
+        terminal.feed(Array("\u{1B}[1;1Hh".utf8))
+        let release = decideTerminalPointer(
+            .up(.left, column: 3, row: 0, modifiers: [.command]),
+            terminal: terminal,
+            state: &state
+        )
+
+        #expect(terminal.activatableLink(at: .init(row: 0, column: 3))?.hyperlink.uri
+            == "https://a.co")
+        #expect(release.openLink == nil)
+    }
+
+    @Test("link arm has move precedence over another report-owned button")
+    func linkArmPrecedesReportMotion() throws {
+        var terminal = try #require(Terminal(columns: 16, rows: 2))
+        terminal.feed(Array("https://a.co\u{1B}[?1003;1006h".utf8))
+        var state = TerminalInteractionState()
+
+        #expect(decideTerminalPointer(
+            .down(.right, column: 14, row: 0), terminal: terminal, state: &state
+        ).consumption == .report)
+        #expect(decideTerminalPointer(
+            .down(.left, column: 2, row: 0, modifiers: [.command]),
+            terminal: terminal,
+            state: &state
+        ).consumption == .link)
+        let move = decideTerminalPointer(
+            .move(column: 3, row: 0, modifiers: [.command]),
+            terminal: terminal,
+            state: &state
+        )
+        #expect(move.consumption == .link)
+        #expect(move.inputBytes.isEmpty)
+        #expect(decideTerminalPointer(
+            .up(.left, column: 3, row: 0, modifiers: [.command]),
+            terminal: terminal,
+            state: &state
+        ).inputBytes.isEmpty)
+    }
+
+    @Test("Cmd moves set hover while release exit and out-of-bounds transitions clear it")
+    func commandHoverAndCancellation() throws {
+        var terminal = try #require(Terminal(columns: 16, rows: 2))
+        terminal.feed(Array("https://a.co\u{1B}[?1003;1006h".utf8))
+        var state = TerminalInteractionState()
+
+        let hover = decideTerminalPointer(
+            .move(column: 2, row: 0, modifiers: [.command]),
+            terminal: terminal,
+            state: &state
+        )
+        let resolved = try #require(terminal.activatableLink(at: .init(row: 0, column: 2)))
+        #expect(hover.hoverMutation == .set(resolved))
+
+        let clear = decideTerminalPointer(
+            .move(column: 2, row: 0), terminal: terminal, state: &state
+        )
+        #expect(clear.hoverMutation == .clear)
+
+        _ = decideTerminalPointer(
+            .down(.left, column: 2, row: 0, modifiers: [.command]),
+            terminal: terminal,
+            state: &state
+        )
+        let outside = decideTerminalPointer(
+            .move(column: -1, row: 0, modifiers: [.command]),
+            terminal: terminal,
+            state: &state
+        )
+        #expect(outside.openLink == nil)
+        #expect(outside.hoverMutation == .clear)
+        #expect(outside.armMutation == .clear)
+        apply(outside.armMutation, to: &terminal)
+        let release = decideTerminalPointer(
+            .up(.left, column: 2, row: 0, modifiers: [.command]),
+            terminal: terminal,
+            state: &state
+        )
+        #expect(release.consumption == .link)
+        #expect(release.inputBytes.isEmpty)
+        #expect(release.openLink == nil)
+
+        #expect(cancelTerminalLinkInteraction(state: &state) == TerminalLinkCancellation(
+            hoverMutation: .clear,
+            armMutation: .clear
+        ))
+    }
+
+    private func apply(_ mutation: TerminalLinkArmMutation?, to terminal: inout Terminal) {
+        switch mutation {
+        case .clear:
+            terminal.clearArmedLink()
+        case .set(let link):
+            _ = terminal.setArmedLink(link)
+        case nil:
+            break
+        }
+    }
+
     private func range(
         _ startRow: Int,
         _ startColumn: Int,

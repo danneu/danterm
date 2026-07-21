@@ -32,10 +32,30 @@ public struct TerminalResolvedLink: Equatable, Sendable {
     /// The contiguous explicit or detected run that must still match on pointer release.
     public let range: TerminalTextRange
 
-    /// Creates a click-time validation token without retaining private grid identity.
+    /// Distinguishes a live run from identical text recreated after pointer down.
+    let activationIdentity: Int
+
+    /// Creates a resolved value for clients that do not participate in private run identity.
     public init(hyperlink: TerminalHyperlink, range: TerminalTextRange) {
         self.hyperlink = hyperlink
         self.range = range
+        activationIdentity = 0
+    }
+
+    /// Couples engine resolution to an opaque identity used only by interaction policy.
+    init(hyperlink: TerminalHyperlink, range: TerminalTextRange, activationIdentity: Int) {
+        self.hyperlink = hyperlink
+        self.range = range
+        self.activationIdentity = activationIdentity
+    }
+
+    /// Adds opaque cell generation to the public value comparison for safe activation only.
+    func matchesActivation(_ other: Self) -> Bool {
+        self == other && activationIdentity == other.activationIdentity
+    }
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.hyperlink == rhs.hyperlink && lhs.range == rhs.range
     }
 }
 
