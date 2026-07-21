@@ -194,6 +194,9 @@ public func drawRenderFrame(
         metrics: metrics,
         colorSpace: colorSpace
     )
+    if let cursor = plan.cursor {
+        context.drawCursor(cursor, metrics: metrics, colorSpace: colorSpace)
+    }
 }
 
 private func quantizedPixelCount(_ pointValue: CGFloat, scale: CGFloat) -> Int? {
@@ -251,6 +254,47 @@ private extension TerminalRenderMetrics {
 }
 
 private extension CGContext {
+    func drawCursor(
+        _ cursor: RenderCursor,
+        metrics: TerminalRenderMetrics,
+        colorSpace: CGColorSpace
+    ) {
+        guard cursor.shape != .block else { return }
+        let cellRect = CGRect(
+            x: CGFloat(cursor.column) * metrics.cellSize.width,
+            y: CGFloat(cursor.row) * metrics.cellSize.height,
+            width: CGFloat(cursor.columnWidth) * metrics.cellSize.width,
+            height: metrics.cellSize.height
+        )
+        let thickness = metrics.underlineThickness
+        let overlayRect: CGRect
+        switch cursor.shape {
+        case .block:
+            return
+        case .underline:
+            overlayRect = CGRect(
+                x: cellRect.minX,
+                y: cellRect.maxY - thickness,
+                width: cellRect.width,
+                height: thickness
+            )
+        case .bar:
+            overlayRect = CGRect(
+                x: cellRect.minX,
+                y: cellRect.minY,
+                width: thickness,
+                height: cellRect.height
+            )
+        }
+
+        saveGState()
+        clip(to: cellRect)
+        setBlendMode(.copy)
+        setFillColor(cursor.color.cgColor(in: colorSpace))
+        fill(overlayRect)
+        restoreGState()
+    }
+
     func drawTextRuns(
         _ runs: [RenderTextRun],
         metrics: TerminalRenderMetrics,

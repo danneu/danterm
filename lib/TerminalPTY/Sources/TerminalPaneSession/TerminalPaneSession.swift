@@ -459,7 +459,8 @@ public final class TerminalPaneSessionController {
             for: terminal,
             presentation: RenderPresentation(
                 theme: .dark,
-                isCursorVisible: presentation.isCursorVisible
+                isCursorVisible: presentation.isCursorVisible,
+                cursorShape: presentation.cursorShape
             )
         )
         lastPlannedTerminal = terminal

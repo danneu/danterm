@@ -10,7 +10,11 @@ struct SelectionRenderPlanningTests {
     func singleRowSelection() throws {
         var terminal = try #require(Terminal(columns: 6, rows: 1))
         terminal.feed(Array("\u{1B}[41;37;4mABCDE".utf8))
-        let presentation = RenderPresentation(theme: .dark, isCursorVisible: true)
+        let presentation = RenderPresentation(
+            theme: .dark,
+            isCursorVisible: true,
+            cursorShape: .block
+        )
         let baseline = planFrame(for: terminal, presentation: presentation)
 
         terminal.setSelection(TerminalTextRange(
@@ -40,7 +44,11 @@ struct SelectionRenderPlanningTests {
 
         let plan = planFrame(
             for: terminal,
-            presentation: RenderPresentation(theme: .dark, isCursorVisible: false)
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: false,
+                cursorShape: .block
+            )
         )
 
         #expect(plan.selectionRuns == [
@@ -62,7 +70,11 @@ struct SelectionRenderPlanningTests {
 
         let following = planFrame(
             for: terminal,
-            presentation: RenderPresentation(theme: .dark, isCursorVisible: false)
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: false,
+                cursorShape: .block
+            )
         )
         #expect(terminal.scrollProjection.topRow == 2)
         #expect(following.selectionRuns == [
@@ -76,7 +88,11 @@ struct SelectionRenderPlanningTests {
         ))
         let fullyOutside = planFrame(
             for: terminal,
-            presentation: RenderPresentation(theme: .dark, isCursorVisible: false)
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: false,
+                cursorShape: .block
+            )
         )
         #expect(fullyOutside.selectionRuns.isEmpty)
     }
@@ -85,7 +101,11 @@ struct SelectionRenderPlanningTests {
     func absentAndEmptySelection() throws {
         var terminal = try #require(Terminal(columns: 5, rows: 2))
         terminal.feed(Array("abcd".utf8))
-        let presentation = RenderPresentation(theme: .dark, isCursorVisible: false)
+        let presentation = RenderPresentation(
+            theme: .dark,
+            isCursorVisible: false,
+            cursorShape: .block
+        )
 
         #expect(planFrame(for: terminal, presentation: presentation).selectionRuns.isEmpty)
 

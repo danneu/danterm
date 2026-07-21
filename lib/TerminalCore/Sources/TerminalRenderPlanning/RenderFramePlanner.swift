@@ -93,7 +93,13 @@ private struct FramePlanner {
             textRuns: textRuns(cells),
             decorationRuns: decorationRuns(cells),
             cursor: cursorSpan.map {
-                RenderCursor(row: $0.row, column: $0.column, columnWidth: $0.columnWidth)
+                RenderCursor(
+                    row: $0.row,
+                    column: $0.column,
+                    columnWidth: $0.columnWidth,
+                    shape: presentation.cursorShape,
+                    color: presentation.theme.cursor
+                )
             }
         )
     }
@@ -169,7 +175,8 @@ private struct FramePlanner {
                         strikethrough: style.strikethrough
                     )
                 }
-                if cursorSpan?.contains(row: row, column: column) == true {
+                if presentation.cursorShape == .block,
+                   cursorSpan?.contains(row: row, column: column) == true {
                     style = ResolvedCellStyle(
                         foreground: presentation.theme.cursorText,
                         background: presentation.theme.cursor,

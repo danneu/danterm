@@ -49,7 +49,11 @@ struct RenderCorpusPlanningTests {
                 guard case .checkpoint = recording.events[eventIndex] else { return }
                 checkpointCount += 1
                 let before = terminal
-                let presentation = RenderPresentation(theme: .dark, isCursorVisible: true)
+                let presentation = RenderPresentation(
+                    theme: .dark,
+                    isCursorVisible: terminal.presentation.isCursorVisible,
+                    cursorShape: terminal.presentation.cursorShape
+                )
                 let first = planFrame(for: terminal, presentation: presentation)
                 let second = planFrame(for: terminal, presentation: presentation)
                 #expect(first == second, "Fixture: \(url.lastPathComponent)")
@@ -91,7 +95,11 @@ struct RenderCorpusPlanningTests {
         _ = terminal.drainDamage()
         var retainedPlan = planFrame(
             for: terminal,
-            presentation: .init(theme: .dark, isCursorVisible: true)
+            presentation: .init(
+                theme: .dark,
+                isCursorVisible: terminal.presentation.isCursorVisible,
+                cursorShape: terminal.presentation.cursorShape
+            )
         )
 
         for (eventIndex, event) in recording.events.enumerated() {
@@ -99,7 +107,11 @@ struct RenderCorpusPlanningTests {
             let damage = terminal.drainDamage()
             let completePlan = planFrame(
                 for: terminal,
-                presentation: .init(theme: .dark, isCursorVisible: true)
+                presentation: .init(
+                    theme: .dark,
+                    isCursorVisible: terminal.presentation.isCursorVisible,
+                    cursorShape: terminal.presentation.cursorShape
+                )
             )
             let clippedPlan = clipFramePlan(completePlan, to: damage)
             retainedPlan = overlay(clippedPlan, damage: damage, on: retainedPlan)

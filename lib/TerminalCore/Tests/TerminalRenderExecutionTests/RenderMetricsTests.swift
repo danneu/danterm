@@ -78,6 +78,10 @@ private func makePlan(columns: Int, rows: Int) throws -> RenderFramePlan {
     let terminal = try #require(Terminal(columns: columns, rows: rows))
     return planFrame(
         for: terminal,
-        presentation: RenderPresentation(theme: .dark, isCursorVisible: false)
+        presentation: RenderPresentation(
+            theme: .dark,
+            isCursorVisible: false,
+            cursorShape: .block
+        )
     )
 }

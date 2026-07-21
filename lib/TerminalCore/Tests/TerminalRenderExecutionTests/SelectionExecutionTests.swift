@@ -18,7 +18,11 @@ struct SelectionExecutionTests {
         ))
         let plan = planFrame(
             for: terminal,
-            presentation: RenderPresentation(theme: .dark, isCursorVisible: false)
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: false,
+                cursorShape: .block
+            )
         )
 
         let bitmap = try renderBitmap(plan: plan, metrics: metrics)

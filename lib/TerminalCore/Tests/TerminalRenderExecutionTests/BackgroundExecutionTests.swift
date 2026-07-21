@@ -14,7 +14,11 @@ struct BackgroundExecutionTests {
         terminal.feed(Array("\u{1B}[41m  \u{1B}[42m  \u{1B}[49m ".utf8))
         let plan = planFrame(
             for: terminal,
-            presentation: RenderPresentation(theme: .dark, isCursorVisible: false)
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: false,
+                cursorShape: .block
+            )
         )
         let bitmap = try renderBitmap(plan: plan, metrics: metrics)
         let y = metrics.cellHeightPixels / 2
@@ -91,6 +95,10 @@ private func makeTwoColumnPlan() throws -> RenderFramePlan {
     let terminal = try #require(Terminal(columns: 2, rows: 1))
     return planFrame(
         for: terminal,
-        presentation: RenderPresentation(theme: .dark, isCursorVisible: false)
+        presentation: RenderPresentation(
+            theme: .dark,
+            isCursorVisible: false,
+            cursorShape: .block
+        )
     )
 }

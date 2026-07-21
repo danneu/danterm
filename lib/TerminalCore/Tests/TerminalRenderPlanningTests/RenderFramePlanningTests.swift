@@ -39,7 +39,11 @@ struct RenderFramePlanningTests {
         feed("A\r\n\u{1B}[41mB\r\n\u{1B}[4mC", to: &terminal)
         let plan = planFrame(
             for: terminal,
-            presentation: RenderPresentation(theme: .dark, isCursorVisible: true)
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: true,
+                cursorShape: .block
+            )
         )
 
         let damage = TerminalDamage(rows: [-1, 1, 5])
@@ -67,7 +71,11 @@ struct RenderFramePlanningTests {
 
         let plan = planFrame(
             for: terminal,
-            presentation: RenderPresentation(theme: .dark, isCursorVisible: false)
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: false,
+                cursorShape: .block
+            )
         )
 
         #expect(plan.columns == 10)
@@ -108,7 +116,11 @@ struct RenderFramePlanningTests {
 
         let plan = planFrame(
             for: terminal,
-            presentation: RenderPresentation(theme: .dark, isCursorVisible: false)
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: false,
+                cursorShape: .block
+            )
         )
 
         try #require(plan.textRuns.count == 2)
@@ -133,7 +145,11 @@ struct RenderFramePlanningTests {
 
         let plan = planFrame(
             for: terminal,
-            presentation: RenderPresentation(theme: .dark, isCursorVisible: false)
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: false,
+                cursorShape: .block
+            )
         )
 
         #expect(plan.backgroundRuns == [
@@ -156,14 +172,22 @@ struct RenderFramePlanningTests {
         var untouched = try #require(Terminal(columns: 5, rows: 2))
         let untouchedPlan = planFrame(
             for: untouched,
-            presentation: RenderPresentation(theme: .dark, isCursorVisible: false)
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: false,
+                cursorShape: .block
+            )
         )
         #expect(untouchedPlan.backgroundRuns.isEmpty)
 
         feed("\u{1B}[41m\u{1B}[2J", to: &untouched)
         let erasedPlan = planFrame(
             for: untouched,
-            presentation: RenderPresentation(theme: .dark, isCursorVisible: false)
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: false,
+                cursorShape: .block
+            )
         )
 
         #expect(erasedPlan.backgroundRuns == [
@@ -190,7 +214,11 @@ struct RenderFramePlanningTests {
 
         let plan = planFrame(
             for: terminal,
-            presentation: RenderPresentation(theme: .dark, isCursorVisible: false)
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: false,
+                cursorShape: .block
+            )
         )
 
         #expect(terminal.geometry.rows[0].cells.map(\.kind) == [.narrow, .narrow, .spacerHead])
@@ -208,22 +236,50 @@ struct RenderFramePlanningTests {
     @Test("Cursor visibility controls span, snapping, pending wrap, and style overrides")
     func cursorPlanning() throws {
         let narrow = try plannedCursor(after: "A\u{1B}[1;1H", columns: 3)
-        #expect(narrow.cursor == RenderCursor(row: 0, column: 0, columnWidth: 1))
+        #expect(narrow.cursor == RenderCursor(
+            row: 0,
+            column: 0,
+            columnWidth: 1,
+            shape: .block,
+            color: RenderTheme.dark.cursor
+        ))
 
         let wideHead = try plannedCursor(after: "\u{754C}\u{1B}[1;1H", columns: 3)
-        #expect(wideHead.cursor == RenderCursor(row: 0, column: 0, columnWidth: 2))
+        #expect(wideHead.cursor == RenderCursor(
+            row: 0,
+            column: 0,
+            columnWidth: 2,
+            shape: .block,
+            color: RenderTheme.dark.cursor
+        ))
 
         let wideTail = try plannedCursor(after: "\u{754C}\u{1B}[1;2H", columns: 3)
-        #expect(wideTail.cursor == RenderCursor(row: 0, column: 0, columnWidth: 2))
+        #expect(wideTail.cursor == RenderCursor(
+            row: 0,
+            column: 0,
+            columnWidth: 2,
+            shape: .block,
+            color: RenderTheme.dark.cursor
+        ))
 
         var pendingTerminal = try #require(Terminal(columns: 2, rows: 1))
         feed("AB", to: &pendingTerminal)
         #expect(pendingTerminal.geometry.cursor?.isPendingWrap == true)
         let pendingWrap = planFrame(
             for: pendingTerminal,
-            presentation: RenderPresentation(theme: .dark, isCursorVisible: true)
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: true,
+                cursorShape: .block
+            )
         )
-        #expect(pendingWrap.cursor == RenderCursor(row: 0, column: 1, columnWidth: 1))
+        #expect(pendingWrap.cursor == RenderCursor(
+            row: 0,
+            column: 1,
+            columnWidth: 1,
+            shape: .block,
+            color: RenderTheme.dark.cursor
+        ))
 
         let styledWide = try plannedCursor(
             after: "\u{1B}[31;44;4m\u{754C}\u{1B}[1;1H",
@@ -243,7 +299,11 @@ struct RenderFramePlanningTests {
     func cursorLayerOverridesAndInvisibility() throws {
         var terminal = try #require(Terminal(columns: 3, rows: 1))
         feed("\u{1B}[31;44;4mA\u{1B}[1;1H", to: &terminal)
-        let presentation = RenderPresentation(theme: .dark, isCursorVisible: true)
+        let presentation = RenderPresentation(
+            theme: .dark,
+            isCursorVisible: true,
+            cursorShape: .block
+        )
         let visible = planFrame(for: terminal, presentation: presentation)
 
         let visibleBackground = try #require(visible.backgroundRuns.first)
@@ -255,7 +315,11 @@ struct RenderFramePlanningTests {
 
         let invisible = planFrame(
             for: terminal,
-            presentation: RenderPresentation(theme: .dark, isCursorVisible: false)
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: false,
+                cursorShape: .block
+            )
         )
         #expect(invisible.cursor == nil)
         let invisibleBackground = try #require(invisible.backgroundRuns.first)
@@ -268,11 +332,120 @@ struct RenderFramePlanningTests {
         var hiddenTerminal = try #require(Terminal(columns: 3, rows: 1))
         feed("\u{1B}[8;4;9mA\u{1B}[1;1H", to: &hiddenTerminal)
         let hidden = planFrame(for: hiddenTerminal, presentation: presentation)
-        #expect(hidden.cursor == RenderCursor(row: 0, column: 0, columnWidth: 1))
+        #expect(hidden.cursor == RenderCursor(
+            row: 0,
+            column: 0,
+            columnWidth: 1,
+            shape: .block,
+            color: RenderTheme.dark.cursor
+        ))
         let hiddenBackground = try #require(hidden.backgroundRuns.first)
         #expect(hiddenBackground.color == RenderTheme.dark.cursor)
         #expect(hidden.textRuns.isEmpty)
         #expect(hidden.decorationRuns.isEmpty)
+    }
+
+    @Test("Cursor shapes preserve block overrides and plan underline and bar overlays")
+    func cursorShapes() throws {
+        var terminal = try #require(Terminal(columns: 3, rows: 1))
+        feed("\u{1B}[31;44;4mA\u{1B}[1;1H", to: &terminal)
+
+        let block = planFrame(
+            for: terminal,
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: true,
+                cursorShape: .block
+            )
+        )
+        let underline = planFrame(
+            for: terminal,
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: true,
+                cursorShape: .underline
+            )
+        )
+        let bar = planFrame(
+            for: terminal,
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: true,
+                cursorShape: .bar
+            )
+        )
+
+        #expect(block.cursor == RenderCursor(
+            row: 0,
+            column: 0,
+            columnWidth: 1,
+            shape: .block,
+            color: RenderTheme.dark.cursor
+        ))
+        #expect(block.backgroundRuns.first?.color == RenderTheme.dark.cursor)
+        #expect(block.textRuns.first?.foreground == RenderTheme.dark.cursorText)
+        #expect(block.decorationRuns.first?.color == RenderTheme.dark.cursorText)
+
+        for overlay in [underline, bar] {
+            #expect(overlay.backgroundRuns.first?.color == RenderTheme.dark.ansiColors[4])
+            #expect(overlay.textRuns.first?.foreground == RenderTheme.dark.ansiColors[1])
+            #expect(overlay.decorationRuns.first?.color == RenderTheme.dark.ansiColors[1])
+            #expect(overlay.cursor?.color == RenderTheme.dark.cursor)
+        }
+        #expect(underline.cursor?.shape == .underline)
+        #expect(bar.cursor?.shape == .bar)
+
+        for shape in [TerminalCursorShape.block, .underline, .bar] {
+            let hidden = planFrame(
+                for: terminal,
+                presentation: RenderPresentation(
+                    theme: .dark,
+                    isCursorVisible: false,
+                    cursorShape: shape
+                )
+            )
+            #expect(hidden.cursor == nil)
+            #expect(hidden.backgroundRuns.first?.color == RenderTheme.dark.ansiColors[4])
+            #expect(hidden.textRuns.first?.foreground == RenderTheme.dark.ansiColors[1])
+            #expect(hidden.decorationRuns.first?.color == RenderTheme.dark.ansiColors[1])
+        }
+    }
+
+    @Test("Every cursor shape shares wide-head and wide-tail snapping")
+    func cursorShapeWideCellSnapping() throws {
+        for shape in [TerminalCursorShape.block, .underline, .bar] {
+            var head = try #require(Terminal(columns: 3, rows: 1))
+            feed("\u{754C}\u{1B}[1;1H", to: &head)
+            let headPlan = planFrame(
+                for: head,
+                presentation: .init(
+                    theme: .dark,
+                    isCursorVisible: true,
+                    cursorShape: shape
+                )
+            )
+
+            var tail = try #require(Terminal(columns: 3, rows: 1))
+            feed("\u{754C}\u{1B}[1;2H", to: &tail)
+            let tailPlan = planFrame(
+                for: tail,
+                presentation: .init(
+                    theme: .dark,
+                    isCursorVisible: true,
+                    cursorShape: shape
+                )
+            )
+
+            let expected = RenderCursor(
+                row: 0,
+                column: 0,
+                columnWidth: 2,
+                shape: shape,
+                color: RenderTheme.dark.cursor
+            )
+            #expect(headPlan.cursor == expected)
+            #expect(tailPlan.cursor == expected)
+        }
     }
 
     @Test("Plans ignore scrollback and an unwritten live pen")
@@ -299,7 +472,11 @@ struct RenderFramePlanningTests {
         feed(input, to: &terminal)
         return planFrame(
             for: terminal,
-            presentation: RenderPresentation(theme: .dark, isCursorVisible: true)
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: true,
+                cursorShape: .block
+            )
         )
     }
 }
@@ -311,7 +488,11 @@ private func feed(_ text: String, to terminal: inout Terminal) {
 private func invisiblePlan(_ terminal: Terminal) -> RenderFramePlan {
     planFrame(
         for: terminal,
-        presentation: RenderPresentation(theme: .dark, isCursorVisible: false)
+        presentation: RenderPresentation(
+            theme: .dark,
+            isCursorVisible: false,
+            cursorShape: .block
+        )
     )
 }
 

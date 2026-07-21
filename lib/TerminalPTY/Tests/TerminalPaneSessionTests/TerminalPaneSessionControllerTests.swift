@@ -250,7 +250,8 @@ struct TerminalPaneSessionControllerTests {
             for: finalTerminal,
             presentation: RenderPresentation(
                 theme: .dark,
-                isCursorVisible: finalTerminal.presentation.isCursorVisible
+                isCursorVisible: finalTerminal.presentation.isCursorVisible,
+                cursorShape: finalTerminal.presentation.cursorShape
             )
         )
         #expect(try #require(plans.last) == expectedPlan)

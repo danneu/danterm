@@ -12,7 +12,11 @@ struct ExecutorContractTests {
         let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
         var terminal = try #require(Terminal(columns: 5, rows: 3))
         terminal.feed(Array("old\r\nkeep\r\nlast".utf8))
-        let presentation = RenderPresentation(theme: .dark, isCursorVisible: false)
+        let presentation = RenderPresentation(
+            theme: .dark,
+            isCursorVisible: false,
+            cursorShape: .block
+        )
         let previous = planFrame(for: terminal, presentation: presentation)
 
         _ = terminal.drainDamage()
@@ -108,6 +112,128 @@ struct ExecutorContractTests {
                 metrics: metrics
             )).allSatisfy { $0 == Pixel(RenderTheme.dark.defaultBackground) }
         )
+    }
+
+    @Test("Underline and bar cursors use pixel-aligned overlays at every supported scale")
+    func cursorOverlayGeometry() throws {
+        for scale: CGFloat in [1, 1.5, 2] {
+            let metrics = try #require(TerminalRenderMetrics(displayScale: scale))
+            for shape in [TerminalCursorShape.underline, .bar] {
+                let plan = try makePlan(
+                    input: "A\u{1B}[1;1H",
+                    columns: 3,
+                    rows: 1,
+                    isCursorVisible: true,
+                    cursorShape: shape
+                )
+                let bitmap = try renderBitmap(plan: plan, metrics: metrics)
+                let hiddenPlan = try makePlan(
+                    input: "A\u{1B}[1;1H",
+                    columns: 3,
+                    rows: 1,
+                    isCursorVisible: false,
+                    cursorShape: shape
+                )
+                let hiddenBitmap = try renderBitmap(plan: hiddenPlan, metrics: metrics)
+                let cursorRect = cellRect(row: 0, column: 0, metrics: metrics)
+                let neighborRect = cellRect(
+                    row: 0,
+                    column: 1,
+                    columnCount: 2,
+                    metrics: metrics
+                )
+                let cursorColor = Pixel(RenderTheme.dark.cursor)
+                let cursorPixels = bitmap.pixels(in: cursorRect)
+
+                #expect(cursorPixels.contains(cursorColor))
+                #expect(cursorPixels.contains { $0 != cursorColor })
+                #expect(bitmap.pixels(in: neighborRect).allSatisfy {
+                    $0 == Pixel(RenderTheme.dark.defaultBackground)
+                })
+
+                let cursorRows = bitmap.inkRows(in: cursorRect)
+                switch shape {
+                case .underline:
+                    #expect(cursorRows.last == cursorRect.y.last)
+                    #expect(cursorRows.count < metrics.cellHeightPixels)
+                    let overlayStart = cursorRect.y.upperBound
+                        - Int((metrics.underlineThickness * scale).rounded())
+                    for y in cursorRect.y.lowerBound..<overlayStart {
+                        for x in cursorRect.x {
+                            #expect(
+                                bitmap.pixel(x: x, yFromTop: y)
+                                    == hiddenBitmap.pixel(x: x, yFromTop: y)
+                            )
+                        }
+                    }
+                case .bar:
+                    let cursorColumns = cursorRect.x.filter { x in
+                        cursorRect.y.contains { y in
+                            bitmap.pixel(x: x, yFromTop: y) == cursorColor
+                        }
+                    }
+                    #expect(cursorColumns.first == cursorRect.x.first)
+                    #expect(cursorColumns.count < metrics.cellWidthPixels)
+                    let overlayEnd = cursorRect.x.lowerBound
+                        + Int((metrics.underlineThickness * scale).rounded())
+                    for y in cursorRect.y {
+                        for x in overlayEnd..<cursorRect.x.upperBound {
+                            #expect(
+                                bitmap.pixel(x: x, yFromTop: y)
+                                    == hiddenBitmap.pixel(x: x, yFromTop: y)
+                            )
+                        }
+                    }
+                case .block:
+                    Issue.record("Unexpected block cursor in overlay geometry proof")
+                }
+            }
+        }
+    }
+
+    @Test("Cursor overlay phase redraws match a fresh full frame for every shape")
+    func cursorOverlayDamageRedrawMatchesFullFrame() throws {
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("A\r\nB\u{1B}[1;1H".utf8))
+
+        for shape in [TerminalCursorShape.block, .underline, .bar] {
+            let visible = planFrame(
+                for: terminal,
+                presentation: .init(
+                    theme: .dark,
+                    isCursorVisible: true,
+                    cursorShape: shape
+                )
+            )
+            let hidden = planFrame(
+                for: terminal,
+                presentation: .init(
+                    theme: .dark,
+                    isCursorVisible: false,
+                    cursorShape: shape
+                )
+            )
+            let damage = TerminalDamage(rows: [0])
+
+            let hiddenIncremental = try renderIncrementalBitmap(
+                previous: visible,
+                current: hidden,
+                damage: damage,
+                metrics: metrics
+            )
+            let visibleIncremental = try renderIncrementalBitmap(
+                previous: hidden,
+                current: visible,
+                damage: damage,
+                metrics: metrics
+            )
+            let hiddenFull = try renderBitmap(plan: hidden, metrics: metrics)
+            let visibleFull = try renderBitmap(plan: visible, metrics: metrics)
+
+            #expect(hiddenIncremental.bytes == hiddenFull.bytes)
+            #expect(visibleIncremental.bytes == visibleFull.bytes)
+        }
     }
 
     @Test("Repeated rendering is byte deterministic")

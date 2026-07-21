@@ -93,13 +93,21 @@ public struct RenderPresentation: Equatable, Sendable {
     /// Palette and cursor colors used to resolve semantic terminal cells.
     public let theme: RenderTheme
 
-    /// Controls whether planning emits and applies the filled-block cursor.
+    /// Controls whether planning emits and applies the requested cursor.
     public let isCursorVisible: Bool
 
-    /// Requires callers to make cursor visibility explicit for every planned frame.
-    public init(theme: RenderTheme, isCursorVisible: Bool) {
+    /// Selects the terminal-requested cursor geometry for this frame.
+    public let cursorShape: TerminalCursorShape
+
+    /// Requires callers to make every cursor presentation input explicit.
+    public init(
+        theme: RenderTheme,
+        isCursorVisible: Bool,
+        cursorShape: TerminalCursorShape
+    ) {
         self.theme = theme
         self.isCursorVisible = isCursorVisible
+        self.cursorShape = cursorShape
     }
 }
 
@@ -130,7 +138,7 @@ public struct RenderFramePlan: Equatable, Sendable {
     /// Underline and strikethrough spans in canonical row-major order.
     public let decorationRuns: [RenderDecorationRun]
 
-    /// Geometry metadata for the cursor block already baked into the frame's runs.
+    /// Geometry and color metadata for the cursor requested by this frame.
     public let cursor: RenderCursor?
 
     init(
@@ -291,8 +299,8 @@ public struct RenderDecorationRun: Equatable, Sendable {
     }
 }
 
-/// Records the terminal-defined filled-block span after wide-tail snapping so
-/// execution never needs to inspect cell kinds.
+/// Records the terminal-defined cursor after wide-tail snapping so execution
+/// can overlay non-block shapes without inspecting terminal state or cell kinds.
 public struct RenderCursor: Equatable, Sendable {
     /// Zero-based viewport row.
     public let row: Int
@@ -300,12 +308,26 @@ public struct RenderCursor: Equatable, Sendable {
     /// Zero-based first column after any wide-tail snap.
     public let column: Int
 
-    /// Filled-block width in terminal columns.
+    /// Cursor width in terminal columns.
     public let columnWidth: Int
 
-    init(row: Int, column: Int, columnWidth: Int) {
+    /// Terminal-requested cursor geometry.
+    public let shape: TerminalCursorShape
+
+    /// Concrete color used by both baked block cursors and cursor overlays.
+    public let color: RenderColor
+
+    init(
+        row: Int,
+        column: Int,
+        columnWidth: Int,
+        shape: TerminalCursorShape,
+        color: RenderColor
+    ) {
         self.row = row
         self.column = column
         self.columnWidth = columnWidth
+        self.shape = shape
+        self.color = color
     }
 }

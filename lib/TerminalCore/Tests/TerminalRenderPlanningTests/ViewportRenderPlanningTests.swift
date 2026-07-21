@@ -14,7 +14,11 @@ struct ViewportRenderPlanningTests {
 
         let plan = planFrame(
             for: terminal,
-            presentation: RenderPresentation(theme: .dark, isCursorVisible: true)
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: true,
+                cursorShape: .block
+            )
         )
 
         #expect(plan.rows == 3)
@@ -35,7 +39,11 @@ struct ViewportRenderPlanningTests {
 
         let plan = planFrame(
             for: terminal,
-            presentation: RenderPresentation(theme: .dark, isCursorVisible: true)
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: true,
+                cursorShape: .block
+            )
         )
 
         #expect(plan.textRuns.flatMap(\.cells).map(\.scalars) == [
@@ -58,10 +66,20 @@ struct ViewportRenderPlanningTests {
 
         let plan = planFrame(
             for: terminal,
-            presentation: RenderPresentation(theme: .dark, isCursorVisible: true)
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: true,
+                cursorShape: .block
+            )
         )
 
-        #expect(plan.cursor == RenderCursor(row: 2, column: 1, columnWidth: 1))
+        #expect(plan.cursor == RenderCursor(
+            row: 2,
+            column: 1,
+            columnWidth: 1,
+            shape: .block,
+            color: RenderTheme.dark.cursor
+        ))
         assertCanonical(plan)
     }
 
@@ -69,7 +87,11 @@ struct ViewportRenderPlanningTests {
     func followFrameRoundTrip() throws {
         var terminal = try #require(Terminal(columns: 4, rows: 3))
         terminal.feed(Array("a\r\nb\r\nc\r\nd".utf8))
-        let presentation = RenderPresentation(theme: .dark, isCursorVisible: true)
+        let presentation = RenderPresentation(
+            theme: .dark,
+            isCursorVisible: true,
+            cursorShape: .block
+        )
         let original = planFrame(for: terminal, presentation: presentation)
 
         terminal.scroll(toTopRow: 0)

@@ -181,12 +181,17 @@ func makePlan(
     input: String,
     columns: Int,
     rows: Int,
-    isCursorVisible: Bool = false
+    isCursorVisible: Bool = false,
+    cursorShape: TerminalCursorShape = .block
 ) throws -> RenderFramePlan {
     var terminal = try #require(Terminal(columns: columns, rows: rows))
     terminal.feed(Array(input.utf8))
     return planFrame(
         for: terminal,
-        presentation: RenderPresentation(theme: .dark, isCursorVisible: isCursorVisible)
+        presentation: RenderPresentation(
+            theme: .dark,
+            isCursorVisible: isCursorVisible,
+            cursorShape: cursorShape
+        )
     )
 }
