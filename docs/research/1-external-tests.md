@@ -24,6 +24,24 @@ External behavior is evidence, not authority. Unicode standards, terminal
 protocol specifications, DanTerm's declared support matrix, and recorded
 product decisions adjudicate disagreements.
 
+## 2026-07-21 Milestone 6 closure adjudication
+
+The completed native suites and the pinned libvterm and Alacritty portfolios
+now cover every behavior in DanTerm's Milestone 6 support matrix. A closure
+review of the previously recommended WezTerm, xterm.js, and Contour case mines
+found no remaining Milestone 6 behavior uniquely evidenced by those sources.
+This is a scope judgment, not a claim that their corpora are redundant: revisit
+them for the protocol, shell-integration, application, and advanced-TUI work in
+Milestones 7 and 8.
+
+Differential replay is dropped from the Milestone 6 gate. The native suite and
+neutral fixtures already provide deterministic, product-owned expectations,
+while backend consensus would not decide whether a disagreement is a DanTerm
+bug or an intentional contract difference. Reconsider differential replay when
+an actual backend disagreement demonstrates diagnostic value; adjudicate any
+result against DanTerm's support matrix and behavioral contracts rather than
+automatically accepting the majority behavior.
+
 ## Candidate summary
 
 | Source | Test shape and useful coverage | Recommended roadmap insertion | License and adoption guidance |

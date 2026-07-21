@@ -253,7 +253,7 @@ The final roadmap state is:
   classify all 45 recordings, ingest and validate all 15 Milestone 6 cases,
   map every superseded case to existing behavioral evidence, preserve future
   milestone assignments, and expand provenance validation.
-- [ ] **Commit 8 -- `docs(plan): finalize milestone 6 external audit`**: record
+- [x] **Commit 8 -- `docs(plan): finalize milestone 6 external audit`**: record
   the conditional-source and differential-replay adjudications, check the
   external-dispositions gate, add the completed roadmap slice entries, and
   leave Milestone 6 explicitly open only for renderer cursor blinking.

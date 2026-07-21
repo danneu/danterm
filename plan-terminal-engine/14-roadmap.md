@@ -247,6 +247,22 @@ mean.
     commit reaches the terminal text path, without terminal key-encoded bytes.
     See the
     [Milestone 6 closure plan](../plans/impl/2026-07-21-1544-milestone-6-closure-audit.md).
+  - [x] **Slice 16: Final libvterm Milestone 6 dispositions.** Classifies the
+    remaining selected files against DanTerm's support matrix, preserves the
+    terminal-property families for Milestone 7, and validates the complete
+    pinned inventory. See the
+    [Milestone 6 closure plan](../plans/impl/2026-07-21-1544-milestone-6-closure-audit.md).
+  - [x] **Slice 17: Alacritty recording adoption and classification.** Validates
+    all 45 pinned recording directories, replays all 15 Milestone 6 cases
+    through neutral public seams, maps superseded cases to behavioral evidence,
+    and leaves the Milestone 7 and 8 recordings visibly pending. See the
+    [Milestone 6 closure plan](../plans/impl/2026-07-21-1544-milestone-6-closure-audit.md).
+  - [x] **Slice 18: Milestone 6 external-source adjudication.** Confirms that
+    the adopted native, libvterm, and Alacritty evidence covers the current
+    support matrix; defers further source mining to Milestones 7 and 8 and
+    differential replay until a real backend disagreement makes it useful.
+    See the
+    [Milestone 6 closure plan](../plans/impl/2026-07-21-1544-milestone-6-closure-audit.md).
   - [x] [Terminal core](04-terminal-core.md) completes the accepted baseline control,
     screen, mode, style, query, and recovery behavior.
     Closure-audit judgment: controls, primary and alternate screens, modes,
@@ -292,14 +308,16 @@ mean.
   - [x] Logical damage and full redraw produce the same visible state. Slice 8
     proves every neutral event by retained-plan overlay and styled output at the
     executor-pixel seam, including resize and alternate-screen cases.
-  - [ ] Every external case family assigned through Milestone 6 in
+  - [x] Every external case family assigned through Milestone 6 in
     [External terminal test research](../docs/research/1-external-tests.md) has
     an adopted, adapted, superseded, or out-of-scope disposition; every
     applicable case passes through DanTerm's public behavioral seams.
-    Closure-audit judgment: the implemented libvterm families are covered, but
-    five selected files still need final dispositions; all pinned Alacritty
-    recordings still need validated classification, and all 15 Milestone 6
-    recordings must enter the neutral behavioral fixture portfolio.
+    Closure-audit judgment: Slice 16 completes and validates the libvterm
+    ledger. Slice 17 classifies the full pinned Alacritty inventory, replays all
+    15 assigned Milestone 6 recordings, validates provenance, and maps every
+    superseded recording to existing behavioral evidence. Slice 18 records
+    that no additional Milestone 6 support-matrix behavior remains unique to
+    the other researched sources.
 
 - [ ] **7. Reach shell and baseline application compatibility**
   - [ ] zsh, bash, fish, ssh, fzf, more, and less complete the minimum workflows in
