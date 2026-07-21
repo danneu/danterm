@@ -34,7 +34,7 @@ struct TerminalFixtureTests {
         }
     }
 
-    @Test("libvterm manifest classifies every case from the thirty-two selected source files")
+    @Test("libvterm manifest classifies every case from the thirty-three selected source files")
     func libvtermManifestCoverage() throws {
         // Intent: pin the adoption ledger to every upstream case heading in
         //   the thirty-two source files selected through the current engine slices.
@@ -64,6 +64,7 @@ struct TerminalFixtureTests {
             "Raw ground-state C1 bytes and UTF-8 encodings beyond U+10FFFF are replaced by U+FFFD using maximal-subpart recovery.",
             "DanTerm retains grapheme scalars exactly instead of truncating after five combining marks.",
             "DanTerm follows VT500 string states: C0 is absorbed inside strings and BEL terminates only OSC.",
+            "DanTerm emits strict xterm legacy encodings where pinned libvterm emits unsolicited fixterms CSI-u for modified letters, Space, and Tab.",
         ])
         #expect(Set(manifest.files.map(\.path)) == Set(Self.expectedCases.keys))
         for file in manifest.files {
@@ -121,6 +122,7 @@ struct TerminalFixtureTests {
             rows: fixture.initial.rows
         ))
         var replyBytes: [UInt8] = []
+        var inputBytes: [UInt8] = []
 
         func feed(_ bytes: [UInt8]) {
             terminal.feed(bytes)
@@ -143,6 +145,16 @@ struct TerminalFixtureTests {
                 case .split:
                     feed(bytes)
                 }
+            case .input(let key, let modifiers):
+                inputBytes.append(contentsOf: encodeTerminalKey(
+                    key,
+                    modifiers: modifiers,
+                    modes: terminal.inputModes
+                ))
+            case .paste(let text):
+                inputBytes.append(contentsOf: encodeTerminalPaste(text, modes: terminal.inputModes))
+            case .focus(let focused):
+                inputBytes.append(contentsOf: encodeTerminalFocus(focused: focused, modes: terminal.inputModes))
             case .resize(let columns, let rows):
                 terminal.resize(columns: columns, rows: rows)
             case .viewport(let navigation):
@@ -155,9 +167,11 @@ struct TerminalFixtureTests {
                 try assert(
                     expectations[eventIndex].expectation,
                     against: terminal,
-                    replyBytes: replyBytes
+                    replyBytes: replyBytes,
+                    inputBytes: inputBytes
                 )
                 replyBytes.removeAll(keepingCapacity: true)
+                inputBytes.removeAll(keepingCapacity: true)
             }
         }
         return terminal
@@ -166,11 +180,15 @@ struct TerminalFixtureTests {
     private func assert(
         _ expectation: FixtureExpectation?,
         against terminal: Terminal,
-        replyBytes: [UInt8]
+        replyBytes: [UInt8],
+        inputBytes: [UInt8]
     ) throws {
         let expectation = try #require(expectation)
         if let expectedReplyBytes = expectation.replyBytes {
             #expect(replyBytes == expectedReplyBytes)
+        }
+        if let expectedInputBytes = expectation.inputBytes {
+            #expect(inputBytes == expectedInputBytes)
         }
         if let presentation = expectation.cursorPresentation {
             #expect(terminal.presentation.isCursorVisible == presentation.isVisible)
@@ -387,6 +405,16 @@ struct TerminalFixtureTests {
             "DECRQSS on SGR RGB8 colours",
             "S8C1T on DSR",
         ],
+        "t/25state_input.test": [
+            "Unmodified ASCII", "Ctrl modifier on ASCII letters",
+            "Alt modifier on ASCII letters", "Ctrl-Alt modifier on ASCII letters",
+            "Special handling of Ctrl-I", "Special handling of Space",
+            "Cursor keys in reset (cursor) mode", "Cursor keys in application mode",
+            "Shift-Tab should be different", "Enter in linefeed mode",
+            "Enter in newline mode", "Unmodified F1 is SS3 P", "Modified F1 is CSI P",
+            "Keypad in DECKPNM", "Keypad in DECKPAM", "Bracketed paste mode off",
+            "Bracketed paste mode on", "Focus reporting disabled", "Focus reporting enabled",
+        ],
         "t/27state_reset.test": [
             "RIS homes cursor",
             "RIS cancels scrolling region",
@@ -555,6 +583,7 @@ private struct FixtureEvent: Decodable {
 
 private struct FixtureExpectation: Decodable {
     let replyBytes: [UInt8]?
+    let inputBytes: [UInt8]?
     let cursorPresentation: FixtureCursorPresentation?
     let viewportText: String?
     let cellKinds: [[String]]?

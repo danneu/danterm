@@ -10,7 +10,8 @@
     "Pinned libvterm lacks SGR 58/59 and mishandles 38:2::r:g:b; DanTerm deliberately consumes both correctly.",
     "Raw ground-state C1 bytes and UTF-8 encodings beyond U+10FFFF are replaced by U+FFFD using maximal-subpart recovery.",
     "DanTerm retains grapheme scalars exactly instead of truncating after five combining marks.",
-    "DanTerm follows VT500 string states: C0 is absorbed inside strings and BEL terminates only OSC."
+    "DanTerm follows VT500 string states: C0 is absorbed inside strings and BEL terminates only OSC.",
+    "DanTerm emits strict xterm legacy encodings where pinned libvterm emits unsolicited fixterms CSI-u for modified letters, Space, and Tab."
   ],
   "files": [
     {
@@ -1001,6 +1002,31 @@
           "disposition": "out-of-scope",
           "rationale": "Configurable default palette colors belong to future renderer and theme policy."
         }
+      ]
+    },
+    {
+      "path": "t/25state_input.test",
+      "licenseNotice": "LICENSE.libvterm.txt",
+      "cases": [
+        { "name": "Unmodified ASCII", "disposition": "adopted", "rationale": "state-input.json encodes normalized printable input as UTF-8." },
+        { "name": "Ctrl modifier on ASCII letters", "disposition": "adapted", "rationale": "DanTerm deliberately emits strict xterm control bytes without unsolicited CSI-u." },
+        { "name": "Alt modifier on ASCII letters", "disposition": "adopted", "rationale": "state-input.json pins the legacy ESC prefix." },
+        { "name": "Ctrl-Alt modifier on ASCII letters", "disposition": "adapted", "rationale": "DanTerm deliberately emits ESC plus the strict xterm control byte." },
+        { "name": "Special handling of Ctrl-I", "disposition": "adapted", "rationale": "DanTerm deliberately emits HT without unsolicited CSI-u." },
+        { "name": "Special handling of Space", "disposition": "adapted", "rationale": "DanTerm deliberately uses strict xterm plain, NUL, and ESC-prefixed forms." },
+        { "name": "Cursor keys in reset (cursor) mode", "disposition": "adopted", "rationale": "state-input.json pins normal CSI cursor bytes." },
+        { "name": "Cursor keys in application mode", "disposition": "adopted", "rationale": "state-input.json derives SS3 cursor bytes from replayed DECCKM state." },
+        { "name": "Shift-Tab should be different", "disposition": "adapted", "rationale": "DanTerm emits CSI Z while Kitty flag 1 owns enhanced modified-Tab reporting." },
+        { "name": "Enter in linefeed mode", "disposition": "adopted", "rationale": "state-input.json pins CR while LNM is reset." },
+        { "name": "Enter in newline mode", "disposition": "adopted", "rationale": "state-input.json derives CRLF from replayed LNM state." },
+        { "name": "Unmodified F1 is SS3 P", "disposition": "adopted", "rationale": "state-input.json pins the legacy SS3 function-key form." },
+        { "name": "Modified F1 is CSI P", "disposition": "adopted", "rationale": "state-input.json pins the xterm modifier parameter form." },
+        { "name": "Keypad in DECKPNM", "disposition": "adopted", "rationale": "state-input.json pins numeric keypad bytes." },
+        { "name": "Keypad in DECKPAM", "disposition": "adopted", "rationale": "state-input.json derives SS3 keypad bytes from replayed DECKPAM state." },
+        { "name": "Bracketed paste mode off", "disposition": "adapted", "rationale": "state-input.json applies DanTerm safe-paste normalization without markers." },
+        { "name": "Bracketed paste mode on", "disposition": "adapted", "rationale": "state-input.json wraps one sanitized body instead of separate start and end callbacks." },
+        { "name": "Focus reporting disabled", "disposition": "adopted", "rationale": "state-input.json pins disabled focus as silent." },
+        { "name": "Focus reporting enabled", "disposition": "adapted", "rationale": "state-input.json derives focus bytes from replayed mode state without property callbacks." }
       ]
     },
     {

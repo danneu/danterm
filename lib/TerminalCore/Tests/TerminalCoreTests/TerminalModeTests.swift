@@ -186,7 +186,6 @@ struct TerminalModeTests {
             "\u{1B}[h",
             "\u{1B}[99h",
             "\u{1B}[?25;26$p",
-            "\u{1B}[?2004h",
             "\u{1B}[4!q",
             "\u{1B}[?6;7$p",
         ]
@@ -219,5 +218,23 @@ struct TerminalModeTests {
             changedMode.feed(Array(sequence.utf8))
             #expect(changedMode != Terminal(columns: 5, rows: 5))
         }
+    }
+
+    @Test("input modes follow DECSET and keypad application escape controls")
+    func inputModeProjection() throws {
+        var terminal = try #require(Terminal(columns: 5, rows: 3))
+        #expect(terminal.inputModes == .default)
+
+        terminal.feed(Array("\u{1B}[?1h\u{1B}[20h\u{1B}[?1004h\u{1B}[?2004h\u{1B}=".utf8))
+        #expect(terminal.inputModes == TerminalInputModes(
+            applicationCursorKeys: true,
+            applicationKeypad: true,
+            lineFeedNewLine: true,
+            focusReporting: true,
+            bracketedPaste: true
+        ))
+
+        terminal.feed(Array("\u{1B}[?1l\u{1B}[20l\u{1B}[?1004l\u{1B}[?2004l\u{1B}>".utf8))
+        #expect(terminal.inputModes == .default)
     }
 }

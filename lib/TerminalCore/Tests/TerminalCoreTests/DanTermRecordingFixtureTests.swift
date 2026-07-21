@@ -7,6 +7,46 @@ import TerminalCoreRecording
 
 /// Keeps the first complete Swift-pane workflow in the default headless regression gate.
 struct DanTermRecordingFixtureTests {
+    @Test("DanTerm Kitty input recording replays mode-aware bytes without input mutation")
+    func kittyInputRecording() throws {
+        let url = try #require(Bundle.module.url(
+            forResource: "keyboard-kitty",
+            withExtension: "json",
+            subdirectory: "Fixtures/danterm"
+        ))
+        let recording = try JSONDecoder().decode(
+            NeutralTerminalRecording.self,
+            from: Data(contentsOf: url)
+        )
+        try recording.provenance.validate()
+
+        var terminal = try #require(Terminal(columns: 8, rows: 3))
+        var emitted: [UInt8] = []
+        for event in recording.events {
+            switch event {
+            case .feed(let bytes):
+                terminal.feed(bytes)
+                emitted.append(contentsOf: terminal.drainReplyBytes())
+            case .input(let key, let modifiers):
+                let before = terminal
+                emitted.append(contentsOf: encodeTerminalKey(key, modifiers: modifiers, modes: terminal.inputModes))
+                #expect(terminal == before)
+            case .paste(let text):
+                let before = terminal
+                emitted.append(contentsOf: encodeTerminalPaste(text, modes: terminal.inputModes))
+                #expect(terminal == before)
+            case .focus(let focused):
+                let before = terminal
+                emitted.append(contentsOf: encodeTerminalFocus(focused: focused, modes: terminal.inputModes))
+                #expect(terminal == before)
+            case .resize, .viewport, .checkpoint:
+                break
+            }
+        }
+
+        #expect(emitted == Array("\u{1B}[?1u\u{1B}[97;5u\u{1B}[13;2u\u{1B}[200~safe\ntext\u{1B}[201~\u{1B}[I".utf8))
+    }
+
     @Test("captured Milestone 4 workflow is provenance-valid and chunk-invariant")
     func milestone4ViabilityRecording() throws {
         // Intent: prove the real app capture validates as DanTerm evidence, produces
@@ -78,6 +118,8 @@ struct DanTermRecordingFixtureTests {
                     terminal.feed(Array(bytes[..<midpoint]))
                     terminal.feed(Array(bytes[midpoint...]))
                 }
+            case .input, .paste, .focus:
+                break
             case .resize(let columns, let rows):
                 terminal.resize(columns: columns, rows: rows)
             case .viewport(let navigation):

@@ -1,0 +1,302 @@
+// Pure normalized-input policy for terminal keys, paste safety, and focus reporting.
+
+/// Snapshot of child-controlled modes that can affect bytes sent back as user input.
+public struct TerminalInputModes: Equatable, Sendable {
+    /// Selects SS3 for unmodified arrows, Home, and End in legacy mode.
+    public var applicationCursorKeys: Bool
+    /// Selects SS3 keypad forms in legacy mode.
+    public var applicationKeypad: Bool
+    /// Makes legacy Return emit CRLF instead of CR.
+    public var lineFeedNewLine: Bool
+    /// Enables focus-in and focus-out reports.
+    public var focusReporting: Bool
+    /// Enables safe-paste marker wrapping without newline normalization.
+    public var bracketedPaste: Bool
+    /// Contains only keyboard protocol flags DanTerm actually implements.
+    public var kittyKeyboardFlags: UInt16
+
+    /// Creates a complete deterministic input-policy snapshot with terminal defaults.
+    public init(
+        applicationCursorKeys: Bool = false,
+        applicationKeypad: Bool = false,
+        lineFeedNewLine: Bool = false,
+        focusReporting: Bool = false,
+        bracketedPaste: Bool = false,
+        kittyKeyboardFlags: UInt16 = 0
+    ) {
+        self.applicationCursorKeys = applicationCursorKeys
+        self.applicationKeypad = applicationKeypad
+        self.lineFeedNewLine = lineFeedNewLine
+        self.focusReporting = focusReporting
+        self.bracketedPaste = bracketedPaste
+        self.kittyKeyboardFlags = kittyKeyboardFlags
+    }
+
+    /// Represents the terminal's initial input-policy state.
+    public static let `default` = Self()
+}
+
+/// Platform-neutral semantic keys whose terminal encodings depend on active child modes.
+public enum TerminalInputKey: Equatable, Sendable {
+    case returnKey, tab, backspace, escape
+    case up, down, right, left, home, end, insert, pageUp, pageDown, deleteForward
+    case f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12
+    case character(Unicode.Scalar)
+    case keypad0, keypad1, keypad2, keypad3, keypad4
+    case keypad5, keypad6, keypad7, keypad8, keypad9
+    case keypadDecimal, keypadDivide, keypadMultiply, keypadSubtract, keypadAdd
+    case keypadEnter, keypadEqual
+}
+
+/// Stable modifier bits shared by AppKit, IPC, fixture replay, and pure policy tests.
+public struct TerminalKeyModifiers: OptionSet, Equatable, Sendable {
+    /// Stable storage shared across module and recording boundaries.
+    public let rawValue: UInt8
+
+    /// Reconstructs modifiers from their stable bit representation.
+    public init(rawValue: UInt8) {
+        self.rawValue = rawValue
+    }
+
+    /// Selects shifted terminal forms without implying text case conversion.
+    public static let shift = Self(rawValue: 1 << 0)
+    /// Selects terminal Alt semantics, including legacy ESC prefixing.
+    public static let alt = Self(rawValue: 1 << 1)
+    /// Selects control-byte or enhanced protocol forms.
+    public static let control = Self(rawValue: 1 << 2)
+}
+
+/// Encodes one normalized key solely from its semantic identity, modifiers, and mode snapshot.
+public func encodeTerminalKey(
+    _ key: TerminalInputKey,
+    modifiers: TerminalKeyModifiers,
+    modes: TerminalInputModes
+) -> [UInt8] {
+    if modes.kittyKeyboardFlags != 0 {
+        return encodeKittyKey(key, modifiers: modifiers)
+    }
+    return encodeLegacyKey(key, modifiers: modifiers, modes: modes)
+}
+
+/// Sanitizes paste text and applies bracket markers without permitting embedded control sequences.
+public func encodeTerminalPaste(_ text: String, modes: TerminalInputModes) -> [UInt8] {
+    let safeScalars = text.unicodeScalars.filter { scalar in
+        let value = scalar.value
+        if value == 0x09 || value == 0x0A || value == 0x0D { return true }
+        return value >= 0x20 && value != 0x7F && (0x80...0x9F).contains(value) == false
+    }
+    guard safeScalars.isEmpty == false else { return [] }
+
+    var body = String.UnicodeScalarView()
+    var index = safeScalars.startIndex
+    while index != safeScalars.endIndex {
+        let scalar = safeScalars[index]
+        if modes.bracketedPaste == false, scalar.value == 0x0D {
+            body.append(scalar)
+            let next = safeScalars.index(after: index)
+            if next != safeScalars.endIndex, safeScalars[next].value == 0x0A {
+                index = next
+            }
+        } else if modes.bracketedPaste == false, scalar.value == 0x0A {
+            body.append("\r")
+        } else {
+            body.append(scalar)
+        }
+        index = safeScalars.index(after: index)
+    }
+
+    let bytes = Array(String(body).utf8)
+    guard modes.bracketedPaste else { return bytes }
+    return Array("\u{1B}[200~".utf8) + bytes + Array("\u{1B}[201~".utf8)
+}
+
+/// Produces xterm focus reports only when the child has enabled DEC mode 1004.
+public func encodeTerminalFocus(focused: Bool, modes: TerminalInputModes) -> [UInt8] {
+    guard modes.focusReporting else { return [] }
+    return Array((focused ? "\u{1B}[I" : "\u{1B}[O").utf8)
+}
+
+private func modifierParameter(_ modifiers: TerminalKeyModifiers) -> Int {
+    1
+        + (modifiers.contains(.shift) ? 1 : 0)
+        + (modifiers.contains(.alt) ? 2 : 0)
+        + (modifiers.contains(.control) ? 4 : 0)
+}
+
+private func csi(_ body: String) -> [UInt8] {
+    Array("\u{1B}[\(body)".utf8)
+}
+
+private func modifiedCSI(
+    parameter: Int = 1,
+    final: Character,
+    modifiers: TerminalKeyModifiers
+) -> [UInt8] {
+    let modifier = modifierParameter(modifiers)
+    return csi(modifier == 1 ? "\(final)" : "\(parameter);\(modifier)\(final)")
+}
+
+private func tilde(_ parameter: Int, modifiers: TerminalKeyModifiers) -> [UInt8] {
+    let modifier = modifierParameter(modifiers)
+    return csi(modifier == 1 ? "\(parameter)~" : "\(parameter);\(modifier)~")
+}
+
+private func encodeLegacyKey(
+    _ key: TerminalInputKey,
+    modifiers: TerminalKeyModifiers,
+    modes: TerminalInputModes
+) -> [UInt8] {
+    switch key {
+    case .returnKey:
+        var bytes: [UInt8] = modes.lineFeedNewLine ? [0x0D, 0x0A] : [0x0D]
+        if modifiers.contains(.alt) { bytes.insert(0x1B, at: 0) }
+        return bytes
+    case .tab:
+        var bytes = modifiers.contains(.shift) ? csi("Z") : [0x09]
+        if modifiers.contains(.alt) { bytes.insert(0x1B, at: 0) }
+        return bytes
+    case .backspace:
+        var bytes: [UInt8] = modifiers.contains(.control) ? [0x08] : [0x7F]
+        if modifiers.contains(.alt) { bytes.insert(0x1B, at: 0) }
+        return bytes
+    case .escape:
+        return [0x1B]
+    case .up, .down, .right, .left, .home, .end:
+        let final: Character
+        switch key {
+        case .up: final = "A"
+        case .down: final = "B"
+        case .right: final = "C"
+        case .left: final = "D"
+        case .home: final = "H"
+        default: final = "F"
+        }
+        if modifiers.isEmpty, modes.applicationCursorKeys {
+            return Array("\u{1B}O\(final)".utf8)
+        }
+        return modifiedCSI(final: final, modifiers: modifiers)
+    case .insert: return tilde(2, modifiers: modifiers)
+    case .deleteForward: return tilde(3, modifiers: modifiers)
+    case .pageUp: return tilde(5, modifiers: modifiers)
+    case .pageDown: return tilde(6, modifiers: modifiers)
+    case .f1, .f2, .f3, .f4:
+        let final: Character = switch key {
+        case .f1: "P"
+        case .f2: "Q"
+        case .f3: "R"
+        default: "S"
+        }
+        if modifiers.isEmpty { return Array("\u{1B}O\(final)".utf8) }
+        return modifiedCSI(final: final, modifiers: modifiers)
+    case .f5: return tilde(15, modifiers: modifiers)
+    case .f6: return tilde(17, modifiers: modifiers)
+    case .f7: return tilde(18, modifiers: modifiers)
+    case .f8: return tilde(19, modifiers: modifiers)
+    case .f9: return tilde(20, modifiers: modifiers)
+    case .f10: return tilde(21, modifiers: modifiers)
+    case .f11: return tilde(23, modifiers: modifiers)
+    case .f12: return tilde(24, modifiers: modifiers)
+    case .character(let scalar):
+        var bytes = modifiers.contains(.control)
+            ? legacyControlBytes(for: scalar)
+            : Array(String(scalar).utf8)
+        if modifiers.contains(.alt) { bytes.insert(0x1B, at: 0) }
+        return bytes
+    case .keypad0, .keypad1, .keypad2, .keypad3, .keypad4,
+         .keypad5, .keypad6, .keypad7, .keypad8, .keypad9,
+         .keypadDecimal, .keypadDivide, .keypadMultiply, .keypadSubtract,
+         .keypadAdd, .keypadEnter, .keypadEqual:
+        let (normal, application, _) = keypadEncoding(for: key)
+        return modes.applicationKeypad ? Array("\u{1B}O\(application)".utf8) : Array(normal.utf8)
+    }
+}
+
+private func legacyControlBytes(for scalar: Unicode.Scalar) -> [UInt8] {
+    switch scalar.value {
+    case 0x20, 0x40: [0x00]
+    case 0x41...0x5A: [UInt8(scalar.value - 0x40)]
+    case 0x61...0x7A: [UInt8(scalar.value - 0x60)]
+    case 0x5B...0x5F: [UInt8(scalar.value - 0x40)]
+    case 0x3F: [0x7F]
+    default: Array(String(scalar).utf8)
+    }
+}
+
+private func encodeKittyKey(
+    _ key: TerminalInputKey,
+    modifiers: TerminalKeyModifiers
+) -> [UInt8] {
+    let modifier = modifierParameter(modifiers)
+    switch key {
+    case .escape:
+        return csi(modifier == 1 ? "27u" : "27;\(modifier)u")
+    case .returnKey, .tab, .backspace:
+        let code = key == .returnKey ? 13 : (key == .tab ? 9 : 127)
+        if modifiers.isEmpty {
+            return [UInt8(code)]
+        }
+        return csi("\(code);\(modifier)u")
+    case .character(let scalar):
+        guard modifiers.contains(.control) || modifiers.contains(.alt) else {
+            return Array(String(scalar).utf8)
+        }
+        let code = (0x41...0x5A).contains(scalar.value) ? scalar.value + 0x20 : scalar.value
+        return csi("\(code);\(modifier)u")
+    case .up, .down, .right, .left, .home, .end:
+        let final: Character = switch key {
+        case .up: "A"
+        case .down: "B"
+        case .right: "C"
+        case .left: "D"
+        case .home: "H"
+        default: "F"
+        }
+        return modifiedCSI(final: final, modifiers: modifiers)
+    case .insert: return tilde(2, modifiers: modifiers)
+    case .deleteForward: return tilde(3, modifiers: modifiers)
+    case .pageUp: return tilde(5, modifiers: modifiers)
+    case .pageDown: return tilde(6, modifiers: modifiers)
+    case .f1, .f2, .f4:
+        let final: Character = key == .f1 ? "P" : (key == .f2 ? "Q" : "S")
+        return modifiedCSI(final: final, modifiers: modifiers)
+    case .f3: return tilde(13, modifiers: modifiers)
+    case .f5: return tilde(15, modifiers: modifiers)
+    case .f6: return tilde(17, modifiers: modifiers)
+    case .f7: return tilde(18, modifiers: modifiers)
+    case .f8: return tilde(19, modifiers: modifiers)
+    case .f9: return tilde(20, modifiers: modifiers)
+    case .f10: return tilde(21, modifiers: modifiers)
+    case .f11: return tilde(23, modifiers: modifiers)
+    case .f12: return tilde(24, modifiers: modifiers)
+    case .keypad0, .keypad1, .keypad2, .keypad3, .keypad4,
+         .keypad5, .keypad6, .keypad7, .keypad8, .keypad9,
+         .keypadDecimal, .keypadDivide, .keypadMultiply, .keypadSubtract,
+         .keypadAdd, .keypadEnter, .keypadEqual:
+        let (normal, _, functionalCode) = keypadEncoding(for: key)
+        guard modifiers.isEmpty == false else { return Array(normal.utf8) }
+        return csi("\(functionalCode);\(modifier)u")
+    }
+}
+
+private func keypadEncoding(for key: TerminalInputKey) -> (String, Character, Int) {
+    switch key {
+    case .keypad0: ("0", "p", 57399)
+    case .keypad1: ("1", "q", 57400)
+    case .keypad2: ("2", "r", 57401)
+    case .keypad3: ("3", "s", 57402)
+    case .keypad4: ("4", "t", 57403)
+    case .keypad5: ("5", "u", 57404)
+    case .keypad6: ("6", "v", 57405)
+    case .keypad7: ("7", "w", 57406)
+    case .keypad8: ("8", "x", 57407)
+    case .keypad9: ("9", "y", 57408)
+    case .keypadDecimal: (".", "n", 57409)
+    case .keypadDivide: ("/", "o", 57410)
+    case .keypadMultiply: ("*", "j", 57411)
+    case .keypadSubtract: ("-", "m", 57412)
+    case .keypadAdd: ("+", "k", 57413)
+    case .keypadEnter: ("\r", "M", 57414)
+    case .keypadEqual: ("=", "X", 57415)
+    default: preconditionFailure("non-keypad key")
+    }
+}

@@ -137,6 +137,9 @@ public enum NeutralTerminalViewportNavigation: Equatable, Sendable {
 /// One owner-ordered terminal transition; checkpoints retain corpus expectation positions.
 public enum NeutralTerminalRecordingEvent: Equatable, Sendable {
     case feed([UInt8])
+    case input(key: TerminalInputKey, modifiers: TerminalKeyModifiers)
+    case paste(String)
+    case focus(Bool)
     case resize(columns: Int, rows: Int)
     case viewport(NeutralTerminalViewportNavigation)
     case checkpoint
@@ -144,7 +147,7 @@ public enum NeutralTerminalRecordingEvent: Equatable, Sendable {
 
 extension NeutralTerminalRecordingEvent: Codable {
     private enum CodingKeys: String, CodingKey {
-        case type, text, hex, columns, rows, action
+        case type, text, hex, columns, rows, action, key, scalar, modifiers, focused
     }
 
     public init(from decoder: any Decoder) throws {
@@ -169,6 +172,20 @@ extension NeutralTerminalRecordingEvent: Codable {
                 columns: try values.decode(Int.self, forKey: .columns),
                 rows: try values.decode(Int.self, forKey: .rows)
             )
+        case "input":
+            self = .input(
+                key: try Self.decodeKey(
+                    try values.decode(String.self, forKey: .key),
+                    scalar: try values.decodeIfPresent(String.self, forKey: .scalar)
+                ),
+                modifiers: try Self.decodeModifiers(
+                    try values.decodeIfPresent([String].self, forKey: .modifiers) ?? []
+                )
+            )
+        case "paste":
+            self = .paste(try values.decode(String.self, forKey: .text))
+        case "focus":
+            self = .focus(try values.decode(Bool.self, forKey: .focused))
         case "viewport":
             let action = try values.decode(String.self, forKey: .action)
             switch action {
@@ -194,6 +211,18 @@ extension NeutralTerminalRecordingEvent: Codable {
         case .feed(let bytes):
             try values.encode("feed", forKey: .type)
             try values.encode(bytes.map { String(format: "%02x", $0) }.joined(), forKey: .hex)
+        case .input(let key, let modifiers):
+            try values.encode("input", forKey: .type)
+            let encoded = Self.encodeKey(key)
+            try values.encode(encoded.name, forKey: .key)
+            try values.encodeIfPresent(encoded.scalar, forKey: .scalar)
+            try values.encode(Self.encodeModifiers(modifiers), forKey: .modifiers)
+        case .paste(let text):
+            try values.encode("paste", forKey: .type)
+            try values.encode(text, forKey: .text)
+        case .focus(let focused):
+            try values.encode("focus", forKey: .type)
+            try values.encode(focused, forKey: .focused)
         case .resize(let columns, let rows):
             try values.encode("resize", forKey: .type)
             try values.encode(columns, forKey: .columns)
@@ -229,6 +258,64 @@ extension NeutralTerminalRecordingEvent: Codable {
             return byte
         }
     }
+
+    private static func decodeModifiers(_ names: [String]) throws -> TerminalKeyModifiers {
+        var modifiers: TerminalKeyModifiers = []
+        for name in names {
+            switch name {
+            case "shift": modifiers.insert(.shift)
+            case "alt": modifiers.insert(.alt)
+            case "control": modifiers.insert(.control)
+            default: throw NeutralTerminalRecordingError.unsupportedEvent("input.modifier.\(name)")
+            }
+        }
+        return modifiers
+    }
+
+    private static func encodeModifiers(_ modifiers: TerminalKeyModifiers) -> [String] {
+        var names: [String] = []
+        if modifiers.contains(.shift) { names.append("shift") }
+        if modifiers.contains(.alt) { names.append("alt") }
+        if modifiers.contains(.control) { names.append("control") }
+        return names
+    }
+
+    private static func decodeKey(_ name: String, scalar: String?) throws -> TerminalInputKey {
+        if name == "character" {
+            guard let scalar, scalar.unicodeScalars.count == 1,
+                  let value = scalar.unicodeScalars.first
+            else { throw NeutralTerminalRecordingError.unsupportedEvent("input.character") }
+            return .character(value)
+        }
+        guard let key = namedKeys[name] else {
+            throw NeutralTerminalRecordingError.unsupportedEvent("input.key.\(name)")
+        }
+        return key
+    }
+
+    private static func encodeKey(_ key: TerminalInputKey) -> (name: String, scalar: String?) {
+        if case .character(let scalar) = key { return ("character", String(scalar)) }
+        guard let name = namedKeys.first(where: { $0.value == key })?.key else {
+            preconditionFailure("missing neutral key token")
+        }
+        return (name, nil)
+    }
+
+    private static let namedKeys: [String: TerminalInputKey] = [
+        "return": .returnKey, "tab": .tab, "backspace": .backspace, "escape": .escape,
+        "up": .up, "down": .down, "right": .right, "left": .left,
+        "home": .home, "end": .end, "insert": .insert,
+        "pageUp": .pageUp, "pageDown": .pageDown, "delete": .deleteForward,
+        "f1": .f1, "f2": .f2, "f3": .f3, "f4": .f4, "f5": .f5, "f6": .f6,
+        "f7": .f7, "f8": .f8, "f9": .f9, "f10": .f10, "f11": .f11, "f12": .f12,
+        "keypad0": .keypad0, "keypad1": .keypad1, "keypad2": .keypad2,
+        "keypad3": .keypad3, "keypad4": .keypad4, "keypad5": .keypad5,
+        "keypad6": .keypad6, "keypad7": .keypad7, "keypad8": .keypad8,
+        "keypad9": .keypad9, "keypadDecimal": .keypadDecimal,
+        "keypadDivide": .keypadDivide, "keypadMultiply": .keypadMultiply,
+        "keypadSubtract": .keypadSubtract, "keypadAdd": .keypadAdd,
+        "keypadEnter": .keypadEnter, "keypadEqual": .keypadEqual,
+    ]
 }
 
 /// Complete neutral evidence that can be serialized by a PTY test and replayed by core tests.
@@ -271,6 +358,8 @@ public struct NeutralTerminalRecording: Codable, Equatable, Sendable {
             case .feed(let bytes):
                 terminal.feed(bytes)
                 _ = terminal.drainReplyBytes()
+            case .input, .paste, .focus:
+                break
             case .resize(let columns, let rows):
                 guard columns >= 2, rows >= 1 else {
                     throw NeutralTerminalRecordingError.invalidDimensions

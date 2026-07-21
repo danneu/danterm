@@ -30,14 +30,16 @@ struct TerminalQueryTests {
     @Test("DECRQM reports every implemented mode and zero for unknown modes")
     func modeQueries() throws {
         let decModes: [(mode: Int, initial: Int, setup: String, updated: Int)] = [
+            (1, 2, "\u{1B}[?1h", 1),
             (6, 2, "\u{1B}[?6h", 1),
             (7, 1, "\u{1B}[?7l", 2),
             (25, 1, "\u{1B}[?25l", 2),
+            (1004, 2, "\u{1B}[?1004h", 1),
             (1047, 2, "\u{1B}[?1047h", 1),
             (1049, 2, "\u{1B}[?1049h", 1),
             (2026, 2, "\u{1B}[?2026h", 1),
             (1048, 0, "\u{1B}[?1048h", 0),
-            (2004, 0, "\u{1B}[?2004h", 0),
+            (2004, 2, "\u{1B}[?2004h", 1),
         ]
         for item in decModes {
             var terminal = try #require(Terminal(columns: 8, rows: 4))
