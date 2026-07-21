@@ -222,11 +222,27 @@ mean.
     metadata, pure link resolution, Cmd-hover presentation, click-time safe
     web activation, and neutral Alacritty hyperlink evidence. See the
     [implementation plan](../plans/impl/2026-07-21-1243-osc8-hyperlinks-safe-web-links.md).
+  - [x] **Slice 11: Application-requested cursor shapes.** Carries DECSCUSR
+    block, underline, and bar shapes through semantic snapshots, render plans,
+    damage-aware execution, and pixel containment proofs. See the
+    [implementation plan](../plans/impl/2026-07-21-1433-milestone-6-cursor-behavior.md).
   - [ ] [Terminal core](04-terminal-core.md) completes the accepted baseline control,
     screen, mode, style, query, and recovery behavior.
-  - [ ] [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md) completes
+    Closure-audit judgment: controls, primary and alternate screens, modes,
+    queries, parser recovery, resets, synchronized output, and cursor
+    presentation state are covered by the terminal, CSI, mode, query,
+    presentation, reset, saved-cursor, and cursor-rendering suites. The only
+    remaining work is dotted and dashed underline shapes plus semantic SGR
+    58/59 underline color.
+  - [x] [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md) completes
     selection/search/viewport anchors, primary- and alternate-screen resize
     behavior, and the fixed 10 MiB scrollback contract.
+    Closure-audit judgment: `resizeAttachment`,
+    `resizePreservesBrowsingAnchor`, `outputPreservesBrowsingAnchorAndContent`,
+    and `evictionClampsBrowsingAnchor` cover the logical and viewport anchors;
+    the alternate-screen and resize suites cover both screen geometries; and
+    `publicProductionBudgetCrossing` plus the budget oracle cover the fixed
+    production limit and eviction behavior.
   - [x] Reflow preserves locally scrolled viewport anchoring across width and
     height changes once [Input and interaction](08-input-interaction.md) provides
     viewport-offset and interaction state. Audit judgment: existing
@@ -236,11 +252,20 @@ mean.
     characterized viewport/full-history, logical-line, selection, search, pane
     read, export, recovery text, and event-driven recovery-freshness behavior
     across reflow.
+    Closure-audit judgment: logical projection and invalidation, selection,
+    search, pane reads, persistence limits, and primary-history capture while
+    alternate screen is active are already covered. Remaining work is
+    event-driven Swift enriched-checkpoint freshness and headless replay of the
+    checked-in Ghostty inspection/recovery characterization corpus.
   - [ ] [Input and interaction](08-input-interaction.md) and
     [Renderer](09-renderer.md) provide an interactive pane with macOS text
     composition, terminal keys, mouse reporting, selection, safe paste,
     local wheel/scrollbar history navigation, clipboard writes, links, font
     fallback, colors, cursor behavior, and correct display scaling.
+    Closure-audit judgment: keyboard, mouse, paste, OSC 52, links, colors,
+    cursor shapes, damage, font fallback, display scaling, and the native text
+    composition seam are covered. Remaining work is the named multi-stage
+    Chinese IME scenario and renderer cursor blinking.
   - [x] Logical damage and full redraw produce the same visible state. Slice 8
     proves every neutral event by retained-plan overlay and styled output at the
     executor-pixel seam, including resize and alternate-screen cases.
@@ -248,6 +273,10 @@ mean.
     [External terminal test research](../docs/research/1-external-tests.md) has
     an adopted, adapted, superseded, or out-of-scope disposition; every
     applicable case passes through DanTerm's public behavioral seams.
+    Closure-audit judgment: the implemented libvterm families are covered, but
+    five selected files still need final dispositions; all pinned Alacritty
+    recordings still need validated classification, and all 15 Milestone 6
+    recordings must enter the neutral behavioral fixture portfolio.
 
 - [ ] **7. Reach shell and baseline application compatibility**
   - [ ] zsh, bash, fish, ssh, fzf, more, and less complete the minimum workflows in
