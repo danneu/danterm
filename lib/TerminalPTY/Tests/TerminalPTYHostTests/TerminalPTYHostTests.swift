@@ -4,6 +4,7 @@ import Foundation
 import Testing
 @testable import TerminalPTYHost
 import PaneLifecycle
+import TerminalCore
 import TerminalCoreRecording
 
 /// Exercises the native owner only through real PTYs and controlled child behavior.
@@ -742,6 +743,108 @@ struct TerminalPTYHostTests {
         await host.close()
     }
 
+    @Test("captured SGR pointer reports use modes already applied by child output", .timeLimit(.minutes(1)))
+    func capturedPointerUsesAuthoritativeModes() async throws {
+        // Intent: decide and encode pointer input from the terminal modes on the owner FIFO.
+        // Why it exists: mode lookup outside the owner can race child DECSET output.
+        // Scenario: a child enables click tracking and SGR encoding before the user clicks.
+        let host = try makeHost()
+        let command = "printf '\\033[?1000;1006h'; exec \(try probeExecutable()) hold \"$0\""
+        await host.start(makeLaunchInput(command: command))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let baseline = await host.inputWrites().count
+
+        host.sendPointer(.down(.left, column: 4, row: 2))
+        host.sendPointer(.up(.left, column: 4, row: 2))
+        _ = host.fencedSnapshot()
+
+        #expect(Array((await host.inputWrites()).dropFirst(baseline)) == [
+            Array("\u{1B}[<0;5;3M".utf8),
+            Array("\u{1B}[<0;5;3m".utf8),
+        ])
+        await host.close()
+    }
+
+    @Test("Shift drag selects locally while captured and replays exactly", .timeLimit(.minutes(1)))
+    func capturedShiftSelectionReplays() async throws {
+        let host = try makeHost()
+        let command = "printf '\\033[?1000;1006halpha beta'; exec \(try probeExecutable()) hold \"$0\""
+        await host.start(makeLaunchInput(command: command))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let baseline = await host.inputWrites().count
+        let lines = host.fencedSnapshot().viewportText
+            .split(separator: "\n", omittingEmptySubsequences: false)
+        let row = try #require(lines.firstIndex(where: { $0.contains("alpha beta") }))
+        let alpha = try #require(lines[row].range(of: "alpha"))
+        let column = lines[row].distance(from: lines[row].startIndex, to: alpha.lowerBound)
+
+        host.sendPointer(.down(
+            .left,
+            column: column,
+            row: row,
+            modifiers: [.shift]
+        ))
+        host.sendPointer(.move(column: column + 4, row: row, modifiers: [.shift]))
+        host.sendPointer(.up(.left, column: column + 4, row: row, modifiers: [.shift]))
+        let snapshot = host.fencedSnapshot()
+        let recording = NeutralTerminalRecording(
+            provenance: .danTerm(test: "captured-shift-selection"),
+            initial: .init(columns: 80, rows: 24),
+            events: (await host.transitions()).map(\.recordingEvent)
+        )
+
+        #expect(snapshot.selectedText == "alpha")
+        #expect(await host.inputWrites().count == baseline)
+        #expect(try recording.replay() == snapshot)
+        await host.close()
+    }
+
+    @Test("captured and Shift wheel routes preserve a browsing viewport", .timeLimit(.minutes(1)))
+    func wheelRoutesPreserveBrowsing() async throws {
+        let host = try makeHost()
+        let command = "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done; printf '\\033[?1000;1006h'; exec \(try probeExecutable()) hold \"$0\""
+        await host.start(makeLaunchInput(command: command))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        host.scroll(byRows: -3)
+        let browsing = host.fencedSnapshot().scrollProjection
+        let baseline = await host.inputWrites().count
+
+        host.sendWheel(.init(rowDelta: -1, column: 2, row: 3))
+        _ = host.fencedSnapshot()
+        #expect(Array((await host.inputWrites()).dropFirst(baseline)) == [
+            Array("\u{1B}[<64;3;4M".utf8),
+        ])
+        #expect(host.fencedSnapshot().scrollProjection == browsing)
+
+        let reportCount = await host.inputWrites().count
+        host.sendWheel(.init(rowDelta: -1, column: 2, row: 3, modifiers: [.shift]))
+        let shifted = host.fencedSnapshot().scrollProjection
+        #expect(await host.inputWrites().count == reportCount)
+        #expect(shifted.topRow == browsing.topRow - 1)
+        #expect(shifted.isFollowing == false)
+        await host.close()
+    }
+
+    @Test("uncaptured pane menu is returned only after right-button release", .timeLimit(.minutes(1)))
+    func paneMenuWaitsForRelease() async throws {
+        let host = try makeHost()
+        await host.start(makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\""))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let menus = AsyncStream<TerminalViewportCell>.makeStream()
+        var iterator = menus.stream.makeAsyncIterator()
+
+        host.sendPointer(.down(.right, column: 9, row: 4)) { cell in
+            _ = menus.continuation.yield(cell)
+        }
+        _ = host.fencedSnapshot()
+        host.sendPointer(.up(.right, column: 9, row: 4)) { cell in
+            _ = menus.continuation.yield(cell)
+        }
+
+        #expect(await iterator.next() == .init(column: 9, row: 4))
+        await host.close()
+    }
+
     @Test("user input snaps browsing to bottom and capture replays the transition", .timeLimit(.minutes(1)))
     func userInputSnapCaptureEquality() async throws {
         // Intent: record the local snap before the user write without classifying replies as input.
@@ -775,6 +878,7 @@ struct TerminalPTYHostTests {
         await host.start(makeLaunchInput(command: try scrollbackCommand()))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         let baseline = (await host.resourceSnapshot()).emittedUpdateSignalCount
+        let writeBaseline = await host.inputWrites().count
 
         host.scroll(toTopRow: -100)
         let top = host.fencedSnapshot()
@@ -786,6 +890,7 @@ struct TerminalPTYHostTests {
         #expect(top.scrollProjection.isFollowing == false)
         #expect(afterChange == baseline + 1)
         #expect((await host.resourceSnapshot()).emittedUpdateSignalCount == afterChange)
+        #expect(await host.inputWrites().count == writeBaseline)
 
         host.scrollToBottom()
         #expect(host.fencedSnapshot().scrollProjection.isFollowing)
@@ -800,11 +905,38 @@ private extension TerminalPTYAppliedTransition {
         case .input(let key, let modifiers): .input(key: key, modifiers: modifiers)
         case .paste(let text): .paste(text)
         case .focus(let focused): .focus(focused)
+        case .mouse(let event): .mouse(event.neutralEvent)
         case .resize(let dimensions):
             .resize(columns: dimensions.columns, rows: dimensions.rows)
         case .scrollByRows(let rows): .viewport(.byRows(rows))
         case .scrollToTopRow(let row): .viewport(.toTopRow(row))
         case .scrollToBottom: .viewport(.toBottom)
+        }
+    }
+}
+
+private extension TerminalPointerEvent {
+    var neutralEvent: NeutralTerminalMouseEvent {
+        switch self {
+        case let .down(button, column, row, modifiers, clickCount):
+            .init(
+                action: .down,
+                button: button.rawValue + 1,
+                column: column,
+                row: row,
+                modifiers: modifiers,
+                clickCount: clickCount
+            )
+        case let .up(button, column, row, modifiers):
+            .init(
+                action: .up,
+                button: button.rawValue + 1,
+                column: column,
+                row: row,
+                modifiers: modifiers
+            )
+        case let .move(column, row, modifiers):
+            .init(action: .move, column: column, row: row, modifiers: modifiers)
         }
     }
 }

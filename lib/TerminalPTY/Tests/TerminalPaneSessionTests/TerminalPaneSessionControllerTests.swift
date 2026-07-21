@@ -631,12 +631,42 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
+    @Test("fenced selection reads observe earlier controller pointer input", .timeLimit(.minutes(1)))
+    func fencedSelectionReadObservesPointerInput() async throws {
+        let host = try makeHost()
+        let command = "printf 'alpha beta'; exec \(try probeExecutable()) hold \"$0\""
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: command)
+        )
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        controller.synchronizeState()
+        let lines = controller.readViewportText()
+            .split(separator: "\n", omittingEmptySubsequences: false)
+        let row = try #require(lines.firstIndex(where: { $0.contains("alpha beta") }))
+        let beta = try #require(lines[row].range(of: "beta"))
+        let column = lines[row].distance(from: lines[row].startIndex, to: beta.lowerBound)
+
+        controller.sendPointer(.down(.left, column: column, row: row, clickCount: 2))
+        controller.sendPointer(.up(.left, column: column, row: row))
+
+        #expect(controller.readSelectedTextSynchronizing() == "beta")
+        #expect(controller.hasSelection)
+        #expect(controller.readSelectedText() == "beta")
+
+        controller.clearSelection()
+        controller.synchronizeState()
+        #expect(controller.hasSelection == false)
+        controller.tearDown()
+        await host.close()
+    }
+
     @Test("captured controller navigation and semantic input replay exactly", .timeLimit(.minutes(1)))
     func controllerNavigationCaptureEquality() async throws {
         // Intent: preserve owner-ordered viewport and normalized input events through capture.
         // Why it exists: input snaps and semantic events cannot be reconstructed from child output.
         // Scenario: a pane scrolls away, receives key/paste/focus input, then exits normally.
-        let command = "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done; read ignored; exit"
+        let command = "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done; printf '\\033[?1000;1006h'; read ignored; exit"
         let controller = try TerminalPaneSessionController(
             configuration: .init(
                 initialDimensions: .init(columns: 80, rows: 24),
@@ -655,9 +685,36 @@ struct TerminalPaneSessionControllerTests {
             await Task.yield()
             controller.synchronizeState()
         }
+        let lines = controller.readViewportText()
+            .split(separator: "\n", omittingEmptySubsequences: false)
+        let selectionRow = try #require(lines.firstIndex(where: { $0.contains("line-39") }))
 
         controller.scroll(byRows: -5)
         controller.synchronizeState()
+        controller.sendPointer(.down(
+            .left,
+            column: 0,
+            row: selectionRow,
+            modifiers: [.shift]
+        ))
+        controller.sendPointer(.move(column: 3, row: selectionRow, modifiers: [.shift]))
+        controller.sendPointer(.up(.left, column: 3, row: selectionRow, modifiers: [.shift]))
+        controller.sendPointer(.down(
+            .left,
+            column: 1,
+            row: selectionRow,
+            modifiers: [.shift],
+            clickCount: 2
+        ))
+        controller.sendPointer(.up(.left, column: 1, row: selectionRow, modifiers: [.shift]))
+        controller.sendPointer(.down(
+            .left,
+            column: 1,
+            row: selectionRow,
+            modifiers: [.shift],
+            clickCount: 3
+        ))
+        controller.sendPointer(.up(.left, column: 1, row: selectionRow, modifiers: [.shift]))
         controller.sendKey(.f5, modifiers: [.shift])
         controller.sendPaste("paste")
         controller.sendFocus(true)
@@ -671,6 +728,16 @@ struct TerminalPaneSessionControllerTests {
         #expect(recording.events.contains(.input(key: .f5, modifiers: [.shift])))
         #expect(recording.events.contains(.paste("paste")))
         #expect(recording.events.contains(.focus(true)))
+        let mouseEvents = recording.events.compactMap { event -> NeutralTerminalMouseEvent? in
+            guard case .mouse(let mouse) = event else { return nil }
+            return mouse
+        }
+        let shiftDownClickCounts = mouseEvents.filter {
+            $0.action == .down && $0.modifiers == [.shift]
+        }.map(\.clickCount)
+        #expect(shiftDownClickCounts.contains(1))
+        #expect(shiftDownClickCounts.contains(2))
+        #expect(shiftDownClickCounts.contains(3))
         #expect(try recording.replay() == controller.terminalSnapshot())
 
         controller.tearDown()

@@ -16,6 +16,7 @@ package enum TerminalPTYAppliedTransition: Equatable, Sendable {
     case input(key: TerminalInputKey, modifiers: TerminalKeyModifiers)
     case paste(String)
     case focus(Bool)
+    case mouse(TerminalPointerEvent)
     case resize(TerminalDimensions)
     case scrollByRows(Int)
     case scrollToTopRow(Int)
@@ -102,6 +103,7 @@ public actor TerminalPTYHost {
     private var isReducing = false
 
     private var recentOutput: [UInt8] = []
+    private var interactionState = TerminalInteractionState()
     private var capturedOutput: [UInt8] = []
     private var appliedTransitions: [TerminalPTYAppliedTransition] = []
     private var capturedSubmittedTransitions: [TerminalPTYSubmittedTransition] = []
@@ -246,11 +248,37 @@ public actor TerminalPTYHost {
         }
     }
 
+    /// Enqueues selection clearing on the same FIFO as pointer mutations and output.
+    nonisolated public func clearSelection() {
+        queue.async { [weak self] in
+            self?.assumeIsolated { owner in owner.applyClearSelection() }
+        }
+    }
+
     /// Routes wheel rows against the active screen at the point the owner executes the intent.
     nonisolated public func sendWheel(_ intent: TerminalWheelIntent) {
         guard intent.rowDelta != 0 else { return }
         queue.async { [weak self] in
-            self?.assumeIsolated { owner in owner.applyWheel(intent) }
+            self?.assumeIsolated { owner in
+                owner.applyWheel(.init(rowDelta: Double(intent.rowDelta), column: 0, row: 0))
+            }
+        }
+    }
+
+    /// Enqueues normalized fractional wheel input for atomic route and mode selection.
+    nonisolated public func sendWheel(_ event: TerminalWheelEvent) {
+        queue.async { [weak self] in
+            self?.assumeIsolated { owner in owner.applyWheel(event) }
+        }
+    }
+
+    /// Enqueues a normalized pointer transition and returns owner-approved pane-menu actions.
+    nonisolated public func sendPointer(
+        _ event: TerminalPointerEvent,
+        onPaneMenu: @escaping @Sendable (TerminalViewportCell) -> Void = { _ in }
+    ) {
+        queue.async { [weak self] in
+            self?.assumeIsolated { owner in owner.applyPointer(event, onPaneMenu: onPaneMenu) }
         }
     }
 
@@ -382,27 +410,55 @@ public actor TerminalPTYHost {
         }
     }
 
-    private func applyWheel(_ intent: TerminalWheelIntent) {
+    private func applyWheel(_ event: TerminalWheelEvent) {
         guard teardownFinished == false else { return }
-        if terminal.isAlternateScreenActive {
-            let count = intent.rowDelta.magnitude
-            let key: TerminalInputKey = intent.rowDelta < 0 ? .up : .down
-            let step = encodeTerminalKey(key, modifiers: [], modes: terminal.inputModes)
-            guard step.isEmpty == false,
-                  count <= UInt(Int.max),
-                  step.count.multipliedReportingOverflow(by: Int(count)).overflow == false
-            else {
-                return
-            }
-            var bytes: [UInt8] = []
-            bytes.reserveCapacity(step.count * Int(count))
-            for _ in 0..<count {
-                bytes.append(contentsOf: step)
-            }
-            process(.sendInput(bytes))
-        } else {
-            applyViewportNavigation(.scrollByRows(intent.rowDelta), publishUpdate: true)
+        let decision = decideTerminalWheel(event, terminal: terminal, state: &interactionState)
+        if decision.inputBytes.isEmpty == false {
+            process(.sendInput(decision.inputBytes))
         }
+        if decision.localRowDelta != 0 {
+            applyViewportNavigation(
+                .scrollByRows(decision.localRowDelta),
+                publishUpdate: true
+            )
+        }
+    }
+
+    private func applyPointer(
+        _ event: TerminalPointerEvent,
+        onPaneMenu: @Sendable (TerminalViewportCell) -> Void
+    ) {
+        guard teardownFinished == false else { return }
+        if captureTransitions { appliedTransitions.append(.mouse(event)) }
+        let decision = decideTerminalPointer(event, terminal: terminal, state: &interactionState)
+        if decision.inputBytes.isEmpty == false {
+            process(.sendInput(decision.inputBytes))
+        }
+        let previousTerminal = terminal
+        switch decision.selectionMutation {
+        case .clear:
+            terminal.clearSelection()
+        case .set(let range):
+            terminal.setSelection(range)
+        case nil:
+            break
+        }
+        if terminal != previousTerminal {
+            markUpdatePending()
+            publishPendingUpdate()
+        }
+        if let cell = decision.paneMenuCell {
+            onPaneMenu(cell)
+        }
+    }
+
+    private func applyClearSelection() {
+        guard teardownFinished == false else { return }
+        let previousTerminal = terminal
+        terminal.clearSelection()
+        guard terminal != previousTerminal else { return }
+        markUpdatePending()
+        publishPendingUpdate()
     }
 
     private func applyKey(_ key: TerminalInputKey, modifiers: TerminalKeyModifiers) {
@@ -441,7 +497,7 @@ public actor TerminalPTYHost {
         case .scrollByRows(let rows): terminal.scroll(byRows: rows)
         case .scrollToTopRow(let row): terminal.scroll(toTopRow: row)
         case .scrollToBottom: terminal.scrollToBottom()
-        case .feed, .input, .paste, .focus, .resize: return
+        case .feed, .input, .paste, .focus, .mouse, .resize: return
         }
         if terminal != previousTerminal {
             markUpdatePending()

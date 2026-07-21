@@ -48,6 +48,9 @@ public final class TerminalPaneSessionController {
     /// Receives scrollbar-relevant state only when its projection or screen availability changes.
     public var onViewportStateChange: ((TerminalPaneViewportState) -> Void)?
 
+    /// Receives an uncaptured pane-menu request only after its pointer gesture completes.
+    public var onPaneMenu: ((TerminalViewportCell) -> Void)?
+
     /// Releases the backend registry entry only after this host's native teardown completes.
     public var onTeardownCompleted: (@MainActor @Sendable () -> Void)?
 
@@ -161,6 +164,17 @@ public final class TerminalPaneSessionController {
         host.sendFocus(focused)
     }
 
+    /// Forwards normalized pointer input without mirroring child modes on the main actor.
+    public func sendPointer(_ event: TerminalPointerEvent) {
+        guard isTornDown == false else { return }
+        host.sendPointer(event) { [weak self] cell in
+            Task { @MainActor [weak self] in
+                guard let self, self.isTornDown == false else { return }
+                self.onPaneMenu?(cell)
+            }
+        }
+    }
+
     /// Submits signed local row navigation through the host's ordered owner queue.
     public func scroll(byRows rowDelta: Int) {
         guard isTornDown == false, rowDelta != 0 else { return }
@@ -183,6 +197,12 @@ public final class TerminalPaneSessionController {
     public func sendWheel(rows: Int) {
         guard isTornDown == false, rows != 0 else { return }
         host.sendWheel(.init(rowDelta: rows))
+    }
+
+    /// Forwards fractional wheel input and gesture boundaries for owner-side routing.
+    public func sendWheel(_ event: TerminalWheelEvent) {
+        guard isTornDown == false else { return }
+        host.sendWheel(event)
     }
 
     /// Submits each distinct valid grid once, preserving its order relative to input.
@@ -224,6 +244,29 @@ public final class TerminalPaneSessionController {
         cachedTerminal.fullHistoryText
     }
 
+    /// Reflects whether the latest consumed terminal snapshot contains selected text.
+    public var hasSelection: Bool {
+        cachedTerminal.selectedText != nil
+    }
+
+    /// Returns selection from the latest asynchronously consumed terminal snapshot.
+    public func readSelectedText() -> String? {
+        cachedTerminal.selectedText
+    }
+
+    /// Fences pending pointer work, refreshes cached state, and returns finalized selection text.
+    public func readSelectedTextSynchronizing() -> String? {
+        guard isTornDown == false else { return nil }
+        consume(snapshot: host.fencedSnapshot(), result: nil, transitions: nil)
+        return cachedTerminal.selectedText
+    }
+
+    /// Enqueues selection clearing on the sole terminal owner.
+    public func clearSelection() {
+        guard isTornDown == false else { return }
+        host.clearSelection()
+    }
+
     /// Returns primary-screen history for persistence consumers that exclude transient screens.
     public func readPrimaryHistoryText() -> String {
         cachedTerminal.primaryHistoryText
@@ -260,6 +303,7 @@ public final class TerminalPaneSessionController {
         onPlan = nil
         onSessionEnded = nil
         onViewportStateChange = nil
+        onPaneMenu = nil
         let onTeardownCompleted = takeTeardownCompletion()
         consumeTask?.cancel()
         consumeTask = nil
@@ -295,6 +339,8 @@ public final class TerminalPaneSessionController {
                         .paste(text)
                     case .focus(let focused):
                         .focus(focused)
+                    case .mouse(let event):
+                        .mouse(neutralMouseEvent(for: event))
                     case .resize(let dimensions):
                         .resize(columns: dimensions.columns, rows: dimensions.rows)
                     case .scrollByRows(let rows):
@@ -316,6 +362,35 @@ public final class TerminalPaneSessionController {
         guard state != lastEmittedViewportState else { return }
         lastEmittedViewportState = state
         onViewportStateChange?(state)
+    }
+
+    private func neutralMouseEvent(for event: TerminalPointerEvent) -> NeutralTerminalMouseEvent {
+        switch event {
+        case let .down(button, column, row, modifiers, clickCount):
+            NeutralTerminalMouseEvent(
+                action: .down,
+                button: button.rawValue + 1,
+                column: column,
+                row: row,
+                modifiers: modifiers,
+                clickCount: clickCount
+            )
+        case let .up(button, column, row, modifiers):
+            NeutralTerminalMouseEvent(
+                action: .up,
+                button: button.rawValue + 1,
+                column: column,
+                row: row,
+                modifiers: modifiers
+            )
+        case let .move(column, row, modifiers):
+            NeutralTerminalMouseEvent(
+                action: .move,
+                column: column,
+                row: row,
+                modifiers: modifiers
+            )
+        }
     }
 
     /// Test support for whole-value recording equality after a synchronization fence.
