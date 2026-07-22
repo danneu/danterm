@@ -352,10 +352,13 @@ mean.
     [capability contract](../docs/terminal-capabilities.md),
     [dated evidence](../docs/evidence/2026-07-21-terminal-capability-contract.md),
     and [slice plan](../plans/impl/2026-07-21-2228-terminal-capability-contract.md).
-  - [ ] The supported black-box protocol and capability tranche in
+  - [x] The supported black-box protocol and capability tranche in
     [External terminal test research](../docs/research/1-external-tests.md)
     passes against the real pane, and failures reduce to native deterministic
-    fixtures where practical.
+    fixtures where practical. See the
+    [dated evidence](../docs/evidence/2026-07-21-real-pane-protocol-probes.md),
+    [wraptest coverage comparison](../docs/research/2-wraptest-coverage.md), and
+    [slice plan](../plans/impl/2026-07-21-2326-real-pane-protocol-probes.md).
 
 - [ ] **8. Reach tmux, editor, and advanced TUI compatibility**
   - [ ] tmux, vim, neovim, btop, htop, lazygit, Claude Code, and Codex complete the

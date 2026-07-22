@@ -45,4 +45,4 @@ Completion checks and links the final Milestone 7 item in `plan-terminal-engine/
 ## Commit progress
 
 - [x] 1. Add the pinned real-pane protocol probe gate
-- [ ] 2. Publish probe evidence and close Milestone 7
+- [x] 2. Publish probe evidence and close Milestone 7
