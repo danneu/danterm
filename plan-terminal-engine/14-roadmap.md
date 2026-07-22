@@ -345,10 +345,13 @@ mean.
     recovery. See the
     [implementation plan](../plans/impl/2026-07-21-2138-asciinema-nested-pty-compatibility.md)
     and [dated evidence](../docs/evidence/2026-07-21-asciinema-nested-pty-compatibility.md).
-  - [ ] [Protocols and shell integration](10-protocols-shell-integration.md) proves
+  - [x] [Protocols and shell integration](10-protocols-shell-integration.md) proves
     the advertised terminal environment, current DanTerm shell events, title,
     cwd, notifications, progress, links, clipboard policy, capability manifest,
-    bell behavior, and cross-component protocol limits.
+    bell behavior, and cross-component protocol limits. See the
+    [capability contract](../docs/terminal-capabilities.md),
+    [dated evidence](../docs/evidence/2026-07-21-terminal-capability-contract.md),
+    and [slice plan](../plans/impl/2026-07-21-2228-terminal-capability-contract.md).
   - [ ] The supported black-box protocol and capability tranche in
     [External terminal test research](../docs/research/1-external-tests.md)
     passes against the real pane, and failures reduce to native deterministic

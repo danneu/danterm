@@ -735,7 +735,7 @@
       "licenseNotice": "LICENSE.libvterm.txt",
       "cases": [
         { "name": "DA", "disposition": "adopted", "rationale": "state-query.json asserts the pinned primary DA reply byte-for-byte." },
-        { "name": "XTVERSION", "disposition": "out-of-scope", "rationale": "Identity and version policy is deferred to Milestone 7." },
+        { "name": "XTVERSION", "disposition": "adapted", "rationale": "TerminalQueryTests asserts DanTerm's injected-version reply byte-for-byte for CSI > q and CSI > 0 q." },
         { "name": "DSR", "disposition": "adopted", "rationale": "state-query.json asserts the pinned operating-status reply byte-for-byte." },
         { "name": "CPR", "disposition": "adopted", "rationale": "state-query.json asserts both pinned cursor-position replies byte-for-byte." },
         { "name": "DECCPR", "disposition": "adopted", "rationale": "state-query.json asserts the pinned DEC-private cursor-position reply byte-for-byte." },
@@ -1126,11 +1126,11 @@
       "path": "t/18state_termprops.test",
       "licenseNotice": "LICENSE.libvterm.txt",
       "cases": [
-        { "name": "Cursor visibility", "disposition": "out-of-scope", "rationale": "Terminal-property callback and mode-query policy remain assigned to Milestone 7." },
-        { "name": "Cursor blink", "disposition": "out-of-scope", "rationale": "Cursor blinking and its terminal-property callback remain assigned to Milestone 7." },
-        { "name": "Cursor shape", "disposition": "out-of-scope", "rationale": "The libvterm terminal-property callback contract remains assigned to Milestone 7." },
-        { "name": "Title", "disposition": "out-of-scope", "rationale": "Title protocol and terminal-property policy remain assigned to Milestone 7." },
-        { "name": "Title split write", "disposition": "out-of-scope", "rationale": "Title protocol and terminal-property policy remain assigned to Milestone 7." }
+        { "name": "Cursor visibility", "disposition": "superseded", "rationale": "TerminalPresentationModeTests and TerminalQueryTests cover public cursor visibility and DECRQM evidence without adopting libvterm's callback topology." },
+        { "name": "Cursor blink", "disposition": "out-of-scope", "rationale": "Application-requested timed cursor blinking remains explicitly deferred after the replacement milestones." },
+        { "name": "Cursor shape", "disposition": "superseded", "rationale": "TerminalPresentationModeTests covers cursor shape through DanTerm's public presentation seam without adopting libvterm's callback topology." },
+        { "name": "Title", "disposition": "adapted", "rationale": "TerminalSemanticEventTests asserts one complete title event at OSC termination instead of a terminal-property callback." },
+        { "name": "Title split write", "disposition": "adapted", "rationale": "TerminalSemanticEventTests asserts chunk-invariant assembly into one complete title event at OSC termination." }
       ]
     },
     {
@@ -1186,8 +1186,8 @@
       "path": "t/68screen_termprops.test",
       "licenseNotice": "LICENSE.libvterm.txt",
       "cases": [
-        { "name": "Cursor visibility", "disposition": "out-of-scope", "rationale": "Screen terminal-property callback policy remains assigned to Milestone 7." },
-        { "name": "Title", "disposition": "out-of-scope", "rationale": "Title protocol and screen terminal-property policy remain assigned to Milestone 7." }
+        { "name": "Cursor visibility", "disposition": "superseded", "rationale": "TerminalPresentationModeTests and TerminalQueryTests already provide the public visibility and mode-query evidence used for the duplicate state-layer case." },
+        { "name": "Title", "disposition": "superseded", "rationale": "TerminalSemanticEventTests already provides the complete public title-event evidence used for the duplicate state-layer case." }
       ]
     },
     {

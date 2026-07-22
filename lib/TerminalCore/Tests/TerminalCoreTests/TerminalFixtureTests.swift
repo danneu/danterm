@@ -83,6 +83,33 @@ struct TerminalFixtureTests {
         }
     }
 
+    @Test("Milestone 7 closes the remaining protocol fixture classifications")
+    func milestone7ProtocolClassifications() throws {
+        let url = try #require(
+            Bundle.module.url(
+                forResource: "libvterm-manifest",
+                withExtension: "json",
+                subdirectory: "Fixtures"
+            )
+        )
+        let manifest = try JSONDecoder().decode(
+            FixtureManifest.self,
+            from: Data(contentsOf: url)
+        )
+        func disposition(_ path: String, _ name: String) -> String? {
+            manifest.files.first { $0.path == path }?.cases.first { $0.name == name }?.disposition
+        }
+
+        #expect(disposition("t/26state_query.test", "XTVERSION") == "adapted")
+        #expect(disposition("t/18state_termprops.test", "Cursor visibility") == "superseded")
+        #expect(disposition("t/18state_termprops.test", "Cursor blink") == "out-of-scope")
+        #expect(disposition("t/18state_termprops.test", "Cursor shape") == "superseded")
+        #expect(disposition("t/18state_termprops.test", "Title") == "adapted")
+        #expect(disposition("t/18state_termprops.test", "Title split write") == "adapted")
+        #expect(disposition("t/68screen_termprops.test", "Cursor visibility") == "superseded")
+        #expect(disposition("t/68screen_termprops.test", "Title") == "superseded")
+    }
+
     @Test("Alacritty manifest classifies the exact pinned recording inventory")
     func alacrittyManifestCoverage() throws {
         // Intent: pin every upstream recording to an explicit milestone disposition and evidence seam.

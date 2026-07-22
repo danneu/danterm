@@ -10,9 +10,10 @@ silently.
 
 ## Protocol support matrix
 
-- Which device and mode queries are required by the prioritized applications?
-- Which OSC notification and progress variants are part of the initial accepted
-  contract beyond DanTerm's current usage?
+- Which additional device and mode queries, beyond capability manifest v1, are
+  required by later prioritized applications?
+- Which notification or progress protocols, if any, justify a future manifest
+  version beyond the bounded OSC 9 and OSC 777 forms in v1?
 
 ## Terminal semantics
 

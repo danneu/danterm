@@ -40,6 +40,33 @@ compatibility target, including:
 - synchronized updates
 - legacy xterm and Kitty keyboard negotiation
 
+The bundled `terminal-capabilities-v1.json` is the public machine-readable
+contract. It records the two pinned terminfo baselines, the limited set of
+claimed capabilities and their variants, supported and denied protocol
+families, child-environment ownership, and numeric resource limits. DanTerm
+installs the same bytes at
+`Contents/Resources/terminal-capabilities-v1.json`; incompatible contract
+changes require a new manifest version.
+
+XTVERSION accepts `CSI > q` and `CSI > 0 q` and replies
+`DCS >|DanTerm <version> ST`, using the same injected bundle version exported as
+`TERM_PROGRAM_VERSION`. DA2, DECRQSS, XTGETTCAP, and 8-bit replies remain
+unsupported.
+
+The accepted notification and progress grammar is deliberately narrow:
+
+- `OSC 9;<body>` emits a notification with an empty title unless the first
+  field is the canonical selector `1` through `12`.
+- `OSC 777;notify;<title>;<body>` emits a notification and retains later
+  semicolons in the body.
+- `OSC 9;4;0`, `OSC 9;4;1;<0...100>`, `OSC 9;4;2[;<0...100>]`,
+  `OSC 9;4;3`, and `OSC 9;4;4[;<0...100>]` respectively remove, set,
+  mark error, mark indeterminate, or pause progress.
+
+Reserved selectors are ignored, including malformed selector-4 forms. Numeric
+bodies outside exact selectors `1` through `12` remain notification text.
+Unknown notification variants and Kitty OSC 99 are ignored.
+
 DanTerm shell integrations use a private, versioned OSC 1337 envelope carrying
 an authenticated pane token and typed command-start, command-end, remote-start,
 and remote-host events. Command and host text uses canonical padded base64. The
@@ -68,21 +95,21 @@ scrollback:
   [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md)
 - one pending OSC, DCS, APC, PM, or SOS string may contain at most 2 MiB of
   encoded input; OSC 52 additionally retains its 1 MiB decoded-content limit
-- one retained title, cwd, link target, notification, progress, or typed
-  shell-event payload is limited to 64 KiB; the 1 MiB aggregate
-  terminal-originated metadata budget per pane applies end to end across engine
-  retention, semantic-event handoff, DanTerm model retention, and adapter queues
+- one retained title, cwd, link target, complete notification title-plus-body,
+  progress, or typed shell-event payload is limited to 64 KiB; the 1 MiB
+  aggregate terminal-originated metadata budget per pane is divided into
+  256 KiB engine, 256 KiB handoff, and 512 KiB model shares
 - pending terminal query replies are limited to 64 KiB per pane
 - damage is coalesced into bounded active-grid state or a full-redraw marker,
   never retained as an event-by-event queue
 
 Semantic-event queues have both count and byte bounds. Replaceable title, cwd,
-and progress values coalesce to their newest complete value; other excess events
-are dropped as complete pane-scoped units rather than creating an unbounded
-model or adapter backlog. Reaching a downstream limit does not retain a second
-unbounded copy or prevent later valid terminal input from being processed.
-Component sub-budgets must sum to the 1 MiB aggregate; no retention layer receives
-an independent 1 MiB allowance.
+and progress values coalesce to their newest complete value. Bell, shell, and
+notification events share a 100-event discrete queue. Other excess events are
+dropped as complete pane-scoped units rather than creating an unbounded model
+or adapter backlog. Query replies are also admitted or dropped as complete
+units. Reaching a downstream limit does not retain a second unbounded copy or
+prevent later valid terminal input from being processed.
 
 When a sequence exceeds its limit, the engine applies none of that sequence,
 consumes through normal termination or cancellation without retaining the
