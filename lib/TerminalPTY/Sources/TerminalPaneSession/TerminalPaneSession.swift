@@ -106,7 +106,8 @@ public final class TerminalPaneSessionController {
             initialDimensions: configuration.initialDimensions,
             bootstrapExecutable: bootstrapExecutable,
             machineHostname: machineHostname,
-            shellIntegrationToken: shellIntegrationToken
+            shellIntegrationToken: shellIntegrationToken,
+            programVersion: configuration.terminalProgramVersion
         )
         self.init(host: host, launchInput: configuration.launchInput, isVisible: isVisible)
     }
@@ -126,6 +127,7 @@ public final class TerminalPaneSessionController {
             bootstrapExecutable: bootstrapExecutable,
             machineHostname: machineHostname,
             shellIntegrationToken: shellIntegrationToken,
+            programVersion: configuration.terminalProgramVersion,
             captureTransitions: captureTransitions
         )
         self.init(host: host, launchInput: configuration.launchInput, isVisible: isVisible)
@@ -144,6 +146,7 @@ public final class TerminalPaneSessionController {
             bootstrapExecutable: bootstrapExecutable,
             machineHostname: machineHostname,
             shellIntegrationToken: shellIntegrationToken,
+            programVersion: configuration.terminalProgramVersion,
             captureTransitions: captureTransitions
         )
         self.init(host: host, launchInput: configuration.launchInput, isVisible: isVisible)

@@ -13,6 +13,15 @@ enum TerminalSemanticEvent {
     case commandEnded
     case remoteStarted
     case remoteHost(user: String, host: String)
+    case desktopNotification(title: String, body: String)
+    case progress(TerminalProgress?)
+}
+
+enum TerminalProgress {
+    case set(percent: UInt8)
+    case indeterminate
+    case error(percent: UInt8?)
+    case pause(percent: UInt8?)
 }
 
 struct RenderColor: Equatable {
@@ -287,6 +296,10 @@ final class TerminalPaneSessionController {
 
     func emitClipboardWrite(_ text: String) {
         onClipboardWrite?(text)
+    }
+
+    func emitSemanticEvents(_ events: [TerminalSemanticEvent]) {
+        onSemanticEvents?(events)
     }
 
     func emitFrameForTest() {

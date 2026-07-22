@@ -107,7 +107,7 @@ struct TerminalQueryTests {
         let queries = [
             "\u{1B}[1c", "\u{1B}[>c", "\u{1B}[=c",
             "\u{1B}[4n", "\u{1B}[7n", "\u{1B}[?4n", "\u{1B}[?7n",
-            "\u{1B}[$p", "\u{1B}[?6;7$p", "\u{1B}[>q",
+            "\u{1B}[$p", "\u{1B}[?6;7$p", "\u{1B}[>1q",
             "\u{1B}P$qm\u{1B}\\",
         ]
         for query in queries {
@@ -174,5 +174,27 @@ struct TerminalQueryTests {
             fedByteCount += fragment.count
             #expect(terminal.pendingReplyBytes.count <= fedByteCount * 4)
         }
+    }
+
+    @Test("XTVERSION replies with the injected DanTerm version")
+    func xtversion() throws {
+        for query in ["\u{1B}[>q", "\u{1B}[>0q"] {
+            var terminal = try #require(Terminal(columns: 8, rows: 4, programVersion: "1.2.3"))
+            terminal.feed(Array(query.utf8))
+            #expect(terminal.drainReplyBytes() == Array("\u{1B}P>|DanTerm 1.2.3\u{1B}\\".utf8))
+        }
+    }
+
+    @Test("reply retention drops complete replies that exceed 64 KiB and recovers after drain")
+    func replyLimitAndRecovery() throws {
+        let query = Array("\u{1B}[5n".utf8)
+        var terminal = try #require(Terminal(columns: 8, rows: 4))
+        for _ in 0..<16_384 { terminal.feed(query) }
+        #expect(terminal.pendingReplyBytes.count == 65_536)
+        terminal.feed(query)
+        #expect(terminal.pendingReplyBytes.count == 65_536)
+        _ = terminal.drainReplyBytes()
+        terminal.feed(query)
+        #expect(terminal.drainReplyBytes() == Array("\u{1B}[0n".utf8))
     }
 }

@@ -72,11 +72,18 @@ public struct TerminalPaneLaunchConfiguration: Equatable, Sendable {
     public let initialDimensions: TerminalDimensions
     /// Launch policy input carrying the same initial geometry.
     public let launchInput: LaunchPolicyInput
+    /// Program version shared by the child environment and terminal query replies.
+    public let terminalProgramVersion: String
 
     /// Creates the coupled boundary consumed by the session controller.
-    public init(initialDimensions: TerminalDimensions, launchInput: LaunchPolicyInput) {
+    public init(
+        initialDimensions: TerminalDimensions,
+        launchInput: LaunchPolicyInput,
+        terminalProgramVersion: String
+    ) {
         self.initialDimensions = initialDimensions
         self.launchInput = launchInput
+        self.terminalProgramVersion = terminalProgramVersion
     }
 }
 
@@ -109,6 +116,7 @@ public func assembleTerminalPaneLaunch(
             launchCommand: request.launchCommand,
             restoreCommandBehavior: request.restoreCommandBehavior,
             initialDimensions: dimensions
-        )
+        ),
+        terminalProgramVersion: facts.terminalProgramVersion
     )
 }

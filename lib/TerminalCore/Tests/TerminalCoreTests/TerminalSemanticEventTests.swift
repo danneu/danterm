@@ -101,4 +101,106 @@ struct TerminalSemanticEventTests {
         #expect(terminal.retainedTerminalMetadataBytes <= 256 * 1_024)
         #expect(terminal.drainSemanticEvents().isEmpty)
     }
+
+    @Test("OSC 9 and OSC 777 emit complete desktop notifications")
+    func notifications() throws {
+        var terminal = try #require(Terminal(columns: 20, rows: 2))
+        terminal.feed(Array("\u{1B}]9;build done\u{7}\u{1B}]777;notify;Deploy;host;ready\u{1B}\\".utf8))
+        #expect(terminal.drainSemanticEvents() == [
+            .desktopNotification(title: "", body: "build done"),
+            .desktopNotification(title: "Deploy", body: "host;ready"),
+        ])
+    }
+
+    @Test("OSC 9 reserves canonical ConEmu selectors before notification fallback")
+    func notificationSelectorPrecedence() throws {
+        var terminal = try #require(Terminal(columns: 20, rows: 2))
+        for selector in 1...12 {
+            terminal.feed(Array("\u{1B}]9;\(selector);ignored\u{7}".utf8))
+        }
+        terminal.feed(Array("\u{1B}]9;13;ordinary\u{7}\u{1B}]9;123\u{7}\u{1B}]9;04;leading\u{7}".utf8))
+        #expect(terminal.drainSemanticEvents() == [
+            .desktopNotification(title: "", body: "13;ordinary"),
+            .desktopNotification(title: "", body: "123"),
+            .desktopNotification(title: "", body: "04;leading"),
+        ])
+    }
+
+    @Test("OSC 9 selector 4 accepts only the canonical progress grammar")
+    func progressGrammar() throws {
+        let cases: [(String, TerminalSemanticEvent)] = [
+            ("1;42", .progress(.set(percent: 42))),
+            ("2", .progress(.error(percent: nil))),
+            ("2;7", .progress(.error(percent: 7))),
+            ("3", .progress(.indeterminate)),
+            ("4", .progress(.pause(percent: nil))),
+            ("4;99", .progress(.pause(percent: 99))),
+            ("0", .progress(nil)),
+        ]
+        for (payload, expected) in cases {
+            var terminal = try #require(Terminal(columns: 20, rows: 2))
+            terminal.feed(Array("\u{1B}]9;4;\(payload)\u{7}".utf8))
+            #expect(terminal.drainSemanticEvents() == [expected])
+        }
+
+        var terminal = try #require(Terminal(columns: 20, rows: 2))
+        terminal.feed(Array("\u{1B}]9;4;1;101\u{7}\u{1B}]9;4;3;1\u{7}".utf8))
+        #expect(terminal.drainSemanticEvents().isEmpty)
+    }
+
+    @Test("progress coalesces while notifications share the discrete event bound")
+    func progressCoalescingAndNotificationBound() throws {
+        var terminal = try #require(Terminal(columns: 20, rows: 2))
+        terminal.feed(Array("\u{1B}]9;4;1;1\u{7}\u{1B}]9;notice\u{7}\u{1B}]9;4;4;50\u{7}".utf8))
+        #expect(terminal.drainSemanticEvents() == [
+            .desktopNotification(title: "", body: "notice"),
+            .progress(.pause(percent: 50)),
+        ])
+
+        for index in 0..<101 {
+            terminal.feed(Array("\u{1B}]9;event-\(index)\u{7}".utf8))
+        }
+        #expect(terminal.drainSemanticEvents().count == 100)
+    }
+
+    @Test("notification title and body share one 64 KiB limit and recover")
+    func notificationLimitAndRecovery() throws {
+        var terminal = try #require(Terminal(columns: 20, rows: 2))
+        let exactBody = String(repeating: "a", count: 65_535)
+        terminal.feed(Array("\u{1B}]777;notify;t;\(exactBody)\u{7}".utf8))
+        #expect(terminal.drainSemanticEvents() == [.desktopNotification(title: "t", body: exactBody)])
+        terminal.feed(Array("\u{1B}]777;notify;tt;\(exactBody)\u{7}\u{1B}]9;ok\u{7}".utf8))
+        #expect(terminal.drainSemanticEvents() == [.desktopNotification(title: "", body: "ok")])
+    }
+
+    @Test("notifications accept every OSC terminator and remain chunk invariant")
+    func notificationTerminatorsAndChunking() throws {
+        let sequences = [
+            Array("\u{1B}]9;bel\u{7}".utf8),
+            Array("\u{1B}]9;st\u{1B}\\".utf8),
+            [0x1B, 0x5D] + Array("9;c1".utf8) + [0x9C],
+        ]
+        let expected: [TerminalSemanticEvent] = [
+            .desktopNotification(title: "", body: "bel"),
+            .desktopNotification(title: "", body: "st"),
+            .desktopNotification(title: "", body: "c1"),
+        ]
+        let bytes = sequences.flatMap { $0 }
+        for split in 0...bytes.count {
+            var terminal = try #require(Terminal(columns: 20, rows: 2))
+            terminal.feed(Array(bytes[..<split]))
+            terminal.feed(Array(bytes[split...]))
+            #expect(terminal.drainSemanticEvents() == expected, "split at \(split)")
+        }
+    }
+
+    @Test("malformed UTF-8 notifications are ignored before a later valid notification")
+    func malformedNotificationUTF8Recovery() throws {
+        var terminal = try #require(Terminal(columns: 20, rows: 2))
+        terminal.feed([0x1B, 0x5D, 0x39, 0x3B, 0xC3, 0x07])
+        terminal.feed(Array("\u{1B}]9;recovered\u{7}".utf8))
+        #expect(terminal.drainSemanticEvents() == [
+            .desktopNotification(title: "", body: "recovered"),
+        ])
+    }
 }

@@ -216,6 +216,8 @@ private enum TerminalWorkflowRunner {
         case .commandEnded: "command-end"
         case .remoteStarted: "remote-start"
         case .remoteHost(let user, let host): "remote-host=\(user)@\(host)"
+        case let .desktopNotification(title, body): "notification=\(title):\(body)"
+        case .progress(let state): "progress=\(String(describing: state))"
         }
     }
 

@@ -479,6 +479,17 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
                 callbackGate.emit(.remoteStarted)
             case let .remoteHost(user, host):
                 callbackGate.emit(.remoteHost(user: user, host: host))
+            case let .desktopNotification(title, body):
+                callbackGate.emit(.desktopNotification(title: title, body: body))
+            case .progress(let progress):
+                callbackGate.emit(.progress(progress.map { state in
+                    switch state {
+                    case .set(let percent): .set(percent: percent)
+                    case .indeterminate: .indeterminate
+                    case .error(let percent): .error(percent: percent)
+                    case .pause(let percent): .pause(percent: percent)
+                    }
+                }))
             }
         }
     }

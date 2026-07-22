@@ -8,6 +8,25 @@ import CoreGraphics
 func swiftTerminalSessionViewTests() {
     print("SwiftTerminalSessionView")
 
+    uiTest("semantic notifications and progress cross the AppKit adapter") {
+        let controller = TerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+        var events: [TerminalSessionEvent] = []
+        pane.onEvent = { events.append($0) }
+
+        controller.emitSemanticEvents([
+            .desktopNotification(title: "Build", body: "Done"),
+            .progress(.set(percent: 42)),
+            .progress(nil),
+        ])
+
+        try uiExpect(events == [
+            .desktopNotification(title: "Build", body: "Done"),
+            .progress(.set(percent: 42)),
+            .progress(nil),
+        ], "semantic adapter diverged: \(events)")
+    }
+
     uiTest("mounted pane forwards fractional wheel metadata once") {
         // Intent: the Swift pane converts a line wheel event into one owner-side row intent
         //   and terminates responder-chain handling at the pane.

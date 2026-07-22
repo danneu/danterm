@@ -292,6 +292,7 @@ public struct Terminal: Equatable, Sendable {
     private var clusterContext: ClusterContext?
     private var inputStream = TerminalInputStream()
     private var replyBytes: [UInt8] = []
+    private var programVersion: String
     private var pendingClipboardWrite: String?
     private var primaryKittyKeyboardStack: [UInt16] = []
     private var alternateKittyKeyboardStack: [UInt16] = []
@@ -312,6 +313,7 @@ public struct Terminal: Equatable, Sendable {
     private var titleUsesWorkingDirectory = false
     private var pendingTitleEvent: PendingTerminalSemanticEvent?
     private var pendingWorkingDirectoryEvent: PendingTerminalSemanticEvent?
+    private var pendingProgressEvent: PendingTerminalSemanticEvent?
     private var pendingDiscreteEvents: [PendingTerminalSemanticEvent] = []
     private var nextSemanticEventOrder: UInt64 = 0
 
@@ -322,6 +324,7 @@ public struct Terminal: Equatable, Sendable {
     static let maximumSemanticValueBytes = 64 * 1_024
     static let maximumShellOSCBytes = 88 * 1_024
     static let maximumDiscreteSemanticEvents = 100
+    static let maximumReplyBytes = 64 * 1_024
 
     /// Exposes aggregate retained link cost to structural bound tests.
     var retainedHyperlinkMetadataBytes: Int {
@@ -395,6 +398,7 @@ public struct Terminal: Equatable, Sendable {
             && pendingClipboardWrite == other.pendingClipboardWrite
             && pendingTitleEvent == other.pendingTitleEvent
             && pendingWorkingDirectoryEvent == other.pendingWorkingDirectoryEvent
+            && pendingProgressEvent == other.pendingProgressEvent
             && pendingDiscreteEvents == other.pendingDiscreteEvents
     }
 
@@ -416,9 +420,11 @@ public struct Terminal: Equatable, Sendable {
         var events = pendingDiscreteEvents
         if let pendingTitleEvent { events.append(pendingTitleEvent) }
         if let pendingWorkingDirectoryEvent { events.append(pendingWorkingDirectoryEvent) }
+        if let pendingProgressEvent { events.append(pendingProgressEvent) }
         events.sort { $0.order < $1.order }
         pendingTitleEvent = nil
         pendingWorkingDirectoryEvent = nil
+        pendingProgressEvent = nil
         pendingDiscreteEvents.removeAll(keepingCapacity: true)
         return events.map(\.event)
     }
@@ -509,14 +515,16 @@ public struct Terminal: Equatable, Sendable {
         columns: Int,
         rows: Int,
         machineHostname: String? = nil,
-        shellIntegrationToken: String? = nil
+        shellIntegrationToken: String? = nil,
+        programVersion: String = "dev"
     ) {
         self.init(
             columns: columns,
             rows: rows,
             scrollbackBudgetBytes: Self.productionScrollbackBudgetBytes,
             machineHostname: machineHostname,
-            shellIntegrationToken: shellIntegrationToken
+            shellIntegrationToken: shellIntegrationToken,
+            programVersion: programVersion
         )
     }
 
@@ -526,7 +534,8 @@ public struct Terminal: Equatable, Sendable {
         rows: Int,
         scrollbackBudgetBytes: Int,
         machineHostname: String? = nil,
-        shellIntegrationToken: String? = nil
+        shellIntegrationToken: String? = nil,
+        programVersion: String = "dev"
     ) {
         guard columns >= 2, rows >= 1, scrollbackBudgetBytes >= 0 else { return nil }
         columnCount = columns
@@ -534,6 +543,7 @@ public struct Terminal: Equatable, Sendable {
         self.scrollbackBudgetBytes = scrollbackBudgetBytes
         self.machineHostname = machineHostname
         self.shellIntegrationToken = shellIntegrationToken
+        self.programVersion = programVersion
         tabStops = Self.defaultTabStops(columns: columns)
         self.rows = (0..<rows).map { _ in
             GridRow(cells: (0..<columns).map { _ in GridCell() })
@@ -577,10 +587,14 @@ public struct Terminal: Equatable, Sendable {
             dispatchOSC7(payload, selectorEnd: selectorEnd)
         case 8:
             dispatchOSC8(payload, selectorEnd: selectorEnd)
+        case 9:
+            dispatchOSC9(payload, selectorEnd: selectorEnd)
         case 52:
             dispatchOSC52(payload, selectorEnd: selectorEnd)
         case 1337:
             dispatchDanTermShell(payload, selectorEnd: selectorEnd)
+        case 777:
+            dispatchOSC777(payload, selectorEnd: selectorEnd)
         default:
             break
         }
@@ -589,12 +603,14 @@ public struct Terminal: Equatable, Sendable {
     private var hasPendingSemanticEvents: Bool {
         pendingTitleEvent != nil
             || pendingWorkingDirectoryEvent != nil
+            || pendingProgressEvent != nil
             || pendingDiscreteEvents.isEmpty == false
     }
 
     private var retainedSemanticEventBytes: Int {
         (pendingTitleEvent?.byteCost ?? 0)
             + (pendingWorkingDirectoryEvent?.byteCost ?? 0)
+            + (pendingProgressEvent?.byteCost ?? 0)
             + pendingDiscreteEvents.reduce(0) { $0 + $1.byteCost }
     }
 
@@ -647,6 +663,80 @@ public struct Terminal: Equatable, Sendable {
         default:
             return
         }
+    }
+
+    private mutating func dispatchOSC9(_ payload: [UInt8], selectorEnd: Int) {
+        let value = payload[payload.index(after: selectorEnd)...]
+        let firstEnd = value.firstIndex(of: 0x3B) ?? value.endIndex
+        let first = value[..<firstEnd]
+        if let selector = canonicalConEmuSelector(first) {
+            if selector == 4 { dispatchProgress(value) }
+            return
+        }
+        admitNotification(titleBytes: [], bodyBytes: value)
+    }
+
+    private mutating func dispatchOSC777(_ payload: [UInt8], selectorEnd: Int) {
+        let fields = payload[payload.index(after: selectorEnd)...].split(
+            separator: 0x3B,
+            maxSplits: 2,
+            omittingEmptySubsequences: false
+        )
+        guard fields.count == 3, fields[0].elementsEqual("notify".utf8) else { return }
+        admitNotification(titleBytes: fields[1], bodyBytes: fields[2])
+    }
+
+    private func canonicalConEmuSelector(_ bytes: ArraySlice<UInt8>) -> Int? {
+        for value in 1...12 where bytes.elementsEqual(String(value).utf8) {
+            return value
+        }
+        return nil
+    }
+
+    private mutating func admitNotification(
+        titleBytes: ArraySlice<UInt8>,
+        bodyBytes: ArraySlice<UInt8>
+    ) {
+        guard titleBytes.count + bodyBytes.count <= Self.maximumSemanticValueBytes,
+              let title = strictlyDecodedUTF8(Array(titleBytes)),
+              let body = strictlyDecodedUTF8(Array(bodyBytes))
+        else { return }
+        admitDiscreteSemanticEvent(.desktopNotification(title: title, body: body))
+    }
+
+    private mutating func dispatchProgress(_ payload: ArraySlice<UInt8>) {
+        let fields = payload.split(separator: 0x3B, omittingEmptySubsequences: false)
+        guard fields.count >= 2, fields[0].elementsEqual("4".utf8),
+              let state = String(validating: fields[1], as: UTF8.self)
+        else { return }
+        let event: TerminalProgress?
+        switch (state, fields.count) {
+        case ("0", 2): event = nil
+        case ("1", 3):
+            guard let percent = progressPercent(fields[2]) else { return }
+            event = .set(percent: percent)
+        case ("2", 2): event = .error(percent: nil)
+        case ("2", 3):
+            guard let percent = progressPercent(fields[2]) else { return }
+            event = .error(percent: percent)
+        case ("3", 2): event = .indeterminate
+        case ("4", 2): event = .pause(percent: nil)
+        case ("4", 3):
+            guard let percent = progressPercent(fields[2]) else { return }
+            event = .pause(percent: percent)
+        default: return
+        }
+        pendingProgressEvent = admittedCoalescedSemanticEvent(
+            .progress(event),
+            replacing: pendingProgressEvent
+        )
+    }
+
+    private func progressPercent(_ bytes: ArraySlice<UInt8>) -> UInt8? {
+        guard bytes.isEmpty == false, bytes.allSatisfy({ (0x30...0x39).contains($0) }),
+              let value = Int(String(decoding: bytes, as: UTF8.self)), value <= 100
+        else { return nil }
+        return UInt8(value)
     }
 
     private func decodedCanonicalBase64(_ bytes: ArraySlice<UInt8>) -> String? {
@@ -3019,6 +3109,12 @@ public struct Terminal: Equatable, Sendable {
             return
         }
         if sequence.intermediates == [0x3E] {
+            if sequence.final == 0x71,
+               sequence.parameters.isEmpty || sequence.parameters == [0]
+            {
+                appendReply("\u{1B}P>|DanTerm \(programVersion)\u{1B}\\")
+                return
+            }
             guard sequence.final == 0x75, sequence.parameters.count <= 1 else { return }
             pushKittyKeyboardFlags(sequence.parameters.first ?? 0)
             return
@@ -3224,7 +3320,9 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func appendReply(_ reply: String) {
-        replyBytes.append(contentsOf: reply.utf8)
+        let bytes = Array(reply.utf8)
+        guard replyBytes.count + bytes.count <= Self.maximumReplyBytes else { return }
+        replyBytes.append(contentsOf: bytes)
     }
 
     private mutating func applyANSIModes(_ parameters: [UInt16], enabled: Bool) {

@@ -171,16 +171,20 @@ struct TerminalPaneSessionControllerTests {
     func semanticCallbacksRemainPaneIsolated() async throws {
         // Intent: each controller delivers only the semantics parsed by its own PTY owner.
         // Why it exists: pane identity belongs to the adapter and cannot come from child output.
-        // Scenario: two panes concurrently publish distinct titles and bells.
+        // Scenario: two panes concurrently publish distinct notifications and progress.
         let firstHost = try makeHost()
         let secondHost = try makeHost()
         let first = TerminalPaneSessionController(
             host: firstHost,
-            launchInput: makeLaunchInput(command: "printf '\\033]2;first\\007'; exec sleep 30")
+            launchInput: makeLaunchInput(
+                command: "printf '\\033]777;notify;First;done\\007\\033]9;4;1;25\\007'; exec sleep 30"
+            )
         )
         let second = TerminalPaneSessionController(
             host: secondHost,
-            launchInput: makeLaunchInput(command: "printf '\\033]2;second\\007\\007'; exec sleep 30")
+            launchInput: makeLaunchInput(
+                command: "printf '\\033]9;second\\007\\033]9;4;4;75\\007'; exec sleep 30"
+            )
         )
         let firstEvents = AsyncStream<[TerminalSemanticEvent]>.makeStream(
             bufferingPolicy: .bufferingNewest(1)
@@ -193,8 +197,14 @@ struct TerminalPaneSessionControllerTests {
         first.onSemanticEvents = { firstEvents.continuation.yield($0) }
         second.onSemanticEvents = { secondEvents.continuation.yield($0) }
 
-        #expect(await firstIterator.next() == [.title("first")])
-        #expect(await secondIterator.next() == [.title("second"), .bell])
+        #expect(await firstIterator.next() == [
+            .desktopNotification(title: "First", body: "done"),
+            .progress(.set(percent: 25)),
+        ])
+        #expect(await secondIterator.next() == [
+            .desktopNotification(title: "", body: "second"),
+            .progress(.pause(percent: 75)),
+        ])
 
         first.tearDown()
         second.tearDown()

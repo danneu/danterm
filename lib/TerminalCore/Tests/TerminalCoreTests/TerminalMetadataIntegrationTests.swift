@@ -68,11 +68,13 @@ private func semanticStringBytes(_ events: [TerminalSemanticEvent]) -> Int {
         switch event {
         case .title(let value), .commandStarted(let value):
             return total + value.utf8.count
+        case let .desktopNotification(title, body):
+            return total + title.utf8.count + body.utf8.count
         case let .remoteHost(user, host):
             return total + user.utf8.count + host.utf8.count
         case .workingDirectory(let value):
             return total + (value?.utf8.count ?? 0)
-        case .bell, .commandEnded, .remoteStarted:
+        case .bell, .commandEnded, .remoteStarted, .progress:
             return total
         }
     }
