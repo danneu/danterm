@@ -126,6 +126,7 @@
         system: pkgs: {
           terminal-workflows = pkgs.mkShell {
             packages = with pkgs; [
+              asciinema
               fish
               fzf
             ];

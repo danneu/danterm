@@ -339,6 +339,12 @@ mean.
     and deterministic
     [harness](../scripts/tests/terminal-workflows-harness_test.sh) and
     [TerminalPTY](../lib/TerminalPTY/Tests) regressions.
+  - [x] **Slice 3b: Asciinema nested-PTY compatibility.** Flake-pinned
+    asciinema 2.4.0 records stdin, output, job control, and resize through an
+    intermediate PTY, then replays the v2 cast locally with prompt and style
+    recovery. See the
+    [implementation plan](../plans/impl/2026-07-21-2138-asciinema-nested-pty-compatibility.md)
+    and [dated evidence](../docs/evidence/2026-07-21-asciinema-nested-pty-compatibility.md).
   - [ ] [Protocols and shell integration](10-protocols-shell-integration.md) proves
     the advertised terminal environment, current DanTerm shell events, title,
     cwd, notifications, progress, links, clipboard policy, capability manifest,

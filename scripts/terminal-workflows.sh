@@ -19,14 +19,19 @@ result="$run_dir/result.txt"
 } > "$manifest"
 
 missing=()
-for tool in fish fzf swift; do
+for tool in fish fzf swift asciinema; do
     path="$(PATH="$WORKFLOW_PATH" command -v "$tool" 2>/dev/null || true)"
     if [[ -z "$path" ]]; then
         missing+=("$tool")
         continue
     fi
     printf '%s_path=%s\n' "$tool" "$path" >> "$manifest"
-    printf '%s_version=%s\n' "$tool" "$(PATH="$WORKFLOW_PATH" "$path" --version 2>&1 | head -1)" >> "$manifest"
+    version="$(PATH="$WORKFLOW_PATH" "$path" --version 2>&1 | head -1)"
+    if [[ -z "$version" && "$tool" == asciinema ]]; then
+        missing+=("$tool-version")
+        continue
+    fi
+    printf '%s_version=%s\n' "$tool" "$version" >> "$manifest"
 done
 for tool in /bin/zsh /bin/bash /usr/bin/ssh /usr/bin/ssh-keygen /usr/sbin/sshd /usr/bin/more /usr/bin/less; do
     name="${tool##*/}"
@@ -145,6 +150,7 @@ set +e
 HOME="$home_dir" PATH="$WORKFLOW_PATH:/usr/bin:/bin:/usr/sbin" \
     DANTERM_FISH="$(PATH="$WORKFLOW_PATH" command -v fish)" \
     DANTERM_FZF="$(PATH="$WORKFLOW_PATH" command -v fzf)" \
+    DANTERM_ASCIINEMA="$(PATH="$WORKFLOW_PATH" command -v asciinema)" \
     DANTERM_REPO_ROOT="$REPO_ROOT" \
     DANTERM_MACHINE_HOSTNAME="$(hostname)" \
     DANTERM_WORKFLOW_SSH_CONFIG="$ssh_dir/config" \
@@ -156,6 +162,23 @@ if (( runner_status != 0 )); then
     echo "terminal workflows: failed; artifacts: $run_dir" >&2
     exit 1
 fi
+
+for workflow in zsh bash fish ssh fzf more less asciinema; do
+    for artifact in result.txt recording.json snapshots.txt semantic-events.txt ownership.txt; do
+        if [[ ! -f "$run_dir/$workflow/$artifact" ]]; then
+            printf 'status=failed\nerror=missing %s/%s\n' "$workflow" "$artifact" > "$result"
+            echo "terminal workflows: missing artifact $workflow/$artifact; artifacts: $run_dir" >&2
+            exit 1
+        fi
+    done
+done
+for artifact in session.cast cast-validation.txt; do
+    if [[ ! -f "$run_dir/asciinema/$artifact" ]]; then
+        printf 'status=failed\nerror=missing asciinema/%s\n' "$artifact" > "$result"
+        echo "terminal workflows: missing artifact asciinema/$artifact; artifacts: $run_dir" >&2
+        exit 1
+    fi
+done
 
 printf 'status=passed\n' > "$result"
 echo "terminal workflows: all workflows passed"

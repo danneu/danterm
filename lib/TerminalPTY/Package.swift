@@ -45,6 +45,17 @@ let package = Package(
             name: "PTYSessionBootstrap",
             path: "Sources/PTYSessionBootstrap"
         ),
+        .testTarget(
+            name: "TerminalWorkflowSupportTests",
+            dependencies: ["TerminalWorkflowSupport"],
+            path: "Tests/TerminalWorkflowSupportTests",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .target(
+            name: "TerminalWorkflowSupport",
+            path: "Sources/TerminalWorkflowSupport",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         .executableTarget(
             name: "PTYProbe",
             path: "Sources/PTYProbe"
@@ -53,6 +64,7 @@ let package = Package(
             name: "TerminalWorkflowRunner",
             dependencies: [
                 "TerminalPaneSession",
+                "TerminalWorkflowSupport",
                 .product(name: "TerminalCoreRecording", package: "TerminalCore"),
             ],
             path: "Sources/TerminalWorkflowRunner",

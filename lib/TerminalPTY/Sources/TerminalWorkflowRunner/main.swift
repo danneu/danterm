@@ -5,6 +5,7 @@ import PaneLifecycle
 import TerminalCore
 import TerminalCoreRecording
 import TerminalPaneSession
+import TerminalWorkflowSupport
 
 /// Defines one independently captured application contract and its owning login shell.
 private struct Workflow {
@@ -139,6 +140,25 @@ private enum TerminalWorkflowRunner {
             do { try validateSemantics(workflow.name, events: semanticEvents) }
             catch { failure = error }
         }
+        if workflow.name == "asciinema" {
+            do {
+                try validateAsciinemaPlayback(capture)
+                let cast = directory.appending(path: "session.cast")
+                let report = try AsciicastValidator.validate(Data(contentsOf: cast))
+                try report.description.write(
+                    to: directory.appending(path: "cast-validation.txt"),
+                    atomically: true,
+                    encoding: .utf8
+                )
+            } catch {
+                try? "status=failed\nerror=\(error)\n".write(
+                    to: directory.appending(path: "cast-validation.txt"),
+                    atomically: true,
+                    encoding: .utf8
+                )
+                if failure == nil { failure = error }
+            }
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(capture.recording).write(to: directory.appending(path: "recording.json"))
@@ -148,7 +168,11 @@ private enum TerminalWorkflowRunner {
         try status.write(to: directory.appending(path: "result.txt"), atomically: true, encoding: .utf8)
         controller.tearDown()
         await terminationHandle.terminateForApplicationExit()
-        try "pane_session=released\npty_owner=released\ndescriptors=released\nsources=released\n".write(to: directory.appending(path: "ownership.txt"), atomically: true, encoding: .utf8)
+        var ownership = "pane_session=released\npty_owner=released\ndescriptors=released\nsources=released\n"
+        if workflow.name == "asciinema" {
+            ownership += "recorder=released\ninner_shell=released\nforeground_job=released\n"
+        }
+        try ownership.write(to: directory.appending(path: "ownership.txt"), atomically: true, encoding: .utf8)
         if let failure { throw failure }
     }
 
@@ -212,6 +236,31 @@ private enum TerminalWorkflowRunner {
         }
     }
 
+    private static func validateAsciinemaPlayback(_ capture: TerminalPaneDiagnosticCapture) throws {
+        let feed = capture.recording.events.flatMap { event -> [UInt8] in
+            if case .feed(let bytes) = event { return bytes }
+            return []
+        }
+        let coloredMarker = Array("\u{1B}[36m__ASCIINEMA_UTF8__=café-λ\u{1B}[0m".utf8)
+        var markerCount = 0
+        if feed.count >= coloredMarker.count {
+            for start in 0...(feed.count - coloredMarker.count) {
+                if feed[start..<(start + coloredMarker.count)].elementsEqual(coloredMarker) {
+                    markerCount += 1
+                }
+            }
+        }
+        guard markerCount >= 2
+        else { throw RunnerError.invalidPlayback("colored marker did not appear in recording and playback") }
+        guard capture.terminal.currentStyle == TerminalStyle(),
+              capture.terminal.isAlternateScreenActive == false,
+              capture.terminal.presentation.isCursorVisible,
+              capture.terminal.presentation.cursorShape == .block,
+              capture.terminal.presentation.isCursorBlinking == false,
+              capture.terminal.presentation.isSynchronizedOutputActive == false
+        else { throw RunnerError.invalidPlayback("terminal style or screen state was not restored") }
+    }
+
     private static func makeWorkflows(runDirectory: URL) -> [Workflow] {
         let corpus = runDirectory.appending(path: "corpus.txt").path
         let sshConfig = runDirectory.appending(path: "ssh/config").path
@@ -219,6 +268,8 @@ private enum TerminalWorkflowRunner {
         let sshConfigArgument = shellQuote(sshConfig)
         let integrationArgument = shellQuote(integration)
         let fzfArgument = shellQuote(ProcessInfo.processInfo.environment["DANTERM_FZF"] ?? "fzf")
+        let asciinemaArgument = shellQuote(ProcessInfo.processInfo.environment["DANTERM_ASCIINEMA"] ?? "asciinema")
+        let cast = runDirectory.appending(path: "asciinema/session.cast").path
         let shellSteps: [Step] = [
             .expect("DANTERM-WORKFLOW>"),
             .text("cd /; cd \"$HOME\"; printf '__CWD_OK__\\n'\n"), .expect("__CWD_OK__"),
@@ -260,6 +311,28 @@ private enum TerminalWorkflowRunner {
             ]),
             Workflow(name: "more", shell: "/bin/zsh", steps: pagerSteps(command: "/usr/bin/more", corpus: corpus)),
             Workflow(name: "less", shell: "/bin/zsh", steps: pagerSteps(command: "/usr/bin/less", corpus: corpus)),
+            Workflow(name: "asciinema", shell: "/bin/zsh", steps: [
+                .expect("DANTERM-WORKFLOW>"),
+                .text("SHELL=/bin/zsh TERM=xterm-256color \(asciinemaArgument) rec --stdin --overwrite --quiet --command /bin/zsh\\ -f \(shellQuote(cast))\n"),
+                .expect("% "),
+                .text("PS1='ASCIINEMA-INNER> '; PROMPT=\"$PS1\"; printf '\\033[36m__ASCIINEMA_UTF8__=café-λ\\033[0m\\n'\n"),
+                .expect("__ASCIINEMA_UTF8__=café-λ"), .expect("ASCIINEMA-INNER>"),
+                .text("sh -c 'echo __ASCIINEMA_JOB__; sleep 30'\n"), .expect("__ASCIINEMA_JOB__"),
+                .key(.character("z"), .control), .expect("ASCIINEMA-INNER>"),
+                .text("bg; printf '__ASCIINEMA_BG__\\n'\n"), .expect("__ASCIINEMA_BG__"),
+                .text("fg\n"), .expectFollowing("sleep 30", after: "__ASCIINEMA_BG__"),
+                .key(.character("c"), .control),
+                .text("printf '__ASCIINEMA_INTERRUPTED__\\n'\n"), .expect("__ASCIINEMA_INTERRUPTED__"),
+                .expectFollowing("ASCIINEMA-INNER>", after: "__ASCIINEMA_INTERRUPTED__"),
+                .resize(53, 17), .text("stty size | sed 's/^/__ASCIINEMA_SIZE__=/'\n"),
+                .expect("__ASCIINEMA_SIZE__=17 53"), .text("exit\n"),
+                .expectFollowing("DANTERM-WORKFLOW>", after: "__ASCIINEMA_SIZE__=17 53"),
+                .resize(80, 24),
+                .text("printf '__ASCIINEMA_PLAYBACK_BEGIN__\\n'; \(asciinemaArgument) play --idle-time-limit 1 --speed 20 \(shellQuote(cast)); printf '__ASCIINEMA_PLAYBACK_DONE__\\n'\n"),
+                .expectFollowing("__ASCIINEMA_UTF8__=café-λ", after: "__ASCIINEMA_PLAYBACK_BEGIN__"),
+                .expect("__ASCIINEMA_PLAYBACK_DONE__"),
+                .expectFollowing("DANTERM-WORKFLOW>", after: "__ASCIINEMA_PLAYBACK_DONE__"),
+            ]),
         ]
     }
 
@@ -284,6 +357,7 @@ private enum RunnerError: Error, CustomStringConvertible {
     case timeout(String)
     case failed(String)
     case missingSemantics(String)
+    case invalidPlayback(String)
 
     var description: String {
         switch self {
@@ -291,6 +365,7 @@ private enum RunnerError: Error, CustomStringConvertible {
         case .timeout(let marker): "timed out waiting for \(marker)"
         case .failed(let failures): failures
         case .missingSemantics(let workflow): "missing shell integration semantics for \(workflow)"
+        case .invalidPlayback(let detail): "invalid asciinema playback: \(detail)"
         }
     }
 }
