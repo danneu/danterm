@@ -84,9 +84,9 @@ struct TerminalSemanticEventTests {
 
     @Test("bells and native shell events share a 100-event FIFO bound")
     func discreteBound() throws {
-        var terminal = try #require(Terminal(columns: 20, rows: 2, shellIntegrationToken: "token"))
+        var terminal = try #require(Terminal(columns: 20, rows: 2))
         terminal.feed(Array(String(repeating: "\u{7}", count: 100).utf8))
-        terminal.feed(Array("\u{1B}]1337;DanTermShell=1;token;command-end\u{7}".utf8))
+        terminal.feed(Array("\u{1B}]1337;DanTermShell=1;command-end\u{7}".utf8))
         #expect(terminal.drainSemanticEvents() == Array(repeating: .bell, count: 100))
     }
 

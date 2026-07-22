@@ -16,14 +16,12 @@ func scrubbedTerminalProcessEnvironment(
 
 func terminalLaunchEnvironment(
     ipcSocketPath: String,
-    paneId: PaneId,
-    token: String
+    paneId: PaneId
 ) -> [(String, String)] {
     [
         (EnvVars.flag, "1"),
         (EnvVars.sock, ipcSocketPath),
         (EnvVars.pane, paneId.rawValue.uuidString),
-        ("DANTERM_TOKEN", token),
     ]
 }
 
@@ -32,14 +30,12 @@ func terminalLaunchEnvironment(
 func restoreLaunchEnvironment(
     ipcSocketPath: String,
     paneId: PaneId,
-    token: String,
     scrollbackFilePath: String?,
     command: String?
 ) -> [(String, String)] {
     var env = terminalLaunchEnvironment(
         ipcSocketPath: ipcSocketPath,
-        paneId: paneId,
-        token: token
+        paneId: paneId
     )
     if let scrollbackFilePath {
         env.append(("DANTERM_RESTORE_SCROLLBACK_FILE", scrollbackFilePath))

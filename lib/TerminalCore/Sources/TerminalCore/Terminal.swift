@@ -308,7 +308,6 @@ public struct Terminal: Equatable, Sendable {
     private var nextHyperlinkId = 1
     private var nextContentIdentity = 1
     private var machineHostname: String?
-    private var shellIntegrationToken: String?
     private var currentWorkingDirectory: String?
     private var titleUsesWorkingDirectory = false
     private var pendingTitleEvent: PendingTerminalSemanticEvent?
@@ -515,7 +514,6 @@ public struct Terminal: Equatable, Sendable {
         columns: Int,
         rows: Int,
         machineHostname: String? = nil,
-        shellIntegrationToken: String? = nil,
         programVersion: String = "dev"
     ) {
         self.init(
@@ -523,7 +521,6 @@ public struct Terminal: Equatable, Sendable {
             rows: rows,
             scrollbackBudgetBytes: Self.productionScrollbackBudgetBytes,
             machineHostname: machineHostname,
-            shellIntegrationToken: shellIntegrationToken,
             programVersion: programVersion
         )
     }
@@ -534,7 +531,6 @@ public struct Terminal: Equatable, Sendable {
         rows: Int,
         scrollbackBudgetBytes: Int,
         machineHostname: String? = nil,
-        shellIntegrationToken: String? = nil,
         programVersion: String = "dev"
     ) {
         guard columns >= 2, rows >= 1, scrollbackBudgetBytes >= 0 else { return nil }
@@ -542,7 +538,6 @@ public struct Terminal: Equatable, Sendable {
         rowCount = rows
         self.scrollbackBudgetBytes = scrollbackBudgetBytes
         self.machineHostname = machineHostname
-        self.shellIntegrationToken = shellIntegrationToken
         self.programVersion = programVersion
         tabStops = Self.defaultTabStops(columns: columns)
         self.rows = (0..<rows).map { _ in
@@ -627,37 +622,34 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func dispatchDanTermShell(_ payload: [UInt8], selectorEnd: Int) {
-        guard payload.count <= Self.maximumShellOSCBytes,
-              let expectedToken = shellIntegrationToken
-        else { return }
+        guard payload.count <= Self.maximumShellOSCBytes else { return }
         let fields = payload[payload.index(after: selectorEnd)...].split(
             separator: 0x3B,
             omittingEmptySubsequences: false
         )
-        guard fields.count >= 3,
+        guard fields.count >= 2,
               fields[0].elementsEqual("DanTermShell=1".utf8),
-              fields[1].elementsEqual(expectedToken.utf8),
-              let eventName = String(validating: fields[2], as: UTF8.self)
+              let eventName = String(validating: fields[1], as: UTF8.self)
         else { return }
 
         switch eventName {
         case "command-start":
-            guard fields.count == 4,
-                  let command = decodedCanonicalBase64(fields[3]),
+            guard fields.count == 3,
+                  let command = decodedCanonicalBase64(fields[2]),
                   !command.contains("\0"),
                   command.utf8.count <= Self.maximumSemanticValueBytes
             else { return }
             admitDiscreteSemanticEvent(.commandStarted(command))
         case "command-end":
-            guard fields.count == 3 else { return }
+            guard fields.count == 2 else { return }
             admitDiscreteSemanticEvent(.commandEnded)
         case "remote-start":
-            guard fields.count == 3 else { return }
+            guard fields.count == 2 else { return }
             admitDiscreteSemanticEvent(.remoteStarted)
         case "remote-host":
-            guard fields.count == 5,
-                  let user = decodedCanonicalBase64(fields[3]),
-                  let host = decodedCanonicalBase64(fields[4]),
+            guard fields.count == 4,
+                  let user = decodedCanonicalBase64(fields[2]),
+                  let host = decodedCanonicalBase64(fields[3]),
                   user.utf8.count + host.utf8.count <= Self.maximumSemanticValueBytes
             else { return }
             admitDiscreteSemanticEvent(.remoteHost(user: user, host: host))

@@ -16,21 +16,14 @@ fi
 readonly _DANTERM_SHELL_INTEGRATION_LOADED=1
 
 _danterm_is_remote=''
-[[ -z ${DANTERM_TOKEN:-} && -n ${LC_DANTERM_TOKEN:-} ]] && _danterm_is_remote=1
+[[ -z ${DANTERM:-} && -n ${LC_DANTERM:-} ]] && _danterm_is_remote=1
 readonly _danterm_is_remote
-if [[ -n ${DANTERM_TOKEN:-} ]]; then
-    readonly _danterm_token="$DANTERM_TOKEN"
-elif [[ -n ${LC_DANTERM_TOKEN:-} ]]; then
-    readonly _danterm_token="$LC_DANTERM_TOKEN"
-else
-    readonly _danterm_token=''
-fi
-unset DANTERM_TOKEN LC_DANTERM_TOKEN
+readonly _danterm_enabled="${DANTERM:-${LC_DANTERM:-}}"
 
 danterm_base64() { printf '%s' "$1" | base64 | tr -d '\n'; }
 danterm_emit() {
-    [[ -n $_danterm_token ]] || return 0
-    printf '\033]1337;DanTermShell=1;%s;%s\033\\' "$_danterm_token" "$1"
+    [[ -n $_danterm_enabled ]] || return 0
+    printf '\033]1337;DanTermShell=1;%s\033\\' "$1"
 }
 danterm_emit_command_start() { danterm_emit "command-start;$(danterm_base64 "$1")"; }
 danterm_emit_command_end() { danterm_emit command-end; }
@@ -39,6 +32,7 @@ danterm_emit_remote_host() {
     danterm_emit "remote-host;$(danterm_base64 "$1");$(danterm_base64 "$2")"
 }
 danterm_emit_cwd() {
+    [[ -n $_danterm_enabled ]] || return 0
     [[ -z $_danterm_is_remote ]] || return 0
     printf '\033]7;file://%s%s\033\\' "${HOSTNAME:-localhost}" "$PWD"
 }
@@ -66,19 +60,19 @@ precmd_functions+=( _danterm_precmd )
 
 danterm_ssh() {
     danterm_emit_remote_start
-    LC_DANTERM_TOKEN=$_danterm_token command ssh -o SendEnv=LC_DANTERM_TOKEN "$@"
+    LC_DANTERM=1 command ssh -o SendEnv=LC_DANTERM "$@"
     if [[ -n ${_danterm_remote_user:-} ]]; then
         danterm_emit_remote_host "$_danterm_remote_user" "$_danterm_remote_host"
     fi
 }
 danterm_mosh() {
     danterm_emit_remote_start
-    LC_DANTERM_TOKEN=$_danterm_token command mosh "$@"
+    LC_DANTERM=1 command mosh "$@"
 }
 ssh() { danterm_ssh "$@"; }
 mosh() { danterm_mosh "$@"; }
 
-if [[ -n $_danterm_token && -n $_danterm_is_remote ]]; then
+if [[ -n $_danterm_enabled && -n $_danterm_is_remote ]]; then
     _danterm_remote_user=${USER:-unknown}
     _danterm_remote_host=${HOSTNAME:-unknown}
     danterm_emit_remote_host "$_danterm_remote_user" "$_danterm_remote_host"

@@ -76,7 +76,7 @@ private enum TerminalWorkflowRunner {
             EnvironmentEntry(name: "PATH", value: path),
             EnvironmentEntry(name: "LANG", value: "en_US.UTF-8"),
             EnvironmentEntry(name: "LC_ALL", value: "en_US.UTF-8"),
-            EnvironmentEntry(name: "DANTERM_TOKEN", value: "workflow-token"),
+            EnvironmentEntry(name: "DANTERM", value: "1"),
             EnvironmentEntry(name: "DANTERM_WORKFLOW_SSH_CONFIG", value: ProcessInfo.processInfo.environment["DANTERM_WORKFLOW_SSH_CONFIG"] ?? ""),
         ]
         let input = LaunchPolicyInput(
@@ -105,7 +105,6 @@ private enum TerminalWorkflowRunner {
             ),
             bootstrapExecutable: bootstrap,
             machineHostname: ProcessInfo.processInfo.environment["DANTERM_MACHINE_HOSTNAME"],
-            shellIntegrationToken: "workflow-token",
             captureTransitions: true
         )
         var semanticEvents: [TerminalSemanticEvent] = []

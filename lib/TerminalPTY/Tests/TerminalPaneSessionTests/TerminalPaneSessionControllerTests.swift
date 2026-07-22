@@ -15,7 +15,6 @@ struct TerminalPaneSessionControllerTests {
     @Test("zsh, bash, and fish integrations deliver typed events through a real PTY")
     func shellIntegrationsDeliverTypedEvents() async throws {
         let integrationDirectory = shellIntegrationDirectory()
-        let token = "11111111-2222-3333-4444-555555555555"
         let command = "printf 'hola 世界; $HOME'"
         let shells = try ["zsh", "bash", "fish"].map { try findExecutable(named: $0) }
 
@@ -25,19 +24,19 @@ struct TerminalPaneSessionControllerTests {
             ).path
             let invocation: String
             if shell.hasSuffix("/fish") {
-                invocation = "DANTERM_TOKEN=\(shellQuote(token)) "
+                invocation = "DANTERM=1 "
                     + "\(shellQuote(shell)) --no-config -c "
                     + shellQuote("sleep 1; source \(asset); "
                         + "danterm_emit_command_start \(shellQuote(command)); "
                         + "danterm_emit_command_end; sleep 1; exit")
             } else {
-                invocation = "DANTERM_TOKEN=\(shellQuote(token)) "
+                invocation = "DANTERM=1 "
                     + "\(shellQuote(shell)) -f -c "
                     + shellQuote("sleep 1; source \(shellQuote(asset)); "
                         + "danterm_emit_command_start \(shellQuote(command)); "
                         + "danterm_emit_command_end; sleep 1; exit")
             }
-            let host = try makeHost(shellIntegrationToken: token)
+            let host = try makeHost()
             let controller = TerminalPaneSessionController(
                 host: host,
                 launchInput: makeLaunchInput(command: invocation + "; exit")
@@ -57,48 +56,15 @@ struct TerminalPaneSessionControllerTests {
         }
     }
 
-    @Test("real PTY panes reject each other's shell tokens")
-    func shellTokensRemainPaneIsolated() async throws {
-        let firstHost = try makeHost(shellIntegrationToken: "first-token")
-        let secondHost = try makeHost(shellIntegrationToken: "second-token")
-        let encoded = Data("owned".utf8).base64EncodedString()
-        let firstCommand = "sleep 1; printf '\\033]1337;DanTermShell=1;second-token;command-start;"
-            + "\(encoded)\\033\\\\'; sleep 1; exit"
-        let secondCommand = "sleep 1; printf '\\033]1337;DanTermShell=1;second-token;command-start;"
-            + "\(encoded)\\033\\\\'; sleep 1; exit"
-        let first = TerminalPaneSessionController(
-            host: firstHost, launchInput: makeLaunchInput(command: firstCommand)
-        )
-        let second = TerminalPaneSessionController(
-            host: secondHost, launchInput: makeLaunchInput(command: secondCommand)
-        )
-        var firstEvents: [TerminalSemanticEvent] = []
-        var secondEvents: [TerminalSemanticEvent] = []
-        first.onSemanticEvents = { firstEvents.append(contentsOf: $0) }
-        second.onSemanticEvents = { secondEvents.append(contentsOf: $0) }
-
-        #expect(await firstHost.waitForResult() == .exited(.exited(0)))
-        #expect(await secondHost.waitForResult() == .exited(.exited(0)))
-        first.synchronizeState()
-        second.synchronizeState()
-        #expect(!firstEvents.contains(.commandStarted("owned")))
-        #expect(secondEvents.contains(.commandStarted("owned")))
-
-        first.tearDown()
-        second.tearDown()
-        await firstHost.close()
-        await secondHost.close()
-    }
-
     @Test("semantic events bypass hidden and synchronized rendering gates", .timeLimit(.minutes(1)))
     func semanticEventsBypassRenderingGates() async throws {
         // Intent: deliver every semantic kind while both rendering gates suppress frames.
         // Why it exists: terminal metadata must not wait for pane visibility or synchronized output.
         // Scenario: a hidden child starts a synchronized update, then reports title, cwd, shell, and BEL.
-        let host = try makeHost(shellIntegrationToken: "token")
+        let host = try makeHost()
         let command = "printf '\\033[?2026h\\033]2;hidden-title\\007"
             + "\\033]7;file://localhost/tmp/pane\\007"
-            + "\\033]1337;DanTermShell=1;token;command-end\\007\\007'; exec sleep 30"
+            + "\\033]1337;DanTermShell=1;command-end\\007\\007'; exec sleep 30"
         let controller = TerminalPaneSessionController(
             host: host,
             launchInput: makeLaunchInput(command: command),
@@ -1277,13 +1243,11 @@ struct TerminalPaneSessionControllerTests {
 }
 
 private func makeHost(
-    captureTransitions: Bool = true,
-    shellIntegrationToken: String? = nil
+    captureTransitions: Bool = true
 ) throws -> TerminalPTYHost {
     try TerminalPTYHost(
         initialDimensions: .init(columns: 80, rows: 24),
         bootstrapExecutable: bootstrapExecutable(),
-        shellIntegrationToken: shellIntegrationToken,
         captureTransitions: captureTransitions
     )
 }

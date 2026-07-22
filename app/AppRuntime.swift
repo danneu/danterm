@@ -480,11 +480,9 @@ class AppRuntime {
     private func perform(_ command: Command) {
         switch command {
         case .createSurface(let paneId, let cwd, let command, let launchCommand, let waitAfterCommand):
-            let token = UUID().uuidString
             let envVars = terminalLaunchEnvironment(
                 ipcSocketPath: ipcSocketPath.path,
-                paneId: paneId,
-                token: token
+                paneId: paneId
             )
             guard let session = makeTerminalSession(
                 paneId: paneId,
@@ -492,7 +490,6 @@ class AppRuntime {
                 command: command,
                 launchCommand: launchCommand,
                 waitAfterCommand: waitAfterCommand,
-                shellIntegrationToken: token,
                 envVars: envVars
             ) else {
                 send(.surfaceCreationFailed(paneId: paneId))
@@ -1175,7 +1172,6 @@ class AppRuntime {
                     for paneId in allPaneIds(tab.rootNode) {
                         let ps = loaded.paneSnapshots[paneId]
                         let resolved = ps.map { resolveLaunch($0) }
-                        let token = UUID().uuidString
                         var scrollbackFilePath: String?
                         if let replayText = recoveryReplayText(scrollback: ps?.scrollback, agentSession: ps?.agentSession),
                            let replayURL = writeReplayFile(scrollback: replayText) {
@@ -1185,7 +1181,6 @@ class AppRuntime {
                         let envVars = restoreLaunchEnvironment(
                             ipcSocketPath: ipcSocketPath.path,
                             paneId: paneId,
-                            token: token,
                             scrollbackFilePath: scrollbackFilePath,
                             command: resolved?.command
                         )
@@ -1195,7 +1190,6 @@ class AppRuntime {
                             command: nil,
                             launchCommand: nil,
                             waitAfterCommand: true,
-                            shellIntegrationToken: token,
                             envVars: envVars
                         ) else {
                             throw RestoreBuildError.surfaceCreationFailed
@@ -1293,11 +1287,9 @@ class AppRuntime {
         command: String?,
         launchCommand: String?,
         waitAfterCommand: Bool,
-        shellIntegrationToken: String,
         envVars: [(String, String)]
     ) -> (any TerminalSession)? {
         let request = TerminalSessionRequest(
-            shellIntegrationToken: shellIntegrationToken,
             workingDirectory: workingDirectory,
             command: command,
             launchCommand: launchCommand,

@@ -110,7 +110,7 @@ Host workflow-host
     IdentityAgent none
     PasswordAuthentication no
     KbdInteractiveAuthentication no
-    SendEnv LC_DANTERM_TOKEN
+    SendEnv LC_DANTERM
 EOF
 
 /usr/bin/ssh-keygen -q -t ed25519 -N '' -f "$ssh_dir/host_key"
@@ -132,7 +132,7 @@ UsePAM no
 AllowAgentForwarding no
 AllowTcpForwarding no
 PermitUserEnvironment no
-AcceptEnv LC_DANTERM_TOKEN
+AcceptEnv LC_DANTERM
 Subsystem sftp internal-sftp
 EOF
 /usr/sbin/sshd -D -e -f "$ssh_dir/sshd_config" > "$ssh_dir/sshd.log" 2>&1 &

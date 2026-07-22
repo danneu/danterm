@@ -99,14 +99,12 @@ public final class TerminalPaneSessionController {
         configuration: TerminalPaneLaunchConfiguration,
         bootstrapExecutable: String,
         isVisible: Bool = true,
-        machineHostname: String? = nil,
-        shellIntegrationToken: String? = nil
+        machineHostname: String? = nil
     ) throws {
         let host = try TerminalPTYHost(
             initialDimensions: configuration.initialDimensions,
             bootstrapExecutable: bootstrapExecutable,
             machineHostname: machineHostname,
-            shellIntegrationToken: shellIntegrationToken,
             programVersion: configuration.terminalProgramVersion
         )
         self.init(host: host, launchInput: configuration.launchInput, isVisible: isVisible)
@@ -119,14 +117,12 @@ public final class TerminalPaneSessionController {
         bootstrapExecutable: String,
         isVisible: Bool = true,
         machineHostname: String? = nil,
-        shellIntegrationToken: String? = nil,
         captureTransitions: Bool
     ) throws {
         let host = try TerminalPTYHost(
             initialDimensions: configuration.initialDimensions,
             bootstrapExecutable: bootstrapExecutable,
             machineHostname: machineHostname,
-            shellIntegrationToken: shellIntegrationToken,
             programVersion: configuration.terminalProgramVersion,
             captureTransitions: captureTransitions
         )
@@ -138,14 +134,12 @@ public final class TerminalPaneSessionController {
         bootstrapExecutable: String,
         isVisible: Bool = true,
         machineHostname: String? = nil,
-        shellIntegrationToken: String? = nil,
         captureTransitions: Bool
     ) throws {
         let host = try TerminalPTYHost(
             initialDimensions: configuration.initialDimensions,
             bootstrapExecutable: bootstrapExecutable,
             machineHostname: machineHostname,
-            shellIntegrationToken: shellIntegrationToken,
             programVersion: configuration.terminalProgramVersion,
             captureTransitions: captureTransitions
         )

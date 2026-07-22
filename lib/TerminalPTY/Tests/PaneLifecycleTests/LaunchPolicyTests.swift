@@ -55,7 +55,6 @@ import Testing
             EnvironmentEntry(name: "TERM", value: "xterm-256color"),
             EnvironmentEntry(name: "DANTERM_PANE", value: "pane-1"),
             EnvironmentEntry(name: "COLORTERM", value: "truecolor"),
-            EnvironmentEntry(name: "DANTERM_TOKEN", value: "secret"),
         ])
     }
 
@@ -155,7 +154,6 @@ private func makeInput() -> LaunchPolicyInput {
         ],
         paneEnvironment: [
             EnvironmentEntry(name: "DANTERM_PANE", value: "pane-1"),
-            EnvironmentEntry(name: "DANTERM_TOKEN", value: "secret"),
         ],
         command: nil,
         launchCommand: nil,

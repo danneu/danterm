@@ -70,17 +70,19 @@ bodies outside exact selectors `1` through `12` remain notification text.
 Unknown notification variants and Kitty OSC 99 are ignored.
 
 DanTerm shell integrations use a private, versioned OSC 1337 envelope carrying
-an authenticated pane token and typed command-start, command-end, remote-start,
-and remote-host events. Command and host text uses canonical padded base64. The
-engine authenticates and bounds the envelope before admitting a semantic event;
-the PTY/session adapter binds accepted events to the owning pane. Shell events
-never pass through title handling.
+typed command-start, command-end, remote-start, and remote-host events:
+`OSC 1337;DanTermShell=1;<event>[;<base64-arg>...] ST`. Command and host text
+uses canonical padded base64. The engine validates exact field counts and
+bounds the envelope before admitting a semantic event; the PTY/session adapter
+binds accepted events to the owning pane. Shell events never pass through title
+handling.
 
 Canonical opt-in zsh, Bash, and fish integrations ship in the app bundle. They
-consume the pane token from the child environment into shell-private state,
-preserve existing prompt hooks, report local cwd with OSC 7, and forward only
-the originating pane's authority through SSH. The token is a private capability,
-not a user-facing identifier or an agent API.
+emit locally when `DANTERM` is present, preserve existing prompt hooks, report
+local cwd with OSC 7, and have ssh/mosh wrappers forward `LC_DANTERM=1` through
+`SendEnv`. A shell with `LC_DANTERM` present and `DANTERM` absent reports its
+remote identity and suppresses OSC 7 cwd events. Markers remain available to
+nested remote shells.
 
 BEL emits DanTerm's existing pane-scoped bell event. The initial engine never
 plays an audible bell. Existing alert suppression and admitted-event

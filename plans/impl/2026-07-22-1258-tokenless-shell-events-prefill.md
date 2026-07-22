@@ -224,7 +224,7 @@ and docs for the behavior it changes.
       rejection), delete `--restore-commands` and both `RestoreCommandBehavior`
       enums -- PO1, PO2, NUL leg of PO4, restore-var and seeded-PTY legs of
       PO3
-- [ ] 2. C: tokenless OSC 1337 wire format, delete token threading and
+- [x] 2. C: tokenless OSC 1337 wire format, delete token threading and
       `DANTERM_TOKEN`/`LC_DANTERM_TOKEN`, marker-based emission/remote
       detection (`DANTERM`/`LC_DANTERM`), workflow-harness sshd `SendEnv`
       switch, manifest + pin test, wire-format/env-contract docs
@@ -236,3 +236,10 @@ and docs for the behavior it changes.
       docs sweep (`integrations/danterm/SKILL.md` if the CLI surface moved,
       `README.md`, the workflow-compatibility evidence doc) -- PO6 smoke,
       PO7 gates
+
+## Implementation notes
+
+- Commit 2 does not recreate `terminal-capabilities-v1.json` or its pin test:
+  commit `dcfd162` intentionally retired that artifact immediately before this
+  plan began. The normative `docs/terminal-capabilities.md` contract and
+  behavioral protocol/environment tests carry the updated claims instead.

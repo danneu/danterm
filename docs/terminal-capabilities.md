@@ -80,7 +80,7 @@ Supported protocol families, with their evidence suite:
 | `title-cwd-notifications-progress` | TerminalSemanticEventTests |
 | `http-https-hyperlinks` | TerminalHyperlinkTests |
 | `clipboard-write-read-denial` | TerminalOSC52Tests |
-| `authenticated-shell-events` | TerminalShellEventTests |
+| `tokenless-shell-events` | TerminalShellEventTests |
 
 Denied: `audible-bell`, `clipboard-read`, `da2`, `decrqss`, `kitty-osc-99`,
 `osc-133`, `sixel`, `xtgettcap`, `eight-bit-replies`.
@@ -100,9 +100,16 @@ version returned by XTVERSION.
 | `DANTERM` (`1`) | pane | public |
 | `DANTERM_SOCK` (`<socket-path>`) | pane | public |
 | `DANTERM_PANE` (`<pane-id>`) | pane | public |
-| `DANTERM_TOKEN` (`<authentication-token>`) | pane | private |
-| `LC_DANTERM_TOKEN` (`<forwarded-authentication-token>`) | pane | private |
+| `LC_DANTERM` (`1`) | ssh/mosh wrapper | public |
 | `DANTERM_RESTORE_SCROLLBACK_FILE` (`<recovery-file-path>`) | pane-when-restoring | private |
+| `DANTERM_RESTORE_COMMAND` (`<editable-command>`) | pane-when-restoring | private |
+
+Private shell events use `OSC 1337;DanTermShell=1;<event>[;<base64-arg>...] ST`.
+The exact field counts are three for `command-start`, two for `command-end` and
+`remote-start`, and four for `remote-host`. Command and host values use
+canonical padded base64 and strict UTF-8. Shell integrations emit when either
+`DANTERM` or `LC_DANTERM` is present; ssh and mosh wrappers forward
+`LC_DANTERM=1`, and a shell with `LC_DANTERM` but no `DANTERM` is remote.
 
 ## Queries and semantic protocols
 

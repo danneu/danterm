@@ -102,8 +102,6 @@ struct TerminalPaneSessionPolicyTests {
                 .init(name: "DANTERM", value: "1"),
                 .init(name: "DANTERM_SOCK", value: "/owned/socket"),
                 .init(name: "DANTERM_PANE", value: "owned-pane"),
-                .init(name: "DANTERM_TOKEN", value: "owned-token"),
-                .init(name: "LC_DANTERM_TOKEN", value: "owned-token"),
             ]
         )
         let facts = TerminalPaneLaunchFacts(
@@ -119,8 +117,6 @@ struct TerminalPaneSessionPolicyTests {
                 .init(name: "DANTERM", value: "hostile"),
                 .init(name: "DANTERM_SOCK", value: "hostile"),
                 .init(name: "DANTERM_PANE", value: "hostile"),
-                .init(name: "DANTERM_TOKEN", value: "hostile"),
-                .init(name: "LC_DANTERM_TOKEN", value: "hostile"),
             ],
             terminalProgramVersion: "9.8.7"
         )
@@ -138,7 +134,5 @@ struct TerminalPaneSessionPolicyTests {
         #expect(environment["DANTERM"] == "1")
         #expect(environment["DANTERM_SOCK"] == "/owned/socket")
         #expect(environment["DANTERM_PANE"] == "owned-pane")
-        #expect(environment["DANTERM_TOKEN"] == "owned-token")
-        #expect(environment["LC_DANTERM_TOKEN"] == "owned-token")
     }
 }
