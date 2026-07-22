@@ -19,6 +19,11 @@ SPEC.loader.exec_module(SUITE)
 
 
 class TerminalBenchmarkSuiteTests(unittest.TestCase):
+    def test_profiled_environment_refuses_to_write_history(self):
+        with mock.patch.dict(SUITE.os.environ, {"DANTERM_BENCHMARK_PROFILING": "1"}):
+            with self.assertRaisesRegex(SystemExit, "Profiled runs cannot enter benchmark history"):
+                SUITE.refuse_profiled_history()
+
     def test_backend_accepts_just_named_argument_spelling(self):
         self.assertEqual(SUITE.parse_backend("backend=swift"), "swift")
 

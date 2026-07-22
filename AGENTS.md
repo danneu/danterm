@@ -294,6 +294,7 @@ Topic docs. Read the linked file before editing if your task touches the topic.
 - [docs/design/2026-06-09-appkit-lifetime-safety.md](docs/design/2026-06-09-appkit-lifetime-safety.md) -- AppKit/Ghostty lifetime invariants that prevent cross-lifetime use-after-free (the 2026-06-09 Cmd-Z SIGSEGV). Read before adding an `allowsUndo` text view, a NotificationCenter observer, an NSEvent monitor, a timer, a popover/sheet/view-controller, a stored escaping closure, an AppKit target/delegate that can outlive its referent, or any `Unmanaged`/C `userdata` callback.
 - [docs/design/2026-03-05-display-scaling.md](docs/design/2026-03-05-display-scaling.md) -- HiDPI/Retina scaling, content scale invariants, zero-frame guards.
 - [agent-docs/build-details.md](agent-docs/build-details.md) -- `build-lib.sh`, Swift compilation modes, xcframework + linker details. Read when touching build scripts or upgrading Ghostty.
+- [agent-docs/terminal-performance.md](agent-docs/terminal-performance.md) -- real-app benchmarks, compatible history, profiler selection, and artifact handling. Read before measuring or optimizing terminal performance.
 - [agent-docs/reference-sources.md](agent-docs/reference-sources.md) -- `.ghostty-src/` layout, key files for the libghostty C API, other terminal references. Read when implementing against libghostty.
 - [docs/ci.md](docs/ci.md) -- CI/CD pipeline, code signing, notarization, troubleshooting.
 - [docs/upgrading-ghostty.md](docs/upgrading-ghostty.md) -- upgrading the pinned Ghostty version, CI cache.

@@ -21,11 +21,21 @@ fi
 WORKLOAD="${1:-plain-scrolling}"
 BACKEND="${2:-swift}"
 BACKEND="${BACKEND#backend=}"
+MODE="${DANTERM_BENCHMARK_MODE:-measure}"
+PROFILE_IDENTITY_PATH="${DANTERM_BENCHMARK_IDENTITY_PATH:-}"
 [[ "$WORKLOAD" == "plain-scrolling" ]] || { echo "Unknown workload: $WORKLOAD" >&2; exit 2; }
 case "$BACKEND" in
     swift|ghostty) ;;
     *) echo "Unknown backend: $BACKEND (expected swift or ghostty)" >&2; exit 2 ;;
 esac
+case "$MODE" in
+    measure|loop) ;;
+    *) echo "Unknown benchmark mode: $MODE" >&2; exit 2 ;;
+esac
+if [[ "$MODE" == "loop" && -z "$PROFILE_IDENTITY_PATH" ]]; then
+    echo "Sustained benchmark mode requires DANTERM_BENCHMARK_IDENTITY_PATH" >&2
+    exit 2
+fi
 
 for command in codesign jq plutil swift; do
     command -v "$command" >/dev/null || { echo "Missing required command: $command" >&2; exit 1; }
@@ -100,7 +110,11 @@ if [[ -d "$REPO_ROOT/lib/ghostty-themes" ]]; then
 else
     cp -R "$REPO_ROOT/.ghostty-src/zig-out/share/ghostty/themes" "$APP_PATH/Contents/Resources/ghostty/themes"
 fi
-codesign --force --deep --sign - "$APP_PATH" >/dev/null
+codesign --force --deep --sign - --entitlements "$SCRIPT_DIR/terminal-benchmark-entitlements.plist" "$APP_PATH" >/dev/null
+codesign -d --entitlements :- "$APP_PATH" 2>&1 | grep -q '<key>com.apple.security.get-task-allow</key>' || {
+    echo "Benchmark app is missing the get-task-allow profiling entitlement" >&2
+    exit 1
+}
 
 env HOME="$HOME_DIR" CFFIXED_USER_HOME="$HOME_DIR" TMPDIR="$TMP_DIR/" ZDOTDIR="$ZDOTDIR" \
     DANTERM_TERMINAL_BACKEND="$BACKEND" \
@@ -113,6 +127,7 @@ env HOME="$HOME_DIR" CFFIXED_USER_HOME="$HOME_DIR" TMPDIR="$TMP_DIR/" ZDOTDIR="$
     DANTERM_TERMINAL_BENCHMARK_RESULT="$DRAW_RESULT" \
     DANTERM_TERMINAL_BENCHMARK_PRODUCER_RESULT="$PRODUCER_RESULT" \
     DANTERM_TERMINAL_BENCHMARK_BACKEND="$BACKEND" \
+    DANTERM_BENCHMARK_MODE="$MODE" \
     "$APP_PATH/Contents/MacOS/DanTerm Benchmark" >"$APP_LOG" 2>&1 &
 APP_PID=$!
 
@@ -144,6 +159,18 @@ done
 printf -v command 'python3 %q' "$SCRIPT_DIR/terminal-benchmark-producer.py"
 "$CLI" pane input --pane "$PANE_ID" --literal -- "$command"
 "$CLI" pane input --pane "$PANE_ID" -- Enter
+if [[ "$MODE" == "loop" ]]; then
+    identity_tmp="$PROFILE_IDENTITY_PATH.tmp.$$"
+    mkdir -p "$(dirname "$PROFILE_IDENTITY_PATH")"
+    jq -n --argjson pid "$APP_PID" --arg workload "$WORKLOAD" --arg backend "$BACKEND" \
+        --arg binary "$APP_PATH/Contents/MacOS/DanTerm Benchmark" --arg artifacts "$ARTIFACTS" \
+        '{schemaVersion: 1, pid: $pid, workload: $workload, backend: $backend, binary: $binary, artifacts: $artifacts, profilingActive: true}' >"$identity_tmp"
+    mv "$identity_tmp" "$PROFILE_IDENTITY_PATH"
+    echo "Sustained benchmark identity: $PROFILE_IDENTITY_PATH" >&2
+    while kill -0 "$APP_PID" 2>/dev/null; do sleep 0.25; done
+    wait "$APP_PID"
+    exit $?
+fi
 while [[ ! -f "$PRODUCER_RESULT" || ( "$BACKEND" == "swift" && ! -f "$DRAW_RESULT" ) ]]; do
     (( SECONDS < deadline )) || { echo "Timed out waiting for benchmark metrics" >&2; exit 1; }
     sleep 0.05

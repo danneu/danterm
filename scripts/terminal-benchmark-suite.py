@@ -120,6 +120,12 @@ def parse_backend(argument):
     return backend
 
 
+def refuse_profiled_history():
+    """Keep diagnostic profiler timings out of append-only benchmark history."""
+    if os.environ.get("DANTERM_BENCHMARK_PROFILING") == "1":
+        raise SystemExit("Profiled runs cannot enter benchmark history")
+
+
 def machine_identity():
     model = command_output("sysctl", "-n", "hw.model")
     try:
@@ -176,6 +182,7 @@ def report(result, baseline):
 
 
 def main():
+    refuse_profiled_history()
     try:
         backend = parse_backend(sys.argv[1] if len(sys.argv) > 1 else "swift")
     except ValueError as error:

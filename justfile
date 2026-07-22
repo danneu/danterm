@@ -82,6 +82,18 @@ benchmark-one workload="plain-scrolling" backend="swift":
 benchmark backend="swift":
     python3 ./scripts/terminal-benchmark-suite.py "{{backend}}"
 
+# Run one isolated workload continuously and publish its exact app pid.
+benchmark-loop workload="plain-scrolling" backend="swift":
+    ./scripts/terminal-benchmark-profile.sh loop "{{workload}}" "{{backend}}"
+
+# Capture a textual sample profile from one isolated sustained Swift workload.
+benchmark-sample workload="plain-scrolling" seconds="15":
+    ./scripts/terminal-benchmark-profile.sh sample "{{workload}}" swift "{{seconds}}"
+
+# Capture and export an xctrace profile from one isolated sustained Swift workload.
+benchmark-trace workload="plain-scrolling" template="Time Profiler" seconds="30":
+    ./scripts/terminal-benchmark-profile.sh trace "{{workload}}" swift "{{seconds}}" "{{template}}"
+
 # Run the opt-in headless shell/application compatibility workflows.
 # Needs asciinema/fish/fzf: nix develop .#terminal-workflows -c just test-terminal-workflows
 test-terminal-workflows:

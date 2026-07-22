@@ -13,6 +13,12 @@ draw_result = os.environ["DANTERM_TERMINAL_BENCHMARK_RESULT"]
 output = os.environ["DANTERM_TERMINAL_BENCHMARK_PRODUCER_RESULT"]
 backend = os.environ["DANTERM_TERMINAL_BENCHMARK_BACKEND"]
 terminal_size = os.get_terminal_size(1)
+if os.environ.get("DANTERM_BENCHMARK_MODE") == "loop":
+    index = 0
+    while True:
+        os.write(1, f"DANTERM-BENCH-LOOP-{index:08d} plain scrolling payload\n".encode())
+        index += 1
+
 os.write(1, (start_marker + "\n").encode())
 if backend == "swift":
     deadline = time.monotonic() + 20
