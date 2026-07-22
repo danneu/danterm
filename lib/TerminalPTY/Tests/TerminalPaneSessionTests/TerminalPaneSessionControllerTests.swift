@@ -865,6 +865,35 @@ struct TerminalPaneSessionControllerTests {
         #expect(controller.capturedRecording(test: "torn-down-pane") == nil)
     }
 
+    @Test("diagnostic capture fences a live session without completing its recording", .timeLimit(.minutes(1)))
+    func diagnosticCaptureFencesLiveSession() async throws {
+        // Intent: failure diagnostics serialize all owner-accepted transitions and the
+        //   matching terminal snapshot before teardown without claiming session completion.
+        // Why it exists: live-workflow failures must retain reproducible evidence while the
+        //   app-facing recording contract remains child-exit-only.
+        // Scenario: a shell prints a marker, stays alive, and the harness captures it before cleanup.
+        let launchInput = makeLaunchInput(command: "printf '__DIAGNOSTIC__\\n'; cat")
+        let controller = try TerminalPaneSessionController(
+            configuration: .init(
+                initialDimensions: launchInput.initialDimensions,
+                launchInput: launchInput
+            ),
+            bootstrapExecutable: bootstrapExecutable(),
+            captureTransitions: true
+        )
+        defer { controller.tearDown() }
+
+        while controller.readFullHistoryText().contains("__DIAGNOSTIC__") == false {
+            controller.synchronizeState()
+            await Task.yield()
+        }
+
+        let capture = controller.diagnosticCapture(test: "live-failure")
+        #expect(capture.recording.events.isEmpty == false)
+        #expect(capture.terminal.fullHistoryText.contains("__DIAGNOSTIC__"))
+        #expect(controller.capturedRecording(test: "ordinary") == nil)
+    }
+
     @Test("capture disabled remains behaviorally inert", .timeLimit(.minutes(1)))
     func captureDisabledExposesNoRecording() async throws {
         // Intent: the default controller path completes a normal session without

@@ -33,6 +33,13 @@ public struct TerminalPaneFrame: Equatable, Sendable {
     }
 }
 
+/// Bundles a failure-time terminal snapshot with the exact transitions that produced it.
+package struct TerminalPaneDiagnosticCapture: Sendable {
+    package let terminal: Terminal
+    package let recording: NeutralTerminalRecording
+    package let semanticEvents: [TerminalSemanticEvent]
+}
+
 /// Owns one headless terminal pane while keeping host bytes and actor state behind the adapter.
 @MainActor
 public final class TerminalPaneSessionController {
@@ -355,14 +362,50 @@ public final class TerminalPaneSessionController {
 
     private func makeCapturedRecording(test: String) -> NeutralTerminalRecording? {
         guard let completedRecordingEvents else { return nil }
+        return makeRecording(test: test, events: completedRecordingEvents)
+    }
+
+    /// Test harness seam that fences live evidence without changing completion eligibility.
+    package func diagnosticCapture(test: String) -> TerminalPaneDiagnosticCapture {
+        let state = host.fencedDiagnosticState()
+        cachedTerminal = state.frameState.terminal
+        return TerminalPaneDiagnosticCapture(
+            terminal: state.frameState.terminal,
+            recording: makeRecording(test: test, events: neutralEvents(state.transitions)),
+            semanticEvents: state.frameState.semanticEvents
+        )
+    }
+
+    private func makeRecording(
+        test: String,
+        events: [NeutralTerminalRecordingEvent]
+    ) -> NeutralTerminalRecording {
         return NeutralTerminalRecording(
             provenance: .danTerm(test: test),
             initial: .init(
                 columns: initialDimensions.columns,
                 rows: initialDimensions.rows
             ),
-            events: completedRecordingEvents
+            events: events
         )
+    }
+
+    private func neutralEvents(
+        _ transitions: [TerminalPTYAppliedTransition]
+    ) -> [NeutralTerminalRecordingEvent] {
+        transitions.map { transition in
+            switch transition {
+            case .feed(let bytes): .feed(bytes)
+            case .input(let key, let modifiers): .input(key: key, modifiers: modifiers)
+            case .paste(let text): .paste(text)
+            case .focus(let focused): .focus(focused)
+            case .mouse(let event): .mouse(neutralMouseEvent(for: event))
+            case .resize(let dimensions): .resize(columns: dimensions.columns, rows: dimensions.rows)
+            case .scrollByRows(let rows): .viewport(.byRows(rows))
+            case .scrollToTopRow(let row): .viewport(.toTopRow(row))
+            case .scrollToBottom: .viewport(.toBottom)
+            }
+        }
     }
 
     /// Ends callbacks immediately and lets a host-only detached task finish bounded teardown.
@@ -411,28 +454,7 @@ public final class TerminalPaneSessionController {
         if let result, didEmitSessionEnded == false {
             didEmitSessionEnded = true
             if let transitions {
-                completedRecordingEvents = transitions.map { transition in
-                    switch transition {
-                    case .feed(let bytes):
-                        .feed(bytes)
-                    case .input(let key, let modifiers):
-                        .input(key: key, modifiers: modifiers)
-                    case .paste(let text):
-                        .paste(text)
-                    case .focus(let focused):
-                        .focus(focused)
-                    case .mouse(let event):
-                        .mouse(neutralMouseEvent(for: event))
-                    case .resize(let dimensions):
-                        .resize(columns: dimensions.columns, rows: dimensions.rows)
-                    case .scrollByRows(let rows):
-                        .viewport(.byRows(rows))
-                    case .scrollToTopRow(let row):
-                        .viewport(.toTopRow(row))
-                    case .scrollToBottom:
-                        .viewport(.toBottom)
-                    }
-                }
+                completedRecordingEvents = neutralEvents(transitions)
             }
             takeTeardownCompletion()?()
             onSessionEnded?(result)

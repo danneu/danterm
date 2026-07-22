@@ -122,6 +122,17 @@
         }
       );
 
+      devShells = forEachSystem appSystems (
+        system: pkgs: {
+          terminal-workflows = pkgs.mkShell {
+            packages = with pkgs; [
+              fish
+              fzf
+            ];
+          };
+        }
+      );
+
       checks = forEachSystem hookSystems (
         system: pkgs: {
           claude-notify-osc777 =

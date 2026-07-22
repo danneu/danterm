@@ -346,6 +346,18 @@ public actor TerminalPTYHost {
         }
     }
 
+    /// Captures one owner-ordered diagnostic boundary before failure cleanup can discard evidence.
+    package nonisolated func fencedDiagnosticState() -> (
+        frameState: TerminalPTYFrameState,
+        transitions: [TerminalPTYAppliedTransition]
+    ) {
+        queue.sync {
+            assumeIsolated { owner in
+                (owner.drainedFrameState(), owner.appliedTransitions)
+            }
+        }
+    }
+
     private func drainedFrameState() -> TerminalPTYFrameState {
         let damage = terminal.drainDamage()
         let clipboardWrite = terminal.drainPendingClipboardWrite()

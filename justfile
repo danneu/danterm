@@ -53,6 +53,7 @@ test:
     ./scripts/tests/terminal-characterization-harness_test.sh
     ./scripts/tests/terminal-viability-harness_test.sh
     ./scripts/tests/test-terminal-pty_test.sh
+    ./scripts/tests/terminal-workflows-harness_test.sh
     ./scripts/tests/shell-integration_test.sh
     ./scripts/tests/native-shell-events-retirement_test.sh
     ./scripts/tests/agent-notifications-live_test.py
@@ -72,6 +73,10 @@ test-terminal-characterization:
 # Run the opt-in Swift terminal viability gate (requires GUI + Accessibility)
 test-terminal-viability:
     ./scripts/terminal-viability.sh
+
+# Run the opt-in headless shell/application compatibility workflows.
+test-terminal-workflows:
+    ./scripts/terminal-workflows.sh
 
 # Run opt-in PTY teardown proofs (requires tmux and passwordless localhost ssh).
 test-pty-external:
