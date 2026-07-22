@@ -13,7 +13,8 @@ aggregation. Each command reports current timings and compatible committed
 deltas, then asks whether to save the completed run. Pass `save=1` to save
 without prompting or `save=0` to decline up front. Saving uses the already
 completed run; it never reruns the benchmark. Confirmed unprofiled results enter
-`benchmarks/results/terminal-app.jsonl`.
+`benchmarks/results/terminal-app.jsonl`. The Mac must be connected to AC power
+before either benchmark command will start.
 
 Deltas use the latest committed entry with the same backend, fixture, machine,
 macOS version, display scale, Swift toolchain, release configuration, geometry,
