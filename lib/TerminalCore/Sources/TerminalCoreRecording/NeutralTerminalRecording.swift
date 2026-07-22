@@ -323,18 +323,39 @@ extension NeutralTerminalRecordingEvent: Codable {
         }
     }
 
+    // Keep this a sequential traversal: offsetting from a String's start for every
+    // byte made large recording feeds quadratic and dominated the replay suite.
     private static func decodeHex(_ hex: String) throws -> [UInt8] {
-        let compact = hex.filter { $0.isWhitespace == false }
-        guard compact.count.isMultiple(of: 2) else {
-            throw NeutralTerminalRecordingError.invalidHex(hex)
-        }
-        return try stride(from: 0, to: compact.count, by: 2).map { offset in
-            let start = compact.index(compact.startIndex, offsetBy: offset)
-            let end = compact.index(start, offsetBy: 2)
-            guard let byte = UInt8(compact[start..<end], radix: 16) else {
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(hex.utf8.count / 2)
+        var highNibble: UInt8?
+
+        for scalar in hex.unicodeScalars {
+            if scalar.properties.isWhitespace { continue }
+            guard let nibble = hexNibble(scalar.value) else {
                 throw NeutralTerminalRecordingError.invalidHex(hex)
             }
-            return byte
+
+            if let high = highNibble {
+                bytes.append(high << 4 | nibble)
+                highNibble = nil
+            } else {
+                highNibble = nibble
+            }
+        }
+
+        guard highNibble == nil else {
+            throw NeutralTerminalRecordingError.invalidHex(hex)
+        }
+        return bytes
+    }
+
+    private static func hexNibble(_ scalar: UInt32) -> UInt8? {
+        switch scalar {
+        case 0x30...0x39: UInt8(scalar - 0x30)
+        case 0x41...0x46: UInt8(scalar - 0x41 + 10)
+        case 0x61...0x66: UInt8(scalar - 0x61 + 10)
+        default: nil
         }
     }
 

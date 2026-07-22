@@ -7,6 +7,35 @@ import TerminalCoreRecording
 
 /// Proves DanTerm-authored recordings use the same public replay path as corpus evidence.
 struct NeutralTerminalRecordingTests {
+    @Test("feed hex accepts mixed case and whitespace")
+    func feedHexAcceptsMixedCaseAndWhitespace() throws {
+        let event = try decodeFeedEvent(hex: " 0a\tBc\nDe Ff ")
+
+        #expect(event == .feed([0x0A, 0xBC, 0xDE, 0xFF]))
+    }
+
+    @Test("empty feed hex decodes to no bytes")
+    func emptyFeedHexDecodesToNoBytes() throws {
+        let event = try decodeFeedEvent(hex: "")
+
+        #expect(event == .feed([]))
+    }
+
+    @Test(
+        "malformed feed hex preserves the original input in invalidHex",
+        arguments: ["a", "0g", "0\u{00E9}"]
+    )
+    func malformedFeedHexPreservesOriginalInput(_ hex: String) {
+        do {
+            _ = try decodeFeedEvent(hex: hex)
+            Issue.record("Expected malformed hex to be rejected.")
+        } catch NeutralTerminalRecordingError.invalidHex(let invalidHex) {
+            #expect(invalidHex == hex)
+        } catch {
+            Issue.record("Expected invalidHex, got \(error).")
+        }
+    }
+
     @Test("Alacritty provenance validates its pinned Apache-2.0 source")
     func alacrittyProvenanceValidates() throws {
         let provenance = NeutralTerminalProvenance(
@@ -248,5 +277,11 @@ struct NeutralTerminalRecordingTests {
             .resize(columns: 10, rows: 3),
         ])
         #expect(try recording.replay().geometry.columns == 10)
+    }
+
+    private func decodeFeedEvent(hex: String) throws -> NeutralTerminalRecordingEvent {
+        let encodedHex = try JSONEncoder().encode(hex)
+        let json = Data("{\"type\":\"feed\",\"hex\":".utf8) + encodedHex + Data("}".utf8)
+        return try JSONDecoder().decode(NeutralTerminalRecordingEvent.self, from: json)
     }
 }
