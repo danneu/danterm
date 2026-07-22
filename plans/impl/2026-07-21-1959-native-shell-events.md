@@ -58,5 +58,5 @@ OSC 1337;DanTermShell=1;<token>;remote-host;<base64-user>;<base64-host>
 ## Commit progress
 
 - [x] 1. Replace legacy title events with authenticated native shell events
-- [ ] 2. Ship sourceable shell integrations with direct and PTY coverage
+- [x] 2. Ship sourceable shell integrations with direct and PTY coverage
 - [ ] 3. Close packaging, documentation, and retirement gates

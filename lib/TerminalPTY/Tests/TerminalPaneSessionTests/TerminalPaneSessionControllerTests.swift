@@ -12,6 +12,84 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct TerminalPaneSessionControllerTests {
+    @Test("zsh, bash, and fish integrations deliver typed events through a real PTY")
+    func shellIntegrationsDeliverTypedEvents() async throws {
+        let integrationDirectory = shellIntegrationDirectory()
+        let token = "11111111-2222-3333-4444-555555555555"
+        let command = "printf 'hola 世界; $HOME'"
+        let shells = try ["zsh", "bash", "fish"].map { try findExecutable(named: $0) }
+
+        for shell in shells {
+            let asset = integrationDirectory.appending(
+                path: "danterm.\(URL(fileURLWithPath: shell).lastPathComponent)"
+            ).path
+            let invocation: String
+            if shell.hasSuffix("/fish") {
+                invocation = "DANTERM_TOKEN=\(shellQuote(token)) "
+                    + "\(shellQuote(shell)) --no-config -c "
+                    + shellQuote("sleep 1; source \(asset); "
+                        + "danterm_emit_command_start \(shellQuote(command)); "
+                        + "danterm_emit_command_end; sleep 1; exit")
+            } else {
+                invocation = "DANTERM_TOKEN=\(shellQuote(token)) "
+                    + "\(shellQuote(shell)) -f -c "
+                    + shellQuote("sleep 1; source \(shellQuote(asset)); "
+                        + "danterm_emit_command_start \(shellQuote(command)); "
+                        + "danterm_emit_command_end; sleep 1; exit")
+            }
+            let host = try makeHost(shellIntegrationToken: token)
+            let controller = TerminalPaneSessionController(
+                host: host,
+                launchInput: makeLaunchInput(command: invocation + "; exit")
+            )
+            var received: [TerminalSemanticEvent] = []
+            controller.onSemanticEvents = { events in
+                received.append(contentsOf: events)
+            }
+
+            #expect(await host.waitForResult() == .exited(.exited(0)))
+            controller.synchronizeState()
+            #expect(received.contains(.commandStarted(command)))
+            #expect(received.contains(.commandEnded))
+
+            controller.tearDown()
+            await host.close()
+        }
+    }
+
+    @Test("real PTY panes reject each other's shell tokens")
+    func shellTokensRemainPaneIsolated() async throws {
+        let firstHost = try makeHost(shellIntegrationToken: "first-token")
+        let secondHost = try makeHost(shellIntegrationToken: "second-token")
+        let encoded = Data("owned".utf8).base64EncodedString()
+        let firstCommand = "sleep 1; printf '\\033]1337;DanTermShell=1;second-token;command-start;"
+            + "\(encoded)\\033\\\\'; sleep 1; exit"
+        let secondCommand = "sleep 1; printf '\\033]1337;DanTermShell=1;second-token;command-start;"
+            + "\(encoded)\\033\\\\'; sleep 1; exit"
+        let first = TerminalPaneSessionController(
+            host: firstHost, launchInput: makeLaunchInput(command: firstCommand)
+        )
+        let second = TerminalPaneSessionController(
+            host: secondHost, launchInput: makeLaunchInput(command: secondCommand)
+        )
+        var firstEvents: [TerminalSemanticEvent] = []
+        var secondEvents: [TerminalSemanticEvent] = []
+        first.onSemanticEvents = { firstEvents.append(contentsOf: $0) }
+        second.onSemanticEvents = { secondEvents.append(contentsOf: $0) }
+
+        #expect(await firstHost.waitForResult() == .exited(.exited(0)))
+        #expect(await secondHost.waitForResult() == .exited(.exited(0)))
+        first.synchronizeState()
+        second.synchronizeState()
+        #expect(!firstEvents.contains(.commandStarted("owned")))
+        #expect(secondEvents.contains(.commandStarted("owned")))
+
+        first.tearDown()
+        second.tearDown()
+        await firstHost.close()
+        await secondHost.close()
+    }
+
     @Test("semantic events bypass hidden and synchronized rendering gates", .timeLimit(.minutes(1)))
     func semanticEventsBypassRenderingGates() async throws {
         // Intent: deliver every semantic kind while both rendering gates suppress frames.
@@ -1178,6 +1256,27 @@ private func makeLaunchInput(command: String?) -> LaunchPolicyInput {
         restoreCommandBehavior: .execute,
         initialDimensions: .init(columns: 80, rows: 24)
     )
+}
+
+private func shellIntegrationDirectory() -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appending(path: "integrations/shell-integration", directoryHint: .isDirectory)
+}
+
+private func findExecutable(named name: String) throws -> String {
+    let path = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
+    return try #require(path.split(separator: ":").lazy
+        .map { URL(fileURLWithPath: String($0)).appending(path: name).path }
+        .first(where: FileManager.default.isExecutableFile(atPath:)))
+}
+
+private func shellQuote(_ value: String) -> String {
+    "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
 }
 
 private func builtExecutable(named name: String) throws -> String {

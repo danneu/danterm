@@ -1,0 +1,4 @@
+Upstream: https://github.com/rcaloras/bash-preexec
+Version: 0.6.0
+Source: bash-preexec.sh from the 0.6.0 tag
+License: MIT, preserved in bash-preexec.LICENSE
