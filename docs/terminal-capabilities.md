@@ -56,8 +56,11 @@ title-plus-body is limited to 64 KiB; and pending query replies are limited to
 64 KiB. Bell, shell, and notification events share a 100-event discrete queue.
 Title, cwd, and progress coalesce to the newest complete value.
 
-Metadata retention is split into 256 KiB engine, 256 KiB handoff, and 512 KiB
-model shares. Scrollback is limited to 10 MiB and damage is bounded by current
-grid state. Oversized or malformed input has no partial effect, does not retain
-a second unbounded copy, and cannot prevent later valid input from being
-processed. A query reply that cannot fit is dropped as one complete unit.
+Metadata retention is bounded independently at each layer rather than by one
+cross-layer sum: the engine caps its own retention at 256 KiB; the model caps
+every terminal-originated field at 64 KiB per value and retains at most 100
+alerts, so its total metadata scales with live pane count rather than a fixed
+app-wide byte bound. Scrollback is limited to 10 MiB and damage is bounded by
+current grid state. Oversized or malformed input has no partial effect, does
+not retain a second unbounded copy, and cannot prevent later valid input from
+being processed. A query reply that cannot fit is dropped as one complete unit.

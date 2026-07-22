@@ -10,9 +10,6 @@ let package = Package(
         .library(name: "TerminalRenderPlanning", targets: ["TerminalRenderPlanning"]),
         .library(name: "TerminalRenderExecution", targets: ["TerminalRenderExecution"]),
     ],
-    dependencies: [
-        .package(path: "../DanTermCore"),
-    ],
     targets: [
         .target(
             name: "TerminalCore",
@@ -42,7 +39,6 @@ let package = Package(
             dependencies: [
                 "TerminalCore",
                 "TerminalCoreRecording",
-                .product(name: "DanTermCore", package: "DanTermCore"),
             ],
             path: "Tests/TerminalCoreTests",
             resources: [.copy("Fixtures")],

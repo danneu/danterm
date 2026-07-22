@@ -504,7 +504,6 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
     case .commandStarted(let paneId, let command):
         guard command.fitsTerminalMetadataValueLimit else { return [] }
         model.updatePane(paneId) { $0.lastCommand = command }
-        enforceTerminalMetadataBudget(for: paneId, in: &model)
         // Persist last command so restore can prefill it in the shell.
         return [.scheduleCheckpoint]
 
@@ -544,7 +543,6 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
                 p.remoteThemeOverride = remoteTheme
             }
         }
-        enforceTerminalMetadataBudget(for: paneId, in: &model)
         return []
 
     // MARK: - Config (external reload)
@@ -710,7 +708,6 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
     case .surfaceTitle(let paneId, let title):
         guard title.fitsTerminalMetadataValueLimit else { return [] }
         model.updatePane(paneId) { $0.title = title }
-        enforceTerminalMetadataBudget(for: paneId, in: &model)
         // Tab/window chrome derives from the focused pane title just set above.
         // Persist so restored tabs show the correct name.
         return [.scheduleCheckpoint]
@@ -718,7 +715,6 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
     case .surfaceCwd(let paneId, let cwd):
         guard cwd?.fitsTerminalMetadataValueLimit != false else { return [] }
         model.updatePane(paneId) { $0.cwd = cwd }
-        enforceTerminalMetadataBudget(for: paneId, in: &model)
         // Tab/window chrome derives from the focused pane cwd just set above.
         // Persist so restored panes open in the right dir.
         return [.scheduleCheckpoint]
@@ -748,7 +744,6 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
             title: "DanTerm", body: paneTitle, createdAt: now, isUnread: true
         )
         model.alerts.insert(alert, at: 0)
-        enforceTerminalMetadataBudget(for: paneId, in: &model)
         if model.alerts.count > 100 { model.alerts.removeLast() }
 
         // The tab/group bell badges now ride reconcileSidebar (the projection counts
@@ -783,7 +778,6 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
             title: title, body: body, createdAt: now, isUnread: true
         )
         model.alerts.insert(alert, at: 0)
-        enforceTerminalMetadataBudget(for: paneId, in: &model)
         if model.alerts.count > 100 { model.alerts.removeLast() }
 
         // Tab/group bell badges ride reconcileSidebar (see surfaceBell).

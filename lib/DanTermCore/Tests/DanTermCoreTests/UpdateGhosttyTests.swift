@@ -380,41 +380,51 @@ import Testing
     @Test("terminal metadata accepts 64 KiB values and rejects larger values")
     func terminalMetadataValueLimit() {
         // Intent: every untrusted string-bearing terminal message applies at
-        //   exactly 64 KiB and has no model or command effect above the limit.
+        //   exactly 64 KiB, has no model or command effect above the limit, and
+        //   a later valid value still applies after an oversized one was
+        //   rejected (I4: no partial/stuck effect from an oversized value).
         // Why it exists: pins DanTerm's defensive boundary independently of
-        //   TerminalCore's parser-side validation.
-        // Scenario: a backend sends title, cwd, command, remote-session, and
-        //   notification values at and just beyond the advertised limit.
+        //   TerminalCore's parser-side validation, now that there is no
+        //   aggregate per-pane budget to fall back on -- the per-value guard is
+        //   the entire model-side contract.
+        // Scenario: a backend sends title, cwd, command, remote-session (both
+        //   user and host), and notification (both title and body) values at
+        //   and just beyond the advertised limit, oversized-then-valid.
         var model = makeModel()
         createTab(&model)
         let paneId = model.groups[0].tabs[0].focusedPaneId
         let accepted = String(repeating: "a", count: 64 * 1024)
         let rejected = accepted + "b"
 
+        #expect(update(&model, .surfaceTitle(paneId: paneId, title: rejected)).isEmpty)
+        #expect(model.pane(paneId)?.title != rejected)
         #expect(update(&model, .surfaceTitle(paneId: paneId, title: accepted)).count == 1)
         #expect(model.pane(paneId)?.title == accepted)
-        #expect(update(&model, .surfaceTitle(paneId: paneId, title: rejected)).isEmpty)
-        #expect(model.pane(paneId)?.title == accepted)
 
+        #expect(update(&model, .surfaceCwd(paneId: paneId, cwd: rejected)).isEmpty)
+        #expect(model.pane(paneId)?.cwd != rejected)
         #expect(update(&model, .surfaceCwd(paneId: paneId, cwd: accepted)).count == 1)
         #expect(model.pane(paneId)?.cwd == accepted)
-        #expect(update(&model, .surfaceCwd(paneId: paneId, cwd: rejected)).isEmpty)
-        #expect(model.pane(paneId)?.cwd == accepted)
 
+        #expect(update(&model, .commandStarted(paneId: paneId, command: rejected)).isEmpty)
+        #expect(model.pane(paneId)?.lastCommand != rejected)
         #expect(update(&model, .commandStarted(paneId: paneId, command: accepted)).count == 1)
         #expect(model.pane(paneId)?.lastCommand == accepted)
-        #expect(update(&model, .commandStarted(paneId: paneId, command: rejected)).isEmpty)
-        #expect(model.pane(paneId)?.lastCommand == accepted)
 
-        update(&model, .remoteSessionReported(
-            paneId: paneId,
-            session: RemoteSession(user: accepted, host: accepted)
-        ))
-        #expect(model.pane(paneId)?.remoteSession == RemoteSession(user: accepted, host: accepted))
         #expect(update(&model, .remoteSessionReported(
             paneId: paneId,
             session: RemoteSession(user: rejected, host: "host")
         )).isEmpty)
+        #expect(model.pane(paneId)?.remoteSession == nil)
+        #expect(update(&model, .remoteSessionReported(
+            paneId: paneId,
+            session: RemoteSession(user: "user", host: rejected)
+        )).isEmpty)
+        #expect(model.pane(paneId)?.remoteSession == nil)
+        update(&model, .remoteSessionReported(
+            paneId: paneId,
+            session: RemoteSession(user: accepted, host: accepted)
+        ))
         #expect(model.pane(paneId)?.remoteSession == RemoteSession(user: accepted, host: accepted))
 
         model.isAppActive = false
@@ -424,48 +434,18 @@ import Testing
             body: "body"
         )).isEmpty)
         #expect(model.alerts.isEmpty)
-    }
-
-    @Test("512 KiB pane share preserves fields and newest same-pane alerts")
-    func paneMetadataBudgetEvictsOldestSamePaneAlerts() throws {
-        // Intent: current pane fields have priority over alerts, and overflow
-        //   removes only the oldest alerts owned by that pane.
-        // Why it exists: pins the deterministic eviction order that bounds a
-        //   stalled model without disturbing another pane's alert history.
-        // Scenario: a pane fills its fields, then receives three large desktop
-        //   notifications while an older alert from another pane is retained.
-        var model = makeModel()
-        model.isAppActive = false
-        createTab(&model)
-        let paneId = model.groups[0].tabs[0].focusedPaneId
-        createTab(&model)
-        let otherPaneId = model.groups[0].tabs[1].focusedPaneId
-        let field = String(repeating: "f", count: 64 * 1024)
-        let alertPart = String(repeating: "a", count: 50 * 1024)
-
-        update(&model, .surfaceTitle(paneId: paneId, title: field))
-        update(&model, .surfaceCwd(paneId: paneId, cwd: field))
-        update(&model, .commandStarted(paneId: paneId, command: field))
-        update(&model, .remoteSessionReported(
+        #expect(update(&model, .desktopNotification(
             paneId: paneId,
-            session: RemoteSession(user: field, host: field)
-        ))
-        update(&model, .desktopNotification(paneId: otherPaneId, title: "other", body: "keep"))
-        for marker in ["oldest", "middle", "newest"] {
-            update(&model, .desktopNotification(
-                paneId: paneId,
-                title: marker + alertPart,
-                body: alertPart
-            ))
-        }
-
-        let paneAlertTitles = model.alerts.filter { $0.paneId == paneId }.map(\.title)
-        let retainedTitle = try #require(paneAlertTitles.first)
-        #expect(paneAlertTitles.count == 1)
-        #expect(retainedTitle.hasPrefix("newest"))
-        #expect(model.alerts.contains { $0.paneId == otherPaneId && $0.body == "keep" })
-        #expect(terminalMetadataBytes(for: paneId, in: model) <= 512 * 1024)
-        #expect(model.pane(paneId)?.remoteSession?.host == field)
+            title: "title",
+            body: rejected
+        )).isEmpty)
+        #expect(model.alerts.isEmpty)
+        #expect(update(&model, .desktopNotification(
+            paneId: paneId,
+            title: "title",
+            body: "body"
+        )).count == 1)
+        #expect(model.alerts.count == 1)
     }
 
     @Test("testDesktopNotificationOnFocusedPaneIsIgnored")

@@ -96,9 +96,11 @@ scrollback:
 - one pending OSC, DCS, APC, PM, or SOS string may contain at most 2 MiB of
   encoded input; OSC 52 additionally retains its 1 MiB decoded-content limit
 - one retained title, cwd, link target, complete notification title-plus-body,
-  progress, or typed shell-event payload is limited to 64 KiB; the 1 MiB
-  aggregate terminal-originated metadata budget per pane is divided into
-  256 KiB engine, 256 KiB handoff, and 512 KiB model shares
+  progress, or typed shell-event payload is limited to 64 KiB; each layer bounds
+  its own retention independently rather than summing to one aggregate budget --
+  the engine caps its own retention at 256 KiB, and the model caps every
+  terminal-originated field at 64 KiB per value plus at most 100 alerts, so
+  model metadata scales with live pane count rather than a fixed byte bound
 - pending terminal query replies are limited to 64 KiB per pane
 - damage is coalesced into bounded active-grid state or a full-redraw marker,
   never retained as an event-by-event queue
