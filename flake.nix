@@ -129,6 +129,10 @@
               fish
               fzf
             ];
+            shellHook = ''
+              export PATH="/usr/bin:/bin:/usr/sbin:$PATH"
+              unset DEVELOPER_DIR SDKROOT
+            '';
           };
         }
       );

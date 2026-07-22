@@ -68,4 +68,4 @@ The capability manifest, remaining libvterm protocol classifications, esctest2, 
 
 - [x] 1. Add the isolated real-PTY workflow harness and diagnostic capture seam
 - [x] 2. Prove the shell, SSH, fzf, more, and less workflow contracts
-- [ ] 3. Publish compatibility evidence and close the first Milestone 7 item
+- [x] 3. Publish compatibility evidence and close the first Milestone 7 item

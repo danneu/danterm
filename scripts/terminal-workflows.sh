@@ -35,7 +35,15 @@ for tool in /bin/zsh /bin/bash /usr/bin/ssh /usr/bin/ssh-keygen /usr/sbin/sshd /
         continue
     fi
     printf '%s_path=%s\n' "$name" "$tool" >> "$manifest"
-    printf '%s_version=%s\n' "$name" "$("$tool" --version 2>&1 | head -1 || true)" >> "$manifest"
+    case "$name" in
+        ssh|ssh-keygen|sshd)
+            version="$(/usr/bin/ssh -V 2>&1)"
+            ;;
+        *)
+            version="$("$tool" --version 2>&1 | head -1 || true)"
+            ;;
+    esac
+    printf '%s_version=%s\n' "$name" "$version" >> "$manifest"
 done
 
 if (( ${#missing[@]} > 0 )); then

@@ -332,8 +332,13 @@ mean.
     SSH/mosh behavior, while direct and real-PTY gates prove pane ownership and
     the old title-channel path is gone. See the
     [slice plan](../plans/impl/2026-07-21-1959-native-shell-events.md).
-  - [ ] zsh, bash, fish, ssh, fzf, more, and less complete the minimum workflows in
-    [Testing and conformance](12-testing-conformance.md).
+  - [x] zsh, bash, fish, ssh, fzf, more, and less complete the minimum workflows in
+    [Testing and conformance](12-testing-conformance.md). The workflow recipe is
+    backed by the
+    [dated evidence](../docs/evidence/2026-07-21-terminal-workflow-compatibility.md)
+    and deterministic
+    [harness](../scripts/tests/terminal-workflows-harness_test.sh) and
+    [TerminalPTY](../lib/TerminalPTY/Tests) regressions.
   - [ ] [Protocols and shell integration](10-protocols-shell-integration.md) proves
     the advertised terminal environment, current DanTerm shell events, title,
     cwd, notifications, progress, links, clipboard policy, capability manifest,

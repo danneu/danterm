@@ -21,6 +21,7 @@ run_dir="$(find "$TMP/runs" -mindepth 1 -maxdepth 1 -type d | head -1)"
 grep -q '^status=preflight-failed$' "$run_dir/result.txt" || fail "wrong failure classification"
 grep -q '^zsh_path=/bin/zsh$' "$run_dir/environment.txt" || fail "system tool path was not recorded"
 grep -q '^zsh_version=' "$run_dir/environment.txt" || fail "system tool version was not recorded"
+grep -q '^ssh_version=OpenSSH_' "$run_dir/environment.txt" || fail "OpenSSH version was not recorded"
 
 mkdir -p "$TMP/ready-bin" "$TMP/ready-runs"
 for tool in fish fzf swift; do
