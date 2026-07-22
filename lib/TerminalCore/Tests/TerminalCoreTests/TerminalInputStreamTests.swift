@@ -196,7 +196,7 @@ struct TerminalInputStreamTests {
         }
     }
 
-    @Test("control strings absorb UTF-8 continuation bytes in the C1 range")
+    @Test("control strings absorb C1-range UTF-8 continuation bytes across chunk boundaries")
     func controlStringsAbsorbUTF8ContinuationBytes() {
         let payload = Array((0x0400...0x041F).compactMap(UnicodeScalar.init).map(String.init).joined().utf8)
         let strings: [[UInt8]] = [
@@ -209,12 +209,28 @@ struct TerminalInputStreamTests {
         ]
 
         for (index, bytes) in strings.enumerated() {
-            var stream = TerminalInputStream()
-            let actions = stream.feed(bytes + [0x41])
-            if index < 2 {
-                #expect(actions == [.osc(payload), .print("A")])
-            } else {
-                #expect(actions == [.escape(0x5C), .print("A")])
+            let input = bytes + [0x41]
+            let expected: [TerminalStreamAction] = index < 2
+                ? [.osc(payload), .print("A")]
+                : [.escape(0x5C), .print("A")]
+
+            var authored = TerminalInputStream()
+            #expect(authored.feed(input) == expected, "control string at index \(index)")
+
+            var bytewise = TerminalInputStream()
+            #expect(
+                input.flatMap { bytewise.feed([$0]) } == expected,
+                "bytewise control string at index \(index)"
+            )
+
+            for offset in 0...input.count {
+                var split = TerminalInputStream()
+                let actions = split.feed(Array(input[..<offset]))
+                    + split.feed(Array(input[offset...]))
+                #expect(
+                    actions == expected,
+                    "control string at index \(index), split at \(offset)"
+                )
             }
         }
     }
