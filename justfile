@@ -159,9 +159,33 @@ screenshot:
     pkill -x "$app_name" 2>/dev/null || true
     sleep 0.5
 
-    # Launch in background with init snapshot
+    # Launch the saved layout, then populate panes through the same CLI input
+    # path users invoke. Snapshot restore never executes saved command text.
     init_json="$(pwd)/docs/screenshot/init.json"
-    open -a "$app_path" --args --init "$init_json" --restore-commands execute
+    open -a "$app_path" --args --init "$init_json"
+
+    danterm_cli="$app_path/Contents/Helpers/danterm"
+    export DANTERM_SOCK="$HOME/Library/Caches/com.danneu.danterm-dev/control.sock"
+    echo "Waiting for control socket..."
+    for i in $(seq 1 20); do
+        if "$danterm_cli" ls >/dev/null 2>&1; then
+            break
+        fi
+        if [[ "$i" -eq 20 ]]; then
+            echo "Timed out waiting for DanTerm control socket"
+            pkill -x "$app_name" 2>/dev/null || true
+            exit 1
+        fi
+        sleep 0.25
+    done
+
+    "$danterm_cli" pane input --pane 2A5C2AF9-CBE2-4934-8573-8204875F079D -- "lazygit" Enter
+    "$danterm_cli" pane input --pane 4A53A920-BC2E-4C8E-8242-267DC4F9BC2D -- "htop" Enter
+    "$danterm_cli" pane input --pane 2F69A409-70D6-4E73-A5F8-E54022AA327C -- "vim README.md" Enter
+    "$danterm_cli" pane input --pane D4E5F6A7-B8C9-4D0E-AF12-3B4C5D6E7F80 -- 'claude "Say cheese"' Enter
+    "$danterm_cli" pane input --pane F6A7B8C9-D0E1-4F20-C134-5D6E7F8A91B2 -- "vim README.md" Enter
+    "$danterm_cli" pane input --pane E5F6A7B8-C9D0-4E1F-B023-4C5D6E7F8A91 -- "ssh dan@silverstone.local" Enter
+    "$danterm_cli" pane input --pane A1B2C3D4-E5F6-4A7B-8C9D-0E1F2A3B4C5D -- "lazygit" Enter
 
     # Resize window to exact screenshot dimensions
     sleep 1

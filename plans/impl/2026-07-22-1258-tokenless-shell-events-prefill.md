@@ -231,7 +231,7 @@ and docs for the behavior it changes.
       (`docs/terminal-capabilities.md`,
       `plan-terminal-engine/10-protocols-shell-integration.md`) -- PO4
       (remainder), PO5, emission/remote legs of PO3
-- [ ] 3. Screenshot recipe rework (CLI-populated panes), regenerate
+- [x] 3. Screenshot recipe rework (CLI-populated panes), regenerate
       `docs/screenshot/init.json` as v2 without `launch.command`, remaining
       docs sweep (`integrations/danterm/SKILL.md` if the CLI surface moved,
       `README.md`, the workflow-compatibility evidence doc) -- PO6 smoke,
@@ -243,3 +243,6 @@ and docs for the behavior it changes.
   commit `dcfd162` intentionally retired that artifact immediately before this
   plan began. The normative `docs/terminal-capabilities.md` contract and
   behavioral protocol/environment tests carry the updated claims instead.
+- The screenshot recipe sets `DANTERM_SOCK` to the dev bundle's socket because
+  its bundled CLI runs outside an application bundle and otherwise falls back
+  to the production socket path.

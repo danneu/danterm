@@ -105,10 +105,9 @@ user-provided criteria.
 
 DanTerm ships opt-in zsh, Bash, and fish integrations at
 `Contents/Resources/shell-integration/danterm.{zsh,bash,fish}`. They report
-command boundaries, cwd, and remote-session metadata to the owning pane. The
-`DANTERM_TOKEN` and `LC_DANTERM_TOKEN` values are private capabilities consumed
-by those integrations. Agents must never print, log, synthesize, or pass these
-values to commands; they are not pane ids and are not part of the CLI API.
+command boundaries, cwd, and remote-session metadata to the owning pane. Local
+integration is enabled by `DANTERM=1`; the bundled ssh/mosh wrappers forward
+`LC_DANTERM=1` so an installed remote integration can report host metadata.
 
 ## Derive targets
 

@@ -43,7 +43,7 @@ helper, fzf resized to 52 by 16, and each pager resized to 49 by 14.
 | zsh | Pass | Exact cursor-edited pipeline output, Unicode completion, stop/bg/fg/interrupt job control, 47x13 child geometry, prompt recovery |
 | Bash | Pass | Exact cursor-edited pipeline output, Unicode completion, stop/bg/fg/interrupt job control, 47x13 child geometry, prompt recovery |
 | fish | Pass | Exact cursor-edited pipeline output, Unicode completion, stop/bg/fg/interrupt job control, 47x13 child geometry, prompt recovery |
-| ssh | Pass | Authenticated remote shell events, magenta Unicode output, 43x12 and 101x37 remote geometry, normal disconnect and local prompt recovery |
+| ssh | Pass | Marker-enabled remote shell events, magenta Unicode output, 43x12 and 101x37 remote geometry, normal disconnect and local prompt recovery |
 | fzf | Pass | Unicode filtering, navigation to the non-default Greek-beta-plus-`ravo` candidate, resize, accept, alternate-screen and prompt recovery |
 | more | Pass | Long Unicode corpus search, forward/backward navigation across resize, quit and prompt recovery |
 | less | Pass | Long Unicode corpus search, forward/backward navigation across resize, quit and prompt recovery |
@@ -55,8 +55,8 @@ disconnect.
 
 The SSH workflow used a generated per-run host key and client key, an
 unprivileged loopback sshd, an isolated known-hosts file, no agent or password
-authentication, no user SSH configuration, and only `LC_DANTERM_TOKEN` via
-`AcceptEnv`. After every workflow, the ownership census reported the pane
+authentication, no user SSH configuration, and only the `LC_DANTERM=1` marker
+via `AcceptEnv`. After every workflow, the ownership census reported the pane
 session, PTY owner, descriptors, and dispatch sources released. The sshd trap
 also waited for the per-run server during harness exit.
 

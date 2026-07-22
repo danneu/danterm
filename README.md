@@ -453,10 +453,10 @@ services.openssh.settings.AcceptEnv = "LC_*";
 ```
 
 `AcceptEnv LANG LC_*` is also fine if you want normal locale forwarding. DanTerm
-only requires `LC_*`, because it forwards the per-pane token as
-`LC_DANTERM_TOKEN` with `SendEnv`. If the remote does not accept or source the
-snippet, DanTerm still shows the compact remote accessory from the local
-`REMOTE_START` event, but the host label stays empty.
+only requires `LC_*`, because its ssh/mosh wrappers forward the integration
+marker as `LC_DANTERM=1` with `SendEnv`. If the remote does not accept or source
+the snippet, DanTerm still shows the compact remote accessory from the local
+`remote-start` event, but the host label stays empty.
 
 When changing the shell integrations, run:
 

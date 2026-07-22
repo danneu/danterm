@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "model": {
     "groups": [
       {
@@ -10,7 +10,11 @@
             "focusedPaneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
             "rootNode": {
               "type": "leaf",
-              "paneId": "A13076E4-A29C-4358-A771-B4B4DF84C6C5"
+              "pane": {
+                "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
+                "title": "Terminal",
+                "cwd": "~/world"
+              }
             }
           },
           {
@@ -18,7 +22,11 @@
             "focusedPaneId": "4A53A920-BC2E-4C8E-8242-267DC4F9BC2D",
             "rootNode": {
               "type": "leaf",
-              "paneId": "4A53A920-BC2E-4C8E-8242-267DC4F9BC2D"
+              "pane": {
+                "id": "4A53A920-BC2E-4C8E-8242-267DC4F9BC2D",
+                "title": "Terminal",
+                "cwd": "~/world"
+              }
             }
           },
           {
@@ -32,11 +40,19 @@
                 "direction": "vertical",
                 "first": {
                   "type": "leaf",
-                  "paneId": "D4E5F6A7-B8C9-4D0E-AF12-3B4C5D6E7F80"
+                  "pane": {
+                    "id": "D4E5F6A7-B8C9-4D0E-AF12-3B4C5D6E7F80",
+                    "title": "Terminal",
+                    "cwd": "~/world"
+                  }
                 },
                 "second": {
                   "type": "leaf",
-                  "paneId": "F6A7B8C9-D0E1-4F20-C134-5D6E7F8A91B2"
+                  "pane": {
+                    "id": "F6A7B8C9-D0E1-4F20-C134-5D6E7F8A91B2",
+                    "title": "Terminal",
+                    "cwd": "~/world/my-apps/danterm"
+                  }
                 }
               },
               "second": {
@@ -44,11 +60,19 @@
                 "direction": "vertical",
                 "first": {
                   "type": "leaf",
-                  "paneId": "E5F6A7B8-C9D0-4E1F-B023-4C5D6E7F8A91"
+                  "pane": {
+                    "id": "E5F6A7B8-C9D0-4E1F-B023-4C5D6E7F8A91",
+                    "title": "Terminal",
+                    "cwd": "~/world"
+                  }
                 },
                 "second": {
                   "type": "leaf",
-                  "paneId": "A1B2C3D4-E5F6-4A7B-8C9D-0E1F2A3B4C5D"
+                  "pane": {
+                    "id": "A1B2C3D4-E5F6-4A7B-8C9D-0E1F2A3B4C5D",
+                    "title": "Terminal",
+                    "cwd": "~/world/my-apps/danterm"
+                  }
                 }
               }
             }
@@ -63,7 +87,11 @@
             "focusedPaneId": "2A5C2AF9-CBE2-4934-8573-8204875F079D",
             "rootNode": {
               "type": "leaf",
-              "paneId": "2A5C2AF9-CBE2-4934-8573-8204875F079D"
+              "pane": {
+                "id": "2A5C2AF9-CBE2-4934-8573-8204875F079D",
+                "title": "Terminal",
+                "cwd": "~/Code/Recontrol"
+              }
             }
           },
           {
@@ -71,76 +99,14 @@
             "focusedPaneId": "2F69A409-70D6-4E73-A5F8-E54022AA327C",
             "rootNode": {
               "type": "leaf",
-              "paneId": "2F69A409-70D6-4E73-A5F8-E54022AA327C"
+              "pane": {
+                "id": "2F69A409-70D6-4E73-A5F8-E54022AA327C",
+                "title": "Terminal",
+                "cwd": "~/Code/Recontrol"
+              }
             }
           }
         ]
-      }
-    ],
-    "panes": [
-      {
-        "id": "A13076E4-A29C-4358-A771-B4B4DF84C6C5",
-        "title": "Terminal",
-        "cwd": "~/world"
-      },
-      {
-        "id": "2A5C2AF9-CBE2-4934-8573-8204875F079D",
-        "title": "Terminal",
-        "cwd": "~/Code/Recontrol",
-        "launch": {
-          "command": "lazygit",
-          "cwd": "~/Code/Recontrol"
-        }
-      },
-      {
-        "id": "4A53A920-BC2E-4C8E-8242-267DC4F9BC2D",
-        "title": "Terminal",
-        "cwd": "~/world",
-        "launch": {
-          "command": "htop",
-          "cwd": "~/world"
-        }
-      },
-      {
-        "id": "2F69A409-70D6-4E73-A5F8-E54022AA327C",
-        "title": "Terminal",
-        "cwd": "~/Code/Recontrol",
-        "launch": {
-          "command": "vim README.md",
-          "cwd": "~/Code/Recontrol"
-        }
-      },
-      {
-        "id": "D4E5F6A7-B8C9-4D0E-AF12-3B4C5D6E7F80",
-        "title": "Terminal",
-        "launch": {
-          "command": "claude \"Say cheese\"",
-          "cwd": "~/world"
-        }
-      },
-      {
-        "id": "F6A7B8C9-D0E1-4F20-C134-5D6E7F8A91B2",
-        "title": "Terminal",
-        "launch": {
-          "command": "vim README.md",
-          "cwd": "~/world/my-apps/danterm"
-        }
-      },
-      {
-        "id": "E5F6A7B8-C9D0-4E1F-B023-4C5D6E7F8A91",
-        "title": "Terminal",
-        "launch": {
-          "command": "ssh dan@silverstone.local",
-          "cwd": "~/world"
-        }
-      },
-      {
-        "id": "A1B2C3D4-E5F6-4A7B-8C9D-0E1F2A3B4C5D",
-        "title": "Terminal",
-        "launch": {
-          "command": "lazygit",
-          "cwd": "~/world/my-apps/danterm"
-        }
       }
     ],
     "selectedTabId": "C1D2E3F4-A1B2-4C3D-9E8F-1A2B3C4D5E6F"
