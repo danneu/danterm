@@ -11,7 +11,7 @@ import TerminalRenderPlanning
 #endif
 
 /// Adapts one headless Swift terminal controller into DanTerm's AppKit pane contract.
-final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession {
+final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValidation, TerminalSession {
     private let controller: TerminalPaneSessionController
     private let callbackGate = TerminalSessionCallbackGate()
     private let wheelNormalizer = TerminalWheelNormalizer()
@@ -427,6 +427,21 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
     private func writeClipboard(_ text: String) {
         selectionPasteboard.clearContents()
         selectionPasteboard.setString(text, forType: .string)
+    }
+
+    /// NSResponder: routes the standard Edit > Copy action, which is what gives the pane Cmd-C.
+    /// `keyDown` deliberately drops Command-modified keys, so this responder-chain method is the
+    /// only owner of the shortcut in the Swift engine.
+    @objc func copy(_ sender: Any?) {
+        copySelection()
+    }
+
+    /// NSMenuItemValidation: greys out Edit > Copy when nothing is selected. Reads the cache-only
+    /// `hasSelection` rather than fencing, because menu tracking must not block on the render
+    /// owner; every other action is left enabled so unrelated items keep their own validation.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard menuItem.action == #selector(copy(_:)) else { return true }
+        return hasSelection
     }
 
     /// NSResponder: routes the standard Edit > Paste action through terminal paste policy.

@@ -206,6 +206,61 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(pane.hasSelection, "cached selection did not refresh after fenced copy")
     }
 
+    uiTest("Edit > Copy routes through the responder chain and validates on cached selection") {
+        // Intent: the standard `copy(_:)` action copies the selection, and Edit > Copy is
+        //   enabled only while a selection exists, without disturbing Paste.
+        // Why it exists: the Swift engine declines Command keys in `keyDown`, so Cmd-C only
+        //   works if the pane owns `copy(_:)` on the responder chain; over-broad validation
+        //   would silently disable unrelated Edit items such as Paste.
+        // Scenario: a user drag-selects output, presses Cmd-C, then clicks to clear it.
+        let controller = TerminalPaneSessionController()
+        controller.selectedTextOnFence = "beta"
+        let pane = makeMountedPane(controller: controller)
+        let pasteboard = NSPasteboard(name: .init("danterm.swift-menu-copy-test"))
+        pasteboard.clearContents()
+        pane.selectionPasteboard = pasteboard
+        let copyItem = NSMenuItem(
+            title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"
+        )
+        let pasteItem = NSMenuItem(
+            title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"
+        )
+
+        try uiExpect(pane.validateMenuItem(copyItem) == false,
+                     "Copy was enabled with no selection")
+        try uiExpect(pane.validateMenuItem(pasteItem), "Paste was disabled by copy validation")
+
+        pane.mouseDown(with: try makeMouseEvent(
+            type: .leftMouseDown,
+            location: .init(x: 1, y: 159)
+        ))
+        pane.mouseUp(with: try makeMouseEvent(
+            type: .leftMouseUp,
+            location: .init(x: 17, y: 159)
+        ))
+        pane.copy(nil)
+
+        try uiExpect(pasteboard.string(forType: .string) == "beta",
+                     "responder-chain copy missed finalized text")
+        try uiExpect(pane.validateMenuItem(copyItem), "Copy stayed disabled with a selection")
+        try uiExpect(pane.validateMenuItem(pasteItem), "Paste validation tracked the selection")
+    }
+
+    uiTest("Command-modified keys produce no terminal input") {
+        // Intent: Cmd-C is owned by the menu/responder chain and never encoded as terminal input.
+        // Why it exists: a fix that reintroduced a Command branch in `keyDown` would send a
+        //   stray byte to the shell whenever the shortcut fell through.
+        // Scenario: the user presses Cmd-C on a mounted pane with no selection.
+        let controller = TerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+        let before = controller.inputBytes
+
+        pane.keyDown(with: try makeKeyEvent(keyCode: 8, modifiers: [.command], characters: "c"))
+
+        try uiExpect(controller.inputBytes == before,
+                     "Command-c leaked terminal input: \(controller.inputBytes)")
+    }
+
     uiTest("OSC 52 writes and empty clears reach the injected pasteboard") {
         // Intent: delivered terminal clipboard effects write only at the AppKit boundary.
         // Why it exists: presentation gating and top-level model routing must not own OSC 52 data.
