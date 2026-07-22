@@ -7,6 +7,25 @@ import TerminalCoreRecording
 
 /// Keeps the first complete Swift-pane workflow in the default headless regression gate.
 struct DanTermRecordingFixtureTests {
+    @Test("captured zsh OSC 133 width sweep remains chunk invariant without stale prompts")
+    func zshOSC133WidthSweepRecording() throws {
+        // Intent: replay the diagnosed zsh repaint byte pattern across interleaved resizes.
+        // Why it exists: a final-state-only synthetic feed misses the resize/repaint ordering
+        //   that produced the split-pane prompt staircase.
+        // Scenario: AppKit emits several intermediate split widths and zsh redraws its
+        //   two-line semantic prompt after each SIGWINCH.
+        let recording = try loadRecording(named: "zsh-osc133-width-sweep")
+        try recording.provenance.validate()
+        let authored = try recording.replay()
+        let bytewise = try replay(recording, strategy: .bytewise)
+        let split = try replay(recording, strategy: .split)
+
+        #expect(bytewise == authored)
+        #expect(split == authored)
+        #expect(authored.fullHistoryText.components(separatedBy: "ABCDEFGHIJKL").count - 1 == 1)
+        expectValidGrid(authored)
+    }
+
     @Test("fish title hook with U+2733 never leaks control-string bytes")
     func fishU2733TitleRecording() throws {
         // Intent: replay the fish title hook and matching program output without allowing

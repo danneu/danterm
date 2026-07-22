@@ -1,0 +1,21 @@
+{
+  "events": [
+    { "hex": "1b5d3133333b41074142434445464748494a4b4c0d0a3e201b5d3133333b4207", "type": "feed" },
+    { "columns": 11, "rows": 5, "type": "resize" },
+    { "hex": "0d0d1b5b411b5b4b1b5d3133333b41074142434445464748494a4b4c0d0a3e201b5d3133333b42071b5b4a", "type": "feed" },
+    { "columns": 10, "rows": 5, "type": "resize" },
+    { "hex": "0d0d1b5b411b5b4b1b5d3133333b41074142434445464748494a4b4c0d0a3e201b5d3133333b42071b5b4a", "type": "feed" },
+    { "columns": 9, "rows": 5, "type": "resize" },
+    { "hex": "0d0d1b5b411b5b4b1b5d3133333b41074142434445464748494a4b4c0d0a3e201b5d3133333b42071b5b4a", "type": "feed" },
+    { "columns": 12, "rows": 5, "type": "resize" },
+    { "hex": "0d0d1b5b411b5b4b1b5d3133333b41074142434445464748494a4b4c0d0a3e201b5d3133333b42071b5b4a", "type": "feed" }
+  ],
+  "initial": { "columns": 12, "rows": 5 },
+  "provenance": {
+    "author": "DanTerm",
+    "recordedDeviations": [],
+    "source": "danterm",
+    "test": "zsh-osc133-width-sweep"
+  },
+  "version": 1
+}

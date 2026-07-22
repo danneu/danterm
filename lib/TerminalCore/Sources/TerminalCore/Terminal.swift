@@ -41,10 +41,32 @@ public struct Terminal: Equatable, Sendable {
         var contentIdentity: Int?
     }
 
-    /// Moves soft-wrap identity with its cells during viewport scrolling.
+    /// Moves row-level wrap and semantic-prompt identity with cells during scrolling.
     private struct GridRow: Equatable, Sendable {
         var cells: [GridCell]
         var isSoftWrapped = false
+        var semanticPrompt = SemanticPromptRow.none
+    }
+
+    /// Marks only the rows needed to find and preserve a shell-redraw prompt block.
+    private enum SemanticPromptRow: Equatable, Sendable {
+        case none
+        case prompt
+        case continuation
+    }
+
+    /// Tracks whether subsequent output belongs to command output, a prompt, or input.
+    private enum SemanticContent: Equatable, Sendable {
+        case output
+        case prompt
+        case input
+    }
+
+    /// Selects the OSC 133 prompt range a capable shell promises to redraw.
+    private enum PromptRedrawMode: Equatable, Sendable {
+        case disabled
+        case full
+        case last
     }
 
     /// Captures non-grid presentation state around one parser action in constant time.
@@ -216,11 +238,13 @@ public struct Terminal: Equatable, Sendable {
         var breakState = GraphemeBreakState()
     }
 
-    /// Retains primary cells and their private reflow anchor while the alternate grid is active.
+    /// Retains primary cells and resize-only cursor semantics while the alternate grid is active.
     private struct InactivePrimaryScreen: Equatable, Sendable {
         var rows: [GridRow]
         var resizeCursor: CellPosition
         var isResizePendingWrap: Bool
+        var semanticContent: SemanticContent
+        var semanticContentClearsAtEndOfLine: Bool
     }
 
     /// Carries one atomic cell unit and the old coordinates that must follow it.
@@ -229,9 +253,10 @@ public struct Terminal: Equatable, Sendable {
         var sourceOffsets: [(key: Int, offset: Int)]
     }
 
-    /// Reconstructs one hard-delimited logical line only for the duration of reflow.
+    /// Reconstructs one hard-delimited logical line and its prompt marker during reflow.
     private struct ReflowLine {
         var units: [ReflowUnit] = []
+        var semanticPrompt = SemanticPromptRow.none
     }
 
     /// Relates an old visual row to its transient logical line and boundary.
@@ -272,6 +297,9 @@ public struct Terminal: Equatable, Sendable {
     private var scrollRegion: Range<Int>?
     private var cursor = CellPosition(row: 0, column: 0)
     private var isPendingWrap = false
+    private var semanticContent = SemanticContent.output
+    private var semanticContentClearsAtEndOfLine = false
+    private var promptRedrawMode = PromptRedrawMode.full
     private var isInsertMode = false
     private var isLineFeedNewLineMode = false
     private var isApplicationCursorKeysMode = false
@@ -586,6 +614,8 @@ public struct Terminal: Equatable, Sendable {
             dispatchOSC9(payload, selectorEnd: selectorEnd)
         case 52:
             dispatchOSC52(payload, selectorEnd: selectorEnd)
+        case 133:
+            dispatchOSC133(payload, selectorEnd: selectorEnd)
         case 1337:
             dispatchDanTermShell(payload, selectorEnd: selectorEnd)
         case 777:
@@ -593,6 +623,85 @@ public struct Terminal: Equatable, Sendable {
         default:
             break
         }
+    }
+
+    private mutating func dispatchOSC133(_ payload: [UInt8], selectorEnd: Int) {
+        let command = Array(payload[payload.index(after: selectorEnd)...])
+        guard let action = command.first else { return }
+        if action == 0x4C { // L takes no options.
+            guard command.count == 1 else { return }
+        } else {
+            guard [0x41, 0x42, 0x49, 0x43, 0x44, 0x4E, 0x50].contains(action),
+                  command.count == 1 || command[1] == 0x3B
+            else { return }
+        }
+
+        let options = command.count > 2 ? Array(command.dropFirst(2)) : []
+        switch action {
+        case 0x41, 0x4E: // A, N
+            semanticPromptFreshLine()
+            setSemanticPrompt(kind: semanticPromptKind(in: options))
+            if let redraw = semanticPromptOption("redraw", in: options) {
+                switch redraw {
+                case "0": promptRedrawMode = .disabled
+                case "1": promptRedrawMode = .full
+                case "last": promptRedrawMode = .last
+                default: break
+                }
+            }
+        case 0x50: // P
+            setSemanticPrompt(kind: semanticPromptKind(in: options))
+        case 0x42: // B
+            semanticContent = .input
+            semanticContentClearsAtEndOfLine = false
+        case 0x49: // I
+            semanticContent = .input
+            semanticContentClearsAtEndOfLine = true
+        case 0x43: // C
+            semanticContent = .output
+            semanticContentClearsAtEndOfLine = false
+            if cursor.column == 0, rows[cursor.row].semanticPrompt != .none {
+                rows[cursor.row].semanticPrompt = .none
+            }
+        case 0x44: // D
+            semanticContent = .output
+            semanticContentClearsAtEndOfLine = false
+        case 0x4C: // L
+            semanticPromptFreshLine()
+        default:
+            break
+        }
+    }
+
+    private mutating func semanticPromptFreshLine() {
+        guard cursor.column != 0 else { return }
+        cursor.column = 0
+        clearPendingMotionState()
+        lineFeed()
+    }
+
+    private mutating func setSemanticPrompt(kind: SemanticPromptRow) {
+        semanticContent = .prompt
+        semanticContentClearsAtEndOfLine = false
+        rows[cursor.row].semanticPrompt = kind
+    }
+
+    private func semanticPromptKind(in options: [UInt8]) -> SemanticPromptRow {
+        switch semanticPromptOption("k", in: options) {
+        case "c", "s": .continuation
+        default: .prompt
+        }
+    }
+
+    private func semanticPromptOption(_ key: String, in options: [UInt8]) -> String? {
+        let keyBytes = Array(key.utf8)
+        for field in options.split(separator: 0x3B, omittingEmptySubsequences: false) {
+            guard let equals = field.firstIndex(of: 0x3D),
+                  Array(field[..<equals]) == keyBytes
+            else { continue }
+            return String(decoding: field[field.index(after: equals)...], as: UTF8.self)
+        }
+        return nil
     }
 
     private var hasPendingSemanticEvents: Bool {
@@ -1051,14 +1160,21 @@ public struct Terminal: Equatable, Sendable {
             let alternateRows = self.rows
             let liveCursor = cursor
             let livePendingWrap = isPendingWrap
+            let liveSemanticContent = semanticContent
+            let liveSemanticContentClearsAtEndOfLine = semanticContentClearsAtEndOfLine
 
             self.rows = primary.rows
             cursor = primary.resizeCursor
             isPendingWrap = primary.isResizePendingWrap
+            semanticContent = primary.semanticContent
+            semanticContentClearsAtEndOfLine = primary.semanticContentClearsAtEndOfLine
+            clearPromptForResizeIfNeeded()
             resizePrimaryScreen(columns: columns, rows: rows)
             primary.rows = self.rows
             primary.resizeCursor = cursor
             primary.isResizePendingWrap = isPendingWrap
+            primary.semanticContent = semanticContent
+            primary.semanticContentClearsAtEndOfLine = semanticContentClearsAtEndOfLine
 
             self.rows = resizedRectangle(
                 alternateRows,
@@ -1068,13 +1184,44 @@ public struct Terminal: Equatable, Sendable {
             )
             cursor = liveCursor
             isPendingWrap = livePendingWrap
+            semanticContent = liveSemanticContent
+            semanticContentClearsAtEndOfLine = liveSemanticContentClearsAtEndOfLine
             inactivePrimaryScreen = primary
         } else {
+            clearPromptForResizeIfNeeded()
             resizePrimaryScreen(columns: columns, rows: rows)
         }
 
         clampCursorStateToActiveGrid()
         clampSelectionToRetainedStream()
+        clusterContext = nil
+    }
+
+    private mutating func clearPromptForResizeIfNeeded() {
+        guard promptRedrawMode != .disabled, semanticContent != .output else { return }
+        if promptRedrawMode == .last {
+            clearPromptCells(in: cursor.row)
+            return
+        }
+
+        var start = cursor.row
+        while start >= 0 {
+            switch rows[start].semanticPrompt {
+            case .prompt:
+                for row in start..<rowCount { clearPromptCells(in: row) }
+                return
+            case .continuation, .none:
+                start -= 1
+            }
+        }
+    }
+
+    private mutating func clearPromptCells(in row: Int) {
+        invalidateInspection(inViewportRows: row..<(row + 1))
+        let style = backgroundEraseStyle
+        for column in 0..<columnCount {
+            rows[row].cells[column] = GridCell(style: style)
+        }
         clusterContext = nil
     }
 
@@ -2511,7 +2658,8 @@ public struct Terminal: Equatable, Sendable {
             repairClippedCells(&cells, clearsSpacers: preservesSpacer == false)
             return GridRow(
                 cells: cells,
-                isSoftWrapped: clearsRowWrap ? false : source.isSoftWrapped
+                isSoftWrapped: clearsRowWrap ? false : source.isSoftWrapped,
+                semanticPrompt: source.semanticPrompt
             )
         }
     }
@@ -2881,6 +3029,9 @@ public struct Terminal: Equatable, Sendable {
         var retainedSourceKeys = Set<Int>()
 
         for (rowIndex, row) in sourceRows.enumerated() {
+            if currentLine.semanticPrompt == .none || row.semanticPrompt == .prompt {
+                currentLine.semanticPrompt = row.semanticPrompt
+            }
             let retainedEnd = retainedContentEnd(in: row)
             let iterationEnd = row.isSoftWrapped ? oldColumnCount : retainedEnd
             var column = 0
@@ -2998,6 +3149,7 @@ public struct Terminal: Equatable, Sendable {
 
     private func pack(line: ReflowLine, columns: Int) -> PackedReflowLine {
         var packedRows = [makeBlankRow(columns: columns)]
+        packedRows[0].semanticPrompt = line.semanticPrompt
         var cellDestinations: [Int: ReflowDestination] = [:]
         var boundaryDestinations = [
             0: ReflowDestination(row: 0, column: 0, isPendingWrap: false),
@@ -3012,6 +3164,9 @@ public struct Terminal: Equatable, Sendable {
                 packedRows.append(makeBlankRow(columns: columns))
                 row += 1
                 column = 0
+                if line.semanticPrompt != .none {
+                    packedRows[row].semanticPrompt = .continuation
+                }
             }
             if unit.cells.count == 2, columns - column == 1 {
                 packedRows[row].cells[column] = GridCell(
@@ -3025,6 +3180,9 @@ public struct Terminal: Equatable, Sendable {
                 packedRows.append(makeBlankRow(columns: columns))
                 row += 1
                 column = 0
+                if line.semanticPrompt != .none {
+                    packedRows[row].semanticPrompt = .continuation
+                }
             }
 
             for (offset, cell) in unit.cells.enumerated() {
@@ -3679,6 +3837,7 @@ public struct Terminal: Equatable, Sendable {
     private mutating func eraseEntireRow(_ row: Int) {
         eraseCells(row: row, columns: 0..<columnCount)
         rows[row].isSoftWrapped = false
+        rows[row].semanticPrompt = .none
     }
 
     private func movementAmount(_ parameters: [UInt16]) -> Int? {
@@ -3851,15 +4010,21 @@ public struct Terminal: Equatable, Sendable {
                 inactivePrimaryScreen = InactivePrimaryScreen(
                     rows: rows,
                     resizeCursor: cursor,
-                    isResizePendingWrap: isPendingWrap
+                    isResizePendingWrap: isPendingWrap,
+                    semanticContent: semanticContent,
+                    semanticContentClearsAtEndOfLine: semanticContentClearsAtEndOfLine
                 )
             }
             rows = (0..<rowCount).map { _ in
                 makeBlankRow(columns: columnCount, style: backgroundEraseStyle)
             }
+            semanticContent = .output
+            semanticContentClearsAtEndOfLine = false
         } else if let primary = inactivePrimaryScreen {
             clearInspection()
             rows = primary.rows
+            semanticContent = primary.semanticContent
+            semanticContentClearsAtEndOfLine = primary.semanticContentClearsAtEndOfLine
             inactivePrimaryScreen = nil
         }
         clearPendingMotionState()
@@ -3870,6 +4035,8 @@ public struct Terminal: Equatable, Sendable {
         damage = .full
         clearInspection()
         rows = primary.rows
+        semanticContent = primary.semanticContent
+        semanticContentClearsAtEndOfLine = primary.semanticContentClearsAtEndOfLine
         inactivePrimaryScreen = nil
     }
 
@@ -3937,6 +4104,9 @@ public struct Terminal: Equatable, Sendable {
         cursor = CellPosition(row: 0, column: 0)
         clearPendingMotionState()
         lastPrintedCluster = nil
+        semanticContent = .output
+        semanticContentClearsAtEndOfLine = false
+        promptRedrawMode = .full
 
         let style = backgroundEraseStyle
         severWrapClaim(before: 0, replacementStyle: style)
@@ -4293,12 +4463,23 @@ public struct Terminal: Equatable, Sendable {
         rows[cursor.row].isSoftWrapped = true
         advanceToNextRow(preservingWrapClaim: true)
         cursor.column = 0
+        stampSemanticContinuationAfterLineAdvance()
         isPendingWrap = false
         clusterContext = nil
     }
 
     private mutating func lineFeed() {
         advanceToNextRow()
+        stampSemanticContinuationAfterLineAdvance()
+    }
+
+    private mutating func stampSemanticContinuationAfterLineAdvance() {
+        if semanticContentClearsAtEndOfLine {
+            semanticContent = .output
+            semanticContentClearsAtEndOfLine = false
+        } else if semanticContent == .prompt || semanticContent == .input {
+            rows[cursor.row].semanticPrompt = .continuation
+        }
     }
 
     private mutating func advanceToNextRow(preservingWrapClaim: Bool = false) {

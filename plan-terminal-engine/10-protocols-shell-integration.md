@@ -38,6 +38,7 @@ compatibility target, including:
 - bounded OSC 52 clipboard writes with reads denied
 - desktop notifications used by DanTerm integrations
 - progress reporting used by DanTerm
+- OSC 133 semantic prompt tracking and shell redraw on primary-screen resize
 - synchronized updates
 - legacy xterm and Kitty keyboard negotiation
 

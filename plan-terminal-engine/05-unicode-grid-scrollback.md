@@ -35,8 +35,10 @@ visual rows at the new width. At the live bottom, a height shrink moves rows
 displaced above the viewport into scrollback, while growth pulls the newest
 eligible primary rows back from scrollback before adding blank rows. Resize does
 not duplicate or discard logical content except through ordinary 10 MiB
-eviction. A viewport browsing older content follows the stable-anchor contract
-in [Input and interaction](08-input-interaction.md).
+eviction or OSC 133 prompt/input rows blanked before reflow when the shell has
+promised to redraw them after SIGWINCH. A viewport browsing older content
+follows the stable-anchor contract in
+[Input and interaction](08-input-interaction.md).
 
 Alternate-screen resize does not reflow and never contributes rows to primary
 history. Cells inside the resized rectangle retain their coordinates; shrink
@@ -54,7 +56,8 @@ primary screen independently follows the primary resize contract above.
 - Reflow changes visual wrapping without changing logical text or hard line
   boundaries.
 - Primary-screen resize preserves the cursor's logical cell boundary and the
-  combined logical content of retained history and active rows.
+  combined logical content of retained history and active rows, except for the
+  explicit OSC 133 shell-redraw prompt/input range.
 - Alternate-screen resize preserves valid cells, cursors, and margins without
   reflowing or transferring alternate content into primary history.
 - Selection and search positions remain attached to logical content across

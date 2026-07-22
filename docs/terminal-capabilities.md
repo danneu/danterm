@@ -80,10 +80,15 @@ Supported protocol families, with their evidence suite:
 | `title-cwd-notifications-progress` | TerminalSemanticEventTests |
 | `http-https-hyperlinks` | TerminalHyperlinkTests |
 | `clipboard-write-read-denial` | TerminalOSC52Tests |
+| `osc-133-semantic-prompt-redraw` | TerminalOSC133Tests, DanTermRecordingFixtureTests |
 | `tokenless-shell-events` | TerminalShellEventTests |
 
 Denied: `audible-bell`, `clipboard-read`, `da2`, `decrqss`, `kitty-osc-99`,
-`osc-133`, `sixel`, `xtgettcap`, `eight-bit-replies`.
+`sixel`, `xtgettcap`, `eight-bit-replies`.
+
+OSC 133 support is engine-internal: semantic prompt/input state lets a shell
+redraw its prompt cleanly after resize. DanTerm does not expose semantic events,
+per-cell semantics, click-to-move, or prompt navigation from this protocol.
 
 ## Child environment
 
@@ -116,7 +121,7 @@ canonical padded base64 and strict UTF-8. Shell integrations emit when either
 DanTerm supports the query, mode, keyboard, mouse, focus, title, cwd, hyperlink,
 clipboard-write, shell-event, notification, progress, and bell families listed
 under "Protocols" above. The denied list is explicit, including DA2, DECRQSS,
-XTGETTCAP, clipboard reads, Kitty OSC 99, OSC 133, 8-bit replies, and audible
+XTGETTCAP, clipboard reads, Kitty OSC 99, 8-bit replies, and audible
 or visual bell effects.
 
 `CSI > q` and `CSI > 0 q` return `DCS >|DanTerm <version> ST`. The accepted
