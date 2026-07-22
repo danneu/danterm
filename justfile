@@ -74,13 +74,13 @@ test-terminal-characterization:
 test-terminal-viability:
     ./scripts/terminal-viability.sh
 
-# Benchmark one real-app terminal workload against the selected backend.
-benchmark-one workload="plain-scrolling" backend="swift":
-    ./scripts/terminal-benchmark.sh "{{workload}}" "{{backend}}"
+# Benchmark one workload, then prompt to save; pass save=1 or save=0 to decide up front.
+benchmark-one workload="plain-scrolling" backend="swift" save="":
+    python3 ./scripts/terminal-benchmark-suite.py "{{backend}}" "workload={{workload}}" "save={{save}}"
 
-# Run repeated real-app corpus measurements and append compatible history.
-benchmark backend="swift":
-    python3 ./scripts/terminal-benchmark-suite.py "{{backend}}"
+# Benchmark the corpus, then prompt to save; pass save=1 or save=0 to decide up front.
+benchmark backend="swift" save="":
+    python3 ./scripts/terminal-benchmark-suite.py "{{backend}}" "save={{save}}"
 
 # Run one isolated workload continuously and publish its exact app pid.
 benchmark-loop workload="plain-scrolling" backend="swift":

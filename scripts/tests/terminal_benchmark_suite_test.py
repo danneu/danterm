@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Behavioral tests for benchmark aggregation and compatible history lookup."""
 import importlib.util
+import io
 import json
 import pathlib
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from unittest import mock
 
 
@@ -28,6 +30,27 @@ FIXTURE_SPEC.loader.exec_module(FIXTURES)
 
 
 class TerminalBenchmarkSuiteTests(unittest.TestCase):
+    def make_result(self, workload="plain-scrolling", iterations=3):
+        return {
+            "schemaVersion": 2,
+            "backend": "swift",
+            "workload": workload,
+            "fixture": {"identity": f"{workload}-v1"},
+            "machine": {"model": "model", "chip": "chip"},
+            "macOS": "15.5",
+            "displayScale": 2.0,
+            "toolchain": "Swift 6.1",
+            "buildConfiguration": "release",
+            "geometry": {"columns": 80, "rows": 24},
+            "profilingActive": False,
+            "iterations": iterations,
+            "summary": {
+                "iterations": iterations,
+                "producerWriteNanoseconds": {"min": 75, "median": 75, "max": 75},
+                "finalDrawNanoseconds": {"available": True, "min": 100, "median": 100, "max": 100},
+            },
+        }
+
     def test_corpus_loads_every_provenance_bearing_workload(self):
         corpus = FIXTURES.load_corpus(ROOT)
 
@@ -84,6 +107,28 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
     def test_backend_accepts_just_named_argument_spelling(self):
         self.assertEqual(SUITE.parse_backend("backend=swift"), "swift")
 
+    def test_arguments_select_save_policy_and_workload(self):
+        self.assertEqual(SUITE.parse_arguments(["backend=swift", "save=1"]), ("swift", None, True))
+        self.assertEqual(SUITE.parse_arguments(["swift", "save=0"]), ("swift", None, False))
+        self.assertEqual(
+            SUITE.parse_arguments(["swift", "workload=plain-scrolling", "save="]),
+            ("swift", "plain-scrolling", None),
+        )
+        with self.assertRaisesRegex(ValueError, "save must be 0 or 1"):
+            SUITE.parse_arguments(["swift", "save=yes"])
+        with self.assertRaisesRegex(ValueError, "unknown benchmark workload"):
+            SUITE.parse_arguments(["swift", "workload=not-committed"])
+
+    def test_prompt_accepts_only_trimmed_yes_answers(self):
+        for answer in ("y", "Y", "yes", " YES "):
+            with self.subTest(answer=answer), mock.patch("builtins.input", return_value=answer):
+                self.assertTrue(SUITE.confirm_save())
+        for answer in ("", "n", "maybe"):
+            with self.subTest(answer=answer), mock.patch("builtins.input", return_value=answer):
+                self.assertFalse(SUITE.confirm_save())
+        with mock.patch("builtins.input", side_effect=EOFError):
+            self.assertFalse(SUITE.confirm_save())
+
     def test_distribution_summarizes_each_available_metric(self):
         runs = [
             {"producerWrite": {"elapsedNanoseconds": 30}, "finalDraw": {"available": True, "elapsedNanoseconds": 90}},
@@ -124,6 +169,7 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
             "buildConfiguration": "release",
             "geometry": {"windowWidth": 1000, "windowHeight": 600},
             "profilingActive": False,
+            "iterations": 3,
         }
         compatible_old = {**key, "commit": "old", "summary": {"producerWriteNanoseconds": {"median": 100}}}
         wrong_scale = {**key, "displayScale": 1.0, "commit": "wrong"}
@@ -136,6 +182,19 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
             SUITE.append_result(history, compatible_new)
 
             self.assertEqual(SUITE.latest_compatible(history, key)["commit"], "new")
+
+    def test_iteration_count_is_required_for_compatibility(self):
+        current = self.make_result(iterations=3)
+        wrong = self.make_result(iterations=2)
+        matching = self.make_result(iterations=3)
+        wrong["commit"] = "wrong"
+        matching["commit"] = "matching"
+
+        self.assertEqual(
+            SUITE.latest_compatible_lines([json.dumps(wrong), json.dumps(matching)], current)["commit"],
+            "matching",
+        )
+        self.assertIsNone(SUITE.latest_compatible_lines([json.dumps(wrong)], current))
 
     def test_older_schema_record_is_not_a_compatible_baseline(self):
         current = {
@@ -150,6 +209,7 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
             "buildConfiguration": "release",
             "geometry": {"columns": 80, "rows": 24},
             "profilingActive": False,
+            "iterations": 3,
         }
 
         self.assertIsNone(SUITE.latest_compatible_lines(['{"schemaVersion":1}'], current))
@@ -167,6 +227,7 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
             "buildConfiguration": "release",
             "geometry": {"columns": 80, "rows": 24},
             "profilingActive": False,
+            "iterations": 3,
         }
         committed = {**current, "commit": "committed"}
         completed = subprocess.CompletedProcess(
@@ -182,6 +243,121 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
         previous = {"summary": {"producerWriteNanoseconds": {"median": 100}}}
 
         self.assertEqual(SUITE.delta_percent(current, previous, "producerWriteNanoseconds"), -25.0)
+
+    def test_promote_staged_results_appends_verbatim(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            staged = root / "staged.jsonl"
+            history = root / "history.jsonl"
+            history.write_text("prior\n", encoding="utf-8")
+            staged.write_text("first\nsecond\n", encoding="utf-8")
+
+            SUITE.promote_staged(staged, history)
+
+            self.assertEqual(history.read_text(encoding="utf-8"), "prior\nfirst\nsecond\n")
+
+    def test_report_prints_the_frozen_result_without_reserializing(self):
+        result = self.make_result()
+        frozen = SUITE.serialize_result(result)
+
+        with io.StringIO() as output, redirect_stdout(output):
+            SUITE.report(result, None, serialized=frozen)
+            printed = output.getvalue()
+
+        self.assertTrue(printed.startswith(frozen))
+        self.assertIn("delta: no compatible committed result", printed)
+
+    def run_main(self, arguments, answer=None, fail_on=None):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = pathlib.Path(temporary.name)
+        history = root / "history.jsonl"
+        staging = root / "staged"
+        made = []
+
+        def run_workload(workload, backend, iterations):
+            if workload == fail_on:
+                raise SystemExit("workload failed")
+            return [{"workload": workload}]
+
+        def make_result(workload, backend, runs):
+            result = self.make_result(workload)
+            made.append(result)
+            return result
+
+        patches = (
+            mock.patch.object(SUITE.sys, "argv", ["suite", *arguments]),
+            mock.patch.object(SUITE, "HISTORY_PATH", history),
+            mock.patch.object(SUITE, "STAGING_ROOT", staging),
+            mock.patch.object(SUITE, "run_workload", side_effect=run_workload),
+            mock.patch.object(SUITE, "make_result", side_effect=make_result),
+            mock.patch.object(SUITE, "latest_committed", return_value=None),
+            mock.patch.object(SUITE, "report"),
+            mock.patch("builtins.input", return_value=answer),
+        )
+        error = None
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6] as report, patches[7] as prompt:
+            try:
+                SUITE.main()
+            except SystemExit as caught:
+                error = caught
+        return history, staging, made, report, prompt, error
+
+    def test_prompted_yes_promotes_exact_staged_content(self):
+        history, staging, made, _, prompt, error = self.run_main(
+            ["swift", "workload=plain-scrolling"], answer="y"
+        )
+
+        self.assertIsNone(error)
+        self.assertTrue(prompt.called)
+        staged = next(staging.glob("*.jsonl"))
+        self.assertEqual(history.read_bytes(), staged.read_bytes())
+        self.assertEqual(json.loads(history.read_text(encoding="utf-8")), made[0])
+
+    def test_prompted_no_keeps_staged_content_and_history_untouched(self):
+        history, staging, _, _, prompt, error = self.run_main(
+            ["swift", "workload=plain-scrolling"], answer="n"
+        )
+
+        self.assertIsNone(error)
+        self.assertTrue(prompt.called)
+        self.assertFalse(history.exists())
+        self.assertEqual(len(list(staging.glob("*.jsonl"))), 1)
+
+    def test_explicit_save_values_never_prompt(self):
+        saved_history, _, _, _, saved_prompt, saved_error = self.run_main(
+            ["swift", "workload=plain-scrolling", "save=1"]
+        )
+        declined_history, _, _, _, declined_prompt, declined_error = self.run_main(
+            ["swift", "workload=plain-scrolling", "save=0"]
+        )
+
+        self.assertIsNone(saved_error)
+        self.assertIsNone(declined_error)
+        self.assertTrue(saved_history.exists())
+        self.assertFalse(declined_history.exists())
+        saved_prompt.assert_not_called()
+        declined_prompt.assert_not_called()
+
+    def test_failed_later_workload_does_not_prompt_or_touch_history(self):
+        history, staging, _, _, prompt, error = self.run_main(
+            ["swift"], answer="y", fail_on="long-line-wrapping"
+        )
+        self.assertRegex(str(error), "workload failed")
+        self.assertFalse(history.exists())
+        prompt.assert_not_called()
+        self.assertEqual(len(list(staging.glob("*.jsonl"))), 1)
+
+    def test_profiled_main_exits_before_prompt_run_or_write(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.dict(SUITE.os.environ, {"DANTERM_BENCHMARK_PROFILING": "1"}), mock.patch.object(
+                SUITE, "STAGING_ROOT", pathlib.Path(directory) / "staged"
+            ), mock.patch.object(SUITE, "run_workload") as run, mock.patch("builtins.input") as prompt:
+                with self.assertRaisesRegex(SystemExit, "Profiled runs cannot enter benchmark history"):
+                    SUITE.main()
+            run.assert_not_called()
+            prompt.assert_not_called()
+            self.assertFalse((pathlib.Path(directory) / "staged").exists())
 
 
 if __name__ == "__main__":

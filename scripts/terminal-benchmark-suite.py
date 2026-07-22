@@ -7,6 +7,7 @@ import pathlib
 import statistics
 import subprocess
 import sys
+import tempfile
 
 from terminal_benchmark_fixtures import load_corpus
 
@@ -17,6 +18,7 @@ WORKLOADS = load_corpus(ROOT)
 CORPUS = tuple(WORKLOADS)
 FIXTURES = {name: workload["identity"] for name, workload in WORKLOADS.items()}
 HISTORY_PATH = ROOT / "benchmarks" / "results" / "terminal-app.jsonl"
+STAGING_ROOT = ROOT / ".build" / "terminal-benchmark-staged"
 COMPATIBILITY_FIELDS = (
     "schemaVersion",
     "backend",
@@ -29,6 +31,7 @@ COMPATIBILITY_FIELDS = (
     "buildConfiguration",
     "geometry",
     "profilingActive",
+    "iterations",
 )
 
 
@@ -63,11 +66,32 @@ def compatibility_key(result):
     return {field: result[field] for field in COMPATIBILITY_FIELDS}
 
 
-def append_result(path, result):
+def append_result(path, result, serialized=None):
     """Append one versioned result without rewriting earlier committed measurements."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as stream:
-        stream.write(json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n")
+        stream.write(serialized if serialized is not None else serialize_result(result))
+
+
+def serialize_result(result):
+    """Freeze one completed run into the bytes used for staging and history."""
+    return json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n"
+
+
+def create_staged_path():
+    """Reserve a durable transient file before the first workload completes."""
+    STAGING_ROOT.mkdir(parents=True, exist_ok=True)
+    descriptor, name = tempfile.mkstemp(prefix="terminal-app-", suffix=".jsonl", dir=STAGING_ROOT)
+    os.close(descriptor)
+    return pathlib.Path(name)
+
+
+def promote_staged(staged_path, history_path):
+    """Append the exact staged bytes after the user confirms the completed run."""
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    with staged_path.open("rb") as source, history_path.open("ab") as destination:
+        while chunk := source.read(1024 * 1024):
+            destination.write(chunk)
 
 
 def latest_compatible(path, current):
@@ -123,6 +147,35 @@ def parse_backend(argument):
     return backend
 
 
+def parse_arguments(arguments):
+    """Parse the suite's backend, optional workload filter, and save policy."""
+    backend = parse_backend(arguments[0] if arguments else "swift")
+    workload = None
+    save = None
+    for argument in arguments[1:]:
+        if argument.startswith("workload="):
+            workload = argument.removeprefix("workload=")
+            if workload not in WORKLOADS:
+                raise ValueError(f"unknown benchmark workload: {workload}")
+        elif argument.startswith("save="):
+            value = argument.removeprefix("save=")
+            if value not in ("", "0", "1"):
+                raise ValueError("save must be 0 or 1")
+            save = {"": None, "0": False, "1": True}[value]
+        else:
+            raise ValueError(f"unknown argument: {argument}")
+    return backend, workload, save
+
+
+def confirm_save():
+    """Ask once after a successful run, defaulting every non-yes answer to no."""
+    try:
+        answer = input("Save these results to benchmark history? [y/N]")
+    except EOFError:
+        return False
+    return answer.strip().lower() in ("y", "yes")
+
+
 def refuse_profiled_history():
     """Keep diagnostic profiler timings out of append-only benchmark history."""
     if os.environ.get("DANTERM_BENCHMARK_PROFILING") == "1":
@@ -169,12 +222,13 @@ def make_result(workload, backend, runs):
         "buildConfiguration": "release",
         "geometry": runs[0]["geometry"],
         "profilingActive": False,
+        "iterations": len(runs),
         "summary": summarize_runs(runs),
     }
 
 
-def report(result, baseline):
-    print(json.dumps(result, indent=2, sort_keys=True))
+def report(result, baseline, serialized=None):
+    print((serialized if serialized is not None else serialize_result(result)).rstrip("\n"))
     if baseline is None:
         print("delta: no compatible committed result")
         return
@@ -187,17 +241,27 @@ def report(result, baseline):
 def main():
     refuse_profiled_history()
     try:
-        backend = parse_backend(sys.argv[1] if len(sys.argv) > 1 else "swift")
+        backend, workload_filter, save = parse_arguments(sys.argv[1:])
     except ValueError as error:
         raise SystemExit(str(error)) from error
     iterations = int(os.environ.get("DANTERM_BENCHMARK_ITERATIONS", "3"))
     if iterations < 2:
         raise SystemExit("DANTERM_BENCHMARK_ITERATIONS must be at least 2")
-    for workload in CORPUS:
+    workloads = (workload_filter,) if workload_filter is not None else CORPUS
+    staged_path = None
+    for workload in workloads:
         result = make_result(workload, backend, run_workload(workload, backend, iterations))
         baseline = latest_committed(result)
-        append_result(HISTORY_PATH, result)
-        report(result, baseline)
+        serialized = serialize_result(result)
+        if staged_path is None:
+            staged_path = create_staged_path()
+        append_result(staged_path, result, serialized=serialized)
+        report(result, baseline, serialized=serialized)
+    should_save = confirm_save() if save is None else save
+    if should_save:
+        promote_staged(staged_path, HISTORY_PATH)
+    else:
+        print(f"Results staged at {staged_path}")
 
 
 if __name__ == "__main__":

@@ -7,18 +7,26 @@ selects or terminates another DanTerm instance.
 
 ## Measure first
 
-Run `just benchmark backend=swift` for repeated corpus measurements. It appends
-unprofiled results to `benchmarks/results/terminal-app.jsonl` and reports deltas
-only against the latest committed entry with the same backend, fixture,
-machine, macOS version, display scale, Swift toolchain, release configuration,
-geometry, schema, and profiling state. Use `backend=ghostty` to measure the same
-PTY workload against Ghostty. A deliberate Swift-to-Ghostty comparison requires
-every compatibility field except backend to match.
+Run `just benchmark` for repeated Swift corpus measurements, or `just
+benchmark-one <workload>` for one workload with the same multi-iteration
+aggregation. Each command reports current timings and compatible committed
+deltas, then asks whether to save the completed run. Pass `save=1` to save
+without prompting or `save=0` to decline up front. Saving uses the already
+completed run; it never reruns the benchmark. Confirmed unprofiled results enter
+`benchmarks/results/terminal-app.jsonl`.
+
+Deltas use the latest committed entry with the same backend, fixture, machine,
+macOS version, display scale, Swift toolchain, release configuration, geometry,
+schema, profiling state, and iteration count. Omitting `backend` selects Swift.
+Use `backend=ghostty` explicitly only to establish or refresh the Ghostty
+baseline: after changing the pinned Ghostty version, benchmark fixtures,
+protocol or schema, or an environment compatibility field. A deliberate
+Swift-to-Ghostty comparison requires every compatibility field except backend
+to match.
 
 The committed corpus covers plain scrolling, long-line wrapping, mixed Unicode,
 dense style and truecolor changes, full redraw and scroll-region updates, and a
-pinned Alacritty Vim recording. Run one case with `just benchmark-one <workload>
-backend=swift`; workload names and provenance live in
+pinned Alacritty Vim recording. Workload names and provenance live in
 `benchmarks/fixtures/terminal-app.json`.
 
 Producer-write elapsed ends when the producer's final PTY write returns. It
@@ -50,6 +58,9 @@ of waiting for UI.
 ## Artifacts and history
 
 - Committed history: `benchmarks/results/terminal-app.jsonl`.
+- Completed runs awaiting confirmation: `.build/terminal-benchmark-staged/`.
+  Only confirmed runs enter committed history; declined and failed partial runs
+  remain here for inspection or manual promotion.
 - Per-run app logs and measurement evidence:
   `.build/terminal-benchmark-runs/<run>/artifacts/`.
 - Identity, harness log, textual profiles, traces, exported trace data, an
