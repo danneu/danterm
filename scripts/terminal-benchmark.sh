@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+# Run one isolated optimized real-app terminal benchmark and emit its metrics as JSON.
+set -euo pipefail
+
+terminate_owned_pid() {
+    local pid="${1:-}"
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 0
+    kill -TERM "$pid" 2>/dev/null || true
+    for _attempt in $(seq 1 40); do
+        kill -0 "$pid" 2>/dev/null || { wait "$pid" 2>/dev/null || true; return 0; }
+        sleep 0.05
+    done
+    kill -KILL "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+}
+
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+    return 0
+fi
+
+WORKLOAD="${1:-plain-scrolling}"
+BACKEND="${2:-swift}"
+BACKEND="${BACKEND#backend=}"
+[[ "$WORKLOAD" == "plain-scrolling" ]] || { echo "Unknown workload: $WORKLOAD" >&2; exit 2; }
+[[ "$BACKEND" == "swift" ]] || { echo "Commit 1 supports only backend=swift" >&2; exit 2; }
+
+for command in codesign jq plutil swift; do
+    command -v "$command" >/dev/null || { echo "Missing required command: $command" >&2; exit 1; }
+done
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BUILD_PATH="$REPO_ROOT/.build/terminal-benchmark-swiftpm"
+RUN_ROOT="$REPO_ROOT/.build/terminal-benchmark-runs/$(date +%Y-%m-%d-%H%M%S)-$$"
+RUNTIME_ROOT="$(mktemp -d /private/tmp/dtb.XXXXXX)"
+APP_PATH="$RUN_ROOT/DanTerm Benchmark.app"
+ARTIFACTS="$RUN_ROOT/artifacts"
+HOME_DIR="$RUNTIME_ROOT/home"
+TMP_DIR="$RUNTIME_ROOT/tmp"
+ZDOTDIR="$RUNTIME_ROOT/zdotdir"
+START_MARKER="DANTERM-BENCH-START-$$"
+COMPLETION_MARKER="DANTERM-BENCH-COMPLETE-$$"
+EXPECTED_FINAL_STATE="DANTERM-BENCH-FINAL-STATE-$$"
+START_ACK="$ARTIFACTS/start-ack"
+DRAW_RESULT="$ARTIFACTS/final-draw.json"
+PRODUCER_RESULT="$ARTIFACTS/producer-write.json"
+PATH_PROBE="$ARTIFACTS/path-probe.json"
+APP_LOG="$ARTIFACTS/app.log"
+APP_PID=""
+mkdir -p "$ARTIFACTS" "$HOME_DIR" "$TMP_DIR" "$ZDOTDIR"
+
+cleanup() {
+    local status=$?
+    trap - EXIT INT TERM
+    terminate_owned_pid "$APP_PID"
+    rm -rf "$RUNTIME_ROOT"
+    if [[ $status -ne 0 ]]; then
+        echo "Benchmark failed; diagnostics preserved at: $ARTIFACTS" >&2
+    fi
+    exit "$status"
+}
+trap cleanup EXIT INT TERM
+
+cat >"$ZDOTDIR/.zshenv" <<'EOF'
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+export LANG=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
+export HISTFILE=/dev/null
+EOF
+cat >"$ZDOTDIR/.zshrc" <<'EOF'
+PROMPT=''
+RPROMPT=''
+EOF
+
+swift build --package-path "$REPO_ROOT" --build-path "$BUILD_PATH" --configuration release \
+    -Xswiftc -DDANTERM_TERMINAL_BENCHMARK
+BIN_PATH="$(swift build --package-path "$REPO_ROOT" --build-path "$BUILD_PATH" \
+    --configuration release -Xswiftc -DDANTERM_TERMINAL_BENCHMARK --show-bin-path)"
+swift build --package-path "$REPO_ROOT/lib/TerminalPTY" --build-path "$BUILD_PATH/TerminalPTY" \
+    --configuration release --product PTYSessionBootstrap
+BOOTSTRAP_BIN_PATH="$(swift build --package-path "$REPO_ROOT/lib/TerminalPTY" \
+    --build-path "$BUILD_PATH/TerminalPTY" --configuration release --show-bin-path)"
+
+mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Helpers" "$APP_PATH/Contents/Resources/ghostty"
+cp "$BIN_PATH/DanTerm" "$APP_PATH/Contents/MacOS/DanTerm Benchmark"
+cp "$BIN_PATH/DanTermCLI" "$APP_PATH/Contents/Helpers/danterm"
+cp "$BOOTSTRAP_BIN_PATH/PTYSessionBootstrap" "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
+chmod +x "$APP_PATH/Contents/MacOS/DanTerm Benchmark" "$APP_PATH/Contents/Helpers/danterm" \
+    "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
+cp "$REPO_ROOT/app/Info.plist" "$APP_PATH/Contents/Info.plist"
+plutil -replace CFBundleIdentifier -string "com.danneu.danterm-terminal-benchmark.$$" "$APP_PATH/Contents/Info.plist"
+plutil -replace CFBundleName -string "DanTerm Benchmark" "$APP_PATH/Contents/Info.plist"
+plutil -replace CFBundleExecutable -string "DanTerm Benchmark" "$APP_PATH/Contents/Info.plist"
+plutil -remove CFBundleIconName "$APP_PATH/Contents/Info.plist" 2>/dev/null || true
+if [[ -d "$REPO_ROOT/lib/ghostty-themes" ]]; then
+    cp -R "$REPO_ROOT/lib/ghostty-themes" "$APP_PATH/Contents/Resources/ghostty/themes"
+else
+    cp -R "$REPO_ROOT/.ghostty-src/zig-out/share/ghostty/themes" "$APP_PATH/Contents/Resources/ghostty/themes"
+fi
+codesign --force --deep --sign - "$APP_PATH" >/dev/null
+
+env HOME="$HOME_DIR" CFFIXED_USER_HOME="$HOME_DIR" TMPDIR="$TMP_DIR/" ZDOTDIR="$ZDOTDIR" \
+    DANTERM_TERMINAL_BACKEND=swift \
+    DANTERM_TERMINAL_CHARACTERIZATION_PATH_PROBE="$PATH_PROBE" \
+    DANTERM_TERMINAL_CHARACTERIZATION_TEMP_ROOT="$TMP_DIR" \
+    DANTERM_TERMINAL_BENCHMARK_START_MARKER="$START_MARKER" \
+    DANTERM_TERMINAL_BENCHMARK_COMPLETION_MARKER="$COMPLETION_MARKER" \
+    DANTERM_TERMINAL_BENCHMARK_EXPECTED_FINAL_STATE="$EXPECTED_FINAL_STATE" \
+    DANTERM_TERMINAL_BENCHMARK_START_ACK="$START_ACK" \
+    DANTERM_TERMINAL_BENCHMARK_RESULT="$DRAW_RESULT" \
+    DANTERM_TERMINAL_BENCHMARK_PRODUCER_RESULT="$PRODUCER_RESULT" \
+    "$APP_PATH/Contents/MacOS/DanTerm Benchmark" >"$APP_LOG" 2>&1 &
+APP_PID=$!
+
+deadline=$((SECONDS + 20))
+while [[ ! -f "$PATH_PROBE" ]]; do
+    kill -0 "$APP_PID" 2>/dev/null || { echo "Benchmark app exited during startup" >&2; exit 1; }
+    (( SECONDS < deadline )) || { echo "Timed out waiting for benchmark app" >&2; exit 1; }
+    sleep 0.05
+done
+for key in home applicationSupport caches temporary config recovery socket replay; do
+    value="$(jq -er --arg key "$key" '.[$key]' "$PATH_PROBE")"
+    case "$value" in
+        "$RUNTIME_ROOT"|"$RUNTIME_ROOT"/*|/tmp/"${RUNTIME_ROOT##*/}"|/tmp/"${RUNTIME_ROOT##*/}"/*) ;;
+        *) echo "Benchmark path escaped isolated runtime: $key=$value" >&2; exit 1 ;;
+    esac
+done
+CLI="$APP_PATH/Contents/Helpers/danterm"
+export DANTERM_SOCK
+DANTERM_SOCK="$(jq -er '.socket' "$PATH_PROBE")"
+PANE_ID=""
+while [[ -z "$PANE_ID" ]]; do
+    model="$("$CLI" ls 2>"$ARTIFACTS/last-cli-error.txt" || true)"
+    PANE_ID="$(printf '%s\n' "$model" | jq -r '.selectedTabId as $tab | .groups[].tabs[] | select(.id == $tab) | .focusedPaneId // empty' 2>/dev/null || true)"
+    kill -0 "$APP_PID" 2>/dev/null || { echo "Benchmark app exited while waiting for a pane" >&2; exit 1; }
+    (( SECONDS < deadline )) || { echo "Timed out waiting for benchmark pane" >&2; exit 1; }
+    [[ -n "$PANE_ID" ]] || sleep 0.05
+done
+
+printf -v command 'python3 %q' "$SCRIPT_DIR/terminal-benchmark-producer.py"
+"$CLI" pane input --pane "$PANE_ID" --literal -- "$command"
+"$CLI" pane input --pane "$PANE_ID" -- Enter
+while [[ ! -f "$PRODUCER_RESULT" || ! -f "$DRAW_RESULT" ]]; do
+    (( SECONDS < deadline )) || { echo "Timed out waiting for benchmark metrics" >&2; exit 1; }
+    sleep 0.05
+done
+
+producer_elapsed="$(jq -er '.elapsedNanoseconds' "$PRODUCER_RESULT")"
+draw_elapsed="$(jq -er '.elapsedNanoseconds' "$DRAW_RESULT")"
+(( draw_elapsed >= producer_elapsed )) || {
+    echo "Invalid timing order: final draw preceded the producer's final write" >&2
+    exit 1
+}
+
+jq -n --arg backend swift --arg workload "$WORKLOAD" \
+    --slurpfile producer "$PRODUCER_RESULT" --slurpfile draw "$DRAW_RESULT" \
+    '{schemaVersion: 1, backend: $backend, workload: $workload, producerWrite: $producer[0], finalDraw: $draw[0]}'
+echo "Benchmark diagnostics: $ARTIFACTS" >&2

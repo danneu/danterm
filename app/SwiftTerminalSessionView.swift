@@ -119,6 +119,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         context.fill(dirtyRect)
         if let frame {
             drawRenderFrame(frame.plan, metrics: frame.metrics, in: context)
+            #if DANTERM_TERMINAL_BENCHMARK
+            TerminalBenchmarkObserver.shared?.observeCompletedDraw(frame.plan)
+            #endif
         }
     }
 
@@ -544,6 +547,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         guard let metrics = currentMetrics else { return }
         #if DANTERM_TERMINAL_CHARACTERIZATION
         recordTerminalCharacterizationPlanDelivery()
+        #endif
+        #if DANTERM_TERMINAL_BENCHMARK
+        TerminalBenchmarkObserver.shared?.observePublishedFrame(frame.plan)
         #endif
         publishedFrame = (frame.plan, metrics)
         if frame.damage.isFull {

@@ -4,10 +4,10 @@ import DanTermProtocol
 import UniformTypeIdentifiers
 @preconcurrency import UserNotifications
 
-/// Resolve DanTerm's process-temporary root, with a characterization-only
-/// override because macOS Foundation ignores a launched app's `TMPDIR` value.
+/// Resolve DanTerm's process-temporary root, with a harness-only override
+/// because macOS Foundation ignores a launched app's `TMPDIR` value.
 func danTermTemporaryDirectoryURL(fileManager: FileManager = .default) -> URL {
-    #if DANTERM_TERMINAL_CHARACTERIZATION
+    #if DANTERM_TERMINAL_CHARACTERIZATION || DANTERM_TERMINAL_BENCHMARK
     if let path = ProcessInfo.processInfo.environment["DANTERM_TERMINAL_CHARACTERIZATION_TEMP_ROOT"] {
         return URL(fileURLWithPath: path, isDirectory: true)
     }

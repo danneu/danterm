@@ -52,6 +52,7 @@ test:
     ./scripts/tests/danterm-cli-connect-errors_test.sh
     ./scripts/tests/terminal-characterization-harness_test.sh
     ./scripts/tests/terminal-viability-harness_test.sh
+    ./scripts/tests/terminal-benchmark-harness_test.sh
     ./scripts/tests/test-terminal-pty_test.sh
     ./scripts/tests/shell-integration_test.sh
     ./scripts/tests/agent-notifications-live_test.py
@@ -71,6 +72,10 @@ test-terminal-characterization:
 # Run the opt-in Swift terminal viability gate (requires GUI + Accessibility)
 test-terminal-viability:
     ./scripts/terminal-viability.sh
+
+# Benchmark one real-app terminal workload against the selected backend.
+benchmark-one workload="plain-scrolling" backend="swift":
+    ./scripts/terminal-benchmark.sh "{{workload}}" "{{backend}}"
 
 # Run the opt-in headless shell/application compatibility workflows.
 # Needs asciinema/fish/fzf: nix develop .#terminal-workflows -c just test-terminal-workflows

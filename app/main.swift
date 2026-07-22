@@ -5,7 +5,7 @@ import Darwin
 import DanTermProtocol
 import GhosttyKit
 
-#if DANTERM_TERMINAL_CHARACTERIZATION
+#if DANTERM_TERMINAL_CHARACTERIZATION || DANTERM_TERMINAL_BENCHMARK
 /// Publish the app process's resolved filesystem paths before terminal creation,
 /// allowing the real-backend harness to reject any escape from its isolated run.
 func writeTerminalCharacterizationPathProbe(to path: String) throws {

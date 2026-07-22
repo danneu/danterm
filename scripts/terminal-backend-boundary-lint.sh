@@ -19,7 +19,7 @@ done < <(find "$TARGET" -name '*.swift' -type f -print)
 
 while IFS= read -r file; do
     case "$(basename "$file")" in
-        SwiftTerminalSessionView.swift|SwiftTerminalBackend.swift)
+        SwiftTerminalSessionView.swift|SwiftTerminalBackend.swift|TerminalBenchmark.swift)
             continue
             ;;
     esac
