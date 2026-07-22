@@ -121,7 +121,27 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
 
     def test_arguments_select_save_policy_and_workload(self):
         self.assertEqual(SUITE.parse_arguments(["backend=swift", "save=1"]), ("swift", None, True))
+        self.assertEqual(
+            SUITE.parse_arguments(["save=1", "workload=unicode-mix", "backend=ghostty"]),
+            ("ghostty", "unicode-mix", True),
+        )
         self.assertEqual(SUITE.parse_arguments(["swift", "save=0"]), ("swift", None, False))
+        self.assertEqual(
+            SUITE.parse_arguments(["unicode-mix", "ghostty", "1"]),
+            ("ghostty", "unicode-mix", True),
+        )
+        self.assertEqual(
+            SUITE.parse_arguments(["default-workload=plain-scrolling", "backend=ghostty"]),
+            ("ghostty", "plain-scrolling", None),
+        )
+        self.assertEqual(
+            SUITE.parse_arguments([
+                "default-workload=plain-scrolling",
+                "workload=unicode-mix",
+                "backend=ghostty",
+            ]),
+            ("ghostty", "unicode-mix", None),
+        )
         self.assertEqual(
             SUITE.parse_arguments(["swift", "workload=plain-scrolling", "save="]),
             ("swift", "plain-scrolling", None),
@@ -130,6 +150,8 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
             SUITE.parse_arguments(["swift", "save=yes"])
         with self.assertRaisesRegex(ValueError, "unknown benchmark workload"):
             SUITE.parse_arguments(["swift", "workload=not-committed"])
+        with self.assertRaisesRegex(ValueError, "backend specified more than once"):
+            SUITE.parse_arguments(["backend=swift", "backend=ghostty"])
 
     def test_prompt_accepts_only_trimmed_yes_answers(self):
         for answer in ("y", "Y", "yes", " YES "):

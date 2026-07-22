@@ -148,23 +148,49 @@ def parse_backend(argument):
 
 
 def parse_arguments(arguments):
-    """Parse the suite's backend, optional workload filter, and save policy."""
-    backend = parse_backend(arguments[0] if arguments else "swift")
+    """Parse named options in any order while retaining positional shorthand."""
+    backend = "swift"
     workload = None
+    default_workload = None
     save = None
-    for argument in arguments[1:]:
-        if argument.startswith("workload="):
+    seen_backend = False
+    seen_workload = False
+    seen_save = False
+    for argument in arguments:
+        if argument.startswith("backend=") or argument in ("swift", "ghostty"):
+            if seen_backend:
+                raise ValueError("backend specified more than once")
+            backend = parse_backend(argument)
+            seen_backend = True
+        elif argument.startswith("workload=") or argument in WORKLOADS:
+            if seen_workload:
+                raise ValueError("workload specified more than once")
             workload = argument.removeprefix("workload=")
             if workload not in WORKLOADS:
                 raise ValueError(f"unknown benchmark workload: {workload}")
+            seen_workload = True
+        elif argument.startswith("default-workload="):
+            default_workload = argument.removeprefix("default-workload=")
+            if default_workload not in WORKLOADS:
+                raise ValueError(f"unknown benchmark workload: {default_workload}")
         elif argument.startswith("save="):
+            if seen_save:
+                raise ValueError("save specified more than once")
             value = argument.removeprefix("save=")
             if value not in ("", "0", "1"):
                 raise ValueError("save must be 0 or 1")
             save = {"": None, "0": False, "1": True}[value]
+            seen_save = True
+        elif argument in ("0", "1"):
+            if seen_save:
+                raise ValueError("save specified more than once")
+            save = argument == "1"
+            seen_save = True
         else:
+            if argument.startswith("workload="):
+                raise ValueError(f"unknown benchmark workload: {argument.removeprefix('workload=')}")
             raise ValueError(f"unknown argument: {argument}")
-    return backend, workload, save
+    return backend, workload if workload is not None else default_workload, save
 
 
 def confirm_save():

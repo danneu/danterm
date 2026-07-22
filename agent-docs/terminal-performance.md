@@ -16,6 +16,10 @@ completed run; it never reruns the benchmark. Confirmed unprofiled results enter
 `benchmarks/results/terminal-app.jsonl`. The Mac must be connected to AC power
 before either benchmark command will start.
 
+Benchmark recipe options use `name=value` spelling and may appear in any
+order, for example `just benchmark backend=ghostty save=1` or
+`just benchmark-one workload=unicode-mix backend=swift save=0`.
+
 Every run converges the terminal to an 80x24 grid before emitting workload
 bytes. Override the target for a diagnostic run with
 `DANTERM_TERMINAL_BENCHMARK_COLUMNS` and
