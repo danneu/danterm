@@ -283,6 +283,8 @@ Literal 100% compatibility with upstream expectations should not be a goal:
 - Some Unicode cases reflect libvterm's combining-mark storage limit rather
   than DanTerm's scalar-exact and eventual extended-grapheme-cluster contract.
 - `14state_encoding` includes legacy non-UTF-8 character-set and raw C1 cases;
+  DanTerm's UTF-8 mode explicitly excludes raw C1 introducers, 8-bit ST, and
+  S8C1T rather than treating those cases as supported parser behavior;
   only the character-set behavior admitted by DanTerm's support matrix should
   be retained.
 - `17state_mouse` tests legacy UTF-8 and rxvt encodings, while DanTerm currently

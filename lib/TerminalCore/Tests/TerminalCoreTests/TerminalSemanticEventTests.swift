@@ -178,12 +178,10 @@ struct TerminalSemanticEventTests {
         let sequences = [
             Array("\u{1B}]9;bel\u{7}".utf8),
             Array("\u{1B}]9;st\u{1B}\\".utf8),
-            [0x1B, 0x5D] + Array("9;c1".utf8) + [0x9C],
         ]
         let expected: [TerminalSemanticEvent] = [
             .desktopNotification(title: "", body: "bel"),
             .desktopNotification(title: "", body: "st"),
-            .desktopNotification(title: "", body: "c1"),
         ]
         let bytes = sequences.flatMap { $0 }
         for split in 0...bytes.count {

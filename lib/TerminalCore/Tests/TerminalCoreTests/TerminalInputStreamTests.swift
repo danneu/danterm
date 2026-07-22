@@ -178,6 +178,64 @@ struct TerminalInputStreamTests {
         }
     }
 
+    @Test("OSC preserves U+2733 bytes without leaking payload text")
+    func oscPreservesU2733Payload() {
+        let payload = Array("0;printf '✳'".utf8)
+        let bytes = [0x1B, 0x5D] + payload + [0x07]
+        let expected = [TerminalStreamAction.osc(payload)]
+
+        var authored = TerminalInputStream()
+        #expect(authored.feed(bytes) == expected)
+
+        var bytewise = TerminalInputStream()
+        #expect(bytes.flatMap { bytewise.feed([$0]) } == expected)
+
+        for offset in 0...bytes.count {
+            var split = TerminalInputStream()
+            #expect(split.feed(Array(bytes[..<offset])) + split.feed(Array(bytes[offset...])) == expected)
+        }
+    }
+
+    @Test("control strings absorb UTF-8 continuation bytes in the C1 range")
+    func controlStringsAbsorbUTF8ContinuationBytes() {
+        let payload = Array((0x0400...0x041F).compactMap(UnicodeScalar.init).map(String.init).joined().utf8)
+        let strings: [[UInt8]] = [
+            [0x1B, 0x5D] + payload + [0x07],
+            [0x1B, 0x5D] + payload + [0x1B, 0x5C],
+            [0x1B, 0x50, 0x71] + payload + [0x1B, 0x5C],
+            [0x1B, 0x5F] + payload + [0x1B, 0x5C],
+            [0x1B, 0x5E] + payload + [0x1B, 0x5C],
+            [0x1B, 0x58] + payload + [0x1B, 0x5C],
+        ]
+
+        for (index, bytes) in strings.enumerated() {
+            var stream = TerminalInputStream()
+            let actions = stream.feed(bytes + [0x41])
+            if index < 2 {
+                #expect(actions == [.osc(payload), .print("A")])
+            } else {
+                #expect(actions == [.escape(0x5C), .print("A")])
+            }
+        }
+    }
+
+    @Test("ESC restart cancels every control string without OSC dispatch")
+    func escapeRestartCancelsControlStrings() {
+        let prefixes: [[UInt8]] = [
+            [0x1B, 0x5D, 0x39, 0x3B, 0x78],
+            [0x1B, 0x50, 0x71, 0x78],
+            [0x1B, 0x5F, 0x78],
+            [0x1B, 0x5E, 0x78],
+            [0x1B, 0x58, 0x78],
+        ]
+
+        for prefix in prefixes {
+            var stream = TerminalInputStream()
+            let actions = stream.feed(prefix + [0x1B, 0x37, 0x41])
+            #expect(actions == [.escape(0x37), .print("A")])
+        }
+    }
+
     @Test("bare ESC finals surface without interpreting their meaning")
     func bareEscapeFinalsSurface() {
         var stream = TerminalInputStream()
@@ -211,10 +269,10 @@ struct TerminalInputStreamTests {
     @Test(
         "raw C1 anywhere transitions apply only while absorbing a sequence",
         arguments: [
-            C1Fixture(bytes: [0x90, 0x71, 0x78, 0x9C], actions: []),
-            C1Fixture(bytes: [0x98, 0x78, 0x9C], actions: []),
-            C1Fixture(bytes: [0x9E, 0x78, 0x9C], actions: []),
-            C1Fixture(bytes: [0x9F, 0x78, 0x9C], actions: []),
+            C1Fixture(bytes: [0x90, 0x71, 0x78, 0x9C, 0x1B, 0x5C], actions: [.escape(0x5C)]),
+            C1Fixture(bytes: [0x98, 0x78, 0x9C, 0x1B, 0x5C], actions: [.escape(0x5C)]),
+            C1Fixture(bytes: [0x9E, 0x78, 0x9C, 0x1B, 0x5C], actions: [.escape(0x5C)]),
+            C1Fixture(bytes: [0x9F, 0x78, 0x9C, 0x1B, 0x5C], actions: [.escape(0x5C)]),
             C1Fixture(
                 bytes: [0x9B, 0x6D],
                 actions: [.csi(CSISequence(

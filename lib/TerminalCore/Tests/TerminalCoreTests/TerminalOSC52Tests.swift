@@ -11,7 +11,6 @@ struct TerminalOSC52Tests {
         let sequences = [
             [0x1B, 0x5D] + payload + [0x07],
             [0x1B, 0x5D] + payload + [0x1B, 0x5C],
-            [0x1B, 0x5D] + payload + [0x9C],
         ]
 
         for bytes in sequences {
@@ -25,7 +24,6 @@ struct TerminalOSC52Tests {
         let prefixes: [[UInt8]] = [
             [0x1B, 0x5D, 0x35, 0x32, 0x3B, 0x18],
             [0x1B, 0x5D, 0x35, 0x32, 0x3B, 0x1A],
-            [0x1B, 0x5D, 0x35, 0x32, 0x3B, 0x91],
             [0x1B, 0x5D, 0x35, 0x32, 0x3B, 0x1B, 0x37],
         ]
 
@@ -103,6 +101,13 @@ struct TerminalOSC52Tests {
             #expect(terminal.drainPendingClipboardWrite() == nil)
             #expect(terminal.drainReplyBytes().isEmpty)
         }
+
+        var rawC1Payload = Terminal(columns: 80, rows: 24)!
+        _ = rawC1Payload.drainDamage()
+        let baseline = rawC1Payload
+        rawC1Payload.feed([0x1B, 0x5D] + Array("52;c;".utf8) + [0x9C, 0x1B, 0x5C])
+        #expect(rawC1Payload == baseline)
+        #expect(rawC1Payload.drainPendingClipboardWrite() == nil)
     }
 
     @Test("OSC 52 decoded limit accepts 1 MiB and rejects one byte more")

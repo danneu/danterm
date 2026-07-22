@@ -16,7 +16,7 @@ struct TerminalShellEventTests {
             "\u{1B}]2;editor\u{7}"
                 + "\u{1B}]1337;DanTermShell=1;\(token);command-start;\(command)\u{1B}\\"
                 + "\u{1B}]1337;DanTermShell=1;\(token);command-end\u{7}"
-                + "\u{1B}]1337;DanTermShell=1;\(token);remote-start\u{9C}"
+                + "\u{1B}]1337;DanTermShell=1;\(token);remote-start\u{7}"
                 + "\u{1B}]1337;DanTermShell=1;\(token);remote-host;\(user);\(host)\u{1B}\\"
         ).utf8))
 

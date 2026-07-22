@@ -7,6 +7,34 @@ import TerminalCoreRecording
 
 /// Keeps the first complete Swift-pane workflow in the default headless regression gate.
 struct DanTermRecordingFixtureTests {
+    @Test("fish title hook with U+2733 never leaks control-string bytes")
+    func fishU2733TitleRecording() throws {
+        // Intent: replay the fish title hook and matching program output without allowing
+        //   U+2733's 0x9c continuation byte to terminate OSC.
+        // Why it exists: valid command text in OSC 0 must not become replacement glyphs or
+        //   stale title bytes in the terminal grid.
+        // Scenario: fish titles a `printf '✳'` command, the program prints the scalar,
+        //   and the following prompt appears on the next line.
+        let recording = try loadRecording(named: "fish-u2733-title")
+        let authored = try recording.replay()
+        let bytes = try #require(recording.events.first?.feedBytes)
+
+        #expect(authored.screenText == "✳                   \n$                   \n                    ")
+        #expect(authored.screenText.contains("\u{FFFD}") == false)
+        #expect(authored.screenText.contains("printf") == false)
+
+        var bytewise = try #require(Terminal(columns: 20, rows: 3))
+        for byte in bytes { bytewise.feed([byte]) }
+        #expect(bytewise == authored)
+
+        for offset in 0...bytes.count {
+            var split = try #require(Terminal(columns: 20, rows: 3))
+            split.feed(Array(bytes[..<offset]))
+            split.feed(Array(bytes[offset...]))
+            #expect(split == authored, "split at \(offset)")
+        }
+    }
+
     @Test("DanTerm Kitty input recording replays mode-aware bytes without input mutation")
     func kittyInputRecording() throws {
         let url = try #require(Bundle.module.url(
@@ -133,6 +161,22 @@ struct DanTermRecordingFixtureTests {
             }
         }
         return terminal
+    }
+
+    private func loadRecording(named name: String) throws -> NeutralTerminalRecording {
+        let url = try #require(Bundle.module.url(
+            forResource: name,
+            withExtension: "json",
+            subdirectory: "Fixtures/danterm"
+        ))
+        return try JSONDecoder().decode(NeutralTerminalRecording.self, from: Data(contentsOf: url))
+    }
+}
+
+private extension NeutralTerminalRecordingEvent {
+    var feedBytes: [UInt8]? {
+        guard case .feed(let bytes) = self else { return nil }
+        return bytes
     }
 }
 

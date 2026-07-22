@@ -34,7 +34,6 @@ struct TerminalHyperlinkTests {
         let bodies = [
             Array("\u{1B}]8;;https://example.com\u{7}x".utf8),
             Array("\u{1B}]8;;https://example.com\u{1B}\\x".utf8),
-            [0x1B, 0x5D] + Array("8;;https://example.com".utf8) + [0x9C, 0x78],
         ]
         var authored = Terminal(columns: 20, rows: 2)!
         authored.feed(bodies[0])
@@ -60,6 +59,7 @@ struct TerminalHyperlinkTests {
         let baseline = terminal
 
         terminal.feed([0x1B, 0x5D] + Array("8;;".utf8) + [0xFF, 0x07])
+        terminal.feed([0x1B, 0x5D] + Array("8;;https://invalid".utf8) + [0x9C, 0x1B, 0x5C])
         terminal.feed(osc8(uri: "https://" + String(repeating: "x", count: 65_529)))
         #expect(terminal == baseline)
 

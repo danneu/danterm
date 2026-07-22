@@ -111,6 +111,22 @@ or adapter backlog. Query replies are also admitted or dropped as complete
 units. Reaching a downstream limit does not retain a second unbounded copy or
 prevent later valid terminal input from being processed.
 
+### UTF-8 control-string parsing
+
+In UTF-8 input mode, OSC, DCS, APC, PM, and SOS payloads own every encoded byte
+from `0x80` through `0x9f`; raw C1 values never transition or terminate an
+active string. OSC terminates on BEL or 7-bit ST (`ESC \`). The other four
+families terminate only on 7-bit ST. CAN and SUB cancel every control string.
+An ESC followed by any byte other than `\` cancels the string without OSC
+dispatch and restarts normal escape recognition from that ESC.
+
+OSC retains each non-C0, non-DEL payload byte up to its encoded-input limit.
+Semantic consumers then validate their own fields atomically: malformed OSC 8
+URI bytes and malformed decoded OSC 52 text apply nothing, while malformed OSC
+8 parameter bytes may discard the optional ID without invalidating a valid URI.
+Raw C1 bytes in ground remain malformed UTF-8. DanTerm does not support 8-bit
+ST, raw C1 introducers, or S8C1T mode.
+
 When a sequence exceeds its limit, the engine applies none of that sequence,
 consumes through normal termination or cancellation without retaining the
 discarded payload, and resumes parsing later valid input. PTY ingress may apply

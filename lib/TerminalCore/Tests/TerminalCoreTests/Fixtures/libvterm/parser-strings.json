@@ -8,7 +8,8 @@
     "license": "MIT",
     "licenseNotice": "LICENSE.libvterm.txt",
     "recordedDeviations": [
-      "DanTerm follows VT500 string states: C0 is absorbed inside strings and BEL terminates only OSC."
+      "DanTerm follows VT500 string states: C0 is absorbed inside strings and BEL terminates only OSC.",
+      "DanTerm's UTF-8 mode excludes raw C1 introducers, 8-bit ST, and S8C1T; bytes 0x80 through 0x9f are opaque inside active control strings."
     ]
   },
   "initial": { "columns": 12, "rows": 2 },
@@ -42,6 +43,6 @@
     { "type": "feed", "text": "\u001bca\u001b_Hello\u0007b\u001b\\c\u001b^Hello\u0007d\u001b\\e\u001bXHello\u0007f\u001b\\g" },
     { "type": "expect", "expect": { "viewportText": "aceg        \n            " } },
     { "type": "feed", "hex": "1b 63 68 1b 58 41 42 43 01 44 45 46 99 47 48 49 1b 5c 69" },
-    { "type": "expect", "expect": { "viewportText": "hGHIi       \n            " } }
+    { "type": "expect", "expect": { "viewportText": "hi          \n            " } }
   ]
 }
