@@ -53,7 +53,7 @@ let package = Package(
         ),
         .target(
             name: "TerminalWorkflowSupport",
-            path: "Sources/TerminalWorkflowSupport",
+            path: "TestSupport/TerminalWorkflowSupport",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .executableTarget(
@@ -67,7 +67,7 @@ let package = Package(
                 "TerminalWorkflowSupport",
                 .product(name: "TerminalCoreRecording", package: "TerminalCore"),
             ],
-            path: "Sources/TerminalWorkflowRunner",
+            path: "TestSupport/TerminalWorkflowRunner",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
