@@ -22,7 +22,10 @@ WORKLOAD="${1:-plain-scrolling}"
 BACKEND="${2:-swift}"
 BACKEND="${BACKEND#backend=}"
 [[ "$WORKLOAD" == "plain-scrolling" ]] || { echo "Unknown workload: $WORKLOAD" >&2; exit 2; }
-[[ "$BACKEND" == "swift" ]] || { echo "Commit 1 supports only backend=swift" >&2; exit 2; }
+case "$BACKEND" in
+    swift|ghostty) ;;
+    *) echo "Unknown backend: $BACKEND (expected swift or ghostty)" >&2; exit 2 ;;
+esac
 
 for command in codesign jq plutil swift; do
     command -v "$command" >/dev/null || { echo "Missing required command: $command" >&2; exit 1; }
@@ -100,7 +103,7 @@ fi
 codesign --force --deep --sign - "$APP_PATH" >/dev/null
 
 env HOME="$HOME_DIR" CFFIXED_USER_HOME="$HOME_DIR" TMPDIR="$TMP_DIR/" ZDOTDIR="$ZDOTDIR" \
-    DANTERM_TERMINAL_BACKEND=swift \
+    DANTERM_TERMINAL_BACKEND="$BACKEND" \
     DANTERM_TERMINAL_CHARACTERIZATION_PATH_PROBE="$PATH_PROBE" \
     DANTERM_TERMINAL_CHARACTERIZATION_TEMP_ROOT="$TMP_DIR" \
     DANTERM_TERMINAL_BENCHMARK_START_MARKER="$START_MARKER" \
@@ -109,6 +112,7 @@ env HOME="$HOME_DIR" CFFIXED_USER_HOME="$HOME_DIR" TMPDIR="$TMP_DIR/" ZDOTDIR="$
     DANTERM_TERMINAL_BENCHMARK_START_ACK="$START_ACK" \
     DANTERM_TERMINAL_BENCHMARK_RESULT="$DRAW_RESULT" \
     DANTERM_TERMINAL_BENCHMARK_PRODUCER_RESULT="$PRODUCER_RESULT" \
+    DANTERM_TERMINAL_BENCHMARK_BACKEND="$BACKEND" \
     "$APP_PATH/Contents/MacOS/DanTerm Benchmark" >"$APP_LOG" 2>&1 &
 APP_PID=$!
 
@@ -140,19 +144,24 @@ done
 printf -v command 'python3 %q' "$SCRIPT_DIR/terminal-benchmark-producer.py"
 "$CLI" pane input --pane "$PANE_ID" --literal -- "$command"
 "$CLI" pane input --pane "$PANE_ID" -- Enter
-while [[ ! -f "$PRODUCER_RESULT" || ! -f "$DRAW_RESULT" ]]; do
+while [[ ! -f "$PRODUCER_RESULT" || ( "$BACKEND" == "swift" && ! -f "$DRAW_RESULT" ) ]]; do
     (( SECONDS < deadline )) || { echo "Timed out waiting for benchmark metrics" >&2; exit 1; }
     sleep 0.05
 done
 
 producer_elapsed="$(jq -er '.elapsedNanoseconds' "$PRODUCER_RESULT")"
-draw_elapsed="$(jq -er '.elapsedNanoseconds' "$DRAW_RESULT")"
-(( draw_elapsed >= producer_elapsed )) || {
-    echo "Invalid timing order: final draw preceded the producer's final write" >&2
-    exit 1
-}
-
-jq -n --arg backend swift --arg workload "$WORKLOAD" \
-    --slurpfile producer "$PRODUCER_RESULT" --slurpfile draw "$DRAW_RESULT" \
-    '{schemaVersion: 1, backend: $backend, workload: $workload, producerWrite: $producer[0], finalDraw: $draw[0]}'
+if [[ "$BACKEND" == "swift" ]]; then
+    draw_elapsed="$(jq -er '.elapsedNanoseconds' "$DRAW_RESULT")"
+    (( draw_elapsed >= producer_elapsed )) || {
+        echo "Invalid timing order: final draw preceded the producer's final write" >&2
+        exit 1
+    }
+    jq -n --arg backend "$BACKEND" --arg workload "$WORKLOAD" \
+        --slurpfile producer "$PRODUCER_RESULT" --slurpfile draw "$DRAW_RESULT" \
+        '{schemaVersion: 1, backend: $backend, workload: $workload, producerWrite: $producer[0], finalDraw: ($draw[0] + {available: true})}'
+else
+    jq -n --arg backend "$BACKEND" --arg workload "$WORKLOAD" \
+        --slurpfile producer "$PRODUCER_RESULT" \
+        '{schemaVersion: 1, backend: $backend, workload: $workload, producerWrite: $producer[0], finalDraw: {available: false, reason: "unavailable-for-ghostty-backend"}}'
+fi
 echo "Benchmark diagnostics: $ARTIFACTS" >&2

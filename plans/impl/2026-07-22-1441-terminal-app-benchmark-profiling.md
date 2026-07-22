@@ -182,7 +182,7 @@ Narrow first; each commit vets an assumption before the surface grows.
 Check a box only when the commit is landed (implemented, tested, committed).
 
 - [x] 1. One workload, Swift only, both metrics
-- [ ] 2. Ghostty comparison
+- [x] 2. Ghostty comparison
 - [ ] 3. Committed history
 - [ ] 4. Agent profiling
 - [ ] 5. Corpus expansion

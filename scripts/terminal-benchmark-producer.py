@@ -11,12 +11,14 @@ expected = os.environ["DANTERM_TERMINAL_BENCHMARK_EXPECTED_FINAL_STATE"]
 start_ack = os.environ["DANTERM_TERMINAL_BENCHMARK_START_ACK"]
 draw_result = os.environ["DANTERM_TERMINAL_BENCHMARK_RESULT"]
 output = os.environ["DANTERM_TERMINAL_BENCHMARK_PRODUCER_RESULT"]
+backend = os.environ["DANTERM_TERMINAL_BENCHMARK_BACKEND"]
 os.write(1, (start_marker + "\n").encode())
-deadline = time.monotonic() + 20
-while not os.path.exists(start_ack):
-    if time.monotonic() >= deadline:
-        raise SystemExit("timed out waiting for app-side start-marker observation")
-    time.sleep(0.005)
+if backend == "swift":
+    deadline = time.monotonic() + 20
+    while not os.path.exists(start_ack):
+        if time.monotonic() >= deadline:
+            raise SystemExit("timed out waiting for app-side start-marker observation")
+        time.sleep(0.005)
 
 started = time.monotonic_ns()
 for index in range(20_000):
@@ -30,8 +32,9 @@ with open(output, "w", encoding="utf-8") as stream:
         "event": "producer-final-write-returned",
     }, stream, sort_keys=True)
 
-deadline = time.monotonic() + 20
-while not os.path.exists(draw_result):
-    if time.monotonic() >= deadline:
-        raise SystemExit("timed out waiting for final draw acknowledgment")
-    time.sleep(0.005)
+if backend == "swift":
+    deadline = time.monotonic() + 20
+    while not os.path.exists(draw_result):
+        if time.monotonic() >= deadline:
+            raise SystemExit("timed out waiting for final draw acknowledgment")
+        time.sleep(0.005)
