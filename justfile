@@ -53,6 +53,7 @@ test:
     ./scripts/tests/terminal-characterization-harness_test.sh
     ./scripts/tests/terminal-viability-harness_test.sh
     ./scripts/tests/terminal-benchmark-harness_test.sh
+    python3 ./scripts/tests/terminal_benchmark_suite_test.py
     ./scripts/tests/test-terminal-pty_test.sh
     ./scripts/tests/shell-integration_test.sh
     ./scripts/tests/agent-notifications-live_test.py
@@ -76,6 +77,10 @@ test-terminal-viability:
 # Benchmark one real-app terminal workload against the selected backend.
 benchmark-one workload="plain-scrolling" backend="swift":
     ./scripts/terminal-benchmark.sh "{{workload}}" "{{backend}}"
+
+# Run repeated real-app corpus measurements and append compatible history.
+benchmark backend="swift":
+    python3 ./scripts/terminal-benchmark-suite.py "{{backend}}"
 
 # Run the opt-in headless shell/application compatibility workflows.
 # Needs asciinema/fish/fzf: nix develop .#terminal-workflows -c just test-terminal-workflows

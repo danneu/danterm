@@ -10,7 +10,7 @@ import GhosttyKit
 /// allowing the real-backend harness to reject any escape from its isolated run.
 func writeTerminalCharacterizationPathProbe(to path: String) throws {
     let fileManager = FileManager.default
-    let paths: [String: String] = [
+    let paths: [String: Any] = [
         "home": NSHomeDirectory(),
         "applicationSupport": fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].path,
         "caches": fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0].path,
@@ -19,6 +19,7 @@ func writeTerminalCharacterizationPathProbe(to path: String) throws {
         "recovery": recoveryDirectoryURL().path,
         "socket": controlSocketPath().path,
         "replay": scrollbackReplayDirectoryURL().path,
+        "displayScale": NSScreen.main?.backingScaleFactor ?? 1.0,
     ]
     let data = try JSONSerialization.data(withJSONObject: paths, options: [.prettyPrinted, .sortedKeys])
     try data.write(to: URL(fileURLWithPath: path), options: .atomic)

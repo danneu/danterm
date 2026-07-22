@@ -76,11 +76,11 @@ RPROMPT=''
 EOF
 
 swift build --package-path "$REPO_ROOT" --build-path "$BUILD_PATH" --configuration release \
-    -Xswiftc -DDANTERM_TERMINAL_BENCHMARK
+    -Xswiftc -DDANTERM_TERMINAL_BENCHMARK >&2
 BIN_PATH="$(swift build --package-path "$REPO_ROOT" --build-path "$BUILD_PATH" \
     --configuration release -Xswiftc -DDANTERM_TERMINAL_BENCHMARK --show-bin-path)"
 swift build --package-path "$REPO_ROOT/lib/TerminalPTY" --build-path "$BUILD_PATH/TerminalPTY" \
-    --configuration release --product PTYSessionBootstrap
+    --configuration release --product PTYSessionBootstrap >&2
 BOOTSTRAP_BIN_PATH="$(swift build --package-path "$REPO_ROOT/lib/TerminalPTY" \
     --build-path "$BUILD_PATH/TerminalPTY" --configuration release --show-bin-path)"
 
@@ -150,18 +150,22 @@ while [[ ! -f "$PRODUCER_RESULT" || ( "$BACKEND" == "swift" && ! -f "$DRAW_RESUL
 done
 
 producer_elapsed="$(jq -er '.elapsedNanoseconds' "$PRODUCER_RESULT")"
+geometry="$(jq -ec '.geometry' "$PRODUCER_RESULT")"
+display_scale="$(jq -er '.displayScale' "$PATH_PROBE")"
 if [[ "$BACKEND" == "swift" ]]; then
     draw_elapsed="$(jq -er '.elapsedNanoseconds' "$DRAW_RESULT")"
     (( draw_elapsed >= producer_elapsed )) || {
         echo "Invalid timing order: final draw preceded the producer's final write" >&2
         exit 1
     }
-    jq -n --arg backend "$BACKEND" --arg workload "$WORKLOAD" \
+    jq -n --arg backend "$BACKEND" --arg workload "$WORKLOAD" --argjson geometry "$geometry" \
+        --argjson displayScale "$display_scale" \
         --slurpfile producer "$PRODUCER_RESULT" --slurpfile draw "$DRAW_RESULT" \
-        '{schemaVersion: 1, backend: $backend, workload: $workload, producerWrite: $producer[0], finalDraw: ($draw[0] + {available: true})}'
+        '{schemaVersion: 1, backend: $backend, workload: $workload, geometry: $geometry, displayScale: $displayScale, producerWrite: $producer[0], finalDraw: ($draw[0] + {available: true})}'
 else
-    jq -n --arg backend "$BACKEND" --arg workload "$WORKLOAD" \
+    jq -n --arg backend "$BACKEND" --arg workload "$WORKLOAD" --argjson geometry "$geometry" \
+        --argjson displayScale "$display_scale" \
         --slurpfile producer "$PRODUCER_RESULT" \
-        '{schemaVersion: 1, backend: $backend, workload: $workload, producerWrite: $producer[0], finalDraw: {available: false, reason: "unavailable-for-ghostty-backend"}}'
+        '{schemaVersion: 1, backend: $backend, workload: $workload, geometry: $geometry, displayScale: $displayScale, producerWrite: $producer[0], finalDraw: {available: false, reason: "unavailable-for-ghostty-backend"}}'
 fi
 echo "Benchmark diagnostics: $ARTIFACTS" >&2
