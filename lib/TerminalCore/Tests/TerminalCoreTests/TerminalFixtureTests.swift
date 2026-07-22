@@ -9,31 +9,27 @@ import TerminalCoreRecording
 struct TerminalFixtureTests {
     @Test("neutral replay fixtures pass every expectation under all feed splits")
     func replayFixtures() throws {
-        let urls = try fixtureURLs()
+        let urls = try fixtureURLs().filter {
+            Self.milestone8AlacrittyRecordings.contains($0.deletingPathExtension().lastPathComponent) == false
+        }
         #expect(urls.isEmpty == false)
 
         for url in urls {
-            let data = try Data(contentsOf: url)
-            let fixture = try JSONDecoder().decode(
-                ReplayFixture.self,
-                from: data
-            )
-            let recording = try JSONDecoder().decode(
-                NeutralTerminalRecording.self,
-                from: data
-            )
-            try validateProvenance(recording.provenance)
-
-            let authored = try run(recording, expectations: fixture.events, strategy: .authored)
-            if recording.provenance.source != "alacritty" {
-                let bytewise = try run(recording, expectations: fixture.events, strategy: .bytewise)
-                #expect(bytewise == authored)
-            }
-
-            for strategy in splitStrategies(for: recording) {
-                #expect(try run(recording, expectations: fixture.events, strategy: strategy) == authored)
-            }
+            try replayFixture(at: url)
         }
+    }
+
+    @Test(
+        "Milestone 8 Alacritty application recordings replay at authored chunking",
+        arguments: Self.milestone8AlacrittyRecordings
+    )
+    func milestone8ApplicationReplay(_ name: String) throws {
+        let url = try #require(Bundle.module.url(
+            forResource: name,
+            withExtension: "json",
+            subdirectory: "Fixtures/alacritty"
+        ))
+        try replayFixture(at: url)
     }
 
     @Test("libvterm manifest classifies every case from the forty-three selected source files")
@@ -130,7 +126,9 @@ struct TerminalFixtureTests {
         #expect(Set(manifest.recordings.map(\.name)) == Self.expectedAlacrittyRecordings)
         #expect(manifest.recordings.count == 45)
         #expect(manifest.recordings.filter { $0.milestone == 6 && ["adopted", "adapted"].contains($0.disposition) }.count == 15)
-        #expect(manifest.recordings.filter { $0.disposition == "superseded" }.count == 16)
+        #expect(manifest.recordings.filter { $0.milestone == 8 && ["adopted", "adapted"].contains($0.disposition) }.count == 5)
+        #expect(manifest.recordings.filter { $0.milestone == 7 }.allSatisfy { $0.disposition != "pending" })
+        #expect(manifest.recordings.filter { $0.disposition == "superseded" }.count == 22)
         #expect(manifest.recordings.filter { $0.disposition == "superseded" }.allSatisfy { $0.evidence?.isEmpty == false })
         #expect(manifest.recordings.filter { $0.disposition == "superseded" }.allSatisfy {
             Self.alacrittyEvidence.contains($0.evidence ?? "")
@@ -141,10 +139,25 @@ struct TerminalFixtureTests {
         })
 
         let adopted = Set(manifest.recordings.compactMap { entry in
-            entry.milestone == 6 && ["adopted", "adapted"].contains(entry.disposition) ? entry.name : nil
+            [6, 8].contains(entry.milestone)
+                && ["adopted", "adapted"].contains(entry.disposition) ? entry.name : nil
         })
         let fixtureNames = Set(try alacrittyFixtureURLs().map { $0.deletingPathExtension().lastPathComponent })
         #expect(fixtureNames == adopted)
+        for url in try alacrittyFixtureURLs()
+            where Self.milestone8AlacrittyRecordings.contains(url.deletingPathExtension().lastPathComponent)
+        {
+            let fixture = try JSONDecoder().decode(ReplayFixture.self, from: Data(contentsOf: url))
+            let expectation = try #require(fixture.events.last?.expectation)
+            #expect(expectation.viewportText != nil)
+            #expect(expectation.cellStyleRuns?.isEmpty == false)
+            #expect(expectation.cursor != nil)
+            #expect(expectation.cursorPresentation != nil)
+            #expect(expectation.scrollbackCount == 0)
+            #expect(expectation.primaryHistoryContains?.isEmpty == false)
+            #expect(expectation.alternateScreenActive == true)
+            #expect(expectation.inputModes != nil)
+        }
     }
 
     private func fixtureURLs() throws -> [URL] {
@@ -212,7 +225,12 @@ struct TerminalFixtureTests {
     private static let adoptedAlacrittyRecordings: Set<String> = [
         "alt_reset", "clear_underline", "colored_reset", "colored_underline", "fish_cc",
         "history", "hyperlinks", "saved_cursor", "saved_cursor_alt", "scroll_in_region_up_preserves_history",
-        "sgr", "tab_rendering", "underline", "wrapline_alt_toggle", "zsh_tab_completion",
+        "sgr", "tab_rendering", "tmux_git_log", "tmux_htop", "underline", "vim_24bitcolors_bce",
+        "vim_large_window_scroll", "vim_simple_edit", "wrapline_alt_toggle", "zsh_tab_completion",
+    ]
+
+    private static let milestone8AlacrittyRecordings = [
+        "tmux_git_log", "tmux_htop", "vim_24bitcolors_bce", "vim_large_window_scroll", "vim_simple_edit",
     ]
 
     private static let expectedAlacrittyRecordings: Set<String> = [
@@ -228,10 +246,27 @@ struct TerminalFixtureTests {
     ]
 
     private static let alacrittyEvidence: Set<String> = [
-        "CSIEraseTests", "Fixtures/libvterm/state-movecursor.json", "TerminalEditingTests",
+        "CSICursorMovementTests", "CSIEraseTests", "Fixtures/libvterm/state-movecursor.json", "TerminalEditingTests",
         "TerminalGraphemeTests", "TerminalModeTests", "TerminalRepeatTests", "TerminalResetTests",
-        "TerminalScrollRegionTests", "TerminalScrollbackTests", "TerminalStyleTests",
+        "TerminalScrollRegionTests", "TerminalScrollbackTests", "TerminalStyleTests", "TerminalTabStopTests",
     ]
+
+    private func replayFixture(at url: URL) throws {
+        let data = try Data(contentsOf: url)
+        let fixture = try JSONDecoder().decode(ReplayFixture.self, from: data)
+        let recording = try JSONDecoder().decode(NeutralTerminalRecording.self, from: data)
+        try validateProvenance(recording.provenance)
+
+        let authored = try run(recording, expectations: fixture.events, strategy: .authored)
+        if recording.provenance.source != "alacritty" {
+            let bytewise = try run(recording, expectations: fixture.events, strategy: .bytewise)
+            #expect(bytewise == authored)
+        }
+
+        for strategy in splitStrategies(for: recording) {
+            #expect(try run(recording, expectations: fixture.events, strategy: strategy) == authored)
+        }
+    }
 
     private func run(
         _ fixture: NeutralTerminalRecording,
@@ -350,6 +385,22 @@ struct TerminalFixtureTests {
                 #expect(cell.style == (try point.style.terminalStyle()))
             }
         }
+        if let runs = expectation.cellStyleRuns {
+            for run in runs {
+                for column in run.startColumn..<run.endColumn {
+                    let cell = try #require(terminal.cell(row: run.row, column: column))
+                    let expected = try run.style.terminalStyle()
+                    guard cell.style == expected else {
+                        throw FixtureError.cellStyleMismatch(
+                            row: run.row,
+                            column: column,
+                            actual: cell.style,
+                            expected: expected
+                        )
+                    }
+                }
+            }
+        }
         if let cellScalars = expectation.cellScalars {
             for point in cellScalars {
                 let cell = try #require(terminal.cell(row: point.row, column: point.column))
@@ -412,6 +463,20 @@ struct TerminalFixtureTests {
         }
         if let fullHistoryText = expectation.fullHistoryText {
             #expect(terminal.fullHistoryText == fullHistoryText)
+        }
+        if let primaryHistoryContains = expectation.primaryHistoryContains {
+            for fragment in primaryHistoryContains {
+                #expect(terminal.primaryHistoryText.contains(fragment))
+            }
+        }
+        if let alternateScreenActive = expectation.alternateScreenActive {
+            #expect(terminal.isAlternateScreenActive == alternateScreenActive)
+        }
+        if let inputModes = expectation.inputModes {
+            let expected = try inputModes.terminalModes()
+            guard terminal.inputModes == expected else {
+                throw FixtureError.inputModesMismatch(actual: terminal.inputModes, expected: expected)
+            }
         }
     }
 
@@ -809,6 +874,9 @@ private enum ChunkStrategy {
 private enum FixtureError: Error {
     case invalidStyleToken(String)
     case invalidCursorShape(String)
+    case invalidMouseTrackingMode(String)
+    case cellStyleMismatch(row: Int, column: Int, actual: TerminalStyle, expected: TerminalStyle)
+    case inputModesMismatch(actual: TerminalInputModes, expected: TerminalInputModes)
 }
 
 private struct ReplayFixture: Decodable {
@@ -838,8 +906,12 @@ private struct FixtureExpectation: Decodable {
     let scrollbackCount: Int?
     let scrollbackRows: [FixtureRow]?
     let fullHistoryText: String?
+    let primaryHistoryContains: [String]?
+    let alternateScreenActive: Bool?
+    let inputModes: FixtureInputModes?
     let currentStyle: FixtureStyle?
     let cellStyles: [FixtureCellStyle]?
+    let cellStyleRuns: [FixtureCellStyleRun]?
     let cellScalars: [FixtureCellScalars]?
     let cellHyperlinks: [FixtureCellHyperlink]?
 }
@@ -895,6 +967,47 @@ private struct FixtureCellStyle: Decodable {
     let row: Int
     let column: Int
     let style: FixtureStyle
+}
+
+/// Compactly retains complete public cell presentation for large application grids.
+private struct FixtureCellStyleRun: Decodable {
+    let row: Int
+    let startColumn: Int
+    let endColumn: Int
+    let style: FixtureStyle
+}
+
+/// Captures the child-controlled input policy left active by an application recording.
+private struct FixtureInputModes: Decodable {
+    let applicationCursorKeys: Bool
+    let applicationKeypad: Bool
+    let lineFeedNewLine: Bool
+    let focusReporting: Bool
+    let bracketedPaste: Bool
+    let mouseTracking: String
+    let sgrMouseEncoding: Bool
+    let kittyKeyboardFlags: UInt16
+
+    func terminalModes() throws -> TerminalInputModes {
+        let tracking: TerminalMouseTrackingMode
+        switch mouseTracking {
+        case "off": tracking = .off
+        case "click": tracking = .click
+        case "drag": tracking = .drag
+        case "any-motion": tracking = .anyMotion
+        default: throw FixtureError.invalidMouseTrackingMode(mouseTracking)
+        }
+        return TerminalInputModes(
+            applicationCursorKeys: applicationCursorKeys,
+            applicationKeypad: applicationKeypad,
+            lineFeedNewLine: lineFeedNewLine,
+            focusReporting: focusReporting,
+            bracketedPaste: bracketedPaste,
+            mouseTracking: tracking,
+            sgrMouseEncoding: sgrMouseEncoding,
+            kittyKeyboardFlags: kittyKeyboardFlags
+        )
+    }
 }
 
 private struct FixtureCellScalars: Decodable {

@@ -320,7 +320,7 @@ mean.
     that no additional Milestone 6 support-matrix behavior remains unique to
     the other researched sources.
 
-- [ ] **7. Reach shell and baseline application compatibility**
+- [x] **7. Reach shell and baseline application compatibility**
   - [x] **Slice 1: Bounded title, cwd, bell, and legacy-event isolation.** Add
     OSC 0/2 title semantics, local-host OSC 7 with cwd reset, BEL alerts, bounded
     pane-scoped delivery, and temporary recognition that carries current
@@ -361,14 +361,26 @@ mean.
     [slice plan](../plans/impl/2026-07-21-2326-real-pane-protocol-probes.md).
 
 - [ ] **8. Reach tmux, editor, and advanced TUI compatibility**
+  - [x] **Slice 1: Alacritty tmux and Vim recording adoption.** Replays the
+    five pinned `tmux_git_log`, `tmux_htop`, and Vim application captures at
+    their authored dimensions and chunking through public terminal
+    projections, including styled cells, cursor and input modes, primary
+    history, and alternate-screen state. Finalizes the six stale Milestone 7
+    vttest ledger entries against native behavioral evidence without treating
+    the imported headless captures as live workflow proof. See the
+    [slice plan](../plans/impl/2026-07-22-0103-alacritty-tmux-vim-recordings.md).
   - [ ] tmux, vim, neovim, btop, htop, lazygit, Claude Code, and Codex complete the
-    minimum workflows in [Testing and conformance](12-testing-conformance.md).
+    DanTerm-owned minimum workflows in
+    [Testing and conformance](12-testing-conformance.md).
   - [ ] Relevant workflows pass both directly and through tmux or ssh where those
     layers materially change terminal behavior.
   - [ ] External and DanTerm-owned recordings identified in
     [External terminal test research](../docs/research/1-external-tests.md)
     cover the supported tmux, editor, and advanced-TUI behaviors without making
     another emulator's output normative.
+  - [ ] Live-pane evidence covers the PTY, input, renderer, teardown, and
+    recording boundaries exercised by those workflows; headless core replay
+    alone does not close this criterion.
 
 - [ ] **9. Pass the replacement quality gates**
   - [ ] Every required component invariant has the behavioral proof required by
