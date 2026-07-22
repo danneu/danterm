@@ -234,7 +234,7 @@ public struct Terminal: Equatable, Sendable {
     /// Retains exactly the target and pairwise look-behind for one open grapheme cluster.
     private struct ClusterContext: Equatable, Sendable {
         var target: CellPosition
-        var previousScalar: Unicode.Scalar
+        var previousClass: GraphemeBreakClass
         var breakState = GraphemeBreakState()
     }
 
@@ -4181,12 +4181,13 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func print(_ scalar: Unicode.Scalar) {
-        if appendToOpenClusterIfJoined(scalar) {
+        let classification = terminalUnicodeClassification(for: scalar)
+        if appendToOpenClusterIfJoined(scalar, classification: classification) {
             rememberOpenCluster()
             return
         }
 
-        let properties = terminalUnicodeProperties(for: scalar)
+        let properties = classification.properties
         guard properties.cellWidth != .zero else { return }
 
         if isPendingWrap {
@@ -4198,9 +4199,9 @@ public struct Terminal: Equatable, Sendable {
         case .zero:
             break
         case .narrow:
-            printNarrow(scalar)
+            printNarrow(scalar, breakClass: classification.graphemeBreakClass)
         case .wide:
-            printWide(scalar)
+            printWide(scalar, breakClass: classification.graphemeBreakClass)
         }
         rememberOpenCluster()
     }
@@ -4214,7 +4215,10 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
-    private mutating func appendToOpenClusterIfJoined(_ scalar: Unicode.Scalar) -> Bool {
+    private mutating func appendToOpenClusterIfJoined(
+        _ scalar: Unicode.Scalar,
+        classification: TerminalUnicodeClassification
+    ) -> Bool {
         guard var context = clusterContext else { return false }
         var target = context.target
         guard rows.indices.contains(target.row), rows[target.row].cells.indices.contains(target.column) else {
@@ -4230,8 +4234,8 @@ public struct Terminal: Equatable, Sendable {
 
         var nextBreakState = context.breakState
         guard graphemeBreak(
-            between: context.previousScalar,
-            and: scalar,
+            between: context.previousClass,
+            and: classification.graphemeBreakClass,
             state: &nextBreakState
         ) == false else {
             return false
@@ -4242,7 +4246,11 @@ public struct Terminal: Equatable, Sendable {
             return false
         }
         invalidateInspection(inViewportRows: target.row..<(target.row + 1))
-        switch desiredClusterWidth(for: scalar, baseScalar: baseScalar) {
+        switch desiredClusterWidth(
+            for: scalar,
+            classification: classification,
+            baseScalar: baseScalar
+        ) {
         case .wide where rows[target.row].cells[target.column].kind == .narrow:
             target = upgradeClusterToWide(at: target)
         case .narrow where rows[target.row].cells[target.column].kind == .wideHead:
@@ -4253,7 +4261,7 @@ public struct Terminal: Equatable, Sendable {
 
         rows[target.row].cells[target.column].scalars.append(scalar)
         context.target = target
-        context.previousScalar = scalar
+        context.previousClass = classification.graphemeBreakClass
         context.breakState = nextBreakState
         clusterContext = context
         return true
@@ -4261,6 +4269,7 @@ public struct Terminal: Equatable, Sendable {
 
     private func desiredClusterWidth(
         for scalar: Unicode.Scalar,
+        classification: TerminalUnicodeClassification,
         baseScalar: Unicode.Scalar
     ) -> TerminalCellWidth? {
         if scalar.value == 0xFE0F || scalar.value == 0xFE0E {
@@ -4270,11 +4279,11 @@ public struct Terminal: Equatable, Sendable {
             return scalar.value == 0xFE0F ? .wide : .narrow
         }
 
-        let properties = terminalUnicodeProperties(for: scalar)
+        let properties = classification.properties
         guard properties.cellWidth != .zero, properties.isEmojiModifier == false else {
             return nil
         }
-        switch graphemeBreakClass(for: scalar) {
+        switch classification.graphemeBreakClass {
         case .v, .t, .prepend:
             return nil
         default:
@@ -4350,7 +4359,10 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    private mutating func printNarrow(_ scalar: Unicode.Scalar) {
+    private mutating func printNarrow(
+        _ scalar: Unicode.Scalar,
+        breakClass: GraphemeBreakClass
+    ) {
         let contentIdentity = nextContentIdentity
         nextContentIdentity += 1
         invalidateInspection(inViewportRows: cursor.row..<(cursor.row + 1))
@@ -4369,7 +4381,7 @@ public struct Terminal: Equatable, Sendable {
             hyperlinkId: hyperlinkPen,
             contentIdentity: contentIdentity
         )
-        clusterContext = ClusterContext(target: cursor, previousScalar: scalar)
+        clusterContext = ClusterContext(target: cursor, previousClass: breakClass)
 
         if cursor.column == columnCount - 1 {
             isPendingWrap = isAutoWrapMode
@@ -4378,7 +4390,10 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    private mutating func printWide(_ scalar: Unicode.Scalar) {
+    private mutating func printWide(
+        _ scalar: Unicode.Scalar,
+        breakClass: GraphemeBreakClass
+    ) {
         let contentIdentity = nextContentIdentity
         nextContentIdentity += 1
         invalidateInspection(inViewportRows: cursor.row..<(cursor.row + 1))
@@ -4436,7 +4451,7 @@ public struct Terminal: Equatable, Sendable {
             hyperlinkId: hyperlinkPen,
             contentIdentity: contentIdentity
         )
-        clusterContext = ClusterContext(target: cursor, previousScalar: scalar)
+        clusterContext = ClusterContext(target: cursor, previousClass: breakClass)
         advanceCursorPastWideCell(at: cursor)
     }
 

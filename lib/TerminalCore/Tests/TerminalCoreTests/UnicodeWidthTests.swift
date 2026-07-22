@@ -40,7 +40,7 @@ import Testing
         for range in unicodeReferenceRanges {
             for value in range.lowerBound...range.upperBound {
                 guard let scalar = Unicode.Scalar(value) else { continue }
-                let properties = terminalUnicodeProperties(for: scalar)
+                let properties = terminalUnicodeClassification(for: scalar).properties
                 #expect(properties.cellWidth.rawValue == range.cellWidth)
                 #expect(properties.isExtendedPictographic == range.isExtendedPictographic)
                 #expect(properties.isEmojiModifier == range.isEmojiModifier)

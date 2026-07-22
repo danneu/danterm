@@ -202,7 +202,7 @@ corpus and share those results the same way.
   with `just benchmark-sample` to check the Set/hash bucket; verify with
   app benchmark `styled-screen-redraw`, save jsonl records with comments,
   run `just test`, share results and ask the user to accept, then commit.
-- [ ] 3. Slice B (packed Unicode table + cached class): differential test
+- [x] 3. Slice B (packed Unicode table + cached class): differential test
   first (PO1); same vet/sample/verify/record/share/commit loop (sample
   check: `contains`/`graphemeBreakClass`).
 - [ ] 4. Slice C (generation counters): same loop; additionally verify

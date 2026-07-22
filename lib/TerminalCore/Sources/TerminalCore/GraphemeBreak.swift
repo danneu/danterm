@@ -47,6 +47,15 @@ func graphemeBreak(
     )
 }
 
+/// Advances segmentation when the caller already cached both scalar classes.
+func graphemeBreak(
+    between previous: GraphemeBreakClass,
+    and current: GraphemeBreakClass,
+    state: inout GraphemeBreakState
+) -> Bool {
+    state.shouldBreak(between: previous, and: current)
+}
+
 private extension GraphemeBreakState {
     mutating func shouldBreak(
         between previous: GraphemeBreakClass,

@@ -16,9 +16,10 @@ import Testing
         for range in unicodeGraphemeReferenceRanges {
             for value in range.lowerBound...range.upperBound {
                 guard let scalar = Unicode.Scalar(value) else { continue }
-                #expect(graphemeBreakClass(for: scalar).rawValue == range.breakClass)
+                let classification = terminalUnicodeClassification(for: scalar)
+                #expect(classification.graphemeBreakClass.rawValue == range.breakClass)
                 #expect(
-                    terminalUnicodeProperties(for: scalar).isEmojiVariationBase
+                    classification.properties.isEmojiVariationBase
                         == range.isEmojiVariationBase
                 )
             }
