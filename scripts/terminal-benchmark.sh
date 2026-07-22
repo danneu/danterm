@@ -18,7 +18,7 @@ if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     return 0
 fi
 
-WORKLOAD="${1:-plain-scrolling}"
+WORKLOAD="${1:-scrollback-stream}"
 BACKEND="${2:-swift}"
 BACKEND="${BACKEND#backend=}"
 MODE="${DANTERM_BENCHMARK_MODE:-measure}"

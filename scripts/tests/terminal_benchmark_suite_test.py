@@ -30,7 +30,7 @@ FIXTURE_SPEC.loader.exec_module(FIXTURES)
 
 
 class TerminalBenchmarkSuiteTests(unittest.TestCase):
-    def make_result(self, workload="plain-scrolling", iterations=3):
+    def make_result(self, workload="scrollback-stream", iterations=3):
         return {
             "schemaVersion": 2,
             "backend": "swift",
@@ -57,12 +57,10 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
         self.assertEqual(
             tuple(corpus),
             (
-                "plain-scrolling",
-                "long-line-wrapping",
-                "unicode-mix",
-                "styles-truecolor",
-                "redraw-scroll-region",
-                "vim-recording",
+                "scrollback-stream",
+                "styled-screen-redraw",
+                "unicode-wrapping",
+                "incremental-screen-updates",
             ),
         )
         for workload in corpus.values():
@@ -70,14 +68,34 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
             self.assertTrue(workload["provenance"]["source"])
             self.assertTrue(workload["provenance"]["license"])
 
-    def test_vim_workload_replays_the_existing_committed_recording(self):
-        workload = FIXTURES.load_corpus(ROOT)["vim-recording"]
+    def test_each_workload_pins_the_major_performance_question_it_answers(self):
+        corpus = FIXTURES.load_corpus(ROOT)
 
-        chunks = list(FIXTURES.iter_bytes(ROOT, workload))
+        self.assertEqual(
+            {name: workload["dominantQuestion"] for name, workload in corpus.items()},
+            {
+                "scrollback-stream": "How fast can sustained output be consumed, scrolled, and retained?",
+                "styled-screen-redraw": "How fast can a styled TUI replace the visible screen?",
+                "unicode-wrapping": "How expensive is complex text flowing and wrapping through the grid?",
+                "incremental-screen-updates": "How efficiently can localized TUI updates avoid full-screen work?",
+            },
+        )
 
-        self.assertGreater(sum(map(len, chunks)), 100_000)
-        self.assertIn(b"\x1b[", b"".join(chunks))
-        self.assertEqual(workload["provenance"]["pinnedCommit"], "852e971cddfabe222d2d5bcda466e130f53af207")
+    def test_workload_streams_exercise_their_dominant_behavior(self):
+        corpus = FIXTURES.load_corpus(ROOT)
+        streams = {
+            name: b"".join(FIXTURES.iter_bytes(ROOT, workload))
+            for name, workload in corpus.items()
+        }
+
+        self.assertGreater(streams["scrollback-stream"].count(b"\n"), 10_000)
+        self.assertIn(b"\x1b[H", streams["styled-screen-redraw"])
+        self.assertIn(b"\x1b[38;2;", streams["styled-screen-redraw"])
+        self.assertIn("\u4f60\u597d\u4e16\u754c".encode(), streams["unicode-wrapping"])
+        self.assertIn("cafe\u0301".encode(), streams["unicode-wrapping"])
+        self.assertIn(b"\x1b[2;23r", streams["incremental-screen-updates"])
+        self.assertIn(b"\x1b[@", streams["incremental-screen-updates"])
+        self.assertIn(b"\x1b[P", streams["incremental-screen-updates"])
 
     def test_write_all_retries_partial_pty_writes(self):
         writes = []
@@ -122,29 +140,29 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
     def test_arguments_select_save_policy_and_workload(self):
         self.assertEqual(SUITE.parse_arguments(["backend=swift", "save=1"]), ("swift", None, True))
         self.assertEqual(
-            SUITE.parse_arguments(["save=1", "workload=unicode-mix", "backend=ghostty"]),
-            ("ghostty", "unicode-mix", True),
+            SUITE.parse_arguments(["save=1", "workload=unicode-wrapping", "backend=ghostty"]),
+            ("ghostty", "unicode-wrapping", True),
         )
         self.assertEqual(SUITE.parse_arguments(["swift", "save=0"]), ("swift", None, False))
         self.assertEqual(
-            SUITE.parse_arguments(["unicode-mix", "ghostty", "1"]),
-            ("ghostty", "unicode-mix", True),
+            SUITE.parse_arguments(["unicode-wrapping", "ghostty", "1"]),
+            ("ghostty", "unicode-wrapping", True),
         )
         self.assertEqual(
-            SUITE.parse_arguments(["default-workload=plain-scrolling", "backend=ghostty"]),
-            ("ghostty", "plain-scrolling", None),
+            SUITE.parse_arguments(["default-workload=scrollback-stream", "backend=ghostty"]),
+            ("ghostty", "scrollback-stream", None),
         )
         self.assertEqual(
             SUITE.parse_arguments([
-                "default-workload=plain-scrolling",
-                "workload=unicode-mix",
+                "default-workload=scrollback-stream",
+                "workload=unicode-wrapping",
                 "backend=ghostty",
             ]),
-            ("ghostty", "unicode-mix", None),
+            ("ghostty", "unicode-wrapping", None),
         )
         self.assertEqual(
-            SUITE.parse_arguments(["swift", "workload=plain-scrolling", "save="]),
-            ("swift", "plain-scrolling", None),
+            SUITE.parse_arguments(["swift", "workload=scrollback-stream", "save="]),
+            ("swift", "scrollback-stream", None),
         )
         with self.assertRaisesRegex(ValueError, "save must be 0 or 1"):
             SUITE.parse_arguments(["swift", "save=yes"])
@@ -194,8 +212,8 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
         key = {
             "schemaVersion": 2,
             "backend": "swift",
-            "workload": "plain-scrolling",
-            "fixture": {"identity": "plain-scrolling-v1"},
+            "workload": "scrollback-stream",
+            "fixture": {"identity": "scrollback-stream-v1"},
             "machine": {"model": "MacBookPro18,3", "chip": "Apple M1 Pro"},
             "macOS": "15.5",
             "displayScale": 2.0,
@@ -251,14 +269,14 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
 
         with mock.patch.object(SUITE, "command_output", return_value=raw):
             with self.assertRaisesRegex(SystemExit, "required 80x24, reported 94x35"):
-                SUITE.run_workload("plain-scrolling", "swift", 1)
+                SUITE.run_workload("scrollback-stream", "swift", 1)
 
     def test_older_schema_record_is_not_a_compatible_baseline(self):
         current = {
             "schemaVersion": 2,
             "backend": "swift",
-            "workload": "plain-scrolling",
-            "fixture": {"identity": "plain-scrolling-v1"},
+            "workload": "scrollback-stream",
+            "fixture": {"identity": "scrollback-stream-v1"},
             "machine": {"model": "model", "chip": "chip"},
             "macOS": "15.5",
             "displayScale": 2.0,
@@ -275,8 +293,8 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
         current = {
             "schemaVersion": 2,
             "backend": "swift",
-            "workload": "plain-scrolling",
-            "fixture": {"identity": "plain-scrolling-v1"},
+            "workload": "scrollback-stream",
+            "fixture": {"identity": "scrollback-stream-v1"},
             "machine": {"model": "model", "chip": "chip"},
             "macOS": "15.5",
             "displayScale": 2.0,
@@ -363,7 +381,7 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
 
     def test_prompted_yes_promotes_exact_staged_content(self):
         history, staging, made, _, prompt, error = self.run_main(
-            ["swift", "workload=plain-scrolling"], answer="y"
+            ["swift", "workload=scrollback-stream"], answer="y"
         )
 
         self.assertIsNone(error)
@@ -374,7 +392,7 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
 
     def test_prompted_no_keeps_staged_content_and_history_untouched(self):
         history, staging, _, _, prompt, error = self.run_main(
-            ["swift", "workload=plain-scrolling"], answer="n"
+            ["swift", "workload=scrollback-stream"], answer="n"
         )
 
         self.assertIsNone(error)
@@ -384,10 +402,10 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
 
     def test_explicit_save_values_never_prompt(self):
         saved_history, _, _, _, saved_prompt, saved_error = self.run_main(
-            ["swift", "workload=plain-scrolling", "save=1"]
+            ["swift", "workload=scrollback-stream", "save=1"]
         )
         declined_history, _, _, _, declined_prompt, declined_error = self.run_main(
-            ["swift", "workload=plain-scrolling", "save=0"]
+            ["swift", "workload=scrollback-stream", "save=0"]
         )
 
         self.assertIsNone(saved_error)
@@ -399,7 +417,7 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
 
     def test_failed_later_workload_does_not_prompt_or_touch_history(self):
         history, staging, _, _, prompt, error = self.run_main(
-            ["swift"], answer="y", fail_on="long-line-wrapping"
+            ["swift"], answer="y", fail_on="styled-screen-redraw"
         )
         self.assertRegex(str(error), "workload failed")
         self.assertFalse(history.exists())

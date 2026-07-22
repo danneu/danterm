@@ -10,7 +10,7 @@ terminate_owned_pid() {
 }
 
 MODE="${1:-loop}"
-WORKLOAD="${2:-plain-scrolling}"
+WORKLOAD="${2:-scrollback-stream}"
 BACKEND="${3:-swift}"
 DURATION="${4:-15}"
 TEMPLATE="${5:-Time Profiler}"

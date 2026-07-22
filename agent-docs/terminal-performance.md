@@ -18,7 +18,7 @@ before either benchmark command will start.
 
 Benchmark recipe options use `name=value` spelling and may appear in any
 order, for example `just benchmark backend=ghostty save=1` or
-`just benchmark-one workload=unicode-mix backend=swift save=0`.
+`just benchmark-one workload=unicode-wrapping backend=swift save=0`.
 
 Every run converges the terminal to an 80x24 grid before emitting workload
 bytes. Override the target for a diagnostic run with
@@ -36,10 +36,18 @@ protocol or schema, or an environment compatibility field. A deliberate
 Swift-to-Ghostty comparison requires every compatibility field except backend
 to match.
 
-The committed corpus covers plain scrolling, long-line wrapping, mixed Unicode,
-dense style and truecolor changes, full redraw and scroll-region updates, and a
-pinned Alacritty Vim recording. Workload names and provenance live in
-`benchmarks/fixtures/terminal-app.json`.
+The committed corpus stays deliberately small. Each workload has one dominant
+performance question recorded alongside its identity and provenance in
+`benchmarks/fixtures/terminal-app.json`; tests pin those questions so fixture
+changes cannot silently change what a result is meant to measure:
+
+- `scrollback-stream`: sustained output, viewport scrolling, and retention.
+- `styled-screen-redraw`: complete styled TUI frame replacement.
+- `unicode-wrapping`: complex text width, wrapping, and rendering.
+- `incremental-screen-updates`: localized TUI mutation without full-screen work.
+
+The imported Alacritty Vim recordings remain terminal-correctness fixtures, not
+primary real-app performance workloads.
 
 Producer-write elapsed ends when the producer's final PTY write returns. It
 measures PTY backpressure and drain performance, not parsing or rendering.
@@ -48,14 +56,14 @@ through completion of the draw that consumed the acknowledged final frame.
 
 ## Choose a profiler
 
-Start with `just benchmark-sample plain-scrolling seconds=15`. The textual
+Start with `just benchmark-sample scrollback-stream seconds=15`. The textual
 profile is quick to search and usually identifies a dominant stack. Use
-`just benchmark-trace plain-scrolling template="Time Profiler" seconds=30`
+`just benchmark-trace scrollback-stream template="Time Profiler" seconds=30`
 when call-tree filtering, thread timelines, or richer Instruments data is
 needed. Both attach by numeric pid from the isolated harness identity file;
 they do not find a process by name or automate Instruments.app.
 
-Use `just benchmark-loop plain-scrolling backend=swift` when attaching another
+Use `just benchmark-loop scrollback-stream backend=swift` when attaching another
 command-line diagnostic tool. It prints the identity JSON and continues until
 interrupted. The file records the exact pid, workload, backend, app binary, and
 run diagnostics. Stop it with Ctrl-C; the harness then terminates only its own

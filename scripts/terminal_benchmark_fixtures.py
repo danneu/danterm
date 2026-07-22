@@ -15,8 +15,13 @@ def load_corpus(root):
         raise ValueError("Terminal benchmark corpus has no workloads")
     for name, workload in workloads.items():
         provenance = workload.get("provenance", {})
-        if not workload.get("identity") or not provenance.get("source") or not provenance.get("license"):
-            raise ValueError(f"Benchmark workload lacks identity or provenance: {name}")
+        if (
+            not workload.get("identity")
+            or not workload.get("dominantQuestion")
+            or not provenance.get("source")
+            or not provenance.get("license")
+        ):
+            raise ValueError(f"Benchmark workload lacks identity, dominant question, or provenance: {name}")
     return workloads
 
 

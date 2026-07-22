@@ -77,22 +77,22 @@ test-terminal-viability:
 
 # Benchmark one workload; options accept backend=, workload=, and save= in any order.
 benchmark-one *args:
-    python3 ./scripts/terminal-benchmark-suite.py default-workload=plain-scrolling {{args}}
+    python3 ./scripts/terminal-benchmark-suite.py default-workload=scrollback-stream {{args}}
 
 # Benchmark the corpus; options accept backend= and save= in any order.
 benchmark *args:
     python3 ./scripts/terminal-benchmark-suite.py {{args}}
 
 # Run one isolated workload continuously and publish its exact app pid.
-benchmark-loop workload="plain-scrolling" backend="swift":
+benchmark-loop workload="scrollback-stream" backend="swift":
     ./scripts/terminal-benchmark-profile.sh loop "{{workload}}" "{{backend}}"
 
 # Capture a textual sample profile from one isolated sustained Swift workload.
-benchmark-sample workload="plain-scrolling" seconds="15":
+benchmark-sample workload="scrollback-stream" seconds="15":
     ./scripts/terminal-benchmark-profile.sh sample "{{workload}}" swift "{{seconds}}"
 
 # Capture and export an xctrace profile from one isolated sustained Swift workload.
-benchmark-trace workload="plain-scrolling" template="Time Profiler" seconds="30":
+benchmark-trace workload="scrollback-stream" template="Time Profiler" seconds="30":
     ./scripts/terminal-benchmark-profile.sh trace "{{workload}}" swift "{{seconds}}" "{{template}}"
 
 # Run the opt-in headless shell/application compatibility workflows.

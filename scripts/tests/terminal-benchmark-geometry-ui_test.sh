@@ -9,7 +9,7 @@ for backend in swift ghostty; do
     result="$(
         DANTERM_TERMINAL_BENCHMARK_COLUMNS=81 \
         DANTERM_TERMINAL_BENCHMARK_ROWS=25 \
-        "$HARNESS" plain-scrolling "$backend"
+        "$HARNESS" scrollback-stream "$backend"
     )"
     geometry="$(jq -c '.geometry' <<<"$result")"
     [[ "$geometry" == '{"columns":81,"rows":25}' ]] || {
