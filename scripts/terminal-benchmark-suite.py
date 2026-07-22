@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 
-from terminal_benchmark_fixtures import load_corpus
+from terminal_benchmark_fixtures import iter_bytes, load_corpus
 
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -19,7 +19,7 @@ CORPUS = tuple(WORKLOADS)
 FIXTURES = {name: workload["identity"] for name, workload in WORKLOADS.items()}
 HISTORY_PATH = ROOT / "benchmarks" / "results" / "terminal-app.jsonl"
 STAGING_ROOT = ROOT / ".build" / "terminal-benchmark-staged"
-COMPATIBILITY_FIELDS = (
+APP_COMPATIBILITY_FIELDS = (
     "schemaVersion",
     "backend",
     "workload",
@@ -32,6 +32,14 @@ COMPATIBILITY_FIELDS = (
     "geometry",
     "profilingActive",
     "iterations",
+)
+CORE_COMPATIBILITY_FIELDS = (
+    "backend",
+    "workload",
+    "fixture",
+    "buildConfiguration",
+    "toolchain",
+    "machine",
 )
 
 
@@ -63,7 +71,8 @@ def summarize_runs(runs):
 
 def compatibility_key(result):
     """Select every environment field that must match before reporting a delta."""
-    return {field: result[field] for field in COMPATIBILITY_FIELDS}
+    fields = CORE_COMPATIBILITY_FIELDS if result["backend"] == "swift-core" else APP_COMPATIBILITY_FIELDS
+    return {field: result[field] for field in fields}
 
 
 def append_result(path, result, serialized=None):
@@ -142,8 +151,8 @@ def command_output(*command):
 def parse_backend(argument):
     """Accept both direct script arguments and just's named-argument spelling."""
     backend = argument.removeprefix("backend=")
-    if backend not in ("swift", "ghostty"):
-        raise ValueError("backend must be swift or ghostty")
+    if backend not in ("swift", "ghostty", "swift-core"):
+        raise ValueError("backend must be swift, ghostty, or swift-core")
     return backend
 
 
@@ -156,8 +165,10 @@ def parse_arguments(arguments):
     seen_backend = False
     seen_workload = False
     seen_save = False
+    comment = None
+    seen_comment = False
     for argument in arguments:
-        if argument.startswith("backend=") or argument in ("swift", "ghostty"):
+        if argument.startswith("backend=") or argument in ("swift", "ghostty", "swift-core"):
             if seen_backend:
                 raise ValueError("backend specified more than once")
             backend = parse_backend(argument)
@@ -186,11 +197,16 @@ def parse_arguments(arguments):
                 raise ValueError("save specified more than once")
             save = argument == "1"
             seen_save = True
+        elif argument.startswith("comment="):
+            if seen_comment:
+                raise ValueError("comment specified more than once")
+            comment = argument.removeprefix("comment=")
+            seen_comment = True
         else:
             if argument.startswith("workload="):
                 raise ValueError(f"unknown benchmark workload: {argument.removeprefix('workload=')}")
             raise ValueError(f"unknown argument: {argument}")
-    return backend, workload if workload is not None else default_workload, save
+    return backend, workload if workload is not None else default_workload, save, comment
 
 
 def confirm_save():
@@ -256,8 +272,24 @@ def run_workload(workload, backend, iterations):
     return runs
 
 
-def make_result(workload, backend, runs):
-    return {
+def run_core_workload(workload, iterations):
+    """Measure only Terminal.feed while preserving the committed corpus chunk boundaries."""
+    command = (
+        "swift", "run", "--package-path", str(ROOT / "lib" / "TerminalCore"),
+        "--configuration", "release", "TerminalCoreBenchmark", str(iterations),
+    )
+    payload = bytearray()
+    for chunk in iter_bytes(ROOT, WORKLOADS[workload]):
+        payload.extend(len(chunk).to_bytes(8, byteorder="big"))
+        payload.extend(chunk)
+    completed = subprocess.run(command, input=bytes(payload), capture_output=True)
+    if completed.returncode != 0:
+        raise SystemExit(completed.stderr.decode(errors="replace").strip())
+    return json.loads(completed.stdout)
+
+
+def make_result(workload, backend, runs, comment=None):
+    result = {
         "schemaVersion": SCHEMA_VERSION,
         "backend": backend,
         "workload": workload,
@@ -265,15 +297,26 @@ def make_result(workload, backend, runs):
         "commit": command_output("git", "-C", str(ROOT), "rev-parse", "HEAD"),
         "recordedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "machine": machine_identity(),
-        "macOS": command_output("sw_vers", "-productVersion"),
-        "displayScale": runs[0]["displayScale"],
         "toolchain": command_output("swift", "--version").splitlines()[0],
         "buildConfiguration": "release",
-        "geometry": runs[0]["geometry"],
         "profilingActive": False,
         "iterations": len(runs),
-        "summary": summarize_runs(runs),
     }
+    if comment is not None:
+        result["comment"] = comment
+    if backend == "swift-core":
+        result["summary"] = {
+            "iterations": len(runs),
+            "feedDurationNanoseconds": distribution(runs),
+        }
+    else:
+        result.update({
+            "macOS": command_output("sw_vers", "-productVersion"),
+            "displayScale": runs[0]["displayScale"],
+            "geometry": runs[0]["geometry"],
+            "summary": summarize_runs(runs),
+        })
+    return result
 
 
 def report(result, baseline, serialized=None):
@@ -281,7 +324,8 @@ def report(result, baseline, serialized=None):
     if baseline is None:
         print("delta: no compatible committed result")
         return
-    metrics = ("producerWriteNanoseconds", "finalDrawNanoseconds")
+    metrics = (("feedDurationNanoseconds",) if result["backend"] == "swift-core"
+               else ("producerWriteNanoseconds", "finalDrawNanoseconds"))
     for metric in metrics:
         if result["summary"][metric].get("available", True):
             print(f"delta {metric}: {delta_percent(result, baseline, metric):+.2f}%")
@@ -290,17 +334,20 @@ def report(result, baseline, serialized=None):
 def main():
     refuse_profiled_history()
     try:
-        backend, workload_filter, save = parse_arguments(sys.argv[1:])
+        backend, workload_filter, save, comment = parse_arguments(sys.argv[1:])
     except ValueError as error:
         raise SystemExit(str(error)) from error
-    require_ac_power()
+    if backend != "swift-core":
+        require_ac_power()
     iterations = int(os.environ.get("DANTERM_BENCHMARK_ITERATIONS", "3"))
     if iterations < 2:
         raise SystemExit("DANTERM_BENCHMARK_ITERATIONS must be at least 2")
     workloads = (workload_filter,) if workload_filter is not None else CORPUS
     staged_path = None
     for workload in workloads:
-        result = make_result(workload, backend, run_workload(workload, backend, iterations))
+        runs = (run_core_workload(workload, iterations) if backend == "swift-core"
+                else run_workload(workload, backend, iterations))
+        result = make_result(workload, backend, runs, comment=comment)
         baseline = latest_committed(result)
         serialized = serialize_result(result)
         if staged_path is None:

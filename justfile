@@ -83,6 +83,10 @@ benchmark-one *args:
 benchmark *args:
     python3 ./scripts/terminal-benchmark-suite.py {{args}}
 
+# Benchmark Terminal.feed headlessly; options accept workload=, comment=, and save=.
+benchmark-core *args:
+    python3 ./scripts/terminal-benchmark-suite.py backend=swift-core {{args}}
+
 # Run one isolated workload continuously and publish its exact app pid.
 benchmark-loop workload="scrollback-stream" backend="swift":
     ./scripts/terminal-benchmark-profile.sh loop "{{workload}}" "{{backend}}"

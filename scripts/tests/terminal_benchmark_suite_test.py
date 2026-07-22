@@ -136,21 +136,121 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
 
     def test_backend_accepts_just_named_argument_spelling(self):
         self.assertEqual(SUITE.parse_backend("backend=swift"), "swift")
+        self.assertEqual(SUITE.parse_backend("backend=swift-core"), "swift-core")
+
+    def test_core_compatibility_omits_app_environment_and_ignores_comment(self):
+        current = {
+            "schemaVersion": 3,
+            "backend": "swift-core",
+            "workload": "scrollback-stream",
+            "fixture": {"identity": "scrollback-stream-v1"},
+            "machine": {"model": "model", "chip": "chip"},
+            "toolchain": "Swift 6.3",
+            "buildConfiguration": "release",
+            "profilingActive": False,
+            "iterations": 3,
+            "comment": "after damage bitset",
+        }
+        previous = {**current, "comment": "baseline", "commit": "previous"}
+        app = {
+            **current,
+            "backend": "swift",
+            "displayScale": 2,
+            "geometry": {"columns": 80, "rows": 24},
+            "macOS": "26.5",
+            "commit": "app",
+        }
+
+        self.assertNotIn("comment", SUITE.compatibility_key(current))
+        self.assertEqual(
+            SUITE.latest_compatible_lines([json.dumps(previous)], current)["commit"],
+            "previous",
+        )
+        self.assertIsNone(SUITE.latest_compatible_lines([json.dumps(app)], current))
+
+    def test_core_summary_and_report_use_only_feed_duration(self):
+        result = self.make_result()
+        result["backend"] = "swift-core"
+        result["summary"] = {
+            "iterations": 3,
+            "feedDurationNanoseconds": {"min": 50, "median": 75, "max": 100},
+        }
+        baseline = {
+            **result,
+            "summary": {
+                "iterations": 3,
+                "feedDurationNanoseconds": {"min": 80, "median": 100, "max": 120},
+            },
+        }
+
+        with io.StringIO() as output, redirect_stdout(output):
+            SUITE.report(result, baseline)
+            printed = output.getvalue()
+
+        self.assertIn("delta feedDurationNanoseconds: -25.00%", printed)
+        self.assertNotIn("producerWriteNanoseconds", printed.splitlines()[-1])
+
+    def test_core_result_omits_app_only_environment_fields_and_accepts_comment(self):
+        with mock.patch.object(SUITE, "command_output", return_value="value"), mock.patch.object(
+            SUITE, "machine_identity", return_value={"model": "model", "chip": "chip"}
+        ):
+            result = SUITE.make_result(
+                "scrollback-stream",
+                "swift-core",
+                [30, 10, 20],
+                comment="dirty baseline",
+            )
+
+        self.assertEqual(result["comment"], "dirty baseline")
+        self.assertEqual(
+            result["summary"],
+            {
+                "iterations": 3,
+                "feedDurationNanoseconds": {"min": 10, "median": 20, "max": 30},
+            },
+        )
+        for field in ("displayScale", "geometry", "macOS"):
+            self.assertNotIn(field, result)
+
+    def test_core_runner_length_frames_fixture_chunks_for_the_swift_harness(self):
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=b"[10,20,30]\n", stderr=b""
+        )
+        with mock.patch.object(SUITE, "iter_bytes", return_value=iter((b"abc", b"de"))), mock.patch.object(
+            SUITE.subprocess, "run", return_value=completed
+        ) as run:
+            durations = SUITE.run_core_workload("scrollback-stream", 3)
+
+        self.assertEqual(durations, [10, 20, 30])
+        self.assertEqual(
+            run.call_args.kwargs["input"],
+            (3).to_bytes(8, "big") + b"abc" + (2).to_bytes(8, "big") + b"de",
+        )
+
+    def test_comment_is_optional_and_parsed_as_free_text(self):
+        self.assertEqual(
+            SUITE.parse_arguments(["swift-core", "comment=dirty tree baseline"]),
+            ("swift-core", None, None, "dirty tree baseline"),
+        )
+        self.assertEqual(
+            SUITE.parse_arguments(["swift", "save=0"]),
+            ("swift", None, False, None),
+        )
 
     def test_arguments_select_save_policy_and_workload(self):
-        self.assertEqual(SUITE.parse_arguments(["backend=swift", "save=1"]), ("swift", None, True))
+        self.assertEqual(SUITE.parse_arguments(["backend=swift", "save=1"]), ("swift", None, True, None))
         self.assertEqual(
             SUITE.parse_arguments(["save=1", "workload=unicode-wrapping", "backend=ghostty"]),
-            ("ghostty", "unicode-wrapping", True),
+            ("ghostty", "unicode-wrapping", True, None),
         )
-        self.assertEqual(SUITE.parse_arguments(["swift", "save=0"]), ("swift", None, False))
+        self.assertEqual(SUITE.parse_arguments(["swift", "save=0"]), ("swift", None, False, None))
         self.assertEqual(
             SUITE.parse_arguments(["unicode-wrapping", "ghostty", "1"]),
-            ("ghostty", "unicode-wrapping", True),
+            ("ghostty", "unicode-wrapping", True, None),
         )
         self.assertEqual(
             SUITE.parse_arguments(["default-workload=scrollback-stream", "backend=ghostty"]),
-            ("ghostty", "scrollback-stream", None),
+            ("ghostty", "scrollback-stream", None, None),
         )
         self.assertEqual(
             SUITE.parse_arguments([
@@ -158,11 +258,11 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
                 "workload=unicode-wrapping",
                 "backend=ghostty",
             ]),
-            ("ghostty", "unicode-wrapping", None),
+            ("ghostty", "unicode-wrapping", None, None),
         )
         self.assertEqual(
             SUITE.parse_arguments(["swift", "workload=scrollback-stream", "save="]),
-            ("swift", "scrollback-stream", None),
+            ("swift", "scrollback-stream", None, None),
         )
         with self.assertRaisesRegex(ValueError, "save must be 0 or 1"):
             SUITE.parse_arguments(["swift", "save=yes"])
@@ -355,7 +455,7 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
                 raise SystemExit("workload failed")
             return [{"workload": workload}]
 
-        def make_result(workload, backend, runs):
+        def make_result(workload, backend, runs, comment=None):
             result = self.make_result(workload)
             made.append(result)
             return result
