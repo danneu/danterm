@@ -14,6 +14,8 @@ from terminal_benchmark_fixtures import iter_bytes, load_corpus
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SCHEMA_VERSION = 2
+CORE_BENCHMARK_METHOD = "fresh-terminal-batch-v1"
+CORE_SAMPLE_TARGET_NANOSECONDS = 1_000_000_000
 WORKLOADS = load_corpus(ROOT)
 CORPUS = tuple(WORKLOADS)
 FIXTURES = {name: workload["identity"] for name, workload in WORKLOADS.items()}
@@ -35,6 +37,7 @@ APP_COMPATIBILITY_FIELDS = (
 )
 CORE_COMPATIBILITY_FIELDS = (
     "backend",
+    "benchmarkMethod",
     "workload",
     "fixture",
     "buildConfiguration",
@@ -285,10 +288,23 @@ def run_core_workload(workload, iterations):
     completed = subprocess.run(command, input=bytes(payload), capture_output=True)
     if completed.returncode != 0:
         raise SystemExit(completed.stderr.decode(errors="replace").strip())
-    return json.loads(completed.stdout)
+    measurements = json.loads(completed.stdout)
+    if len(measurements["feedDurationNanoseconds"]) != iterations:
+        raise SystemExit("Core benchmark returned the wrong sample count")
+    if any(
+        duration < CORE_SAMPLE_TARGET_NANOSECONDS
+        for duration in measurements["sampleDurationNanoseconds"]
+    ):
+        raise SystemExit("Core benchmark returned a sample below the duration floor")
+    return measurements
 
 
 def make_result(workload, backend, runs, comment=None):
+    iteration_count = (
+        len(runs["feedDurationNanoseconds"])
+        if backend == "swift-core"
+        else len(runs)
+    )
     result = {
         "schemaVersion": SCHEMA_VERSION,
         "backend": backend,
@@ -300,14 +316,16 @@ def make_result(workload, backend, runs, comment=None):
         "toolchain": command_output("swift", "--version").splitlines()[0],
         "buildConfiguration": "release",
         "profilingActive": False,
-        "iterations": len(runs),
+        "iterations": iteration_count,
     }
     if comment is not None:
         result["comment"] = comment
     if backend == "swift-core":
+        result["benchmarkMethod"] = CORE_BENCHMARK_METHOD
         result["summary"] = {
-            "iterations": len(runs),
-            "feedDurationNanoseconds": distribution(runs),
+            "iterations": iteration_count,
+            "batchCount": runs["batchCount"],
+            "feedDurationNanoseconds": distribution(runs["feedDurationNanoseconds"]),
         }
     else:
         result.update({

@@ -37,8 +37,20 @@ let package = Package(
         ),
         .executableTarget(
             name: "TerminalCoreBenchmark",
-            dependencies: ["TerminalCore"],
+            dependencies: ["TerminalCoreBenchmarkSupport"],
             path: "Sources/TerminalCoreBenchmark",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .target(
+            name: "TerminalCoreBenchmarkSupport",
+            dependencies: ["TerminalCore"],
+            path: "Sources/TerminalCoreBenchmarkSupport",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "TerminalCoreBenchmarkSupportTests",
+            dependencies: ["TerminalCoreBenchmarkSupport", "TerminalCore"],
+            path: "Tests/TerminalCoreBenchmarkSupportTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(

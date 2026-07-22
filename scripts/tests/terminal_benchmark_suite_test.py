@@ -149,6 +149,7 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
             "buildConfiguration": "release",
             "profilingActive": False,
             "iterations": 3,
+            "benchmarkMethod": "fresh-terminal-batch-v1",
             "comment": "after damage bitset",
         }
         previous = {**current, "comment": "baseline", "commit": "previous"}
@@ -167,6 +168,9 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
             "previous",
         )
         self.assertIsNone(SUITE.latest_compatible_lines([json.dumps(app)], current))
+
+        old_method = {key: value for key, value in previous.items() if key != "benchmarkMethod"}
+        self.assertIsNone(SUITE.latest_compatible_lines([json.dumps(old_method)], current))
 
     def test_core_summary_and_report_use_only_feed_duration(self):
         result = self.make_result()
@@ -197,7 +201,11 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
             result = SUITE.make_result(
                 "scrollback-stream",
                 "swift-core",
-                [30, 10, 20],
+                {
+                    "batchCount": 7,
+                    "feedDurationNanoseconds": [30, 10, 20],
+                    "sampleDurationNanoseconds": [210, 70, 140],
+                },
                 comment="dirty baseline",
             )
 
@@ -206,22 +214,38 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
             result["summary"],
             {
                 "iterations": 3,
+                "batchCount": 7,
                 "feedDurationNanoseconds": {"min": 10, "median": 20, "max": 30},
             },
         )
+        self.assertEqual(result["benchmarkMethod"], "fresh-terminal-batch-v1")
         for field in ("displayScale", "geometry", "macOS"):
             self.assertNotIn(field, result)
 
     def test_core_runner_length_frames_fixture_chunks_for_the_swift_harness(self):
         completed = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout=b"[10,20,30]\n", stderr=b""
+            args=[],
+            returncode=0,
+            stdout=(
+                b'{"batchCount":2,"feedDurationNanoseconds":[1000000000,1100000000,1200000000],'
+                b'"sampleDurationNanoseconds":[2000000000,2200000000,2400000000]}\n'
+            ),
+            stderr=b"",
         )
         with mock.patch.object(SUITE, "iter_bytes", return_value=iter((b"abc", b"de"))), mock.patch.object(
             SUITE.subprocess, "run", return_value=completed
         ) as run:
-            durations = SUITE.run_core_workload("scrollback-stream", 3)
+            measurements = SUITE.run_core_workload("scrollback-stream", 3)
 
-        self.assertEqual(durations, [10, 20, 30])
+        self.assertEqual(measurements["batchCount"], 2)
+        self.assertEqual(
+            measurements["feedDurationNanoseconds"],
+            [1_000_000_000, 1_100_000_000, 1_200_000_000],
+        )
+        self.assertTrue(all(
+            duration >= SUITE.CORE_SAMPLE_TARGET_NANOSECONDS
+            for duration in measurements["sampleDurationNanoseconds"]
+        ))
         self.assertEqual(
             run.call_args.kwargs["input"],
             (3).to_bytes(8, "big") + b"abc" + (2).to_bytes(8, "big") + b"de",

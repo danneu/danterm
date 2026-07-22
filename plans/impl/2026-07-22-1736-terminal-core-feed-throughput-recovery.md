@@ -193,7 +193,7 @@ corpus and share those results the same way.
   committed corpora wired into suite staging/history; optional `comment` on
   jsonl records; suite schema tests updated (PO6); record baseline
   microbench entries for all four workloads with a comment.
-- [ ] 1. Duration-stable core samples: add untimed calibration and fresh-state
+- [x] 1. Duration-stable core samples: add untimed calibration and fresh-state
   batching to reach at least one second of feed work per sample; normalize
   results per fixture execution; distinguish the benchmark method in core
   compatibility; test PO6; record replacement baselines for all four
