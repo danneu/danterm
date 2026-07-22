@@ -4,12 +4,14 @@ import importlib.util
 import json
 import pathlib
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
 SPEC = importlib.util.spec_from_file_location(
     "terminal_benchmark_suite", ROOT / "scripts" / "terminal-benchmark-suite.py"
 )
@@ -17,8 +19,63 @@ SUITE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(SUITE)
 
+FIXTURE_SPEC = importlib.util.spec_from_file_location(
+    "terminal_benchmark_fixtures", ROOT / "scripts" / "terminal_benchmark_fixtures.py"
+)
+FIXTURES = importlib.util.module_from_spec(FIXTURE_SPEC)
+assert FIXTURE_SPEC.loader is not None
+FIXTURE_SPEC.loader.exec_module(FIXTURES)
+
 
 class TerminalBenchmarkSuiteTests(unittest.TestCase):
+    def test_corpus_loads_every_provenance_bearing_workload(self):
+        corpus = FIXTURES.load_corpus(ROOT)
+
+        self.assertEqual(
+            tuple(corpus),
+            (
+                "plain-scrolling",
+                "long-line-wrapping",
+                "unicode-mix",
+                "styles-truecolor",
+                "redraw-scroll-region",
+                "vim-recording",
+            ),
+        )
+        for workload in corpus.values():
+            self.assertTrue(workload["identity"])
+            self.assertTrue(workload["provenance"]["source"])
+            self.assertTrue(workload["provenance"]["license"])
+
+    def test_vim_workload_replays_the_existing_committed_recording(self):
+        workload = FIXTURES.load_corpus(ROOT)["vim-recording"]
+
+        chunks = list(FIXTURES.iter_bytes(ROOT, workload))
+
+        self.assertGreater(sum(map(len, chunks)), 100_000)
+        self.assertIn(b"\x1b[", b"".join(chunks))
+        self.assertEqual(workload["provenance"]["pinnedCommit"], "852e971cddfabe222d2d5bcda466e130f53af207")
+
+    def test_write_all_retries_partial_pty_writes(self):
+        writes = []
+
+        def partial_writer(file_descriptor, data):
+            writes.append((file_descriptor, bytes(data)))
+            return min(3, len(data))
+
+        FIXTURES.write_all(1, b"abcdefgh", writer=partial_writer)
+
+        self.assertEqual([data for _, data in writes], [b"abcdefgh", b"defgh", b"gh"])
+
+    def test_suite_fixture_identities_come_from_the_committed_corpus(self):
+        corpus = FIXTURES.load_corpus(ROOT)
+
+        self.assertEqual(SUITE.CORPUS, tuple(corpus))
+        self.assertEqual(
+            SUITE.FIXTURES,
+            {name: workload["identity"] for name, workload in corpus.items()},
+        )
+
     def test_profiled_environment_refuses_to_write_history(self):
         with mock.patch.dict(SUITE.os.environ, {"DANTERM_BENCHMARK_PROFILING": "1"}):
             with self.assertRaisesRegex(SystemExit, "Profiled runs cannot enter benchmark history"):

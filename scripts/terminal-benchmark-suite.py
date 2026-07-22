@@ -8,11 +8,14 @@ import statistics
 import subprocess
 import sys
 
+from terminal_benchmark_fixtures import load_corpus
 
-SCHEMA_VERSION = 2
-CORPUS = ("plain-scrolling",)
-FIXTURES = {"plain-scrolling": "plain-scrolling-v1-20000-lines"}
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+SCHEMA_VERSION = 2
+WORKLOADS = load_corpus(ROOT)
+CORPUS = tuple(WORKLOADS)
+FIXTURES = {name: workload["identity"] for name, workload in WORKLOADS.items()}
 HISTORY_PATH = ROOT / "benchmarks" / "results" / "terminal-app.jsonl"
 COMPATIBILITY_FIELDS = (
     "schemaVersion",

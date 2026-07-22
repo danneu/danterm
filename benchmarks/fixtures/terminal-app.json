@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "workloads": {
+    "plain-scrolling": {
+      "identity": "plain-scrolling-v1-20000-lines",
+      "provenance": {
+        "source": "DanTerm benchmark corpus",
+        "license": "MIT",
+        "description": "Twenty thousand numbered ASCII lines authored for the original real-app benchmark."
+      },
+      "segments": [
+        {"repeat": 20000, "template": "DANTERM-BENCH-LINE-{index:05d} plain scrolling payload\n"}
+      ]
+    },
+    "long-line-wrapping": {
+      "identity": "long-line-wrapping-v1-5000-lines",
+      "provenance": {
+        "source": "DanTerm benchmark corpus",
+        "license": "MIT",
+        "description": "Five thousand 240-column ASCII records authored to exercise autowrap."
+      },
+      "segments": [
+        {"repeat": 5000, "template": "WRAP-{index:05d}:abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789-END\n"}
+      ]
+    },
+    "unicode-mix": {
+      "identity": "unicode-mix-v1-6000-lines",
+      "provenance": {
+        "source": "DanTerm benchmark corpus",
+        "license": "MIT",
+        "description": "Authored Spanish, Chinese, combining-mark, and emoji output."
+      },
+      "segments": [
+        {"repeat": 6000, "template": "UNICODE-{index:05d}: Espanol: manana y corazon; Chinese: \u4f60\u597d\u4e16\u754c; combining: cafe\u0301; emoji: \ud83d\udc69\ud83c\udffd\u200d\ud83d\udcbb \ud83d\ude80\n"}
+      ]
+    },
+    "styles-truecolor": {
+      "identity": "styles-truecolor-v1-12000-lines",
+      "provenance": {
+        "source": "DanTerm benchmark corpus",
+        "license": "MIT",
+        "description": "Authored SGR attribute, indexed-color, and truecolor transitions."
+      },
+      "segments": [
+        {"repeat": 12000, "template": "\u001b[1;3;4;38;2;17;93;211;48;2;31;37;43mSTYLE-{index:05d}\u001b[22;23;24;38;5;214;49m indexed-color \u001b[0m plain\n"}
+      ]
+    },
+    "redraw-scroll-region": {
+      "identity": "redraw-scroll-region-v1-2500-cycles",
+      "provenance": {
+        "source": "DanTerm benchmark corpus",
+        "license": "MIT",
+        "description": "Authored full-screen redraws and bounded scrolling-region updates."
+      },
+      "segments": [
+        {"bytes": "\u001b[2J\u001b[H"},
+        {"repeat": 2500, "template": "\u001b[H\u001b[2JREDRAW-{index:05d}\nrow one\nrow two\nrow three\u001b[2;20r\u001b[20;1Hregion-{index:05d}\n\u001b[r"}
+      ]
+    },
+    "vim-recording": {
+      "identity": "alacritty-vim-large-window-scroll-852e971c",
+      "provenance": {
+        "source": "Alacritty vim_large_window_scroll recording",
+        "license": "Apache-2.0",
+        "url": "https://github.com/alacritty/alacritty/blob/852e971cddfabe222d2d5bcda466e130f53af207/alacritty_terminal/tests/ref/vim_large_window_scroll/alacritty.recording",
+        "pinnedCommit": "852e971cddfabe222d2d5bcda466e130f53af207"
+      },
+      "recording": "lib/TerminalCore/Tests/TerminalCoreTests/Fixtures/alacritty/vim_large_window_scroll.json"
+    }
+  }
+}

@@ -15,6 +15,12 @@ geometry, schema, and profiling state. Use `backend=ghostty` to measure the same
 PTY workload against Ghostty. A deliberate Swift-to-Ghostty comparison requires
 every compatibility field except backend to match.
 
+The committed corpus covers plain scrolling, long-line wrapping, mixed Unicode,
+dense style and truecolor changes, full redraw and scroll-region updates, and a
+pinned Alacritty Vim recording. Run one case with `just benchmark-one <workload>
+backend=swift`; workload names and provenance live in
+`benchmarks/fixtures/terminal-app.json`.
+
 Producer-write elapsed ends when the producer's final PTY write returns. It
 measures PTY backpressure and drain performance, not parsing or rendering.
 Final-draw elapsed is Swift-only and measures from app-side start-marker parsing

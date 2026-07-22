@@ -185,7 +185,7 @@ Check a box only when the commit is landed (implemented, tested, committed).
 - [x] 2. Ghostty comparison
 - [x] 3. Committed history
 - [x] 4. Agent profiling
-- [ ] 5. Corpus expansion
+- [x] 5. Corpus expansion
 
 ## Invariants
 

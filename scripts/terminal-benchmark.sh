@@ -23,7 +23,7 @@ BACKEND="${2:-swift}"
 BACKEND="${BACKEND#backend=}"
 MODE="${DANTERM_BENCHMARK_MODE:-measure}"
 PROFILE_IDENTITY_PATH="${DANTERM_BENCHMARK_IDENTITY_PATH:-}"
-[[ "$WORKLOAD" == "plain-scrolling" ]] || { echo "Unknown workload: $WORKLOAD" >&2; exit 2; }
+CORPUS_PATH="$(cd "$(dirname "$0")/.." && pwd)/benchmarks/fixtures/terminal-app.json"
 case "$BACKEND" in
     swift|ghostty) ;;
     *) echo "Unknown backend: $BACKEND (expected swift or ghostty)" >&2; exit 2 ;;
@@ -40,6 +40,10 @@ fi
 for command in codesign jq plutil swift; do
     command -v "$command" >/dev/null || { echo "Missing required command: $command" >&2; exit 1; }
 done
+jq -e --arg workload "$WORKLOAD" '.workloads[$workload] != null' "$CORPUS_PATH" >/dev/null || {
+    echo "Unknown workload: $WORKLOAD" >&2
+    exit 2
+}
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -127,6 +131,7 @@ env HOME="$HOME_DIR" CFFIXED_USER_HOME="$HOME_DIR" TMPDIR="$TMP_DIR/" ZDOTDIR="$
     DANTERM_TERMINAL_BENCHMARK_RESULT="$DRAW_RESULT" \
     DANTERM_TERMINAL_BENCHMARK_PRODUCER_RESULT="$PRODUCER_RESULT" \
     DANTERM_TERMINAL_BENCHMARK_BACKEND="$BACKEND" \
+    DANTERM_TERMINAL_BENCHMARK_WORKLOAD="$WORKLOAD" \
     DANTERM_BENCHMARK_MODE="$MODE" \
     "$APP_PATH/Contents/MacOS/DanTerm Benchmark" >"$APP_LOG" 2>&1 &
 APP_PID=$!
@@ -171,6 +176,7 @@ if [[ "$MODE" == "loop" ]]; then
     wait "$APP_PID"
     exit $?
 fi
+deadline=$((SECONDS + 20))
 while [[ ! -f "$PRODUCER_RESULT" || ( "$BACKEND" == "swift" && ! -f "$DRAW_RESULT" ) ]]; do
     (( SECONDS < deadline )) || { echo "Timed out waiting for benchmark metrics" >&2; exit 1; }
     sleep 0.05
