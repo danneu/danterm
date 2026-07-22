@@ -198,7 +198,7 @@ corpus and share those results the same way.
   results per fixture execution; distinguish the benchmark method in core
   compatibility; test PO6; record replacement baselines for all four
   workloads with a comment.
-- [ ] 2. Slice A (damage bitset): implement; vet on microbench; re-sample
+- [x] 2. Slice A (damage bitset): implement; vet on microbench; re-sample
   with `just benchmark-sample` to check the Set/hash bucket; verify with
   app benchmark `styled-screen-redraw`, save jsonl records with comments,
   run `just test`, share results and ask the user to accept, then commit.

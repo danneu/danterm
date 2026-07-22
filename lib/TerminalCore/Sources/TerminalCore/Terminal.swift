@@ -330,7 +330,7 @@ public struct Terminal: Equatable, Sendable {
     private var hoveredLinkState: InteractionLinkState?
     private var armedLinkState: InteractionLinkState?
     private var viewportState = ViewportState.following
-    private var damage = TerminalDamage.full
+    private var damage: TerminalDamageAccumulator
     private var hyperlinkTargets: [Int: TerminalHyperlink] = [:]
     private var hyperlinkPen: Int?
     private var nextHyperlinkId = 1
@@ -416,7 +416,7 @@ public struct Terminal: Equatable, Sendable {
 
     /// Reports whether a frame consumer has redraw work or a completed semantic write to drain.
     public var hasPendingConsumerWork: Bool {
-        damage != .none || pendingClipboardWrite != nil || hasPendingSemanticEvents
+        damage.hasDamage || pendingClipboardWrite != nil || hasPendingSemanticEvents
     }
 
     /// Compares only the accumulators whose changes require a frame consumer wakeup.
@@ -458,9 +458,7 @@ public struct Terminal: Equatable, Sendable {
 
     /// Transfers all accumulated logical redraw work to one frame consumer.
     public mutating func drainDamage() -> TerminalDamage {
-        let drained = damage
-        damage = .none
-        return drained
+        damage.drain()
     }
 
     private var damageActionSnapshot: DamageActionSnapshot {
@@ -487,47 +485,44 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func recordDamage(since before: DamageActionSnapshot) {
-        guard damage.isFull == false else { return }
         let after = damageActionSnapshot
         if before.isFollowing == false {
-            damage = .full
+            damage.recordFull()
             return
         }
         guard before.topRow == after.topRow,
               before.isAlternateScreenActive == after.isAlternateScreenActive
         else {
-            damage = .full
+            damage.recordFull()
             return
         }
         if after.isFollowing == false {
-            damage = .full
+            damage.recordFull()
             return
         }
-        var changedRows = Set<Int>()
         if before.cursor != after.cursor
             || before.cursorPresentation != after.cursorPresentation
         {
-            if let row = before.cursor?.row { changedRows.insert(row) }
-            if let row = after.cursor?.row { changedRows.insert(row) }
+            if let row = before.cursor?.row { damage.record(row: row) }
+            if let row = after.cursor?.row { damage.record(row: row) }
         }
         if before.selection != after.selection {
-            changedRows.formUnion(damagedViewportRows(for: before.selection))
-            changedRows.formUnion(damagedViewportRows(for: after.selection))
+            damage.record(rows: damagedViewportRows(for: before.selection))
+            damage.record(rows: damagedViewportRows(for: after.selection))
         }
         if before.hoveredLink != after.hoveredLink {
-            changedRows.formUnion(damagedViewportRows(for: before.hoveredLink?.range))
-            changedRows.formUnion(damagedViewportRows(for: after.hoveredLink?.range))
+            damage.record(rows: damagedViewportRows(for: before.hoveredLink?.range))
+            damage.record(rows: damagedViewportRows(for: after.hoveredLink?.range))
         }
-        damage.formUnion(TerminalDamage(rows: changedRows))
     }
 
-    private func damagedViewportRows(for range: TerminalTextRange?) -> Set<Int> {
-        guard let range, range.start != range.end else { return [] }
+    private func damagedViewportRows(for range: TerminalTextRange?) -> Range<Int> {
+        guard let range, range.start != range.end else { return 0..<0 }
         let top = scrollProjection.topRow
         let lower = max(range.start.row, top)
         let upper = min(range.end.row, top + rowCount - 1)
-        guard lower <= upper else { return [] }
-        return Set((lower...upper).map { $0 - top })
+        guard lower <= upper else { return 0..<0 }
+        return (lower - top)..<(upper - top + 1)
     }
 
     private var backgroundEraseStyle: TerminalStyle {
@@ -568,6 +563,7 @@ public struct Terminal: Equatable, Sendable {
         self.machineHostname = machineHostname
         self.programVersion = programVersion
         tabStops = Self.defaultTabStops(columns: columns)
+        damage = TerminalDamageAccumulator(rowCount: rows, isFull: true)
         self.rows = (0..<rows).map { _ in
             GridRow(cells: (0..<columns).map { _ in GridCell() })
         }
@@ -1144,7 +1140,7 @@ public struct Terminal: Equatable, Sendable {
         guard columns >= 2, rows >= 1 else { return }
         guard columns != columnCount || rows != rowCount else { return }
 
-        damage = .full
+        damage.reset(rowCount: rows, isFull: true)
 
         if inactivePrimaryScreen != nil {
             clearInspection()
@@ -1305,7 +1301,7 @@ public struct Terminal: Equatable, Sendable {
             )
         }
         if viewportState != previous {
-            damage = .full
+            damage.recordFull()
         }
     }
 
@@ -1314,7 +1310,7 @@ public struct Terminal: Equatable, Sendable {
         guard inactivePrimaryScreen == nil else { return }
         guard viewportState != .following else { return }
         viewportState = .following
-        damage = .full
+        damage.recordFull()
     }
 
     /// Returns retained primary rows in oldest-first order.
@@ -1967,7 +1963,7 @@ public struct Terminal: Equatable, Sendable {
         search = SearchState(query: query, range: match)
         revealSearchMatchIfNeeded()
         if viewportState != previousViewport {
-            damage = .full
+            damage.recordFull()
         }
         return true
     }
@@ -1984,7 +1980,7 @@ public struct Terminal: Equatable, Sendable {
         self.search?.range = matches[current - 1]
         revealSearchMatchIfNeeded()
         if viewportState != previousViewport {
-            damage = .full
+            damage.recordFull()
         }
         return true
     }
@@ -2001,7 +1997,7 @@ public struct Terminal: Equatable, Sendable {
         self.search?.range = matches[current + 1]
         revealSearchMatchIfNeeded()
         if viewportState != previousViewport {
-            damage = .full
+            damage.recordFull()
         }
         return true
     }
@@ -2420,9 +2416,9 @@ public struct Terminal: Equatable, Sendable {
     private mutating func invalidateInspection(inViewportRows range: Range<Int>) {
         guard range.isEmpty == false else { return }
         if viewportState == .following {
-            damage.formUnion(TerminalDamage(rows: Set(range)))
+            damage.record(rows: range)
         } else {
-            damage = .full
+            damage.recordFull()
         }
         guard selection != nil || search != nil || hoveredLinkState != nil || armedLinkState != nil
         else { return }
@@ -2433,7 +2429,7 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func invalidateInspection(inScrollbackRow row: Int) {
         if viewportState != .following {
-            damage = .full
+            damage.recordFull()
         }
         guard selection != nil || search != nil || hoveredLinkState != nil || armedLinkState != nil
         else { return }
@@ -4003,7 +3999,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func switchAlternateScreen(enabled: Bool) {
-        damage = .full
+        damage.recordFull()
         if enabled {
             clearInspection()
             if inactivePrimaryScreen == nil {
@@ -4032,7 +4028,7 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func selectPrimaryScreen() {
         guard let primary = inactivePrimaryScreen else { return }
-        damage = .full
+        damage.recordFull()
         clearInspection()
         rows = primary.rows
         semanticContent = primary.semanticContent
@@ -4082,7 +4078,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func softReset() {
-        damage = .full
+        damage.recordFull()
         selectPrimaryScreen()
         resetControlState()
         hyperlinkPen = nil
@@ -4092,7 +4088,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func hardReset() {
-        damage = .full
+        damage.recordFull()
         clearInspection()
         evictedRowCount = 0
         selectPrimaryScreen()
@@ -4485,7 +4481,7 @@ public struct Terminal: Equatable, Sendable {
     private mutating func advanceToNextRow(preservingWrapClaim: Bool = false) {
         let region = activeScrollRegion
         if cursor.row == region.upperBound - 1 {
-            damage.formUnion(TerminalDamage(rows: Set(region)))
+            damage.record(rows: region)
             moveAndFillRows(
                 in: region,
                 by: -1,

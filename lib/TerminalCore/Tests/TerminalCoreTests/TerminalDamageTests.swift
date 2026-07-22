@@ -5,6 +5,34 @@ import Testing
 
 /// Pins terminal mutations to the conservative row-granular damage contract.
 struct TerminalDamageTests {
+    @Test("row damage crosses storage word boundaries without changing public indexes")
+    func rowDamageWordBoundaries() throws {
+        var terminal = try #require(Terminal(columns: 2, rows: 130))
+        _ = terminal.drainDamage()
+
+        terminal.feed(Array("\u{1B}[63;1HA\u{1B}[66;1HB\u{1B}[130;1HC".utf8))
+
+        #expect(terminal.drainDamage() == TerminalDamage(rows: [0, 62, 65, 129]))
+        #expect(terminal.drainDamage() == .none)
+    }
+
+    @Test("full damage discards previously accumulated row distinctions")
+    func fullDamageCanonicalizesRows() throws {
+        var first = try #require(Terminal(columns: 3, rows: 3))
+        var second = first
+        _ = first.drainDamage()
+        _ = second.drainDamage()
+        first.feed(Array("\u{1B}[2;1H\u{1B}[1;1H".utf8))
+
+        first.feed(Array("\u{1B}[?1049h".utf8))
+        second.feed(Array("\u{1B}[?1049h".utf8))
+
+        #expect(first.hasSamePendingConsumerWork(as: second))
+        #expect(first == second)
+        #expect(first.drainDamage() == .full)
+        #expect(second.drainDamage() == .full)
+    }
+
     @Test("fresh damage drains once and repeated drains stay empty")
     func drainCanonicality() throws {
         var terminal = try #require(Terminal(columns: 6, rows: 3))
