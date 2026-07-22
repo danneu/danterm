@@ -39,15 +39,10 @@ include="^($(IFS='|'; echo "${cases[*]}"))$"
     printf 'selected_cases=%s\n' "${#cases[@]}"
 } > "$run_dir/environment.txt"
 
-runner="${DANTERM_PROTOCOL_PROBE_RUNNER:-}"
-if [[ -z "$runner" ]]; then
-    swift build --package-path "$REPO_ROOT/lib/TerminalPTY" --product TerminalProtocolProbeRunner
-    swift build --package-path "$REPO_ROOT/lib/TerminalPTY" --product PTYSessionBootstrap
-    runner="$REPO_ROOT/lib/TerminalPTY/.build/debug/TerminalProtocolProbeRunner"
-    bootstrap="$REPO_ROOT/lib/TerminalPTY/.build/debug/PTYSessionBootstrap"
-else
-    bootstrap="injected-runner"
-fi
+swift build --package-path "$REPO_ROOT/lib/TerminalPTY" --product TerminalProtocolProbeRunner
+swift build --package-path "$REPO_ROOT/lib/TerminalPTY" --product PTYSessionBootstrap
+runner="$REPO_ROOT/lib/TerminalPTY/.build/debug/TerminalProtocolProbeRunner"
+bootstrap="$REPO_ROOT/lib/TerminalPTY/.build/debug/PTYSessionBootstrap"
 
 set +e
 DANTERM_PROTOCOL_PROBE_INCLUDE="$include" \

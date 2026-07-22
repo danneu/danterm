@@ -62,13 +62,13 @@ also waited for the per-run server during harness exit.
 
 ## Deterministic coverage and regressions
 
-`just test` covers prerequisite refusal, isolated home and SSH configuration,
-failure artifact preservation, bounded lifecycle cleanup, diagnostic capture
-replay, and the rule that ordinary characterization capture appears only after
-child-originated completion. The relevant behavioral proofs are
-[`terminal-workflows-harness_test.sh`](../../scripts/tests/terminal-workflows-harness_test.sh)
-and the TerminalPTY controller/lifecycle suites under
-[`lib/TerminalPTY/Tests`](../../lib/TerminalPTY/Tests).
+`just test` covers diagnostic capture replay and the rule that ordinary
+characterization capture appears only after child-originated completion, via
+the TerminalPTY controller/lifecycle suites under
+[`lib/TerminalPTY/Tests`](../../lib/TerminalPTY/Tests). Prerequisite refusal,
+isolated home and SSH configuration, failure artifact preservation, and
+bounded lifecycle cleanup are exercised by the opt-in recipe
+`just test-terminal-workflows`, not by `just test`.
 
 No live failure exposed a terminal parsing, state, resize, reflow, style, or
 screen defect, so this slice promoted no new TerminalCore fixture. The evidence

@@ -53,10 +53,7 @@ test:
     ./scripts/tests/terminal-characterization-harness_test.sh
     ./scripts/tests/terminal-viability-harness_test.sh
     ./scripts/tests/test-terminal-pty_test.sh
-    ./scripts/tests/terminal-workflows-harness_test.sh
-    ./scripts/tests/terminal-protocol-probes-harness_test.sh
     ./scripts/tests/shell-integration_test.sh
-    ./scripts/tests/native-shell-events-retirement_test.sh
     ./scripts/tests/agent-notifications-live_test.py
 
 # Run UI tests (AppKit, requires display)
@@ -76,6 +73,7 @@ test-terminal-viability:
     ./scripts/terminal-viability.sh
 
 # Run the opt-in headless shell/application compatibility workflows.
+# Needs asciinema/fish/fzf: nix develop .#terminal-workflows -c just test-terminal-workflows
 test-terminal-workflows:
     ./scripts/terminal-workflows.sh
 

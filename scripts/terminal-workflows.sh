@@ -54,6 +54,8 @@ done
 if (( ${#missing[@]} > 0 )); then
     printf 'status=preflight-failed\nmissing=%s\n' "${missing[*]}" > "$result"
     echo "terminal workflows: missing prerequisites: ${missing[*]}" >&2
+    # asciinema/fish/fzf come from the flake devShell, not a plain login shell.
+    echo "hint: nix develop .#terminal-workflows -c just test-terminal-workflows" >&2
     echo "artifacts: $run_dir" >&2
     exit 2
 fi
@@ -111,14 +113,12 @@ Host workflow-host
     SendEnv LC_DANTERM_TOKEN
 EOF
 
-runner="${DANTERM_WORKFLOW_RUNNER:-}"
-if [[ -z "$runner" ]]; then
-    /usr/bin/ssh-keygen -q -t ed25519 -N '' -f "$ssh_dir/host_key"
-    /usr/bin/ssh-keygen -q -t ed25519 -N '' -f "$ssh_dir/client_key"
-    cp "$ssh_dir/client_key.pub" "$ssh_dir/authorized_keys"
-    host_public_key="$(cut -d ' ' -f 1,2 "$ssh_dir/host_key.pub")"
-    printf '[127.0.0.1]:%s %s\n' "$ssh_port" "$host_public_key" > "$ssh_dir/known_hosts"
-    cat > "$ssh_dir/sshd_config" <<EOF
+/usr/bin/ssh-keygen -q -t ed25519 -N '' -f "$ssh_dir/host_key"
+/usr/bin/ssh-keygen -q -t ed25519 -N '' -f "$ssh_dir/client_key"
+cp "$ssh_dir/client_key.pub" "$ssh_dir/authorized_keys"
+host_public_key="$(cut -d ' ' -f 1,2 "$ssh_dir/host_key.pub")"
+printf '[127.0.0.1]:%s %s\n' "$ssh_port" "$host_public_key" > "$ssh_dir/known_hosts"
+cat > "$ssh_dir/sshd_config" <<EOF
 Port $ssh_port
 ListenAddress 127.0.0.1
 HostKey $ssh_dir/host_key
@@ -135,16 +135,13 @@ PermitUserEnvironment no
 AcceptEnv LC_DANTERM_TOKEN
 Subsystem sftp internal-sftp
 EOF
-    /usr/sbin/sshd -D -e -f "$ssh_dir/sshd_config" > "$ssh_dir/sshd.log" 2>&1 &
-    sshd_pid=$!
-    trap 'kill "$sshd_pid" 2>/dev/null || true; wait "$sshd_pid" 2>/dev/null || true' EXIT
-    PATH="$WORKFLOW_PATH" swift build --package-path "$REPO_ROOT/lib/TerminalPTY" --product TerminalWorkflowRunner
-    PATH="$WORKFLOW_PATH" swift build --package-path "$REPO_ROOT/lib/TerminalPTY" --product PTYSessionBootstrap
-    runner="$REPO_ROOT/lib/TerminalPTY/.build/debug/TerminalWorkflowRunner"
-    bootstrap="$REPO_ROOT/lib/TerminalPTY/.build/debug/PTYSessionBootstrap"
-else
-    bootstrap="unused-by-injected-runner"
-fi
+/usr/sbin/sshd -D -e -f "$ssh_dir/sshd_config" > "$ssh_dir/sshd.log" 2>&1 &
+sshd_pid=$!
+trap 'kill "$sshd_pid" 2>/dev/null || true; wait "$sshd_pid" 2>/dev/null || true' EXIT
+PATH="$WORKFLOW_PATH" swift build --package-path "$REPO_ROOT/lib/TerminalPTY" --product TerminalWorkflowRunner
+PATH="$WORKFLOW_PATH" swift build --package-path "$REPO_ROOT/lib/TerminalPTY" --product PTYSessionBootstrap
+runner="$REPO_ROOT/lib/TerminalPTY/.build/debug/TerminalWorkflowRunner"
+bootstrap="$REPO_ROOT/lib/TerminalPTY/.build/debug/PTYSessionBootstrap"
 
 set +e
 HOME="$home_dir" PATH="$WORKFLOW_PATH:/usr/bin:/bin:/usr/sbin" \

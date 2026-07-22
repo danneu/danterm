@@ -337,7 +337,6 @@ mean.
     backed by the
     [dated evidence](../docs/evidence/2026-07-21-terminal-workflow-compatibility.md)
     and deterministic
-    [harness](../scripts/tests/terminal-workflows-harness_test.sh) and
     [TerminalPTY](../lib/TerminalPTY/Tests) regressions.
   - [x] **Slice 3b: Asciinema nested-PTY compatibility.** Flake-pinned
     asciinema 2.4.0 records stdin, output, job control, and resize through an
