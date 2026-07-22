@@ -10,10 +10,12 @@ silently.
 
 ## Protocol support matrix
 
-- Which additional device and mode queries, beyond capability manifest v1, are
-  required by later prioritized applications?
-- Which notification or progress protocols, if any, justify a future manifest
-  version beyond the bounded OSC 9 and OSC 777 forms in v1?
+- Which additional device and mode queries, beyond the current documented
+  capability contract, are required by later prioritized applications?
+- Which notification or progress protocols, if any, justify extending the
+  documented contract (or, if a machine-readable artifact is ever needed
+  again, a new versioned artifact) beyond the bounded OSC 9 and OSC 777 forms
+  currently supported?
 
 ## Terminal semantics
 

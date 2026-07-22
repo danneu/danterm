@@ -201,4 +201,30 @@ struct TerminalKeyEncodingTests {
             #expect(encodeTerminalKey(key, modifiers: modifiers, modes: modes) == Array(expected.utf8))
         }
     }
+
+    // Formerly TerminalCapabilityManifestTests.keyConformance, decoding these
+    // sequences out of the now-retired terminal-capabilities-v1.json manifest;
+    // see docs/terminal-capabilities.md for the full terminfo claim table these
+    // sequences are pinned against.
+    @Test("application-cursor-mode navigation keys match DanTerm's xterm-256color terminfo entries")
+    func applicationCursorModeMatchesXterm256ColorTerminfo() {
+        let modes = TerminalInputModes(applicationCursorKeys: true)
+        let cases: [(TerminalInputKey, String)] = [
+            (.up, "\u{1B}OA"),
+            (.down, "\u{1B}OB"),
+            (.left, "\u{1B}OD"),
+            (.right, "\u{1B}OC"),
+            (.home, "\u{1B}OH"),
+            (.end, "\u{1B}OF"),
+            (.deleteForward, "\u{1B}[3~"),
+            (.pageUp, "\u{1B}[5~"),
+            (.pageDown, "\u{1B}[6~"),
+        ]
+        for (key, expected) in cases {
+            #expect(
+                String(decoding: encodeTerminalKey(key, modifiers: [], modes: modes), as: UTF8.self)
+                    == expected
+            )
+        }
+    }
 }

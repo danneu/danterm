@@ -1,33 +1,116 @@
 # Terminal Capability Contract
 
 DanTerm advertises `TERM=xterm-256color` for compatibility, but does not claim
-every behavior found in an xterm terminfo database. The normative contract is
-[`terminal-capabilities-v1.json`](../terminal-capabilities-v1.json), also
-installed byte-for-byte at
-`DanTerm.app/Contents/Resources/terminal-capabilities-v1.json`.
+every behavior found in an xterm terminfo database. This document is the
+normative contract: it records the exact terminfo claims needed by accepted
+workflows, their macOS 26 ncurses 6.0 and current ncurses variants, supported
+and denied protocol families, environment ownership, and numeric limits.
+Applications should treat unlisted terminfo entries and protocols as
+unsupported. An incompatible change will use a new versioned document section
+or, should a machine-readable contract be needed again, a new artifact (v2+) --
+never a revival of the retired `terminal-capabilities-v1.json`.
 
-The manifest records the exact terminfo claims needed by accepted workflows,
-their macOS 26 ncurses 6.0 and current ncurses 1.1261 variants, supported and
-denied protocol families, environment ownership, evidence suites, and numeric
-limits. Applications should treat unlisted terminfo entries and protocols as
-unsupported. An incompatible change will use a new manifest version.
+## Provenance
+
+Terminfo values below were captured from the `xterm-256color` terminfo entries
+of two baselines: macOS 26's `/usr/share/terminfo` entry (`infocmp` ncurses
+6.0.20150808) and the official ncurses `terminfo.src` revision 1.1261 dated
+2026-07-19. Through 2026-07-22 these values were also carried in a
+machine-readable `terminal-capabilities-v1.json` manifest, cross-checked
+byte-for-byte against two JSON terminfo fixtures and copied into the app
+bundle; that manifest, its fixtures, and the build/CI byte-comparison gates
+were retired in favor of this document (see
+[plans/impl](../plans/impl/) for the retirement plan). The two baselines agree
+on every claim below except `pairs`, which no DanTerm behavior depends on; the
+old cross-ncurses "baseline matrix" byte-comparison this document replaces is
+superseded by this provenance note plus the behavioral key-conformance test in
+`TerminalKeyEncodingTests`.
+
+## Terminfo claims
+
+| id | kind | macOS 26 ncurses 6.0 | ncurses 1.1261 | evidence |
+|---|---|---|---|---|
+| `am` | boolean | `true` | `true` | TerminalEditingTests |
+| `bce` | boolean | `true` | `true` | TerminalEditingTests |
+| `colors` | number | `256` | `256` | TerminalStyleTests |
+| `pairs` | number | `32767` | `65536` | TerminalStyleTests |
+| `clear` | output | `\x1b[H\x1b[2J` | same | TerminalEditingTests |
+| `cup` | output-parameterized | `\x1b[%i%p1%d;%p2%dH` | same | TerminalEditingTests |
+| `civis` | output | `\x1b[?25l` | same | TerminalModeTests |
+| `cnorm` | output | `\x1b[?12l\x1b[?25h` | same | TerminalModeTests |
+| `smcup` | output | `\x1b[?1049h` | same | TerminalModeTests |
+| `rmcup` | output | `\x1b[?1049l` | same | TerminalModeTests |
+| `setaf` | output-parameterized | `\x1b[%?%p1%{8}%<%t3%p1%d%e%p1%{16}%<%t9%p1%{8}%-%d%e38;5;%p1%d%;m` | same | TerminalStyleTests |
+| `setab` | output-parameterized | `\x1b[%?%p1%{8}%<%t4%p1%d%e%p1%{16}%<%t10%p1%{8}%-%d%e48;5;%p1%d%;m` | same | TerminalStyleTests |
+| `sgr0` | output | `\x1b(B\x1b[m` | same | TerminalStyleTests |
+| `bold` | output | `\x1b[1m` | same | TerminalStyleTests |
+| `smul` | output | `\x1b[4m` | same | TerminalStyleTests |
+| `rmul` | output | `\x1b[24m` | same | TerminalStyleTests |
+| `el` | output | `\x1b[K` | same | TerminalEditingTests |
+| `ed` | output | `\x1b[J` | same | TerminalEditingTests |
+| `kcuu1` | key | `\x1bOA` | same | TerminalKeyEncodingTests |
+| `kcud1` | key | `\x1bOB` | same | TerminalKeyEncodingTests |
+| `kcub1` | key | `\x1bOD` | same | TerminalKeyEncodingTests |
+| `kcuf1` | key | `\x1bOC` | same | TerminalKeyEncodingTests |
+| `khome` | key | `\x1bOH` | same | TerminalKeyEncodingTests |
+| `kend` | key | `\x1bOF` | same | TerminalKeyEncodingTests |
+| `kdch1` | key | `\x1b[3~` | same | TerminalKeyEncodingTests |
+| `kpp` | key | `\x1b[5~` | same | TerminalKeyEncodingTests |
+| `knp` | key | `\x1b[6~` | same | TerminalKeyEncodingTests |
+| `kmous` (prefix) | key-prefix | `\x1b[M` | same | TerminalMouseEncodingTests |
+
+The nine key rows (`kcuu1` through `knp`) are pinned by an executable test:
+`TerminalKeyEncodingTests` asserts that `encodeTerminalKey` produces exactly
+these terminfo sequences in application-cursor-mode.
+
+## Protocols
+
+Supported protocol families, with their evidence suite:
+
+| id | evidence |
+|---|---|
+| `da1-dsr-cpr-deccpr-decrqm` | TerminalQueryTests |
+| `xtversion` | TerminalQueryTests |
+| `kitty-keyboard` | TerminalKeyEncodingTests |
+| `legacy-xterm-keyboard` | TerminalKeyEncodingTests |
+| `legacy-and-sgr-mouse` | TerminalMouseEncodingTests |
+| `focus-reporting` | TerminalModeTests |
+| `alternate-screen-bracketed-paste-synchronized-updates` | TerminalModeTests |
+| `pane-bell-without-audio-or-flash` | TerminalSemanticEventTests |
+| `title-cwd-notifications-progress` | TerminalSemanticEventTests |
+| `http-https-hyperlinks` | TerminalHyperlinkTests |
+| `clipboard-write-read-denial` | TerminalOSC52Tests |
+| `authenticated-shell-events` | TerminalShellEventTests |
+
+Denied: `audible-bell`, `clipboard-read`, `da2`, `decrqss`, `kitty-osc-99`,
+`osc-133`, `sixel`, `xtgettcap`, `eight-bit-replies`.
 
 ## Child environment
 
-DanTerm owns `TERM=xterm-256color`, `COLORTERM=truecolor`,
-`TERM_PROGRAM=DanTerm`, and `TERM_PROGRAM_VERSION=<bundle-version>`. Pane launch
-also owns `DANTERM`, `DANTERM_SOCK`, `DANTERM_PANE`, private `DANTERM_TOKEN`,
-forwarded private `LC_DANTERM_TOKEN`, and the conditional private recovery-file
-variable. Inherited collisions cannot override these values. The bundle version
-is also the version returned by XTVERSION.
+DanTerm owns the following child-process environment variables. Inherited
+collisions cannot override these values. The bundle version is also the
+version returned by XTVERSION.
+
+| name | ownership | visibility |
+|---|---|---|
+| `TERM` (`xterm-256color`) | danterm | public |
+| `COLORTERM` (`truecolor`) | danterm | public |
+| `TERM_PROGRAM` (`DanTerm`) | danterm | public |
+| `TERM_PROGRAM_VERSION` (`<bundle-version>`) | danterm | public |
+| `DANTERM` (`1`) | pane | public |
+| `DANTERM_SOCK` (`<socket-path>`) | pane | public |
+| `DANTERM_PANE` (`<pane-id>`) | pane | public |
+| `DANTERM_TOKEN` (`<authentication-token>`) | pane | private |
+| `LC_DANTERM_TOKEN` (`<forwarded-authentication-token>`) | pane | private |
+| `DANTERM_RESTORE_SCROLLBACK_FILE` (`<recovery-file-path>`) | pane-when-restoring | private |
 
 ## Queries and semantic protocols
 
 DanTerm supports the query, mode, keyboard, mouse, focus, title, cwd, hyperlink,
 clipboard-write, shell-event, notification, progress, and bell families listed
-under `protocols.supported`. The `protocols.denied` list is explicit, including
-DA2, DECRQSS, XTGETTCAP, clipboard reads, Kitty OSC 99, OSC 133, 8-bit replies,
-and audible or visual bell effects.
+under "Protocols" above. The denied list is explicit, including DA2, DECRQSS,
+XTGETTCAP, clipboard reads, Kitty OSC 99, OSC 133, 8-bit replies, and audible
+or visual bell effects.
 
 `CSI > q` and `CSI > 0 q` return `DCS >|DanTerm <version> ST`. The accepted
 desktop notification forms are `OSC 9;<body>` and
@@ -49,12 +132,26 @@ unknown forms are ignored.
 
 ## Resource behavior
 
-The manifest's numeric limits are part of the public contract. In particular,
-control strings retain at most 2 MiB encoded input; decoded clipboard writes
-are limited to 1 MiB; a title, cwd, link, shell payload, or complete notification
-title-plus-body is limited to 64 KiB; and pending query replies are limited to
-64 KiB. Bell, shell, and notification events share a 100-event discrete queue.
-Title, cwd, and progress coalesce to the newest complete value.
+These numeric limits are part of the public contract:
+
+| id | value | unit | evidence |
+|---|---|---|---|
+| `pending-control-string` | 2097152 | bytes | TerminalInputStreamTests |
+| `decoded-clipboard-write` | 1048576 | bytes | TerminalOSC52Tests |
+| `semantic-value` | 65536 | bytes | TerminalSemanticEventTests |
+| `discrete-semantic-events` | 100 | events | TerminalSemanticEventTests |
+| `engine-metadata` | 262144 | bytes | TerminalMetadataIntegrationTests |
+| `handoff-metadata` | 262144 | bytes | TerminalMetadataIntegrationTests |
+| `model-metadata` | 524288 | bytes | TerminalMetadataIntegrationTests |
+| `pending-query-replies` | 65536 | bytes | TerminalQueryTests |
+| `scrollback` | 10485760 | bytes | TerminalScrollbackBudgetTests |
+
+In particular, control strings retain at most 2 MiB encoded input; decoded
+clipboard writes are limited to 1 MiB; a title, cwd, link, shell payload, or
+complete notification title-plus-body is limited to 64 KiB; and pending query
+replies are limited to 64 KiB. Bell, shell, and notification events share a
+100-event discrete queue. Title, cwd, and progress coalesce to the newest
+complete value.
 
 Metadata retention is bounded independently at each layer rather than by one
 cross-layer sum: the engine caps its own retention at 256 KiB; the model caps

@@ -62,9 +62,9 @@ architecture.
   foreground process group, standard streams, cwd, and final `execve` without
   forking the multithreaded app process.
 - Correctness comes before rendering performance.
-- `TERM=xterm-256color` is the initial advertised identity; a DanTerm-owned
-  capability manifest is the normative contract across supported terminfo
-  variants.
+- `TERM=xterm-256color` is the initial advertised identity; [DanTerm's
+  documented capability contract](../docs/terminal-capabilities.md) is
+  normative across supported terminfo variants.
 - Reflow on resize, Spanish text, Chinese text, basic emoji, links, clipboard,
   and mouse support are required before replacement.
 - Bidirectional/RTL layout, terminal image protocols, VoiceOver, ligatures, and

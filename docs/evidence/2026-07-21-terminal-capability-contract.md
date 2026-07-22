@@ -3,23 +3,28 @@
 ## Judgment
 
 DanTerm's Milestone 7 protocol and capability tranche is closed at the native,
-deterministic boundary. The versioned manifest is bundled byte-for-byte, every
-claimed terminfo capability is checked against both pinned baselines, and the
-advertised environment, queries, semantic protocols, and cross-component limits
-have executable evidence. The separate real-pane external black-box tranche
-remains open.
+deterministic boundary. Every claimed terminfo capability is checked against
+both pinned baselines, and the advertised environment, queries, semantic
+protocols, and cross-component limits have executable evidence. The separate
+real-pane external black-box tranche remains open.
 
 ## Contract and provenance
 
-[`terminal-capabilities-v1.json`](../../terminal-capabilities-v1.json) is the
-normative artifact. Its fixtures capture macOS 26's ncurses 6.0
+[`docs/terminal-capabilities.md`](../terminal-capabilities.md) is the
+normative document. Its provenance note captures macOS 26's ncurses 6.0
 `xterm-256color` entry and official ncurses `terminfo.src` revision 1.1261 dated
-2026-07-19. `TerminalCapabilityManifestTests` validates schema version,
-provenance, unique claims, fixture coverage, baseline variants, evidence names,
-environment ownership, key encodings, and numeric limits.
+2026-07-19. At the time of this evidence, a machine-readable
+`terminal-capabilities-v1.json` manifest (since retired in favor of the
+markdown doc; see [plans/impl](../../plans/impl/)) additionally validated
+schema version, provenance, unique claims, fixture coverage, baseline variants,
+evidence names, environment ownership, key encodings, and numeric limits via
+`TerminalCapabilityManifestTests`; that coverage now lives in
+`TerminalKeyEncodingTests`'s behavioral key-conformance test plus this
+document's tables.
 
-The dev and release build contracts copy the repository artifact unchanged and
-verify the bundled or archived copy with `cmp`. Launch-policy tests prove that
+The dev and release build contracts formerly copied the repository artifact
+unchanged and verified the bundled or archived copy with `cmp`; this gate was
+retired along with the JSON manifest. Launch-policy tests prove that
 hostile inherited values cannot replace the fixed terminal identity or private
 pane variables, and that the version used for `TERM_PROGRAM_VERSION` is the
 version injected into TerminalCore for XTVERSION.

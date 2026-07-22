@@ -346,7 +346,7 @@ mean.
     and [dated evidence](../docs/evidence/2026-07-21-asciinema-nested-pty-compatibility.md).
   - [x] [Protocols and shell integration](10-protocols-shell-integration.md) proves
     the advertised terminal environment, current DanTerm shell events, title,
-    cwd, notifications, progress, links, clipboard policy, capability manifest,
+    cwd, notifications, progress, links, clipboard policy, capability contract,
     bell behavior, and cross-component protocol limits. See the
     [capability contract](../docs/terminal-capabilities.md),
     [dated evidence](../docs/evidence/2026-07-21-terminal-capability-contract.md),

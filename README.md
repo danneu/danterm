@@ -216,9 +216,8 @@ clicked, will take you to the originating pane.
 
 The exact accepted notification forms, terminal identity, queries, terminfo
 claims, denials, and resource limits are documented in the
-[terminal capability contract](docs/terminal-capabilities.md). The bundled
-`terminal-capabilities-v1.json` is the normative machine-readable contract;
-`TERM=xterm-256color` is only its compatibility selector.
+[terminal capability contract](docs/terminal-capabilities.md), the normative
+contract; `TERM=xterm-256color` is only its compatibility selector.
 
 ### Live agent notification compatibility tests
 

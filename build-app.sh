@@ -63,7 +63,6 @@ fi
 
 mkdir -p "$APP_PATH/Contents/Resources"
 cp "$SCRIPT_DIR/icon/AppIcon/Assets.car" "$APP_PATH/Contents/Resources/"
-cp "$SCRIPT_DIR/terminal-capabilities-v1.json" "$APP_PATH/Contents/Resources/terminal-capabilities-v1.json"
 
 # Bundle the agent hook scripts as plain resources so users can point Claude Code
 # and Codex hooks at a stable in-bundle path. These must live under Resources,

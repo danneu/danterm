@@ -193,7 +193,7 @@ and clipboard-write expectations to DanTerm's advertised identity and security
 policy rather than libvterm's replies.
 
 Begin a pinned, supported esctest2 subset once DanTerm has a real PTY, the
-necessary terminal-to-host replies, and a declared capability manifest. Add
+necessary terminal-to-host replies, and a documented capability contract. Add
 Termless/terminfo.dev census probes for capabilities DanTerm actually
 advertises. Record selected vttest sessions and run wraptest externally against
 the real pane. Failures from these programs should be reduced to native

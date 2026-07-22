@@ -19,14 +19,15 @@ TERM_PROGRAM_VERSION=<DanTerm version>
 ```
 
 `xterm-256color` is the advertised identity, not a promise to clone all of
-xterm. A versioned DanTerm capability manifest is normative: it lists the exact
-terminfo capabilities and dynamically discoverable protocols required by the
-accepted workflows, including every output and key-sequence variant those
-workflows exercise. The manifest is checked against the `xterm-256color`
-entries shipped by the minimum supported macOS and a pinned current ncurses
-source fixture. A fixture difference must be added to the manifest or shown not
-to occur in an accepted workflow; a single database snapshot is never treated
-as authoritative.
+xterm. DanTerm's documented capability contract
+([`docs/terminal-capabilities.md`](../docs/terminal-capabilities.md)) is
+normative: it lists the exact terminfo capabilities and dynamically
+discoverable protocols required by the accepted workflows, including every
+output and key-sequence variant those workflows exercise. The contract is
+checked against the `xterm-256color` entries shipped by the minimum supported
+macOS and a pinned current ncurses source. A difference must be added to the
+contract or shown not to occur in an accepted workflow; a single database
+snapshot is never treated as authoritative.
 
 The engine recognizes the protocols needed by existing DanTerm behavior and the
 compatibility target, including:
@@ -40,13 +41,14 @@ compatibility target, including:
 - synchronized updates
 - legacy xterm and Kitty keyboard negotiation
 
-The bundled `terminal-capabilities-v1.json` is the public machine-readable
-contract. It records the two pinned terminfo baselines, the limited set of
-claimed capabilities and their variants, supported and denied protocol
-families, child-environment ownership, and numeric resource limits. DanTerm
-installs the same bytes at
-`Contents/Resources/terminal-capabilities-v1.json`; incompatible contract
-changes require a new manifest version.
+[`docs/terminal-capabilities.md`](../docs/terminal-capabilities.md) is the
+public contract. It records the two pinned terminfo baselines, the limited set
+of claimed capabilities and their variants, supported and denied protocol
+families, child-environment ownership, and numeric resource limits.
+Incompatible contract changes require a new versioned document section or, if
+a machine-readable artifact is ever needed again, a new versioned artifact
+(v2+) -- not a revival of the retired v1 JSON manifest this document
+superseded.
 
 XTVERSION accepts `CSI > q` and `CSI > 0 q` and replies
 `DCS >|DanTerm <version> ST`, using the same injected bundle version exported as
