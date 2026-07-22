@@ -820,7 +820,8 @@ struct TerminalPaneSessionControllerTests {
         let controller = try TerminalPaneSessionController(
             configuration: .init(
                 initialDimensions: launchInput.initialDimensions,
-                launchInput: launchInput
+                launchInput: launchInput,
+                terminalProgramVersion: "dev"
             ),
             bootstrapExecutable: bootstrapExecutable(),
             captureTransitions: true
@@ -886,7 +887,8 @@ struct TerminalPaneSessionControllerTests {
         let controller = try TerminalPaneSessionController(
             configuration: .init(
                 initialDimensions: launchInput.initialDimensions,
-                launchInput: launchInput
+                launchInput: launchInput,
+                terminalProgramVersion: "dev"
             ),
             bootstrapExecutable: bootstrapExecutable(),
             captureTransitions: true
@@ -1156,7 +1158,8 @@ struct TerminalPaneSessionControllerTests {
         let controller = try TerminalPaneSessionController(
             configuration: .init(
                 initialDimensions: .init(columns: 80, rows: 24),
-                launchInput: makeLaunchInput(command: command)
+                launchInput: makeLaunchInput(command: command),
+                terminalProgramVersion: "dev"
             ),
             bootstrapExecutable: bootstrapExecutable(),
             captureTransitions: true

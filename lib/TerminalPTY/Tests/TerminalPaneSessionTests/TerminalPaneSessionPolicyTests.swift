@@ -93,4 +93,55 @@ struct TerminalPaneSessionPolicyTests {
         #expect(input.launchCommand == "launch")
         #expect(input.restoreCommandBehavior == .execute)
     }
+
+    @Test("DanTerm launch values override hostile inherited identity and pane collisions")
+    func launchAssemblyOverridesInheritedCollisions() throws {
+        let request = TerminalPaneLaunchRequest(
+            workingDirectory: nil,
+            command: nil,
+            launchCommand: nil,
+            restoreCommandBehavior: .prefill,
+            environment: [
+                .init(name: "DANTERM", value: "1"),
+                .init(name: "DANTERM_SOCK", value: "/owned/socket"),
+                .init(name: "DANTERM_PANE", value: "owned-pane"),
+                .init(name: "DANTERM_TOKEN", value: "owned-token"),
+                .init(name: "LC_DANTERM_TOKEN", value: "owned-token"),
+            ]
+        )
+        let facts = TerminalPaneLaunchFacts(
+            accountShell: "/bin/zsh",
+            executablePaths: ["/bin/zsh"],
+            homeDirectory: "/home",
+            accessibleDirectories: ["/home"],
+            inheritedEnvironment: [
+                .init(name: "TERM", value: "hostile"),
+                .init(name: "COLORTERM", value: "hostile"),
+                .init(name: "TERM_PROGRAM", value: "hostile"),
+                .init(name: "TERM_PROGRAM_VERSION", value: "hostile"),
+                .init(name: "DANTERM", value: "hostile"),
+                .init(name: "DANTERM_SOCK", value: "hostile"),
+                .init(name: "DANTERM_PANE", value: "hostile"),
+                .init(name: "DANTERM_TOKEN", value: "hostile"),
+                .init(name: "LC_DANTERM_TOKEN", value: "hostile"),
+            ],
+            terminalProgramVersion: "9.8.7"
+        )
+
+        let configuration = assembleTerminalPaneLaunch(request: request, facts: facts)
+        let plan = try resolveLaunchPlan(configuration.launchInput).get()
+        let environment = Dictionary(uniqueKeysWithValues: plan.attempts[0].environment.map {
+            ($0.name, $0.value)
+        })
+
+        #expect(environment["TERM"] == "xterm-256color")
+        #expect(environment["COLORTERM"] == "truecolor")
+        #expect(environment["TERM_PROGRAM"] == "DanTerm")
+        #expect(environment["TERM_PROGRAM_VERSION"] == configuration.terminalProgramVersion)
+        #expect(environment["DANTERM"] == "1")
+        #expect(environment["DANTERM_SOCK"] == "/owned/socket")
+        #expect(environment["DANTERM_PANE"] == "owned-pane")
+        #expect(environment["DANTERM_TOKEN"] == "owned-token")
+        #expect(environment["LC_DANTERM_TOKEN"] == "owned-token")
+    }
 }

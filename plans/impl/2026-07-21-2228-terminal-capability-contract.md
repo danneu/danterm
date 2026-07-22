@@ -86,5 +86,5 @@ Complete missing Swift-backend notification, progress, and XTVERSION behavior; r
 ## Commit progress
 
 - [x] 1. Add bounded notification, progress, and XTVERSION semantics
-- [ ] 2. Publish and verify the terminal capability manifest
+- [x] 2. Publish and verify the terminal capability manifest
 - [ ] 3. Close protocol documentation and fixture classifications

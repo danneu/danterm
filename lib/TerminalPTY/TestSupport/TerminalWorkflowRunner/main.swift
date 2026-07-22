@@ -76,7 +76,6 @@ private enum TerminalWorkflowRunner {
             EnvironmentEntry(name: "PATH", value: path),
             EnvironmentEntry(name: "LANG", value: "en_US.UTF-8"),
             EnvironmentEntry(name: "LC_ALL", value: "en_US.UTF-8"),
-            EnvironmentEntry(name: "TERM", value: "xterm-256color"),
             EnvironmentEntry(name: "DANTERM_TOKEN", value: "workflow-token"),
             EnvironmentEntry(name: "DANTERM_WORKFLOW_SSH_CONFIG", value: ProcessInfo.processInfo.environment["DANTERM_WORKFLOW_SSH_CONFIG"] ?? ""),
         ]
@@ -87,7 +86,12 @@ private enum TerminalWorkflowRunner {
             homeDirectory: home,
             accessibleDirectories: [home],
             inheritedEnvironment: environment,
-            advertisedEnvironment: [],
+            advertisedEnvironment: [
+                EnvironmentEntry(name: "TERM", value: "xterm-256color"),
+                EnvironmentEntry(name: "COLORTERM", value: "truecolor"),
+                EnvironmentEntry(name: "TERM_PROGRAM", value: "DanTerm"),
+                EnvironmentEntry(name: "TERM_PROGRAM_VERSION", value: "workflow-test"),
+            ],
             paneEnvironment: [],
             command: nil,
             launchCommand: nil,
@@ -95,7 +99,11 @@ private enum TerminalWorkflowRunner {
             initialDimensions: dimensions
         )
         let controller = try TerminalPaneSessionController(
-            configuration: .init(initialDimensions: dimensions, launchInput: input),
+            configuration: .init(
+                initialDimensions: dimensions,
+                launchInput: input,
+                terminalProgramVersion: "workflow-test"
+            ),
             bootstrapExecutable: bootstrap,
             machineHostname: ProcessInfo.processInfo.environment["DANTERM_MACHINE_HOSTNAME"],
             shellIntegrationToken: "workflow-token",

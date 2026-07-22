@@ -24,6 +24,7 @@ mkdir -p "$BUILD_ROOT/lib/GhosttyKit.xcframework" \
     "$FAKE_BIN"
 ln -s "$ROOT_DIR/dev-build.sh" "$BUILD_ROOT/dev-build.sh"
 cp "$ROOT_DIR/app/Info.plist" "$BUILD_ROOT/app/Info.plist"
+cp "$ROOT_DIR/terminal-capabilities-v1.json" "$BUILD_ROOT/terminal-capabilities-v1.json"
 : > "$BUILD_ROOT/icon/AppIcon-dev/Assets.car"
 : > "$BUILD_ROOT/dev-entitlements.plist"
 : > "$BUILD_ROOT/integrations/claude-code/claude-notify-osc777.sh"
@@ -86,6 +87,9 @@ run_build() {
 # Why it exists: adding an optimized variant must not slow the normal incremental dev loop.
 # Scenario: a developer runs ./dev-build.sh or `just build` without an option.
 run_build debug
+cmp "$BUILD_ROOT/terminal-capabilities-v1.json" \
+    "$BUILD_ROOT/.build/DanTerm Dev.app/Contents/Resources/terminal-capabilities-v1.json" \
+    || fail "debug bundle did not preserve the terminal capability manifest byte-for-byte"
 for shell in zsh bash fish; do
     cmp "$BUILD_ROOT/integrations/shell-integration/danterm.$shell" \
         "$BUILD_ROOT/.build/DanTerm Dev.app/Contents/Resources/shell-integration/danterm.$shell" \

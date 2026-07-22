@@ -169,6 +169,7 @@ jobs:
           for shell in zsh bash fish; do
             test -r "$APP_PATH/Contents/Resources/shell-integration/danterm.$shell"
           done
+          cmp terminal-capabilities-v1.json "$APP_PATH/Contents/Resources/terminal-capabilities-v1.json"
           if cmp -s "$APP_PATH/Contents/MacOS/DanTerm" "$APP_PATH/Contents/Helpers/danterm"; then
             echo "Error: GUI and CLI bundle binaries have identical content" >&2
             exit 1
@@ -189,6 +190,7 @@ jobs:
           for shell in zsh bash fish; do
             test -r "$ZIP_WORK/DanTerm.app/Contents/Resources/shell-integration/danterm.$shell"
           done
+          cmp terminal-capabilities-v1.json "$ZIP_WORK/DanTerm.app/Contents/Resources/terminal-capabilities-v1.json"
           echo "Release build validation passed"
 
   validator-self-test:
