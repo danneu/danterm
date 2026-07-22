@@ -20,6 +20,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     // Session recovery state set by main.swift before app launch.
     var lastSessionSnapshot: ValidatedAppRestore?  // merged + validated from Recovery/last-light.json + last-enriched.json
     var previousSessionCrashed: Bool = false     // true if session.json lock was still present
+    #if DANTERM_TERMINAL_BENCHMARK
+    private var benchmarkGeometryController: TerminalBenchmarkGeometryController?
+    #endif
     /// Set by the .terminate effect before calling NSApp.terminate to bypass the
     /// applicationShouldTerminate safety net (user already confirmed).
     var quitConfirmed = false
@@ -174,6 +177,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         } else {
             runtime.send(.createTab(inGroupId: nil))
         }
+
+        #if DANTERM_TERMINAL_BENCHMARK
+        let benchmarkRuntime = runtime
+        benchmarkGeometryController = TerminalBenchmarkGeometryController(
+            window: window,
+            environment: ProcessInfo.processInfo.environment,
+            session: { [weak benchmarkRuntime] in benchmarkRuntime?.surfaces.values.first }
+        )
+        benchmarkGeometryController?.start()
+        #endif
 
         #if !DANTERM_TERMINAL_CHARACTERIZATION
         // Set up notification center

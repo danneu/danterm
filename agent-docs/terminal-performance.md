@@ -16,6 +16,13 @@ completed run; it never reruns the benchmark. Confirmed unprofiled results enter
 `benchmarks/results/terminal-app.jsonl`. The Mac must be connected to AC power
 before either benchmark command will start.
 
+Every run converges the terminal to an 80x24 grid before emitting workload
+bytes. Override the target for a diagnostic run with
+`DANTERM_TERMINAL_BENCHMARK_COLUMNS` and
+`DANTERM_TERMINAL_BENCHMARK_ROWS`; both must be positive integers. A target
+that the window cannot reach fails before measurement and reports the required
+and observed grids instead of recording a result.
+
 Deltas use the latest committed entry with the same backend, fixture, machine,
 macOS version, display scale, Swift toolchain, release configuration, geometry,
 schema, profiling state, and iteration count. Omitting `backend` selects Swift.

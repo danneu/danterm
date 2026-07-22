@@ -208,6 +208,29 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
         )
         self.assertIsNone(SUITE.latest_compatible_lines([json.dumps(wrong)], current))
 
+    def test_geometry_difference_is_not_compatible_but_identical_geometry_is(self):
+        current = self.make_result()
+        wrong = {**self.make_result(), "geometry": {"columns": 100, "rows": 30}, "commit": "wrong"}
+        matching = {**self.make_result(), "commit": "matching"}
+
+        self.assertEqual(
+            SUITE.latest_compatible_lines([json.dumps(wrong), json.dumps(matching)], current)["commit"],
+            "matching",
+        )
+        self.assertIsNone(SUITE.latest_compatible_lines([json.dumps(wrong)], current))
+
+    def test_run_workload_rejects_geometry_other_than_requested_target(self):
+        raw = json.dumps({
+            "geometry": {"columns": 94, "rows": 35},
+            "displayScale": 2,
+            "producerWrite": {"elapsedNanoseconds": 1},
+            "finalDraw": {"available": False, "reason": "test"},
+        })
+
+        with mock.patch.object(SUITE, "command_output", return_value=raw):
+            with self.assertRaisesRegex(SystemExit, "required 80x24, reported 94x35"):
+                SUITE.run_workload("plain-scrolling", "swift", 1)
+
     def test_older_schema_record_is_not_a_compatible_baseline(self):
         current = {
             "schemaVersion": 2,

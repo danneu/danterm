@@ -55,6 +55,24 @@ class TerminalView: NSView, NSTextInputClient, TerminalSession {
         return ghostty_surface_has_selection(surface)
     }
 
+    #if DANTERM_TERMINAL_BENCHMARK
+    var benchmarkGeometry: TerminalBenchmarkGeometry? {
+        guard let surface, let window else { return nil }
+        let size = ghostty_surface_size(surface)
+        let scale = window.backingScaleFactor
+        guard size.columns > 0, size.rows > 0,
+              size.cell_width_px > 0, size.cell_height_px > 0,
+              scale > 0
+        else { return nil }
+        return TerminalBenchmarkGeometry(
+            columns: Int(size.columns),
+            rows: Int(size.rows),
+            cellWidth: CGFloat(size.cell_width_px) / scale,
+            cellHeight: CGFloat(size.cell_height_px) / scale
+        )
+    }
+    #endif
+
     var cellSize: NSSize = .zero {
         didSet { emitState() }
     }

@@ -89,3 +89,4 @@ echo "Compiling UI tests..."
 )
 echo "Running UI tests..."
 /tmp/danterm-ui-tests
+"$SCRIPT_DIR/scripts/tests/terminal-benchmark-geometry-ui_test.sh"

@@ -72,6 +72,10 @@ protocol TerminalSession: AnyObject {
     var onEvent: ((TerminalSessionEvent) -> Void)? { get set }
     var onPrimaryHistoryMutation: ((String) -> Void)? { get set }
     var hasSelection: Bool { get }
+    #if DANTERM_TERMINAL_BENCHMARK
+    /// Exposes only the achieved grid and cell metrics needed for benchmark convergence.
+    var benchmarkGeometry: TerminalBenchmarkGeometry? { get }
+    #endif
 
     func sendText(_ text: String)
     func sendInputText(_ text: String)

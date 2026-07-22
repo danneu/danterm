@@ -23,6 +23,8 @@ BACKEND="${2:-swift}"
 BACKEND="${BACKEND#backend=}"
 MODE="${DANTERM_BENCHMARK_MODE:-measure}"
 PROFILE_IDENTITY_PATH="${DANTERM_BENCHMARK_IDENTITY_PATH:-}"
+TARGET_COLUMNS="${DANTERM_TERMINAL_BENCHMARK_COLUMNS:-80}"
+TARGET_ROWS="${DANTERM_TERMINAL_BENCHMARK_ROWS:-24}"
 CORPUS_PATH="$(cd "$(dirname "$0")/.." && pwd)/benchmarks/fixtures/terminal-app.json"
 case "$BACKEND" in
     swift|ghostty) ;;
@@ -34,6 +36,10 @@ case "$MODE" in
 esac
 if [[ "$MODE" == "loop" && -z "$PROFILE_IDENTITY_PATH" ]]; then
     echo "Sustained benchmark mode requires DANTERM_BENCHMARK_IDENTITY_PATH" >&2
+    exit 2
+fi
+if [[ ! "$TARGET_COLUMNS" =~ ^[1-9][0-9]*$ || ! "$TARGET_ROWS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "Benchmark geometry must use positive integer columns and rows" >&2
     exit 2
 fi
 
@@ -61,6 +67,7 @@ EXPECTED_FINAL_STATE="DANTERM-BENCH-FINAL-STATE-$$"
 START_ACK="$ARTIFACTS/start-ack"
 DRAW_RESULT="$ARTIFACTS/final-draw.json"
 PRODUCER_RESULT="$ARTIFACTS/producer-write.json"
+GEOMETRY_READY="$ARTIFACTS/geometry-ready"
 PATH_PROBE="$ARTIFACTS/path-probe.json"
 APP_LOG="$ARTIFACTS/app.log"
 APP_PID=""
@@ -130,8 +137,11 @@ env HOME="$HOME_DIR" CFFIXED_USER_HOME="$HOME_DIR" TMPDIR="$TMP_DIR/" ZDOTDIR="$
     DANTERM_TERMINAL_BENCHMARK_START_ACK="$START_ACK" \
     DANTERM_TERMINAL_BENCHMARK_RESULT="$DRAW_RESULT" \
     DANTERM_TERMINAL_BENCHMARK_PRODUCER_RESULT="$PRODUCER_RESULT" \
+    DANTERM_TERMINAL_BENCHMARK_GEOMETRY_READY="$GEOMETRY_READY" \
     DANTERM_TERMINAL_BENCHMARK_BACKEND="$BACKEND" \
     DANTERM_TERMINAL_BENCHMARK_WORKLOAD="$WORKLOAD" \
+    DANTERM_TERMINAL_BENCHMARK_COLUMNS="$TARGET_COLUMNS" \
+    DANTERM_TERMINAL_BENCHMARK_ROWS="$TARGET_ROWS" \
     DANTERM_BENCHMARK_MODE="$MODE" \
     "$APP_PATH/Contents/MacOS/DanTerm Benchmark" >"$APP_LOG" 2>&1 &
 APP_PID=$!
@@ -165,6 +175,15 @@ printf -v command 'python3 %q' "$SCRIPT_DIR/terminal-benchmark-producer.py"
 "$CLI" pane input --pane "$PANE_ID" --literal -- "$command"
 "$CLI" pane input --pane "$PANE_ID" -- Enter
 if [[ "$MODE" == "loop" ]]; then
+    deadline=$((SECONDS + 20))
+    while [[ ! -f "$GEOMETRY_READY" ]]; do
+        if [[ -f "$PRODUCER_RESULT" ]]; then
+            producer_error="$(jq -r '.error // empty' "$PRODUCER_RESULT")"
+            [[ -z "$producer_error" ]] || { echo "$producer_error" >&2; exit 1; }
+        fi
+        (( SECONDS < deadline )) || { echo "Timed out waiting for benchmark geometry" >&2; exit 1; }
+        sleep 0.05
+    done
     identity_tmp="$PROFILE_IDENTITY_PATH.tmp.$$"
     mkdir -p "$(dirname "$PROFILE_IDENTITY_PATH")"
     jq -n --argjson pid "$APP_PID" --arg workload "$WORKLOAD" --arg backend "$BACKEND" \
@@ -177,13 +196,28 @@ if [[ "$MODE" == "loop" ]]; then
     exit $?
 fi
 deadline=$((SECONDS + 20))
-while [[ ! -f "$PRODUCER_RESULT" || ( "$BACKEND" == "swift" && ! -f "$DRAW_RESULT" ) ]]; do
+while true; do
+    if [[ -f "$PRODUCER_RESULT" ]]; then
+        [[ -n "$(jq -r '.error // empty' "$PRODUCER_RESULT")" ]] && break
+        [[ "$BACKEND" != "swift" || -f "$DRAW_RESULT" ]] && break
+    fi
     (( SECONDS < deadline )) || { echo "Timed out waiting for benchmark metrics" >&2; exit 1; }
     sleep 0.05
 done
+producer_error="$(jq -r '.error // empty' "$PRODUCER_RESULT")"
+if [[ -n "$producer_error" ]]; then
+    echo "$producer_error" >&2
+    exit 1
+fi
 
 producer_elapsed="$(jq -er '.elapsedNanoseconds' "$PRODUCER_RESULT")"
 geometry="$(jq -ec '.geometry' "$PRODUCER_RESULT")"
+reported_columns="$(jq -er '.columns' <<<"$geometry")"
+reported_rows="$(jq -er '.rows' <<<"$geometry")"
+if [[ "$reported_columns" != "$TARGET_COLUMNS" || "$reported_rows" != "$TARGET_ROWS" ]]; then
+    echo "Benchmark geometry mismatch: required ${TARGET_COLUMNS}x${TARGET_ROWS}, reported ${reported_columns}x${reported_rows}" >&2
+    exit 1
+fi
 display_scale="$(jq -er '.displayScale' "$PATH_PROBE")"
 if [[ "$BACKEND" == "swift" ]]; then
     draw_elapsed="$(jq -er '.elapsedNanoseconds' "$DRAW_RESULT")"

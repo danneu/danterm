@@ -189,6 +189,14 @@ def require_ac_power():
         raise SystemExit("Benchmark requires AC power; plug in this Mac and retry")
 
 
+def target_geometry():
+    """Return the grid every raw harness run must report."""
+    return {
+        "columns": int(os.environ.get("DANTERM_TERMINAL_BENCHMARK_COLUMNS", "80")),
+        "rows": int(os.environ.get("DANTERM_TERMINAL_BENCHMARK_ROWS", "24")),
+    }
+
+
 def machine_identity():
     model = command_output("sysctl", "-n", "hw.model")
     try:
@@ -207,6 +215,14 @@ def run_workload(workload, backend, iterations):
         print(f"[{workload}] iteration {iteration}/{iterations}", file=sys.stderr)
         output = command_output(str(ROOT / "scripts" / "terminal-benchmark.sh"), workload, backend)
         runs.append(json.loads(output))
+    target = target_geometry()
+    mismatched = next((run["geometry"] for run in runs if run["geometry"] != target), None)
+    if mismatched is not None:
+        raise SystemExit(
+            "Benchmark geometry mismatch: "
+            f"required {target['columns']}x{target['rows']}, "
+            f"reported {mismatched['columns']}x{mismatched['rows']}"
+        )
     geometry = runs[0]["geometry"]
     display_scale = runs[0]["displayScale"]
     if any(run["geometry"] != geometry or run["displayScale"] != display_scale for run in runs[1:]):

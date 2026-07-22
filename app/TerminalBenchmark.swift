@@ -1,9 +1,74 @@
-// Env-gated app-side timing for terminal benchmarks. It observes published Swift
-// frames before display and acknowledges only the exact frame consumed by draw.
-import Foundation
+// Env-gated app-side geometry convergence and timing for terminal benchmarks.
+// It resizes the window to a requested grid, then observes the exact Swift frame
+// consumed by draw without adding hooks to TerminalCore.
+import Cocoa
 import TerminalRenderPlanning
 
 #if DANTERM_TERMINAL_BENCHMARK
+/// Carries one backend's achieved grid and point-sized cells across the narrow session seam.
+struct TerminalBenchmarkGeometry: Equatable {
+    let columns: Int
+    let rows: Int
+    let cellWidth: CGFloat
+    let cellHeight: CGFloat
+}
+
+/// Converges the benchmark window by correcting only the terminal grid's point-size delta.
+@MainActor
+final class TerminalBenchmarkGeometryController {
+    private weak var window: NSWindow?
+    private let targetColumns: Int
+    private let targetRows: Int
+    private let session: () -> (any TerminalSession)?
+    private var timer: Timer?
+
+    init?(
+        window: NSWindow,
+        environment: [String: String],
+        session: @escaping () -> (any TerminalSession)?
+    ) {
+        guard let columnsValue = environment["DANTERM_TERMINAL_BENCHMARK_COLUMNS"],
+              let rowsValue = environment["DANTERM_TERMINAL_BENCHMARK_ROWS"],
+              let columns = Int(columnsValue), columns > 0,
+              let rows = Int(rowsValue), rows > 0
+        else { return nil }
+        self.window = window
+        self.targetColumns = columns
+        self.targetRows = rows
+        self.session = session
+    }
+
+    deinit {
+        timer?.invalidate()
+    }
+
+    /// Starts bounded-cadence convergence on the main run loop after pane creation.
+    func start() {
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.convergeOnce()
+            }
+        }
+    }
+
+    private func convergeOnce() {
+        guard let window, let geometry = session()?.benchmarkGeometry else { return }
+        guard geometry.columns != targetColumns || geometry.rows != targetRows else {
+            timer?.invalidate()
+            timer = nil
+            return
+        }
+        let widthDelta = CGFloat(targetColumns - geometry.columns) * geometry.cellWidth
+        let heightDelta = CGFloat(targetRows - geometry.rows) * geometry.cellHeight
+        let contentSize = window.contentView?.bounds.size ?? window.contentLayoutRect.size
+        window.setContentSize(NSSize(
+            width: contentSize.width + widthDelta,
+            height: contentSize.height + heightDelta
+        ))
+    }
+}
+
 /// Measures parse-to-draw benchmark markers without adding hooks to TerminalCore.
 @MainActor
 final class TerminalBenchmarkObserver {

@@ -53,6 +53,7 @@ test:
     ./scripts/tests/terminal-characterization-harness_test.sh
     ./scripts/tests/terminal-viability-harness_test.sh
     ./scripts/tests/terminal-benchmark-harness_test.sh
+    python3 ./scripts/tests/terminal_benchmark_producer_test.py
     python3 ./scripts/tests/terminal_benchmark_suite_test.py
     ./scripts/tests/test-terminal-pty_test.sh
     ./scripts/tests/shell-integration_test.sh

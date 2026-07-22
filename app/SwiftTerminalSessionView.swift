@@ -65,6 +65,17 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
         )
     }
     var hasSelection: Bool { controller.hasSelection }
+    #if DANTERM_TERMINAL_BENCHMARK
+    var benchmarkGeometry: TerminalBenchmarkGeometry? {
+        guard let dimensions = currentDimensions, let metrics = currentMetrics else { return nil }
+        return TerminalBenchmarkGeometry(
+            columns: dimensions.columns,
+            rows: dimensions.rows,
+            cellWidth: metrics.cellSize.width,
+            cellHeight: metrics.cellSize.height
+        )
+    }
+    #endif
     override var acceptsFirstResponder: Bool { true }
     override var isFlipped: Bool { true }
 
