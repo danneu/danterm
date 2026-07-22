@@ -42,7 +42,7 @@ class ScrollableTerminalView: NSView, TerminalSessionStateObserver {
         scrollView.usesPredominantAxisScrolling = true
         scrollView.scrollerStyle = .overlay
         scrollView.drawsBackground = false
-        scrollView.contentView.clipsToBounds = false
+        scrollView.contentView.clipsToBounds = true
 
         // Blank document view — its height represents total scrollback in pixels
         documentView = NSView(frame: .zero)
