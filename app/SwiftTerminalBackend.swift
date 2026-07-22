@@ -68,13 +68,15 @@ final class SwiftTerminalBackend: TerminalBackend {
                 configuration: configuration,
                 bootstrapExecutable: bootstrapExecutable,
                 machineHostname: ProcessInfo.processInfo.hostName,
+                shellIntegrationToken: request.shellIntegrationToken,
                 captureTransitions: recordingDirectory != nil
             )
             #else
             controller = try TerminalPaneSessionController(
                 configuration: configuration,
                 bootstrapExecutable: bootstrapExecutable,
-                machineHostname: ProcessInfo.processInfo.hostName
+                machineHostname: ProcessInfo.processInfo.hostName,
+                shellIntegrationToken: request.shellIntegrationToken
             )
             #endif
         } catch {

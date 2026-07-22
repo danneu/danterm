@@ -471,8 +471,14 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, TerminalSession
                 callbackGate.emit(.cwdChanged(cwd))
             case .bell:
                 callbackGate.emit(.bell)
-            case .legacyPrivateShell(let payload):
-                callbackGate.emit(.legacyPrivateShell(payload))
+            case .commandStarted(let command):
+                callbackGate.emit(.commandStarted(command))
+            case .commandEnded:
+                callbackGate.emit(.commandEnded)
+            case .remoteStarted:
+                callbackGate.emit(.remoteStarted)
+            case let .remoteHost(user, host):
+                callbackGate.emit(.remoteHost(user: user, host: host))
             }
         }
     }

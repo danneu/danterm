@@ -113,7 +113,6 @@ class AppRuntime {
     private struct StagedRestoreSession {
         let model: AppModel
         let surfaces: [PaneId: any TerminalSession]
-        let tokenStore: PaneTokenStore
         let replayFiles: [PaneId: URL]
     }
 
@@ -132,7 +131,6 @@ class AppRuntime {
     var caches = ReconcilerCaches()
     // internal (not private): the cross-file reconcileContainers extension reads/mutates it.
     var tabContainers: [TabId: SplitContainerView] = [:]
-    var tokenStore = PaneTokenStore()
     weak var window: NSWindow?
     weak var sidebarView: SidebarView?
     weak var contentArea: NSView?
@@ -335,9 +333,7 @@ class AppRuntime {
     }
 
     func send(_ msg: Msg) {
-        guard let translatedMsg = translateMsg(msg, tokenForPane: { self.tokenStore.token(for: $0) }) else { return }
-
-        let commands = update(&model, translatedMsg)
+        let commands = update(&model, msg)
         // Command-phase split: most commands run before reconcile(); the few that
         // target a view the reconciler creates (Stage 4: only .focusSearchField,
         // whose search field reconcilePaneChrome builds) run after. See
@@ -347,7 +343,7 @@ class AppRuntime {
         }
         let emitsPostReconcile = commands.contains { $0.isPostReconcile }
         switch reconcileDecision(
-            for: translatedMsg,
+            for: msg,
             coalescedSweepPending: coalescedReconcileTimer != nil,
             emitsPostReconcile: emitsPostReconcile
         ) {
@@ -365,7 +361,7 @@ class AppRuntime {
 
         // Defensive backstop: cancel drag on app resign, in case the coordinator's
         // notification observer fires out of order.
-        if case .appResignedActive = translatedMsg {
+        if case .appResignedActive = msg {
             cancelPaneDrag()
             // Flush pending light checkpoint so we don't lose state if the app
             // is killed while backgrounded (e.g. memory pressure, force quit).
@@ -484,7 +480,7 @@ class AppRuntime {
     private func perform(_ command: Command) {
         switch command {
         case .createSurface(let paneId, let cwd, let command, let launchCommand, let waitAfterCommand):
-            let token = tokenStore.generate(for: paneId)
+            let token = UUID().uuidString
             let envVars = terminalLaunchEnvironment(
                 ipcSocketPath: ipcSocketPath.path,
                 paneId: paneId,
@@ -497,9 +493,9 @@ class AppRuntime {
                 launchCommand: launchCommand,
                 waitAfterCommand: waitAfterCommand,
                 restoreCommandBehavior: .execute,
+                shellIntegrationToken: token,
                 envVars: envVars
             ) else {
-                tokenStore.remove(paneId)
                 send(.surfaceCreationFailed(paneId: paneId))
                 break
             }
@@ -804,7 +800,6 @@ class AppRuntime {
     /// calls it for every pane absent from `model.allPaneIds`). `internal` so the
     /// cross-file reconcile extension can reach it.
     func tearDownSurface(_ paneId: PaneId) {
-        tokenStore.remove(paneId)
         cleanupReplayFile(for: paneId)
         searchDebouncers[paneId]?.cancel()
         searchDebouncers.removeValue(forKey: paneId)
@@ -1177,7 +1172,6 @@ class AppRuntime {
         restoreCommandBehavior: RestoreCommandBehavior
     ) throws -> StagedRestoreSession {
         var stagedSurfaces: [PaneId: any TerminalSession] = [:]
-        var stagedTokenStore = PaneTokenStore()
         var stagedReplayFiles: [PaneId: URL] = [:]
 
         do {
@@ -1186,7 +1180,7 @@ class AppRuntime {
                     for paneId in allPaneIds(tab.rootNode) {
                         let ps = loaded.paneSnapshots[paneId]
                         let resolved = ps.map { resolveLaunch($0) }
-                        let token = stagedTokenStore.generate(for: paneId)
+                        let token = UUID().uuidString
                         var scrollbackFilePath: String?
                         if let replayText = recoveryReplayText(scrollback: ps?.scrollback, agentSession: ps?.agentSession),
                            let replayURL = writeReplayFile(scrollback: replayText) {
@@ -1206,6 +1200,7 @@ class AppRuntime {
                             launchCommand: nil,
                             waitAfterCommand: true,
                             restoreCommandBehavior: restoreCommandBehavior,
+                            shellIntegrationToken: token,
                             envVars: envVars
                         ) else {
                             throw RestoreBuildError.surfaceCreationFailed
@@ -1218,14 +1213,12 @@ class AppRuntime {
             return StagedRestoreSession(
                 model: loaded.model,
                 surfaces: stagedSurfaces,
-                tokenStore: stagedTokenStore,
                 replayFiles: stagedReplayFiles
             )
         } catch {
             discardRestoreSession(StagedRestoreSession(
                 model: loaded.model,
                 surfaces: stagedSurfaces,
-                tokenStore: stagedTokenStore,
                 replayFiles: stagedReplayFiles
             ))
             throw error
@@ -1265,7 +1258,6 @@ class AppRuntime {
         for paneId in Array(replayFiles.keys) {
             cleanupReplayFile(for: paneId)
         }
-        tokenStore = PaneTokenStore()
     }
 
     /// Swap a fully staged restore into the live runtime and refresh derived UI state.
@@ -1273,7 +1265,6 @@ class AppRuntime {
         tearDownCurrentSession()
         model = staged.model
         surfaces = staged.surfaces
-        tokenStore = staged.tokenStore
         replayFiles = staged.replayFiles
         cancelCoalescedReconcile()
 
@@ -1308,9 +1299,11 @@ class AppRuntime {
         launchCommand: String?,
         waitAfterCommand: Bool,
         restoreCommandBehavior: RestoreCommandBehavior,
+        shellIntegrationToken: String,
         envVars: [(String, String)]
     ) -> (any TerminalSession)? {
         let request = TerminalSessionRequest(
+            shellIntegrationToken: shellIntegrationToken,
             workingDirectory: workingDirectory,
             command: command,
             launchCommand: launchCommand,

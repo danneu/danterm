@@ -1,4 +1,5 @@
 // Pure headless terminal reduction: byte ingestion, grid mutation, controls, and inspection.
+import Foundation
 
 /// Addresses a projection boundary in the current scrollback-plus-viewport stream.
 public struct TerminalTextPosition: Equatable, Sendable {
@@ -307,6 +308,7 @@ public struct Terminal: Equatable, Sendable {
     private var nextHyperlinkId = 1
     private var nextContentIdentity = 1
     private var machineHostname: String?
+    private var shellIntegrationToken: String?
     private var currentWorkingDirectory: String?
     private var titleUsesWorkingDirectory = false
     private var pendingTitleEvent: PendingTerminalSemanticEvent?
@@ -319,6 +321,7 @@ public struct Terminal: Equatable, Sendable {
     static let maximumHyperlinkTargetBytes = 65_536
     static let maximumTerminalMetadataBytes = 256 * 1_024
     static let maximumSemanticValueBytes = 64 * 1_024
+    static let maximumShellOSCBytes = 88 * 1_024
     static let maximumDiscreteSemanticEvents = 100
 
     /// Exposes aggregate retained link cost to structural bound tests.
@@ -503,12 +506,18 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Rejects dimensions that cannot represent all supported terminal cells.
-    public init?(columns: Int, rows: Int, machineHostname: String? = nil) {
+    public init?(
+        columns: Int,
+        rows: Int,
+        machineHostname: String? = nil,
+        shellIntegrationToken: String? = nil
+    ) {
         self.init(
             columns: columns,
             rows: rows,
             scrollbackBudgetBytes: Self.productionScrollbackBudgetBytes,
-            machineHostname: machineHostname
+            machineHostname: machineHostname,
+            shellIntegrationToken: shellIntegrationToken
         )
     }
 
@@ -517,13 +526,15 @@ public struct Terminal: Equatable, Sendable {
         columns: Int,
         rows: Int,
         scrollbackBudgetBytes: Int,
-        machineHostname: String? = nil
+        machineHostname: String? = nil,
+        shellIntegrationToken: String? = nil
     ) {
         guard columns >= 2, rows >= 1, scrollbackBudgetBytes >= 0 else { return nil }
         columnCount = columns
         rowCount = rows
         self.scrollbackBudgetBytes = scrollbackBudgetBytes
         self.machineHostname = machineHostname
+        self.shellIntegrationToken = shellIntegrationToken
         tabStops = Self.defaultTabStops(columns: columns)
         self.rows = (0..<rows).map { _ in
             GridRow(cells: (0..<columns).map { _ in GridCell() })
@@ -569,6 +580,8 @@ public struct Terminal: Equatable, Sendable {
             dispatchOSC8(payload, selectorEnd: selectorEnd)
         case 52:
             dispatchOSC52(payload, selectorEnd: selectorEnd)
+        case 1337:
+            dispatchDanTermShell(payload, selectorEnd: selectorEnd)
         default:
             break
         }
@@ -591,15 +604,61 @@ public struct Terminal: Equatable, Sendable {
         guard valueBytes.count <= Self.maximumSemanticValueBytes,
               let value = strictlyDecodedUTF8(valueBytes)
         else { return }
-        if value.hasPrefix("__DANTERM_EVT__:") {
-            admitDiscreteSemanticEvent(.legacyPrivateShell(value))
-            return
-        }
         titleUsesWorkingDirectory = value.isEmpty
         pendingTitleEvent = admittedCoalescedSemanticEvent(
             .title(value.isEmpty ? currentWorkingDirectory ?? "" : value),
             replacing: pendingTitleEvent
         )
+    }
+
+    private mutating func dispatchDanTermShell(_ payload: [UInt8], selectorEnd: Int) {
+        guard payload.count <= Self.maximumShellOSCBytes,
+              let expectedToken = shellIntegrationToken
+        else { return }
+        let fields = payload[payload.index(after: selectorEnd)...].split(
+            separator: 0x3B,
+            omittingEmptySubsequences: false
+        )
+        guard fields.count >= 3,
+              fields[0].elementsEqual("DanTermShell=1".utf8),
+              fields[1].elementsEqual(expectedToken.utf8),
+              let eventName = String(bytes: fields[2], encoding: .utf8)
+        else { return }
+
+        switch eventName {
+        case "command-start":
+            guard fields.count == 4,
+                  let command = decodedCanonicalBase64(fields[3]),
+                  command.utf8.count <= Self.maximumSemanticValueBytes
+            else { return }
+            admitDiscreteSemanticEvent(.commandStarted(command))
+        case "command-end":
+            guard fields.count == 3 else { return }
+            admitDiscreteSemanticEvent(.commandEnded)
+        case "remote-start":
+            guard fields.count == 3 else { return }
+            admitDiscreteSemanticEvent(.remoteStarted)
+        case "remote-host":
+            guard fields.count == 5,
+                  let user = decodedCanonicalBase64(fields[3]),
+                  let host = decodedCanonicalBase64(fields[4]),
+                  user.utf8.count + host.utf8.count <= Self.maximumSemanticValueBytes
+            else { return }
+            admitDiscreteSemanticEvent(.remoteHost(user: user, host: host))
+        default:
+            return
+        }
+    }
+
+    private func decodedCanonicalBase64(_ bytes: ArraySlice<UInt8>) -> String? {
+        guard bytes.isEmpty == false,
+              let encoded = String(bytes: bytes, encoding: .ascii),
+              let data = Data(base64Encoded: encoded),
+              data.base64EncodedString() == encoded,
+              let value = String(data: data, encoding: .utf8),
+              value.isEmpty == false
+        else { return nil }
+        return value
     }
 
     private mutating func dispatchOSC7(_ payload: [UInt8], selectorEnd: Int) {

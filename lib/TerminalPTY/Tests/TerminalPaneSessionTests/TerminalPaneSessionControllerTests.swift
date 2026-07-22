@@ -17,10 +17,10 @@ struct TerminalPaneSessionControllerTests {
         // Intent: deliver every semantic kind while both rendering gates suppress frames.
         // Why it exists: terminal metadata must not wait for pane visibility or synchronized output.
         // Scenario: a hidden child starts a synchronized update, then reports title, cwd, shell, and BEL.
-        let host = try makeHost()
+        let host = try makeHost(shellIntegrationToken: "token")
         let command = "printf '\\033[?2026h\\033]2;hidden-title\\007"
             + "\\033]7;file://localhost/tmp/pane\\007"
-            + "\\033]0;__DANTERM_EVT__:token:CMD_END\\007\\007'; exec sleep 30"
+            + "\\033]1337;DanTermShell=1;token;command-end\\007\\007'; exec sleep 30"
         let controller = TerminalPaneSessionController(
             host: host,
             launchInput: makeLaunchInput(command: command),
@@ -35,7 +35,7 @@ struct TerminalPaneSessionControllerTests {
         #expect(await iterator.next() == [
             .title("hidden-title"),
             .workingDirectory("/tmp/pane"),
-            .legacyPrivateShell("__DANTERM_EVT__:token:CMD_END"),
+            .commandEnded,
             .bell,
         ])
         #expect(controller.currentPlan == nil)
@@ -1151,10 +1151,14 @@ struct TerminalPaneSessionControllerTests {
     }
 }
 
-private func makeHost(captureTransitions: Bool = true) throws -> TerminalPTYHost {
+private func makeHost(
+    captureTransitions: Bool = true,
+    shellIntegrationToken: String? = nil
+) throws -> TerminalPTYHost {
     try TerminalPTYHost(
         initialDimensions: .init(columns: 80, rows: 24),
         bootstrapExecutable: bootstrapExecutable(),
+        shellIntegrationToken: shellIntegrationToken,
         captureTransitions: captureTransitions
     )
 }

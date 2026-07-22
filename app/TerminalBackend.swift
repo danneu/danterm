@@ -55,6 +55,7 @@ final class TerminalSessionCallbackGate {
 
 /// Inputs needed to create one terminal session without exposing adapter handles.
 struct TerminalSessionRequest {
+    let shellIntegrationToken: String
     let workingDirectory: String?
     let command: String?
     let launchCommand: String?

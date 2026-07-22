@@ -826,7 +826,6 @@ private struct FixtureSemanticEvent: Decodable {
         case "title": .title(value ?? "")
         case "cwd": .workingDirectory(value)
         case "bell": .bell
-        case "legacy": .legacyPrivateShell(value ?? "")
         default: preconditionFailure("Unknown semantic fixture event: \(kind)")
         }
     }

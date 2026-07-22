@@ -6,7 +6,10 @@ enum TerminalSessionEvent: Equatable {
     case titleChanged(String)
     case cwdChanged(String?)
     case bell
-    case legacyPrivateShell(String)
+    case commandStarted(String)
+    case commandEnded
+    case remoteStarted
+    case remoteHost(user: String, host: String)
     case desktopNotification(title: String, body: String)
     case progress(ProgressState?)
     case searchStarted(String)
@@ -52,8 +55,17 @@ func terminalMessage(for event: TerminalSessionEvent, paneId: PaneId) -> Msg {
         return .surfaceCwd(paneId: paneId, cwd: cwd)
     case .bell:
         return .surfaceBell(paneId: paneId)
-    case .legacyPrivateShell(let payload):
-        return .surfaceTitle(paneId: paneId, title: payload)
+    case .commandStarted(let command):
+        return .commandStarted(paneId: paneId, command: command)
+    case .commandEnded:
+        return .commandEnded(paneId: paneId)
+    case .remoteStarted:
+        return .remoteSessionStarted(paneId: paneId)
+    case let .remoteHost(user, host):
+        return .remoteSessionReported(
+            paneId: paneId,
+            session: RemoteSession(user: user, host: host)
+        )
     case .desktopNotification(let title, let body):
         return .desktopNotification(paneId: paneId, title: title, body: body)
     case .progress(let state):

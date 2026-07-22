@@ -196,9 +196,8 @@ extension Msg {
     /// never dropped; only the whole-model view sweep is deferred -- and the
     /// side-effecting commands these emit (.sendNotification, .scheduleCheckpoint)
     /// are not post-reconcile, so they still run inline. The runtime evaluates this
-    /// on the translated message, so a title-channel `__DANTERM_EVT__:` event's
-    /// eligibility is its translated case's: commandStarted/commandEnded opt in
-    /// here; remoteSession start/report events stay inline. Eligibility is
+    /// on the pane-scoped message, so commandStarted/commandEnded opt in here;
+    /// remoteSession start/report events stay inline. Eligibility is
     /// necessary but not sufficient: reconcileDecision still forces an inline
     /// reconcile when update() emitted a post-reconcile command, so opting a message
     /// in here is always safe.

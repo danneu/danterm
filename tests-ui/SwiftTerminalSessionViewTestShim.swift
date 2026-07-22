@@ -9,7 +9,10 @@ enum TerminalSemanticEvent {
     case title(String)
     case workingDirectory(String?)
     case bell
-    case legacyPrivateShell(String)
+    case commandStarted(String)
+    case commandEnded
+    case remoteStarted
+    case remoteHost(user: String, host: String)
 }
 
 struct RenderColor: Equatable {

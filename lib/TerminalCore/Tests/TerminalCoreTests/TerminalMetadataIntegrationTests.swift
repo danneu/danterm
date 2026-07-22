@@ -16,10 +16,17 @@ struct TerminalMetadataIntegrationTests {
         //   live at once rather than relying only on isolated cap tests.
         // Scenario: a consumer stalls after draining one batch while child
         //   output refills the core and existing pane history fills the model.
-        var terminal = try #require(Terminal(columns: 2, rows: 1))
-        let prefix = "__DANTERM_EVT__:"
-        let value = prefix + String(repeating: "x", count: 64 * 1024 - prefix.utf8.count)
-        let sequence = Array("\u{1B}]0;\(value)\u{07}".utf8)
+        let token = "token"
+        var terminal = try #require(Terminal(
+            columns: 2,
+            rows: 1,
+            shellIntegrationToken: token
+        ))
+        let value = String(repeating: "x", count: 64 * 1024)
+        let encoded = Data(value.utf8).base64EncodedString()
+        let sequence = Array(
+            "\u{1B}]1337;DanTermShell=1;\(token);command-start;\(encoded)\u{07}".utf8
+        )
 
         for _ in 0..<4 { terminal.feed(sequence) }
         let heldHandoff = terminal.drainSemanticEvents()
@@ -59,11 +66,13 @@ struct TerminalMetadataIntegrationTests {
 private func semanticStringBytes(_ events: [TerminalSemanticEvent]) -> Int {
     events.reduce(0) { total, event in
         switch event {
-        case .title(let value), .legacyPrivateShell(let value):
+        case .title(let value), .commandStarted(let value):
             return total + value.utf8.count
+        case let .remoteHost(user, host):
+            return total + user.utf8.count + host.utf8.count
         case .workingDirectory(let value):
             return total + (value?.utf8.count ?? 0)
-        case .bell:
+        case .bell, .commandEnded, .remoteStarted:
             return total
         }
     }

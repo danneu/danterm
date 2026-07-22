@@ -824,39 +824,6 @@ func deleteGroupAction(for groupId: GroupId, in model: AppModel) -> DeleteGroupA
   }
 }
 
-// MARK: - DanTerm Event Protocol
-
-enum DantermEvent: Equatable {
-  case commandStarted(command: String)
-  case commandEnded
-  case remoteStart
-  case remoteSession(value: RemoteSession)
-}
-
-/// Token store for pane-to-token mapping. Used by AppRuntime; extracted here for testability.
-struct PaneTokenStore {
-  private(set) var tokens: [PaneId: String] = [:]
-  private var idGenerator: () -> UUID
-
-  init(idGenerator: @escaping () -> UUID = UUID.init) {
-    self.idGenerator = idGenerator
-  }
-
-  mutating func generate(for paneId: PaneId) -> String {
-    let token = idGenerator().uuidString
-    tokens[paneId] = token
-    return token
-  }
-
-  mutating func remove(_ paneId: PaneId) {
-    tokens.removeValue(forKey: paneId)
-  }
-
-  func token(for paneId: PaneId) -> String? {
-    tokens[paneId]
-  }
-}
-
 /// How send() should drive reconcile() for a translated message.
 enum ReconcileDecision: Equatable {
   case reconcileNow
@@ -872,72 +839,6 @@ func reconcileDecision(
 ) -> ReconcileDecision {
   guard msg.coalescesReconcile, !emitsPostReconcile else { return .reconcileNow }
   return coalescedSweepPending ? .coalesceIntoPending : .scheduleCoalesced
-}
-
-/// Translate a Msg through the event protocol layer.
-/// Returns nil when the message should be dropped (bad token, malformed event).
-/// Normal (non-event) messages pass through unchanged.
-func translateMsg(_ msg: Msg, tokenForPane: (PaneId) -> String?) -> Msg? {
-  guard case .surfaceTitle(let paneId, let title) = msg,
-    title.hasPrefix("__DANTERM_EVT__:")
-  else {
-    return msg
-  }
-  guard let token = tokenForPane(paneId),
-    let event = parseDantermEvent(title, expectedToken: token)
-  else {
-    return nil
-  }
-  switch event {
-  case .commandStarted(let command):
-    return .commandStarted(paneId: paneId, command: command)
-  case .commandEnded:
-    return .commandEnded(paneId: paneId)
-  case .remoteStart:
-    return .remoteSessionStarted(paneId: paneId)
-  case .remoteSession(let value):
-    return .remoteSessionReported(paneId: paneId, session: value)
-  }
-}
-
-func parseDantermEvent(_ raw: String, expectedToken: String) -> DantermEvent? {
-  let prefix = "__DANTERM_EVT__:"
-  guard raw.hasPrefix(prefix) else { return nil }
-  let payload = String(raw.dropFirst(prefix.count))
-
-  let parts = payload.split(separator: ":", maxSplits: 1)
-  guard parts.count == 2, String(parts[0]) == expectedToken else { return nil }
-  let event = String(parts[1])
-
-  if event.hasPrefix("CMD_START:") {
-    let b64 = String(event.dropFirst("CMD_START:".count))
-    guard let data = Data(base64Encoded: b64),
-      let cmd = String(data: data, encoding: .utf8),
-      !cmd.isEmpty
-    else { return nil }
-    return .commandStarted(command: cmd)
-  } else if event == "CMD_END" {
-    return .commandEnded
-  } else if event == "REMOTE_START" {
-    return .remoteStart
-  } else if event.hasPrefix("REMOTE_HOST:") {
-    let payload = String(event.dropFirst("REMOTE_HOST:".count))
-    let parts = payload.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
-    guard parts.count == 2 else { return nil }
-    let userB64 = String(parts[0])
-    let hostB64 = String(parts[1])
-    guard !userB64.isEmpty,
-      !hostB64.isEmpty,
-      let userData = Data(base64Encoded: userB64),
-      let user = String(data: userData, encoding: .utf8),
-      !user.isEmpty,
-      let hostData = Data(base64Encoded: hostB64),
-      let host = String(data: hostData, encoding: .utf8),
-      !host.isEmpty
-    else { return nil }
-    return .remoteSession(value: RemoteSession(user: user, host: host))
-  }
-  return nil
 }
 
 // MARK: - MRU Tab Switcher

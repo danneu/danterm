@@ -92,12 +92,14 @@ public final class TerminalPaneSessionController {
         configuration: TerminalPaneLaunchConfiguration,
         bootstrapExecutable: String,
         isVisible: Bool = true,
-        machineHostname: String? = nil
+        machineHostname: String? = nil,
+        shellIntegrationToken: String? = nil
     ) throws {
         let host = try TerminalPTYHost(
             initialDimensions: configuration.initialDimensions,
             bootstrapExecutable: bootstrapExecutable,
-            machineHostname: machineHostname
+            machineHostname: machineHostname,
+            shellIntegrationToken: shellIntegrationToken
         )
         self.init(host: host, launchInput: configuration.launchInput, isVisible: isVisible)
     }
@@ -109,12 +111,14 @@ public final class TerminalPaneSessionController {
         bootstrapExecutable: String,
         isVisible: Bool = true,
         machineHostname: String? = nil,
+        shellIntegrationToken: String? = nil,
         captureTransitions: Bool
     ) throws {
         let host = try TerminalPTYHost(
             initialDimensions: configuration.initialDimensions,
             bootstrapExecutable: bootstrapExecutable,
             machineHostname: machineHostname,
+            shellIntegrationToken: shellIntegrationToken,
             captureTransitions: captureTransitions
         )
         self.init(host: host, launchInput: configuration.launchInput, isVisible: isVisible)
@@ -125,12 +129,14 @@ public final class TerminalPaneSessionController {
         bootstrapExecutable: String,
         isVisible: Bool = true,
         machineHostname: String? = nil,
+        shellIntegrationToken: String? = nil,
         captureTransitions: Bool
     ) throws {
         let host = try TerminalPTYHost(
             initialDimensions: configuration.initialDimensions,
             bootstrapExecutable: bootstrapExecutable,
             machineHostname: machineHostname,
+            shellIntegrationToken: shellIntegrationToken,
             captureTransitions: captureTransitions
         )
         self.init(host: host, launchInput: configuration.launchInput, isVisible: isVisible)

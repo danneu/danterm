@@ -37,14 +37,11 @@ struct TerminalSemanticEventTests {
         #expect(terminal.drainSemanticEvents() == [.bell, .title("title")])
     }
 
-    @Test("legacy shell payloads remain discrete and never become titles")
-    func legacyPayload() throws {
+    @Test("retired private title prefixes follow ordinary title behavior")
+    func retiredPrivateTitleIsOrdinary() throws {
         var terminal = try #require(Terminal(columns: 20, rows: 2))
-        terminal.feed(Array("\u{1B}]0;__DANTERM_EVT__:token:start\u{7}\u{1B}]2;shown\u{7}\u{7}\u{1B}]0;__DANTERM_EVT__:token:end\u{7}".utf8))
-        #expect(terminal.drainSemanticEvents() == [
-            .legacyPrivateShell("__DANTERM_EVT__:token:start"), .title("shown"), .bell,
-            .legacyPrivateShell("__DANTERM_EVT__:token:end"),
-        ])
+        terminal.feed(Array("\u{1B}]0;__DANTERM_EVT__:ordinary\u{7}".utf8))
+        #expect(terminal.drainSemanticEvents() == [.title("__DANTERM_EVT__:ordinary")])
     }
 
     @Test("valid multibyte title bytes survive chunking across C1-range continuations")
@@ -85,11 +82,11 @@ struct TerminalSemanticEventTests {
         #expect(terminal.drainSemanticEvents() == [.bell, .workingDirectory("/a"), .title("new")])
     }
 
-    @Test("bells and private events share a 100-event FIFO bound")
+    @Test("bells and native shell events share a 100-event FIFO bound")
     func discreteBound() throws {
-        var terminal = try #require(Terminal(columns: 20, rows: 2))
+        var terminal = try #require(Terminal(columns: 20, rows: 2, shellIntegrationToken: "token"))
         terminal.feed(Array(String(repeating: "\u{7}", count: 100).utf8))
-        terminal.feed(Array("\u{1B}]0;__DANTERM_EVT__:dropped\u{7}".utf8))
+        terminal.feed(Array("\u{1B}]1337;DanTermShell=1;token;command-end\u{7}".utf8))
         #expect(terminal.drainSemanticEvents() == Array(repeating: .bell, count: 100))
     }
 

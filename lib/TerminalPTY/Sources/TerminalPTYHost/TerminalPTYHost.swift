@@ -146,12 +146,14 @@ public actor TerminalPTYHost {
     public init(
         initialDimensions: TerminalDimensions,
         bootstrapExecutable: String,
-        machineHostname: String? = nil
+        machineHostname: String? = nil,
+        shellIntegrationToken: String? = nil
     ) throws {
         try self.init(
             initialDimensions: initialDimensions,
             bootstrapExecutable: bootstrapExecutable,
             machineHostname: machineHostname,
+            shellIntegrationToken: shellIntegrationToken,
             captureTransitions: false
         )
     }
@@ -160,12 +162,14 @@ public actor TerminalPTYHost {
         initialDimensions: TerminalDimensions,
         bootstrapExecutable: String,
         machineHostname: String? = nil,
+        shellIntegrationToken: String? = nil,
         captureTransitions: Bool
     ) throws {
         guard let terminal = Terminal(
             columns: initialDimensions.columns,
             rows: initialDimensions.rows,
-            machineHostname: machineHostname
+            machineHostname: machineHostname,
+            shellIntegrationToken: shellIntegrationToken
         ) else {
             throw TerminalPTYHostError.invalidDimensions
         }

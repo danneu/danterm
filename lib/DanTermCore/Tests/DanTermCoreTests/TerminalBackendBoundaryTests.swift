@@ -31,9 +31,23 @@ struct TerminalBackendBoundaryTests {
             if case .surfaceBell(let id) = $0 { return id == paneId }
             return false
         }
-        assertSessionMessage(.legacyPrivateShell("__DANTERM_EVT__:token:CMD_END"), paneId: paneId) {
-            if case .surfaceTitle(let id, let title) = $0 {
-                return id == paneId && title == "__DANTERM_EVT__:token:CMD_END"
+        assertSessionMessage(.commandStarted("echo ok"), paneId: paneId) {
+            if case .commandStarted(let id, let command) = $0 {
+                return id == paneId && command == "echo ok"
+            }
+            return false
+        }
+        assertSessionMessage(.commandEnded, paneId: paneId) {
+            if case .commandEnded(let id) = $0 { return id == paneId }
+            return false
+        }
+        assertSessionMessage(.remoteStarted, paneId: paneId) {
+            if case .remoteSessionStarted(let id) = $0 { return id == paneId }
+            return false
+        }
+        assertSessionMessage(.remoteHost(user: "dan", host: "caja"), paneId: paneId) {
+            if case .remoteSessionReported(let id, let session) = $0 {
+                return id == paneId && session == RemoteSession(user: "dan", host: "caja")
             }
             return false
         }
