@@ -172,6 +172,24 @@
                   ${pkgs.bash}/bin/bash integrations/codex/danterm-agent-session.test.sh
                 touch $out
               '';
+          shell-integration =
+            pkgs.runCommand "danterm-shell-integration-test"
+              {
+                nativeBuildInputs = with pkgs; [
+                  bash
+                  fish
+                  hostname
+                  zsh
+                ];
+              }
+              ''
+                mkdir -p integrations scripts/tests
+                cp -R ${./integrations/shell-integration} integrations/shell-integration
+                cp ${./scripts/tests/shell-integration_test.sh} scripts/tests/shell-integration_test.sh
+                chmod -R u+w integrations scripts
+                bash scripts/tests/shell-integration_test.sh
+                touch $out
+              '';
         }
       );
 

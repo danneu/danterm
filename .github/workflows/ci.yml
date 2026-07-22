@@ -166,6 +166,9 @@ jobs:
           for h in danterm-claude-notify-osc777 danterm-claude-agent-session danterm-codex-agent-session; do
             test -x "$APP_PATH/Contents/Resources/danterm-hooks/$h"
           done
+          for shell in zsh bash fish; do
+            test -r "$APP_PATH/Contents/Resources/shell-integration/danterm.$shell"
+          done
           if cmp -s "$APP_PATH/Contents/MacOS/DanTerm" "$APP_PATH/Contents/Helpers/danterm"; then
             echo "Error: GUI and CLI bundle binaries have identical content" >&2
             exit 1
@@ -182,6 +185,9 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$ZIP_WORK/DanTerm.app"
           for h in danterm-claude-notify-osc777 danterm-claude-agent-session danterm-codex-agent-session; do
             test -x "$ZIP_WORK/DanTerm.app/Contents/Resources/danterm-hooks/$h"
+          done
+          for shell in zsh bash fish; do
+            test -r "$ZIP_WORK/DanTerm.app/Contents/Resources/shell-integration/danterm.$shell"
           done
           echo "Release build validation passed"
 

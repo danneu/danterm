@@ -84,6 +84,12 @@ for pair in \
     test -x "$APP_PATH/Contents/Resources/danterm-hooks/$2" || { echo "Error: hook script $2 not bundled" >&2; exit 1; }
 done
 
+mkdir -p "$APP_PATH/Contents/Resources/shell-integration"
+for shell in zsh bash fish; do
+    cp "$SCRIPT_DIR/integrations/shell-integration/danterm.$shell" \
+        "$APP_PATH/Contents/Resources/shell-integration/danterm.$shell"
+done
+
 # Bundle all ghostty themes for per-pane theme switching and browsing.
 THEMES_SRC="$SCRIPT_DIR/.ghostty-src/zig-out/share/ghostty/themes"
 THEMES_DST="$APP_PATH/Contents/Resources/ghostty/themes"

@@ -101,6 +101,15 @@ If these are absent, the user may be outside DanTerm. You may still use
 `danterm` only with explicit ids derived from `danterm ls` and unique
 user-provided criteria.
 
+## Shell integration capability
+
+DanTerm ships opt-in zsh, Bash, and fish integrations at
+`Contents/Resources/shell-integration/danterm.{zsh,bash,fish}`. They report
+command boundaries, cwd, and remote-session metadata to the owning pane. The
+`DANTERM_TOKEN` and `LC_DANTERM_TOKEN` values are private capabilities consumed
+by those integrations. Agents must never print, log, synthesize, or pass these
+values to commands; they are not pane ids and are not part of the CLI API.
+
 ## Derive targets
 
 Inside DanTerm, derive the originating pane, tab, and group:

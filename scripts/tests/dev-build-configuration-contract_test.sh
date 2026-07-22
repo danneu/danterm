@@ -20,6 +20,7 @@ mkdir -p "$BUILD_ROOT/lib/GhosttyKit.xcframework" \
     "$BUILD_ROOT/icon/AppIcon-dev" \
     "$BUILD_ROOT/integrations/claude-code" \
     "$BUILD_ROOT/integrations/codex" \
+    "$BUILD_ROOT/integrations/shell-integration" \
     "$FAKE_BIN"
 ln -s "$ROOT_DIR/dev-build.sh" "$BUILD_ROOT/dev-build.sh"
 cp "$ROOT_DIR/app/Info.plist" "$BUILD_ROOT/app/Info.plist"
@@ -28,6 +29,9 @@ cp "$ROOT_DIR/app/Info.plist" "$BUILD_ROOT/app/Info.plist"
 : > "$BUILD_ROOT/integrations/claude-code/claude-notify-osc777.sh"
 : > "$BUILD_ROOT/integrations/claude-code/danterm-agent-session.sh"
 : > "$BUILD_ROOT/integrations/codex/danterm-agent-session.sh"
+for shell in zsh bash fish; do
+    printf '# fixture %s integration\n' "$shell" > "$BUILD_ROOT/integrations/shell-integration/danterm.$shell"
+done
 
 export SWIFT_ARGV_LOG="$TEST_ROOT/swift-argv.log"
 cat > "$FAKE_BIN/swift" <<'SHIM'
@@ -82,6 +86,11 @@ run_build() {
 # Why it exists: adding an optimized variant must not slow the normal incremental dev loop.
 # Scenario: a developer runs ./dev-build.sh or `just build` without an option.
 run_build debug
+for shell in zsh bash fish; do
+    cmp "$BUILD_ROOT/integrations/shell-integration/danterm.$shell" \
+        "$BUILD_ROOT/.build/DanTerm Dev.app/Contents/Resources/shell-integration/danterm.$shell" \
+        || fail "debug bundle did not preserve the $shell integration"
+done
 [[ $(wc -l < "$TEST_ROOT/debug.swift-argv") -eq 4 ]] \
     || fail "debug build did not make four SwiftPM build/bin-path calls"
 if grep -q -- '--configuration' "$TEST_ROOT/debug.swift-argv"; then

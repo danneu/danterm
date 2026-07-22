@@ -40,13 +40,18 @@ compatibility target, including:
 - synchronized updates
 - legacy xterm and Kitty keyboard negotiation
 
-The first semantic-event slice preserves DanTerm's authenticated title-channel shell
-hooks as a temporary wire-compatibility shim. The engine recognizes those prefixed
-OSC 0 payloads before ordinary title handling, reports them as distinct private
-events, and never applies or coalesces them as terminal titles. A follow-on retirement
-slice selects a non-title shell-event protocol, migrates the hooks, and deletes both
-the OSC 0 compatibility recognition and legacy translator before the replacement gate
-can close.
+DanTerm shell integrations use a private, versioned OSC 1337 envelope carrying
+an authenticated pane token and typed command-start, command-end, remote-start,
+and remote-host events. Command and host text uses canonical padded base64. The
+engine authenticates and bounds the envelope before admitting a semantic event;
+the PTY/session adapter binds accepted events to the owning pane. Shell events
+never pass through title handling.
+
+Canonical opt-in zsh, Bash, and fish integrations ship in the app bundle. They
+consume the pane token from the child environment into shell-private state,
+preserve existing prompt hooks, report local cwd with OSC 7, and forward only
+the originating pane's authority through SSH. The token is a private capability,
+not a user-facing identifier or an agent API.
 
 BEL emits DanTerm's existing pane-scoped bell event. The initial engine never
 plays an audible bell. Existing alert suppression and admitted-event
@@ -63,7 +68,7 @@ scrollback:
   [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md)
 - one pending OSC, DCS, APC, PM, or SOS string may contain at most 2 MiB of
   encoded input; OSC 52 additionally retains its 1 MiB decoded-content limit
-- one retained title, cwd, link target, notification, progress, or private
+- one retained title, cwd, link target, notification, progress, or typed
   shell-event payload is limited to 64 KiB; the 1 MiB aggregate
   terminal-originated metadata budget per pane applies end to end across engine
   retention, semantic-event handoff, DanTerm model retention, and adapter queues
@@ -94,7 +99,7 @@ implements the outer capabilities tmux consumes.
 - Unrecognized OSC, CSI, and DCS sequences are bounded and ignored safely.
 - Terminal-originated title, cwd, notification, progress, clipboard, and shell
   events remain pane-scoped.
-- Authentication on existing DanTerm-private shell events remains enforced.
+- Authentication on DanTerm-private shell events remains enforced.
 - A remote application receives no broader host authority than the protocol
   policy grants.
 - Aggregate parser, metadata, semantic-event, reply, scrollback, model, adapter,
@@ -109,11 +114,8 @@ implements the outer capabilities tmux consumes.
   reached by an accepted workflow.
 - tmux runs the required compatibility workflows with correct colors, keys,
   mouse, links, clipboard writes, focus, and synchronized updates.
-- Existing DanTerm shell hooks continue driving command and remote-session model
-  behavior through the new backend.
-- Before the replacement gate closes, migrated shell hooks drive the same behavior
-  without encoding private directives as titles, and legacy OSC 0 payloads are no
-  longer recognized.
+- Bundled DanTerm shell hooks drive command and remote-session model behavior
+  through the native backend without encoding private directives as titles.
 - Within the resource policy, notification and progress protocols produce the
   same pane-scoped DanTerm behavior as the current app; overload follows the
   explicit coalescing and drop contract.
@@ -132,14 +134,12 @@ implements the outer capabilities tmux consumes.
 - Initial `TERM=danterm`: remote hosts would need a custom terminfo entry before
   ordinary applications could rely on it.
 - Ghostty terminal identity or protocol compatibility as a goal.
-- Redesigning DanTerm's private shell-event channel in the first title/cwd/bell
-  slice; that slice isolates the legacy encoding, and a follow-on retirement slice
-  removes it deliberately.
+- Encoding private shell directives as terminal titles; it couples application
+  title behavior to authenticated model events and risks visible title pollution.
 
 ## Implementation discretion
 
 - Additional harmless protocols may be supported when required by the accepted
   application matrix.
-- The exact non-title shell-event wire protocol is reserved for the follow-on
-  retirement plan; choosing it must preserve command text, remote metadata,
-  authentication policy, and bounded typed delivery.
+- Compatible additions to the private envelope require a new version; unknown
+  versions and events remain ignored.

@@ -326,12 +326,12 @@ mean.
     pane-scoped delivery, and temporary recognition that carries current
     authenticated shell payloads as private events rather than titles. See the
     [slice plan](../plans/impl/2026-07-21-1810-title-cwd-bell-events.md).
-  - [ ] **Slice 2: Native shell-event protocol and legacy retirement.** Select a
-    non-title protocol for command text/boundaries and remote-session metadata,
-    migrate the zsh/bash/fish and SSH integration emitters, preserve typed bounded
-    authentication and existing model behavior, then delete `__DANTERM_EVT__` OSC 0
-    recognition, translation, and its follow-up visible-title workaround. Milestone
-    7 cannot close while both encodings remain supported.
+  - [x] **Slice 2: Native shell-event protocol and title-shim retirement.** The
+    authenticated OSC 1337 protocol now carries typed command and remote-session
+    metadata. Bundled zsh, Bash, and fish integrations preserve prompt hooks and
+    SSH/mosh behavior, while direct and real-PTY gates prove pane ownership and
+    the old title-channel path is gone. See the
+    [slice plan](../plans/impl/2026-07-21-1959-native-shell-events.md).
   - [ ] zsh, bash, fish, ssh, fzf, more, and less complete the minimum workflows in
     [Testing and conformance](12-testing-conformance.md).
   - [ ] [Protocols and shell integration](10-protocols-shell-integration.md) proves

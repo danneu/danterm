@@ -1,5 +1,15 @@
 # Sourceable DanTerm integration for Bash command, cwd, SSH, and mosh metadata.
 
+if [[ -n ${DANTERM_RESTORE_SCROLLBACK_FILE:-} ]]; then
+    _danterm_scrollback_file=$DANTERM_RESTORE_SCROLLBACK_FILE
+    unset DANTERM_RESTORE_SCROLLBACK_FILE
+    if [[ -r $_danterm_scrollback_file ]]; then
+        /bin/cat -- "$_danterm_scrollback_file" 2>/dev/null || true
+        /bin/rm -f -- "$_danterm_scrollback_file" >/dev/null 2>&1 || true
+    fi
+    unset _danterm_scrollback_file
+fi
+
 [[ -z ${_DANTERM_SHELL_INTEGRATION_LOADED:-} ]] || return 0
 readonly _DANTERM_SHELL_INTEGRATION_LOADED=1
 

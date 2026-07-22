@@ -1,5 +1,14 @@
 # Sourceable DanTerm integration for fish command, cwd, SSH, and mosh metadata.
 
+if set -q DANTERM_RESTORE_SCROLLBACK_FILE
+    set -l _danterm_scrollback_file "$DANTERM_RESTORE_SCROLLBACK_FILE"
+    set -e DANTERM_RESTORE_SCROLLBACK_FILE
+    if test -r "$_danterm_scrollback_file"
+        /bin/cat -- "$_danterm_scrollback_file" 2>/dev/null; or true
+        /bin/rm -f -- "$_danterm_scrollback_file" >/dev/null 2>&1; or true
+    end
+end
+
 set -q _DANTERM_SHELL_INTEGRATION_LOADED; and return 0
 set -g _DANTERM_SHELL_INTEGRATION_LOADED 1
 

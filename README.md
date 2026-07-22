@@ -420,123 +420,21 @@ DanTerm can export its state or load from a state file.
 This state includes the tab groups, tabs, pane layout, cwd of each pane, and
 (once you opt in) the command running in each pane.
 
-Add the snippet for your shell to opt in. It's zero-cost when not running inside DanTerm.
+Source the bundled integration for your shell to opt in. Use the matching line
+in `~/.zshrc`, `~/.bashrc`, or `~/.config/fish/config.fish`:
 
-<details>
-<summary>Zsh (~/.zshrc)</summary>
-
-```zsh
-# Restore scrollback and agent-session recovery hints from previous DanTerm session
-if [[ -n "$DANTERM_RESTORE_SCROLLBACK_FILE" ]]; then
-  _danterm_sbf="$DANTERM_RESTORE_SCROLLBACK_FILE"
-  unset DANTERM_RESTORE_SCROLLBACK_FILE
-  if [[ -r "$_danterm_sbf" ]]; then
-    /bin/cat -- "$_danterm_sbf" 2>/dev/null || true
-    /bin/rm -f -- "$_danterm_sbf" >/dev/null 2>&1 || true
-  fi
-  unset _danterm_sbf
-fi
-
-# Report current command to DanTerm.app
-if [[ -n "$DANTERM_TOKEN" ]]; then
-  typeset -g _danterm_tok="$DANTERM_TOKEN"
-  unset DANTERM_TOKEN
-  _danterm_b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
-  _danterm_preexec() {
-    printf '\e]0;__DANTERM_EVT__:%s:CMD_START:%s\a' "$_danterm_tok" "$(_danterm_b64 "$1")"
-    printf '\e]0;%s\a' "$1"
-  }
-  _danterm_precmd() {
-    printf '\e]0;__DANTERM_EVT__:%s:CMD_END\a' "$_danterm_tok"
-    printf '\e]0;%s\a' "${(%):-%(4~|…/%3~|%~)}"
-  }
-  preexec_functions+=(_danterm_preexec)
-  precmd_functions+=(_danterm_precmd)
-  # Remote session detection: wraps ssh/mosh to emit REMOTE_START event
-  ssh() {
-    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' "$_danterm_tok"
-    LC_DANTERM_TOKEN="$_danterm_tok" command ssh -o "SendEnv LC_DANTERM_TOKEN" "$@"
-  }
-  mosh() {
-    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' "$_danterm_tok"
-    command mosh "$@"
-  }
-elif [[ -n "$LC_DANTERM_TOKEN" ]]; then
-  typeset -g _danterm_tok="$LC_DANTERM_TOKEN"
-  unset LC_DANTERM_TOKEN
-  _danterm_b64() { printf '%s' "$1" | base64 | tr -d '\n'; }
-  _danterm_remote_host() {
-    local ub="$(_danterm_b64 "$(whoami)")"
-    local hb="$(_danterm_b64 "$(hostname)")"
-    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_HOST:%s:%s\a' \
-      "$_danterm_tok" "$ub" "$hb"
-  }
-  precmd_functions+=(_danterm_remote_host)
-  ssh() {
-    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' "$_danterm_tok"
-    LC_DANTERM_TOKEN="$_danterm_tok" command ssh -o "SendEnv LC_DANTERM_TOKEN" "$@"
-  }
-fi
+```sh
+source /Applications/DanTerm.app/Contents/Resources/shell-integration/danterm.zsh
+source /Applications/DanTerm.app/Contents/Resources/shell-integration/danterm.bash
+source /Applications/DanTerm.app/Contents/Resources/shell-integration/danterm.fish
 ```
 
-</details>
+Choose only the line for the shell loading that configuration file. The assets
+are inert outside DanTerm and safe to source repeatedly. They preserve existing
+prompt hooks, report command boundaries and local cwd without changing terminal
+titles, and wrap SSH/mosh to preserve pane-scoped remote-session reporting.
 
-<details>
-<summary>Fish (~/.config/fish/config.fish)</summary>
-
-```fish
-# Restore scrollback and agent-session recovery hints from previous DanTerm session
-if set -q DANTERM_RESTORE_SCROLLBACK_FILE
-  set -l f $DANTERM_RESTORE_SCROLLBACK_FILE
-  set -e DANTERM_RESTORE_SCROLLBACK_FILE
-  if test -r "$f"
-    /bin/cat -- "$f" 2>/dev/null; or true
-    /bin/rm -f -- "$f" >/dev/null 2>&1; or true
-  end
-end
-
-# Report current command to DanTerm.app
-if set -q DANTERM_TOKEN
-  set -g _danterm_tok $DANTERM_TOKEN
-  set -e DANTERM_TOKEN
-  function __danterm_preexec --on-event fish_preexec
-    set -l b64 (printf '%s' $argv[1] | base64 | string replace -a '\n' '')
-    printf '\e]0;__DANTERM_EVT__:%s:CMD_START:%s\a' $_danterm_tok $b64
-    printf '\e]0;%s\a' $argv[1]
-  end
-  function __danterm_postcmd --on-event fish_prompt
-    printf '\e]0;__DANTERM_EVT__:%s:CMD_END\a' $_danterm_tok
-    printf '\e]0;%s\a' (prompt_pwd)
-  end
-  # Remote session detection: wraps ssh/mosh to emit REMOTE_START event
-  function ssh --wraps ssh
-    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' $_danterm_tok
-    set -lx LC_DANTERM_TOKEN $_danterm_tok
-    command ssh -o "SendEnv LC_DANTERM_TOKEN" $argv
-  end
-  function mosh --wraps mosh
-    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' $_danterm_tok
-    command mosh $argv
-  end
-else if set -q LC_DANTERM_TOKEN
-  set -g _danterm_tok $LC_DANTERM_TOKEN
-  set -e LC_DANTERM_TOKEN
-  function _danterm_remote_host --on-event fish_prompt
-    set -l ub (printf '%s' (whoami) | base64 | tr -d '\n')
-    set -l hb (printf '%s' (hostname) | base64 | tr -d '\n')
-    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_HOST:%s:%s\a' $_danterm_tok $ub $hb
-  end
-  function ssh --wraps ssh
-    printf '\e]0;__DANTERM_EVT__:%s:REMOTE_START\a' $_danterm_tok
-    set -lx LC_DANTERM_TOKEN $_danterm_tok
-    command ssh -o "SendEnv LC_DANTERM_TOKEN" $argv
-  end
-end
-```
-
-</details>
-
-For `user@host` labels, install the same snippet on the remote shell and ensure
+For `user@host` labels, source the same bundled asset on the remote shell and ensure
 the remote sshd accepts `LC_*` environment variables. In `sshd_config`, use:
 
 ```sshconfig
@@ -555,10 +453,10 @@ only requires `LC_*`, because it forwards the per-pane token as
 snippet, DanTerm still shows the compact remote accessory from the local
 `REMOTE_START` event, but the host label stays empty.
 
-When changing the shell snippets in `~/world/scripts`, run:
+When changing the shell integrations, run:
 
 ```sh
-bash ~/world/scripts/tests/danterm-integration_test.sh
+bash scripts/tests/shell-integration_test.sh
 ```
 
 ## Keybinds

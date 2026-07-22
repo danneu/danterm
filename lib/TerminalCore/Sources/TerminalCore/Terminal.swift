@@ -1,5 +1,4 @@
 // Pure headless terminal reduction: byte ingestion, grid mutation, controls, and inspection.
-import Foundation
 
 /// Addresses a projection boundary in the current scrollback-plus-viewport stream.
 public struct TerminalTextPosition: Equatable, Sendable {
@@ -622,7 +621,7 @@ public struct Terminal: Equatable, Sendable {
         guard fields.count >= 3,
               fields[0].elementsEqual("DanTermShell=1".utf8),
               fields[1].elementsEqual(expectedToken.utf8),
-              let eventName = String(bytes: fields[2], encoding: .utf8)
+              let eventName = String(validating: fields[2], as: UTF8.self)
         else { return }
 
         switch eventName {
@@ -652,10 +651,8 @@ public struct Terminal: Equatable, Sendable {
 
     private func decodedCanonicalBase64(_ bytes: ArraySlice<UInt8>) -> String? {
         guard bytes.isEmpty == false,
-              let encoded = String(bytes: bytes, encoding: .ascii),
-              let data = Data(base64Encoded: encoded),
-              data.base64EncodedString() == encoded,
-              let value = String(data: data, encoding: .utf8),
+              let decoded = decodeBase64(bytes, maximumByteCount: Self.maximumSemanticValueBytes),
+              let value = String(validating: decoded, as: UTF8.self),
               value.isEmpty == false
         else { return nil }
         return value

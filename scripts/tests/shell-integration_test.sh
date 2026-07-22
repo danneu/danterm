@@ -35,6 +35,24 @@ for asset in danterm.zsh danterm.bash danterm.fish vendor/bash-preexec.sh vendor
     test -f "$integration_dir/$asset" || fail "missing $asset"
 done
 
+for shell in zsh bash fish; do
+    restore_file="$(mktemp)"
+    printf 'restored scrollback' > "$restore_file"
+    case "$shell" in
+        zsh)
+            restore_output="$(DANTERM_RESTORE_SCROLLBACK_FILE="$restore_file" /usr/bin/env zsh -f -c 'source "$1/danterm.zsh"' _ "$integration_dir")"
+            ;;
+        bash)
+            restore_output="$(DANTERM_RESTORE_SCROLLBACK_FILE="$restore_file" /bin/bash --noprofile --norc -c 'source "$1/danterm.bash"' _ "$integration_dir")"
+            ;;
+        fish)
+            restore_output="$(env DANTERM_RESTORE_SCROLLBACK_FILE="$restore_file" /usr/bin/env fish --no-config -c 'source $argv[1]/danterm.fish' "$integration_dir")"
+            ;;
+    esac
+    test "$restore_output" = 'restored scrollback' || fail "$shell did not restore scrollback"
+    test ! -e "$restore_file" || fail "$shell did not consume the scrollback file"
+done
+
 zsh_output="$(DANTERM_TOKEN="$token" /usr/bin/env zsh -f -c '
     source "$1/danterm.zsh"
     source "$1/danterm.zsh"
