@@ -964,7 +964,7 @@ public actor TerminalPTYHost {
     }
 
     private func applyOutput(_ bytes: [UInt8]) {
-        let previousTerminal = terminal
+        let previousConsumerWorkGeneration = terminal.pendingConsumerWorkGeneration
         terminal.feed(bytes)
         let replies = terminal.drainReplyBytes()
         if replies.isEmpty == false {
@@ -975,7 +975,7 @@ public actor TerminalPTYHost {
         }
         if terminal.hasPendingConsumerWork,
            consumerWorkWasSignaled == false
-            || terminal.hasSamePendingConsumerWork(as: previousTerminal) == false
+            || terminal.pendingConsumerWorkGeneration != previousConsumerWorkGeneration
         {
             markUpdatePending()
         }

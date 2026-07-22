@@ -34,7 +34,7 @@ class TerminalView: NSView, NSTextInputClient, TerminalSession {
         get { callbackGate.onEvent }
         set { callbackGate.onEvent = newValue }
     }
-    var onPrimaryHistoryMutation: ((String) -> Void)?
+    var onPrimaryHistoryMutation: (() -> Void)?
     weak var stateObserver: (any TerminalSessionStateObserver)? {
         get { callbackGate.stateObserver }
         set { callbackGate.stateObserver = newValue }

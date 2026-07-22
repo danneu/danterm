@@ -1304,15 +1304,7 @@ class AppRuntime {
             self?.send(terminalMessage(for: event, paneId: paneId))
         }
         let initialRecoveryCandidate = session.readPrimaryHistoryText() ?? ""
-        var lastRecoveryCandidate = initialRecoveryCandidate
-        session.onPrimaryHistoryMutation = { [weak self] primaryHistoryText in
-            guard enrichedRecoveryProjectionChanged(
-                from: lastRecoveryCandidate,
-                to: primaryHistoryText
-            ) else { return }
-            lastRecoveryCandidate = primaryHistoryText
-            self?.notePrimaryHistoryMutation()
-        }
+        session.onPrimaryHistoryMutation = { [weak self] in self?.notePrimaryHistoryMutation() }
         if truncateScrollback(initialRecoveryCandidate) != nil {
             notePrimaryHistoryMutation()
         }

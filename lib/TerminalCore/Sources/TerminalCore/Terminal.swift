@@ -32,6 +32,13 @@ public struct TerminalTextRange: Equatable, Sendable {
 
 /// Reduces terminal bytes into deterministic value-semantic screen state without IO.
 public struct Terminal: Equatable, Sendable {
+    /// Carries owner-observed generations without making observation history part of value equality.
+    private struct ObservationGeneration: Equatable, Sendable {
+        var value: UInt64 = 0
+
+        static func == (_ lhs: Self, _ rhs: Self) -> Bool { true }
+    }
+
     /// Keeps scalar storage and wide-cell roles together for invariant-preserving mutation.
     private struct GridCell: Equatable, Sendable {
         var kind: TerminalCellKind = .padding
@@ -343,6 +350,8 @@ public struct Terminal: Equatable, Sendable {
     private var pendingProgressEvent: PendingTerminalSemanticEvent?
     private var pendingDiscreteEvents: [PendingTerminalSemanticEvent] = []
     private var nextSemanticEventOrder: UInt64 = 0
+    private var pendingConsumerWorkObservation = ObservationGeneration()
+    private var primaryHistoryObservation = ObservationGeneration()
 
     static let productionScrollbackBudgetBytes = 10_485_760
     static let kittyKeyboardStackDepth = 8
@@ -419,14 +428,14 @@ public struct Terminal: Equatable, Sendable {
         damage.hasDamage || pendingClipboardWrite != nil || hasPendingSemanticEvents
     }
 
-    /// Compares only the accumulators whose changes require a frame consumer wakeup.
-    public func hasSamePendingConsumerWork(as other: Terminal) -> Bool {
-        damage == other.damage
-            && pendingClipboardWrite == other.pendingClipboardWrite
-            && pendingTitleEvent == other.pendingTitleEvent
-            && pendingWorkingDirectoryEvent == other.pendingWorkingDirectoryEvent
-            && pendingProgressEvent == other.pendingProgressEvent
-            && pendingDiscreteEvents == other.pendingDiscreteEvents
+    /// Lets the serialized host detect accumulator changes without copying terminal storage.
+    public var pendingConsumerWorkGeneration: UInt64 {
+        pendingConsumerWorkObservation.value
+    }
+
+    /// Lets recovery consumers classify primary-text frames before materializing their projection.
+    public var primaryHistoryGeneration: UInt64 {
+        primaryHistoryObservation.value
     }
 
     /// Transfers all ordered terminal replies to one consumer without a parallel output path.
@@ -487,33 +496,45 @@ public struct Terminal: Equatable, Sendable {
     private mutating func recordDamage(since before: DamageActionSnapshot) {
         let after = damageActionSnapshot
         if before.isFollowing == false {
-            damage.recordFull()
+            recordFullDamage()
             return
         }
         guard before.topRow == after.topRow,
               before.isAlternateScreenActive == after.isAlternateScreenActive
         else {
-            damage.recordFull()
+            recordFullDamage()
             return
         }
         if after.isFollowing == false {
-            damage.recordFull()
+            recordFullDamage()
             return
         }
         if before.cursor != after.cursor
             || before.cursorPresentation != after.cursorPresentation
         {
-            if let row = before.cursor?.row { damage.record(row: row) }
-            if let row = after.cursor?.row { damage.record(row: row) }
+            if let row = before.cursor?.row { recordDamage(row: row) }
+            if let row = after.cursor?.row { recordDamage(row: row) }
         }
         if before.selection != after.selection {
-            damage.record(rows: damagedViewportRows(for: before.selection))
-            damage.record(rows: damagedViewportRows(for: after.selection))
+            recordDamage(rows: damagedViewportRows(for: before.selection))
+            recordDamage(rows: damagedViewportRows(for: after.selection))
         }
         if before.hoveredLink != after.hoveredLink {
-            damage.record(rows: damagedViewportRows(for: before.hoveredLink?.range))
-            damage.record(rows: damagedViewportRows(for: after.hoveredLink?.range))
+            recordDamage(rows: damagedViewportRows(for: before.hoveredLink?.range))
+            recordDamage(rows: damagedViewportRows(for: after.hoveredLink?.range))
         }
+    }
+
+    private mutating func recordFullDamage() {
+        if damage.recordFull() { pendingConsumerWorkObservation.value &+= 1 }
+    }
+
+    private mutating func recordDamage(row: Int) {
+        if damage.record(row: row) { pendingConsumerWorkObservation.value &+= 1 }
+    }
+
+    private mutating func recordDamage(rows: some Sequence<Int>) {
+        if damage.record(rows: rows) { pendingConsumerWorkObservation.value &+= 1 }
     }
 
     private func damagedViewportRows(for range: TerminalTextRange?) -> Range<Int> {
@@ -720,10 +741,12 @@ public struct Terminal: Equatable, Sendable {
               let value = strictlyDecodedUTF8(valueBytes)
         else { return }
         titleUsesWorkingDirectory = value.isEmpty
+        let previous = pendingTitleEvent
         pendingTitleEvent = admittedCoalescedSemanticEvent(
             .title(value.isEmpty ? currentWorkingDirectory ?? "" : value),
             replacing: pendingTitleEvent
         )
+        if pendingTitleEvent != previous { pendingConsumerWorkObservation.value &+= 1 }
     }
 
     private mutating func dispatchDanTermShell(_ payload: [UInt8], selectorEnd: Int) {
@@ -824,10 +847,12 @@ public struct Terminal: Equatable, Sendable {
             event = .pause(percent: percent)
         default: return
         }
+        let previous = pendingProgressEvent
         pendingProgressEvent = admittedCoalescedSemanticEvent(
             .progress(event),
             replacing: pendingProgressEvent
         )
+        if pendingProgressEvent != previous { pendingConsumerWorkObservation.value &+= 1 }
     }
 
     private func progressPercent(_ bytes: ArraySlice<UInt8>) -> UInt8? {
@@ -857,15 +882,21 @@ public struct Terminal: Equatable, Sendable {
             cwd = parsed
         }
         currentWorkingDirectory = cwd
+        let previousWorkingDirectory = pendingWorkingDirectoryEvent
         pendingWorkingDirectoryEvent = admittedCoalescedSemanticEvent(
             .workingDirectory(cwd),
             replacing: pendingWorkingDirectoryEvent
         )
+        if pendingWorkingDirectoryEvent != previousWorkingDirectory {
+            pendingConsumerWorkObservation.value &+= 1
+        }
         if titleUsesWorkingDirectory {
+            let previousTitle = pendingTitleEvent
             pendingTitleEvent = admittedCoalescedSemanticEvent(
                 .title(cwd ?? ""),
                 replacing: pendingTitleEvent
             )
+            if pendingTitleEvent != previousTitle { pendingConsumerWorkObservation.value &+= 1 }
         }
     }
 
@@ -875,6 +906,7 @@ public struct Terminal: Equatable, Sendable {
         guard canAdmitSemanticBytes(candidate.byteCost) else { return }
         nextSemanticEventOrder &+= 1
         pendingDiscreteEvents.append(candidate)
+        pendingConsumerWorkObservation.value &+= 1
     }
 
     private mutating func admittedCoalescedSemanticEvent(
@@ -1050,7 +1082,10 @@ public struct Terminal: Equatable, Sendable {
         else { return }
         let value = String(decoding: decoded, as: UTF8.self)
         guard Array(value.utf8) == decoded else { return }
-        pendingClipboardWrite = value
+        if pendingClipboardWrite != value {
+            pendingClipboardWrite = value
+            pendingConsumerWorkObservation.value &+= 1
+        }
     }
 
     private func parseOSCSelector(_ bytes: ArraySlice<UInt8>) -> Int? {
@@ -1140,6 +1175,8 @@ public struct Terminal: Equatable, Sendable {
         guard columns >= 2, rows >= 1 else { return }
         guard columns != columnCount || rows != rowCount else { return }
 
+        // Resize can evict or rewrite retained primary text, including behind the alternate screen.
+        primaryHistoryObservation.value &+= 1
         damage.reset(rowCount: rows, isFull: true)
 
         if inactivePrimaryScreen != nil {
@@ -1301,7 +1338,7 @@ public struct Terminal: Equatable, Sendable {
             )
         }
         if viewportState != previous {
-            damage.recordFull()
+            recordFullDamage()
         }
     }
 
@@ -1310,7 +1347,7 @@ public struct Terminal: Equatable, Sendable {
         guard inactivePrimaryScreen == nil else { return }
         guard viewportState != .following else { return }
         viewportState = .following
-        damage.recordFull()
+        recordFullDamage()
     }
 
     /// Returns retained primary rows in oldest-first order.
@@ -1963,7 +2000,7 @@ public struct Terminal: Equatable, Sendable {
         search = SearchState(query: query, range: match)
         revealSearchMatchIfNeeded()
         if viewportState != previousViewport {
-            damage.recordFull()
+            recordFullDamage()
         }
         return true
     }
@@ -1980,7 +2017,7 @@ public struct Terminal: Equatable, Sendable {
         self.search?.range = matches[current - 1]
         revealSearchMatchIfNeeded()
         if viewportState != previousViewport {
-            damage.recordFull()
+            recordFullDamage()
         }
         return true
     }
@@ -1997,7 +2034,7 @@ public struct Terminal: Equatable, Sendable {
         self.search?.range = matches[current + 1]
         revealSearchMatchIfNeeded()
         if viewportState != previousViewport {
-            damage.recordFull()
+            recordFullDamage()
         }
         return true
     }
@@ -2416,9 +2453,9 @@ public struct Terminal: Equatable, Sendable {
     private mutating func invalidateInspection(inViewportRows range: Range<Int>) {
         guard range.isEmpty == false else { return }
         if viewportState == .following {
-            damage.record(rows: range)
+            recordDamage(rows: range)
         } else {
-            damage.recordFull()
+            recordFullDamage()
         }
         guard selection != nil || search != nil || hoveredLinkState != nil || armedLinkState != nil
         else { return }
@@ -2429,7 +2466,7 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func invalidateInspection(inScrollbackRow row: Int) {
         if viewportState != .following {
-            damage.recordFull()
+            recordFullDamage()
         }
         guard selection != nil || search != nil || hoveredLinkState != nil || armedLinkState != nil
         else { return }
@@ -2601,6 +2638,7 @@ public struct Terminal: Equatable, Sendable {
         var lower = max(0, columns.lowerBound)
         var upper = min(columnCount, columns.upperBound)
         guard lower < upper else { return }
+        if inactivePrimaryScreen == nil { primaryHistoryObservation.value &+= 1 }
 
         if self.rows[row].cells[lower].kind == .wideTail {
             lower -= 1
@@ -3816,6 +3854,7 @@ public struct Terminal: Equatable, Sendable {
             scrollbackRows.removeAll(keepingCapacity: true)
             scrollbackByteCount = 0
             isHistoryHeadTruncated = false
+            if evictedCount > 0 { primaryHistoryObservation.value &+= 1 }
             handleEviction(of: evictedCount)
             clearPendingMotionState()
         default:
@@ -3903,6 +3942,7 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func dispatchEscape(_ sequence: EscapeSequence) {
         guard sequence.intermediates == [0x23], sequence.final == 0x38 else { return }
+        if inactivePrimaryScreen == nil { primaryHistoryObservation.value &+= 1 }
         invalidateInspection(inViewportRows: rows.indices)
         for row in rows.indices {
             rows[row] = GridRow(cells: (0..<columnCount).map { _ in
@@ -3999,7 +4039,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func switchAlternateScreen(enabled: Bool) {
-        damage.recordFull()
+        recordFullDamage()
         if enabled {
             clearInspection()
             if inactivePrimaryScreen == nil {
@@ -4028,7 +4068,7 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func selectPrimaryScreen() {
         guard let primary = inactivePrimaryScreen else { return }
-        damage.recordFull()
+        recordFullDamage()
         clearInspection()
         rows = primary.rows
         semanticContent = primary.semanticContent
@@ -4078,7 +4118,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func softReset() {
-        damage.recordFull()
+        recordFullDamage()
         selectPrimaryScreen()
         resetControlState()
         hyperlinkPen = nil
@@ -4088,7 +4128,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func hardReset() {
-        damage.recordFull()
+        recordFullDamage()
         clearInspection()
         evictedRowCount = 0
         selectPrimaryScreen()
@@ -4183,12 +4223,15 @@ public struct Terminal: Equatable, Sendable {
     private mutating func print(_ scalar: Unicode.Scalar) {
         let classification = terminalUnicodeClassification(for: scalar)
         if appendToOpenClusterIfJoined(scalar, classification: classification) {
+            if inactivePrimaryScreen == nil { primaryHistoryObservation.value &+= 1 }
             rememberOpenCluster()
             return
         }
 
         let properties = classification.properties
         guard properties.cellWidth != .zero else { return }
+
+        if inactivePrimaryScreen == nil { primaryHistoryObservation.value &+= 1 }
 
         if isPendingWrap {
             invalidateInspection(inViewportRows: cursor.row..<(cursor.row + 1))
@@ -4496,7 +4539,7 @@ public struct Terminal: Equatable, Sendable {
     private mutating func advanceToNextRow(preservingWrapClaim: Bool = false) {
         let region = activeScrollRegion
         if cursor.row == region.upperBound - 1 {
-            damage.record(rows: region)
+            recordDamage(rows: region)
             moveAndFillRows(
                 in: region,
                 by: -1,
@@ -4606,6 +4649,7 @@ public struct Terminal: Equatable, Sendable {
         invalidatesInspection: Bool = true
     ) {
         guard range.isEmpty == false, delta != 0 else { return }
+        if inactivePrimaryScreen == nil { primaryHistoryObservation.value &+= 1 }
         if invalidatesInspection {
             invalidateInspection(inViewportRows: range)
         }
@@ -4648,6 +4692,7 @@ public struct Terminal: Equatable, Sendable {
         by delta: Int
     ) {
         guard range.isEmpty == false, delta != 0 else { return }
+        if inactivePrimaryScreen == nil { primaryHistoryObservation.value &+= 1 }
         invalidateInspection(inViewportRows: row..<(row + 1))
         let amount = min(abs(delta), range.count)
         let sourceCells = Array(rows[row].cells[range])

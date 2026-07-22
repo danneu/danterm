@@ -43,7 +43,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         get { callbackGate.onEvent }
         set { callbackGate.onEvent = newValue }
     }
-    var onPrimaryHistoryMutation: ((String) -> Void)? {
+    var onPrimaryHistoryMutation: (() -> Void)? {
         get { controller.onPrimaryHistoryMutation }
         set { controller.onPrimaryHistoryMutation = newValue }
     }

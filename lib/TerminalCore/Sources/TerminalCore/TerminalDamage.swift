@@ -50,23 +50,30 @@ struct TerminalDamageAccumulator: Equatable, Sendable {
         isFull || words.contains { $0 != 0 }
     }
 
-    mutating func recordFull() {
+    mutating func recordFull() -> Bool {
+        guard isFull == false else { return false }
         isFull = true
         clearWords()
+        return true
     }
 
-    mutating func record(row: Int) {
-        guard isFull == false, row >= 0 else { return }
+    mutating func record(row: Int) -> Bool {
+        guard isFull == false, row >= 0 else { return false }
         let word = row / 64
-        guard word < words.count else { return }
-        words[word] |= UInt64(1) << UInt64(row % 64)
+        guard word < words.count else { return false }
+        let mask = UInt64(1) << UInt64(row % 64)
+        guard words[word] & mask == 0 else { return false }
+        words[word] |= mask
+        return true
     }
 
-    mutating func record(rows: some Sequence<Int>) {
-        guard isFull == false else { return }
+    mutating func record(rows: some Sequence<Int>) -> Bool {
+        guard isFull == false else { return false }
+        var changed = false
         for row in rows {
-            record(row: row)
+            changed = record(row: row) || changed
         }
+        return changed
     }
 
     mutating func reset(rowCount: Int, isFull: Bool) {

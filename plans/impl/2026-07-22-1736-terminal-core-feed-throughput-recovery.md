@@ -205,7 +205,7 @@ corpus and share those results the same way.
 - [x] 3. Slice B (packed Unicode table + cached class): differential test
   first (PO1); same vet/sample/verify/record/share/commit loop (sample
   check: `contains`/`graphemeBreakClass`).
-- [ ] 4. Slice C (generation counters): same loop; additionally verify
+- [x] 4. Slice C (generation counters): same loop; additionally verify
   `scrollback-stream` to confirm the O(history) fix; both differential
   signaling tests before removing either old oracle (PO4a, PO4b).
 - [ ] 5. Slice D (inline cluster storage): same loop (sample check:

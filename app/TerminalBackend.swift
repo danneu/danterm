@@ -70,7 +70,7 @@ protocol TerminalSession: AnyObject {
     var state: TerminalSessionState { get }
     var stateObserver: (any TerminalSessionStateObserver)? { get set }
     var onEvent: ((TerminalSessionEvent) -> Void)? { get set }
-    var onPrimaryHistoryMutation: ((String) -> Void)? { get set }
+    var onPrimaryHistoryMutation: (() -> Void)? { get set }
     var hasSelection: Bool { get }
     #if DANTERM_TERMINAL_BENCHMARK
     /// Exposes only the achieved grid and cell metrics needed for benchmark convergence.

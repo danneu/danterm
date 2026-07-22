@@ -1,7 +1,7 @@
 // Real-PTY session tests for planning, visibility, capture, exit, and teardown.
 import Foundation
 import PaneLifecycle
-import TerminalCore
+@testable import TerminalCore
 import TerminalCoreRecording
 import TerminalRenderPlanning
 import Testing
@@ -12,6 +12,49 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct TerminalPaneSessionControllerTests {
+    @Test("primary-history generation covers every session string mutation")
+    func primaryHistoryGenerationDifferential() throws {
+        // Intent: every recovery projection change advances the primary-history generation.
+        // Why it exists: recovery callbacks must stay complete while generation over-approximation
+        //   remains free to trade a redundant write for simpler mutation tracking.
+        // Scenario: unchanged frames, primary edits, coalesced edits, alternate-screen output, and
+        //   a truncating resize are observed through both the old and new frame classifiers.
+        var terminal = try #require(Terminal(columns: 8, rows: 3))
+        var lastText = terminal.primaryHistoryText
+        var lastGeneration = terminal.primaryHistoryGeneration
+
+        func verifyMutation(_ mutate: (inout Terminal) -> Void, terminal: inout Terminal) {
+            mutate(&terminal)
+            let text = terminal.primaryHistoryText
+            // Over-approximation is safe (a redundant recovery write); a missed emission is not.
+            if text != lastText {
+                #expect(terminal.primaryHistoryGeneration != lastGeneration)
+            }
+            lastText = text
+            lastGeneration = terminal.primaryHistoryGeneration
+        }
+
+        func verifyFrame(_ bytes: [UInt8], terminal: inout Terminal) {
+            verifyMutation({ $0.feed(bytes) }, terminal: &terminal)
+        }
+
+        verifyFrame(Array("\u{1B}[?25l".utf8), terminal: &terminal)
+        verifyFrame(Array("A".utf8), terminal: &terminal)
+        verifyFrame(Array("BC\rZ".utf8), terminal: &terminal)
+        verifyFrame(Array("\u{1B}[2K".utf8), terminal: &terminal)
+        verifyFrame(Array("1\r\n2\r\n3\r\n4".utf8), terminal: &terminal)
+        verifyFrame(Array("\u{1B}[3J".utf8), terminal: &terminal)
+        verifyFrame(Array("\u{1B}[?1049hALT\u{1B}[?1049l".utf8), terminal: &terminal)
+        verifyFrame(Array("\u{1B}[31m".utf8), terminal: &terminal)
+        verifyFrame(Array("D".utf8), terminal: &terminal)
+
+        terminal = try #require(Terminal(columns: 4, rows: 1, scrollbackBudgetBytes: 352))
+        terminal.feed(Array("ABCDEFGHI".utf8))
+        lastText = terminal.primaryHistoryText
+        lastGeneration = terminal.primaryHistoryGeneration
+        verifyMutation({ $0.resize(columns: 2, rows: 1) }, terminal: &terminal)
+    }
+
     @Test("zsh, bash, and fish integrations deliver typed events through a real PTY")
     func shellIntegrationsDeliverTypedEvents() async throws {
         let integrationDirectory = shellIntegrationDirectory()
@@ -178,10 +221,10 @@ struct TerminalPaneSessionControllerTests {
         await secondHost.close()
     }
 
-    @Test("recovery candidate callback excludes alternate content", .timeLimit(.minutes(1)))
+    @Test("recovery mutation signal follows primary content after alternate screen", .timeLimit(.minutes(1)))
     func recoveryMutationClassification() async throws {
-        // Intent: publish primary candidates without ever substituting transient alternate content.
-        // Why it exists: the app classifies these candidates against its persisted projection.
+        // Intent: signal primary mutations without treating transient alternate content as history.
+        // Why it exists: recovery reads primary history only after this payload-free signal fires.
         // Scenario: a child changes cursor/presentation, visits alternate, then prints primary text.
         let host = try makeHost()
         let command = "stty -echo; printf '__READY__'; read ignored; "
@@ -196,20 +239,23 @@ struct TerminalPaneSessionControllerTests {
         let baselineAltMentions = controller.readPrimaryHistoryText()
             .components(separatedBy: "ALT")
             .count
-        var candidates: [String] = []
-        controller.onPrimaryHistoryMutation = { candidates.append($0) }
+        var mutationCount = 0
+        controller.onPrimaryHistoryMutation = { mutationCount += 1 }
 
         controller.sendText("continue\n")
         #expect(await host.waitForOutput(containing: Array("ALT".utf8)))
         controller.synchronizeState()
-        #expect(candidates.allSatisfy {
-            $0.components(separatedBy: "ALT").count == baselineAltMentions
-        })
+        let countAfterAlternate = mutationCount
+        #expect(
+            controller.readPrimaryHistoryText().components(separatedBy: "ALT").count
+                == baselineAltMentions
+        )
 
         controller.sendText("continue\n")
         #expect(await host.waitForOutput(containing: Array("__PRIMARY__".utf8)))
         controller.synchronizeState()
-        #expect(candidates.last?.contains("__PRIMARY__") == true)
+        #expect(mutationCount > countAfterAlternate)
+        #expect(controller.readPrimaryHistoryText().contains("__PRIMARY__"))
 
         controller.tearDown()
         await host.close()

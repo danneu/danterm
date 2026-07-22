@@ -200,6 +200,32 @@ struct TerminalScrollbackBudgetTests {
         expectValidGrid(truncated)
     }
 
+    @Test("truncating resize advances primary history generation on either screen")
+    func truncatingResizeAdvancesPrimaryHistoryGeneration() throws {
+        // Intent: signal recovery whenever resize eviction changes retained primary history.
+        // Why it exists: generation-based recovery observation can otherwise miss a truncated
+        //   history head and keep stale text after resize.
+        // Scenario: a budget-filled shell narrows either directly or behind a full-screen app.
+        for entersAlternateScreen in [false, true] {
+            var terminal = try #require(Terminal(
+                columns: 4,
+                rows: 1,
+                scrollbackBudgetBytes: 352
+            ))
+            terminal.feed(Array("ABCDEFGHI".utf8))
+            if entersAlternateScreen {
+                terminal.feed(Array("\u{1B}[?1047h".utf8))
+            }
+            let textBeforeResize = terminal.primaryHistoryText
+            let generationBeforeResize = terminal.primaryHistoryGeneration
+
+            terminal.resize(columns: 2, rows: 1)
+
+            #expect(terminal.primaryHistoryText != textBeforeResize)
+            #expect(terminal.primaryHistoryGeneration != generationBeforeResize)
+        }
+    }
+
     @Test("alternate scrolling is inert while alternate resize matches primary eviction")
     func alternateScreenInterplay() throws {
         // Intent: keep alternate output outside history while resizing shared primary history.
