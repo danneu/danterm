@@ -10,6 +10,7 @@ let package = Package(
         .library(name: "TerminalPaneSession", targets: ["TerminalPaneSession"]),
         .executable(name: "PTYSessionBootstrap", targets: ["PTYSessionBootstrap"]),
         .executable(name: "TerminalWorkflowRunner", targets: ["TerminalWorkflowRunner"]),
+        .executable(name: "TerminalProtocolProbeRunner", targets: ["TerminalProtocolProbeRunner"]),
     ],
     dependencies: [
         .package(path: "../TerminalCore"),
@@ -56,6 +57,17 @@ let package = Package(
             path: "TestSupport/TerminalWorkflowSupport",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
+        .testTarget(
+            name: "TerminalProtocolProbeSupportTests",
+            dependencies: ["TerminalProtocolProbeSupport"],
+            path: "Tests/TerminalProtocolProbeSupportTests",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .target(
+            name: "TerminalProtocolProbeSupport",
+            path: "TestSupport/TerminalProtocolProbeSupport",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         .executableTarget(
             name: "PTYProbe",
             path: "Sources/PTYProbe"
@@ -68,6 +80,16 @@ let package = Package(
                 .product(name: "TerminalCoreRecording", package: "TerminalCore"),
             ],
             path: "TestSupport/TerminalWorkflowRunner",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .executableTarget(
+            name: "TerminalProtocolProbeRunner",
+            dependencies: [
+                "TerminalPaneSession",
+                "TerminalProtocolProbeSupport",
+                .product(name: "TerminalCoreRecording", package: "TerminalCore"),
+            ],
+            path: "TestSupport/TerminalProtocolProbeRunner",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(

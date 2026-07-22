@@ -1,0 +1,13 @@
+diff --git a/esctest/escutil.py b/esctest/escutil.py
+index 27f8436..73e9b29 100644
+--- a/esctest/escutil.py
++++ b/esctest/escutil.py
+@@ -190,5 +190,3 @@ def GetScreenSize():
+-  The size is reported for the terminal's character-cell window,
+-  which is smaller than the shell-window."""
+-  esccmd.XTERM_WINOPS(esccmd.WINOP_REPORT_TEXT_AREA_CHARS)
+-  params = escio.ReadCSI("t")
+-  return Size(params[2], params[1])
++  DanTerm's probe runner fixes the PTY to 80x24. Avoid asking for the xterm
++  window-size protocol, which DanTerm deliberately does not advertise."""
++  return Size(80, 24)

@@ -1,0 +1,16 @@
+# Pinned esctest2 cases selected for stateful behavior DanTerm advertises.
+# Cursor movement is observed through CPR after defaulting, clamping, or moving
+# each coordinate independently; feed-only fixtures cannot prove reply routing.
+CUPTests.test_CUP_DefaultParams
+CUPTests.test_CUP_RowOnly
+CUPTests.test_CUP_ColumnOnly
+CUPTests.test_CUP_ZeroIsTreatedAsOne
+CUPTests.test_CUP_OutOfBoundsParams
+# These modes are implemented and queryable. Each case observes state, toggles
+# it through the public protocol, and observes the changed DECRQM reply.
+DECRQMTests.test_DECRQM_ANSI_IRM
+DECRQMTests.test_DECRQM_ANSI_LNM
+DECRQMTests.test_DECRQM_DEC_DECCKM
+DECRQMTests.test_DECRQM_DEC_DECOM
+DECRQMTests.test_DECRQM_DEC_DECAWM
+DECRQMTests.test_DECRQM_DEC_DECTCEM
