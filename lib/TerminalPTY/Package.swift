@@ -9,6 +9,7 @@ let package = Package(
         .library(name: "TerminalPTYHost", targets: ["TerminalPTYHost"]),
         .library(name: "TerminalPaneSession", targets: ["TerminalPaneSession"]),
         .executable(name: "PTYSessionBootstrap", targets: ["PTYSessionBootstrap"]),
+        .executable(name: "TerminalWorkflowRunner", targets: ["TerminalWorkflowRunner"]),
     ],
     dependencies: [
         .package(path: "../TerminalCore"),
@@ -47,6 +48,15 @@ let package = Package(
         .executableTarget(
             name: "PTYProbe",
             path: "Sources/PTYProbe"
+        ),
+        .executableTarget(
+            name: "TerminalWorkflowRunner",
+            dependencies: [
+                "TerminalPaneSession",
+                .product(name: "TerminalCoreRecording", package: "TerminalCore"),
+            ],
+            path: "Sources/TerminalWorkflowRunner",
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "PaneLifecycleTests",
