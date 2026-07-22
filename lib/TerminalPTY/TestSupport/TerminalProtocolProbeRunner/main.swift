@@ -55,7 +55,6 @@ private enum TerminalProtocolProbeRunner {
             paneEnvironment: [],
             command: nil,
             launchCommand: command,
-            restoreCommandBehavior: .execute,
             initialDimensions: dimensions
         )
         let controller = try TerminalPaneSessionController(

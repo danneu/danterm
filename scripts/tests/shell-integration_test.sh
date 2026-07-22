@@ -38,19 +38,59 @@ done
 for shell in zsh bash fish; do
     restore_file="$(mktemp)"
     printf 'restored scrollback' > "$restore_file"
+    restore_command='printf first
+printf second'
     case "$shell" in
         zsh)
-            restore_output="$(DANTERM_RESTORE_SCROLLBACK_FILE="$restore_file" /usr/bin/env zsh -f -c 'source "$1/danterm.zsh"' _ "$integration_dir")"
+            restore_output="$(DANTERM_RESTORE_SCROLLBACK_FILE="$restore_file" DANTERM_RESTORE_COMMAND="$restore_command" /usr/bin/env zsh -f -c 'source "$1/danterm.zsh"; [[ -z ${DANTERM_RESTORE_COMMAND+x} ]] || exit 34; printf "|%s" "$_danterm_restore_command"' _ "$integration_dir")"
             ;;
         bash)
-            restore_output="$(DANTERM_RESTORE_SCROLLBACK_FILE="$restore_file" /bin/bash --noprofile --norc -c 'source "$1/danterm.bash"' _ "$integration_dir")"
+            restore_output="$(DANTERM_RESTORE_SCROLLBACK_FILE="$restore_file" DANTERM_RESTORE_COMMAND="$restore_command" /bin/bash --noprofile --norc -c 'source "$1/danterm.bash"; [[ -z ${DANTERM_RESTORE_COMMAND+x} ]] || exit 34; printf "|unset"' _ "$integration_dir")"
             ;;
         fish)
-            restore_output="$(env DANTERM_RESTORE_SCROLLBACK_FILE="$restore_file" /usr/bin/env fish --no-config -c 'source $argv[1]/danterm.fish' "$integration_dir")"
+            restore_output="$(env DANTERM_RESTORE_SCROLLBACK_FILE="$restore_file" DANTERM_RESTORE_COMMAND="$restore_command" /usr/bin/env fish --no-config -c 'source $argv[1]/danterm.fish; set -q DANTERM_RESTORE_COMMAND; and exit 34; printf "|%s" "$_danterm_restore_command"' "$integration_dir")"
             ;;
     esac
-    test "$restore_output" = 'restored scrollback' || fail "$shell did not restore scrollback"
+    if test "$shell" = bash; then
+        expected_restore='restored scrollback|unset'
+    else
+        expected_restore="restored scrollback|$restore_command"
+    fi
+    test "$restore_output" = "$expected_restore" || fail "$shell did not consume restore values"
     test ! -e "$restore_file" || fail "$shell did not consume the scrollback file"
+done
+
+for shell in zsh fish; do
+    command -v "$shell" >/dev/null 2>&1 || continue
+    SHELL_UNDER_TEST="$shell" INTEGRATION_DIR="$integration_dir" /usr/bin/expect <<'EXPECT' || fail "$shell did not seed restore command safely"
+set timeout 10
+set shell $env(SHELL_UNDER_TEST)
+set integration $env(INTEGRATION_DIR)
+set marker DANTERM_PREFILL_EXECUTED
+set command "printf DANTERM_PREFILL_%s EXECUTED"
+if {$shell eq "zsh"} {
+    spawn env DANTERM_RESTORE_COMMAND=$command "PROMPT=DANTERM_PROMPT> " zsh -f
+    expect "DANTERM_PROMPT> "
+    send -- "source $integration/danterm.zsh\r"
+} else {
+    spawn env DANTERM_RESTORE_COMMAND=$command fish_greeting= fish --no-config
+    expect -re {> $}
+    send -- "function fish_prompt; printf 'DANTERM_PROMPT> '; end\r"
+    expect "DANTERM_PROMPT> "
+    send -- "source $integration/danterm.fish\r"
+}
+expect $command
+set timeout 1
+expect {
+    $marker { exit 35 }
+    timeout {}
+}
+set timeout 10
+send -- "\r"
+expect $marker
+send -- "exit\r"
+expect eof
+EXPECT
 done
 
 zsh_output="$(DANTERM_TOKEN="$token" /usr/bin/env zsh -f -c '

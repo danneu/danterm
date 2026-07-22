@@ -153,7 +153,6 @@ class GhosttyApp: TerminalBackend {
             command: request.command,
             launchCommand: request.launchCommand,
             waitAfterCommand: request.waitAfterCommand,
-            restoreCommandBehavior: request.restoreCommandBehavior,
             envVars: request.environment
         )
         guard view.surface != nil else { return nil }

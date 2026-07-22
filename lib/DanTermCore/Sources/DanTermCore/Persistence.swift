@@ -1,5 +1,5 @@
 // Model <-> disk: the pure serialization/restore policy, no file I/O. Restore
-// (decode + validate an init file from in-memory Data, restore-command behavior),
+// (decode + validate an init file from in-memory Data),
 // Export (AppModel -> snapshot -> init file, plus scrollback grafting), the
 // checkpoint merge (enriched scrollback grafted into a light restore), and
 // scrollback truncation. Everything is pure value-mapping: the FileManager/Data
@@ -51,37 +51,6 @@ func loadValidatedInitFile(from data: Data, env: CoreEnv = .live) throws -> Vali
     model: built.model,
     paneSnapshots: built.paneSnapshots
   )
-}
-
-/// Parse the restore command behavior from CLI arguments.
-/// Defaults to `.prefill` to avoid surprising command execution during restore.
-func restoreCommandBehavior(from arguments: [String]) -> RestoreCommandBehavior {
-  guard let idx = arguments.firstIndex(of: "--restore-commands"),
-    idx + 1 < arguments.count
-  else {
-    return .prefill
-  }
-
-  switch arguments[idx + 1] {
-  case RestoreCommandBehavior.execute.rawValue:
-    return .execute
-  case RestoreCommandBehavior.prefill.rawValue:
-    return .prefill
-  default:
-    return .prefill
-  }
-}
-
-/// Convert saved command metadata into live shell input for restore.
-/// `.prefill` restores the draft command without executing it.
-func restoreInitialInput(for command: String?, behavior: RestoreCommandBehavior) -> String? {
-  guard let command, !command.isEmpty else { return nil }
-  switch behavior {
-  case .prefill:
-    return command
-  case .execute:
-    return command.hasSuffix("\n") ? command : command + "\n"
-  }
 }
 
 // MARK: - Export

@@ -623,16 +623,14 @@ struct TerminalPTYHostTests {
         }
     }
 
-    @Test("initial input variants reach the interactive login shell exactly once", .timeLimit(.minutes(1)))
-    func initialInputSeamPreservesBytesAndRecoveryEnvironment() async throws {
+    @Test("user-authored command input reaches the interactive login shell exactly once", .timeLimit(.minutes(1)))
+    func initialInputSeamPreservesBytes() async throws {
         // Intent: prove the app-facing command variants become one byte-exact
         //   owner write to the ordinary login shell, including newline handling.
         // Why it exists: facade wiring can otherwise drop, duplicate, direct-exec,
         //   or mutate restore input even when the pure launch policy is correct.
-        // Scenario: command launch, restore prefill/execute, and recovery replay
-        //   each run through a real PTY and controlled shell command.
+        // Scenario: both command seams run through a real PTY and controlled shell command.
         let probe = try probeExecutable()
-        let restorePath = "/tmp/danterm-recovery-recording.json"
         let cases = [
             InitialInputCase(
                 name: "launch",
@@ -647,22 +645,10 @@ struct TerminalPTYHostTests {
                 expectedWrite: "exec \(probe) initial launch-newline\n"
             ),
             InitialInputCase(
-                name: "prefill",
-                command: "exec \(probe) initial prefill",
-                source: .restorePrefill,
-                expectedWrite: "exec \(probe) initial prefill"
-            ),
-            InitialInputCase(
-                name: "execute-newline",
-                command: "exec \(probe) initial execute-newline\n",
-                source: .restoreExecute,
-                expectedWrite: "exec \(probe) initial execute-newline\n"
-            ),
-            InitialInputCase(
-                name: "recovery",
-                command: "exec \(probe) initial recovery",
-                source: .recoveryReplay(restorePath),
-                expectedWrite: "exec \(probe) initial recovery\n"
+                name: "command",
+                command: "exec \(probe) initial command",
+                source: .command,
+                expectedWrite: "exec \(probe) initial command\n"
             ),
         ]
 
@@ -673,39 +659,17 @@ struct TerminalPTYHostTests {
             switch testCase.source {
             case .launchCommand:
                 input.launchCommand = testCase.command
-            case .restorePrefill:
+            case .command:
                 input.command = testCase.command
-                input.restoreCommandBehavior = .prefill
-            case .restoreExecute:
-                input.command = testCase.command
-                input.restoreCommandBehavior = .execute
-            case .recoveryReplay(let path):
-                input.command = testCase.command
-                input.restoreCommandBehavior = .execute
-                input.paneEnvironment.append(.init(
-                    name: "DANTERM_RESTORE_SCROLLBACK_FILE",
-                    value: path
-                ))
             }
 
             await host.start(input)
-            if case .restorePrefill = testCase.source {
-                #expect(await host.waitForOutput(containing: Array(testCase.command.utf8)))
-                #expect(await host.inputWrites() == [Array(testCase.expectedWrite.utf8)])
-                host.send(Array("\n".utf8))
-            }
             #expect(await host.waitForResult() == .exited(.exited(0)))
+            #expect(await host.inputWrites() == [Array(testCase.expectedWrite.utf8)])
 
-            let writes = await host.inputWrites()
-            let expectedWrites = [Array(testCase.expectedWrite.utf8)]
-                + (testCase.source == .restorePrefill ? [Array("\n".utf8)] : [])
-            #expect(writes == expectedWrites)
             let output = String(decoding: await host.outputBytes(), as: UTF8.self)
             #expect(output.components(separatedBy: "__INITIAL_EXECUTED__=").count - 1 == 1)
             #expect(output.contains("__INITIAL_EXECUTED__=\(testCase.name)"))
-            if case .recoveryReplay = testCase.source {
-                #expect(output.contains("__RESTORE_FILE__=\(restorePath)"))
-            }
             #expect((await host.resourceSnapshot()).isReleased)
         }
     }
@@ -1180,7 +1144,6 @@ private func makeLaunchInput(command: String) -> LaunchPolicyInput {
         paneEnvironment: [EnvironmentEntry(name: "DANTERM_PROBE", value: "pane-wins")],
         command: nil,
         launchCommand: command,
-        restoreCommandBehavior: .execute,
         initialDimensions: .init(columns: 80, rows: 24)
     )
 }
@@ -1224,9 +1187,7 @@ private func taggedValue(_ tag: String, in output: String) throws -> Substring {
 
 private enum InitialInputSource: Equatable {
     case launchCommand
-    case restorePrefill
-    case restoreExecute
-    case recoveryReplay(String)
+    case command
 }
 
 private struct InitialInputCase {

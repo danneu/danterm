@@ -31,12 +31,6 @@ public struct EnvironmentEntry: Equatable, Sendable {
     }
 }
 
-/// Whether a restored command remains editable or is submitted to the login shell.
-public enum RestoreCommandBehavior: Equatable, Sendable {
-    case prefill
-    case execute
-}
-
 /// Injected ambient facts and pane values from which deterministic launch attempts are built.
 public struct LaunchPolicyInput: Equatable, Sendable {
     /// Account-database shell, before executable fallback policy is applied.
@@ -55,12 +49,10 @@ public struct LaunchPolicyInput: Equatable, Sendable {
     public var advertisedEnvironment: [EnvironmentEntry]
     /// Pane-scoped values that have final precedence.
     public var paneEnvironment: [EnvironmentEntry]
-    /// Restored command text when this pane originates from saved state.
+    /// User-authored command submitted as interactive shell input.
     public var command: String?
     /// Explicit launch command, always submitted as interactive shell input.
     public var launchCommand: String?
-    /// Newline policy for restored command text.
-    public var restoreCommandBehavior: RestoreCommandBehavior
     /// Geometry installed before the child starts.
     public var initialDimensions: TerminalDimensions
 
@@ -76,7 +68,6 @@ public struct LaunchPolicyInput: Equatable, Sendable {
         paneEnvironment: [EnvironmentEntry],
         command: String?,
         launchCommand: String?,
-        restoreCommandBehavior: RestoreCommandBehavior,
         initialDimensions: TerminalDimensions
     ) {
         self.accountShell = accountShell
@@ -89,7 +80,6 @@ public struct LaunchPolicyInput: Equatable, Sendable {
         self.paneEnvironment = paneEnvironment
         self.command = command
         self.launchCommand = launchCommand
-        self.restoreCommandBehavior = restoreCommandBehavior
         self.initialDimensions = initialDimensions
     }
 }
@@ -176,8 +166,7 @@ public func resolveLaunchPlan(
         },
         initialInput: resolvedInitialInput(
             command: input.command,
-            launchCommand: input.launchCommand,
-            restoreBehavior: input.restoreCommandBehavior
+            launchCommand: input.launchCommand
         )
     ))
 }
@@ -227,22 +216,16 @@ private func mergedEnvironment(
     return result
 }
 
-/// Resolves direct-launch compatibility into exactly one ordinary login-shell write.
+/// Resolves user-authored command input into exactly one ordinary login-shell write.
 private func resolvedInitialInput(
     command: String?,
-    launchCommand: String?,
-    restoreBehavior: RestoreCommandBehavior
+    launchCommand: String?
 ) -> [UInt8]? {
     if let launchCommand, !launchCommand.isEmpty {
         return Array(terminatedForExecution(launchCommand).utf8)
     }
     guard let command, !command.isEmpty else { return nil }
-    switch restoreBehavior {
-    case .prefill:
-        return Array(command.utf8)
-    case .execute:
-        return Array(terminatedForExecution(command).utf8)
-    }
+    return Array(terminatedForExecution(command).utf8)
 }
 
 /// Adds a newline only when shell input does not already end in one.

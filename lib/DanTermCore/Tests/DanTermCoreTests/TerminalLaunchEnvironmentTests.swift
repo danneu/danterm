@@ -31,7 +31,7 @@ import DanTermProtocol
         #expect(dict["DANTERM_TAB"] == nil, "new pane environments should not include DANTERM_TAB")
     }
 
-    @Test("restore launch env includes pane context and optional scrollback var")
+    @Test("restore launch env includes optional restore values verbatim")
     func restoreLaunchEnvIncludesPaneContextAndOptionalScrollbackVar() {
         // Intent: restoreLaunchEnvironment restores the same DanTerm pane
         //   context as new panes and adds the replay var only when present.
@@ -44,7 +44,8 @@ import DanTermProtocol
             ipcSocketPath: "/tmp/danterm/control.sock",
             paneId: paneId,
             token: "secret-token",
-            scrollbackFilePath: "/tmp/danterm/replay.txt"
+            scrollbackFilePath: "/tmp/danterm/replay.txt",
+            command: "printf 'one\ntwo'"
         ))
 
         #expect(full[EnvVars.flag] == "1")
@@ -52,13 +53,52 @@ import DanTermProtocol
         #expect(full[EnvVars.pane] == paneId.rawValue.uuidString)
         #expect(full["DANTERM_TOKEN"] == "secret-token")
         #expect(full["DANTERM_RESTORE_SCROLLBACK_FILE"] == "/tmp/danterm/replay.txt")
+        #expect(full["DANTERM_RESTORE_COMMAND"] == "printf 'one\ntwo'")
 
         let minimal = Dictionary(uniqueKeysWithValues: restoreLaunchEnvironment(
             ipcSocketPath: "/tmp/danterm/control.sock",
             paneId: paneId,
             token: "secret-token",
-            scrollbackFilePath: nil
+            scrollbackFilePath: nil,
+            command: ""
         ))
         #expect(minimal["DANTERM_RESTORE_SCROLLBACK_FILE"] == nil)
+        #expect(minimal["DANTERM_RESTORE_COMMAND"] == nil)
+    }
+
+    @Test("hostile inherited restore values are absent from every launch shape")
+    func inheritedRestoreValuesAreScrubbed() {
+        let paneId = PaneId()
+        let inherited = scrubbedTerminalProcessEnvironment([
+            "PATH": "/usr/bin",
+            "DANTERM_RESTORE_COMMAND": "hostile command",
+            "DANTERM_RESTORE_SCROLLBACK_FILE": "/hostile/replay",
+        ])
+        let normal = Dictionary(uniqueKeysWithValues: terminalLaunchEnvironment(
+            ipcSocketPath: "/tmp/danterm/control.sock",
+            paneId: paneId,
+            token: "token"
+        ))
+        let emptyRestore = Dictionary(uniqueKeysWithValues: restoreLaunchEnvironment(
+            ipcSocketPath: "/tmp/danterm/control.sock",
+            paneId: paneId,
+            token: "token",
+            scrollbackFilePath: nil,
+            command: ""
+        ))
+        let restored = Dictionary(uniqueKeysWithValues: restoreLaunchEnvironment(
+            ipcSocketPath: "/tmp/danterm/control.sock",
+            paneId: paneId,
+            token: "token",
+            scrollbackFilePath: "/owned/replay",
+            command: "owned command"
+        ))
+
+        #expect(inherited["DANTERM_RESTORE_COMMAND"] == nil)
+        #expect(inherited["DANTERM_RESTORE_SCROLLBACK_FILE"] == nil)
+        #expect(normal["DANTERM_RESTORE_COMMAND"] == nil)
+        #expect(emptyRestore["DANTERM_RESTORE_COMMAND"] == nil)
+        #expect(restored["DANTERM_RESTORE_COMMAND"] == "owned command")
+        #expect(restored["DANTERM_RESTORE_SCROLLBACK_FILE"] == "/owned/replay")
     }
 }

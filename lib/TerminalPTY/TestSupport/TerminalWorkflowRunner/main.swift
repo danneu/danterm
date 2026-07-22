@@ -95,7 +95,6 @@ private enum TerminalWorkflowRunner {
             paneEnvironment: [],
             command: nil,
             launchCommand: nil,
-            restoreCommandBehavior: .prefill,
             initialDimensions: dimensions
         )
         let controller = try TerminalPaneSessionController(

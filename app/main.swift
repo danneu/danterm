@@ -1,6 +1,7 @@
 // Application entry point: initializes libghostty, resolves explicit init or
 // recovery state, then hands startup ownership to AppKit.
 import Cocoa
+import Darwin
 import DanTermProtocol
 import GhosttyKit
 
@@ -33,7 +34,13 @@ if let path = ProcessInfo.processInfo.environment["DANTERM_TERMINAL_CHARACTERIZA
 }
 #endif
 
-// Initialize ghostty — must happen before anything else.
+// Restore variables are reserved for per-pane injection. Ghostty can only add
+// surface overrides, so inherited values must be removed process-wide first.
+for name in reservedRestoreEnvironmentVariableNames {
+    unsetenv(name)
+}
+
+// Initialize ghostty -- must happen before anything else.
 let rc = ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv)
 guard rc == GHOSTTY_SUCCESS else {
     print("ghostty_init failed with code \(rc)")
@@ -42,16 +49,8 @@ guard rc == GHOSTTY_SUCCESS else {
 
 // Parse restore-related CLI arguments.
 var initSnapshot: AppModelSnapshot? = nil
-var restoreBehavior = RestoreCommandBehavior.prefill
 do {
     let args = CommandLine.arguments
-    restoreBehavior = restoreCommandBehavior(from: args)
-    if let idx = args.firstIndex(of: "--restore-commands"), idx + 1 < args.count {
-        let value = args[idx + 1]
-        if value != RestoreCommandBehavior.prefill.rawValue && value != RestoreCommandBehavior.execute.rawValue {
-            print("[init] Unknown --restore-commands value '\(value)'; defaulting to prefill")
-        }
-    }
     if let idx = args.firstIndex(of: "--init"), idx + 1 < args.count {
         let path = args[idx + 1]
         let url = URL(fileURLWithPath: path)
@@ -112,7 +111,6 @@ app.setActivationPolicy(.regular)
 let delegate = MainActor.assumeIsolated { () -> AppDelegate in
     let delegate = AppDelegate()
     delegate.initSnapshot = initSnapshot
-    delegate.restoreCommandBehavior = restoreBehavior
     delegate.lastSessionSnapshot = lastSessionSnapshot
     delegate.previousSessionCrashed = previousSessionCrashed
     NSApp.delegate = delegate

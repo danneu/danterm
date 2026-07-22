@@ -8,12 +8,10 @@ public let terminalPaneInitialDimensions = TerminalDimensions(columns: 80, rows:
 public struct TerminalPaneLaunchRequest: Equatable, Sendable {
     /// Pane-requested cwd before launch policy applies accessibility fallbacks.
     public let workingDirectory: String?
-    /// Restored shell text retained as either prefill or executable input.
+    /// User-authored command submitted as interactive shell input.
     public let command: String?
     /// Explicit command that takes precedence as initial shell input.
     public let launchCommand: String?
-    /// Whether restored command text stays editable or is submitted.
-    public let restoreCommandBehavior: RestoreCommandBehavior
     /// Pane-scoped environment layer with final precedence.
     public let environment: [EnvironmentEntry]
 
@@ -22,13 +20,11 @@ public struct TerminalPaneLaunchRequest: Equatable, Sendable {
         workingDirectory: String?,
         command: String?,
         launchCommand: String?,
-        restoreCommandBehavior: RestoreCommandBehavior,
         environment: [EnvironmentEntry]
     ) {
         self.workingDirectory = workingDirectory
         self.command = command
         self.launchCommand = launchCommand
-        self.restoreCommandBehavior = restoreCommandBehavior
         self.environment = environment
     }
 }
@@ -114,7 +110,6 @@ public func assembleTerminalPaneLaunch(
             paneEnvironment: request.environment,
             command: request.command,
             launchCommand: request.launchCommand,
-            restoreCommandBehavior: request.restoreCommandBehavior,
             initialDimensions: dimensions
         ),
         terminalProgramVersion: facts.terminalProgramVersion

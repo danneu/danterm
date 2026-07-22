@@ -492,7 +492,6 @@ class AppRuntime {
                 command: command,
                 launchCommand: launchCommand,
                 waitAfterCommand: waitAfterCommand,
-                restoreCommandBehavior: .execute,
                 shellIntegrationToken: token,
                 envVars: envVars
             ) else {
@@ -1007,7 +1006,7 @@ class AppRuntime {
     // MARK: - State Import
 
     /// Present a file picker, validate the chosen state file, and replace the current session.
-    func importStateFromPanel(restoreCommandBehavior: RestoreCommandBehavior = .prefill) {
+    func importStateFromPanel() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.json]
         panel.allowsMultipleSelection = false
@@ -1015,17 +1014,17 @@ class AppRuntime {
         guard let window else { return }
         panel.beginSheetModal(for: window) { [weak self] response in
             guard let self, response == .OK, let url = panel.url else { return }
-            self.importState(from: url, restoreCommandBehavior: restoreCommandBehavior)
+            self.importState(from: url)
         }
     }
 
     /// Load a state file from disk, keeping the current session intact on any validation failure.
-    func importState(from url: URL, restoreCommandBehavior: RestoreCommandBehavior = .prefill) {
+    func importState(from url: URL) {
         do {
             let data = try Data(contentsOf: url)
             let loaded = try loadValidatedInitFile(from: data)
             do {
-                let staged = try stageValidatedRestore(loaded, restoreCommandBehavior: restoreCommandBehavior)
+                let staged = try stageValidatedRestore(loaded)
                 commitRestoreSession(staged)
             } catch {
                 showImportError(message: "Import failed while creating terminal surfaces.")
@@ -1141,24 +1140,23 @@ class AppRuntime {
     // MARK: - Snapshot Bootstrap
 
     /// Validate a raw snapshot (the --init path) then stage + commit it.
-    func bootstrapFromSnapshot(_ snapshot: AppModelSnapshot, restoreCommandBehavior: RestoreCommandBehavior = .prefill) {
+    func bootstrapFromSnapshot(_ snapshot: AppModelSnapshot) {
         guard let built = validateAndBuildDetailed(snapshot) else {
             print("[init] Snapshot validation failed, falling back to default startup")
             send(.createTab(inGroupId: nil))
             return
         }
         bootstrapFromValidatedRestore(
-            ValidatedAppRestore(snapshot: snapshot, model: built.model, paneSnapshots: built.paneSnapshots),
-            restoreCommandBehavior: restoreCommandBehavior
+            ValidatedAppRestore(snapshot: snapshot, model: built.model, paneSnapshots: built.paneSnapshots)
         )
     }
 
     /// Stage + commit an already-validated restore (the crash/clean-recovery path,
     /// where main.swift validated and merged the checkpoints up front). Avoids
     /// decoding/validating the recovered structure a second time.
-    func bootstrapFromValidatedRestore(_ loaded: ValidatedAppRestore, restoreCommandBehavior: RestoreCommandBehavior = .prefill) {
+    func bootstrapFromValidatedRestore(_ loaded: ValidatedAppRestore) {
         do {
-            let staged = try stageValidatedRestore(loaded, restoreCommandBehavior: restoreCommandBehavior)
+            let staged = try stageValidatedRestore(loaded)
             commitRestoreSession(staged)
         } catch {
             print("[init] Snapshot surface creation failed, falling back to default startup")
@@ -1167,10 +1165,7 @@ class AppRuntime {
     }
 
     /// Build all runtime objects for a validated restore without touching the live session.
-    private func stageValidatedRestore(
-        _ loaded: ValidatedAppRestore,
-        restoreCommandBehavior: RestoreCommandBehavior
-    ) throws -> StagedRestoreSession {
+    private func stageValidatedRestore(_ loaded: ValidatedAppRestore) throws -> StagedRestoreSession {
         var stagedSurfaces: [PaneId: any TerminalSession] = [:]
         var stagedReplayFiles: [PaneId: URL] = [:]
 
@@ -1191,15 +1186,15 @@ class AppRuntime {
                             ipcSocketPath: ipcSocketPath.path,
                             paneId: paneId,
                             token: token,
-                            scrollbackFilePath: scrollbackFilePath
+                            scrollbackFilePath: scrollbackFilePath,
+                            command: resolved?.command
                         )
                         guard let session = makeTerminalSession(
                             paneId: paneId,
                             workingDirectory: resolved?.cwd,
-                            command: resolved?.command,
+                            command: nil,
                             launchCommand: nil,
                             waitAfterCommand: true,
-                            restoreCommandBehavior: restoreCommandBehavior,
                             shellIntegrationToken: token,
                             envVars: envVars
                         ) else {
@@ -1298,7 +1293,6 @@ class AppRuntime {
         command: String?,
         launchCommand: String?,
         waitAfterCommand: Bool,
-        restoreCommandBehavior: RestoreCommandBehavior,
         shellIntegrationToken: String,
         envVars: [(String, String)]
     ) -> (any TerminalSession)? {
@@ -1308,7 +1302,6 @@ class AppRuntime {
             command: command,
             launchCommand: launchCommand,
             waitAfterCommand: waitAfterCommand,
-            restoreCommandBehavior: restoreCommandBehavior,
             environment: envVars
         )
         guard let session = terminalBackend.createSession(request) else { return nil }

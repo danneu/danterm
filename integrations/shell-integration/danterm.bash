@@ -1,5 +1,7 @@
 # Sourceable DanTerm integration for Bash command, cwd, SSH, and mosh metadata.
 
+unset DANTERM_RESTORE_COMMAND
+
 if [[ -n ${DANTERM_RESTORE_SCROLLBACK_FILE:-} ]]; then
     _danterm_scrollback_file=$DANTERM_RESTORE_SCROLLBACK_FILE
     unset DANTERM_RESTORE_SCROLLBACK_FILE

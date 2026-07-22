@@ -275,11 +275,6 @@ struct ViewLocalState {
     var sidebarRenameTarget: RenameTarget?
 }
 
-enum RestoreCommandBehavior: String, Equatable {
-    case prefill
-    case execute
-}
-
 // MARK: - Init Snapshot Types
 
 // Current on-disk/wire format version. v2 is the leaf-embedded format: each

@@ -54,7 +54,6 @@ final class SwiftTerminalBackend: TerminalBackend {
             workingDirectory: request.workingDirectory,
             command: request.command,
             launchCommand: request.launchCommand,
-            restoreCommandBehavior: Self.restoreBehavior(request.restoreCommandBehavior),
             environment: request.environment.map(EnvironmentEntry.init(name:value:))
         )
         let configuration = assembleTerminalPaneLaunch(
@@ -147,7 +146,7 @@ final class SwiftTerminalBackend: TerminalBackend {
     private static func launchFacts(
         requestedWorkingDirectory: String?
     ) -> TerminalPaneLaunchFacts {
-        let environment = ProcessInfo.processInfo.environment
+        let environment = scrubbedTerminalProcessEnvironment(ProcessInfo.processInfo.environment)
         let accountShell = accountShell(environment: environment)
         let executablePaths = [accountShell, "/bin/zsh", "/bin/sh"]
             .compactMap { $0 }
@@ -187,12 +186,4 @@ final class SwiftTerminalBackend: TerminalBackend {
         return environment["SHELL"]
     }
 
-    private static func restoreBehavior(
-        _ behavior: RestoreCommandBehavior
-    ) -> PaneLifecycle.RestoreCommandBehavior {
-        switch behavior {
-        case .prefill: .prefill
-        case .execute: .execute
-        }
-    }
 }

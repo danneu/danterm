@@ -17,7 +17,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     var splitView: NSSplitView!
     var chromeView: WindowChromeView!
     var initSnapshot: AppModelSnapshot?
-    var restoreCommandBehavior: RestoreCommandBehavior = .prefill
     // Session recovery state set by main.swift before app launch.
     var lastSessionSnapshot: ValidatedAppRestore?  // merged + validated from Recovery/last-light.json + last-enriched.json
     var previousSessionCrashed: Bool = false     // true if session.json lock was still present
@@ -145,7 +144,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
         // Bootstrap startup: --init CLI > crash/clean restore prompt > fresh
         if let snapshot = initSnapshot {
-            runtime.bootstrapFromSnapshot(snapshot, restoreCommandBehavior: restoreCommandBehavior)
+            runtime.bootstrapFromSnapshot(snapshot)
             initSnapshot = nil
         } else if let lastSession = lastSessionSnapshot {
             // Prompt the user before restoring so they know what's coming.
@@ -167,7 +166,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
             }
             let response = alert.runModal()
             if response == .alertFirstButtonReturn {
-                runtime.bootstrapFromValidatedRestore(lastSession, restoreCommandBehavior: .prefill)
+                runtime.bootstrapFromValidatedRestore(lastSession)
             } else {
                 runtime.send(.createTab(inGroupId: nil))
             }
@@ -530,7 +529,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     }
 
     @objc func importState(_ sender: Any?) {
-        runtime.importStateFromPanel(restoreCommandBehavior: restoreCommandBehavior)
+        runtime.importStateFromPanel()
     }
 
     @objc func showPreferences(_ sender: Any?) {

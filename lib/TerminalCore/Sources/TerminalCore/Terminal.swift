@@ -644,6 +644,7 @@ public struct Terminal: Equatable, Sendable {
         case "command-start":
             guard fields.count == 4,
                   let command = decodedCanonicalBase64(fields[3]),
+                  !command.contains("\0"),
                   command.utf8.count <= Self.maximumSemanticValueBytes
             else { return }
             admitDiscreteSemanticEvent(.commandStarted(command))

@@ -60,7 +60,6 @@ struct TerminalSessionRequest {
     let command: String?
     let launchCommand: String?
     let waitAfterCommand: Bool
-    let restoreCommandBehavior: RestoreCommandBehavior
     let environment: [(String, String)]
 }
 

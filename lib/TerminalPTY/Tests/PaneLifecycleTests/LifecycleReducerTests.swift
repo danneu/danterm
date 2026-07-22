@@ -169,7 +169,6 @@ func lifecycleInput() -> LaunchPolicyInput {
         paneEnvironment: [],
         command: nil,
         launchCommand: nil,
-        restoreCommandBehavior: .prefill,
         initialDimensions: TerminalDimensions(columns: 80, rows: 24)
     )
 }

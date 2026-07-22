@@ -2,6 +2,18 @@
 import Foundation
 import DanTermProtocol
 
+let reservedRestoreEnvironmentVariableNames = [
+    "DANTERM_RESTORE_COMMAND",
+    "DANTERM_RESTORE_SCROLLBACK_FILE",
+]
+
+/// Removes pane-scoped restore values before inherited process environment is used.
+func scrubbedTerminalProcessEnvironment(
+    _ environment: [String: String]
+) -> [String: String] {
+    environment.filter { !reservedRestoreEnvironmentVariableNames.contains($0.key) }
+}
+
 func terminalLaunchEnvironment(
     ipcSocketPath: String,
     paneId: PaneId,
@@ -21,7 +33,8 @@ func restoreLaunchEnvironment(
     ipcSocketPath: String,
     paneId: PaneId,
     token: String,
-    scrollbackFilePath: String?
+    scrollbackFilePath: String?,
+    command: String?
 ) -> [(String, String)] {
     var env = terminalLaunchEnvironment(
         ipcSocketPath: ipcSocketPath,
@@ -30,6 +43,9 @@ func restoreLaunchEnvironment(
     )
     if let scrollbackFilePath {
         env.append(("DANTERM_RESTORE_SCROLLBACK_FILE", scrollbackFilePath))
+    }
+    if let command, !command.isEmpty {
+        env.append(("DANTERM_RESTORE_COMMAND", command))
     }
     return env
 }

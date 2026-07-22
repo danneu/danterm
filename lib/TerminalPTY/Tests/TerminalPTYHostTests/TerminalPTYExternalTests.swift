@@ -103,7 +103,6 @@ private func externalLaunchInput(command: String) -> LaunchPolicyInput {
         paneEnvironment: [],
         command: nil,
         launchCommand: command,
-        restoreCommandBehavior: .execute,
         initialDimensions: .init(columns: 80, rows: 24)
     )
 }

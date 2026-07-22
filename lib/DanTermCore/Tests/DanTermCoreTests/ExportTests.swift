@@ -1,6 +1,5 @@
 // Swift Testing migration of the legacy `tests/ExportTests.swift` harness
-// suite. Pins restore-command behavior and prefill/execute input synthesis,
-// commandStarted Msg side effects, truncateScrollback's char/line/whitespace
+// suite. Pins commandStarted Msg side effects, truncateScrollback's char/line/whitespace
 // rules, exportState's snapshot payload, the toSnapshot/validateAndBuild
 // round-trip + launch field projection, and the JSON encode/decode contract.
 // `guard case` patterns that the legacy suite asserted via `throw
@@ -11,85 +10,6 @@ import Testing
 @testable import DanTermCore
 
 @Suite struct ExportTests {
-    // MARK: - restore command behavior
-
-    @Test("restoreCommandBehavior defaults to prefill")
-    func restoreCommandBehaviorDefaultsToPrefill() {
-        // Intent: with no --restore-commands flag, behavior defaults to
-        //   .prefill (the safe option that doesn't auto-execute).
-        // Why it exists: pins the conservative default so a fresh install
-        //   doesn't auto-run prior session commands.
-        // Scenario: spec-first default -- argv without the flag yields
-        //   .prefill.
-        let behavior = restoreCommandBehavior(from: ["DanTerm", "--init", "/tmp/state.json"])
-        #expect(behavior == .prefill)
-    }
-
-    @Test("restoreCommandBehavior parses execute flag")
-    func restoreCommandBehaviorParsesExecuteFlag() {
-        // Intent: `--restore-commands execute` resolves to .execute.
-        // Why it exists: pins the opt-in execute mode.
-        // Scenario: spec-first opt-in -- argv with `--restore-commands
-        //   execute` yields .execute.
-        let behavior = restoreCommandBehavior(from: ["DanTerm", "--init", "/tmp/state.json", "--restore-commands", "execute"])
-        #expect(behavior == .execute)
-    }
-
-    @Test("restoreCommandBehavior falls back to prefill for unknown value")
-    func restoreCommandBehaviorFallsBackToPrefillForUnknownValue() {
-        // Intent: `--restore-commands bogus` falls back to .prefill (the
-        //   safe default) rather than throwing or erroring.
-        // Why it exists: pins forward-compat -- unknown values do not
-        //   crash startup.
-        // Scenario: spec-first robust fallback -- argv with "bogus"
-        //   yields .prefill.
-        let behavior = restoreCommandBehavior(from: ["DanTerm", "--restore-commands", "bogus"])
-        #expect(behavior == .prefill)
-    }
-
-    @Test("restoreInitialInput prefills without newline by default")
-    func restoreInitialInputPrefillsWithoutNewlineByDefault() {
-        // Intent: in .prefill mode, the command is returned verbatim with
-        //   no trailing newline appended.
-        // Why it exists: pins the prefill-only semantics so the user must
-        //   press Enter to actually run the prior command.
-        // Scenario: spec-first prefill -- input == command, no newline.
-        let input = restoreInitialInput(for: "node server.js", behavior: .prefill)
-        #expect(input == "node server.js")
-    }
-
-    @Test("restoreInitialInput execute appends trailing newline")
-    func restoreInitialInputExecuteAppendsTrailingNewline() {
-        // Intent: in .execute mode, the command is suffixed with a single
-        //   trailing newline so the shell runs it immediately.
-        // Why it exists: pins the execute-mode side effect explicitly.
-        // Scenario: spec-first execute -- input ends in "\n".
-        let input = restoreInitialInput(for: "node server.js", behavior: .execute)
-        #expect(input == "node server.js\n")
-    }
-
-    @Test("restoreInitialInput execute preserves existing trailing newline")
-    func restoreInitialInputExecutePreservesExistingTrailingNewline() {
-        // Intent: in .execute mode, a command already ending in "\n" is
-        //   not double-suffixed.
-        // Why it exists: pins idempotency of the newline append so two
-        //   restore paths producing the same effective input.
-        // Scenario: spec-first idempotent -- a command already ending in
-        //   "\n" stays a single-newline string.
-        let input = restoreInitialInput(for: "node server.js\n", behavior: .execute)
-        #expect(input == "node server.js\n")
-    }
-
-    @Test("restoreInitialInput returns nil for empty command")
-    func restoreInitialInputReturnsNilForEmptyCommand() {
-        // Intent: an empty command surfaces no input (nil), in either mode.
-        // Why it exists: pins the no-op behavior for missing commands so
-        //   the pane does not see a phantom empty line.
-        // Scenario: spec-first no-op -- empty command -> nil.
-        let input = restoreInitialInput(for: "", behavior: .prefill)
-        #expect(input == nil, "empty command should not produce input")
-    }
-
     // MARK: - commandStarted Msg
 
     @Test("commandStarted sets lastCommand")

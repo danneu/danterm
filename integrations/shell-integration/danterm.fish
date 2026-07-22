@@ -1,5 +1,10 @@
 # Sourceable DanTerm integration for fish command, cwd, SSH, and mosh metadata.
 
+if set -q DANTERM_RESTORE_COMMAND
+    set -g _danterm_restore_command "$DANTERM_RESTORE_COMMAND"
+    set -e DANTERM_RESTORE_COMMAND
+end
+
 if set -q DANTERM_RESTORE_SCROLLBACK_FILE
     set -l _danterm_scrollback_file "$DANTERM_RESTORE_SCROLLBACK_FILE"
     set -e DANTERM_RESTORE_SCROLLBACK_FILE
@@ -56,6 +61,11 @@ function _danterm_prompt --on-event fish_prompt
         danterm_emit_remote_host "$_danterm_remote_user" "$_danterm_remote_host"
     else
         danterm_emit_cwd
+    end
+    if set -q _danterm_restore_command
+        commandline --replace -- "$_danterm_restore_command"
+        commandline --cursor (string length -- "$_danterm_restore_command")
+        set -e _danterm_restore_command
     end
 end
 

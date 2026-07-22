@@ -1,5 +1,10 @@
 # Sourceable DanTerm integration for zsh command, cwd, SSH, and mosh metadata.
 
+if [[ -n ${DANTERM_RESTORE_COMMAND+x} ]]; then
+    typeset -g _danterm_restore_command=$DANTERM_RESTORE_COMMAND
+    unset DANTERM_RESTORE_COMMAND
+fi
+
 if [[ -n ${DANTERM_RESTORE_SCROLLBACK_FILE:-} ]]; then
     typeset _danterm_scrollback_file=$DANTERM_RESTORE_SCROLLBACK_FILE
     unset DANTERM_RESTORE_SCROLLBACK_FILE
@@ -57,6 +62,10 @@ _danterm_precmd() {
         danterm_emit_remote_host "${_danterm_remote_identity%%:*}" "${_danterm_remote_identity#*:}"
     else
         danterm_emit_cwd
+    fi
+    if [[ -n ${_danterm_restore_command+x} ]]; then
+        print -z -- "$_danterm_restore_command"
+        unset _danterm_restore_command
     fi
 }
 add-zsh-hook preexec _danterm_preexec

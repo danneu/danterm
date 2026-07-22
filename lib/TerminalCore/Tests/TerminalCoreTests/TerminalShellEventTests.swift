@@ -29,6 +29,17 @@ struct TerminalShellEventTests {
         ])
     }
 
+    @Test("command-start rejects NUL before persistence")
+    func rejectsNULCommand() throws {
+        let token = "pane-token"
+        let command = Data("printf before\0after".utf8).base64EncodedString()
+        var terminal = try #require(Terminal(columns: 20, rows: 2, shellIntegrationToken: token))
+
+        terminal.feed(Array("\u{1B}]1337;DanTermShell=1;\(token);command-start;\(command)\u{1B}\\".utf8))
+
+        #expect(terminal.drainSemanticEvents().isEmpty)
+    }
+
     @Test("wrong tokens and malformed payloads recover to later valid input")
     func authenticationAndRecovery() throws {
         let token = "right"

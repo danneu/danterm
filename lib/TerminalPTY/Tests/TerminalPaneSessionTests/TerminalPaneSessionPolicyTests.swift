@@ -62,7 +62,6 @@ struct TerminalPaneSessionPolicyTests {
             workingDirectory: "/requested",
             command: "restored",
             launchCommand: "launch",
-            restoreCommandBehavior: .execute,
             environment: [.init(name: "PANE", value: "pane")]
         )
         let facts = TerminalPaneLaunchFacts(
@@ -91,7 +90,6 @@ struct TerminalPaneSessionPolicyTests {
         #expect(input.paneEnvironment == [.init(name: "PANE", value: "pane")])
         #expect(input.command == "restored")
         #expect(input.launchCommand == "launch")
-        #expect(input.restoreCommandBehavior == .execute)
     }
 
     @Test("DanTerm launch values override hostile inherited identity and pane collisions")
@@ -100,7 +98,6 @@ struct TerminalPaneSessionPolicyTests {
             workingDirectory: nil,
             command: nil,
             launchCommand: nil,
-            restoreCommandBehavior: .prefill,
             environment: [
                 .init(name: "DANTERM", value: "1"),
                 .init(name: "DANTERM_SOCK", value: "/owned/socket"),

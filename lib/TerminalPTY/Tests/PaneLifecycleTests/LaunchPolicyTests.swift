@@ -81,25 +81,13 @@ import Testing
         #expect(resolveLaunchPlan(input) == .failure(.invalidDimensions))
     }
 
-    @Test("restore prefill preserves command bytes without executing")
-    func restorePrefillIsByteExact() throws {
-        var input = makeInput()
-        input.command = "printf 'espanol: nino'"
-        input.restoreCommandBehavior = .prefill
-
-        let plan = try resolveLaunchPlan(input).get()
-
-        #expect(plan.initialInput == Array("printf 'espanol: nino'".utf8))
-    }
-
-    @Test("restore execute appends exactly one newline", arguments: [
+    @Test("command input executes with exactly one trailing newline", arguments: [
         ("printf ok", "printf ok\n"),
         ("printf ok\n", "printf ok\n"),
     ])
-    func restoreExecuteNewline(command: String, expected: String) throws {
+    func commandInputExecutes(command: String, expected: String) throws {
         var input = makeInput()
         input.command = command
-        input.restoreCommandBehavior = .execute
 
         let plan = try resolveLaunchPlan(input).get()
 
@@ -111,7 +99,6 @@ import Testing
         var input = makeInput()
         input.command = "restored draft"
         input.launchCommand = "printf launched"
-        input.restoreCommandBehavior = .prefill
 
         let plan = try resolveLaunchPlan(input).get()
 
@@ -128,6 +115,25 @@ import Testing
         let plan = try resolveLaunchPlan(input).get()
 
         #expect(plan.initialInput == nil)
+    }
+
+    @Test("restore metadata remains environment-only")
+    func restoreMetadataProducesNoInput() throws {
+        var input = makeInput()
+        input.paneEnvironment.append(.init(
+            name: "DANTERM_RESTORE_COMMAND",
+            value: "printf restored"
+        ))
+
+        let plan = try resolveLaunchPlan(input).get()
+
+        #expect(plan.initialInput == nil)
+        #expect(plan.attempts.allSatisfy {
+            $0.environment.contains(.init(
+                name: "DANTERM_RESTORE_COMMAND",
+                value: "printf restored"
+            ))
+        })
     }
 }
 
@@ -153,7 +159,6 @@ private func makeInput() -> LaunchPolicyInput {
         ],
         command: nil,
         launchCommand: nil,
-        restoreCommandBehavior: .prefill,
         initialDimensions: TerminalDimensions(columns: 100, rows: 40)
     )
 }
