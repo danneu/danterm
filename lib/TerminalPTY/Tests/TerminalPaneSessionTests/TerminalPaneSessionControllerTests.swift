@@ -1266,6 +1266,11 @@ struct TerminalPaneSessionControllerTests {
             await host.close()
             #expect((await host.resourceSnapshot()).isReleased)
         }
+        // Actor deallocation can lag the last await under scheduler load in
+        // parallel runs; a retain cycle persists, scheduling noise settles.
+        for _ in 0..<40 where releasedController != nil || releasedHost != nil {
+            try await Task.sleep(for: .milliseconds(50))
+        }
         #expect(releasedController == nil)
         #expect(releasedHost == nil)
     }

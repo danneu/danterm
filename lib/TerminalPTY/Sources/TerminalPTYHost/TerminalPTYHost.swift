@@ -106,6 +106,7 @@ public actor TerminalPTYHost {
     private var writeSource: (any DispatchSourceWrite)?
     private var processSource: (any DispatchSourceProcess)?
     private var processSourceActivated = false
+    private var childExitPollSource: (any DispatchSourceTimer)?
     private var graceSource: (any DispatchSourceTimer)?
     private var sessionPollSource: (any DispatchSourceTimer)?
     private var sessionPollStage: TeardownStage?
@@ -124,11 +125,11 @@ public actor TerminalPTYHost {
     private var capturedSubmittedTransitions: [TerminalPTYSubmittedTransition] = []
     private var capturedInputWrites: [[UInt8]] = []
     private var capturedReplyWrites: [[UInt8]] = []
-    private var outputWaiters: [OutputWaiter] = []
     private var reportedResult: PaneLifecycleResult?
-    private var resultWaiters: [CheckedContinuation<PaneLifecycleResult?, Never>] = []
     private var teardownFinished = false
-    private var teardownWaiters: [CheckedContinuation<Void, Never>] = []
+    private var waiterSlots: [Int: WaiterSlot] = [:]
+    private var nextWaiterID = 0
+    private var transientChildWaitInjections = 0
     private var callbacksAfterTeardown = 0
     private var updatePending = false
     private var shouldFinishUpdates = false
@@ -391,20 +392,75 @@ public actor TerminalPTYHost {
     }
 
     /// Suspends until teardown, returning nil when no child result was produced.
+    /// Cancellation resumes the wait with nil without disturbing the pane.
     public func waitForResult() async -> PaneLifecycleResult? {
         if let reportedResult { return reportedResult }
         if teardownFinished { return nil }
-        return await withCheckedContinuation { continuation in
-            resultWaiters.append(continuation)
+        let id = allocateWaiterID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                registerWaiter(id: id, slot: .result(continuation))
+            }
+        } onCancel: {
+            Task { await self.cancelWaiter(id) }
         }
     }
 
     /// Test synchronization waits on observed bytes rather than elapsed time.
+    /// Cancellation resumes the wait with false without disturbing the pane.
     func waitForOutput(containing bytes: [UInt8]) async -> Bool {
         guard bytes.isEmpty == false else { return true }
         if recentOutput.containsSubsequence(bytes) { return true }
-        return await withCheckedContinuation { continuation in
-            outputWaiters.append(OutputWaiter(needle: bytes, continuation: continuation))
+        if teardownFinished { return false }
+        let id = allocateWaiterID()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                registerWaiter(id: id, slot: .output(
+                    OutputWaiter(needle: bytes, continuation: continuation)
+                ))
+            }
+        } onCancel: {
+            Task { await self.cancelWaiter(id) }
+        }
+    }
+
+    /// Waiter identity lets cancellation remove exactly its own continuation.
+    private func allocateWaiterID() -> Int {
+        defer { nextWaiterID += 1 }
+        waiterSlots[nextWaiterID] = .pending
+        return nextWaiterID
+    }
+
+    /// Exactly-once resumption invariant: whichever path removes a waiter's slot
+    /// (delivery, teardown, or cancellation) is the one that resumes it; a
+    /// missing slot is always a no-op. All paths are actor-serialized.
+    private func registerWaiter(id: Int, slot: WaiterSlot) {
+        switch waiterSlots[id] {
+        case .cancelled:
+            waiterSlots[id] = nil
+            slot.resumeCancelled()
+        case .pending:
+            if teardownFinished {
+                waiterSlots[id] = nil
+                slot.resumeCancelled()
+            } else {
+                waiterSlots[id] = slot
+            }
+        default:
+            waiterSlots[id] = nil
+            slot.resumeCancelled()
+        }
+    }
+
+    private func cancelWaiter(_ id: Int) {
+        switch waiterSlots[id] {
+        case .pending:
+            waiterSlots[id] = .cancelled
+        case .cancelled, nil:
+            break
+        case .some(let slot):
+            waiterSlots[id] = nil
+            slot.resumeCancelled()
         }
     }
 
@@ -441,6 +497,7 @@ public actor TerminalPTYHost {
                 readSource != nil,
                 writeSource != nil,
                 processSource != nil,
+                childExitPollSource != nil,
                 graceSource != nil,
                 sessionPollSource != nil,
             ].filter { $0 }.count,
@@ -456,8 +513,13 @@ public actor TerminalPTYHost {
 
     private func waitForTeardown() async {
         if teardownFinished { return }
-        await withCheckedContinuation { continuation in
-            teardownWaiters.append(continuation)
+        let id = allocateWaiterID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                registerWaiter(id: id, slot: .teardown(continuation))
+            }
+        } onCancel: {
+            Task { await self.cancelWaiter(id) }
         }
     }
 
@@ -812,14 +874,35 @@ public actor TerminalPTYHost {
         }
     }
 
+    /// Test-support fault injection replicating macOS publishing NOTE_EXIT
+    /// before the child's wait status is readable: the next `count` exit checks
+    /// behave as that transient regardless of the real waitid answer.
+    package func injectTransientChildWaits(_ count: Int) {
+        transientChildWaitInjections = count
+    }
+
     private func childExited() {
         guard let leaderPID else { return }
         var info = siginfo_t()
-        guard waitid(P_PID, id_t(leaderPID), &info, WEXITED | WNOHANG | WNOWAIT) == 0,
-              info.si_pid == leaderPID
+        var rc = waitid(P_PID, id_t(leaderPID), &info, WEXITED | WNOHANG | WNOWAIT)
+        if transientChildWaitInjections > 0 {
+            transientChildWaitInjections -= 1
+            rc = 0
+            info.si_pid = 0
+        }
+        guard rc == 0, info.si_pid == leaderPID
         else {
+            // macOS can publish NOTE_EXIT before the wait status is readable
+            // (waitid succeeds with si_pid == 0). The process source is a
+            // one-shot notification for an event that already happened, so
+            // dropping this fire would lose the exit forever: poll the dead
+            // child until it becomes waitable. Hard waitid errors stay final.
+            if rc == 0, info.si_pid == 0 {
+                installChildExitPollIfNeeded()
+            }
             return
         }
+        cancelChildExitPoll()
         let status: ChildExitStatus
         switch info.si_code {
         case CLD_EXITED:
@@ -829,6 +912,31 @@ public actor TerminalPTYHost {
         }
         cancelProcessSource()
         process(.childExited(status))
+    }
+
+    private func installChildExitPollIfNeeded() {
+        guard childExitPollSource == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(
+            deadline: .now() + .milliseconds(5),
+            repeating: .milliseconds(5),
+            leeway: .milliseconds(1)
+        )
+        timer.setEventHandler { [weak self] in
+            self?.assumeIsolated { owner in owner.childExitPollFired() }
+        }
+        childExitPollSource = timer
+        timer.activate()
+    }
+
+    private func childExitPollFired() {
+        guard recordSystemCallback() else { return }
+        childExited()
+    }
+
+    private func cancelChildExitPoll() {
+        childExitPollSource?.cancel()
+        childExitPollSource = nil
     }
 
     private func drainCommittedOutput() {
@@ -1066,9 +1174,11 @@ public actor TerminalPTYHost {
         guard reportedResult == nil else { return }
         reportedResult = result
         markUpdatePending()
-        let waiters = resultWaiters
-        resultWaiters.removeAll()
-        for waiter in waiters { waiter.resume(returning: result) }
+        for id in waiterSlots.keys {
+            guard case .result(let continuation) = waiterSlots[id] else { continue }
+            waiterSlots[id] = nil
+            continuation.resume(returning: result)
+        }
     }
 
     private func finishTeardown() {
@@ -1079,14 +1189,21 @@ public actor TerminalPTYHost {
         cancelGrace()
         cancelSessionPoll()
         cancelProcessSource()
+        cancelChildExitPoll()
         leaderPID = nil
         sessionID = nil
-        let waiters = outputWaiters
-        outputWaiters.removeAll()
-        for waiter in waiters { waiter.continuation.resume(returning: false) }
-        let resultWaiters = resultWaiters
-        self.resultWaiters.removeAll()
-        for waiter in resultWaiters { waiter.resume(returning: nil) }
+        for id in waiterSlots.keys {
+            switch waiterSlots[id] {
+            case .output(let waiter):
+                waiterSlots[id] = nil
+                waiter.continuation.resume(returning: false)
+            case .result(let continuation):
+                waiterSlots[id] = nil
+                continuation.resume(returning: nil)
+            default:
+                break
+            }
+        }
         teardownFinished = true
         shouldFinishUpdates = true
     }
@@ -1112,21 +1229,46 @@ public actor TerminalPTYHost {
         shouldFinishUpdates = false
         updateContinuation.finish()
         updateSignalFinished = true
-        let teardownWaiters = teardownWaiters
-        self.teardownWaiters.removeAll()
-        for waiter in teardownWaiters { waiter.resume() }
+        for id in waiterSlots.keys {
+            guard case .teardown(let continuation) = waiterSlots[id] else { continue }
+            waiterSlots[id] = nil
+            continuation.resume()
+        }
     }
 
     private func resumeOutputWaiters() {
-        var remaining: [OutputWaiter] = []
-        for waiter in outputWaiters {
-            if recentOutput.containsSubsequence(waiter.needle) {
-                waiter.continuation.resume(returning: true)
-            } else {
-                remaining.append(waiter)
-            }
+        for id in waiterSlots.keys {
+            guard case .output(let waiter) = waiterSlots[id],
+                  recentOutput.containsSubsequence(waiter.needle)
+            else { continue }
+            waiterSlots[id] = nil
+            waiter.continuation.resume(returning: true)
         }
-        outputWaiters = remaining
+    }
+}
+
+/// One suspended waiter's lifecycle: allocated `.pending`, then either upgraded
+/// to a continuation-bearing case or marked `.cancelled` if the owning task was
+/// cancelled before registration could store its continuation.
+private enum WaiterSlot {
+    case pending
+    case cancelled
+    case result(CheckedContinuation<PaneLifecycleResult?, Never>)
+    case output(OutputWaiter)
+    case teardown(CheckedContinuation<Void, Never>)
+
+    /// Resumes with the "wait abandoned" value for the slot's wait kind.
+    func resumeCancelled() {
+        switch self {
+        case .pending, .cancelled:
+            break
+        case .result(let continuation):
+            continuation.resume(returning: nil)
+        case .output(let waiter):
+            waiter.continuation.resume(returning: false)
+        case .teardown(let continuation):
+            continuation.resume()
+        }
     }
 }
 

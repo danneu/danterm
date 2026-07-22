@@ -564,10 +564,20 @@ struct TerminalPTYHostTests {
                 }
                 #expect((await host.resourceSnapshot()).isReleased)
             }
+            for _ in 0..<40 where releasedHost != nil {
+                try await Task.sleep(for: .milliseconds(50))
+            }
             #expect(releasedHost == nil)
         }
 
-        let descriptorsAfter = try openFileDescriptorCount()
+        // The census is process-wide, and other suites in this process open
+        // PTYs concurrently in parallel runs: a real leak from this loop
+        // persists, neighbor descriptors are transient, so settle briefly.
+        var descriptorsAfter = try openFileDescriptorCount()
+        for _ in 0..<40 where descriptorsAfter > descriptorsBefore {
+            try await Task.sleep(for: .milliseconds(50))
+            descriptorsAfter = try openFileDescriptorCount()
+        }
         #expect(descriptorsAfter <= descriptorsBefore)
     }
 
@@ -1003,6 +1013,96 @@ struct TerminalPTYHostTests {
         host.scrollToBottom()
         #expect(host.fencedSnapshot().scrollProjection.isFollowing)
         await host.close()
+    }
+
+    @Test("cancelled result and output waits resume promptly without teardown", .timeLimit(.minutes(1)))
+    func cancelledWaitsResumePromptly() async throws {
+        // Intent: cancelling a task suspended in waitForResult/waitForOutput
+        //   resumes it promptly (nil/false) while the pane keeps running.
+        // Why it exists: these waits used bare checked continuations that ignore
+        //   cancellation, so a timed-out Swift Testing test never unwound and the
+        //   whole suite sat idle forever holding the PTY.
+        // Scenario: the 2026-07-22 stress run where launchRecipeAndDuplexIO hit
+        //   its 60s time limit yet the run had to be killed by hand.
+        let host = try makeHost(captureTransitions: false)
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+
+        let resultTask = Task { await host.waitForResult() }
+        let outputTask = Task { await host.waitForOutput(containing: Array("__NEVER__".utf8)) }
+        try await Task.sleep(for: .milliseconds(50))
+        resultTask.cancel()
+        outputTask.cancel()
+
+        let cancelledResult = await value(of: resultTask, withinMilliseconds: 2000)
+        let cancelledOutput = await value(of: outputTask, withinMilliseconds: 2000)
+        #expect(cancelledResult == .some(nil))
+        #expect(cancelledOutput == false)
+
+        // A wait born already-cancelled must not register a stranded waiter.
+        let bornCancelled = Task { await host.waitForResult() }
+        bornCancelled.cancel()
+        #expect(await value(of: bornCancelled, withinMilliseconds: 2000) == .some(nil))
+
+        await host.close()
+        #expect((await host.resourceSnapshot()).isReleased)
+    }
+
+    @Test("child exit report survives a transient waitid race", .timeLimit(.minutes(1)))
+    func childExitReportSurvivesTransientWaitidRace() async throws {
+        // Intent: a NOTE_EXIT delivered before the child's wait status is
+        //   readable still converges to a reported result and full teardown.
+        // Why it exists: childExited() dropped the one-shot exit notification
+        //   whenever waitid transiently returned si_pid == 0, wedging
+        //   waitForResult() and close() forever.
+        // Scenario: the 2026-07-22 parallel stress-run hang; the lifecycle trace
+        //   showed "processSourceFired" then "waitid rc=0 errno=0 si_pid=0" and
+        //   no further child events.
+        let host = try makeHost(captureTransitions: false)
+        await host.injectTransientChildWaits(3)
+        await host.start(makeLaunchInput(command: "printf '__READY__\\n'; exit 7"))
+
+        let result = await value(
+            of: Task { await host.waitForResult() },
+            withinMilliseconds: 5000
+        )
+        #expect(result == .exited(.exited(7)))
+
+        let closed = await value(
+            of: Task { await host.close() },
+            withinMilliseconds: 5000
+        )
+        #expect(closed != nil)
+        #expect((await host.resourceSnapshot()).isReleased)
+    }
+}
+
+/// Awaits the task's value but gives up after the bound, returning nil on
+/// timeout WITHOUT requiring the awaited task to finish: pre-fix regressions
+/// suspend forever, and the census helper must stay bounded regardless.
+private func value<T: Sendable>(
+    of task: Task<T, Never>,
+    withinMilliseconds bound: Int
+) async -> T? {
+    let completions = AsyncStream<T> { continuation in
+        Task {
+            continuation.yield(await task.value)
+            continuation.finish()
+        }
+    }
+    return await withTaskGroup(of: T?.self) { group in
+        group.addTask {
+            for await completed in completions { return completed }
+            return nil
+        }
+        group.addTask {
+            try? await Task.sleep(for: .milliseconds(bound))
+            return nil
+        }
+        defer { group.cancelAll() }
+        return await group.next() ?? nil
     }
 }
 
