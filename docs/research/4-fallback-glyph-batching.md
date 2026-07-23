@@ -92,25 +92,62 @@ serialized workload is a prerequisite for making claims.
 
 ## Tasks
 
-- [ ] **Task 1: verify the trigger.** Instrument the executor with aggregate
+- [x] **Task 1: verify the trigger.** Instrument the executor with aggregate
   counters (not per-cell logging, which drowns the signal) that classify
-  every fallback entry by reason:
+  every fallback entry by one mutually exclusive reason:
   - BMP cmap miss
   - multi-scalar cell
   - supplementary-plane scalar
-  - zero glyph returned after fallback resolution
-  - which styled font variant was in effect
 
-  Record the PostScript names of the four trait variants alongside the
-  counters, and cross-check the hot scalars (braille U+2800-28FF, box
-  drawing U+2500-257F, blocks U+2580-259F expected) against the primary
-  font's coverage directly. This is a diagnostic run; its numbers never
-  enter benchmark history. Pivot criteria: if the symbols are covered by the
-  primary font and the fast path rejects them for a fixable reason, fix that
-  instead; if the symbols resolve through a stable already-available cascade
-  font, batch by resolved font; if the dominant fallback reason is
-  multi-scalar content, pivot away from cmap-miss batching entirely, because
-  the proposed mechanism would not attack the observed cost.
+  Record styled font variant and cell width (one or two columns) as
+  cross-cutting dimensions. For each unique `(font variant, BMP scalar)` cmap
+  miss, resolve a fallback font once while diagnostics are enabled and record
+  its PostScript name plus whether that resolved font returns a nonzero glyph;
+  failure after fallback resolution is a secondary outcome, not an entry
+  reason in today's renderer. Bound the scalar report to the hottest entries
+  and emit compact cumulative summaries periodically rather than writing from
+  every cell.
+
+  Gate the probe behind an opt-in environment variable so ordinary rendering
+  and benchmark runs do not pay for it. Record the PostScript names of the
+  four primary trait variants alongside the counters, and cross-check the hot
+  scalars (braille U+2800-28FF, box drawing U+2500-257F, blocks U+2580-259F
+  expected) against those exact fonts directly. Run the probe in an optimized
+  build while scrolling btop's process list. This is a diagnostic run; its
+  numbers never enter benchmark history.
+
+  Pivot criteria: if the symbols are covered by the primary font and the fast
+  path rejects them for a fixable reason, fix that instead; if the symbols
+  resolve through a stable already-available cascade font, batch by resolved
+  font; if the dominant fallback reason is multi-scalar content, supplementary
+  content, or wide cells, pivot away from BMP cmap-miss batching because the
+  proposed mechanism would not attack the observed cost.
+
+  **Result (2026-07-23): confirmed.** An optimized Swift-backend btop run
+  scrolled the process list while an opt-in executor probe accumulated 480
+  drawn frames. Its final report counted 5,426,258 examined text cells and
+  284,611 fallback entries (5.25%). Every fallback was a width-one BMP cmap
+  miss: 284,153 regular and 458 bold, with zero multi-scalar,
+  supplementary-plane, or wide-cell entries.
+
+  The configured primary faces were
+  `.AppleSystemUIFontMonospaced-Regular`,
+  `.AppleSystemUIFontMonospaced-Semibold`,
+  `.AppleSystemUIFontMonospaced-RegularItalic`, and
+  `.AppleSystemUIFontMonospaced-SemiboldItalic`. The hot misses were braille:
+  U+28C0 alone accounted for 252,836 entries, followed by U+28FF (8,246),
+  U+2880 (4,809), U+28E4 (4,784), and other U+2800-28FF scalars. Every
+  observed regular braille miss resolved to `AppleBraille` and returned a
+  nonzero glyph. The only material non-braille miss in the top entries,
+  bold U+21B5 (458), resolved to `Menlo-Bold` and also mapped successfully.
+
+  This rules out the multi-scalar, supplementary-plane, and wide-cell pivots
+  for the captured workload. It also establishes the favorable batching
+  shape: btop's dominant fallback population resolves through one stable font
+  (`AppleBraille`), with a much smaller styled population resolving through a
+  second font. The temporary probe was removed after recording this evidence;
+  `/tmp/danterm-fallback-glyphs.txt` remains a diagnostic artifact, not
+  benchmark history.
 - [ ] **Task 2: add a symbol-churn serialized workload.** Extend the redraw
   suite with a `full-screen-symbol-churn`-style fixture whose grid is
   dominated by braille/box-drawing cells, matching the existing suite's
@@ -147,6 +184,11 @@ serialized workload is a prerequisite for making claims.
 
 ## Results
 
-Not yet run. Update each task above with its evidence and compatible
-before/after medians as it completes, then summarize the verdict on each
-hypothesis here.
+- **Hypothesis 1 -- confirmed for the captured btop workload.** Its fallback
+  traffic is entirely width-one BMP cmap misses, overwhelmingly regular
+  braille resolving to `AppleBraille`; multi-scalar and supplementary-plane
+  content do not explain the hot CTLine path.
+- **Hypotheses 2 and 3 -- not yet tested.** Task 1 shows a stable resolved-font
+  population suitable for batching, but only the symbol-churn baseline,
+  implementation experiment, compatible medians, and re-profile can establish
+  its cost and improvement.
