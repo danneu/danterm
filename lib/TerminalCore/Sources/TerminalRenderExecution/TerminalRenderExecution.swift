@@ -3,6 +3,7 @@ import AppKit
 import CoreGraphics
 import CoreText
 import TerminalRenderPlanning
+import TerminalSpriteGeometry
 
 /// Fixes the regular 13 pt system-monospace grid geometry for one explicit
 /// display scale so later font choices cannot move terminal cell boundaries.
@@ -355,6 +356,7 @@ private extension CGContext {
             var candidateCells: [(cell: RenderTextCell, column: Int)] = []
             var fallbackCells: [(cell: RenderTextCell, column: Int)] = []
             var spriteRects: [CGRect] = []
+            var shadedSpriteRects: [BlockElementShade: [CGRect]] = [:]
             var column = run.startColumn
             for cell in run.cells {
                 if let pattern = BrailleSprite.pattern(for: cell.scalars) {
@@ -364,6 +366,15 @@ private extension CGContext {
                         column: column,
                         metrics: metrics,
                         to: &spriteRects
+                    )
+                } else if let pattern = BlockElementSprite.pattern(for: cell.scalars) {
+                    let shade = BlockElementSprite.shade(for: pattern)
+                    BlockElementSprite.appendRects(
+                        pattern: pattern,
+                        row: run.row,
+                        column: column,
+                        metrics: metrics,
+                        to: &shadedSpriteRects[shade, default: []]
                     )
                 } else if cell.scalars.count == 1,
                    let scalar = cell.scalars.first,
@@ -380,6 +391,11 @@ private extension CGContext {
             if spriteRects.isEmpty == false {
                 setFillColor(foreground)
                 fill(spriteRects)
+            }
+            for (shade, rects) in shadedSpriteRects where rects.isEmpty == false {
+                let alpha = CGFloat(shade.rawValue) / 255
+                setFillColor(foreground.copy(alpha: alpha) ?? foreground)
+                fill(rects)
             }
             var glyphs = Array(repeating: CGGlyph(), count: characters.count)
             if characters.isEmpty == false {

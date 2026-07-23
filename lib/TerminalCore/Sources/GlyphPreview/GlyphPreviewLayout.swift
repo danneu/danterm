@@ -25,7 +25,11 @@ struct GlyphPreviewSection {
 
 let glyphPreviewSections = [
     GlyphPreviewSection(title: "Box Drawing", ranges: [0x2500...0x257F]),
-    GlyphPreviewSection(title: "Block Elements", ranges: [0x2580...0x259F]),
+    GlyphPreviewSection(
+        title: "Block Elements",
+        ranges: [0x2580...0x259F],
+        implementedRanges: [0x2580...0x259F]
+    ),
     GlyphPreviewSection(
         title: "Geometric Shapes",
         ranges: [0x25E2...0x25E5, 0x25F8...0x25FA, 0x25FF...0x25FF]
