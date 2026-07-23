@@ -223,7 +223,7 @@ corpus and share those results the same way.
 - [x] 6. Slice D (inline cluster storage): same loop (sample check:
   malloc/free and GridCell-copy traffic); full cluster/reflow fixture pass
   (PO2).
-- [ ] 7. Final verification: rerun all four workloads unprofiled, save
+- [x] 7. Final verification: rerun all four workloads unprofiled, save
   records with a closing comment, share the full comparison with the user
   for acceptance, update
   `agent-docs/terminal-performance.md` if the investigation workflow
