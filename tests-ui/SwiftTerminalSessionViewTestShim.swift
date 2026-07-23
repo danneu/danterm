@@ -203,7 +203,7 @@ final class TerminalPaneSessionController {
     var onViewportStateChange: ((TerminalPaneViewportState) -> Void)?
     var onPaneMenu: ((TerminalViewportCell) -> Void)?
     var onOpenLink: ((TerminalHyperlink) -> Void)?
-    var onPrimaryHistoryMutation: ((String) -> Void)?
+    var onPrimaryHistoryMutation: (() -> Void)?
     var currentPlan: RenderFramePlan?
     var viewportState: TerminalPaneViewportState
     private(set) var scrolledTopRows: [Int] = []
