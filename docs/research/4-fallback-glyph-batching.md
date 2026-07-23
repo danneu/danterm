@@ -77,11 +77,12 @@ serialized workload is a prerequisite for making claims.
 2. **Per-cell fixed overhead dominates again, not glyph complexity.** As in
    doc 3, the cost is CTLine construction and its per-cell ICU
    `NeedsShapingForGlyphs` walk, not drawing braille outlines. Falsifiable
-   claim (thresholds to be grounded once task 2 records the symbol-churn
-   baseline): after batching fallback cells into per-run `CTFontDrawGlyphs`
-   calls, `CTLineCreateWithAttributedString` falls below 5% of main-thread
-   samples in the task 4 re-profile, and symbol churn lands within 2x of
-   ordinary content churn in compatible benchmark-redraw runs.
+   claim: after batching fallback cells into per-run `CTFontDrawGlyphs` calls,
+   `CTLineCreateWithAttributedString` falls below 5% of main-thread samples in
+   the task 4 re-profile, and symbol churn falls from its 30,003,225 ns/draw
+   baseline to at most 636,060 ns/draw (within 2x the compatible 318,030
+   ns/draw ordinary content-churn result). That requires a reduction of at
+   least 97.88% from the symbol baseline.
 3. **Per-run fallback resolution is cheap enough to stay stateless.** One
    `CTFontCreateForString` (or `CTFontCreateForStringWithLanguage`) per
    fallback run per frame, followed by one `CTFontGetGlyphsForCharacters`
@@ -148,7 +149,7 @@ serialized workload is a prerequisite for making claims.
   second font. The temporary probe was removed after recording this evidence;
   `/tmp/danterm-fallback-glyphs.txt` remains a diagnostic artifact, not
   benchmark history.
-- [ ] **Task 2: add a symbol-churn serialized workload.** Extend the redraw
+- [x] **Task 2: add a symbol-churn serialized workload.** Extend the redraw
   suite with a `full-screen-symbol-churn`-style fixture whose grid is
   dominated by braille/box-drawing cells, matching the existing suite's
   contract (one completed draw per submitted state, 24 dirty rows, 80x24,
@@ -156,6 +157,32 @@ serialized workload is a prerequisite for making claims.
   compatible `just benchmark-redraw` run before any renderer change. The
   baseline should confirm the profile's prediction: symbol churn draws far
   slower than the ~0.32 ms content/style/mixed results.
+
+  **Result (2026-07-23): confirmed.** The committed-history workload identity
+  is `full-screen-symbol-churn-v1-btop-symbol-mix-80x24`. Every 80x24 frame
+  uses all 79 safely writable columns: 1,706 braille cells (90%) and 190
+  box-drawing cells (10%). Symbols change deterministically with each
+  sequence while row styles stay fixed, and the sequence marker remains in
+  the terminal title. Contract tests pin the Unicode cell count, symbol mix,
+  content churn, fixed styling, no scrolling/autowrap, and workload selection.
+
+  The compatible unprofiled run used 15 fresh optimized app batches and 17
+  serialized completed draws per batch (255 measured draws total):
+
+  | Metric | Minimum | Median | Maximum |
+  |---|---:|---:|---:|
+  | Nanoseconds per draw | 29,450,703 | 30,003,225 | 30,533,931 |
+  | Cumulative draw time per batch | 500,661,959 | 510,054,832 | 519,076,836 |
+
+  Every batch reported exactly 17 completed draws and every draw damaged all
+  24 rows. The result is saved in
+  `benchmarks/results/terminal-redraw.jsonl` with comment
+  `unoptimized-fallback-glyph-baseline`. Its 30.003 ms median is 94.3x the
+  compatible 318,030 ns/draw ordinary content-churn result, decisively
+  confirming that the workload exposes the fallback path rather than the
+  existing fast path. The Hypothesis 2 target is therefore grounded at
+  636,060 ns/draw (at most 2x ordinary content churn), a required 97.88%
+  reduction.
 - [ ] **Task 3a: metric-equivalence characterization test.** Before touching
   the executor, add a focused test comparing CTLine's resolved glyph, font,
   and placement against the proposed direct path (resolved fallback font +
@@ -181,6 +208,18 @@ serialized workload is a prerequisite for making claims.
   in an optimized build. Expect `CTLineCreateWithAttributedString` and the
   ICU `NeedsShapingForGlyphs` stack to be effectively absent and overall
   DanTerm CPU to drop substantially. Record hypothesis confirmed or rejected.
+- [ ] **Task 5: add a general geometric-symbol churn workload.** After the
+  btop-specific fallback-batching hypothesis is resolved, add a separate
+  serialized redraw workload that deterministically churns a curated,
+  width-one sprite-candidate set across geometric shapes (U+25A0-U+25FF),
+  block elements (U+2580-U+259F), and box drawing (U+2500-U+257F). Keep
+  `full-screen-symbol-churn` unchanged so its btop-grounded baseline and
+  acceptance threshold remain compatible. Pin the new workload's exact
+  scalar set, cell count, content churn, fixed styling, and identity in
+  contract tests; record a font-rendered baseline and representative scale-1
+  and scale-2 bitmap fixtures. This becomes the comparison workload and
+  rendering contract if these symbols are later replaced with DanTerm-owned
+  sprites.
 
 ## Results
 
@@ -188,7 +227,10 @@ serialized workload is a prerequisite for making claims.
   traffic is entirely width-one BMP cmap misses, overwhelmingly regular
   braille resolving to `AppleBraille`; multi-scalar and supplementary-plane
   content do not explain the hot CTLine path.
-- **Hypotheses 2 and 3 -- not yet tested.** Task 1 shows a stable resolved-font
-  population suitable for batching, but only the symbol-churn baseline,
-  implementation experiment, compatible medians, and re-profile can establish
-  its cost and improvement.
+- **Hypothesis 2 -- baseline established, batching not yet tested.** Symbol
+  churn is 94.3x ordinary content churn, giving task 3b a sensitive benchmark
+  and a concrete target of at most 636,060 ns/draw plus less than 5% of
+  main-thread samples in `CTLineCreateWithAttributedString`.
+- **Hypothesis 3 -- not yet tested.** Task 1 shows a stable resolved-font
+  population suitable for batching, but task 3b must measure whether per-run
+  fallback resolution is cheap enough to meet the grounded target.
