@@ -359,6 +359,7 @@ private extension CGContext {
             var shadedSpriteRects: [BlockElementShade: [CGRect]] = [:]
             var geometricShapeTriangles: [GeometricShapeRenderTriangle] = []
             var powerlinePaths: [PowerlineRenderPath] = []
+            var branchDrawingGeometries: [BranchDrawingRenderGeometry] = []
             var boxDrawingStrokes: [BoxDrawingRenderStroke] = []
             var column = run.startColumn
             for cell in run.cells {
@@ -404,6 +405,13 @@ private extension CGContext {
                         column: column,
                         metrics: metrics
                     )
+                } else if let pattern = BranchDrawingSprite.pattern(for: cell.scalars) {
+                    branchDrawingGeometries.append(BranchDrawingSprite.geometry(
+                        pattern: pattern,
+                        row: run.row,
+                        column: column,
+                        metrics: metrics
+                    ))
                 } else if cell.scalars.count == 1,
                    let scalar = cell.scalars.first,
                    scalar.value <= UInt16.max
@@ -444,6 +452,9 @@ private extension CGContext {
                 for path in powerlinePaths {
                     drawPowerlinePath(path, metrics: metrics)
                 }
+            }
+            for geometry in branchDrawingGeometries {
+                drawBranchDrawingGeometry(geometry, metrics: metrics, foreground: foreground)
             }
             var glyphs = Array(repeating: CGGlyph(), count: characters.count)
             if characters.isEmpty == false {
@@ -587,6 +598,59 @@ private extension CGContext {
             addPath(shape)
             setLineWidth(CGFloat(widthPixels * 2) / scale)
             strokePath()
+        }
+    }
+
+    func drawBranchDrawingGeometry(
+        _ renderGeometry: BranchDrawingRenderGeometry,
+        metrics: TerminalRenderMetrics,
+        foreground: CGColor
+    ) {
+        let scale = metrics.displayScale
+        let origin = renderGeometry.cellOrigin
+        func point(_ point: SpritePixelPoint) -> CGPoint {
+            CGPoint(x: origin.x + CGFloat(point.x) / scale, y: origin.y + CGFloat(point.y) / scale)
+        }
+        saveGState()
+        defer { restoreGState() }
+        clip(to: CGRect(origin: origin, size: metrics.cellSize))
+
+        for item in renderGeometry.geometry.rects {
+            setFillColor(foreground.copy(alpha: CGFloat(item.alpha) / 255) ?? foreground)
+            fill(CGRect(
+                x: origin.x + CGFloat(item.rect.x) / scale,
+                y: origin.y + CGFloat(item.rect.y) / scale,
+                width: CGFloat(item.rect.width) / scale,
+                height: CGFloat(item.rect.height) / scale
+            ))
+        }
+        setStrokeColor(foreground)
+        setShouldAntialias(true)
+        setAllowsAntialiasing(true)
+        setLineCap(.butt)
+        for arc in renderGeometry.geometry.arcs {
+            setLineWidth(CGFloat(arc.width) / scale)
+            beginPath()
+            move(to: point(arc.start))
+            addQuadCurve(to: point(arc.end), control: point(arc.control))
+            strokePath()
+        }
+        if let node = renderGeometry.geometry.node {
+            let rect = CGRect(
+                x: origin.x + CGFloat(node.centerX - node.radius) / scale,
+                y: origin.y + CGFloat(node.centerY - node.radius) / scale,
+                width: CGFloat(node.radius * 2) / scale,
+                height: CGFloat(node.radius * 2) / scale
+            )
+            if node.filled {
+                setFillColor(foreground)
+                fillEllipse(in: rect)
+            } else if node.radius >= Double(node.strokeWidth) / 2 {
+                setStrokeColor(foreground)
+                setLineWidth(CGFloat(node.strokeWidth) / scale)
+                let inset = CGFloat(node.strokeWidth) / (2 * scale)
+                strokeEllipse(in: rect.insetBy(dx: inset, dy: inset))
+            }
         }
     }
 

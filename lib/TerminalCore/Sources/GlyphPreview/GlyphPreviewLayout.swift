@@ -51,7 +51,8 @@ let glyphPreviewSections = [
     ),
     GlyphPreviewSection(
         title: "Branch Drawing private-use glyphs",
-        ranges: [0xF5D0...0xF60D]
+        ranges: [0xF5D0...0xF60D],
+        implementedRanges: [0xF5D0...0xF60D]
     ),
     GlyphPreviewSection(
         title: "Symbols for Legacy Computing",
