@@ -87,6 +87,10 @@ benchmark *args:
 benchmark-core *args:
     python3 ./scripts/terminal-benchmark-suite.py backend=swift-core {{args}}
 
+# Benchmark full-frame and damage-clipped CoreText drawing headlessly.
+benchmark-draw iterations="5":
+    swift run --package-path lib/TerminalCore -c release TerminalDrawBenchmark {{iterations}}
+
 # Run one isolated workload continuously and publish its exact app pid.
 benchmark-loop workload="scrollback-stream" backend="swift":
     ./scripts/terminal-benchmark-profile.sh loop "{{workload}}" "{{backend}}"

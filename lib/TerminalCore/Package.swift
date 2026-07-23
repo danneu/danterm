@@ -10,6 +10,7 @@ let package = Package(
         .library(name: "TerminalRenderPlanning", targets: ["TerminalRenderPlanning"]),
         .library(name: "TerminalRenderExecution", targets: ["TerminalRenderExecution"]),
         .executable(name: "TerminalCoreBenchmark", targets: ["TerminalCoreBenchmark"]),
+        .executable(name: "TerminalDrawBenchmark", targets: ["TerminalDrawBenchmark"]),
     ],
     targets: [
         .target(
@@ -45,6 +46,24 @@ let package = Package(
             name: "TerminalCoreBenchmarkSupport",
             dependencies: ["TerminalCore"],
             path: "Sources/TerminalCoreBenchmarkSupport",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .executableTarget(
+            name: "TerminalDrawBenchmark",
+            dependencies: ["TerminalDrawBenchmarkSupport"],
+            path: "Sources/TerminalDrawBenchmark",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .target(
+            name: "TerminalDrawBenchmarkSupport",
+            dependencies: ["TerminalCore", "TerminalRenderPlanning", "TerminalRenderExecution"],
+            path: "Sources/TerminalDrawBenchmarkSupport",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "TerminalDrawBenchmarkSupportTests",
+            dependencies: ["TerminalDrawBenchmarkSupport", "TerminalCore", "TerminalRenderPlanning"],
+            path: "Tests/TerminalDrawBenchmarkSupportTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
