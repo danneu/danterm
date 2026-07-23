@@ -20,3 +20,4 @@ build/
 .spm-build/
 .swiftpm/
 Package.resolved
+/scripts/__pycache__
