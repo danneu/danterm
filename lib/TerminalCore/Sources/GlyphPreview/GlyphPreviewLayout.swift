@@ -32,7 +32,8 @@ let glyphPreviewSections = [
     ),
     GlyphPreviewSection(
         title: "Geometric Shapes",
-        ranges: [0x25E2...0x25E5, 0x25F8...0x25FA, 0x25FF...0x25FF]
+        ranges: [0x25E2...0x25E5, 0x25F8...0x25FA, 0x25FF...0x25FF],
+        implementedRanges: [0x25E2...0x25E5, 0x25F8...0x25FA, 0x25FF...0x25FF]
     ),
     GlyphPreviewSection(
         title: "Braille Patterns",

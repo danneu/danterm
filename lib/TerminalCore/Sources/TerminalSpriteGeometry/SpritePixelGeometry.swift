@@ -15,3 +15,15 @@ public struct SpritePixelRect: Equatable, Sendable {
         self.height = height
     }
 }
+
+/// Describes a path vertex in cell-local physical pixels without introducing
+/// Core Graphics into deterministic sprite geometry.
+public struct SpritePixelPoint: Equatable, Sendable {
+    public let x: Int
+    public let y: Int
+
+    public init(x: Int, y: Int) {
+        self.x = x
+        self.y = y
+    }
+}

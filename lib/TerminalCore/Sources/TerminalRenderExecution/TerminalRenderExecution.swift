@@ -357,6 +357,7 @@ private extension CGContext {
             var fallbackCells: [(cell: RenderTextCell, column: Int)] = []
             var spriteRects: [CGRect] = []
             var shadedSpriteRects: [BlockElementShade: [CGRect]] = [:]
+            var geometricShapeTriangles: [GeometricShapeRenderTriangle] = []
             var column = run.startColumn
             for cell in run.cells {
                 if let pattern = BrailleSprite.pattern(for: cell.scalars) {
@@ -376,6 +377,15 @@ private extension CGContext {
                         metrics: metrics,
                         to: &shadedSpriteRects[shade, default: []]
                     )
+                } else if let pattern = GeometricShapeSprite.pattern(for: cell.scalars),
+                          let triangle = GeometricShapeSprite.triangle(
+                              pattern: pattern,
+                              row: run.row,
+                              column: column,
+                              metrics: metrics
+                          )
+                {
+                    geometricShapeTriangles.append(triangle)
                 } else if cell.scalars.count == 1,
                    let scalar = cell.scalars.first,
                    scalar.value <= UInt16.max
@@ -396,6 +406,13 @@ private extension CGContext {
                 let alpha = CGFloat(shade.rawValue) / 255
                 setFillColor(foreground.copy(alpha: alpha) ?? foreground)
                 fill(rects)
+            }
+            if geometricShapeTriangles.isEmpty == false {
+                setFillColor(foreground)
+                setStrokeColor(foreground)
+                for triangle in geometricShapeTriangles {
+                    drawGeometricShapeTriangle(triangle, metrics: metrics)
+                }
             }
             var glyphs = Array(repeating: CGGlyph(), count: characters.count)
             if characters.isEmpty == false {
@@ -442,6 +459,50 @@ private extension CGContext {
                     metrics: metrics
                 )
             }
+        }
+    }
+
+    func drawGeometricShapeTriangle(
+        _ triangle: GeometricShapeRenderTriangle,
+        metrics: TerminalRenderMetrics
+    ) {
+        let scale = metrics.displayScale
+        let points = triangle.geometry.points.map {
+            CGPoint(
+                x: triangle.cellOrigin.x + CGFloat($0.x) / scale,
+                y: triangle.cellOrigin.y + CGFloat($0.y) / scale
+            )
+        }
+        guard let first = points.first else { return }
+        let cellRect = CGRect(
+            origin: triangle.cellOrigin,
+            size: metrics.cellSize
+        )
+
+        saveGState()
+        defer { restoreGState() }
+        clip(to: cellRect)
+        setShouldAntialias(true)
+        setAllowsAntialiasing(true)
+        beginPath()
+        move(to: first)
+        for point in points.dropFirst() {
+            addLine(to: point)
+        }
+        closePath()
+
+        switch triangle.geometry.renderStyle {
+        case .fill:
+            fillPath()
+        case let .innerStroke(widthPixels):
+            guard let trianglePath = path else { return }
+            addPath(trianglePath)
+            clip()
+            addPath(trianglePath)
+            setLineWidth(CGFloat(widthPixels * 2) / scale)
+            setLineCap(.butt)
+            setLineJoin(.miter)
+            strokePath()
         }
     }
 
