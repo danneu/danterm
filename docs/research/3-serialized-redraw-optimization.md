@@ -400,3 +400,6 @@ loop time plus benchmark-only acknowledgment IO.
 - `7e990fa` (`perf(terminal): batch glyph draws by styled run`) implements the
   per-run glyph fast path, clipped complex-cell fallback, one-row damage halo,
   and their behavioral tests.
+- `8ebb92c` (`fix(benchmark): serialize redraw acknowledgments`) transfers
+  sequence ownership when a frame is published and retries an exact-grid draw
+  when AppKit merges that frame with older partial invalidation.
