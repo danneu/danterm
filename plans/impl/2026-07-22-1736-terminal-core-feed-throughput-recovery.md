@@ -220,7 +220,7 @@ corpus and share those results the same way.
   their generation updates; derive primary-history observation from the damage
   funnel plus named history-shrink exceptions; prove the premise across every
   committed neutral fixture frame.
-- [ ] 6. Slice D (inline cluster storage): same loop (sample check:
+- [x] 6. Slice D (inline cluster storage): same loop (sample check:
   malloc/free and GridCell-copy traffic); full cluster/reflow fixture pass
   (PO2).
 - [ ] 7. Final verification: rerun all four workloads unprofiled, save
@@ -228,3 +228,18 @@ corpus and share those results the same way.
   for acceptance, update
   `agent-docs/terminal-performance.md` if the investigation workflow
   changed.
+
+## Implementation notes
+
+- Slice D uses a private three-case scalar collection: empty and single-scalar
+  cells are inline, while the second scalar upgrades storage to a spill array.
+  Hot print paths construct the single case directly so they do not allocate a
+  temporary variadic array. Public projections still materialize the existing
+  `[Unicode.Scalar]` API, keeping the representation private and grid behavior
+  unchanged.
+- Slice D relies on the existing behavioral grapheme, width-transition,
+  overwrite/erase/scroll, and resize/reflow suites rather than adding a
+  representation-sensitive memory-layout test. The pre-D sample's
+  one-element-array allocation branch under `printNarrow` disappeared in the
+  post-D sample, which is the direct performance evidence for the structural
+  change.

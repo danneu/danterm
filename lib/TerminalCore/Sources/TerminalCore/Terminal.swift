@@ -113,10 +113,57 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
+    /// Keeps the common empty and one-scalar cell cases inline while spilling grapheme clusters.
+    private enum GridCellScalars: Equatable, Sendable, RandomAccessCollection {
+        case empty
+        case single(Unicode.Scalar)
+        case spill([Unicode.Scalar])
+
+        typealias Index = Int
+        typealias Element = Unicode.Scalar
+
+        var startIndex: Int { 0 }
+
+        var endIndex: Int {
+            switch self {
+            case .empty: 0
+            case .single: 1
+            case let .spill(scalars): scalars.count
+            }
+        }
+
+        subscript(position: Int) -> Unicode.Scalar {
+            switch self {
+            case .empty:
+                preconditionFailure("empty cell scalar storage has no valid index")
+            case let .single(scalar):
+                precondition(position == 0, "single cell scalar storage index out of bounds")
+                return scalar
+            case let .spill(scalars):
+                return scalars[position]
+            }
+        }
+
+        mutating func append(_ scalar: Unicode.Scalar) {
+            switch self {
+            case .empty:
+                self = .single(scalar)
+            case let .single(first):
+                self = .spill([first, scalar])
+            case let .spill(existing):
+                // Release the enum's owner before append so a unique spill grows in place.
+                self = .empty
+                var scalars = existing
+                scalars.append(scalar)
+                self = .spill(scalars)
+            }
+        }
+    }
+
     /// Keeps scalar storage and wide-cell roles together for invariant-preserving mutation.
     private struct GridCell: Equatable, Sendable {
         var kind: TerminalCellKind = .padding
-        var scalars: [Unicode.Scalar] = []
+        var scalars = GridCellScalars.empty
         var style = TerminalStyle()
         var hyperlinkId: Int?
         var contentIdentity: Int?
@@ -1435,7 +1482,7 @@ public struct Terminal: Equatable, Sendable {
             cells: row.cells.map {
                 TerminalCell(
                     kind: $0.kind,
-                    scalars: $0.scalars,
+                    scalars: Array($0.scalars),
                     style: $0.style,
                     hyperlink: $0.hyperlinkId.flatMap { hyperlinkTargets[$0] }
                 )
@@ -2208,7 +2255,7 @@ public struct Terminal: Equatable, Sendable {
                 let scalars: [Unicode.Scalar]?
                 switch cell.kind {
                 case .narrow, .wideHead:
-                    scalars = cell.scalars
+                    scalars = Array(cell.scalars)
                 case .padding:
                     scalars = [" "]
                 case .wideTail, .spacerHead:
@@ -2691,7 +2738,7 @@ public struct Terminal: Equatable, Sendable {
         let cell = windowRow.cells[column]
         return TerminalCell(
             kind: cell.kind,
-            scalars: cell.scalars,
+            scalars: Array(cell.scalars),
             style: cell.style,
             hyperlink: cell.hyperlinkId.flatMap { hyperlinkTargets[$0] }
         )
@@ -3172,7 +3219,6 @@ public struct Terminal: Equatable, Sendable {
                             cell,
                             GridCell(
                                 kind: .wideTail,
-                                scalars: [],
                                 style: cell.style,
                                 hyperlinkId: cell.hyperlinkId,
                                 contentIdentity: cell.contentIdentity
@@ -3276,7 +3322,6 @@ public struct Terminal: Equatable, Sendable {
             if unit.cells.count == 2, columns - column == 1 {
                 packedRows[row].cells[column] = GridCell(
                     kind: .spacerHead,
-                    scalars: [],
                     style: unit.cells[0].style,
                     hyperlinkId: unit.cells[0].hyperlinkId,
                     contentIdentity: unit.cells[0].contentIdentity
@@ -4016,7 +4061,7 @@ public struct Terminal: Equatable, Sendable {
         invalidateInspection(inViewportRows: rows.indices)
         for row in rows.indices {
             rows[row] = GridRow(cells: (0..<columnCount).map { _ in
-                GridCell(kind: .narrow, scalars: ["E"], style: currentStyle)
+                GridCell(kind: .narrow, scalars: .single("E"), style: currentStyle)
             })
         }
         clearPendingMotionState()
@@ -4320,7 +4365,7 @@ public struct Terminal: Equatable, Sendable {
         guard let context = clusterContext else { return }
         let cell = rows[context.target.row].cells[context.target.column]
         lastPrintedCluster = LastPrintedCluster(
-            scalars: cell.scalars,
+            scalars: Array(cell.scalars),
             cellWidth: cell.kind == .wideHead ? 2 : 1
         )
     }
@@ -4413,7 +4458,6 @@ public struct Terminal: Equatable, Sendable {
                 clearCellAndPair(row: target.row, column: target.column)
                 rows[target.row].cells[target.column] = GridCell(
                     kind: .spacerHead,
-                    scalars: [],
                     style: style,
                     hyperlinkId: hyperlinkId,
                     contentIdentity: contentIdentity
@@ -4445,7 +4489,6 @@ public struct Terminal: Equatable, Sendable {
         )
         rows[destination.row].cells[destination.column + 1] = GridCell(
             kind: .wideTail,
-            scalars: [],
             style: style,
             hyperlinkId: hyperlinkId,
             contentIdentity: contentIdentity
@@ -4486,7 +4529,7 @@ public struct Terminal: Equatable, Sendable {
         clearCellAndPair(row: cursor.row, column: cursor.column)
         rows[cursor.row].cells[cursor.column] = GridCell(
             kind: .narrow,
-            scalars: [scalar],
+            scalars: .single(scalar),
             style: currentStyle,
             hyperlinkId: hyperlinkPen,
             contentIdentity: contentIdentity
@@ -4513,7 +4556,6 @@ public struct Terminal: Equatable, Sendable {
                 clearCellAndPair(row: cursor.row, column: cursor.column)
                 rows[cursor.row].cells[cursor.column] = GridCell(
                     kind: .spacerHead,
-                    scalars: [],
                     style: currentStyle,
                     hyperlinkId: hyperlinkPen,
                     contentIdentity: contentIdentity
@@ -4549,14 +4591,13 @@ public struct Terminal: Equatable, Sendable {
         )
         rows[cursor.row].cells[cursor.column] = GridCell(
             kind: .wideHead,
-            scalars: [scalar],
+            scalars: .single(scalar),
             style: currentStyle,
             hyperlinkId: hyperlinkPen,
             contentIdentity: contentIdentity
         )
         rows[cursor.row].cells[cursor.column + 1] = GridCell(
             kind: .wideTail,
-            scalars: [],
             style: currentStyle,
             hyperlinkId: hyperlinkPen,
             contentIdentity: contentIdentity
