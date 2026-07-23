@@ -389,6 +389,14 @@ private extension CGContext {
                         metrics: metrics,
                         to: &shadedSpriteRects[shade, default: []]
                     )
+                } else if let pattern = LegacyComputingSupplementSprite.pattern(for: cell.scalars) {
+                    LegacyComputingSupplementSprite.appendRects(
+                        pattern: pattern,
+                        row: run.row,
+                        column: column,
+                        metrics: metrics,
+                        to: &spriteRects
+                    )
                 } else if let pattern = GeometricShapeSprite.pattern(for: cell.scalars),
                           let triangle = GeometricShapeSprite.triangle(
                               pattern: pattern,

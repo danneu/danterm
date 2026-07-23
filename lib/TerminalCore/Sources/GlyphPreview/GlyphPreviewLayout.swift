@@ -73,6 +73,15 @@ let glyphPreviewSections = [
             0x1CE0B...0x1CE0C,
             0x1CE16...0x1CE19,
             0x1CE51...0x1CEAF,
+        ],
+        implementedRanges: [
+            0x1CC1B...0x1CC1E,
+            0x1CC21...0x1CC3F,
+            0x1CD00...0x1CDE5,
+            0x1CE00...0x1CE01,
+            0x1CE0B...0x1CE0C,
+            0x1CE16...0x1CE19,
+            0x1CE51...0x1CEAF,
         ]
     ),
 ]
