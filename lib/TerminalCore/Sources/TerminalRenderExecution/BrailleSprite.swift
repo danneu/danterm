@@ -7,6 +7,32 @@ struct BrailleDot: Equatable, Sendable {
     let row: Int
 }
 
+/// Describes one half-open dot rectangle in cell-local physical pixels.
+struct BraillePixelRect: Equatable, Sendable {
+    let x: Int
+    let y: Int
+    let width: Int
+    let height: Int
+}
+
+/// Separates braille's local integer-pixel allocation from cell placement and point conversion.
+struct BraillePixelLayout: Equatable, Sendable {
+    let dotWidth: Int
+    let dotHeight: Int
+    let xPositions: [Int]
+    let yPositions: [Int]
+
+    /// Selects a dot rectangle from the shared 2-column by 4-row grid.
+    func rect(for dot: BrailleDot) -> BraillePixelRect {
+        BraillePixelRect(
+            x: xPositions[dot.column],
+            y: yPositions[dot.row],
+            width: dotWidth,
+            height: dotHeight
+        )
+    }
+}
+
 /// Keeps exact braille membership and geometry independent from font fallback.
 enum BrailleSprite {
     static func pattern(for scalars: [Unicode.Scalar]) -> UInt8? {
@@ -24,6 +50,32 @@ enum BrailleSprite {
             guard pattern & (1 << bit) != 0 else { return nil }
             return dot(forBit: bit)
         }
+    }
+
+    /// Allocates the shared dot grid before pattern selection or terminal-cell translation.
+    static func layout(
+        cellWidthPixels: Int,
+        cellHeightPixels: Int
+    ) -> BraillePixelLayout {
+        let dotWidth = max(1, cellWidthPixels / 4)
+        let dotHeight = max(1, min(dotWidth, cellHeightPixels / 8))
+        let xPositions = (0..<2).map { column in
+            let slotMin = column * cellWidthPixels / 2
+            let slotMax = (column + 1) * cellWidthPixels / 2
+            return slotMin + (slotMax - slotMin - dotWidth) / 2
+        }
+        let yPositions = (0..<4).map { row in
+            let slotMin = row * cellHeightPixels / 4
+            let slotMax = (row + 1) * cellHeightPixels / 4
+            return slotMin + (slotMax - slotMin - dotHeight) / 2
+        }
+
+        return BraillePixelLayout(
+            dotWidth: dotWidth,
+            dotHeight: dotHeight,
+            xPositions: xPositions,
+            yPositions: yPositions
+        )
     }
 
     static func rects(
@@ -55,24 +107,21 @@ enum BrailleSprite {
         let scale = metrics.displayScale
         let cellWidth = metrics.cellWidthPixels
         let cellHeight = metrics.cellHeightPixels
-        let dotWidth = max(1, cellWidth / 4)
-        let dotHeight = max(1, min(dotWidth, cellHeight / 8))
+        let layout = layout(
+            cellWidthPixels: cellWidth,
+            cellHeightPixels: cellHeight
+        )
         let cellX = column * cellWidth
         let cellY = row * cellHeight
 
         for bit in 0..<8 where pattern & (1 << bit) != 0 {
             let dot = dot(forBit: bit)
-            let slotMinX = dot.column * cellWidth / 2
-            let slotMaxX = (dot.column + 1) * cellWidth / 2
-            let slotMinY = dot.row * cellHeight / 4
-            let slotMaxY = (dot.row + 1) * cellHeight / 4
-            let x = cellX + slotMinX + (slotMaxX - slotMinX - dotWidth) / 2
-            let y = cellY + slotMinY + (slotMaxY - slotMinY - dotHeight) / 2
+            let pixelRect = layout.rect(for: dot)
             rects.append(CGRect(
-                x: CGFloat(x) / scale,
-                y: CGFloat(y) / scale,
-                width: CGFloat(dotWidth) / scale,
-                height: CGFloat(dotHeight) / scale
+                x: CGFloat(cellX + pixelRect.x) / scale,
+                y: CGFloat(cellY + pixelRect.y) / scale,
+                width: CGFloat(pixelRect.width) / scale,
+                height: CGFloat(pixelRect.height) / scale
             ))
         }
     }

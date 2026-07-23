@@ -7,6 +7,20 @@ import TerminalCore
 import TerminalRenderPlanning
 
 struct BrailleSpriteExecutionTests {
+    @Test("Braille layout is cell-local physical-pixel geometry")
+    func cellLocalPhysicalPixelLayout() {
+        let layout = BrailleSprite.layout(cellWidthPixels: 9, cellHeightPixels: 18)
+
+        #expect(layout.dotWidth == 2)
+        #expect(layout.dotHeight == 2)
+        #expect(layout.xPositions == [1, 5])
+        #expect(layout.yPositions == [1, 5, 10, 14])
+        #expect(
+            layout.rect(for: BrailleDot(column: 1, row: 2))
+                == BraillePixelRect(x: 5, y: 10, width: 2, height: 2)
+        )
+    }
+
     @Test("Sprite membership is exactly one scalar in the Unicode braille block")
     func exactSupportedSet() {
         #expect(BrailleSprite.dots(for: ["\u{2800}"]) == [])
