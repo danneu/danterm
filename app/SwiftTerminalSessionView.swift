@@ -10,6 +10,18 @@ import TerminalRenderExecution
 import TerminalRenderPlanning
 #endif
 
+/// Expands partial row damage so unclipped glyph ink crossing a row boundary is repainted.
+func terminalDamageRowsWithGlyphHalo(_ rows: Set<Int>, rowCount: Int) -> Set<Int> {
+    guard rowCount > 0 else { return [] }
+    var expanded: Set<Int> = []
+    for row in rows where row >= 0 && row < rowCount {
+        expanded.insert(max(0, row - 1))
+        expanded.insert(row)
+        expanded.insert(min(rowCount - 1, row + 1))
+    }
+    return expanded
+}
+
 /// Adapts one headless Swift terminal controller into DanTerm's AppKit pane contract.
 final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValidation, TerminalSession {
     private let controller: TerminalPaneSessionController
@@ -609,7 +621,11 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         if frame.damage.isFull {
             needsDisplay = true
         } else {
-            for row in frame.damage.rows where frame.plan.rows > row {
+            let rows = terminalDamageRowsWithGlyphHalo(
+                frame.damage.rows,
+                rowCount: frame.plan.rows
+            )
+            for row in rows {
                 setNeedsDisplay(NSRect(
                     x: 0,
                     y: CGFloat(row) * metrics.cellSize.height,

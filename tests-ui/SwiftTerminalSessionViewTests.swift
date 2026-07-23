@@ -8,6 +8,25 @@ import CoreGraphics
 func swiftTerminalSessionViewTests() {
     print("SwiftTerminalSessionView")
 
+    uiTest("partial terminal damage includes a bounded one-row glyph halo") {
+        try uiExpect(
+            terminalDamageRowsWithGlyphHalo([0], rowCount: 4) == [0, 1],
+            "top-row damage did not include the following row"
+        )
+        try uiExpect(
+            terminalDamageRowsWithGlyphHalo([2], rowCount: 4) == [1, 2, 3],
+            "middle-row damage did not include both neighboring rows"
+        )
+        try uiExpect(
+            terminalDamageRowsWithGlyphHalo([3], rowCount: 4) == [2, 3],
+            "bottom-row damage escaped the viewport"
+        )
+        try uiExpect(
+            terminalDamageRowsWithGlyphHalo([], rowCount: 4).isEmpty,
+            "empty damage unexpectedly invalidated rows"
+        )
+    }
+
     uiTest("semantic notifications and progress cross the AppKit adapter") {
         let controller = TerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)

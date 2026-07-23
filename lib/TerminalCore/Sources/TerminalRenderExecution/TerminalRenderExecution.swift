@@ -328,24 +328,90 @@ private extension CGContext {
         colorSpace: CGColorSpace
     ) {
         setBlendMode(.normal)
+        let regularFont = metrics.font(bold: false, italic: false)
+        let boldFont = metrics.font(bold: true, italic: false)
+        let italicFont = metrics.font(bold: false, italic: true)
+        let boldItalicFont = metrics.font(bold: true, italic: true)
+        var colors: [UInt32: CGColor] = [:]
+
         for run in runs {
-            let font = metrics.font(bold: run.bold, italic: run.italic)
+            let font = switch (run.bold, run.italic) {
+            case (false, false): regularFont
+            case (true, false): boldFont
+            case (false, true): italicFont
+            case (true, true): boldItalicFont
+            }
+            let colorKey = UInt32(run.foreground.red) << 16
+                | UInt32(run.foreground.green) << 8
+                | UInt32(run.foreground.blue)
+            let foreground = colors[colorKey] ?? run.foreground.cgColor(in: colorSpace)
+            colors[colorKey] = foreground
             let attributes: [NSAttributedString.Key: Any] = [
                 kCTFontAttributeName as NSAttributedString.Key: font,
-                kCTForegroundColorAttributeName as NSAttributedString.Key:
-                    run.foreground.cgColor(in: colorSpace),
+                kCTForegroundColorAttributeName as NSAttributedString.Key: foreground,
                 kCTLigatureAttributeName as NSAttributedString.Key: 0,
             ]
+            var characters: [UniChar] = []
+            var candidateCells: [(cell: RenderTextCell, column: Int)] = []
+            var fallbackCells: [(cell: RenderTextCell, column: Int)] = []
             var column = run.startColumn
             for cell in run.cells {
+                if cell.scalars.count == 1,
+                   let scalar = cell.scalars.first,
+                   scalar.value <= UInt16.max
+                {
+                    characters.append(UniChar(scalar.value))
+                    candidateCells.append((cell, column))
+                } else {
+                    fallbackCells.append((cell, column))
+                }
+                column += cell.columnWidth
+            }
+
+            var glyphs = Array(repeating: CGGlyph(), count: characters.count)
+            if characters.isEmpty == false {
+                CTFontGetGlyphsForCharacters(
+                    font,
+                    &characters,
+                    &glyphs,
+                    characters.count
+                )
+            }
+            var mappedGlyphs: [CGGlyph] = []
+            var positions: [CGPoint] = []
+            for (index, candidate) in candidateCells.enumerated() {
+                let glyph = glyphs[index]
+                guard glyph != 0 else {
+                    fallbackCells.append(candidate)
+                    continue
+                }
+                mappedGlyphs.append(glyph)
+                positions.append(CGPoint(
+                    x: CGFloat(candidate.column) * metrics.cellSize.width,
+                    y: -(CGFloat(run.row) * metrics.cellSize.height
+                        + metrics.baselineOffset)
+                ))
+            }
+
+            if mappedGlyphs.isEmpty == false {
+                setFillColor(foreground)
+                textMatrix = CGAffineTransform(scaleX: 1, y: -1)
+                CTFontDrawGlyphs(
+                    font,
+                    mappedGlyphs,
+                    positions,
+                    mappedGlyphs.count,
+                    self
+                )
+            }
+            for fallback in fallbackCells {
                 drawTextCell(
-                    cell,
+                    fallback.cell,
                     row: run.row,
-                    column: column,
+                    column: fallback.column,
                     attributes: attributes,
                     metrics: metrics
                 )
-                column += cell.columnWidth
             }
         }
     }

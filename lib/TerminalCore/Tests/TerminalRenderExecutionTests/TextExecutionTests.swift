@@ -9,14 +9,14 @@ import TerminalCore
 import TerminalRenderPlanning
 
 struct TextExecutionTests {
-    @Test("A positioned overhanging glyph is clipped to its grid cell", arguments: [1.0, 2.0])
-    func positionedGlyphIsCellClipped(scale: CGFloat) throws {
-        // Intent: a bold-italic glyph with a measured right overhang is
-        //   contained by the executor's one-cell clip at a nonzero position.
-        // Why it exists: an ordinary upright glyph can fit naturally and let a
-        //   missing per-cell clip pass a broad containment probe.
-        // Scenario: styled terminal output reaches toward the next blank cell
-        //   at either standard display scale.
+    @Test("A fast-path glyph may overhang its horizontal grid boundary", arguments: [1.0, 2.0])
+    func positionedFastPathGlyphMayOverhang(scale: CGFloat) throws {
+        // Intent: direct glyph batching preserves the font's horizontal
+        //   overhang instead of paying for a clip around every mapped glyph.
+        // Why it exists: accepting horizontal overhang is the explicit
+        //   correctness trade-off that makes the fast path clip-free.
+        // Scenario: a bold-italic glyph reaches from its terminal cell into an
+        //   adjacent blank cell at either standard display scale.
         let metrics = try #require(TerminalRenderMetrics(displayScale: scale))
         let plan = try makePlan(
             input: "\u{1B}[2;3H\u{1B}[1;3mX",
@@ -27,15 +27,17 @@ struct TextExecutionTests {
         let target = cellRect(row: 1, column: 2, metrics: metrics)
 
         #expect(bitmap.inkCount(in: target) > 0)
+        var neighboringInk = 0
         for row in 0..<3 {
             for column in 0..<5 where row != 1 || column != 2 {
-                #expect(bitmap.inkCount(in: cellRect(
+                neighboringInk += bitmap.inkCount(in: cellRect(
                     row: row,
                     column: column,
                     metrics: metrics
-                )) == 0)
+                ))
             }
         }
+        #expect(neighboringInk > 0)
     }
 
     @Test("Adjacent f and i cells match independently shaped controls")
