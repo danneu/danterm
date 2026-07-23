@@ -392,3 +392,11 @@ intrinsic rasterization, dominated the original renderer. Per-run batching
 removed that fixed call-count cost, reduced compatible serialized redraw
 medians by roughly 97%, and left the sampling profile dominated by idle event
 loop time plus benchmark-only acknowledgment IO.
+
+## Implementation commits
+
+- `98ba9e6` (`docs(perf): close serialized redraw research`) preserves the
+  completed hypothesis, experiments, benchmark results, and profile findings.
+- `7e990fa` (`perf(terminal): batch glyph draws by styled run`) implements the
+  per-run glyph fast path, clipped complex-cell fallback, one-row damage halo,
+  and their behavioral tests.
