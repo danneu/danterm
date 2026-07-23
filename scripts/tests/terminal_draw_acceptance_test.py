@@ -84,6 +84,17 @@ class TerminalDrawAcceptanceTests(unittest.TestCase):
         self.assertTrue(
             ACCEPTANCE.parse_arguments(["redraw=1"])[5],
         )
+        self.assertEqual(
+            ACCEPTANCE.parse_arguments([
+                "workload=full-screen-symbol-churn",
+                "save=0",
+            ])[:2],
+            ("full-screen-symbol-churn", False),
+        )
+        self.assertEqual(
+            ACCEPTANCE.REDRAW_IDENTITIES["full-screen-symbol-churn"],
+            "full-screen-symbol-churn-v1-btop-symbol-mix-80x24",
+        )
 
     def test_latest_committed_requires_every_redraw_compatibility_field(self):
         current = {

@@ -70,7 +70,7 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
                 body = payload.split(b"\x07\x1b[H", 1)[1]
                 rows = body.split(b"\r\n")
                 visible = [
-                    re.sub(rb"\x1b\[[0-9;]*m", b"", row)
+                    re.sub(rb"\x1b\[[0-9;]*m", b"", row).decode()
                     for row in rows
                 ]
 
@@ -93,6 +93,27 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
         self.assertEqual(styles(content_first), styles(content_second))
         self.assertEqual(strip_styles(style_first), strip_styles(style_second))
         self.assertNotEqual(styles(style_first), styles(style_second))
+
+    def test_symbol_churn_models_btop_with_ninety_percent_braille(self):
+        first = PRODUCER.redraw_screen("full-screen-symbol-churn", 1)
+        second = PRODUCER.redraw_screen("full-screen-symbol-churn", 2)
+        strip_metadata = lambda payload: payload.split(b"\x07\x1b[H", 1)[1]
+        strip_styles = lambda payload: re.sub(
+            rb"\x1b\[[0-9;]*m", b"", strip_metadata(payload)
+        ).decode().replace("\r\n", "")
+        styles = lambda payload: re.findall(
+            rb"\x1b\[[0-9;]*m", strip_metadata(payload)
+        )
+
+        visible = strip_styles(first)
+        braille = sum("\u2800" <= character <= "\u28ff" for character in visible)
+        box_drawing = sum("\u2500" <= character <= "\u257f" for character in visible)
+
+        self.assertEqual(len(visible), 79 * 24)
+        self.assertEqual(braille, 1_706)
+        self.assertEqual(box_drawing, 190)
+        self.assertNotEqual(strip_styles(first), strip_styles(second))
+        self.assertEqual(styles(first), styles(second))
 
     def test_redraw_workload_alternates_writes_and_exact_draw_acknowledgments(self):
         events = []

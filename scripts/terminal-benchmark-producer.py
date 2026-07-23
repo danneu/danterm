@@ -63,11 +63,26 @@ REDRAW_WORKLOADS = (
     "full-screen-content-churn",
     "full-screen-style-churn",
     "full-screen-mixed-churn",
+    "full-screen-symbol-churn",
 )
 
 
+def symbol_churn_content(sequence, row, width):
+    """Build one btop-weighted row with 90% braille and 10% box drawing."""
+    box_drawing = "\u2500\u2502\u250c\u2510\u2514\u2518\u251c\u2524\u252c\u2534\u253c"
+    cells = []
+    for column in range(width):
+        index = row * width + column
+        if index % 10 == 0:
+            cells.append(box_drawing[(sequence + row + column) % len(box_drawing)])
+        else:
+            pattern = 1 + (sequence * 37 + row * 17 + column * 29) % 255
+            cells.append(chr(0x2800 + pattern))
+    return "".join(cells)
+
+
 def redraw_screen(workload, sequence, columns=80, rows=24):
-    """Build one dense ASCII pseudo-TUI frame without scrolling or last-column writes."""
+    """Build one dense pseudo-TUI frame without scrolling or last-column writes."""
     if workload not in REDRAW_WORKLOADS:
         raise ValueError(f"unknown redraw workload: {workload}")
     title = (
@@ -78,14 +93,18 @@ def redraw_screen(workload, sequence, columns=80, rows=24):
     lines = [f"\x1b]0;{title}\x07\x1b[H"]
     width = columns - 1
     for row in range(rows):
-        content_sequence = 0 if workload == "full-screen-style-churn" else sequence
-        label = (
-            f" {row + 1:02d}  branch feature/redraw  item "
-            f"{(content_sequence * 17 + row * 7) % 10000:04d}  "
-            f"{'working tree clean' if row % 3 else 'modified benchmark.swift'}"
-        )
-        content = label.ljust(width, ".")[:width]
-        style_sequence = 0 if workload == "full-screen-content-churn" else sequence
+        if workload == "full-screen-symbol-churn":
+            content = symbol_churn_content(sequence, row, width)
+            style_sequence = 0
+        else:
+            content_sequence = 0 if workload == "full-screen-style-churn" else sequence
+            label = (
+                f" {row + 1:02d}  branch feature/redraw  item "
+                f"{(content_sequence * 17 + row * 7) % 10000:04d}  "
+                f"{'working tree clean' if row % 3 else 'modified benchmark.swift'}"
+            )
+            content = label.ljust(width, ".")[:width]
+            style_sequence = 0 if workload == "full-screen-content-churn" else sequence
         red = 40 + (style_sequence * 17 + row * 11) % 180
         green = 40 + (style_sequence * 23 + row * 13) % 180
         blue = 40 + (style_sequence * 29 + row * 7) % 180
