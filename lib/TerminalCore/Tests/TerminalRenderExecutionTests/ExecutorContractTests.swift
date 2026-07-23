@@ -39,6 +39,65 @@ struct ExecutorContractTests {
         #expect(incremental.bytes == full.bytes)
     }
 
+    @Test("Dirty-rect row clipping is pixel-identical to a fresh full frame")
+    func dirtyRectRedrawMatchesFullFrame() throws {
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
+        var terminal = try #require(Terminal(columns: 5, rows: 3))
+        terminal.feed(Array("old\r\nkeep\r\nlast".utf8))
+        let presentation = RenderPresentation(
+            theme: .dark,
+            isCursorVisible: false,
+            cursorShape: .block
+        )
+        let previous = planFrame(for: terminal, presentation: presentation)
+
+        terminal.feed(Array("\u{1B}[2;1H\u{1B}[41;37;4mNEW".utf8))
+        let current = planFrame(for: terminal, presentation: presentation)
+        let dirtyRect = CGRect(
+            x: 0,
+            y: metrics.cellSize.height,
+            width: metrics.cellSize.width * 5,
+            height: metrics.cellSize.height
+        )
+
+        let incremental = try renderDirtyRectBitmap(
+            previous: previous,
+            current: current,
+            dirtyRect: dirtyRect,
+            metrics: metrics
+        )
+        let full = try renderBitmap(plan: current, metrics: metrics)
+
+        #expect(incremental.bytes == full.bytes)
+    }
+
+    @Test("Full-grid dirty rect uses the complete frame plan")
+    func fullGridDirtyRectRedrawMatchesFullFrame() throws {
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
+        var terminal = try #require(Terminal(columns: 5, rows: 3))
+        terminal.feed(Array("old\r\nkeep\r\nlast".utf8))
+        let presentation = RenderPresentation(
+            theme: .dark,
+            isCursorVisible: false,
+            cursorShape: .block
+        )
+        let previous = planFrame(for: terminal, presentation: presentation)
+
+        terminal.feed(Array("\u{1B}[H\u{1B}[44;37mwhole frame changed".utf8))
+        let current = planFrame(for: terminal, presentation: presentation)
+        let frameSize = try #require(renderFrameSize(for: current, metrics: metrics))
+
+        let incremental = try renderDirtyRectBitmap(
+            previous: previous,
+            current: current,
+            dirtyRect: CGRect(origin: .zero, size: frameSize.pointSize),
+            metrics: metrics
+        )
+        let full = try renderBitmap(plan: current, metrics: metrics)
+
+        #expect(incremental.bytes == full.bytes)
+    }
+
     @Test("Rendering styled fallback content cannot alter regular-face metrics")
     func renderingDoesNotAlterMetrics() throws {
         let before = try #require(TerminalRenderMetrics(displayScale: 2))

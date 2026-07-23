@@ -57,6 +57,61 @@ struct RenderMetricsTests {
 
         #expect(renderFrameSize(for: plan, metrics: metrics) == nil)
     }
+
+    @Test("Dirty rect selects every partially overlapping row")
+    func dirtyRectSelectsPartialRows() throws {
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
+        let height = metrics.cellSize.height
+        let dirtyRect = CGRect(x: 0, y: height / 2, width: 10, height: height * 1.5)
+
+        #expect(terminalRows(intersecting: dirtyRect, metrics: metrics, rowCount: 4) == 0..<2)
+    }
+
+    @Test("Dirty rect excludes a row that only abuts its edge")
+    func dirtyRectExcludesAbuttingRow() throws {
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
+        let height = metrics.cellSize.height
+        let dirtyRect = CGRect(x: 0, y: height, width: 10, height: height)
+
+        #expect(terminalRows(intersecting: dirtyRect, metrics: metrics, rowCount: 4) == 1..<2)
+    }
+
+    @Test("Dirty rect clips partial overlap to the grid")
+    func dirtyRectClipsToGrid() throws {
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
+        let height = metrics.cellSize.height
+        let dirtyRect = CGRect(x: 0, y: -height / 2, width: 10, height: height)
+
+        #expect(terminalRows(intersecting: dirtyRect, metrics: metrics, rowCount: 4) == 0..<1)
+    }
+
+    @Test(
+        "Dirty rect outside the grid or without area selects no rows",
+        arguments: [
+            CGRect(x: 0, y: -20, width: 10, height: 5),
+            CGRect(x: 0, y: 100, width: 10, height: 5),
+            CGRect(x: 0, y: 0, width: 0, height: 10),
+            CGRect(x: 0, y: 0, width: 10, height: 0),
+        ]
+    )
+    func dirtyRectWithoutGridAreaSelectsNoRows(dirtyRect: CGRect) throws {
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
+
+        #expect(terminalRows(intersecting: dirtyRect, metrics: metrics, rowCount: 4).isEmpty)
+    }
+
+    @Test("Full-grid dirty rect selects the complete row range at display scale 2")
+    func fullGridDirtyRectSelectsEveryRow() throws {
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
+        let dirtyRect = CGRect(
+            x: 0,
+            y: 0,
+            width: metrics.cellSize.width * 8,
+            height: metrics.cellSize.height * 4
+        )
+
+        #expect(terminalRows(intersecting: dirtyRect, metrics: metrics, rowCount: 4) == 0..<4)
+    }
 }
 
 private func largestMetricsWhoseTwoColumnFrameOverflows() -> TerminalRenderMetrics? {

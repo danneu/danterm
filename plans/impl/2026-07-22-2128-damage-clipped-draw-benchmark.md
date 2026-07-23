@@ -195,7 +195,7 @@ workload=incremental-screen-updates backend=swift`, and core microbench
       delivered dirty-row reporting; refine the draw microbenchmark to 15
       duration-stable 400 ms batches, then record both baselines while the real
       view still performs full-frame drawing.
-- [ ] 3. Apply dirty-rect row clipping without a backing-store change, prove it
+- [x] 3. Apply dirty-rect row clipping without a backing-store change, prove it
       with pixel-equivalence tests, and retain it only if the localized-update
       acceptance benchmark improves materially outside the baseline ranges
       without regressing full-frame drawing.
@@ -230,3 +230,16 @@ workload=incremental-screen-updates backend=swift`, and core microbench
   (481.62-500.95 ms), or 18.13 ms per draw (17.84-18.55 ms across batch means).
   Each batch exceeded the 400 ms direct-draw-work floor; end-to-end time was
   recorded only as a secondary diagnostic.
+- Dirty-rect row clipping retained after the production-path benchmark proved a
+  clear improvement. All 15 batches delivered 1,315 separate one-row draws.
+  Mean time per draw had a 0.517 ms median (0.511-0.526 ms), about 97.1% below
+  the 18.13 ms baseline and wholly separated from its 17.84-18.55 ms range.
+  Duration calibration necessarily increased the work per batch from 27 to
+  1,315 draws, so raw cumulative batch time (679.79 ms median,
+  671.81-691.77 ms) is a sampling-floor diagnostic rather than an equal-work
+  before/after statistic.
+- The full-frame draw controls did not regress: 80x24 median 51.12 ms versus
+  53.82 ms baseline, and 160x50 median 213.70 ms versus 223.83 ms baseline.
+  The optimized styled-screen app workload remained noise-scale stable at
+  833.02 ms final-draw median versus 823.98 ms baseline; the benchmark's
+  compatible committed delta was -2.05%.

@@ -139,6 +139,33 @@ public func renderFrameSize(
     )
 }
 
+/// Converts AppKit's point-space repaint region into the exact grid rows whose
+/// contents must be present in a clipped frame plan.
+public func terminalRows(
+    intersecting dirtyRect: CGRect,
+    metrics: TerminalRenderMetrics,
+    rowCount: Int
+) -> Range<Int> {
+    guard rowCount > 0, dirtyRect.isEmpty == false,
+          dirtyRect.minY.isFinite, dirtyRect.maxY.isFinite
+    else {
+        return 0..<0
+    }
+
+    let gridHeight = metrics.cellSize.height * CGFloat(rowCount)
+    guard gridHeight.isFinite else { return 0..<0 }
+    let clippedMinY = max(0, dirtyRect.minY)
+    let clippedMaxY = min(gridHeight, dirtyRect.maxY)
+    guard clippedMinY < clippedMaxY else { return 0..<0 }
+
+    let lowerRow = max(0, Int(floor(clippedMinY / metrics.cellSize.height)))
+    let upperRow = min(
+        rowCount,
+        Int(ceil(clippedMaxY / metrics.cellSize.height))
+    )
+    return lowerRow..<max(lowerRow, upperRow)
+}
+
 /// Executes every planned layer in fixed order while borrowing the caller's
 /// context without retaining or changing its state.
 public func drawRenderFrame(

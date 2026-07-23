@@ -132,7 +132,22 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         context.setFillColor(Self.cgColor(background))
         context.fill(dirtyRect)
         if let frame {
+            #if DANTERM_UI_TEST
             drawRenderFrame(frame.plan, metrics: frame.metrics, in: context)
+            #else
+            let rows = terminalRows(
+                intersecting: dirtyRect,
+                metrics: frame.metrics,
+                rowCount: frame.plan.rows
+            )
+            let plan = rows == 0..<frame.plan.rows
+                ? frame.plan
+                : clipFramePlan(frame.plan, to: TerminalDamage(rows: Set(rows)))
+            context.saveGState()
+            context.clip(to: dirtyRect)
+            drawRenderFrame(plan, metrics: frame.metrics, in: context)
+            context.restoreGState()
+            #endif
             #if DANTERM_TERMINAL_BENCHMARK
             let drawDurationNanoseconds =
                 DispatchTime.now().uptimeNanoseconds - drawStartedNanoseconds
