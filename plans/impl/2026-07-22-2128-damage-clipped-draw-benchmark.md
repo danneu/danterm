@@ -199,9 +199,9 @@ workload=incremental-screen-updates backend=swift`, and core microbench
       with pixel-equivalence tests, and retain it only if the localized-update
       acceptance benchmark improves materially outside the baseline ranges
       without regressing full-frame drawing.
-- [ ] 4. Only if benchmark evidence shows AppKit expands localized dirty rects,
-      A/B test a per-view backing-store format change as a separate commit and
-      retain it only if it adds a measured acceptance-benchmark improvement.
+- [x] 4. Close the conditional backing-store experiment without a code change:
+      the acceptance benchmark delivered exact one-row dirty rects, so AppKit
+      did not exhibit the expansion that would justify the A/B test.
 
 ## Implementation notes
 
@@ -243,3 +243,8 @@ workload=incremental-screen-updates backend=swift`, and core microbench
   The optimized styled-screen app workload remained noise-scale stable at
   833.02 ms final-draw median versus 823.98 ms baseline; the benchmark's
   compatible committed delta was -2.05%.
+- The backing-store A/B test was not run. Every localized acceptance batch
+  delivered exact one-row dirty rects both before and after row clipping, so
+  the conditional evidence gate for changing the per-view backing-store format
+  was false. Making that production change anyway would be unmeasured
+  speculation outside the plan's acceptance rule.
