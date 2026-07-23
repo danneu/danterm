@@ -112,7 +112,7 @@ public func executeDrawScenario(
 /// Measures every standard workload with calibration excluded and a fixed batch per reported sample.
 public func measureDrawBenchmarks(
     iterations: Int,
-    targetNanoseconds: UInt64 = 1_000_000_000
+    targetNanoseconds: UInt64 = 400_000_000
 ) throws -> DrawBenchmarkReport {
     precondition(iterations >= 2)
     precondition(targetNanoseconds > 0)

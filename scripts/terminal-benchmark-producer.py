@@ -8,6 +8,57 @@ from pathlib import Path
 from terminal_benchmark_fixtures import iter_bytes, load_corpus, write_all
 
 
+def localized_draw_update(sequence, row):
+    """Build one fixed-row update whose marker lets the app acknowledge its draw."""
+    marker = f"DANTERM-BENCH-LOCALIZED-{sequence:06d}"
+    return (
+        f"\x1b[{row};1H"
+        f"\x1b[38;2;237;158;86m{marker}"
+        "\x1b[38;2;129;202;191m status"
+        "\x1b[38;2;207;171;224m metrics"
+        "\x1b[0m\x1b[K"
+    ).encode()
+
+
+def localized_draw_ready(row):
+    """Build the excluded settling update that drains setup invalidation."""
+    return (
+        f"\x1b[{row};1H"
+        "\x1b[38;2;129;202;191mDANTERM-BENCH-LOCALIZED-READY"
+        "\x1b[0m\x1b[K"
+    ).encode()
+
+
+def localized_draw_initial_screen(start_marker, columns, rows):
+    """Build one dense styled screen before timing localized updates."""
+    lines = ["\x1b[2J\x1b[H"]
+    for row in range(1, rows + 1):
+        label = start_marker if row == rows else f"localized draw baseline row {row:02d}"
+        content = label.ljust(columns - 1)[:columns - 1]
+        if row == rows:
+            lines.append(f"\x1b[38;2;207;171;224m{content}\x1b[0m")
+            continue
+        cells = []
+        for column in range(0, len(content), 4):
+            red = 40 + (row * 13 + column * 7) % 180
+            green = 40 + (row * 17 + column * 11) % 180
+            blue = 40 + (row * 19 + column * 5) % 180
+            cells.append(
+                f"\x1b[38;2;{red};{green};{blue}m{content[column:column + 4]}"
+            )
+        lines.append("".join(cells) + "\x1b[0m")
+        if row != rows:
+            lines.append("\r\n")
+    return "".join(lines).encode()
+
+
+def run_localized_draw_workload(*, update_count, row, write, await_draw):
+    """Serialize fixed-row updates by waiting for each real draw to complete."""
+    for sequence in range(update_count):
+        write(localized_draw_update(sequence, row))
+        await_draw(sequence)
+
+
 def wait_for_target_geometry(
     target, terminal_size, monotonic, sleep, timeout_seconds=20
 ):
@@ -85,10 +136,16 @@ def main():
     environment = os.environ
     root = Path(__file__).resolve().parent.parent
     workload_name = environment["DANTERM_TERMINAL_BENCHMARK_WORKLOAD"]
-    try:
-        workload = load_corpus(root)[workload_name]
-    except KeyError as error:
-        raise SystemExit(f"unknown benchmark workload: {workload_name}") from error
+    localized_update_count = int(
+        environment.get("DANTERM_TERMINAL_BENCHMARK_LOCALIZED_UPDATES", "0")
+    )
+    if localized_update_count > 0:
+        workload = None
+    else:
+        try:
+            workload = load_corpus(root)[workload_name]
+        except KeyError as error:
+            raise SystemExit(f"unknown benchmark workload: {workload_name}") from error
 
     backend = environment["DANTERM_TERMINAL_BENCHMARK_BACKEND"]
     start_ack = environment["DANTERM_TERMINAL_BENCHMARK_START_ACK"]
@@ -117,6 +174,49 @@ def main():
             }, stream, sort_keys=True)
 
     try:
+        if localized_update_count > 0:
+            achieved = wait_for_target_geometry(
+                target, lambda: os.get_terminal_size(1), time.monotonic, time.sleep
+            )
+            Path(geometry_ready).touch()
+            write_all(
+                1,
+                localized_draw_initial_screen(
+                    environment["DANTERM_TERMINAL_BENCHMARK_START_MARKER"],
+                    target.columns,
+                    target.lines,
+                ),
+            )
+            wait_for_path(
+                start_ack, "timed out waiting for app-side start-marker observation"
+            )
+            wait_for_path(
+                environment["DANTERM_TERMINAL_BENCHMARK_START_DRAW_ACK"],
+                "timed out waiting for start frame draw",
+            )
+            write_all(1, localized_draw_ready(max(1, target.lines // 2)))
+            wait_for_path(
+                environment["DANTERM_TERMINAL_BENCHMARK_READY_DRAW_ACK"],
+                "timed out waiting for localized settling draw",
+            )
+            started = time.monotonic_ns()
+            acknowledgment_prefix = environment[
+                "DANTERM_TERMINAL_BENCHMARK_LOCALIZED_DRAW_ACK_PREFIX"
+            ]
+            run_localized_draw_workload(
+                update_count=localized_update_count,
+                row=max(1, target.lines // 2),
+                write=lambda chunk: write_all(1, chunk),
+                await_draw=lambda sequence: wait_for_path(
+                    f"{acknowledgment_prefix}-{sequence:06d}",
+                    f"timed out waiting for localized draw {sequence}",
+                ),
+            )
+            write_all(1, completion)
+            write_result(time.monotonic_ns() - started, achieved)
+            wait_for_path(draw_result, "timed out waiting for final draw acknowledgment")
+            return
+
         run_workload(
             mode=environment.get("DANTERM_BENCHMARK_MODE", "measure"),
             target=target,

@@ -2,6 +2,7 @@
 // It resizes the window to a requested grid, then observes the exact Swift frame
 // consumed by draw without adding hooks to TerminalCore.
 import Cocoa
+import TerminalRenderExecution
 import TerminalRenderPlanning
 
 #if DANTERM_TERMINAL_BENCHMARK
@@ -78,9 +79,15 @@ final class TerminalBenchmarkObserver {
     private let completionMarker: String
     private let expectedFinalState: String
     private let startAcknowledgmentPath: String
+    private let startDrawAcknowledgmentPath: String?
+    private let readyDrawAcknowledgmentPath: String?
+    private let localizedDrawAcknowledgmentPrefix: String?
     private let resultPath: String
     private var startNanoseconds: UInt64?
     private var completed = false
+    private var localizedSequences = Set<Int>()
+    private var localizedDrawDurations: [UInt64] = []
+    private var localizedDirtyRowCounts: [Int] = []
 
     init?(environment: [String: String]) {
         guard let startMarker = environment["DANTERM_TERMINAL_BENCHMARK_START_MARKER"],
@@ -93,35 +100,97 @@ final class TerminalBenchmarkObserver {
         self.completionMarker = completionMarker
         self.expectedFinalState = expectedFinalState
         self.startAcknowledgmentPath = startAcknowledgmentPath
+        self.startDrawAcknowledgmentPath =
+            environment["DANTERM_TERMINAL_BENCHMARK_START_DRAW_ACK"]
+        self.readyDrawAcknowledgmentPath =
+            environment["DANTERM_TERMINAL_BENCHMARK_READY_DRAW_ACK"]
+        self.localizedDrawAcknowledgmentPrefix =
+            environment["DANTERM_TERMINAL_BENCHMARK_LOCALIZED_DRAW_ACK_PREFIX"]
         self.resultPath = resultPath
     }
 
     /// Records the app-side observation before a newly parsed frame becomes drawable.
     func observePublishedFrame(_ plan: RenderFramePlan) {
-        guard startNanoseconds == nil, frameText(plan).contains(startMarker) else { return }
+        let text = frameText(plan)
+        guard startNanoseconds == nil, text.contains(startMarker) else { return }
         startNanoseconds = DispatchTime.now().uptimeNanoseconds
         FileManager.default.createFile(atPath: startAcknowledgmentPath, contents: Data())
     }
 
     /// Acknowledges the consumed frame only after its synchronous drawing work returns.
-    func observeCompletedDraw(_ plan: RenderFramePlan) {
+    func observeCompletedDraw(
+        _ plan: RenderFramePlan,
+        dirtyRect: CGRect,
+        metrics: TerminalRenderMetrics,
+        drawDurationNanoseconds: UInt64
+    ) {
         guard completed == false, let startNanoseconds else { return }
         let text = frameText(plan)
+        if text.contains(startMarker), let startDrawAcknowledgmentPath {
+            FileManager.default.createFile(
+                atPath: startDrawAcknowledgmentPath,
+                contents: Data()
+            )
+        }
+        if text.contains("DANTERM-BENCH-LOCALIZED-READY"),
+           let readyDrawAcknowledgmentPath
+        {
+            FileManager.default.createFile(
+                atPath: readyDrawAcknowledgmentPath,
+                contents: Data()
+            )
+        }
+        if let sequence = localizedSequence(in: text),
+           localizedSequences.insert(sequence).inserted
+        {
+            localizedDrawDurations.append(drawDurationNanoseconds)
+            localizedDirtyRowCounts.append(
+                dirtyRowCount(for: dirtyRect, metrics: metrics, rowCount: plan.rows)
+            )
+            if let localizedDrawAcknowledgmentPrefix {
+                FileManager.default.createFile(
+                    atPath: "\(localizedDrawAcknowledgmentPrefix)-\(String(format: "%06d", sequence))",
+                    contents: Data()
+                )
+            }
+        }
         guard text.contains(completionMarker), text.contains(expectedFinalState) else { return }
         completed = true
         let elapsed = DispatchTime.now().uptimeNanoseconds - startNanoseconds
-        let object: [String: Any] = [
+        var object: [String: Any] = [
             "clock": "dispatch-uptime-nanoseconds",
             "elapsedNanoseconds": elapsed,
             "event": "final-draw-completed",
             "expectedFinalState": expectedFinalState,
         ]
+        if localizedDrawDurations.isEmpty == false {
+            object["cumulativeDrawNanoseconds"] = localizedDrawDurations.reduce(0, +)
+            object["drawCount"] = localizedDrawDurations.count
+            object["dirtyRowCounts"] = localizedDirtyRowCounts
+        }
         do {
             let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
             try data.write(to: URL(fileURLWithPath: resultPath), options: .atomic)
         } catch {
             print("[benchmark] Failed to write final-draw result: \(error)")
         }
+    }
+
+    private func localizedSequence(in text: String) -> Int? {
+        guard let marker = text.range(of: "DANTERM-BENCH-LOCALIZED-") else { return nil }
+        let suffix = text[marker.upperBound...].prefix(6)
+        return suffix.count == 6 ? Int(suffix) : nil
+    }
+
+    private func dirtyRowCount(
+        for rect: CGRect,
+        metrics: TerminalRenderMetrics,
+        rowCount: Int
+    ) -> Int {
+        guard rowCount > 0, rect.isEmpty == false else { return 0 }
+        let first = min(rowCount, max(0, Int(floor(rect.minY / metrics.cellSize.height))))
+        let end = min(rowCount, max(0, Int(ceil(rect.maxY / metrics.cellSize.height))))
+        return max(0, end - first)
     }
 
     private func frameText(_ plan: RenderFramePlan) -> String {

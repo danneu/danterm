@@ -3,6 +3,7 @@
 import importlib.util
 import os
 import pathlib
+import re
 import sys
 import unittest
 
@@ -17,6 +18,51 @@ SPEC.loader.exec_module(PRODUCER)
 
 
 class TerminalBenchmarkProducerTests(unittest.TestCase):
+    def test_localized_draw_updates_are_fixed_row_writes_without_full_screen_commands(self):
+        first = PRODUCER.localized_draw_update(0, row=12)
+        second = PRODUCER.localized_draw_update(1, row=12)
+
+        self.assertTrue(first.startswith(b"\x1b[12;1H"))
+        self.assertIn(b"DANTERM-BENCH-LOCALIZED-000000", first)
+        self.assertIn(b"DANTERM-BENCH-LOCALIZED-000001", second)
+        self.assertNotIn(b"\x1b[2J", first)
+        self.assertNotIn(b"\x1b[r", first)
+        self.assertNotIn(b"\n", first)
+        self.assertIn(
+            b"DANTERM-BENCH-LOCALIZED-READY",
+            PRODUCER.localized_draw_ready(row=12),
+        )
+
+    def test_localized_draw_setup_fills_the_grid_without_triggering_autowrap(self):
+        payload = PRODUCER.localized_draw_initial_screen("START-MARKER", 80, 24)
+        visible_rows = [
+            re.sub(rb"\x1b\[[0-9;]*[A-Za-z]", b"", row)
+            for row in payload.removeprefix(b"\x1b[2J\x1b[H").split(b"\r\n")
+        ]
+
+        self.assertEqual(len(visible_rows), 24)
+        self.assertTrue(all(len(row) == 79 for row in visible_rows))
+        self.assertIn(b"START-MARKER", visible_rows[-1])
+
+    def test_localized_draw_workload_waits_for_each_completed_draw_before_next_write(self):
+        events = []
+
+        PRODUCER.run_localized_draw_workload(
+            update_count=3,
+            row=12,
+            write=lambda chunk: events.append(("write", chunk)),
+            await_draw=lambda sequence: events.append(("draw", sequence)),
+        )
+
+        self.assertEqual(
+            [event[0] for event in events],
+            ["write", "draw", "write", "draw", "write", "draw"],
+        )
+        self.assertEqual(
+            [event[1] for event in events if event[0] == "draw"],
+            [0, 1, 2],
+        )
+
     def test_geometry_gate_accepts_a_late_match_before_measurement(self):
         observations = iter((os.terminal_size((94, 35)), os.terminal_size((90, 30)), os.terminal_size((80, 24))))
         events = []

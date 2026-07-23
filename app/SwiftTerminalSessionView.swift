@@ -124,6 +124,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
 
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
+        #if DANTERM_TERMINAL_BENCHMARK
+        let drawStartedNanoseconds = DispatchTime.now().uptimeNanoseconds
+        #endif
         let frame = publishedFrame
         let background = frame?.plan.defaultBackground ?? RenderTheme.dark.defaultBackground
         context.setFillColor(Self.cgColor(background))
@@ -131,7 +134,14 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         if let frame {
             drawRenderFrame(frame.plan, metrics: frame.metrics, in: context)
             #if DANTERM_TERMINAL_BENCHMARK
-            TerminalBenchmarkObserver.shared?.observeCompletedDraw(frame.plan)
+            let drawDurationNanoseconds =
+                DispatchTime.now().uptimeNanoseconds - drawStartedNanoseconds
+            TerminalBenchmarkObserver.shared?.observeCompletedDraw(
+                frame.plan,
+                dirtyRect: dirtyRect,
+                metrics: frame.metrics,
+                drawDurationNanoseconds: drawDurationNanoseconds
+            )
             #endif
         }
     }

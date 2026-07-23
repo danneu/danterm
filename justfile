@@ -55,6 +55,7 @@ test:
     ./scripts/tests/terminal-benchmark-harness_test.sh
     python3 ./scripts/tests/terminal_benchmark_producer_test.py
     python3 ./scripts/tests/terminal_benchmark_suite_test.py
+    python3 ./scripts/tests/terminal_draw_acceptance_test.py
     ./scripts/tests/test-terminal-pty_test.sh
     ./scripts/tests/shell-integration_test.sh
     ./scripts/tests/agent-notifications-live_test.py
@@ -88,8 +89,12 @@ benchmark-core *args:
     python3 ./scripts/terminal-benchmark-suite.py backend=swift-core {{args}}
 
 # Benchmark full-frame and damage-clipped CoreText drawing headlessly.
-benchmark-draw iterations="5":
+benchmark-draw iterations="15":
     swift run --package-path lib/TerminalCore -c release TerminalDrawBenchmark {{iterations}}
+
+# Benchmark fixed-row updates through the real optimized AppKit draw path.
+benchmark-draw-app batches="15" target_ms="400":
+    python3 ./scripts/terminal-draw-acceptance.py {{batches}} {{target_ms}}
 
 # Run one isolated workload continuously and publish its exact app pid.
 benchmark-loop workload="scrollback-stream" backend="swift":
