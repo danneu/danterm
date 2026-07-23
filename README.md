@@ -555,6 +555,13 @@ The optimized commands retain the `DanTerm Dev.app` name, dev bundle ID,
 development signing, install path, and selected terminal backend. They do not
 create a production release or publish anything.
 
+The `just preview-glyphs` sprite comparison requires
+[`SymbolsNerdFontMono-Regular.ttf`](https://github.com/ryanoasis/nerd-fonts/releases/latest/download/NerdFontsSymbolsOnly.zip)
+for its Powerline references and
+[`unifont_upper-17.0.05.otf`](https://unifoundry.com/pub/unifont/unifont-17.0.05/font-builds/unifont_upper-17.0.05.otf)
+for its Symbols for Legacy Computing references. Install both with Font Book
+before launching the preview.
+
 I don't remember why, but there was some benefit to running the app from the macOS applications folder during dev.
 
 I think so that it shows up in permissions lists in macOS settings.

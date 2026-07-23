@@ -72,7 +72,9 @@ final class GlyphPreviewView: NSView {
     private let layout: GlyphPreviewLayout
     private let sections: [GlyphPreviewSection]
     private let plan: RenderFramePlan
-    private let referenceFont: CTFont
+    private let systemReferenceFont: CTFont
+    private let nerdSymbolsReferenceFont: CTFont
+    private let unifontUpperReferenceFont: CTFont
     private let headingFont: CTFont
 
     override var isFlipped: Bool { true }
@@ -118,10 +120,26 @@ final class GlyphPreviewView: NSView {
                 cursorShape: .block
             )
         )
-        let referenceFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-        self.referenceFont = CTFontCreateWithName(
-            referenceFont.fontName as CFString,
-            referenceFont.pointSize,
+        let systemReferenceFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        self.systemReferenceFont = CTFontCreateWithName(
+            systemReferenceFont.fontName as CFString,
+            systemReferenceFont.pointSize,
+            nil
+        )
+        // "SymbolsNFM" is the PostScript name for Symbols Nerd Font Mono Regular.
+        guard let nerdSymbolsReferenceFont = NSFont(name: "SymbolsNFM", size: 13),
+              let unifontUpperReferenceFont = NSFont(name: "UnifontUpper", size: 13)
+        else {
+            return nil
+        }
+        self.nerdSymbolsReferenceFont = CTFontCreateWithName(
+            nerdSymbolsReferenceFont.fontName as CFString,
+            nerdSymbolsReferenceFont.pointSize,
+            nil
+        )
+        self.unifontUpperReferenceFont = CTFontCreateWithName(
+            unifontUpperReferenceFont.fontName as CFString,
+            unifontUpperReferenceFont.pointSize,
             nil
         )
         let headingFont = NSFont.systemFont(ofSize: 11, weight: .semibold)
@@ -171,6 +189,7 @@ final class GlyphPreviewView: NSView {
                 ) else {
                     continue
                 }
+                let referenceFont = referenceFont(for: scalar)
                 let attributes: [NSAttributedString.Key: Any] = [
                     kCTFontAttributeName as NSAttributedString.Key: referenceFont,
                     kCTForegroundColorAttributeName as NSAttributedString.Key:
@@ -198,6 +217,19 @@ final class GlyphPreviewView: NSView {
                     }
                 }
             }
+        }
+    }
+
+    private func referenceFont(for scalar: Unicode.Scalar) -> CTFont {
+        switch scalar.value {
+        case 0xE0B0...0xE0BF, 0xE0D2, 0xE0D4:
+            nerdSymbolsReferenceFont
+        case 0x1FB00...0x1FBEF, 0x1CC1B...0x1CC1E, 0x1CC21...0x1CC3F,
+             0x1CD00...0x1CDE5, 0x1CE00...0x1CE01, 0x1CE0B...0x1CE0C,
+             0x1CE16...0x1CE19, 0x1CE51...0x1CEAF:
+            unifontUpperReferenceFont
+        default:
+            systemReferenceFont
         }
     }
 
