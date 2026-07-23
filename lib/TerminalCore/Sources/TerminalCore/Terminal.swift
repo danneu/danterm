@@ -552,51 +552,78 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
+    /// Records only the render deltas implied by a cursor/selection/hover snapshot diff.
+    ///
+    /// Every statement here is presentation-only, so none advances the history generation:
+    /// callers do mutate cells around this call, but that content reaches the generation
+    /// through its own funnels (`invalidateInspection`, scrollback append, budget eviction).
+    /// Bumping here as well would make "generation advanced" unreadable as "history changed",
+    /// since a bare cursor move or selection drag would trip it.
     private mutating func recordDamage(since before: DamageActionSnapshot) {
         let after = damageActionSnapshot
         if before.isFollowing == false {
-            recordFullDamage()
+            recordPresentationFullDamage()
             return
         }
         guard before.topRow == after.topRow,
               before.isAlternateScreenActive == after.isAlternateScreenActive
         else {
-            recordFullDamage()
+            recordPresentationFullDamage()
             return
         }
         if after.isFollowing == false {
-            recordFullDamage()
+            recordPresentationFullDamage()
             return
         }
         if before.cursor != after.cursor
             || before.cursorPresentation != after.cursorPresentation
         {
-            if let row = before.cursor?.row { recordDamage(row: row) }
-            if let row = after.cursor?.row { recordDamage(row: row) }
+            if let row = before.cursor?.row { recordPresentationDamage(row: row) }
+            if let row = after.cursor?.row { recordPresentationDamage(row: row) }
         }
         if before.selection != after.selection {
-            recordDamage(rows: damagedViewportRows(for: before.selection))
-            recordDamage(rows: damagedViewportRows(for: after.selection))
+            recordPresentationDamage(rows: damagedViewportRows(for: before.selection))
+            recordPresentationDamage(rows: damagedViewportRows(for: after.selection))
         }
         if before.hoveredLink != after.hoveredLink {
-            recordDamage(rows: damagedViewportRows(for: before.hoveredLink?.range))
-            recordDamage(rows: damagedViewportRows(for: after.hoveredLink?.range))
+            recordPresentationDamage(rows: damagedViewportRows(for: before.hoveredLink?.range))
+            recordPresentationDamage(rows: damagedViewportRows(for: after.hoveredLink?.range))
         }
     }
 
     private mutating func recordFullDamage() {
-        if damage.recordFull() { pendingConsumerWork.noteDamageChanged() }
+        recordPresentationFullDamage()
         notePrimaryHistoryDamage()
     }
 
     private mutating func recordDamage(row: Int) {
-        if damage.record(row: row) { pendingConsumerWork.noteDamageChanged() }
+        recordPresentationDamage(row: row)
         notePrimaryHistoryDamage()
     }
 
     private mutating func recordDamage(rows: some Sequence<Int>) {
-        if damage.record(rows: rows) { pendingConsumerWork.noteDamageChanged() }
+        recordPresentationDamage(rows: rows)
         notePrimaryHistoryDamage()
+    }
+
+    // The non-bumping variants below are the exception, not the rule: bumping stays the default
+    // so the failure mode of a future miscategorized call site is a redundant recovery write,
+    // never a lost one. A direct damage call outside `recordDamage(since:)` may use them only
+    // when the mutation it follows touches `viewportState`/`search` alone -- never cell storage
+    // -- and cannot run behind an active alternate screen. `invalidateInspection(inViewportRows:)`
+    // reads presentational but fails that test: its full-damage branch follows a cell write and
+    // is the content funnel for scrolled-back output.
+
+    private mutating func recordPresentationFullDamage() {
+        if damage.recordFull() { pendingConsumerWork.noteDamageChanged() }
+    }
+
+    private mutating func recordPresentationDamage(row: Int) {
+        if damage.record(row: row) { pendingConsumerWork.noteDamageChanged() }
+    }
+
+    private mutating func recordPresentationDamage(rows: some Sequence<Int>) {
+        if damage.record(rows: rows) { pendingConsumerWork.noteDamageChanged() }
     }
 
     private mutating func notePrimaryHistoryDamage() {
@@ -1380,7 +1407,7 @@ public struct Terminal: Equatable, Sendable {
             )
         }
         if viewportState != previous {
-            recordFullDamage()
+            recordPresentationFullDamage()
         }
     }
 
@@ -1389,7 +1416,7 @@ public struct Terminal: Equatable, Sendable {
         guard inactivePrimaryScreen == nil else { return }
         guard viewportState != .following else { return }
         viewportState = .following
-        recordFullDamage()
+        recordPresentationFullDamage()
     }
 
     /// Returns retained primary rows in oldest-first order.
@@ -2042,7 +2069,7 @@ public struct Terminal: Equatable, Sendable {
         search = SearchState(query: query, range: match)
         revealSearchMatchIfNeeded()
         if viewportState != previousViewport {
-            recordFullDamage()
+            recordPresentationFullDamage()
         }
         return true
     }
@@ -2059,7 +2086,7 @@ public struct Terminal: Equatable, Sendable {
         self.search?.range = matches[current - 1]
         revealSearchMatchIfNeeded()
         if viewportState != previousViewport {
-            recordFullDamage()
+            recordPresentationFullDamage()
         }
         return true
     }
@@ -2076,7 +2103,7 @@ public struct Terminal: Equatable, Sendable {
         self.search?.range = matches[current + 1]
         revealSearchMatchIfNeeded()
         if viewportState != previousViewport {
-            recordFullDamage()
+            recordPresentationFullDamage()
         }
         return true
     }

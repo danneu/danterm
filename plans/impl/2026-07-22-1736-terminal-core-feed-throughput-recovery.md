@@ -109,7 +109,13 @@ corpus and share those results the same way.
 - I5: Consumer-work signaling remains unchanged; history-mutation signaling
   covers every primary-history text change, with safe over-approximation
   allowed. New pending-work accumulators cannot be written without advancing
-  the generation.
+  the generation. Presentation-only events (cursor, selection, hover, viewport
+  scrolling, search navigation) do not advance the history generation, but the
+  remaining over-approximation is real: an identical-content cell rewrite (a
+  shell repainting its prompt on each keystroke) still advances it, so
+  "generation advanced" means "content was written", not "text differs". The
+  cost is bounded by the checkpoint policy's open-window no-op guard and its
+  600-second window.
 - I6: The terminal core stays pure and dependency-free.
 - I7: Benchmark history stays trustworthy: profiled runs never enter
   committed history; records without a comment remain valid; delta matching
