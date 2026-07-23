@@ -100,4 +100,4 @@ three baseline records separately.
 ## Commit progress
 
 - [x] 1. Add serialized full-screen redraw benchmark harness
-- [ ] 2. Record Swift renderer full-screen redraw baselines
+- [x] 2. Record Swift renderer full-screen redraw baselines
