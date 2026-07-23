@@ -117,7 +117,10 @@ cp "$BOOTSTRAP_BIN_PATH/PTYSessionBootstrap" "$APP_PATH/Contents/Helpers/PTYSess
 chmod +x "$APP_PATH/Contents/MacOS/DanTerm Benchmark" "$APP_PATH/Contents/Helpers/danterm" \
     "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
 cp "$REPO_ROOT/app/Info.plist" "$APP_PATH/Contents/Info.plist"
-plutil -replace CFBundleIdentifier -string "com.danneu.danterm-terminal-benchmark.$$" "$APP_PATH/Contents/Info.plist"
+# Keep a benchmark-only identity, but do not suffix it with the run PID. Filesystem,
+# socket, bundle-path, and process ownership already isolate concurrent runs; a fresh
+# bundle id only makes macOS repeat first-launch privacy prompts between iterations.
+plutil -replace CFBundleIdentifier -string "com.danneu.danterm-terminal-benchmark" "$APP_PATH/Contents/Info.plist"
 plutil -replace CFBundleName -string "DanTerm Benchmark" "$APP_PATH/Contents/Info.plist"
 plutil -replace CFBundleExecutable -string "DanTerm Benchmark" "$APP_PATH/Contents/Info.plist"
 plutil -remove CFBundleIconName "$APP_PATH/Contents/Info.plist" 2>/dev/null || true

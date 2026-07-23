@@ -196,8 +196,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
         NSApp.activate(ignoringOtherApps: true)
 
-        // Benchmark builds are excluded: each run gets a fresh bundle id, so macOS sees a brand-new
-        // app and pops its first-launch "would like to send you notifications" prompt every time.
+        // Benchmark builds are excluded so notification authorization never interrupts a measurement.
         #if !DANTERM_TERMINAL_CHARACTERIZATION && !DANTERM_TERMINAL_BENCHMARK
         // Request notification authorization after the app is active so the
         // system prompt is not racing the initial launch and window setup.

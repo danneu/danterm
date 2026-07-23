@@ -41,6 +41,11 @@ grep -q -- '--attach "$target_pid"' "$PROFILE"
 grep -q -- '--no-prompt' "$PROFILE"
 grep -q 'symbols.txt' "$PROFILE"
 grep -q 'get-task-allow' "$ROOT/scripts/terminal-benchmark-entitlements.plist"
+grep -q 'com.danneu.danterm-terminal-benchmark"' "$HARNESS"
+if grep -q 'com.danneu.danterm-terminal-benchmark\.\$\$' "$HARNESS"; then
+    echo "benchmark bundle id must stay stable across runs" >&2
+    exit 1
+fi
 grep -q 'benchmark-loop' "$ROOT/justfile"
 grep -q 'benchmark-sample' "$ROOT/justfile"
 grep -q 'benchmark-trace' "$ROOT/justfile"
