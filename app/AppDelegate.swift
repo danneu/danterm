@@ -122,7 +122,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         ])
 
         window.contentView = rootView
+        #if DANTERM_TERMINAL_BENCHMARK
+        window.orderFront(nil)
+        #else
         window.makeKeyAndOrderFront(nil)
+        #endif
 
         // Set divider position after window is visible
         splitView.setPosition(Self.minSidebarWidth, ofDividerAt: 0)
@@ -194,7 +198,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         notifCenter.delegate = self
         #endif
 
+        #if !DANTERM_TERMINAL_BENCHMARK
         NSApp.activate(ignoringOtherApps: true)
+        #endif
 
         // Benchmark builds are excluded so notification authorization never interrupts a measurement.
         #if !DANTERM_TERMINAL_CHARACTERIZATION && !DANTERM_TERMINAL_BENCHMARK

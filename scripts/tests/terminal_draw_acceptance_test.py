@@ -81,6 +81,9 @@ class TerminalDrawAcceptanceTests(unittest.TestCase):
             ACCEPTANCE.parse_arguments(["15", "400"])[3:],
             (15, 400, False),
         )
+        self.assertIsNone(
+            ACCEPTANCE.parse_arguments(["redraw=1"])[4],
+        )
         self.assertTrue(
             ACCEPTANCE.parse_arguments(["redraw=1"])[5],
         )
@@ -113,6 +116,49 @@ class TerminalDrawAcceptanceTests(unittest.TestCase):
 
         with mock.patch.object(ACCEPTANCE.subprocess, "run", return_value=completed):
             self.assertEqual(ACCEPTANCE.latest_committed(current)["commit"], "compatible")
+
+    def test_duration_floor_does_not_split_normalized_redraw_history(self):
+        self.assertNotIn(
+            "targetBatchNanoseconds",
+            ACCEPTANCE.REDRAW_COMPATIBILITY_FIELDS,
+        )
+
+    def test_fast_ordinary_workloads_use_a_shorter_default_duration_floor(self):
+        self.assertEqual(
+            ACCEPTANCE.target_milliseconds_for(
+                "full-screen-content-churn",
+                requested=None,
+            ),
+            50,
+        )
+        self.assertEqual(
+            ACCEPTANCE.target_milliseconds_for(
+                "full-screen-style-churn",
+                requested=None,
+            ),
+            50,
+        )
+        self.assertEqual(
+            ACCEPTANCE.target_milliseconds_for(
+                "full-screen-mixed-churn",
+                requested=None,
+            ),
+            50,
+        )
+        self.assertEqual(
+            ACCEPTANCE.target_milliseconds_for(
+                "full-screen-symbol-churn",
+                requested=None,
+            ),
+            400,
+        )
+        self.assertEqual(
+            ACCEPTANCE.target_milliseconds_for(
+                "full-screen-content-churn",
+                requested=125,
+            ),
+            125,
+        )
 
     def test_serialized_results_are_stable_exact_staged_bytes(self):
         result = {"workload": "full-screen-mixed-churn", "summary": {"median": 12}}

@@ -29,6 +29,13 @@ REDRAW_IDENTITIES = {
 HISTORY_PATH = ROOT / "benchmarks" / "results" / "terminal-redraw.jsonl"
 STAGING_ROOT = ROOT / ".build" / "terminal-benchmark-staged"
 REDRAW_METHOD = "serialized-completed-draw-v1"
+DEFAULT_TARGET_MILLISECONDS = 400
+FAST_ORDINARY_TARGET_MILLISECONDS = 50
+FAST_ORDINARY_WORKLOADS = {
+    "full-screen-content-churn",
+    "full-screen-style-churn",
+    "full-screen-mixed-churn",
+}
 REDRAW_COMPATIBILITY_FIELDS = (
     "schemaVersion",
     "workload",
@@ -41,7 +48,6 @@ REDRAW_COMPATIBILITY_FIELDS = (
     "buildConfiguration",
     "geometry",
     "batchCount",
-    "targetBatchNanoseconds",
     "profilingActive",
 )
 
@@ -51,6 +57,15 @@ def calibrated_update_count(measured_nanoseconds, measured_updates, target_nanos
     if measured_nanoseconds <= 0 or measured_updates <= 0:
         raise ValueError("calibration requires positive draw duration and update count")
     return max(1, math.ceil(target_nanoseconds * measured_updates / measured_nanoseconds))
+
+
+def target_milliseconds_for(workload, requested):
+    """Keep fast redraw batches statistically useful without thousands of acknowledgments."""
+    if requested is not None:
+        return requested
+    if workload in FAST_ORDINARY_WORKLOADS:
+        return FAST_ORDINARY_TARGET_MILLISECONDS
+    return DEFAULT_TARGET_MILLISECONDS
 
 
 def distribution(values):
@@ -116,7 +131,7 @@ def parse_arguments(arguments):
     save = None
     comment = None
     batches = 15
-    target_milliseconds = 400
+    target_milliseconds = None
     positional_count = 0
     redraw_requested = False
     for argument in arguments:
@@ -147,7 +162,7 @@ def parse_arguments(arguments):
             positional_count += 1
         else:
             raise ValueError(f"unknown argument: {argument}")
-    if batches < 2 or target_milliseconds <= 0:
+    if batches < 2 or (target_milliseconds is not None and target_milliseconds <= 0):
         raise ValueError("batches must be >=2 and target_ms must be >0")
     return workload, save, comment, batches, target_milliseconds, redraw_requested
 
@@ -276,7 +291,11 @@ def main():
         )
         results = []
         for name in workloads:
-            result = run_redraw(name, batches, target_milliseconds)
+            result = run_redraw(
+                name,
+                batches,
+                target_milliseconds_for(name, target_milliseconds),
+            )
             if comment is not None:
                 result["comment"] = comment
             results.append(result)
@@ -301,7 +320,9 @@ def main():
                 destination.write(staged.read_bytes())
         return
 
-    target_nanoseconds = target_milliseconds * 1_000_000
+    target_nanoseconds = (
+        target_milliseconds_for(None, target_milliseconds) * 1_000_000
+    )
     warmup_updates = 8
     print(
         f"[localized draw] excluded warm-up with {warmup_updates} updates",

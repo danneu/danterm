@@ -66,14 +66,20 @@ contract as the corpus suite. Each measured update waits for its exact
 completed draw, every draw must damage all 24 rows, and sequence metadata stays
 in the terminal title rather than visible grid content.
 
-The redraw suite excludes warm-up and calibration, then runs 15 fresh optimized
-app batches with at least 400 ms of cumulative synchronous draw work per batch.
+The full recording run excludes warm-up and calibration, then runs 15 fresh
+optimized app batches. The content-only, style-only, and mixed workloads use at
+least 50 ms of cumulative synchronous draw work per batch; at their ordinary
+speed this still provides roughly 150-250 completed draws in each independent
+sample without paying for thousands of serialized producer acknowledgments.
+The slower symbol workloads retain the 400 ms floor. `target_ms=` explicitly
+overrides either default for diagnostics.
 It reports min/median/max draw count, nanoseconds per draw, cumulative draw
 time, and dirty rows per draw. Confirmed unprofiled results enter
 `benchmarks/results/terminal-redraw.jsonl`; deltas require an exact match on
 fixture, method, machine, macOS, display scale, Swift toolchain, release
-configuration, 80x24 geometry, batch count, duration floor, and profiling
-state.
+configuration, 80x24 geometry, batch count, and profiling state. The duration
+floor remains recorded as methodology but is not a compatibility key because
+the reported comparison is normalized nanoseconds per completed draw.
 
 ## Choose a profiler
 

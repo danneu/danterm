@@ -52,4 +52,11 @@ grep -q 'benchmark-trace' "$ROOT/justfile"
 grep -q 'benchmark-redraw' "$ROOT/justfile"
 grep -q 'observeTitle(title)' "$ROOT/app/SwiftTerminalSessionView.swift"
 grep -q 'pendingRedrawSequence' "$ROOT/app/TerminalBenchmark.swift"
+awk '
+    /#if DANTERM_TERMINAL_BENCHMARK/ {
+        getline
+        if (index($0, "window.orderFront(nil)") != 0) found = 1
+    }
+    END { exit(found ? 0 : 1) }
+' "$ROOT/app/AppDelegate.swift"
 echo "terminal benchmark harness contract: ok"
