@@ -31,8 +31,10 @@ history) of 10,371 main-thread samples shows:
 - The largest stack under CTLine creation is not shaping or rasterization but
   `TFont::NeedsShapingForGlyphs -> TFont::ShapesAnyPreferredLanguage ->
   ICU locale machinery` (`uscript_getCode`, `ulocimp_addLikelySubtags`,
-  resource-bundle lookups): ~1,600 samples. CoreText re-answers a
-  per-font-per-language question once per cell, per frame.
+  resource-bundle lookups): ~1,600 samples. The per-cell CTLine path
+  repeatedly enters CoreText's font/language shaping checks; `sample` gives
+  time-in-stack, not invocation counts, so confirming the per-cell invocation
+  frequency requires instrumentation (task 1).
 - Everything else is modest: `FramePlanner.plan`/`textRuns`/`inspectedCells`
   ~800-900 samples, `Terminal.feed` a few hundred, publish plumbing small.
 
@@ -64,18 +66,22 @@ serialized workload is a prerequisite for making claims.
 ## Hypotheses
 
 1. **Cmap miss is the trigger.** btop's braille/box-drawing/block characters
-   are absent from the primary font, and that absence -- not multi-scalar
-   content or wide cells -- is what routes them to the CTLine fallback.
-   Falsifiable by logging which characters fail
-   `CTFontGetGlyphsForCharacters` and checking the primary font's coverage
-   directly.
+   are absent from the configured font's cmap, and that absence -- not
+   multi-scalar content or wide cells -- is what routes them to the CTLine
+   fallback. The configured font is itself evidence: record the PostScript
+   name of all four trait variants (regular, bold, italic, bold-italic) and
+   attribute each miss to a `(font variant, scalar)` pair, since a symbol may
+   map in the regular face but miss in a synthesized trait variant.
+   Falsifiable by task 1's categorized miss counters plus a direct coverage
+   check of the primary font.
 2. **Per-cell fixed overhead dominates again, not glyph complexity.** As in
    doc 3, the cost is CTLine construction and its per-cell ICU
    `NeedsShapingForGlyphs` walk, not drawing braille outlines. Falsifiable
-   claim: batching fallback cells into per-run `CTFontDrawGlyphs` calls
-   against a per-run resolved fallback font reduces per-draw time on a
-   symbol-churn workload by more than 80% (from a per-cell-CTLine level near
-   the doc 3 baseline toward the fast-path level).
+   claim (thresholds to be grounded once task 2 records the symbol-churn
+   baseline): after batching fallback cells into per-run `CTFontDrawGlyphs`
+   calls, `CTLineCreateWithAttributedString` falls below 5% of main-thread
+   samples in the task 4 re-profile, and symbol churn lands within 2x of
+   ordinary content churn in compatible benchmark-redraw runs.
 3. **Per-run fallback resolution is cheap enough to stay stateless.** One
    `CTFontCreateForString` (or `CTFontCreateForStringWithLanguage`) per
    fallback run per frame, followed by one `CTFontGetGlyphsForCharacters`
@@ -86,14 +92,25 @@ serialized workload is a prerequisite for making claims.
 
 ## Tasks
 
-- [ ] **Task 1: verify the trigger.** Instrument or test which btop-emitted
-  characters fail `CTFontGetGlyphsForCharacters` against the configured
-  primary font (braille U+2800-28FF, box drawing U+2500-257F, blocks
-  U+2580-259F expected). Confirm whether the misses are genuine cmap
-  absences or a fast-path rejection for another reason (wide-cell or
-  multi-scalar conditions). If the font actually covers them and the fast
-  path is rejecting them for a fixable reason, the fix is cheaper than
-  hypothesis 2's plan; record that and re-plan.
+- [ ] **Task 1: verify the trigger.** Instrument the executor with aggregate
+  counters (not per-cell logging, which drowns the signal) that classify
+  every fallback entry by reason:
+  - BMP cmap miss
+  - multi-scalar cell
+  - supplementary-plane scalar
+  - zero glyph returned after fallback resolution
+  - which styled font variant was in effect
+
+  Record the PostScript names of the four trait variants alongside the
+  counters, and cross-check the hot scalars (braille U+2800-28FF, box
+  drawing U+2500-257F, blocks U+2580-259F expected) against the primary
+  font's coverage directly. This is a diagnostic run; its numbers never
+  enter benchmark history. Pivot criteria: if the symbols are covered by the
+  primary font and the fast path rejects them for a fixable reason, fix that
+  instead; if the symbols resolve through a stable already-available cascade
+  font, batch by resolved font; if the dominant fallback reason is
+  multi-scalar content, pivot away from cmap-miss batching entirely, because
+  the proposed mechanism would not attack the observed cost.
 - [ ] **Task 2: add a symbol-churn serialized workload.** Extend the redraw
   suite with a `full-screen-symbol-churn`-style fixture whose grid is
   dominated by braille/box-drawing cells, matching the existing suite's
@@ -102,14 +119,25 @@ serialized workload is a prerequisite for making claims.
   compatible `just benchmark-redraw` run before any renderer change. The
   baseline should confirm the profile's prediction: symbol churn draws far
   slower than the ~0.32 ms content/style/mixed results.
-- [ ] **Task 3: per-run fallback-font batching.** In the executor, group
-  consecutive cmap-miss cells of a styled run into fallback runs; resolve one
-  fallback font per run (`CTFontCreateForString` on the run's text), retry
-  `CTFontGetGlyphsForCharacters` on it, and issue one `CTFontDrawGlyphs`.
-  Cells that still miss, plus multi-scalar/combining-mark cells, keep the
-  clipped per-cell CTLine path. TDD: bitmap fixtures asserting
-  fallback-rendered symbols are pixel-identical (or accepted-overhang
-  equivalent) before and after. Judge with compatible `just benchmark-redraw`
+- [ ] **Task 3a: metric-equivalence characterization test.** Before touching
+  the executor, add a focused test comparing CTLine's resolved glyph, font,
+  and placement against the proposed direct path (resolved fallback font +
+  existing baseline offset + `CTFontDrawGlyphs`) for braille, box drawing,
+  and block elements at scale 1 and scale 2. CTLine may apply the fallback
+  font's own metrics or baseline behavior that direct drawing does not
+  reproduce automatically; this test decides whether pixel-identical is an
+  achievable contract for task 3b's fixtures or whether a documented
+  placement delta must be accepted instead.
+- [ ] **Task 3b: per-run fallback-font batching.** In the executor, group
+  cmap-miss cells of a styled run into fallback runs: resolve a fallback
+  font from the first unresolved cell (`CTFontCreateForString`), then extend
+  the batch only while that font maps subsequent cells -- one resolved font
+  must not be assumed to cover the whole styled run, and original column
+  positions must be preserved when batching across resolved/unresolved gaps.
+  Issue one `CTFontDrawGlyphs` per fallback run. Cells that still miss, plus
+  multi-scalar/combining-mark cells, keep the clipped per-cell CTLine path.
+  TDD: bitmap fixtures asserting fallback-rendered symbols match the
+  contract task 3a established. Judge with compatible `just benchmark-redraw`
   runs on symbol churn plus the three existing workloads (which must not
   regress).
 - [ ] **Task 4: re-profile btop.** Repeat the arrow-key-hold `sample` capture
