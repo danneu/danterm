@@ -354,9 +354,18 @@ private extension CGContext {
             var characters: [UniChar] = []
             var candidateCells: [(cell: RenderTextCell, column: Int)] = []
             var fallbackCells: [(cell: RenderTextCell, column: Int)] = []
+            var spriteRects: [CGRect] = []
             var column = run.startColumn
             for cell in run.cells {
-                if cell.scalars.count == 1,
+                if let pattern = BrailleSprite.pattern(for: cell.scalars) {
+                    BrailleSprite.appendRects(
+                        pattern: pattern,
+                        row: run.row,
+                        column: column,
+                        metrics: metrics,
+                        to: &spriteRects
+                    )
+                } else if cell.scalars.count == 1,
                    let scalar = cell.scalars.first,
                    scalar.value <= UInt16.max
                 {
@@ -368,6 +377,10 @@ private extension CGContext {
                 column += cell.columnWidth
             }
 
+            if spriteRects.isEmpty == false {
+                setFillColor(foreground)
+                fill(spriteRects)
+            }
             var glyphs = Array(repeating: CGGlyph(), count: characters.count)
             if characters.isEmpty == false {
                 CTFontGetGlyphsForCharacters(

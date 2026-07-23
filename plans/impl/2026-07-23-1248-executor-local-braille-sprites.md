@@ -126,10 +126,30 @@ ordinary-workload regression gate.
 ## Commit progress
 
 - [x] 1. perf(benchmark): record pre-braille ordinary redraw baselines
-- [ ] 2. perf(renderer): draw braille cells as executor-local sprites
+- [x] 2. perf(renderer): draw braille cells as executor-local sprites
 
 ## Implementation notes
 
 - The compatible pre-change medians are 298,554 ns/draw for content churn,
   325,672 ns/draw for style churn, and 319,840 ns/draw for mixed churn. All
   three records use the `pre-braille-compatible-baseline` comment.
+- Braille uses integer backing-pixel 2x4 slots with one centered rectangle per
+  enabled dot. The executor batches those rectangles per existing text run,
+  converts to point coordinates only at the Core Graphics boundary, and keeps
+  classification before cmap lookup.
+- The compatible post-change medians are 342,513 ns/draw for btop-shaped
+  symbol churn, 12,420,459 ns/draw for curated sprite coverage, 324,141
+  ns/draw for content churn, 320,814 ns/draw for style churn, and 331,802
+  ns/draw for mixed churn. The btop-shaped workload improved 98.86% and passed
+  the 636,060 ns/draw target. The ordinary workload ranges overlap their
+  pre-change ranges, so they do not show a repeatable regression.
+
+## Follow Up
+
+- Replace the slot-centered braille geometry in
+  `lib/TerminalCore/Sources/TerminalRenderExecution/BrailleSprite.swift` with
+  a whole-shape square-dot pixel allocator and odd/tiny-cell behavioral proofs
+  before adding another sprite family.
+- Reduce the wall time and foreground-input fragility of full 15-batch
+  recordings in `scripts/terminal-draw-acceptance.py` while preserving
+  independent compatible samples.
