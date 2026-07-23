@@ -16,12 +16,15 @@ REDRAW_WORKLOADS = (
     "full-screen-style-churn",
     "full-screen-mixed-churn",
     "full-screen-symbol-churn",
+    "full-screen-sprite-coverage-churn",
 )
 REDRAW_IDENTITIES = {
     "full-screen-content-churn": "full-screen-content-churn-v1-pseudo-lazygit-80x24",
     "full-screen-style-churn": "full-screen-style-churn-v1-pseudo-lazygit-80x24",
     "full-screen-mixed-churn": "full-screen-mixed-churn-v1-pseudo-lazygit-80x24",
-    "full-screen-symbol-churn": "full-screen-symbol-churn-v2-geometric-sprite-mix-80x24",
+    "full-screen-symbol-churn": "full-screen-symbol-churn-v1-btop-symbol-mix-80x24",
+    "full-screen-sprite-coverage-churn":
+        "full-screen-sprite-coverage-churn-v1-curated-candidates-80x24",
 }
 HISTORY_PATH = ROOT / "benchmarks" / "results" / "terminal-redraw.jsonl"
 STAGING_ROOT = ROOT / ".build" / "terminal-benchmark-staged"

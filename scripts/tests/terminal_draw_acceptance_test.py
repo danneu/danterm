@@ -93,7 +93,11 @@ class TerminalDrawAcceptanceTests(unittest.TestCase):
         )
         self.assertEqual(
             ACCEPTANCE.REDRAW_IDENTITIES["full-screen-symbol-churn"],
-            "full-screen-symbol-churn-v2-geometric-sprite-mix-80x24",
+            "full-screen-symbol-churn-v1-btop-symbol-mix-80x24",
+        )
+        self.assertEqual(
+            ACCEPTANCE.REDRAW_IDENTITIES["full-screen-sprite-coverage-churn"],
+            "full-screen-sprite-coverage-churn-v1-curated-candidates-80x24",
         )
 
     def test_latest_committed_requires_every_redraw_compatibility_field(self):

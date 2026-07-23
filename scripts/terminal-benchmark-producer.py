@@ -64,27 +64,44 @@ REDRAW_WORKLOADS = (
     "full-screen-style-churn",
     "full-screen-mixed-churn",
     "full-screen-symbol-churn",
+    "full-screen-sprite-coverage-churn",
 )
 
 
-# The four sprite-candidate Unicode ranges the sprite-glyph pivot targets:
-# box drawing, block elements, geometric shapes, braille patterns.
-SYMBOL_CHURN_RANGES = (
-    (0x2500, 0x257F),
-    (0x2580, 0x259F),
-    (0x25A0, 0x25FF),
-    (0x2800, 0x28FF),
+BTOP_BOX_DRAWING = "\u2500\u2502\u250c\u2510\u2514\u2518\u251c\u2524\u252c\u2534\u253c"
+
+# Explicit candidate sets keep benchmark coverage separate from a promise that
+# every scalar in a neighboring Unicode block belongs on the sprite path.
+SPRITE_COVERAGE_SETS = (
+    tuple(range(0x2500, 0x2580)),
+    tuple(range(0x2580, 0x25A0)),
+    (0x25E2, 0x25E3, 0x25E4, 0x25E5, 0x25F8, 0x25F9, 0x25FA, 0x25FF),
+    tuple(range(0x2800, 0x2900)),
 )
 
 
 def symbol_churn_content(sequence, row, width):
-    """Build one row spread evenly across the four sprite-candidate ranges."""
+    """Build one btop-weighted row with 90% braille and 10% box drawing."""
     cells = []
     for column in range(width):
-        start, end = SYMBOL_CHURN_RANGES[(row * width + column) % 4]
-        span = end - start + 1
-        offset = (sequence * 37 + row * 17 + column * 29) % span
-        cells.append(chr(start + offset))
+        index = row * width + column
+        if index % 10 == 0:
+            cells.append(BTOP_BOX_DRAWING[
+                (sequence + row + column) % len(BTOP_BOX_DRAWING)
+            ])
+        else:
+            pattern = 1 + (sequence * 37 + row * 17 + column * 29) % 255
+            cells.append(chr(0x2800 + pattern))
+    return "".join(cells)
+
+
+def sprite_coverage_churn_content(sequence, row, width):
+    """Build one row spread evenly across explicit sprite candidate sets."""
+    cells = []
+    for column in range(width):
+        candidates = SPRITE_COVERAGE_SETS[(row * width + column) % 4]
+        offset = (sequence * 37 + row * 17 + column * 29) % len(candidates)
+        cells.append(chr(candidates[offset]))
     return "".join(cells)
 
 
@@ -102,6 +119,9 @@ def redraw_screen(workload, sequence, columns=80, rows=24):
     for row in range(rows):
         if workload == "full-screen-symbol-churn":
             content = symbol_churn_content(sequence, row, width)
+            style_sequence = 0
+        elif workload == "full-screen-sprite-coverage-churn":
+            content = sprite_coverage_churn_content(sequence, row, width)
             style_sequence = 0
         else:
             content_sequence = 0 if workload == "full-screen-style-churn" else sequence

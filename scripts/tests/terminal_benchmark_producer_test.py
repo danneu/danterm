@@ -94,15 +94,40 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
         self.assertEqual(strip_styles(style_first), strip_styles(style_second))
         self.assertNotEqual(styles(style_first), styles(style_second))
 
-    def test_symbol_churn_mixes_the_four_sprite_ranges_evenly(self):
-        # Intent: the v2 symbol workload churns cells evenly across the four
-        #   sprite-candidate ranges (box drawing, blocks, geometric shapes,
-        #   braille) with content-only churn between frames.
-        # Why it exists: pins the workload the sprite-glyph pivot is judged
-        #   against, so the fixture identity stays honest about its content.
-        # Scenario: spec-first; replaces the retired v1 btop-weighted mix.
+    def test_symbol_churn_models_btop_with_ninety_percent_braille(self):
+        # Intent: the symbol workload remains the deterministic proxy for the
+        #   measured btop regression: 90% braille and 10% box drawing.
+        # Why it exists: keeps the standing regression tied to the real workload
+        #   that motivated sprite rendering instead of replacing it with coverage.
+        # Scenario: spec-first; btop's process-list scroll remains reproducible.
         first = PRODUCER.redraw_screen("full-screen-symbol-churn", 1)
         second = PRODUCER.redraw_screen("full-screen-symbol-churn", 2)
+        strip_metadata = lambda payload: payload.split(b"\x07\x1b[H", 1)[1]
+        strip_styles = lambda payload: re.sub(
+            rb"\x1b\[[0-9;]*m", b"", strip_metadata(payload)
+        ).decode().replace("\r\n", "")
+        styles = lambda payload: re.findall(
+            rb"\x1b\[[0-9;]*m", strip_metadata(payload)
+        )
+
+        visible = strip_styles(first)
+        box_drawing = sum("\u2500" <= character <= "\u257f" for character in visible)
+        braille = sum("\u2800" <= character <= "\u28ff" for character in visible)
+
+        self.assertEqual(len(visible), 79 * 24)
+        self.assertEqual(braille, 1_706)
+        self.assertEqual(box_drawing, 190)
+        self.assertNotEqual(strip_styles(first), strip_styles(second))
+        self.assertEqual(styles(first), styles(second))
+
+    def test_sprite_coverage_churn_mixes_curated_candidate_sets_evenly(self):
+        # Intent: a separate coverage workload churns curated sprite candidates
+        #   without changing the btop-shaped performance regression.
+        # Why it exists: broad implementation coverage and the measured btop
+        #   regression are different benchmark questions with distinct identities.
+        # Scenario: spec-first; future sprite increments use this second yardstick.
+        first = PRODUCER.redraw_screen("full-screen-sprite-coverage-churn", 1)
+        second = PRODUCER.redraw_screen("full-screen-sprite-coverage-churn", 2)
         strip_metadata = lambda payload: payload.split(b"\x07\x1b[H", 1)[1]
         strip_styles = lambda payload: re.sub(
             rb"\x1b\[[0-9;]*m", b"", strip_metadata(payload)
