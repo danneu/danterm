@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "TerminalRenderExecution", targets: ["TerminalRenderExecution"]),
         .executable(name: "TerminalCoreBenchmark", targets: ["TerminalCoreBenchmark"]),
         .executable(name: "TerminalDrawBenchmark", targets: ["TerminalDrawBenchmark"]),
+        .executable(name: "GlyphPreview", targets: ["GlyphPreview"]),
     ],
     targets: [
         .target(
@@ -54,6 +55,12 @@ let package = Package(
             path: "Sources/TerminalDrawBenchmark",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
+        .executableTarget(
+            name: "GlyphPreview",
+            dependencies: ["TerminalCore", "TerminalRenderPlanning", "TerminalRenderExecution"],
+            path: "Sources/GlyphPreview",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         .target(
             name: "TerminalDrawBenchmarkSupport",
             dependencies: ["TerminalCore", "TerminalRenderPlanning", "TerminalRenderExecution"],
@@ -92,6 +99,12 @@ let package = Package(
             name: "TerminalRenderExecutionTests",
             dependencies: ["TerminalRenderExecution", "TerminalRenderPlanning", "TerminalCore"],
             path: "Tests/TerminalRenderExecutionTests",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "GlyphPreviewTests",
+            dependencies: ["GlyphPreview"],
+            path: "Tests/GlyphPreviewTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]

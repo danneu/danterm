@@ -92,6 +92,10 @@ benchmark-core *args:
 benchmark-draw iterations="15":
     swift run --package-path lib/TerminalCore -c release TerminalDrawBenchmark {{iterations}}
 
+# Build and open the unoptimized system-glyph versus sprite comparison app.
+preview-glyphs:
+    swift run --package-path lib/TerminalCore GlyphPreview
+
 # Benchmark fixed-row updates through the real optimized AppKit draw path.
 benchmark-draw-app batches="15" target_ms="400":
     python3 ./scripts/terminal-draw-acceptance.py {{batches}} {{target_ms}}
