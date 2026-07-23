@@ -39,6 +39,80 @@ public struct Terminal: Equatable, Sendable {
         static func == (_ lhs: Self, _ rhs: Self) -> Bool { true }
     }
 
+    /// Owns every accumulator whose mutation requires a frame-consumer wakeup so the
+    /// generation cannot drift from the pending work it describes.
+    private struct PendingConsumerWork: Equatable, Sendable {
+        private(set) var clipboardWrite: String?
+        private(set) var title: PendingTerminalSemanticEvent?
+        private(set) var workingDirectory: PendingTerminalSemanticEvent?
+        private(set) var progress: PendingTerminalSemanticEvent?
+        private(set) var discrete: [PendingTerminalSemanticEvent] = []
+        private(set) var generation = ObservationGeneration()
+
+        var hasWork: Bool {
+            clipboardWrite != nil || title != nil || workingDirectory != nil
+                || progress != nil || discrete.isEmpty == false
+        }
+
+        var retainedSemanticEventBytes: Int {
+            (title?.byteCost ?? 0)
+                + (workingDirectory?.byteCost ?? 0)
+                + (progress?.byteCost ?? 0)
+                + discrete.reduce(0) { $0 + $1.byteCost }
+        }
+
+        mutating func noteDamageChanged() {
+            generation.value &+= 1
+        }
+
+        mutating func setClipboardWrite(_ value: String?) {
+            guard clipboardWrite != value else { return }
+            clipboardWrite = value
+            generation.value &+= 1
+        }
+
+        mutating func setTitle(_ value: PendingTerminalSemanticEvent?) {
+            guard title != value else { return }
+            title = value
+            generation.value &+= 1
+        }
+
+        mutating func setWorkingDirectory(_ value: PendingTerminalSemanticEvent?) {
+            guard workingDirectory != value else { return }
+            workingDirectory = value
+            generation.value &+= 1
+        }
+
+        mutating func setProgress(_ value: PendingTerminalSemanticEvent?) {
+            guard progress != value else { return }
+            progress = value
+            generation.value &+= 1
+        }
+
+        mutating func appendDiscrete(_ value: PendingTerminalSemanticEvent) {
+            discrete.append(value)
+            generation.value &+= 1
+        }
+
+        mutating func drainClipboardWrite() -> String? {
+            defer { clipboardWrite = nil }
+            return clipboardWrite
+        }
+
+        mutating func drainSemanticEvents() -> [TerminalSemanticEvent] {
+            var events = discrete
+            if let title { events.append(title) }
+            if let workingDirectory { events.append(workingDirectory) }
+            if let progress { events.append(progress) }
+            events.sort { $0.order < $1.order }
+            title = nil
+            workingDirectory = nil
+            progress = nil
+            discrete.removeAll(keepingCapacity: true)
+            return events.map(\.event)
+        }
+    }
+
     /// Keeps scalar storage and wide-cell roles together for invariant-preserving mutation.
     private struct GridCell: Equatable, Sendable {
         var kind: TerminalCellKind = .padding
@@ -328,7 +402,6 @@ public struct Terminal: Equatable, Sendable {
     private var inputStream = TerminalInputStream()
     private var replyBytes: [UInt8] = []
     private var programVersion: String
-    private var pendingClipboardWrite: String?
     private var primaryKittyKeyboardStack: [UInt16] = []
     private var alternateKittyKeyboardStack: [UInt16] = []
     private var evictedRowCount = 0
@@ -345,12 +418,8 @@ public struct Terminal: Equatable, Sendable {
     private var machineHostname: String?
     private var currentWorkingDirectory: String?
     private var titleUsesWorkingDirectory = false
-    private var pendingTitleEvent: PendingTerminalSemanticEvent?
-    private var pendingWorkingDirectoryEvent: PendingTerminalSemanticEvent?
-    private var pendingProgressEvent: PendingTerminalSemanticEvent?
-    private var pendingDiscreteEvents: [PendingTerminalSemanticEvent] = []
+    private var pendingConsumerWork = PendingConsumerWork()
     private var nextSemanticEventOrder: UInt64 = 0
-    private var pendingConsumerWorkObservation = ObservationGeneration()
     private var primaryHistoryObservation = ObservationGeneration()
 
     static let productionScrollbackBudgetBytes = 10_485_760
@@ -425,12 +494,12 @@ public struct Terminal: Equatable, Sendable {
 
     /// Reports whether a frame consumer has redraw work or a completed semantic write to drain.
     public var hasPendingConsumerWork: Bool {
-        damage.hasDamage || pendingClipboardWrite != nil || hasPendingSemanticEvents
+        damage.hasDamage || pendingConsumerWork.hasWork
     }
 
     /// Lets the serialized host detect accumulator changes without copying terminal storage.
     public var pendingConsumerWorkGeneration: UInt64 {
-        pendingConsumerWorkObservation.value
+        pendingConsumerWork.generation.value
     }
 
     /// Lets recovery consumers classify primary-text frames before materializing their projection.
@@ -447,22 +516,12 @@ public struct Terminal: Equatable, Sendable {
 
     /// Transfers the newest completed clipboard write while preserving empty-string clears.
     public mutating func drainPendingClipboardWrite() -> String? {
-        defer { pendingClipboardWrite = nil }
-        return pendingClipboardWrite
+        pendingConsumerWork.drainClipboardWrite()
     }
 
     /// Transfers the retained semantic batch in terminal-stream order and clears its budget share.
     public mutating func drainSemanticEvents() -> [TerminalSemanticEvent] {
-        var events = pendingDiscreteEvents
-        if let pendingTitleEvent { events.append(pendingTitleEvent) }
-        if let pendingWorkingDirectoryEvent { events.append(pendingWorkingDirectoryEvent) }
-        if let pendingProgressEvent { events.append(pendingProgressEvent) }
-        events.sort { $0.order < $1.order }
-        pendingTitleEvent = nil
-        pendingWorkingDirectoryEvent = nil
-        pendingProgressEvent = nil
-        pendingDiscreteEvents.removeAll(keepingCapacity: true)
-        return events.map(\.event)
+        pendingConsumerWork.drainSemanticEvents()
     }
 
     /// Transfers all accumulated logical redraw work to one frame consumer.
@@ -526,15 +585,22 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func recordFullDamage() {
-        if damage.recordFull() { pendingConsumerWorkObservation.value &+= 1 }
+        if damage.recordFull() { pendingConsumerWork.noteDamageChanged() }
+        notePrimaryHistoryDamage()
     }
 
     private mutating func recordDamage(row: Int) {
-        if damage.record(row: row) { pendingConsumerWorkObservation.value &+= 1 }
+        if damage.record(row: row) { pendingConsumerWork.noteDamageChanged() }
+        notePrimaryHistoryDamage()
     }
 
     private mutating func recordDamage(rows: some Sequence<Int>) {
-        if damage.record(rows: rows) { pendingConsumerWorkObservation.value &+= 1 }
+        if damage.record(rows: rows) { pendingConsumerWork.noteDamageChanged() }
+        notePrimaryHistoryDamage()
+    }
+
+    private mutating func notePrimaryHistoryDamage() {
+        if inactivePrimaryScreen == nil { primaryHistoryObservation.value &+= 1 }
     }
 
     private func damagedViewportRows(for range: TerminalTextRange?) -> Range<Int> {
@@ -721,18 +787,8 @@ public struct Terminal: Equatable, Sendable {
         return nil
     }
 
-    private var hasPendingSemanticEvents: Bool {
-        pendingTitleEvent != nil
-            || pendingWorkingDirectoryEvent != nil
-            || pendingProgressEvent != nil
-            || pendingDiscreteEvents.isEmpty == false
-    }
-
     private var retainedSemanticEventBytes: Int {
-        (pendingTitleEvent?.byteCost ?? 0)
-            + (pendingWorkingDirectoryEvent?.byteCost ?? 0)
-            + (pendingProgressEvent?.byteCost ?? 0)
-            + pendingDiscreteEvents.reduce(0) { $0 + $1.byteCost }
+        pendingConsumerWork.retainedSemanticEventBytes
     }
 
     private mutating func dispatchTitle(_ payload: [UInt8], selectorEnd: Int) {
@@ -741,12 +797,10 @@ public struct Terminal: Equatable, Sendable {
               let value = strictlyDecodedUTF8(valueBytes)
         else { return }
         titleUsesWorkingDirectory = value.isEmpty
-        let previous = pendingTitleEvent
-        pendingTitleEvent = admittedCoalescedSemanticEvent(
+        pendingConsumerWork.setTitle(admittedCoalescedSemanticEvent(
             .title(value.isEmpty ? currentWorkingDirectory ?? "" : value),
-            replacing: pendingTitleEvent
-        )
-        if pendingTitleEvent != previous { pendingConsumerWorkObservation.value &+= 1 }
+            replacing: pendingConsumerWork.title
+        ))
     }
 
     private mutating func dispatchDanTermShell(_ payload: [UInt8], selectorEnd: Int) {
@@ -847,12 +901,10 @@ public struct Terminal: Equatable, Sendable {
             event = .pause(percent: percent)
         default: return
         }
-        let previous = pendingProgressEvent
-        pendingProgressEvent = admittedCoalescedSemanticEvent(
+        pendingConsumerWork.setProgress(admittedCoalescedSemanticEvent(
             .progress(event),
-            replacing: pendingProgressEvent
-        )
-        if pendingProgressEvent != previous { pendingConsumerWorkObservation.value &+= 1 }
+            replacing: pendingConsumerWork.progress
+        ))
     }
 
     private func progressPercent(_ bytes: ArraySlice<UInt8>) -> UInt8? {
@@ -882,31 +934,24 @@ public struct Terminal: Equatable, Sendable {
             cwd = parsed
         }
         currentWorkingDirectory = cwd
-        let previousWorkingDirectory = pendingWorkingDirectoryEvent
-        pendingWorkingDirectoryEvent = admittedCoalescedSemanticEvent(
+        pendingConsumerWork.setWorkingDirectory(admittedCoalescedSemanticEvent(
             .workingDirectory(cwd),
-            replacing: pendingWorkingDirectoryEvent
-        )
-        if pendingWorkingDirectoryEvent != previousWorkingDirectory {
-            pendingConsumerWorkObservation.value &+= 1
-        }
+            replacing: pendingConsumerWork.workingDirectory
+        ))
         if titleUsesWorkingDirectory {
-            let previousTitle = pendingTitleEvent
-            pendingTitleEvent = admittedCoalescedSemanticEvent(
+            pendingConsumerWork.setTitle(admittedCoalescedSemanticEvent(
                 .title(cwd ?? ""),
-                replacing: pendingTitleEvent
-            )
-            if pendingTitleEvent != previousTitle { pendingConsumerWorkObservation.value &+= 1 }
+                replacing: pendingConsumerWork.title
+            ))
         }
     }
 
     private mutating func admitDiscreteSemanticEvent(_ event: TerminalSemanticEvent) {
-        guard pendingDiscreteEvents.count < Self.maximumDiscreteSemanticEvents else { return }
+        guard pendingConsumerWork.discrete.count < Self.maximumDiscreteSemanticEvents else { return }
         let candidate = PendingTerminalSemanticEvent(order: nextSemanticEventOrder, event: event)
         guard canAdmitSemanticBytes(candidate.byteCost) else { return }
         nextSemanticEventOrder &+= 1
-        pendingDiscreteEvents.append(candidate)
-        pendingConsumerWorkObservation.value &+= 1
+        pendingConsumerWork.appendDiscrete(candidate)
     }
 
     private mutating func admittedCoalescedSemanticEvent(
@@ -1082,10 +1127,7 @@ public struct Terminal: Equatable, Sendable {
         else { return }
         let value = String(decoding: decoded, as: UTF8.self)
         guard Array(value.utf8) == decoded else { return }
-        if pendingClipboardWrite != value {
-            pendingClipboardWrite = value
-            pendingConsumerWorkObservation.value &+= 1
-        }
+        pendingConsumerWork.setClipboardWrite(value)
     }
 
     private func parseOSCSelector(_ bytes: ArraySlice<UInt8>) -> Int? {
@@ -2576,6 +2618,7 @@ public struct Terminal: Equatable, Sendable {
         if let lastEvicted {
             isHistoryHeadTruncated = lastEvicted.isSoftWrapped
         }
+        if evictedCount > 0 { primaryHistoryObservation.value &+= 1 }
         handleEviction(of: evictedCount)
     }
 
@@ -2638,8 +2681,6 @@ public struct Terminal: Equatable, Sendable {
         var lower = max(0, columns.lowerBound)
         var upper = min(columnCount, columns.upperBound)
         guard lower < upper else { return }
-        if inactivePrimaryScreen == nil { primaryHistoryObservation.value &+= 1 }
-
         if self.rows[row].cells[lower].kind == .wideTail {
             lower -= 1
         }
@@ -3942,7 +3983,6 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func dispatchEscape(_ sequence: EscapeSequence) {
         guard sequence.intermediates == [0x23], sequence.final == 0x38 else { return }
-        if inactivePrimaryScreen == nil { primaryHistoryObservation.value &+= 1 }
         invalidateInspection(inViewportRows: rows.indices)
         for row in rows.indices {
             rows[row] = GridRow(cells: (0..<columnCount).map { _ in
@@ -4223,15 +4263,12 @@ public struct Terminal: Equatable, Sendable {
     private mutating func print(_ scalar: Unicode.Scalar) {
         let classification = terminalUnicodeClassification(for: scalar)
         if appendToOpenClusterIfJoined(scalar, classification: classification) {
-            if inactivePrimaryScreen == nil { primaryHistoryObservation.value &+= 1 }
             rememberOpenCluster()
             return
         }
 
         let properties = classification.properties
         guard properties.cellWidth != .zero else { return }
-
-        if inactivePrimaryScreen == nil { primaryHistoryObservation.value &+= 1 }
 
         if isPendingWrap {
             invalidateInspection(inViewportRows: cursor.row..<(cursor.row + 1))
@@ -4649,7 +4686,6 @@ public struct Terminal: Equatable, Sendable {
         invalidatesInspection: Bool = true
     ) {
         guard range.isEmpty == false, delta != 0 else { return }
-        if inactivePrimaryScreen == nil { primaryHistoryObservation.value &+= 1 }
         if invalidatesInspection {
             invalidateInspection(inViewportRows: range)
         }
@@ -4692,7 +4728,6 @@ public struct Terminal: Equatable, Sendable {
         by delta: Int
     ) {
         guard range.isEmpty == false, delta != 0 else { return }
-        if inactivePrimaryScreen == nil { primaryHistoryObservation.value &+= 1 }
         invalidateInspection(inViewportRows: row..<(row + 1))
         let amount = min(abs(delta), range.count)
         let sourceCells = Array(rows[row].cells[range])

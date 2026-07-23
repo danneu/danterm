@@ -106,8 +106,10 @@ corpus and share those results the same way.
 - I4: Damage remains observationally correct: every row whose rendered
   content changed since the last drain is reported (over-approximation
   remains allowed); consumers observe no API behavior change.
-- I5: Consumer-work and history-mutation signaling fire in exactly the
-  situations they fire today.
+- I5: Consumer-work signaling remains unchanged; history-mutation signaling
+  covers every primary-history text change, with safe over-approximation
+  allowed. New pending-work accumulators cannot be written without advancing
+  the generation.
 - I6: The terminal core stays pure and dependency-free.
 - I7: Benchmark history stays trustworthy: profiled runs never enter
   committed history; records without a comment remain valid; delta matching
@@ -208,10 +210,14 @@ corpus and share those results the same way.
 - [x] 4. Slice C (generation counters): same loop; additionally verify
   `scrollback-stream` to confirm the O(history) fix; both differential
   signaling tests before removing either old oracle (PO4a, PO4b).
-- [ ] 5. Slice D (inline cluster storage): same loop (sample check:
+- [x] 5. Pre-D signaling funnel refactor: make pending-work accumulators own
+  their generation updates; derive primary-history observation from the damage
+  funnel plus named history-shrink exceptions; prove the premise across every
+  committed neutral fixture frame.
+- [ ] 6. Slice D (inline cluster storage): same loop (sample check:
   malloc/free and GridCell-copy traffic); full cluster/reflow fixture pass
   (PO2).
-- [ ] 6. Final verification: rerun all four workloads unprofiled, save
+- [ ] 7. Final verification: rerun all four workloads unprofiled, save
   records with a closing comment, share the full comparison with the user
   for acceptance, update
   `agent-docs/terminal-performance.md` if the investigation workflow

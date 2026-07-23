@@ -32,6 +32,60 @@ struct TerminalFixtureTests {
         try replayFixture(at: url)
     }
 
+    @Test("primary-history generation covers every fixture-frame text mutation")
+    func primaryHistoryGenerationCoversFixtureFrames() throws {
+        // Intent: every primary-history text mutation in the committed recording corpora
+        //   advances the cheap generation observed by recovery.
+        // Why it exists: history generation is derived from the damage funnel, so a new
+        //   mutation path that bypasses damage could otherwise leave recovery stale.
+        // Scenario: replay every authored libvterm, Alacritty, and DanTerm frame
+        //   and require changed recovery text to remain observable without requiring exact bumps.
+        for url in try recordingFixtureURLs() {
+            let recording = try JSONDecoder().decode(
+                NeutralTerminalRecording.self,
+                from: Data(contentsOf: url)
+            )
+            var terminal = try #require(Terminal(
+                columns: recording.initial.columns,
+                rows: recording.initial.rows
+            ))
+            var interactionState = TerminalInteractionState()
+
+            for (eventIndex, event) in recording.events.enumerated() {
+                let previousText = terminal.primaryHistoryText
+                let previousGeneration = terminal.primaryHistoryGeneration
+
+                switch event {
+                case .feed(let bytes):
+                    terminal.feed(bytes)
+                case .resize(let columns, let rows):
+                    terminal.resize(columns: columns, rows: rows)
+                case .viewport(let navigation):
+                    switch navigation {
+                    case .byRows(let rows): terminal.scroll(byRows: rows)
+                    case .toTopRow(let row): terminal.scroll(toTopRow: row)
+                    case .toBottom: terminal.scrollToBottom()
+                    }
+                case .mouse(let mouse):
+                    _ = applyNeutralTerminalMouse(
+                        mouse,
+                        terminal: &terminal,
+                        interactionState: &interactionState
+                    )
+                case .input, .paste, .focus, .checkpoint:
+                    break
+                }
+
+                if terminal.primaryHistoryText != previousText {
+                    #expect(
+                        terminal.primaryHistoryGeneration != previousGeneration,
+                        "Missed primary-history generation for \(url.lastPathComponent) event \(eventIndex)"
+                    )
+                }
+            }
+        }
+    }
+
     @Test("libvterm manifest classifies every case from the forty-three selected source files")
     func libvtermManifestCoverage() throws {
         // Intent: pin the adoption ledger to every upstream case heading in
@@ -171,6 +225,19 @@ struct TerminalFixtureTests {
             .filter { $0.pathExtension == "json" }
         }
         .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    private func recordingFixtureURLs() throws -> [URL] {
+        let root = try #require(Bundle.module.resourceURL)
+            .appending(path: "Fixtures", directoryHint: .isDirectory)
+        return try ["libvterm", "alacritty", "danterm"].flatMap { directory in
+            try FileManager.default.contentsOfDirectory(
+                at: root.appending(path: directory, directoryHint: .isDirectory),
+                includingPropertiesForKeys: nil
+            )
+            .filter { $0.pathExtension == "json" }
+        }
+        .sorted { $0.path < $1.path }
     }
 
     private func alacrittyFixtureURLs() throws -> [URL] {
