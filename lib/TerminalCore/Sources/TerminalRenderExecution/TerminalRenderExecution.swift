@@ -358,9 +358,19 @@ private extension CGContext {
             var spriteRects: [CGRect] = []
             var shadedSpriteRects: [BlockElementShade: [CGRect]] = [:]
             var geometricShapeTriangles: [GeometricShapeRenderTriangle] = []
+            var boxDrawingStrokes: [BoxDrawingRenderStroke] = []
             var column = run.startColumn
             for cell in run.cells {
-                if let pattern = BrailleSprite.pattern(for: cell.scalars) {
+                if let pattern = BoxDrawingSprite.pattern(for: cell.scalars) {
+                    BoxDrawingSprite.append(
+                        pattern: pattern,
+                        row: run.row,
+                        column: column,
+                        metrics: metrics,
+                        rects: &spriteRects,
+                        strokes: &boxDrawingStrokes
+                    )
+                } else if let pattern = BrailleSprite.pattern(for: cell.scalars) {
                     BrailleSprite.appendRects(
                         pattern: pattern,
                         row: run.row,
@@ -401,6 +411,12 @@ private extension CGContext {
             if spriteRects.isEmpty == false {
                 setFillColor(foreground)
                 fill(spriteRects)
+            }
+            if boxDrawingStrokes.isEmpty == false {
+                setStrokeColor(foreground)
+                for stroke in boxDrawingStrokes {
+                    drawBoxDrawingStroke(stroke, metrics: metrics)
+                }
             }
             for (shade, rects) in shadedSpriteRects where rects.isEmpty == false {
                 let alpha = CGFloat(shade.rawValue) / 255
@@ -504,6 +520,35 @@ private extension CGContext {
             setLineJoin(.miter)
             strokePath()
         }
+    }
+
+    func drawBoxDrawingStroke(
+        _ stroke: BoxDrawingRenderStroke,
+        metrics: TerminalRenderMetrics
+    ) {
+        let scale = metrics.displayScale
+        let points = stroke.geometry.points.map {
+            CGPoint(
+                x: stroke.cellOrigin.x + CGFloat($0.x) / scale,
+                y: stroke.cellOrigin.y + CGFloat($0.y) / scale
+            )
+        }
+        guard let first = points.first, let last = points.last else { return }
+        saveGState()
+        defer { restoreGState() }
+        clip(to: CGRect(origin: stroke.cellOrigin, size: metrics.cellSize))
+        setShouldAntialias(true)
+        setAllowsAntialiasing(true)
+        setLineCap(.butt)
+        setLineWidth(CGFloat(stroke.geometry.width) / scale)
+        beginPath()
+        move(to: first)
+        if stroke.geometry.isCurved, points.count == 3 {
+            addQuadCurve(to: last, control: points[1])
+        } else {
+            for point in points.dropFirst() { addLine(to: point) }
+        }
+        strokePath()
     }
 
     func drawTextCell(
