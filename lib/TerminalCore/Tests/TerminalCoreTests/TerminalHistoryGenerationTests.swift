@@ -21,6 +21,8 @@ struct TerminalHistoryGenerationTests {
         //   `isFollowing == false` early return was previously a blanket bump covering every
         //   scrolled-back mutation at once. Without per-funnel coverage, a funnel that quietly
         //   stopped reporting would leave recovery holding stale text with no failing test.
+        //   These cases exhaust the current content funnels; adding another funnel
+        //   requires adding its behavioral proof here.
         // Scenario: the PROBE-BROWSE case -- the user scrolls up to read history while the
         //   shell keeps writing, resizes nothing, and expects recovery to still see the output.
         // Funnels 1 and 3 are reachable in isolation. Funnels 2 and 4 are not -- a scrollback

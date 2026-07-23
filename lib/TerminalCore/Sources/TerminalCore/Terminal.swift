@@ -557,6 +557,9 @@ public struct Terminal: Equatable, Sendable {
     /// Every statement here is presentation-only, so none advances the history generation:
     /// callers do mutate cells around this call, but that content reaches the generation
     /// through its own funnels (`invalidateInspection`, scrollback append, budget eviction).
+    /// This is a global maintenance obligation: any new content mutation reachable
+    /// from a caller must use an independently bumping path and extend
+    /// `contentFunnelsAdvanceGenerationWhileScrolledBack`.
     /// Bumping here as well would make "generation advanced" unreadable as "history changed",
     /// since a bare cursor move or selection drag would trip it.
     private mutating func recordDamage(since before: DamageActionSnapshot) {

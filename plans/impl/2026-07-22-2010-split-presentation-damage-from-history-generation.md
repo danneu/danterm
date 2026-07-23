@@ -108,7 +108,10 @@ keystroke) still advance the generation, so "generation advanced" is not
   `invalidateInspection(inScrollbackRow:)`), linefeed-driven scrollback
   append (the direct `recordDamage(rows:)` at ~4579, which passes
   `invalidatesInspection: false`), and `enforceScrollbackBudget`
-  eviction. Four assertions, one test.
+  eviction. Four assertions, one test. These are the four current content
+  funnels, not a closed architectural set. Any new content-mutation path
+  reachable from a `recordDamage(since:)` caller must advance the generation
+  independently and extend this proof obligation.
 - PO-B (I-B): a converse test pins that pure cursor/selection/hover
   events and pure scroll/search-navigation events leave the generation
   unchanged; its preamble notes that identical-content rewrites still
