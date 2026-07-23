@@ -280,6 +280,13 @@ public actor TerminalPTYHost {
         }
     }
 
+    /// Enqueues whole-stream selection on the same FIFO as pointer mutations and output.
+    nonisolated public func selectAll() {
+        queue.async { [weak self] in
+            self?.assumeIsolated { owner in owner.applySelectAll() }
+        }
+    }
+
     /// Enqueues normalized fractional wheel input for atomic route and mode selection.
     nonisolated public func sendWheel(_ event: TerminalWheelEvent) {
         queue.async { [weak self] in
@@ -622,6 +629,15 @@ public actor TerminalPTYHost {
         guard teardownFinished == false else { return }
         let previousTerminal = terminal
         terminal.clearSelection()
+        guard terminal != previousTerminal else { return }
+        markUpdatePending()
+        publishPendingUpdate()
+    }
+
+    private func applySelectAll() {
+        guard teardownFinished == false else { return }
+        let previousTerminal = terminal
+        terminal.selectAll()
         guard terminal != previousTerminal else { return }
         markUpdatePending()
         publishPendingUpdate()

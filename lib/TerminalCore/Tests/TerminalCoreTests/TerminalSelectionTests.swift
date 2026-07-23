@@ -277,6 +277,44 @@ struct TerminalSelectionTests {
         #expect(empty.selectedText == "")
     }
 
+    @Test("select-all covers the whole retained stream including scrollback")
+    func selectAllCoversWholeStream() throws {
+        // Intent: select-all selects the entire retained stream, so its text equals the
+        //   full-history projection and its start anchors the first retained row.
+        // Why it exists: pins whole-stream extent (not the viewport), computed inside the
+        //   terminal value, the contract the Cmd-A plumbing relies on to copy scrollback.
+        // Scenario: output has scrolled past one screen, evicting early rows into scrollback.
+        let rowCost = 16 + 2 * 32 + 8
+        var terminal = try #require(Terminal(
+            columns: 2,
+            rows: 1,
+            scrollbackBudgetBytes: rowCost * 2
+        ))
+        terminal.feed(Array("A\r\nB\r\nC\r\nD".utf8))
+
+        terminal.selectAll()
+
+        #expect(terminal.fullHistoryText == "B\nC\nD")
+        #expect(terminal.selectedText == terminal.fullHistoryText)
+        #expect(terminal.selectionRange?.start == TerminalTextPosition(row: 0, column: 0))
+    }
+
+    @Test("select-all on an empty buffer yields a present empty selection")
+    func selectAllEmptyBuffer() throws {
+        // Intent: select-all on a fresh terminal produces a present selection whose text is the
+        //   (empty) full-history projection, not an unselected terminal.
+        // Why it exists: selection presence drives `hasSelection` and therefore Copy enablement,
+        //   so an empty buffer must still register a selection rather than no-op.
+        // Scenario: a user presses Cmd-A immediately after opening a pane with no output.
+        var terminal = try #require(Terminal(columns: 4, rows: 3))
+
+        terminal.selectAll()
+
+        #expect(terminal.selectionRange != nil)
+        #expect(terminal.selectedText == terminal.fullHistoryText)
+        #expect(terminal.selectedText == "")
+    }
+
     @Test("screen replacement clears inspection while inert controls preserve it")
     func screenLifetime() throws {
         var terminal = try #require(Terminal(columns: 4, rows: 2))

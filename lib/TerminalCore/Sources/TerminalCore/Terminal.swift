@@ -1695,6 +1695,23 @@ public struct Terminal: Equatable, Sendable {
         recordDamage(since: before)
     }
 
+    /// Selects the entire retained stream -- scrollback through viewport -- so callers copy full
+    /// history without deriving stream bounds themselves. The extent is computed here from the same
+    /// projection `fullHistoryText` uses, so the selected text equals it; an empty or blank buffer
+    /// yields a present but empty selection, which keeps `selectedText` non-nil (and therefore
+    /// `hasSelection` true) for Copy enablement rather than leaving the terminal unselected.
+    public mutating func selectAll() {
+        let before = damageActionSnapshot
+        let units = projectionUnits()
+        if let first = units.first, let last = units.last {
+            selection = TextAnchorRange(start: first.start, end: last.end)
+        } else {
+            let anchor = TextAnchor(row: evictedRowCount, column: 0)
+            selection = TextAnchorRange(start: anchor, end: anchor)
+        }
+        recordDamage(since: before)
+    }
+
     /// Returns the maximal same-class word unit used by native double-click selection.
     public func wordRange(at position: TerminalTextPosition) -> TerminalTextRange {
         let units = projectionUnits()

@@ -341,6 +341,12 @@ public final class TerminalPaneSessionController {
         host.clearSelection()
     }
 
+    /// Enqueues whole-stream selection on the sole terminal owner.
+    public func selectAll() {
+        guard isTornDown == false else { return }
+        host.selectAll()
+    }
+
     /// Returns primary-screen history for persistence consumers that exclude transient screens.
     public func readPrimaryHistoryText() -> String {
         cachedTerminal.primaryHistoryText

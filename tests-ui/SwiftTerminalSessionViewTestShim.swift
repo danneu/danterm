@@ -270,6 +270,11 @@ final class TerminalPaneSessionController {
         emitFrame()
     }
     func readHoveredLink() -> TerminalHyperlink? { cachedHoveredLink }
+    private(set) var selectAllRequests = 0
+    func selectAll() {
+        selectAllRequests += 1
+        cachedHasSelection = true
+    }
     var hasSelection: Bool { cachedHasSelection }
     func readSelectedTextSynchronizing() -> String? {
         synchronizedSelectionReads += 1

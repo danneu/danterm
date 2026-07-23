@@ -484,6 +484,13 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         copySelection()
     }
 
+    /// NSResponder: routes the standard Edit > Select All action, which is what gives the pane
+    /// Cmd-A. `keyDown` drops Command-modified keys, so this override is the sole owner of the
+    /// shortcut; the enqueued whole-stream selection lets the existing Copy path copy scrollback.
+    override func selectAll(_ sender: Any?) {
+        controller.selectAll()
+    }
+
     /// NSMenuItemValidation: greys out Edit > Copy when nothing is selected. Reads the cache-only
     /// `hasSelection` rather than fencing, because menu tracking must not block on the render
     /// owner; every other action is left enabled so unrelated items keep their own validation.

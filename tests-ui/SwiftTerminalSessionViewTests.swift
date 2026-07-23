@@ -265,19 +265,56 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(pane.validateMenuItem(pasteItem), "Paste validation tracked the selection")
     }
 
+    uiTest("Edit > Select All routes through the responder chain and validates as enabled") {
+        // Intent: the nil-targeted `selectAll(_:)` action reaches the pane through AppKit's
+        //   responder-chain lookup, produces a selection the pane reports, and leaves
+        //   Edit > Select All validating as enabled.
+        // Why it exists: the Swift engine declines Command keys in `keyDown`, so Cmd-A only
+        //   works if the pane owns `selectAll(_:)` on the responder chain; dispatching through
+        //   the chain (not calling the method directly) is the point -- a direct call would pass
+        //   even if the menu item stayed disabled or the action resolved to another responder.
+        // Scenario: a user makes the pane first responder and presses Cmd-A.
+        let controller = TerminalPaneSessionController()
+        let pane = makeMountedPane(controller: controller)
+        guard let window = pane.window else {
+            throw UITestFailure(message: "mounted pane had no window")
+        }
+        // Dispatch from a child first responder whose `nextResponder` is the pane, so the
+        // nil-targeted action resolves up the responder chain to the pane rather than being
+        // called on it directly. (A key-window-scoped `NSApp.sendAction` can't run headless.)
+        let probe = FirstResponderProbeView(frame: .zero)
+        pane.addSubview(probe)
+        try uiExpect(window.makeFirstResponder(probe), "probe could not become first responder")
+        let selectAllItem = NSMenuItem(
+            title: "Select All", action: #selector(NSResponder.selectAll(_:)), keyEquivalent: "a"
+        )
+
+        try uiExpect(
+            probe.tryToPerform(#selector(NSResponder.selectAll(_:)), with: nil),
+            "responder chain declined the nil-targeted Select All action"
+        )
+
+        try uiExpect(controller.selectAllRequests == 1, "Select All did not reach the owner")
+        try uiExpect(pane.hasSelection, "pane reported no selection after Select All")
+        try uiExpect(pane.validateMenuItem(selectAllItem), "Select All validated as disabled")
+    }
+
     uiTest("Command-modified keys produce no terminal input") {
-        // Intent: Cmd-C is owned by the menu/responder chain and never encoded as terminal input.
+        // Intent: Cmd-C and Cmd-A are owned by the menu/responder chain and never encoded as
+        //   terminal input.
         // Why it exists: a fix that reintroduced a Command branch in `keyDown` would send a
-        //   stray byte to the shell whenever the shortcut fell through.
-        // Scenario: the user presses Cmd-C on a mounted pane with no selection.
+        //   stray byte to the shell whenever such a shortcut fell through -- for Cmd-A, the
+        //   `\x01` the line editor uses for start-of-line.
+        // Scenario: the user presses Cmd-C then Cmd-A on a mounted pane with no selection.
         let controller = TerminalPaneSessionController()
         let pane = makeMountedPane(controller: controller)
         let before = controller.inputBytes
 
         pane.keyDown(with: try makeKeyEvent(keyCode: 8, modifiers: [.command], characters: "c"))
+        pane.keyDown(with: try makeKeyEvent(keyCode: 0, modifiers: [.command], characters: "a"))
 
         try uiExpect(controller.inputBytes == before,
-                     "Command-c leaked terminal input: \(controller.inputBytes)")
+                     "Command key leaked terminal input: \(controller.inputBytes)")
     }
 
     uiTest("OSC 52 writes and empty clears reach the injected pasteboard") {
@@ -761,6 +798,12 @@ private func makeMountedPane(controller: TerminalPaneSessionController) -> Swift
     pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
     mountInTestWindow(pane, frame: pane.frame)
     return pane
+}
+
+/// A child view that can hold first-responder status so a nil-targeted action can be dispatched
+/// up the responder chain (child -> pane) instead of being invoked on the pane directly.
+private final class FirstResponderProbeView: NSView {
+    override var acceptsFirstResponder: Bool { true }
 }
 
 @MainActor
