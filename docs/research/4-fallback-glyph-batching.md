@@ -237,7 +237,7 @@ a non-covering font, with per-cell CTLine construction hot again.
   This remains the standing deterministic regression for the measured btop
   problem. The real-btop profile closes the loop, but does not replace this
   repeatable workload.
-- [ ] **Task 2b: add and baseline a distinct generic sprite-coverage workload.**
+- [x] **Task 2b: add and baseline a distinct generic sprite-coverage workload.**
   Add `full-screen-sprite-coverage-churn` under fixture identity
   `full-screen-sprite-coverage-churn-v1-curated-candidates-80x24`. Its four
   equally represented candidate sets are box drawing, block elements,
@@ -247,8 +247,21 @@ a non-covering font, with per-cell CTLine construction hot again.
   both symbol workloads independently so coverage work cannot replace the
   btop regression again.
 
-  The generator and contract tests are complete. Record its compatible
-  font-rendered baseline before task 3 implementation. The earlier
+  **Result (2026-07-23): complete.** The compatible unprofiled run used 15
+  fresh optimized app batches and 25 serialized completed draws per batch
+  (375 measured draws total):
+
+  | Metric | Minimum | Median | Maximum |
+  |---|---:|---:|---:|
+  | Nanoseconds per draw | 20,458,081 | 20,745,788 | 21,255,291 |
+  | Cumulative draw time per batch | 511,452,042 | 518,644,707 | 531,382,295 |
+
+  Every batch reported exactly 25 completed draws and every draw damaged all
+  24 rows. The result is saved in
+  `benchmarks/results/terminal-redraw.jsonl` with comment
+  `font-rendered-sprite-coverage-baseline`.
+
+  The earlier
   `full-screen-symbol-churn-v2-geometric-sprite-mix-80x24` result remains
   closed history: it exercised the entire U+25A0-25FF block and therefore
   cannot serve as the baseline for this corrected fixture.
