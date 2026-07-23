@@ -19,23 +19,23 @@ architecture.
 
 ## Component plans
 
-| Document | Scope | Planning status |
-|---|---|---|
-| [Product contract](01-product-contract.md) | Product scope, compatibility target, non-goals | Initial decisions captured |
-| [Migration and app boundary](02-migration-and-boundary.md) | Temporary backend coexistence and DanTerm-facing terminal contract | Initial direction captured |
-| [Engine architecture and testability](03-engine-architecture.md) | Reducer boundaries, ownership, effects, and pure policy seams | Initial direction captured |
-| [Terminal core](04-terminal-core.md) | Pure parser, terminal state, modes, and semantic output | Initial direction captured |
-| [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md) | Grapheme behavior, widths, reflow, and retention | Initial decisions captured |
-| [Inspection, search, and recovery](06-inspection-recovery.md) | Observable terminal text, pane reads, selection/search, export, and replay | Initial decisions captured |
-| [PTY and process lifecycle](07-pty-process-lifecycle.md) | macOS child-process ownership and teardown | Initial decisions captured |
-| [Input and interaction](08-input-interaction.md) | Keyboard, IME, mouse, selection, paste, clipboard, and links | Initial decisions captured |
-| [Renderer](09-renderer.md) | Correctness-first AppKit/CoreText rendering | Initial decisions captured |
-| [Protocols and shell integration](10-protocols-shell-integration.md) | TERM contract, escape protocols, and DanTerm events | Initial decisions captured |
-| [Configuration and themes](11-configuration-themes.md) | Baked defaults and future DanTerm-owned formats | Initial decisions captured |
-| [Testing and conformance](12-testing-conformance.md) | Behavioral proof strategy and compatibility gates | Initial direction captured |
-| [Power and performance](13-power-performance.md) | Idle, visibility, sleep/wake, and responsiveness contracts | Initial decisions captured |
-| [Incremental roadmap](14-roadmap.md) | Canonical high-level progress checklist and replacement gate | Initial checklist captured |
-| [Open questions](15-open-questions.md) | Decisions intentionally left for the next planning rounds | Active |
+| Document                                                             | Scope                                                                      | Planning status            |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------- | -------------------------- |
+| [Product contract](01-product-contract.md)                           | Product scope, compatibility target, non-goals                             | Initial decisions captured |
+| [Migration and app boundary](02-migration-and-boundary.md)           | Temporary backend coexistence and DanTerm-facing terminal contract         | Initial direction captured |
+| [Engine architecture and testability](03-engine-architecture.md)     | Reducer boundaries, ownership, effects, and pure policy seams              | Initial direction captured |
+| [Terminal core](04-terminal-core.md)                                 | Pure parser, terminal state, modes, and semantic output                    | Initial direction captured |
+| [Unicode, grid, and scrollback](05-unicode-grid-scrollback.md)       | Grapheme behavior, widths, reflow, and retention                           | Initial decisions captured |
+| [Inspection, search, and recovery](06-inspection-recovery.md)        | Observable terminal text, pane reads, selection/search, export, and replay | Initial decisions captured |
+| [PTY and process lifecycle](07-pty-process-lifecycle.md)             | macOS child-process ownership and teardown                                 | Initial decisions captured |
+| [Input and interaction](08-input-interaction.md)                     | Keyboard, IME, mouse, selection, paste, clipboard, and links               | Initial decisions captured |
+| [Renderer](09-renderer.md)                                           | Correctness-first AppKit/CoreText rendering                                | Initial decisions captured |
+| [Protocols and shell integration](10-protocols-shell-integration.md) | TERM contract, escape protocols, and DanTerm events                        | Initial decisions captured |
+| [Configuration and themes](11-configuration-themes.md)               | Baked defaults and future DanTerm-owned formats                            | Initial decisions captured |
+| [Testing and conformance](12-testing-conformance.md)                 | Behavioral proof strategy and compatibility gates                          | Initial direction captured |
+| [Power and performance](13-power-performance.md)                     | Idle, visibility, sleep/wake, and responsiveness contracts                 | Initial decisions captured |
+| [Incremental roadmap](14-roadmap.md)                                 | Canonical high-level progress checklist and replacement gate               | Initial checklist captured |
+| [Open questions](15-open-questions.md)                               | Decisions intentionally left for the next planning rounds                  | Active                     |
 
 ## Decisions already fixed
 
@@ -79,6 +79,44 @@ architecture.
 Passing the experiment gate proves that the architecture is worth extending;
 it does not prove replacement readiness. Replacement still requires the full
 component, compatibility, and quality gates in the roadmap.
+
+## Performance optimization index
+
+The engine began with intentionally straightforward implementations. This
+index records the places where profiling justified additional complexity so a
+future reader can distinguish deliberate performance machinery from incidental
+cleverness. Percentages are approximate reductions in median duration on the
+committed 80x24 benchmark records. Each percentage is incremental: it compares
+that change with the best compatible result recorded before it, not with the
+original naive baseline. They are evidence for orientation, not permanent
+performance guarantees.
+
+- **[Bounded damage bitset](../plans/impl/2026-07-22-1736-terminal-core-feed-throughput-recovery.md)
+  -- about 20% faster core feed.** A reusable viewport-
+  row bitset replaced per-scalar `Set<Int>` allocation, hashing, and union while
+  preserving the public `TerminalDamage` value. The trade-off is separate
+  internal and consumer-facing damage representations, with set materialization
+  deferred until drain.
+- **[Packed Unicode lookup and cached look-behind class](../plans/impl/2026-07-22-1736-terminal-core-feed-throughput-recovery.md)
+  -- about 31% faster core feed after the damage change.** One generated
+  two-stage lookup replaced repeated binary searches for width, emoji
+  properties, and grapheme-break class, and the segmenter now retains the
+  preceding class. The trade-off is a larger generated table and a less direct
+  classification path.
+- **[Generation counters for change detection](../plans/impl/2026-07-22-1736-terminal-core-feed-throughput-recovery.md)
+  -- no measured core-feed gain on styled redraw.** Monotonic generations
+  replaced whole-`Terminal` copies for pending-work detection and repeated
+  O(history) string comparisons for recovery notifications. Styled redraw was
+  about 1% slower than the preceding result, within the role of this slice as a
+  scrollback-specific fix. The saved results do not include an immediately
+  preceding scrollback run, so no isolated scrollback percentage is claimed.
+  The trade-off is explicit mutation accounting and conservative history-change
+  signaling.
+- **[Inline single-scalar grid cells](../plans/impl/2026-07-22-1736-terminal-core-feed-throughput-recovery.md)
+  -- about 2% faster core feed than the prior best result.** Empty and
+  single-scalar clusters stay inline while multi-scalar graphemes spill to an
+  array. The trade-off is a specialized three-case storage representation and
+  more involved upgrade and downgrade paths.
 
 ## Branch and worktree workflow
 
