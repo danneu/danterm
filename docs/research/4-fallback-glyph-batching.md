@@ -91,6 +91,42 @@ serialized workload is a prerequisite for making claims.
    is evidence for promoting resolution to frame scope (still stateless), and
    only failing that would a cross-frame cache be on the table.
 
+## Pivot (2026-07-23): DanTerm-owned sprite glyphs
+
+Task 1's distribution and the Ghostty reference changed the chosen mechanism.
+The fallback population is entirely spec-defined geometry (braille, with box
+drawing/blocks/geometric shapes as the adjacent ranges), and these ranges are
+specified shapes -- a fixed 2x4 dot grid, edge-connecting lines, cell fills --
+not typography. Ghostty, kitty, Alacritty, and iTerm2 all draw them
+procedurally, checked before any font lookup
+(`.ghostty-src/src/font/sprite/`), because procedural drawing is both faster
+than any font path (no CoreText at all) and more correct (exact cell fit, no
+hairline gaps between adjacent cells, no dependence on installed fallback
+fonts).
+
+DanTerm adopts the same approach: a sprite path for braille, box drawing,
+block elements, and geometric shapes, resolved before font lookup in the
+executor. Consequences for this document:
+
+- Tasks 3a/3b (per-run fallback-font batching) are superseded, not deleted.
+  Their design notes remain below as the deferred general-case mechanism,
+  with an explicit revival trigger: a profiled real workload dominated by
+  non-sprite cmap misses (for example CJK-heavy screens in a non-covering
+  font) showing per-cell CTLine hot again.
+- Task 2's workload pivots to v2: the btop-weighted mix overfits the yardstick
+  to braille, while the regression question ("is btop fixed?") is already
+  answered by task 4's real-btop re-profile. The standing benchmark should
+  instead churn all sprite-candidate ranges so a partial sprite
+  implementation cannot ace it. The committed btop-mix baseline stays in
+  `benchmarks/results/terminal-redraw.jsonl` as a closed historical record.
+- Hypothesis 2's grounded target must be re-based on the v2 workload's
+  font-rendered baseline once recorded; the 94.3x fallback-cost evidence from
+  the v1 baseline stands on its own.
+- Sprite output intentionally differs from font-rendered output for these
+  ranges (better cell fit). Existing bitmap fixtures containing these
+  characters get deliberately re-baselined, and new sprite fixtures become
+  the rendering contract.
+
 ## Tasks
 
 - [x] **Task 1: verify the trigger.** Instrument the executor with aggregate
@@ -183,7 +219,41 @@ serialized workload is a prerequisite for making claims.
   existing fast path. The Hypothesis 2 target is therefore grounded at
   636,060 ns/draw (at most 2x ordinary content churn), a required 97.88%
   reduction.
-- [ ] **Task 3a: metric-equivalence characterization test.** Before touching
+
+  **Pivot note (2026-07-23):** the v1 btop-mix workload and its baseline are
+  now a closed record (see the pivot section). Task 2v2 below replaces it as
+  the standing symbol benchmark.
+- [ ] **Task 2v2: pivot the symbol workload to a generic sprite-range mix.**
+  Replace the btop-weighted generator with a curated deterministic churn
+  across all sprite-candidate ranges -- box drawing (U+2500-257F), block
+  elements (U+2580-259F), geometric shapes (U+25A0-25FF), and braille
+  (U+2800-28FF) -- under a new fixture identity (for example
+  `full-screen-symbol-churn-v2-geometric-sprite-mix-80x24`). Re-pin the exact
+  scalar set, cell counts, content churn, fixed styling, and identity in
+  contract tests. Record the v2 font-rendered baseline with a compatible
+  unprofiled `just benchmark-redraw` run before any renderer change, then
+  re-ground hypothesis 2's target against it (same form: at most 2x ordinary
+  content churn, CTLine below 5% of main-thread samples).
+- [ ] **Task 3: sprite glyph path.** Draw braille, box drawing, block
+  elements, and geometric shapes procedurally in the executor, classified
+  before font lookup so sprite ranges never enter
+  `CTFontGetGlyphsForCharacters` or the CTLine fallback. Geometry generation
+  is pure and unit-testable; fills batch per run. Mine
+  `.ghostty-src/src/font/sprite/draw/` for the pixel-snapping and
+  line-weight details (adjacent cells must join without seams at scale 1 and
+  scale 2). TDD: sprite bitmap fixtures at both scales become the new
+  rendering contract, replacing font-rendered expectations for these ranges;
+  add a randomized full-screen pressure test (seeded, deterministic) that
+  churns cells across every implemented sprite scalar and asserts the
+  executor's invariants hold. Judge with compatible `just benchmark-redraw`
+  runs on symbol churn v2 plus the three existing workloads (which must not
+  regress). Detailed sprite-system planning happens in its own plan file
+  before implementation.
+- ~~**Task 3a: metric-equivalence characterization test.**~~
+  **Superseded by the sprite pivot.** The CTLine-equivalence question no
+  longer gates anything: sprite output is intentionally different rendering,
+  pinned by its own fixtures. Original text kept for the record below.
+  Before touching
   the executor, add a focused test comparing CTLine's resolved glyph, font,
   and placement against the proposed direct path (resolved fallback font +
   existing baseline offset + `CTFontDrawGlyphs`) for braille, box drawing,
@@ -192,7 +262,11 @@ serialized workload is a prerequisite for making claims.
   reproduce automatically; this test decides whether pixel-identical is an
   achievable contract for task 3b's fixtures or whether a documented
   placement delta must be accepted instead.
-- [ ] **Task 3b: per-run fallback-font batching.** In the executor, group
+- ~~**Task 3b: per-run fallback-font batching.**~~ **Superseded by the
+  sprite pivot; deferred, not deleted.** Revival trigger: a profiled real
+  workload dominated by non-sprite cmap misses (for example CJK-heavy
+  screens in a non-covering font) showing per-cell CTLine hot again. The
+  design below stays ready for that case. In the executor, group
   cmap-miss cells of a styled run into fallback runs: resolve a fallback
   font from the first unresolved cell (`CTFontCreateForString`), then extend
   the batch only while that font maps subsequent cells -- one resolved font
@@ -205,21 +279,12 @@ serialized workload is a prerequisite for making claims.
   runs on symbol churn plus the three existing workloads (which must not
   regress).
 - [ ] **Task 4: re-profile btop.** Repeat the arrow-key-hold `sample` capture
-  in an optimized build. Expect `CTLineCreateWithAttributedString` and the
-  ICU `NeedsShapingForGlyphs` stack to be effectively absent and overall
-  DanTerm CPU to drop substantially. Record hypothesis confirmed or rejected.
-- [ ] **Task 5: add a general geometric-symbol churn workload.** After the
-  btop-specific fallback-batching hypothesis is resolved, add a separate
-  serialized redraw workload that deterministically churns a curated,
-  width-one sprite-candidate set across geometric shapes (U+25A0-U+25FF),
-  block elements (U+2580-U+259F), and box drawing (U+2500-U+257F). Keep
-  `full-screen-symbol-churn` unchanged so its btop-grounded baseline and
-  acceptance threshold remain compatible. Pin the new workload's exact
-  scalar set, cell count, content churn, fixed styling, and identity in
-  contract tests; record a font-rendered baseline and representative scale-1
-  and scale-2 bitmap fixtures. This becomes the comparison workload and
-  rendering contract if these symbols are later replaced with DanTerm-owned
-  sprites.
+  in an optimized build after the sprite path lands. Expect
+  `CTLineCreateWithAttributedString` and the ICU `NeedsShapingForGlyphs`
+  stack to be effectively absent and overall DanTerm CPU to drop
+  substantially. This closes the loop on the motivating regression that the
+  retired v1 btop-mix workload modeled. Record hypothesis confirmed or
+  rejected.
 
 ## Results
 
@@ -227,10 +292,12 @@ serialized workload is a prerequisite for making claims.
   traffic is entirely width-one BMP cmap misses, overwhelmingly regular
   braille resolving to `AppleBraille`; multi-scalar and supplementary-plane
   content do not explain the hot CTLine path.
-- **Hypothesis 2 -- baseline established, batching not yet tested.** Symbol
-  churn is 94.3x ordinary content churn, giving task 3b a sensitive benchmark
-  and a concrete target of at most 636,060 ns/draw plus less than 5% of
-  main-thread samples in `CTLineCreateWithAttributedString`.
-- **Hypothesis 3 -- not yet tested.** Task 1 shows a stable resolved-font
-  population suitable for batching, but task 3b must measure whether per-run
-  fallback resolution is cheap enough to meet the grounded target.
+- **Hypothesis 2 -- fallback cost confirmed; target pending re-grounding.**
+  The v1 baseline proved symbol churn is 94.3x ordinary content churn, so
+  per-cell fallback cost (not glyph complexity) dominates. The mechanism
+  pivoted from fallback batching to the sprite path; the concrete target
+  moves to the task 2v2 baseline once recorded (same form: at most 2x
+  ordinary content churn, CTLine below 5% of main-thread samples).
+- **Hypothesis 3 -- mooted by the pivot for sprite ranges.** Sprite drawing
+  needs no fallback resolution at all. The stateless-resolution question
+  only returns if the deferred task 3b revival trigger fires.
