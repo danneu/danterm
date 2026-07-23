@@ -188,7 +188,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         benchmarkGeometryController?.start()
         #endif
 
-        #if !DANTERM_TERMINAL_CHARACTERIZATION
+        #if !DANTERM_TERMINAL_CHARACTERIZATION && !DANTERM_TERMINAL_BENCHMARK
         // Set up notification center
         let notifCenter = UNUserNotificationCenter.current()
         notifCenter.delegate = self
@@ -196,7 +196,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
         NSApp.activate(ignoringOtherApps: true)
 
-        #if !DANTERM_TERMINAL_CHARACTERIZATION
+        // Benchmark builds are excluded: each run gets a fresh bundle id, so macOS sees a brand-new
+        // app and pops its first-launch "would like to send you notifications" prompt every time.
+        #if !DANTERM_TERMINAL_CHARACTERIZATION && !DANTERM_TERMINAL_BENCHMARK
         // Request notification authorization after the app is active so the
         // system prompt is not racing the initial launch and window setup.
         DispatchQueue.main.async { [weak self] in
