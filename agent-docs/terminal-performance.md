@@ -90,6 +90,84 @@ interrupted. The file records the exact pid, workload, backend, app binary, and
 run diagnostics. Stop it with Ctrl-C; the harness then terminates only its own
 app.
 
+## Choose the benchmark boundary from the profile
+
+Use a real application or interactive scenario to discover the concrete hot
+operation, then reduce that operation into a deterministic workload for routine
+optimization. Preserve the properties the profile shows are relevant, such as
+PTY bytes, read chunk boundaries, update cadence, snapshot consumption, or
+drawing. Do not assume a core microbenchmark represents an app regression when
+the observed cost sits outside the core.
+
+Choose the narrowest benchmark level that still contains the measured
+bottleneck:
+
+| Level | Measures | Appropriate when |
+|---|---|---|
+| Core microbenchmark | Parser, grid mutation, and damage calculation | `Terminal.feed` or other pure terminal-state work is hot. |
+| Session/package benchmark | PTY chunking, actor hops, snapshot delivery, and backpressure | Scheduling, chunk boundaries, or snapshot production is hot. |
+| Optimized app benchmark | Render planning, CoreText work, and AppKit drawing | Main-thread planning or rendering is hot. |
+
+When practical, replay one neutral deterministic fixture at multiple levels. A
+fast core benchmark alongside a slow app benchmark is useful evidence that the
+optimization belongs above the core; an app rerun also confirms that a core
+improvement affects the user-visible path. Name the fixture for the behavior it
+exercises, such as incremental styled-row selection, rather than for the
+application that exposed it.
+
+## Investigate and report before optimizing
+
+Before choosing a workload, inspect `benchmarks/results/terminal-app.jsonl` for
+the latest mutually compatible Swift and Ghostty results. Compare only entries
+whose compatibility fields match as described above, and use their median
+producer-write values to rank regressions; compare final-draw values only
+between backends that expose that metric.
+
+Profile workloads in an order driven by the current compatible benchmark
+results. Start with the largest regression or the workload most relevant to the
+reported problem. When there is no stronger signal, use this default order:
+
+1. `styled-screen-redraw` -- full-frame planning and drawing.
+2. `incremental-screen-updates` -- damage propagation, coalescing, and PTY
+   backpressure.
+3. `unicode-wrapping` -- decoding, width calculation, wrapping, and glyph work.
+4. `scrollback-stream` -- sustained mutation, retention, copying, and viewport
+   updates.
+
+Collect at least two textual profiles before treating a sampled stack as a
+stable bottleneck. Use a Time Profiler trace when samples cannot distinguish
+CPU cost from scheduling, actor contention, or main-thread stalls.
+
+Before changing code, report the findings to the user and pause to brainstorm
+the solution. The report should contain:
+
+- Workload and compatible unprofiled baseline.
+- Profiles collected and their artifact paths.
+- Top concrete bottlenecks, ordered by expected impact.
+- Evidence for each bottleneck: hot functions, own-time or sample share, thread,
+  call path, and whether it appeared across profiles.
+- Which benchmark phase the evidence explains: producer backpressure, final
+  draw, or both.
+- Any important uncertainty or competing interpretation.
+- Two or three candidate solutions for the leading bottleneck.
+- Tradeoffs and correctness risks for each candidate.
+- The agent's recommended first experiment and why it is the smallest useful
+  test of the hypothesis.
+
+Do not present broad areas such as "rendering is slow" as findings. Name the
+repeated concrete work and its call path, for example: every incremental update
+rebuilds the complete render plan, or every visible cell creates a separate
+CoreText line.
+
+Do not implement an optimization until the user has had an opportunity to
+review the evidence and choose or revise the proposed direction.
+
+After agreeing on a direction, change one dominant path at a time. Protect the
+behavioral invariant with structure-insensitive tests, run the relevant package
+tests and `just test`, then rerun the same unprofiled workload under compatible
+conditions. Profiled runs are diagnostic evidence and must not be saved as
+benchmark history.
+
 If attachment is refused, grant Developer Tools access to the invoking terminal
 in System Settings and retry. The benchmark app is ad-hoc signed with
 `get-task-allow`; the harness verifies the entitlement before launch. `xctrace`
