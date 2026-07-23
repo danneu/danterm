@@ -67,17 +67,24 @@ REDRAW_WORKLOADS = (
 )
 
 
+# The four sprite-candidate Unicode ranges the sprite-glyph pivot targets:
+# box drawing, block elements, geometric shapes, braille patterns.
+SYMBOL_CHURN_RANGES = (
+    (0x2500, 0x257F),
+    (0x2580, 0x259F),
+    (0x25A0, 0x25FF),
+    (0x2800, 0x28FF),
+)
+
+
 def symbol_churn_content(sequence, row, width):
-    """Build one btop-weighted row with 90% braille and 10% box drawing."""
-    box_drawing = "\u2500\u2502\u250c\u2510\u2514\u2518\u251c\u2524\u252c\u2534\u253c"
+    """Build one row spread evenly across the four sprite-candidate ranges."""
     cells = []
     for column in range(width):
-        index = row * width + column
-        if index % 10 == 0:
-            cells.append(box_drawing[(sequence + row + column) % len(box_drawing)])
-        else:
-            pattern = 1 + (sequence * 37 + row * 17 + column * 29) % 255
-            cells.append(chr(0x2800 + pattern))
+        start, end = SYMBOL_CHURN_RANGES[(row * width + column) % 4]
+        span = end - start + 1
+        offset = (sequence * 37 + row * 17 + column * 29) % span
+        cells.append(chr(start + offset))
     return "".join(cells)
 
 

@@ -94,7 +94,13 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
         self.assertEqual(strip_styles(style_first), strip_styles(style_second))
         self.assertNotEqual(styles(style_first), styles(style_second))
 
-    def test_symbol_churn_models_btop_with_ninety_percent_braille(self):
+    def test_symbol_churn_mixes_the_four_sprite_ranges_evenly(self):
+        # Intent: the v2 symbol workload churns cells evenly across the four
+        #   sprite-candidate ranges (box drawing, blocks, geometric shapes,
+        #   braille) with content-only churn between frames.
+        # Why it exists: pins the workload the sprite-glyph pivot is judged
+        #   against, so the fixture identity stays honest about its content.
+        # Scenario: spec-first; replaces the retired v1 btop-weighted mix.
         first = PRODUCER.redraw_screen("full-screen-symbol-churn", 1)
         second = PRODUCER.redraw_screen("full-screen-symbol-churn", 2)
         strip_metadata = lambda payload: payload.split(b"\x07\x1b[H", 1)[1]
@@ -106,12 +112,16 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
         )
 
         visible = strip_styles(first)
-        braille = sum("\u2800" <= character <= "\u28ff" for character in visible)
         box_drawing = sum("\u2500" <= character <= "\u257f" for character in visible)
+        blocks = sum("\u2580" <= character <= "\u259f" for character in visible)
+        geometric = sum("\u25a0" <= character <= "\u25ff" for character in visible)
+        braille = sum("\u2800" <= character <= "\u28ff" for character in visible)
 
         self.assertEqual(len(visible), 79 * 24)
-        self.assertEqual(braille, 1_706)
-        self.assertEqual(box_drawing, 190)
+        self.assertEqual(box_drawing, 474)
+        self.assertEqual(blocks, 474)
+        self.assertEqual(geometric, 474)
+        self.assertEqual(braille, 474)
         self.assertNotEqual(strip_styles(first), strip_styles(second))
         self.assertEqual(styles(first), styles(second))
 
