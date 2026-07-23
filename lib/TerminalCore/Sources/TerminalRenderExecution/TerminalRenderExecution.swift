@@ -360,6 +360,7 @@ private extension CGContext {
             var geometricShapeTriangles: [GeometricShapeRenderTriangle] = []
             var powerlinePaths: [PowerlineRenderPath] = []
             var branchDrawingGeometries: [BranchDrawingRenderGeometry] = []
+            var legacySpriteRects: [UInt8: [CGRect]] = [:]
             var boxDrawingStrokes: [BoxDrawingRenderStroke] = []
             var column = run.startColumn
             for cell in run.cells {
@@ -420,6 +421,14 @@ private extension CGContext {
                         column: column,
                         metrics: metrics
                     ))
+                } else if let pattern = LegacyComputingSprite.pattern(for: cell.scalars) {
+                    LegacyComputingSprite.appendRects(
+                        pattern: pattern,
+                        row: run.row,
+                        column: column,
+                        metrics: metrics,
+                        to: &legacySpriteRects
+                    )
                 } else if cell.scalars.count == 1,
                    let scalar = cell.scalars.first,
                    scalar.value <= UInt16.max
@@ -463,6 +472,10 @@ private extension CGContext {
             }
             for geometry in branchDrawingGeometries {
                 drawBranchDrawingGeometry(geometry, metrics: metrics, foreground: foreground)
+            }
+            for (alpha, rects) in legacySpriteRects where rects.isEmpty == false {
+                setFillColor(foreground.copy(alpha: CGFloat(alpha) / 255) ?? foreground)
+                fill(rects)
             }
             var glyphs = Array(repeating: CGGlyph(), count: characters.count)
             if characters.isEmpty == false {
