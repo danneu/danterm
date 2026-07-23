@@ -89,6 +89,7 @@ final class TerminalBenchmarkObserver {
     private var localizedDrawDurations: [UInt64] = []
     private var localizedDirtyRowCounts: [Int] = []
     private var pendingRedrawSequence: Int?
+    private var publishedRedrawSequence: Int?
     private var redrawSequences = Set<Int>()
 
     init?(environment: [String: String]) {
@@ -113,6 +114,10 @@ final class TerminalBenchmarkObserver {
 
     /// Records the app-side observation before a newly parsed frame becomes drawable.
     func observePublishedFrame(_ plan: RenderFramePlan) {
+        if let pendingRedrawSequence {
+            publishedRedrawSequence = pendingRedrawSequence
+            self.pendingRedrawSequence = nil
+        }
         let text = frameText(plan)
         guard startNanoseconds == nil, text.contains(startMarker) else { return }
         startNanoseconds = DispatchTime.now().uptimeNanoseconds
@@ -126,6 +131,11 @@ final class TerminalBenchmarkObserver {
             return
         }
         pendingRedrawSequence = sequence
+    }
+
+    /// Tells the view to retry when AppKit merged a published full redraw with older partial damage.
+    var needsPublishedRedraw: Bool {
+        publishedRedrawSequence != nil
     }
 
     /// Acknowledges the consumed frame only after its synchronous drawing work returns.
@@ -165,14 +175,18 @@ final class TerminalBenchmarkObserver {
                 )
             }
         }
-        if let sequence = pendingRedrawSequence,
+        let redrawDirtyRowCount = dirtyRowCount(
+            for: dirtyRect,
+            metrics: metrics,
+            rowCount: plan.rows
+        )
+        if let sequence = publishedRedrawSequence,
+           redrawDirtyRowCount == plan.rows,
            redrawSequences.insert(sequence).inserted
         {
-            pendingRedrawSequence = nil
+            publishedRedrawSequence = nil
             localizedDrawDurations.append(drawDurationNanoseconds)
-            localizedDirtyRowCounts.append(
-                dirtyRowCount(for: dirtyRect, metrics: metrics, rowCount: plan.rows)
-            )
+            localizedDirtyRowCounts.append(redrawDirtyRowCount)
             if let localizedDrawAcknowledgmentPrefix {
                 FileManager.default.createFile(
                     atPath: "\(localizedDrawAcknowledgmentPrefix)-\(String(format: "%06d", sequence))",

@@ -169,6 +169,17 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
                 metrics: frame.metrics,
                 drawDurationNanoseconds: drawDurationNanoseconds
             )
+            if TerminalBenchmarkObserver.shared?.needsPublishedRedraw == true {
+                let redrawRect = NSRect(
+                    x: 0,
+                    y: 0,
+                    width: CGFloat(frame.plan.columns) * frame.metrics.cellSize.width,
+                    height: CGFloat(frame.plan.rows) * frame.metrics.cellSize.height
+                )
+                DispatchQueue.main.async { [weak self] in
+                    self?.setNeedsDisplay(redrawRect)
+                }
+            }
             #endif
         }
     }
