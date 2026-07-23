@@ -46,7 +46,8 @@ let glyphPreviewSections = [
     ),
     GlyphPreviewSection(
         title: "Powerline private-use glyphs",
-        ranges: [0xE0B0...0xE0BF, 0xE0D2...0xE0D2, 0xE0D4...0xE0D4]
+        ranges: [0xE0B0...0xE0BF, 0xE0D2...0xE0D2, 0xE0D4...0xE0D4],
+        implementedRanges: [0xE0B0...0xE0BF, 0xE0D2...0xE0D2, 0xE0D4...0xE0D4]
     ),
     GlyphPreviewSection(
         title: "Branch Drawing private-use glyphs",

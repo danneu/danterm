@@ -43,7 +43,7 @@ struct GlyphPreviewLayoutTests {
             128, 32, 8, 256, 18, 62, 213, 368,
         ])
         #expect(glyphPreviewSections.map(\.customSpriteScalars.count) == [
-            128, 32, 8, 256, 0, 0, 0, 0,
+            128, 32, 8, 256, 18, 0, 0, 0,
         ])
         #expect(glyphPreviewSections.flatMap(\.scalars).count == 1_085)
     }

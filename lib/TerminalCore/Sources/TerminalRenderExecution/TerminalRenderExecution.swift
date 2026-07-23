@@ -358,6 +358,7 @@ private extension CGContext {
             var spriteRects: [CGRect] = []
             var shadedSpriteRects: [BlockElementShade: [CGRect]] = [:]
             var geometricShapeTriangles: [GeometricShapeRenderTriangle] = []
+            var powerlinePaths: [PowerlineRenderPath] = []
             var boxDrawingStrokes: [BoxDrawingRenderStroke] = []
             var column = run.startColumn
             for cell in run.cells {
@@ -396,6 +397,13 @@ private extension CGContext {
                           )
                 {
                     geometricShapeTriangles.append(triangle)
+                } else if let pattern = PowerlineSprite.pattern(for: cell.scalars) {
+                    powerlinePaths += PowerlineSprite.paths(
+                        pattern: pattern,
+                        row: run.row,
+                        column: column,
+                        metrics: metrics
+                    )
                 } else if cell.scalars.count == 1,
                    let scalar = cell.scalars.first,
                    scalar.value <= UInt16.max
@@ -428,6 +436,13 @@ private extension CGContext {
                 setStrokeColor(foreground)
                 for triangle in geometricShapeTriangles {
                     drawGeometricShapeTriangle(triangle, metrics: metrics)
+                }
+            }
+            if powerlinePaths.isEmpty == false {
+                setFillColor(foreground)
+                setStrokeColor(foreground)
+                for path in powerlinePaths {
+                    drawPowerlinePath(path, metrics: metrics)
                 }
             }
             var glyphs = Array(repeating: CGGlyph(), count: characters.count)
@@ -518,6 +533,59 @@ private extension CGContext {
             setLineWidth(CGFloat(widthPixels * 2) / scale)
             setLineCap(.butt)
             setLineJoin(.miter)
+            strokePath()
+        }
+    }
+
+    func drawPowerlinePath(
+        _ path: PowerlineRenderPath,
+        metrics: TerminalRenderMetrics
+    ) {
+        let scale = metrics.displayScale
+        func point(_ point: PowerlinePixelPoint) -> CGPoint {
+            CGPoint(
+                x: path.cellOrigin.x + CGFloat(point.x) / scale,
+                y: path.cellOrigin.y + CGFloat(point.y) / scale
+            )
+        }
+
+        saveGState()
+        defer { restoreGState() }
+        clip(to: CGRect(origin: path.cellOrigin, size: metrics.cellSize))
+        setShouldAntialias(true)
+        setAllowsAntialiasing(true)
+        setLineCap(.butt)
+        setLineJoin(.miter)
+        beginPath()
+        for command in path.geometry.commands {
+            switch command {
+            case let .move(destination):
+                move(to: point(destination))
+            case let .line(destination):
+                addLine(to: point(destination))
+            case let .cubic(control1, control2, end):
+                addCurve(
+                    to: point(end),
+                    control1: point(control1),
+                    control2: point(control2)
+                )
+            case .close:
+                closePath()
+            }
+        }
+
+        switch path.geometry.style {
+        case .fill:
+            fillPath()
+        case let .stroke(widthPixels):
+            setLineWidth(CGFloat(widthPixels) / scale)
+            strokePath()
+        case let .innerStroke(widthPixels):
+            guard let shape = self.path else { return }
+            addPath(shape)
+            clip()
+            addPath(shape)
+            setLineWidth(CGFloat(widthPixels * 2) / scale)
             strokePath()
         }
     }
