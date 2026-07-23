@@ -88,6 +88,8 @@ final class TerminalBenchmarkObserver {
     private var localizedSequences = Set<Int>()
     private var localizedDrawDurations: [UInt64] = []
     private var localizedDirtyRowCounts: [Int] = []
+    private var pendingRedrawSequence: Int?
+    private var redrawSequences = Set<Int>()
 
     init?(environment: [String: String]) {
         guard let startMarker = environment["DANTERM_TERMINAL_BENCHMARK_START_MARKER"],
@@ -117,6 +119,15 @@ final class TerminalBenchmarkObserver {
         FileManager.default.createFile(atPath: startAcknowledgmentPath, contents: Data())
     }
 
+    /// Associates benchmark-only OSC title metadata with the next published full-screen frame.
+    func observeTitle(_ title: String) {
+        let prefix = "DANTERM-BENCH-REDRAW-"
+        guard title.hasPrefix(prefix), let sequence = Int(title.dropFirst(prefix.count)) else {
+            return
+        }
+        pendingRedrawSequence = sequence
+    }
+
     /// Acknowledges the consumed frame only after its synchronous drawing work returns.
     func observeCompletedDraw(
         _ plan: RenderFramePlan,
@@ -143,6 +154,21 @@ final class TerminalBenchmarkObserver {
         if let sequence = localizedSequence(in: text),
            localizedSequences.insert(sequence).inserted
         {
+            localizedDrawDurations.append(drawDurationNanoseconds)
+            localizedDirtyRowCounts.append(
+                dirtyRowCount(for: dirtyRect, metrics: metrics, rowCount: plan.rows)
+            )
+            if let localizedDrawAcknowledgmentPrefix {
+                FileManager.default.createFile(
+                    atPath: "\(localizedDrawAcknowledgmentPrefix)-\(String(format: "%06d", sequence))",
+                    contents: Data()
+                )
+            }
+        }
+        if let sequence = pendingRedrawSequence,
+           redrawSequences.insert(sequence).inserted
+        {
+            pendingRedrawSequence = nil
             localizedDrawDurations.append(drawDurationNanoseconds)
             localizedDirtyRowCounts.append(
                 dirtyRowCount(for: dirtyRect, metrics: metrics, rowCount: plan.rows)

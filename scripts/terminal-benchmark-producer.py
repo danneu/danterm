@@ -59,6 +59,57 @@ def run_localized_draw_workload(*, update_count, row, write, await_draw):
         await_draw(sequence)
 
 
+REDRAW_WORKLOADS = (
+    "full-screen-content-churn",
+    "full-screen-style-churn",
+    "full-screen-mixed-churn",
+)
+
+
+def redraw_screen(workload, sequence, columns=80, rows=24):
+    """Build one dense ASCII pseudo-TUI frame without scrolling or last-column writes."""
+    if workload not in REDRAW_WORKLOADS:
+        raise ValueError(f"unknown redraw workload: {workload}")
+    title = (
+        f"DANTERM-BENCH-REDRAW-{sequence:06d}"
+        if sequence >= 0
+        else "DANTERM-BENCH-REDRAW-SETUP"
+    )
+    lines = [f"\x1b]0;{title}\x07\x1b[H"]
+    width = columns - 1
+    for row in range(rows):
+        content_sequence = 0 if workload == "full-screen-style-churn" else sequence
+        label = (
+            f" {row + 1:02d}  branch feature/redraw  item "
+            f"{(content_sequence * 17 + row * 7) % 10000:04d}  "
+            f"{'working tree clean' if row % 3 else 'modified benchmark.swift'}"
+        )
+        content = label.ljust(width, ".")[:width]
+        style_sequence = 0 if workload == "full-screen-content-churn" else sequence
+        red = 40 + (style_sequence * 17 + row * 11) % 180
+        green = 40 + (style_sequence * 23 + row * 13) % 180
+        blue = 40 + (style_sequence * 29 + row * 7) % 180
+        background = (
+            18 + (style_sequence * 5 + row * 3) % 42,
+            20 + (style_sequence * 7 + row * 5) % 42,
+            24 + (style_sequence * 11 + row * 2) % 42,
+        )
+        lines.append(
+            f"\x1b[38;2;{red};{green};{blue};48;2;"
+            f"{background[0]};{background[1]};{background[2]}m{content}\x1b[0m"
+        )
+        if row != rows - 1:
+            lines.append("\r\n")
+    return "".join(lines).encode()
+
+
+def run_redraw_workload(*, workload, update_count, write, await_draw):
+    """Alternate one full-screen write with acknowledgment of that exact completed draw."""
+    for sequence in range(update_count):
+        write(redraw_screen(workload, sequence))
+        await_draw(sequence)
+
+
 def wait_for_target_geometry(
     target, terminal_size, monotonic, sleep, timeout_seconds=20
 ):
@@ -139,7 +190,10 @@ def main():
     localized_update_count = int(
         environment.get("DANTERM_TERMINAL_BENCHMARK_LOCALIZED_UPDATES", "0")
     )
-    if localized_update_count > 0:
+    redraw_update_count = int(
+        environment.get("DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES", "0")
+    )
+    if localized_update_count > 0 or redraw_update_count > 0:
         workload = None
     else:
         try:
@@ -174,19 +228,29 @@ def main():
             }, stream, sort_keys=True)
 
     try:
-        if localized_update_count > 0:
+        if localized_update_count > 0 or redraw_update_count > 0:
             achieved = wait_for_target_geometry(
                 target, lambda: os.get_terminal_size(1), time.monotonic, time.sleep
             )
             Path(geometry_ready).touch()
-            write_all(
-                1,
-                localized_draw_initial_screen(
-                    environment["DANTERM_TERMINAL_BENCHMARK_START_MARKER"],
-                    target.columns,
-                    target.lines,
-                ),
-            )
+            if redraw_update_count > 0:
+                write_all(1, redraw_screen(workload_name, -1, target.columns, target.lines))
+                write_all(
+                    1,
+                    (
+                        f"\x1b[{target.lines};1H"
+                        + environment["DANTERM_TERMINAL_BENCHMARK_START_MARKER"]
+                    ).encode(),
+                )
+            else:
+                write_all(
+                    1,
+                    localized_draw_initial_screen(
+                        environment["DANTERM_TERMINAL_BENCHMARK_START_MARKER"],
+                        target.columns,
+                        target.lines,
+                    ),
+                )
             wait_for_path(
                 start_ack, "timed out waiting for app-side start-marker observation"
             )
@@ -203,15 +267,24 @@ def main():
             acknowledgment_prefix = environment[
                 "DANTERM_TERMINAL_BENCHMARK_LOCALIZED_DRAW_ACK_PREFIX"
             ]
-            run_localized_draw_workload(
-                update_count=localized_update_count,
-                row=max(1, target.lines // 2),
-                write=lambda chunk: write_all(1, chunk),
-                await_draw=lambda sequence: wait_for_path(
-                    f"{acknowledgment_prefix}-{sequence:06d}",
-                    f"timed out waiting for localized draw {sequence}",
-                ),
+            await_draw = lambda sequence: wait_for_path(
+                f"{acknowledgment_prefix}-{sequence:06d}",
+                f"timed out waiting for completed draw {sequence}",
             )
+            if redraw_update_count > 0:
+                run_redraw_workload(
+                    workload=workload_name,
+                    update_count=redraw_update_count,
+                    write=lambda chunk: write_all(1, chunk),
+                    await_draw=await_draw,
+                )
+            else:
+                run_localized_draw_workload(
+                    update_count=localized_update_count,
+                    row=max(1, target.lines // 2),
+                    write=lambda chunk: write_all(1, chunk),
+                    await_draw=await_draw,
+                )
             write_all(1, completion)
             write_result(time.monotonic_ns() - started, achieved)
             wait_for_path(draw_result, "timed out waiting for final draw acknowledgment")

@@ -520,6 +520,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         for event in events {
             switch event {
             case .title(let title):
+                #if DANTERM_TERMINAL_BENCHMARK
+                TerminalBenchmarkObserver.shared?.observeTitle(title)
+                #endif
                 callbackGate.emit(.titleChanged(title))
             case .workingDirectory(let cwd):
                 callbackGate.emit(.cwdChanged(cwd))

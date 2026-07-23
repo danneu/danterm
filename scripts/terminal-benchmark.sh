@@ -26,6 +26,7 @@ PROFILE_IDENTITY_PATH="${DANTERM_BENCHMARK_IDENTITY_PATH:-}"
 TARGET_COLUMNS="${DANTERM_TERMINAL_BENCHMARK_COLUMNS:-80}"
 TARGET_ROWS="${DANTERM_TERMINAL_BENCHMARK_ROWS:-24}"
 LOCALIZED_UPDATES="${DANTERM_TERMINAL_BENCHMARK_LOCALIZED_UPDATES:-0}"
+REDRAW_UPDATES="${DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES:-0}"
 CORPUS_PATH="$(cd "$(dirname "$0")/.." && pwd)/benchmarks/fixtures/terminal-app.json"
 case "$BACKEND" in
     swift|ghostty) ;;
@@ -47,7 +48,7 @@ fi
 for command in codesign jq plutil swift; do
     command -v "$command" >/dev/null || { echo "Missing required command: $command" >&2; exit 1; }
 done
-[[ "$WORKLOAD" == "localized-draw-acceptance" ]] || jq -e --arg workload "$WORKLOAD" '.workloads[$workload] != null' "$CORPUS_PATH" >/dev/null || {
+[[ "$WORKLOAD" == "localized-draw-acceptance" || "$WORKLOAD" == full-screen-*-churn ]] || jq -e --arg workload "$WORKLOAD" '.workloads[$workload] != null' "$CORPUS_PATH" >/dev/null || {
     echo "Unknown workload: $WORKLOAD" >&2
     exit 2
 }
@@ -143,6 +144,7 @@ env HOME="$HOME_DIR" CFFIXED_USER_HOME="$HOME_DIR" TMPDIR="$TMP_DIR/" ZDOTDIR="$
     DANTERM_TERMINAL_BENCHMARK_READY_DRAW_ACK="$READY_DRAW_ACK" \
     DANTERM_TERMINAL_BENCHMARK_LOCALIZED_DRAW_ACK_PREFIX="$LOCALIZED_DRAW_ACK_PREFIX" \
     DANTERM_TERMINAL_BENCHMARK_LOCALIZED_UPDATES="$LOCALIZED_UPDATES" \
+    DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES="$REDRAW_UPDATES" \
     DANTERM_TERMINAL_BENCHMARK_RESULT="$DRAW_RESULT" \
     DANTERM_TERMINAL_BENCHMARK_PRODUCER_RESULT="$PRODUCER_RESULT" \
     DANTERM_TERMINAL_BENCHMARK_GEOMETRY_READY="$GEOMETRY_READY" \

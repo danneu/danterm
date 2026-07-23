@@ -63,6 +63,62 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
             [0, 1, 2],
         )
 
+    def test_redraw_frames_fill_24_rows_without_scrolling_or_autowrap(self):
+        for workload in PRODUCER.REDRAW_WORKLOADS:
+            with self.subTest(workload=workload):
+                payload = PRODUCER.redraw_screen(workload, sequence=3)
+                body = payload.split(b"\x07\x1b[H", 1)[1]
+                rows = body.split(b"\r\n")
+                visible = [
+                    re.sub(rb"\x1b\[[0-9;]*m", b"", row)
+                    for row in rows
+                ]
+
+                self.assertEqual(len(visible), 24)
+                self.assertTrue(all(len(row) == 79 for row in visible))
+                self.assertNotIn(b"\x1b[2J", payload)
+                self.assertFalse(payload.endswith(b"\r\n"))
+
+    def test_redraw_workloads_isolate_content_and_style_churn(self):
+        content_first = PRODUCER.redraw_screen("full-screen-content-churn", 1)
+        content_second = PRODUCER.redraw_screen("full-screen-content-churn", 2)
+        style_first = PRODUCER.redraw_screen("full-screen-style-churn", 1)
+        style_second = PRODUCER.redraw_screen("full-screen-style-churn", 2)
+
+        strip_metadata = lambda payload: payload.split(b"\x07", 1)[1]
+        strip_styles = lambda payload: re.sub(rb"\x1b\[[0-9;]*m", b"", strip_metadata(payload))
+        styles = lambda payload: re.findall(rb"\x1b\[[0-9;]*m", strip_metadata(payload))
+
+        self.assertNotEqual(strip_styles(content_first), strip_styles(content_second))
+        self.assertEqual(styles(content_first), styles(content_second))
+        self.assertEqual(strip_styles(style_first), strip_styles(style_second))
+        self.assertNotEqual(styles(style_first), styles(style_second))
+
+    def test_redraw_workload_alternates_writes_and_exact_draw_acknowledgments(self):
+        events = []
+
+        PRODUCER.run_redraw_workload(
+            workload="full-screen-mixed-churn",
+            update_count=3,
+            write=lambda chunk: events.append(("write", chunk)),
+            await_draw=lambda sequence: events.append(("draw", sequence)),
+        )
+
+        self.assertEqual(
+            [event[0] for event in events],
+            ["write", "draw", "write", "draw", "write", "draw"],
+        )
+        self.assertEqual(
+            [event[1] for event in events if event[0] == "draw"],
+            [0, 1, 2],
+        )
+        self.assertTrue(all(
+            b"DANTERM-BENCH-REDRAW-" not in re.sub(
+                rb"\x1b\].*?\x07", b"", event[1]
+            )
+            for event in events if event[0] == "write"
+        ))
+
     def test_geometry_gate_accepts_a_late_match_before_measurement(self):
         observations = iter((os.terminal_size((94, 35)), os.terminal_size((90, 30)), os.terminal_size((80, 24))))
         events = []

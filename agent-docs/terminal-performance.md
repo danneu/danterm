@@ -53,6 +53,27 @@ Producer-write elapsed ends when the producer's final PTY write returns. It
 measures PTY backpressure and drain performance, not parsing or rendering.
 Final-draw elapsed is Swift-only and measures from app-side start-marker parsing
 through completion of the draw that consumed the acknowledged final frame.
+The `styled-screen-redraw` producer intentionally runs without per-frame
+acknowledgments, so intermediate terminal states may coalesce. It measures
+consumption and backpressure rather than presentation of every submitted state.
+
+Use `just benchmark-redraw` when the question is the cost of presenting every
+complete 80x24 state. It runs content-only, style-only, and mixed pseudo-TUI
+churn by default; select one with `workload=full-screen-content-churn`,
+`workload=full-screen-style-churn`, or `workload=full-screen-mixed-churn`.
+Options `save=0|1` and `comment=` use the same completion-before-confirmation
+contract as the corpus suite. Each measured update waits for its exact
+completed draw, every draw must damage all 24 rows, and sequence metadata stays
+in the terminal title rather than visible grid content.
+
+The redraw suite excludes warm-up and calibration, then runs 15 fresh optimized
+app batches with at least 400 ms of cumulative synchronous draw work per batch.
+It reports min/median/max draw count, nanoseconds per draw, cumulative draw
+time, and dirty rows per draw. Confirmed unprofiled results enter
+`benchmarks/results/terminal-redraw.jsonl`; deltas require an exact match on
+fixture, method, machine, macOS, display scale, Swift toolchain, release
+configuration, 80x24 geometry, batch count, duration floor, and profiling
+state.
 
 ## Choose a profiler
 
@@ -78,6 +99,8 @@ of waiting for UI.
 ## Artifacts and history
 
 - Committed history: `benchmarks/results/terminal-app.jsonl`.
+- Serialized complete-draw history:
+  `benchmarks/results/terminal-redraw.jsonl`.
 - Completed runs awaiting confirmation: `.build/terminal-benchmark-staged/`.
   Only confirmed runs enter committed history; declined and failed partial runs
   remain here for inspection or manual promotion.

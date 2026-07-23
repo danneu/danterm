@@ -15,7 +15,7 @@
     },
     "styled-screen-redraw": {
       "identity": "styled-screen-redraw-v1-3500-frames",
-      "dominantQuestion": "How fast can a styled TUI replace the visible screen?",
+      "dominantQuestion": "How fast can styled TUI output be consumed when intermediate screen states may coalesce?",
       "provenance": {
         "source": "DanTerm benchmark corpus",
         "license": "MIT",

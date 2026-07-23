@@ -96,6 +96,10 @@ benchmark-draw iterations="15":
 benchmark-draw-app batches="15" target_ms="400":
     python3 ./scripts/terminal-draw-acceptance.py {{batches}} {{target_ms}}
 
+# Benchmark serialized complete redraws; options accept workload=, save=, and comment=.
+benchmark-redraw *args:
+    python3 ./scripts/terminal-draw-acceptance.py redraw=1 {{args}}
+
 # Run one isolated workload continuously and publish its exact app pid.
 benchmark-loop workload="scrollback-stream" backend="swift":
     ./scripts/terminal-benchmark-profile.sh loop "{{workload}}" "{{backend}}"

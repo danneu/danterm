@@ -75,7 +75,7 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
             {name: workload["dominantQuestion"] for name, workload in corpus.items()},
             {
                 "scrollback-stream": "How fast can sustained output be consumed, scrolled, and retained?",
-                "styled-screen-redraw": "How fast can a styled TUI replace the visible screen?",
+                "styled-screen-redraw": "How fast can styled TUI output be consumed when intermediate screen states may coalesce?",
                 "unicode-wrapping": "How expensive is complex text flowing and wrapping through the grid?",
                 "incremental-screen-updates": "How efficiently can localized TUI updates avoid full-screen work?",
             },

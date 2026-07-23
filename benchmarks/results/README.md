@@ -5,3 +5,8 @@
 schema-versioned workload result with its complete
 compatibility key and min/median/max summaries. Commit new lines when preserving
 a measurement; do not hand-edit prior entries.
+
+`terminal-redraw.jsonl` is separate append-only history for serialized
+completed-draw measurements. Its direct synchronous draw timings are not
+comparable with producer-write or final-draw elapsed values in
+`terminal-app.jsonl`.
