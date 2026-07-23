@@ -560,7 +560,9 @@ The `just preview-glyphs` sprite comparison requires
 for its Powerline references and
 [`unifont_upper-17.0.05.otf`](https://unifoundry.com/pub/unifont/unifont-17.0.05/font-builds/unifont_upper-17.0.05.otf)
 for its Symbols for Legacy Computing references. Install both with Font Book
-before launching the preview.
+before launching the preview. The
+[terminal sprite system](docs/terminal-sprites.md) documents the procedural
+glyph contract, layer boundaries, family models, and extension rules.
 
 I don't remember why, but there was some benefit to running the app from the macOS applications folder during dev.
 

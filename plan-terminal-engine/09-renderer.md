@@ -15,7 +15,9 @@ terminal semantics.
 Rendering separates deterministic planning from Apple-framework execution.
 Given a read-only terminal snapshot and explicit presentation inputs, planning
 decides the required drawing work; CoreText/CoreGraphics resolve and execute
-the system-specific glyph and drawing operations.
+the system-specific glyph and drawing operations. Procedural terminal glyphs
+follow the separate, implementation-facing
+[terminal sprite system contract](../docs/terminal-sprites.md).
 
 Initial presentation defaults are:
 
