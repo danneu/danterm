@@ -364,77 +364,121 @@ private extension CGContext {
             var boxDrawingStrokes: [BoxDrawingRenderStroke] = []
             var column = run.startColumn
             for cell in run.cells {
-                if let pattern = BoxDrawingSprite.pattern(for: cell.scalars) {
-                    BoxDrawingSprite.append(
-                        pattern: pattern,
-                        row: run.row,
-                        column: column,
-                        metrics: metrics,
-                        rects: &spriteRects,
-                        strokes: &boxDrawingStrokes
-                    )
-                } else if let pattern = BrailleSprite.pattern(for: cell.scalars) {
-                    BrailleSprite.appendRects(
-                        pattern: pattern,
-                        row: run.row,
-                        column: column,
-                        metrics: metrics,
-                        to: &spriteRects
-                    )
-                } else if let pattern = BlockElementSprite.pattern(for: cell.scalars) {
-                    let shade = BlockElementSprite.shade(for: pattern)
-                    BlockElementSprite.appendRects(
-                        pattern: pattern,
-                        row: run.row,
-                        column: column,
-                        metrics: metrics,
-                        to: &shadedSpriteRects[shade, default: []]
-                    )
-                } else if let pattern = LegacyComputingSupplementSprite.pattern(for: cell.scalars) {
-                    LegacyComputingSupplementSprite.appendRects(
-                        pattern: pattern,
-                        row: run.row,
-                        column: column,
-                        metrics: metrics,
-                        to: &spriteRects
-                    )
-                } else if let pattern = GeometricShapeSprite.pattern(for: cell.scalars),
-                          let triangle = GeometricShapeSprite.triangle(
-                              pattern: pattern,
-                              row: run.row,
-                              column: column,
-                              metrics: metrics
-                          )
-                {
-                    geometricShapeTriangles.append(triangle)
-                } else if let pattern = PowerlineSprite.pattern(for: cell.scalars) {
-                    powerlinePaths += PowerlineSprite.paths(
-                        pattern: pattern,
-                        row: run.row,
-                        column: column,
-                        metrics: metrics
-                    )
-                } else if let pattern = BranchDrawingSprite.pattern(for: cell.scalars) {
-                    branchDrawingGeometries.append(BranchDrawingSprite.geometry(
-                        pattern: pattern,
-                        row: run.row,
-                        column: column,
-                        metrics: metrics
-                    ))
-                } else if let pattern = LegacyComputingSprite.pattern(for: cell.scalars) {
-                    LegacyComputingSprite.appendRects(
-                        pattern: pattern,
-                        row: run.row,
-                        column: column,
-                        metrics: metrics,
-                        to: &legacySpriteRects
-                    )
-                } else if cell.scalars.count == 1,
-                   let scalar = cell.scalars.first,
-                   scalar.value <= UInt16.max
-                {
-                    characters.append(UniChar(scalar.value))
-                    candidateCells.append((cell, column))
+                // Direct single-scalar family routing. A cell can only be a sprite when it is
+                // exactly one scalar, and every supported family occupies a scalar range
+                // disjoint from the others, so route to the single family whose range can
+                // contain the scalar instead of testing all eight in order. Exact membership
+                // and pattern decoding stay inside each family: a routed family that returns
+                // nil (a sparse gap inside its range, e.g. an unmapped Geometric or Powerline
+                // scalar, or a Geometric pattern with no representable triangle) falls through
+                // to the font path exactly as the former ordered chain did, because no other
+                // family's range could have matched it either. Multi-scalar and out-of-range
+                // cells skip classification entirely.
+                var classifiedAsSprite = false
+                if cell.scalars.count == 1, let scalar = cell.scalars.first {
+                    switch scalar.value {
+                    case 0x2500...0x257F:
+                        if let pattern = BoxDrawingSprite.pattern(for: cell.scalars) {
+                            BoxDrawingSprite.append(
+                                pattern: pattern,
+                                row: run.row,
+                                column: column,
+                                metrics: metrics,
+                                rects: &spriteRects,
+                                strokes: &boxDrawingStrokes
+                            )
+                            classifiedAsSprite = true
+                        }
+                    case 0x2580...0x259F:
+                        if let pattern = BlockElementSprite.pattern(for: cell.scalars) {
+                            let shade = BlockElementSprite.shade(for: pattern)
+                            BlockElementSprite.appendRects(
+                                pattern: pattern,
+                                row: run.row,
+                                column: column,
+                                metrics: metrics,
+                                to: &shadedSpriteRects[shade, default: []]
+                            )
+                            classifiedAsSprite = true
+                        }
+                    case 0x25E2...0x25FF:
+                        if let pattern = GeometricShapeSprite.pattern(for: cell.scalars),
+                           let triangle = GeometricShapeSprite.triangle(
+                               pattern: pattern,
+                               row: run.row,
+                               column: column,
+                               metrics: metrics
+                           )
+                        {
+                            geometricShapeTriangles.append(triangle)
+                            classifiedAsSprite = true
+                        }
+                    case 0x2800...0x28FF:
+                        if let pattern = BrailleSprite.pattern(for: cell.scalars) {
+                            BrailleSprite.appendRects(
+                                pattern: pattern,
+                                row: run.row,
+                                column: column,
+                                metrics: metrics,
+                                to: &spriteRects
+                            )
+                            classifiedAsSprite = true
+                        }
+                    case 0xE0B0...0xE0D4:
+                        if let pattern = PowerlineSprite.pattern(for: cell.scalars) {
+                            powerlinePaths += PowerlineSprite.paths(
+                                pattern: pattern,
+                                row: run.row,
+                                column: column,
+                                metrics: metrics
+                            )
+                            classifiedAsSprite = true
+                        }
+                    case 0xF5D0...0xF60D:
+                        if let pattern = BranchDrawingSprite.pattern(for: cell.scalars) {
+                            branchDrawingGeometries.append(BranchDrawingSprite.geometry(
+                                pattern: pattern,
+                                row: run.row,
+                                column: column,
+                                metrics: metrics
+                            ))
+                            classifiedAsSprite = true
+                        }
+                    // Coarse ranges spanning each multi-range family; the family returns nil
+                    // for the interior gaps, which then fall through to the font path.
+                    case 0x1CC1B...0x1CEAF:
+                        if let pattern = LegacyComputingSupplementSprite.pattern(for: cell.scalars) {
+                            LegacyComputingSupplementSprite.appendRects(
+                                pattern: pattern,
+                                row: run.row,
+                                column: column,
+                                metrics: metrics,
+                                to: &spriteRects
+                            )
+                            classifiedAsSprite = true
+                        }
+                    case 0x1FB00...0x1FBEF:
+                        if let pattern = LegacyComputingSprite.pattern(for: cell.scalars) {
+                            LegacyComputingSprite.appendRects(
+                                pattern: pattern,
+                                row: run.row,
+                                column: column,
+                                metrics: metrics,
+                                to: &legacySpriteRects
+                            )
+                            classifiedAsSprite = true
+                        }
+                    default:
+                        break
+                    }
+                    if classifiedAsSprite == false {
+                        if scalar.value <= UInt16.max {
+                            characters.append(UniChar(scalar.value))
+                            candidateCells.append((cell, column))
+                        } else {
+                            fallbackCells.append((cell, column))
+                        }
+                    }
                 } else {
                     fallbackCells.append((cell, column))
                 }

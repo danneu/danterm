@@ -45,8 +45,11 @@ sprite-family series runs from
 `140934b docs(renderer): document terminal sprite system`.
 
 A full `just benchmark-redraw save=1` after that series produced records stamped
-`b6c98ad`. HEAD moved while the benchmark was running, so these results are
-useful discovery evidence but are not yet a reproducible post-sprite baseline.
+`b6c98ad`. HEAD moved while the benchmark was running because the unrelated
+Cmd-A whole-stream selection commit landed. That commit does not touch render
+execution, sprite code, benchmark generation, or the benchmark harness, so the
+JSONL measurements are trusted for this investigation. The stamp still does
+not identify the exact source snapshot compiled at benchmark startup.
 
 Machine: Apple M1 Pro (MacBookPro18,1), macOS 26.5.2, display scale 2, release,
 80x24, 15 batches, Swift 6.3.3. Metric is median nanoseconds per completed draw.
@@ -144,17 +147,17 @@ is not the dominant cost.
 
 ### Phase 1 -- establish trustworthy baselines
 
-- [ ] Confirm the worktree and HEAD remain stationary for the duration of each
-      run; record the commit and cleanliness in the findings log.
-- [ ] Rerun all five serialized redraw workloads unprofiled from a clean
-      post-sprite commit with compatible machine, OS, scale, toolchain,
-      configuration, geometry, batch count, and fixture fields.
-- [ ] Treat the `b6c98ad` records as exploratory rather than canonical if the
-      clean rerun supersedes them.
-- [ ] Record the compatible baseline medians, variation, draw counts, and
-      result locations in Finding F1.
-- [ ] Decide whether the regression reproduces strongly enough to continue. If
-      it does not, repeat under controlled conditions before profiling.
+- [ ] For future runs, confirm the worktree and HEAD remain stationary for the
+  duration of each run; record the commit and cleanliness in the findings log.
+- [x] Confirm that the unrelated `b6c98ad` Cmd-A selection commit does not
+  touch the measured renderer, sprite implementation, workload generator, or
+  benchmark harness.
+- [x] Accept the five unprofiled `b6c98ad` JSONL records as the trustworthy
+  post-sprite investigation baseline despite the source-stamp caveat.
+- [ ] Record the compatible baseline medians, variation, draw counts, and JSONL
+  locations in Finding F1.
+- [x] Decide that the consistent 11-16% text regressions and 42% symbol
+  regression are strong enough to continue to attribution.
 
 ### Phase 2 -- attribute the text-path regression
 
@@ -242,47 +245,164 @@ append a correction and mark the earlier interpretation superseded.
 
 ### F1 -- reproducible post-sprite baseline
 
-- Status: pending
-- Date and investigator:
-- Commit and worktree state:
-- Commands:
+- Status: transcription complete; a fresh stationary post-sprite rerun with
+  matching batch targets is still owed before F1 is a canonical baseline.
+- Date and investigator: 2026-07-23
+- Commit and worktree state: records stamped `b6c98ad`; HEAD moved during the
+  run for the unrelated Cmd-A whole-stream selection commit. The commit does
+  not touch the renderer, sprites, workload generator, or benchmark harness.
+- Commands: `just benchmark-redraw save=1`
 - Compatible comparison record:
-- New result or artifact paths:
-- Measurements:
-- Observation:
-- Inference:
-- Uncertainty:
-- Next action:
+  `0698376`, labelled `executor-local-braille-sprites`
+- New result or artifact paths: `benchmarks/results/terminal-redraw.jsonl`
+- Measurements: medians are recorded in "Trigger and current evidence" above.
+  Full min / median / max ns-per-draw and draw counts from the trusted records:
+
+  Baseline `0698376` (`executor-local-braille-sprites`):
+  | Workload        |        min |     median |        max | draws |
+  | --------------- | ---------: | ---------: | ---------: | ----: |
+  | content-churn   |    294,992 |    324,141 |    334,968 | 1,849 |
+  | style-churn     |    300,910 |    320,814 |    330,247 | 1,825 |
+  | mixed-churn     |    319,739 |    331,802 |    344,051 | 1,807 |
+  | symbol-churn    |    337,210 |    342,513 |    347,633 | 1,458 |
+  | sprite-coverage | 12,272,750 | 12,420,459 | 12,706,174 |    39 |
+
+  Exploratory `b6c98ad`:
+  | Workload        |       min |    median |       max | draws |
+  | --------------- | --------: | --------: | --------: | ----: |
+  | content-churn   |   340,886 |   368,789 |   376,994 |   191 |
+  | style-churn     |   354,098 |   373,417 |   385,317 |   215 |
+  | mixed-churn     |   356,510 |   369,718 |   381,793 |   214 |
+  | symbol-churn    |   483,242 |   486,283 |   490,350 | 1,015 |
+  | sprite-coverage | 1,118,039 | 1,132,792 | 1,147,543 |   391 |
+
+- Observation: content, style, and mixed churn regress by 11-16%; symbol churn
+  regresses by 42%; sprite-coverage churn improves by about 10x. For every
+  workload the two runs' regressed medians fall outside each other's min/max
+  bands (baseline text spread is ~13% of median, exploratory ~10%), so the
+  direction of each delta is not within-run variance.
+- Inference: the regressions are strong and consistent enough to continue to
+  attribution.
+- Uncertainty: `b6c98ad` identifies the repository state when results were
+  recorded, not necessarily the exact source snapshot compiled at startup.
+  This is accepted because the intervening commit is unrelated to the measured
+  paths. Separately, the baseline text runs used `targetBatchNanoseconds`
+  400,000,000 (~1,800 draws) while the exploratory text runs used 50,000,000
+  (~200 draws). `targetBatchNanoseconds` is deliberately not a redraw
+  compatibility field (`REDRAW_COMPATIBILITY_FIELDS`) because results are
+  normalized per completed draw, so this difference is worth recording but does
+  not by itself invalidate the comparison. The `b6c98ad` non-reproducible stamp
+  (HEAD moved during the run) remains the standing reason to prefer a fresh
+  stationary rerun before treating F1 as canonical.
+- Next action: Phase 2 -- capture a second sprite-free text profile and attribute
+  the text-path regression (F2).
 
 ### F2 -- text-path profiles
 
-- Status: pending
-- Date and investigator:
-- Commit and worktree state:
-- Workload and reason:
+- Status: two profiles captured and cross-checked.
+- Date and investigator: 2026-07-23, Dan (with Claude).
+- Commit and worktree state: current worktree (dirty: agent-docs, this doc, and
+  the redraw JSONL modified). Both profiles built the release Benchmark binary
+  from this source state.
+- Workload and reason: `scrollback-stream` (max codepoint `0x7d`, verified to
+  contain no scalar at or above `U+2500`, so no supported sprite candidate).
+  This is the workload the sampling harness (`just benchmark-sample`) drives; it
+  is sprite-free like the regressed `content-churn`/`style-churn`, whose
+  fixtures are also pure ASCII (verified independently).
 - Profile commands:
+  - `just benchmark-sample scrollback-stream seconds=15` (profile 1, pre-existing)
+  - `just benchmark-sample scrollback-stream seconds=15` (profile 2, this session)
 - Artifact paths:
-- Repeated hot functions and call paths:
-- Thread and sample/own-time evidence:
-- Observation:
+  - `.build/terminal-benchmark-profiles/2026-07-23-160656-30415/sample.txt`
+  - `.build/terminal-benchmark-profiles/2026-07-23-162904-46215/sample.txt`
+- Repeated hot functions and call paths: both profiles show the same render
+  spine on the main thread --
+  `SwiftTerminalSessionView.draw(_:)` (app/SwiftTerminalSessionView.swift:160)
+  -> `drawRenderFrame(_:metrics:in:)` (TerminalRenderExecution.swift:214)
+  -> `CGContextRef.drawTextRuns(_:metrics:colorSpace:)`. Inside `drawTextRuns`
+  both profiles surface inlined sprite-family classifier frames on a workload
+  with no sprites: profile 1 shows `BlockElementSprite.pattern(for:)` and
+  `PowerlineSprite.pattern(for:)`; profile 2 shows `BoxDrawingSprite.pattern`,
+  `BranchDrawingSprite.pattern`, and `LegacyComputingSupplementSprite.pattern`.
+- Thread and sample/own-time evidence: main-thread totals 12,197 (p1) and
+  12,254 (p2) samples. The entire on-screen draw subtree is tiny on this
+  workload: `SwiftTerminalSessionView.draw` = 80 (p1) / 81 (p2) samples,
+  `drawRenderFrame` = 79 / 77, i.e. ~0.65% of main-thread samples. Within that
+  subtree WMO inlines the classification chain into `drawTextRuns`, so named
+  classifier frames are sparse (1-2 samples each) and no single node dominates.
+- Observation: both profiles independently confirm that sprite-free text still
+  executes the sprite-family classification chain per cell (H1's premise). The
+  classifier frames repeat across two runs, so their presence is stable, not a
+  one-off sampling artifact.
 - Competing interpretations:
-- Confidence:
-- Next action:
+  1. Per-cell classifier calls (H1) -- present and confirmed, but share of cost
+     unquantified.
+  2. Per-run accumulator setup (H3) -- not separable from H1 in these samples.
+  3. CoreText / CGContext `drawTextRuns` glyph work -- the bulk of the draw
+     subtree; classification is a fraction of it.
+  4. Sampler cannot quantify the redraw regression here: `scrollback-stream` is
+     parse/scroll-bound (draw is ~0.65% of samples), while the regression was
+     measured on the serialized-redraw harness, which isolates the draw path and
+     would magnify classification's share. The two are different harnesses.
+- Confidence: high that classification executes on sprite-free text; low that
+  these profiles quantify how much of the 11-16% redraw regression it explains.
+  Sparse inlined frames plus a parse-bound workload mean magnitude must come
+  from a controlled unprofiled bypass on the redraw workloads, not from the
+  sampler.
+- Next action: propose the smallest one-variable diagnostic that bypasses only
+  sprite classification for provably ineligible single-scalar cells, run it
+  against `content`/`style`/`mixed` churn unprofiled, and record recovered time
+  in F3 (pause for agreement before implementing).
 
 ### F3 -- classification isolation experiment
 
-- Status: pending
-- Date and investigator:
-- Commit and worktree state:
-- Exact isolated variable:
-- Diagnostic change:
-- Behavioral verification:
-- Before/after compatible measurements:
+- Status: complete; paired A/B measured, guard reverted.
+- Date and investigator: 2026-07-23, Dan (with Claude).
+- Commit and worktree state: HEAD `6d93366`, same source tree for both arms
+  except the one-line diagnostic guard. Both arms run in the same session on AC
+  power to isolate the guard from run-to-run environmental drift; the guard was
+  reverted after measuring, leaving only research-log updates.
+- Exact isolated variable: the per-cell sprite-family classifier chain for
+  provably-ineligible cells. Everything else in the draw path is unchanged.
+- Diagnostic change: in `drawTextRuns` (TerminalRenderExecution.swift), a guard
+  at the top of the per-cell loop -- when `cell.scalars.count == 1` and the
+  single `scalar.value < 0x2500` (below every supported sprite family's floor),
+  append straight to the character path and skip the eight `pattern(for:)`
+  calls. `< 0x2500` implies `<= UInt16.max`, so the routed cells are
+  behavior-identical to the existing character branch. Multi-scalar and
+  `>= 0x2500` cells still traverse the full chain.
+- Behavioral verification: `just test` exits 0 (0 failures across all suites,
+  including the render/sprite Swift Testing suites). No new behavioral test
+  added: the change deliberately preserves behavior and a branch-entry assertion
+  would be structure-coupled; existing rendering tests plus the benchmark are
+  the appropriate guard.
+- Before/after compatible measurements: paired, same session, `save=0`,
+  `target_ms=50`, `batches=15`, identical workloads. Median ns per draw
+  (min..max, draws):
+  | Workload  | Control A                        | Diagnostic B                     |
+  | --------- | -------------------------------- | -------------------------------- |
+  | content   | 348,053 (333,990..363,026; 204)  | 329,146 (315,102..341,399; 224)  |
+  | style     | 358,448 (337,172..374,614; 206)  | 327,756 (276,310..340,545; 221)  |
+  | mixed     | 350,732 (338,826..361,591; 201)  | 328,224 (308,009..340,496; 228)  |
 - Recovered time and percentage:
-- Observation:
-- H1 disposition: pending
-- Uncertainty:
-- Next action:
+  - content: 18,907 ns/draw, -5.43%
+  - style:   30,692 ns/draw, -8.56%
+  - mixed:   22,508 ns/draw, -6.42%
+- Observation: bypassing sprite classification for ineligible single-scalar
+  cells recovers 5.4-8.6% of per-draw time on the three ASCII text workloads,
+  with medians cleanly separated between arms. This is a large fraction of the
+  measured ~11-16% text regression but does not close it entirely.
+- H1 disposition: confirmed material. Per-cell sprite classification is a
+  dominant, directly-attributed contributor to the text-path regression.
+- Uncertainty: the recovered 5.4-8.6% is smaller than the full 11-16% regression
+  band, so classification is not the sole cause. The residual is consistent with
+  H3 (per-run accumulator setup) or other common-path machinery added in the
+  same series; F3 does not isolate that residual. The paired A/B is one session's
+  measurement, not a canonical saved baseline.
+- Next action: Phase 3 -- compare production candidates (ASCII-only guard vs
+  direct single-scalar family routing vs centralized exact classification)
+  against this measured cost, then pause for a direction decision (D1) before
+  implementing. Consider a follow-on isolation for the H3 residual.
 
 ### F4 -- symbol-path isolation
 
@@ -303,16 +423,149 @@ append a correction and mark the earlier interpretation superseded.
 
 ### D1 -- text-path production fix
 
-- Status: pending
-- Evidence used:
+- Status: drafted; paused for direction review before implementation. Scoped to
+  H1 only -- H3 residual is deliberately excluded and follows after this fix is
+  measured, so the H1 fix's benchmark is cleanly attributable.
+- Evidence used: F3 (guard recovers 5.4-8.6% per draw, H1 confirmed material),
+  F2 (classification executes on sprite-free text in two profiles), F1 (text
+  regression band 11-16%). Family scalar map read from the eight sprite sources:
+
+  | Family (dispatch order)      | Supported scalar range(s)                                             | Shape within range |
+  | ---------------------------- | --------------------------------------------------------------------- | ------------------ |
+  | Box Drawing                  | `0x2500...0x257F`                                                      | dense              |
+  | Block Elements               | `0x2580...0x259F`                                                      | dense              |
+  | Geometric Shapes             | `0x25E2...0x25FF` (only 8 scalars: E2-E5, F8-FA, FF)                   | sparse             |
+  | Braille                      | `0x2800...0x28FF`                                                      | dense              |
+  | Powerline                    | `0xE0B0...0xE0D4` (PUA, sparse subset)                                 | sparse             |
+  | Branch Drawing               | `0xF5D0...0xF60D` (PUA)                                                | dense              |
+  | Legacy Computing             | `0x1FB00...0x1FBAF`, `0x1FBBD...0x1FBBF`, `0x1FBCE...0x1FBEF`          | multi-range        |
+  | Legacy Computing Supplement  | `0x1CC1B..1E`, `0x1CC21..3F`, `0x1CD00..DE5`, `0x1CE00..01/0B..0C/16..19/51..AF` | multi-range |
+
+  The eight coarse ranges are mutually disjoint, so any single scalar value maps
+  to at most one candidate family by range membership. Within a coarse range a
+  family may still return `nil` for an unsupported member (Geometric, Powerline,
+  the multi-range families), which each family's exact `pattern(for:)` already
+  handles.
+
 - Candidate solutions:
+  1. **ASCII-only guard** -- route single-scalar cells with `scalar.value < 0x2500`
+     straight to the character path; everything else keeps the eight-family chain.
+     This is exactly the F3 diagnostic promoted to production.
+  2. **Direct single-scalar family routing** -- extract the single scalar once,
+     select the one family whose coarse range contains it (or the font path for
+     `< 0x2500`, inter-family gaps, and multi-scalar cells), and invoke only that
+     family's exact `pattern(for:)`. Membership/pattern decoding stays inside
+     each family.
+  3. **Centralized exact classification** -- a single `classify(scalar) -> Family?`
+     (or a sprite-kind enum) that owns the full mapping and returns the decoded
+     pattern, replacing the inline chain with one table/dispatch.
+
 - Tradeoffs and correctness risks:
-- Recommendation:
-- Direction review:
-- Selected fix:
-- Behavioral verification:
-- Performance verification:
-- Decision and rationale:
+  - **ASCII-only guard (1):** smallest, lowest-risk change; benefit is directly
+    validated by F3 (5.4-8.6%). Helps only `< U+2500` text -- unsupported
+    non-ASCII cells (CJK, emoji, most of the BMP) still pay the full eight-family
+    chain, and real sprite cells still walk the chain to their family. No new
+    boundary surface: the only edge is the single `0x2500` literal, and
+    multi-scalar/`>= 0x2500` behavior is byte-for-byte unchanged.
+  - **Direct single-scalar routing (2):** broadest reach -- ASCII, unsupported
+    Unicode, and real sprites each invoke at most one family classifier instead
+    of up to eight. Correctness obligations: the coarse range table must exactly
+    cover each family's real membership floor/ceiling; every inter-family gap
+    (`0x25A0...0x25E1`? no -- Geometric starts 0x25E2 so `0x25A0...0x25E1` is a
+    real gap; `0x2600...0x27FF`, `0x2900...0xE0AF`, `0xE0D5...0xF5CF`,
+    `0xF60E...0x1CC1A`, etc.) must fall through to the font path; and the router
+    must preserve dispatch precedence where ranges are adjacent (Box ends 0x257F,
+    Block begins 0x2580 -- disjoint, so no ordering hazard, but the table must be
+    kept in sync as families change). Sparse families (Geometric, Powerline)
+    still delegate the exact-membership `nil` decision to the family, so coarse
+    routing is safe. Main risk is the range table drifting out of sync with a
+    family's real set on future edits.
+  - **Centralized exact classification (3):** cleanest conceptual API and one
+    dispatch point, but it either duplicates each family's membership knowledge
+    in the central table (two sources of truth to keep synchronized -- the exact
+    risk the sprite-doc shared-abstraction policy warns against) or introduces an
+    intermediate sprite-kind representation plus a second dispatch to the family,
+    adding indirection cost on the hot path the fix is meant to shorten.
+
+- Recommendation: **direct single-scalar family routing (candidate 2)**, with
+  exact pattern decoding kept inside each family. It captures the full F3-measured
+  win for ASCII, extends the same one-classifier bound to unsupported Unicode and
+  real sprites (helping the symbol path too, relevant to Phase 4), and avoids
+  duplicating family membership. The ASCII-only guard is the fallback if routing's
+  boundary coverage proves fragile; centralized classification is rejected for
+  duplicating mapping knowledge or adding dispatch cost.
+
+- Minimal structure-insensitive behavioral coverage required (write failing
+  first where a contract changes):
+  - each supported family still classifies and renders its representative
+    scalars (one per family);
+  - range boundaries and gaps: lowest/highest supported scalar of each family
+    renders as a sprite; the scalars just outside each range (e.g. `0x24FF`,
+    `0x2580` vs `0x257F`, `0x25A0`, `0x25E1`, `0xE0AF`, `0xE0D5`) render via the
+    font path;
+  - multi-scalar cells fall back to the font path regardless of leading scalar;
+  - wide-cell placement and grid advance unchanged;
+  - a sprite-free ASCII line and a mixed sprite/text line produce visibly
+    unchanged rendering.
+
+- Direction review: APPROVED -- direct single-scalar family routing selected,
+  with exact membership and pattern decoding kept inside each family.
+- Test-coverage audit (no new tests for unchanged behavior): existing suites
+  already provide the structure-insensitive coverage routing must preserve.
+  - Per-family membership: each family has a `Sprite membership is exactly ...`
+    test that asserts every in-range scalar classifies and that just-outside
+    boundaries (e.g. `0x24FF`, `0x2580`) and multi-scalar inputs return `nil`.
+    These pin membership <= coarse range and boundary/multi-scalar rejection.
+  - Per-family end-to-end rendering: each family has an exhaustive execution
+    test (e.g. "All 128 Box Drawing scalars render as cell-local foreground
+    sprites", plus the 32 block, 62 branch, 213 legacy, braille block, 8
+    geometric, 18 powerline, and supplement-range equivalents) that renders
+    every supported scalar through the full `drawTextRuns` executor and checks
+    sprite ink lands in-cell and adjacent cells stay clean. A misroute that
+    dropped a supported scalar to the font path would fail these.
+  - Mixed lines / stale pixels and wide cells: per-family "..., text, and other
+    sprites replace without stale pixels" tests plus the wide-cursor test cover
+    mixed rendering and column advancement.
+  Because coarse ranges are disjoint and each family's real membership is a
+  subset of its coarse range, the only failure routing can introduce is dropping
+  a supported scalar to font (caught by the exhaustive execution tests); a
+  gap/out-of-range scalar routed to one family returns `nil` and falls to font,
+  identical to the chain. Conclusion: no new behavioral tests are warranted; no
+  test-only "candidate family" seam is added.
+- Selected fix: direct single-scalar family routing in `drawTextRuns`. The
+  per-cell loop now extracts the single scalar once and `switch`es on its value
+  to the one family whose coarse range can contain it (Box `0x2500...0x257F`,
+  Block `0x2580...0x259F`, Geometric `0x25E2...0x25FF`, Braille
+  `0x2800...0x28FF`, Powerline `0xE0B0...0xE0D4`, Branch `0xF5D0...0xF60D`,
+  Supplement `0x1CC1B...0x1CEAF`, Legacy `0x1FB00...0x1FBEF`), invoking only that
+  family's exact `pattern(for:)`. A `nil` result (sparse gap, or a Geometric
+  pattern with no representable triangle) and every out-of-range or multi-scalar
+  cell fall through to the unchanged character/fallback path. Exact membership
+  and pattern decoding remain owned by each family.
+- Behavioral verification: focused `swift test --package-path lib/TerminalCore`
+  passes (570 tests, 77 suites; the pre-existing 1 known issue unchanged); full
+  `just test` exits 0 with 0 failures. No new tests added, per the audit above.
+- Performance verification: clean back-to-back paired A/B in one session on AC
+  power, `save=0`, default per-workload targets, `batches=15`. Median ns per
+  draw (min..max, draws):
+  | Workload        | Control (no routing)             | Routing                          | Recovered  |     % |
+  | --------------- | -------------------------------- | -------------------------------- | ---------: | ----: |
+  | content         | 353,170 (338,218..356,451; 202)  | 325,783 (319,528..332,723; 226)  | 27,387 ns  | -7.76 |
+  | style           | 360,477 (337,166..374,477; 206)  | 327,000 (320,209..336,903; 220)  | 33,477 ns  | -9.29 |
+  | mixed           | 360,784 (352,912..373,299; 205)  | 325,154 (314,513..336,087; 222)  | 35,630 ns  | -9.88 |
+  | symbol          | 516,451 (491,785..519,904; 1006) | 489,429 (483,107..494,107; 950)  | 27,022 ns  | -5.23 |
+  | sprite-coverage | 1,223,122 (1,208,830..1,240,287; 384) | 1,155,057 (1,140,611..1,170,575; 425) | 68,065 ns | -5.57 |
+  All five workloads improved and none regressed. Text recovery (7.8-9.9%)
+  covers most of the F1 11-16% text-regression band; the residual is left to H3.
+  Symbol and sprite-coverage also improved (~5%) because sprite cells now invoke
+  one family instead of walking the chain, but symbol's large regression versus
+  the pre-sprite baseline is unaffected and remains Phase 4 work. No profiled or
+  diagnostic result was saved to `benchmarks/results/*.jsonl` (`save=0`).
+- Decision and rationale: ACCEPTED. Behavior is preserved (full suite green),
+  the target text regression improves materially, and no workload incurs an
+  unexplained loss. Routing is the production text-path fix. Next: Phase 4
+  symbol-path isolation, and a follow-on H3 (per-run accumulator setup)
+  isolation now that the H1 fix is the clean baseline.
 
 ### D2 -- symbol-path production fix or accepted tradeoff
 
@@ -349,8 +602,11 @@ unprofiled isolation experiment.
 
 ## Open questions and caveats
 
-- The `b6c98ad` benchmark stamp does not identify the exact source state that
-  produced the exploratory results because HEAD moved during the run.
+- The `b6c98ad` benchmark stamp does not identify the exact source state
+  compiled at benchmark startup because HEAD moved during the run. The
+  intervening Cmd-A selection commit is unrelated to rendering and benchmark
+  execution, so this is an accepted provenance caveat rather than a reason to
+  discard or repeat the measurements.
 - The `0698376` reference records are labelled as post-change procedural
   Braille measurements, but the implementation was committed later as
   `6d0306d`; controlled reruns must replace commit-stamp inference.
