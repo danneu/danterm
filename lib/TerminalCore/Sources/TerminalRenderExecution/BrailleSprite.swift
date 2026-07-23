@@ -17,8 +17,7 @@ struct BraillePixelRect: Equatable, Sendable {
 
 /// Separates braille's local integer-pixel allocation from cell placement and point conversion.
 struct BraillePixelLayout: Equatable, Sendable {
-    let dotWidth: Int
-    let dotHeight: Int
+    let dotSize: Int
     let xPositions: [Int]
     let yPositions: [Int]
 
@@ -27,8 +26,8 @@ struct BraillePixelLayout: Equatable, Sendable {
         BraillePixelRect(
             x: xPositions[dot.column],
             y: yPositions[dot.row],
-            width: dotWidth,
-            height: dotHeight
+            width: dotSize,
+            height: dotSize
         )
     }
 }
@@ -57,22 +56,70 @@ enum BrailleSprite {
         cellWidthPixels: Int,
         cellHeightPixels: Int
     ) -> BraillePixelLayout {
-        let dotWidth = max(1, cellWidthPixels / 4)
-        let dotHeight = max(1, min(dotWidth, cellHeightPixels / 8))
-        let xPositions = (0..<2).map { column in
-            let slotMin = column * cellWidthPixels / 2
-            let slotMax = (column + 1) * cellWidthPixels / 2
-            return slotMin + (slotMax - slotMin - dotWidth) / 2
-        }
-        let yPositions = (0..<4).map { row in
-            let slotMin = row * cellHeightPixels / 4
-            let slotMax = (row + 1) * cellHeightPixels / 4
-            return slotMin + (slotMax - slotMin - dotHeight) / 2
+        var dotSize = min(cellWidthPixels / 4, cellHeightPixels / 8)
+        var xSpacing = cellWidthPixels / 4
+        var ySpacing = cellHeightPixels / 8
+        var xMargin = xSpacing / 2
+        var yMargin = ySpacing / 2
+        var horizontalRemainder =
+            cellWidthPixels - 2 * xMargin - xSpacing - 2 * dotSize
+        var verticalRemainder =
+            cellHeightPixels - 2 * yMargin - 3 * ySpacing - 4 * dotSize
+
+        if dotSize == 0, horizontalRemainder >= 2, verticalRemainder >= 4 {
+            dotSize += 1
+            horizontalRemainder -= 2
+            verticalRemainder -= 4
         }
 
+        if xMargin == 0, horizontalRemainder >= 2 {
+            xMargin += 1
+            horizontalRemainder -= 2
+        }
+        if yMargin == 0, verticalRemainder >= 2 {
+            yMargin += 1
+            verticalRemainder -= 2
+        }
+
+        if horizontalRemainder >= 1 {
+            xSpacing += 1
+            horizontalRemainder -= 1
+        }
+        if verticalRemainder >= 3 {
+            ySpacing += 1
+            verticalRemainder -= 3
+        }
+
+        if horizontalRemainder >= 2 {
+            xMargin += 1
+            horizontalRemainder -= 2
+        }
+        if verticalRemainder >= 2 {
+            yMargin += 1
+            verticalRemainder -= 2
+        }
+
+        if horizontalRemainder >= 2, verticalRemainder >= 4 {
+            dotSize += 1
+            horizontalRemainder -= 2
+            verticalRemainder -= 4
+        }
+
+        assert(horizontalRemainder >= 0)
+        assert(verticalRemainder >= 0)
+        assert(horizontalRemainder < 2 || verticalRemainder < 4)
+        assert(2 * xMargin + xSpacing + 2 * dotSize <= cellWidthPixels)
+        assert(2 * yMargin + 3 * ySpacing + 4 * dotSize <= cellHeightPixels)
+
+        let xPositions = [
+            xMargin,
+            xMargin + dotSize + xSpacing,
+        ]
+        let yPositions = (0..<4).map { row in
+            yMargin + row * (dotSize + ySpacing)
+        }
         return BraillePixelLayout(
-            dotWidth: dotWidth,
-            dotHeight: dotHeight,
+            dotSize: dotSize,
             xPositions: xPositions,
             yPositions: yPositions
         )
