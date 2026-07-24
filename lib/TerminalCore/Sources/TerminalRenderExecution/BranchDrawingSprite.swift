@@ -10,6 +10,9 @@ struct BranchDrawingRenderGeometry {
 
 /// Maps the contiguous 62-glyph Branch Drawing range without accepting scalar sequences.
 enum BranchDrawingSprite {
+    /// Coarse routing span for the classifier switch; exact membership stays in `pattern(for:)`.
+    static let coarseRange: ClosedRange<UInt32> = 0xF5D0...0xF60D
+
     static func pattern(for scalars: [Unicode.Scalar]) -> BranchDrawingPattern? {
         guard scalars.count == 1, let value = scalars.first?.value,
               (0xF5D0...0xF60D).contains(value)

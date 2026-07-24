@@ -10,6 +10,11 @@ enum LegacyComputingSupplementSprite {
         0x1CE51...0x1CEAF,
     ]
 
+    /// Coarse routing span (the `implementedRanges` envelope) for the classifier switch. Wider
+    /// than the discontiguous membership decoded in `pattern(for:)`; interior gaps return nil
+    /// there and fall through to the font path.
+    static let coarseRange: ClosedRange<UInt32> = 0x1CC1B...0x1CEAF
+
     static func pattern(for scalars: [Unicode.Scalar]) -> LegacySupplementPattern? {
         guard scalars.count == 1, let value = scalars.first?.value else { return nil }
         switch value {

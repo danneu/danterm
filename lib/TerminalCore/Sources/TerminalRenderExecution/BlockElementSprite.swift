@@ -4,6 +4,9 @@ import TerminalSpriteGeometry
 
 /// Maps the complete Block Elements range to its pure physical-pixel geometry.
 enum BlockElementSprite {
+    /// Coarse routing span for the classifier switch; exact membership stays in `pattern(for:)`.
+    static let coarseRange: ClosedRange<UInt32> = 0x2580...0x259F
+
     static func pattern(for scalars: [Unicode.Scalar]) -> BlockElementPattern? {
         guard scalars.count == 1, let value = scalars.first?.value,
               (0x2580...0x259F).contains(value)

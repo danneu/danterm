@@ -4,6 +4,10 @@ import TerminalSpriteGeometry
 
 /// Maps Ghostty's discontiguous legacy-computing scalar set to pure pixel geometry.
 enum LegacyComputingSprite {
+    /// Coarse routing span for the classifier switch. Wider than the discontiguous membership
+    /// decoded in `pattern(for:)`; interior gaps return nil there and fall through to the font path.
+    static let coarseRange: ClosedRange<UInt32> = 0x1FB00...0x1FBEF
+
     static func pattern(for scalars: [Unicode.Scalar]) -> LegacyComputingPattern? {
         guard scalars.count == 1, let value = scalars.first?.value else { return nil }
         let supported = (0x1FB00...0x1FBAF).contains(value)

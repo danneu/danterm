@@ -10,6 +10,9 @@ struct BrailleDot: Equatable, Sendable {
 
 /// Keeps exact braille membership and geometry independent from font fallback.
 enum BrailleSprite {
+    /// Coarse routing span for the classifier switch; exact membership stays in `pattern(for:)`.
+    static let coarseRange: ClosedRange<UInt32> = 0x2800...0x28FF
+
     static func pattern(for scalars: [Unicode.Scalar]) -> UInt8? {
         guard scalars.count == 1, let scalar = scalars.first,
               (0x2800...0x28FF).contains(scalar.value)

@@ -16,6 +16,10 @@ struct GeometricShapeRenderTriangle {
 
 /// Maps the supported Geometric Shapes scalars and translates their pure geometry.
 enum GeometricShapeSprite {
+    /// Coarse routing span for the classifier switch. Wider than the sparse membership decoded
+    /// in `pattern(for:)`; interior gaps return nil there and fall through to the font path.
+    static let coarseRange: ClosedRange<UInt32> = 0x25E2...0x25FF
+
     static func pattern(for scalars: [Unicode.Scalar]) -> GeometricShapePattern? {
         guard scalars.count == 1, let value = scalars.first?.value else { return nil }
         return switch value {

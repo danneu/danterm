@@ -10,6 +10,10 @@ struct PowerlineRenderPath {
 
 /// Maps Ghostty's finite Powerline set and translates its pure physical geometry.
 enum PowerlineSprite {
+    /// Coarse routing span for the classifier switch. Wider than the sparse membership decoded
+    /// in `pattern(for:)`; interior gaps return nil there and fall through to the font path.
+    static let coarseRange: ClosedRange<UInt32> = 0xE0B0...0xE0D4
+
     static func pattern(for scalars: [Unicode.Scalar]) -> PowerlinePattern? {
         guard scalars.count == 1, let value = scalars.first?.value else { return nil }
         return switch value {

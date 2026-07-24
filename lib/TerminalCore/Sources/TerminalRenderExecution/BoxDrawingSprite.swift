@@ -4,6 +4,9 @@ import TerminalSpriteGeometry
 
 /// Maps every U+2500...U+257F scalar to Box Drawing-specific physical geometry.
 enum BoxDrawingSprite {
+    /// Coarse routing span for the classifier switch; exact membership stays in `pattern(for:)`.
+    static let coarseRange: ClosedRange<UInt32> = 0x2500...0x257F
+
     static func pattern(for scalars: [Unicode.Scalar]) -> BoxDrawingPattern? {
         guard scalars.count == 1, let value = scalars.first?.value,
               (0x2500...0x257F).contains(value)

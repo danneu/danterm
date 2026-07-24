@@ -382,7 +382,7 @@ private extension CGContext {
                 var classifiedAsSprite = false
                 if cell.scalars.count == 1, let scalar = cell.scalars.first {
                     switch scalar.value {
-                    case 0x2500...0x257F:
+                    case BoxDrawingSprite.coarseRange:
                         if let pattern = BoxDrawingSprite.pattern(for: cell.scalars) {
                             BoxDrawingSprite.append(
                                 pattern: pattern,
@@ -394,7 +394,7 @@ private extension CGContext {
                             )
                             classifiedAsSprite = true
                         }
-                    case 0x2580...0x259F:
+                    case BlockElementSprite.coarseRange:
                         if let pattern = BlockElementSprite.pattern(for: cell.scalars) {
                             let shade = BlockElementSprite.shade(for: pattern)
                             BlockElementSprite.appendRects(
@@ -406,7 +406,7 @@ private extension CGContext {
                             )
                             classifiedAsSprite = true
                         }
-                    case 0x25E2...0x25FF:
+                    case GeometricShapeSprite.coarseRange:
                         if let pattern = GeometricShapeSprite.pattern(for: cell.scalars),
                            let triangle = GeometricShapeSprite.triangle(
                                pattern: pattern,
@@ -418,7 +418,7 @@ private extension CGContext {
                             geometricShapeTriangles.append(triangle)
                             classifiedAsSprite = true
                         }
-                    case 0x2800...0x28FF:
+                    case BrailleSprite.coarseRange:
                         if let pattern = BrailleSprite.pattern(for: cell.scalars) {
                             let layout = brailleLayout ?? BrailleSpriteGeometry.layout(
                                 cellWidthPixels: metrics.cellWidthPixels,
@@ -435,7 +435,7 @@ private extension CGContext {
                             )
                             classifiedAsSprite = true
                         }
-                    case 0xE0B0...0xE0D4:
+                    case PowerlineSprite.coarseRange:
                         if let pattern = PowerlineSprite.pattern(for: cell.scalars) {
                             powerlinePaths += PowerlineSprite.paths(
                                 pattern: pattern,
@@ -445,7 +445,7 @@ private extension CGContext {
                             )
                             classifiedAsSprite = true
                         }
-                    case 0xF5D0...0xF60D:
+                    case BranchDrawingSprite.coarseRange:
                         if let pattern = BranchDrawingSprite.pattern(for: cell.scalars) {
                             branchDrawingGeometries.append(BranchDrawingSprite.geometry(
                                 pattern: pattern,
@@ -457,7 +457,7 @@ private extension CGContext {
                         }
                     // Coarse ranges spanning each multi-range family; the family returns nil
                     // for the interior gaps, which then fall through to the font path.
-                    case 0x1CC1B...0x1CEAF:
+                    case LegacyComputingSupplementSprite.coarseRange:
                         if let pattern = LegacyComputingSupplementSprite.pattern(for: cell.scalars) {
                             LegacyComputingSupplementSprite.appendRects(
                                 pattern: pattern,
@@ -468,7 +468,7 @@ private extension CGContext {
                             )
                             classifiedAsSprite = true
                         }
-                    case 0x1FB00...0x1FBEF:
+                    case LegacyComputingSprite.coarseRange:
                         if let pattern = LegacyComputingSprite.pattern(for: cell.scalars) {
                             LegacyComputingSprite.appendRects(
                                 pattern: pattern,
