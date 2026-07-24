@@ -64,10 +64,18 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
         )
 
     def test_redraw_frames_fill_66_rows_without_scrolling_or_autowrap(self):
-        for workload in PRODUCER.REDRAW_WORKLOADS:
+        # incremental-mixed only takes the full-screen path for its settling frame
+        # (sequence -1); its measured frames are the row-subset updates covered by
+        # test_incremental_mixed_churn_changes_content_and_style_in_a_row_subset.
+        frames = {
+            "full-screen-content-churn": 3,
+            "full-screen-style-churn": 3,
+            "full-screen-incremental-mixed-churn": -1,
+        }
+        for workload, sequence in frames.items():
             with self.subTest(workload=workload):
                 payload = PRODUCER.redraw_screen(
-                    workload, sequence=3, columns=179, rows=66
+                    workload, sequence=sequence, columns=179, rows=66
                 )
                 body = payload.split(b"\x07\x1b[H", 1)[1]
                 rows = body.split(b"\r\n")
@@ -105,67 +113,29 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
         self.assertNotIn(b"\x1b[2J", first)
         self.assertEqual(PRODUCER.incremental_mixed_rows(66), (31, 32, 33, 34))
 
-    def test_symbol_churn_models_btop_with_ninety_percent_braille(self):
-        # Intent: the symbol workload remains the deterministic proxy for the
-        #   measured btop regression: 90% braille and 10% box drawing.
-        # Why it exists: keeps the standing regression tied to the real workload
-        #   that motivated sprite rendering instead of replacing it with coverage.
-        # Scenario: spec-first; btop's process-list scroll remains reproducible.
-        first = PRODUCER.redraw_screen("full-screen-symbol-churn", 1)
-        second = PRODUCER.redraw_screen("full-screen-symbol-churn", 2)
-        strip_metadata = lambda payload: payload.split(b"\x07\x1b[H", 1)[1]
-        strip_styles = lambda payload: re.sub(
-            rb"\x1b\[[0-9;]*m", b"", strip_metadata(payload)
-        ).decode().replace("\r\n", "")
-        styles = lambda payload: re.findall(
-            rb"\x1b\[[0-9;]*m", strip_metadata(payload)
+    def test_redraw_screen_rejects_a_workload_the_paired_ladder_does_not_measure(self):
+        # Intent: the producer emits stimulus only for the three full-screen draw
+        #   workloads the paired ladder measures.
+        # Why it exists: an unreachable workload is dead stimulus that drifts out of
+        #   sync with the ladder while still looking maintained; this keeps the set
+        #   closed so adding stimulus forces adding a measured workload.
+        # Scenario: spec-first; a caller asks for a workload no recipe can run.
+        self.assertEqual(
+            PRODUCER.REDRAW_WORKLOADS,
+            (
+                "full-screen-content-churn",
+                "full-screen-style-churn",
+                "full-screen-incremental-mixed-churn",
+            ),
         )
-
-        visible = strip_styles(first)
-        box_drawing = sum("\u2500" <= character <= "\u257f" for character in visible)
-        braille = sum("\u2800" <= character <= "\u28ff" for character in visible)
-
-        self.assertEqual(len(visible), 178 * 66)
-        self.assertEqual(braille, 10_573)
-        self.assertEqual(box_drawing, 1_175)
-        self.assertNotEqual(strip_styles(first), strip_styles(second))
-        self.assertEqual(styles(first), styles(second))
-
-    def test_sprite_coverage_churn_mixes_curated_candidate_sets_evenly(self):
-        # Intent: a separate coverage workload churns curated sprite candidates
-        #   without changing the btop-shaped performance regression.
-        # Why it exists: broad implementation coverage and the measured btop
-        #   regression are different benchmark questions with distinct identities.
-        # Scenario: spec-first; future sprite increments use this second yardstick.
-        first = PRODUCER.redraw_screen("full-screen-sprite-coverage-churn", 1)
-        second = PRODUCER.redraw_screen("full-screen-sprite-coverage-churn", 2)
-        strip_metadata = lambda payload: payload.split(b"\x07\x1b[H", 1)[1]
-        strip_styles = lambda payload: re.sub(
-            rb"\x1b\[[0-9;]*m", b"", strip_metadata(payload)
-        ).decode().replace("\r\n", "")
-        styles = lambda payload: re.findall(
-            rb"\x1b\[[0-9;]*m", strip_metadata(payload)
-        )
-
-        visible = strip_styles(first)
-        box_drawing = sum("\u2500" <= character <= "\u257f" for character in visible)
-        blocks = sum("\u2580" <= character <= "\u259f" for character in visible)
-        geometric = sum("\u25a0" <= character <= "\u25ff" for character in visible)
-        braille = sum("\u2800" <= character <= "\u28ff" for character in visible)
-
-        self.assertEqual(len(visible), 178 * 66)
-        self.assertEqual(box_drawing, 2_937)
-        self.assertEqual(blocks, 2_937)
-        self.assertEqual(geometric, 2_937)
-        self.assertEqual(braille, 2_937)
-        self.assertNotEqual(strip_styles(first), strip_styles(second))
-        self.assertEqual(styles(first), styles(second))
+        with self.assertRaisesRegex(ValueError, "unknown redraw workload"):
+            PRODUCER.redraw_screen("full-screen-symbol-churn", 1)
 
     def test_redraw_workload_alternates_writes_and_exact_draw_acknowledgments(self):
         events = []
 
         PRODUCER.run_redraw_workload(
-            workload="full-screen-mixed-churn",
+            workload="full-screen-content-churn",
             update_count=3,
             write=lambda chunk: events.append(("write", chunk)),
             await_draw=lambda sequence: events.append(("draw", sequence)),

@@ -358,13 +358,15 @@ test-terminal-benchmark-gui` recipe alongside the existing
   on the research timings rather than on the production commands. The first real
   optimization (PO7) should record the reported snapshot / cache / comparison /
   total phase times alongside its decision.
-- `scripts/terminal-benchmark.sh` still accepts the `full-screen-symbol-churn`
-  and `full-screen-sprite-coverage-churn` workloads, whose fixture identities are
-  80x24 and which no recipe now reaches. Decide whether to port them to 179x66
-  as paired workloads or delete them with their app-side fixtures.
-- `make_scrollback_stream_runner` (`scripts/terminal-benchmark-validation.py:715`)
-  launches each block's fresh app with a per-arm `.a`/`.b` bundle suffix, while
-  the persistent draw arms share the empty namespace the calibration froze. The
-  two never coexist, so the namespace bias RI2 describes should not apply -- but
-  the difference is worth confirming against the calibration record before the
-  next threshold refresh.
+- ~~`scripts/terminal-benchmark.sh` still accepts the `full-screen-symbol-churn`
+  and `full-screen-sprite-coverage-churn` workloads.~~ Resolved: both workloads
+  and the orphaned `full-screen-mixed-churn` are deleted, the harness gate is a
+  closed set instead of a `full-screen-*-churn` glob, and
+  `scripts/tests/terminal_benchmark_workloads_test.py` pins producer, harness,
+  and paired lifecycle to the same three draw workloads.
+- ~~`make_scrollback_stream_runner` launches each block's fresh app with a
+  per-arm `.a`/`.b` bundle suffix.~~ Resolved: the per-arm namespace predates and
+  fed scrollback's own A/A pilot, so its residual offset is already inside the
+  screened envelope; the shared-namespace correction applies to the persistent
+  draw arms because those coexist. Rationale is now a docstring on the runner so
+  it is not "fixed" into a different distribution.

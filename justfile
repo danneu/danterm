@@ -55,8 +55,11 @@ test:
     ./scripts/tests/terminal-benchmark-harness_test.sh
     ./scripts/tests/terminal-benchmark-commands_test.sh
     python3 ./scripts/tests/terminal_benchmark_snapshot_test.py
+    python3 ./scripts/tests/terminal_benchmark_calibration_test.py
+    python3 ./scripts/tests/terminal_benchmark_validation_test.py
     python3 ./scripts/tests/terminal_benchmark_compare_test.py
     python3 ./scripts/tests/terminal_benchmark_producer_test.py
+    python3 ./scripts/tests/terminal_benchmark_workloads_test.py
     python3 ./scripts/tests/terminal_draw_acceptance_test.py
     ./scripts/tests/test-terminal-pty_test.sh
     ./scripts/tests/shell-integration_test.sh

@@ -67,10 +67,21 @@ fi
 for command in codesign jq plutil swift; do
     command -v "$command" >/dev/null || { echo "Missing required command: $command" >&2; exit 1; }
 done
-[[ "$WORKLOAD" == "localized-draw-acceptance" || "$WORKLOAD" == full-screen-*-churn ]] || jq -e --arg workload "$WORKLOAD" '.workloads[$workload] != null' "$CORPUS_PATH" >/dev/null || {
-    echo "Unknown workload: $WORKLOAD" >&2
-    exit 2
-}
+# Closed set, not a glob: the producer emits stimulus only for these three draw
+# workloads plus the diagnostic localized microbenchmark. Anything else must come
+# from the committed corpus, so a typo or a deleted workload fails here.
+case "$WORKLOAD" in
+    localized-draw-acceptance \
+    | full-screen-content-churn \
+    | full-screen-style-churn \
+    | full-screen-incremental-mixed-churn) ;;
+    *)
+        jq -e --arg workload "$WORKLOAD" '.workloads[$workload] != null' "$CORPUS_PATH" >/dev/null || {
+            echo "Unknown workload: $WORKLOAD" >&2
+            exit 2
+        }
+        ;;
+esac
 FIXTURE_IDENTITY="$(jq -r --arg workload "$WORKLOAD" \
     '.workloads[$workload].identity // $workload' "$CORPUS_PATH")"
 

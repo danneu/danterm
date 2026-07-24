@@ -702,7 +702,16 @@ def collect_scrollback_stream(blocks, *, run_block):
 
 
 def make_scrollback_stream_runner(arm_roots):
-    """Bind each arm to a fresh optimized app harness invocation per block."""
+    """Bind each arm to a fresh optimized app harness invocation per block.
+
+    The per-arm `.a`/`.b` bundle namespace is deliberate and calibrated, not an
+    oversight. The shared-namespace correction that the persistent draw arms use
+    exists because those arms coexist; these blocks run one fresh app at a time.
+    The A/A pilot that fed scrollback's screened pair count and threshold was
+    collected through this same per-arm namespace, so its residual offset is
+    already inside the frozen envelope -- switching to a shared namespace would
+    move scrollback off the distribution its threshold was screened against.
+    """
     roots = {arm: pathlib.Path(root) for arm, root in arm_roots.items()}
     if set(roots) != {"a", "b"}:
         raise ValueError("scrollback-stream runner requires physical arms a and b")

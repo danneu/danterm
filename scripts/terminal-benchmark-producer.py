@@ -59,55 +59,19 @@ def run_localized_draw_workload(*, update_count, row, write, await_draw):
         await_draw(sequence)
 
 
+# Closed set: exactly the full-screen draw workloads the paired ladder measures
+# (`content-churn`, `style-churn`, `incremental-mixed`). A workload no recipe
+# reaches is dead stimulus, so adding one here means adding it to the ladder.
 REDRAW_WORKLOADS = (
     "full-screen-content-churn",
     "full-screen-style-churn",
-    "full-screen-mixed-churn",
-    "full-screen-symbol-churn",
-    "full-screen-sprite-coverage-churn",
+    "full-screen-incremental-mixed-churn",
 )
-
-
-BTOP_BOX_DRAWING = "\u2500\u2502\u250c\u2510\u2514\u2518\u251c\u2524\u252c\u2534\u253c"
-
-# Explicit candidate sets keep benchmark coverage separate from a promise that
-# every scalar in a neighboring Unicode block belongs on the sprite path.
-SPRITE_COVERAGE_SETS = (
-    tuple(range(0x2500, 0x2580)),
-    tuple(range(0x2580, 0x25A0)),
-    (0x25E2, 0x25E3, 0x25E4, 0x25E5, 0x25F8, 0x25F9, 0x25FA, 0x25FF),
-    tuple(range(0x2800, 0x2900)),
-)
-
-
-def symbol_churn_content(sequence, row, width):
-    """Build one btop-weighted row with 90% braille and 10% box drawing."""
-    cells = []
-    for column in range(width):
-        index = row * width + column
-        if index % 10 == 0:
-            cells.append(BTOP_BOX_DRAWING[
-                (sequence + row + column) % len(BTOP_BOX_DRAWING)
-            ])
-        else:
-            pattern = 1 + (sequence * 37 + row * 17 + column * 29) % 255
-            cells.append(chr(0x2800 + pattern))
-    return "".join(cells)
-
-
-def sprite_coverage_churn_content(sequence, row, width):
-    """Build one row spread evenly across explicit sprite candidate sets."""
-    cells = []
-    for column in range(width):
-        candidates = SPRITE_COVERAGE_SETS[(row * width + column) % 4]
-        offset = (sequence * 37 + row * 17 + column * 29) % len(candidates)
-        cells.append(chr(candidates[offset]))
-    return "".join(cells)
 
 
 def redraw_screen(workload, sequence, columns=179, rows=66):
     """Build one dense pseudo-TUI frame without scrolling or last-column writes."""
-    if workload not in REDRAW_WORKLOADS and workload != "full-screen-incremental-mixed-churn":
+    if workload not in REDRAW_WORKLOADS:
         raise ValueError(f"unknown redraw workload: {workload}")
     if workload == "full-screen-incremental-mixed-churn" and sequence >= 0:
         return incremental_mixed_screen(sequence, columns, rows)
@@ -118,23 +82,18 @@ def redraw_screen(workload, sequence, columns=179, rows=66):
     )
     lines = [f"\x1b]0;{title}\x07\x1b[H"]
     width = columns - 1
+    # Each workload freezes one axis: style-churn holds content still, content-churn
+    # holds style still, so a measured difference names the work that changed.
+    content_sequence = 0 if workload == "full-screen-style-churn" else sequence
+    style_sequence = 0 if workload == "full-screen-content-churn" else sequence
     for row in range(rows):
-        if workload == "full-screen-symbol-churn":
-            content = symbol_churn_content(sequence, row, width)
-            style_sequence = 0
-        elif workload == "full-screen-sprite-coverage-churn":
-            content = sprite_coverage_churn_content(sequence, row, width)
-            style_sequence = 0
-        else:
-            content_sequence = 0 if workload == "full-screen-style-churn" else sequence
-            label = (
-                f" {row + 1:02d}  branch feature/redraw  item "
-                f"{(content_sequence * 17 + row * 7) % 10000:04d}  "
-                f"{'working tree clean' if row % 3 else 'modified benchmark.swift'}"
-            )
-            content = label.ljust(width, ".")[:width]
-            style_sequence = 0 if workload == "full-screen-content-churn" else sequence
-        red = 40 + (style_sequence * 17 + row * 11) % 180
+        label = (
+            f" {row + 1:02d}  branch feature/redraw  item "
+            f"{(content_sequence * 17 + row * 7) % 10000:04d}  "
+            f"{'working tree clean' if row % 3 else 'modified benchmark.swift'}"
+        )
+        content = label.ljust(width, ".")[:width]
+        red =40 + (style_sequence * 17 + row * 11) % 180
         green = 40 + (style_sequence * 23 + row * 13) % 180
         blue = 40 + (style_sequence * 29 + row * 7) % 180
         background = (
