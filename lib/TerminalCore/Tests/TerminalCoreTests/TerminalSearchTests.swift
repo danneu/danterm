@@ -102,4 +102,131 @@ struct TerminalSearchTests {
         moved = terminal.searchNext()
         #expect(moved == false)
     }
+
+    @Test("search status counts matches and orients the newest as index zero")
+    func statusCountsAndOrientation() throws {
+        // Intent: `searchStatus` reports the live match total plus the selected
+        //   match's index, with the newest match reading as index 0 so the overlay
+        //   renders it as 1/N.
+        // Why it exists: pins the index orientation the find overlay's `selected + 1`
+        //   counter depends on, and the no-wrap edges where navigation must leave
+        //   the status untouched.
+        var terminal = try #require(Terminal(columns: 8, rows: 4))
+        terminal.feed(Array("hit\r\nzzz\r\nhit\r\nhit".utf8))
+
+        #expect(terminal.searchStatus == nil)
+        var moved = terminal.beginSearch("hit")
+        #expect(moved)
+        #expect(terminal.searchStatus == TerminalSearchStatus(total: 3, selected: 0))
+        moved = terminal.searchNext()
+        #expect(moved)
+        #expect(terminal.searchStatus == TerminalSearchStatus(total: 3, selected: 1))
+        moved = terminal.searchNext()
+        #expect(moved)
+        #expect(terminal.searchStatus == TerminalSearchStatus(total: 3, selected: 2))
+        moved = terminal.searchNext()
+        #expect(moved == false)
+        #expect(terminal.searchStatus == TerminalSearchStatus(total: 3, selected: 2))
+        moved = terminal.searchPrevious()
+        #expect(moved)
+        #expect(terminal.searchStatus == TerminalSearchStatus(total: 3, selected: 1))
+        moved = terminal.searchPrevious()
+        #expect(moved)
+        #expect(terminal.searchStatus == TerminalSearchStatus(total: 3, selected: 0))
+        moved = terminal.searchPrevious()
+        #expect(moved == false)
+        #expect(terminal.searchStatus == TerminalSearchStatus(total: 3, selected: 0))
+    }
+
+    @Test("a needle that matches nothing reports an empty status, and clearing reports none")
+    func statusDistinguishesFailedSearchFromNoSearch() throws {
+        // Intent: a non-empty needle with no occurrences stays an active search
+        //   reporting total 0 / selected nil, while an empty needle or an explicit
+        //   clear reports no status at all.
+        // Why it exists: the overlay renders `-/0` for the failed-search pair and
+        //   nothing for a nil status; collapsing the two would make a failed search
+        //   indistinguishable from a closed one.
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        terminal.feed(Array("hit".utf8))
+
+        var moved = terminal.beginSearch("nope")
+        #expect(moved == false)
+        #expect(terminal.searchStatus == TerminalSearchStatus(total: 0, selected: nil))
+        #expect(terminal.activeSearchMatchRange == nil)
+        moved = terminal.searchNext()
+        #expect(moved == false)
+        moved = terminal.searchPrevious()
+        #expect(moved == false)
+        #expect(terminal.searchStatus == TerminalSearchStatus(total: 0, selected: nil))
+
+        terminal.clearSearch()
+        #expect(terminal.searchStatus == nil)
+
+        moved = terminal.beginSearch("")
+        #expect(moved == false)
+        #expect(terminal.searchStatus == nil)
+    }
+
+    @Test("the alternate screen suppresses both search reads")
+    func alternateScreenReportsNoSearch() throws {
+        // Intent: while the alternate screen is active, both `searchStatus` and
+        //   `activeSearchMatchRange` report nothing even though the needle still
+        //   matches retained scrollback.
+        // Why it exists: match anchors are absolute stream rows spanning scrollback,
+        //   but the alternate screen's projection restarts at row 0 -- an unguarded
+        //   read would paint a scrollback match over unrelated alt-screen content at
+        //   the same numeric row. `revealSearchMatchIfNeeded` already carries this
+        //   guard; these reads must agree with it.
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        terminal.feed(Array("hit\r\nzzz\r\nyyy".utf8))
+        terminal.feed(Array("\u{1B}[?1049h".utf8))
+
+        _ = terminal.beginSearch("hit")
+        #expect(terminal.searchStatus == nil)
+        #expect(terminal.activeSearchMatchRange == nil)
+
+        // Leaving the alternate screen drops inspection state, so re-run the search to
+        // prove the suppression is a read-time guard rather than a permanent loss.
+        terminal.feed(Array("\u{1B}[?1049l".utf8))
+        let found = terminal.beginSearch("hit")
+        #expect(found)
+        #expect(terminal.searchStatus == TerminalSearchStatus(total: 1, selected: 0))
+        #expect(terminal.activeSearchMatchRange != nil)
+    }
+
+    @Test("every search mutation damages the departing and arriving match rows")
+    func searchMutationsRecordRowDamage() throws {
+        // Intent: begin, next, previous, clear, and a needle that transitions from
+        //   matching to not matching each record row damage covering both the match
+        //   that left and the match that arrived -- including when the match moves
+        //   entirely within the current viewport, so nothing scrolls.
+        // Why it exists: the renderer redraws only damaged rows. A search mutation
+        //   that publishes `.none` damage leaves the previous highlight painted and
+        //   the new one invisible.
+        var terminal = try #require(Terminal(columns: 8, rows: 4))
+        terminal.feed(Array("hit\r\nzzz\r\nhit\r\nyyy".utf8))
+        _ = terminal.drainDamage()
+
+        var moved = terminal.beginSearch("hit")
+        #expect(moved)
+        #expect(terminal.drainDamage() == TerminalDamage(rows: [2]))
+
+        moved = terminal.searchNext()
+        #expect(moved)
+        #expect(terminal.drainDamage() == TerminalDamage(rows: [0, 2]))
+
+        moved = terminal.searchPrevious()
+        #expect(moved)
+        #expect(terminal.drainDamage() == TerminalDamage(rows: [0, 2]))
+
+        moved = terminal.beginSearch("nope")
+        #expect(moved == false)
+        #expect(terminal.drainDamage() == TerminalDamage(rows: [2]))
+
+        moved = terminal.beginSearch("hit")
+        #expect(moved)
+        _ = terminal.drainDamage()
+        terminal.clearSearch()
+        #expect(terminal.drainDamage() == TerminalDamage(rows: [2]))
+    }
 }

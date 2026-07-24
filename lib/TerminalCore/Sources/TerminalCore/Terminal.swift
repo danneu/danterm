@@ -201,6 +201,7 @@ public struct Terminal: Equatable, Sendable {
     private struct DamageActionSnapshot {
         var cursor: TerminalCursor?
         var selection: TerminalTextRange?
+        var searchMatch: TerminalTextRange?
         var hoveredLink: TerminalResolvedLink?
         var topRow: Int
         var isFollowing: Bool
@@ -315,9 +316,13 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Stores only the active query and occurrence so navigation always rescans live text.
+    ///
+    /// `range` is nil while the query matches nothing. That state is deliberately distinct
+    /// from `search == nil`: a needle the user typed that found nothing is still an active
+    /// search reporting an empty status, whereas no search state at all reports none.
     private struct SearchState: Equatable, Sendable {
         var query: String
-        var range: TextAnchorRange
+        var range: TextAnchorRange?
     }
 
     /// Retains hover presentation against reflowable text anchors without storing platform state.
@@ -591,6 +596,7 @@ public struct Terminal: Equatable, Sendable {
                 )
                 : nil,
             selection: selectionRange,
+            searchMatch: activeSearchMatchRange,
             hoveredLink: hoveredLink,
             topRow: projection.topRow,
             isFollowing: projection.isFollowing,
@@ -599,7 +605,7 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
-    /// Records only the render deltas implied by a cursor/selection/hover snapshot diff.
+    /// Records only the render deltas implied by a cursor/selection/search/hover snapshot diff.
     ///
     /// Every statement here is presentation-only, so none advances the history generation:
     /// callers do mutate cells around this call, but that content reaches the generation
@@ -634,6 +640,10 @@ public struct Terminal: Equatable, Sendable {
         if before.selection != after.selection {
             recordPresentationDamage(rows: damagedViewportRows(for: before.selection))
             recordPresentationDamage(rows: damagedViewportRows(for: after.selection))
+        }
+        if before.searchMatch != after.searchMatch {
+            recordPresentationDamage(rows: damagedViewportRows(for: before.searchMatch))
+            recordPresentationDamage(rows: damagedViewportRows(for: after.searchMatch))
         }
         if before.hoveredLink != after.hoveredLink {
             recordPresentationDamage(rows: damagedViewportRows(for: before.hoveredLink?.range))
@@ -1689,8 +1699,28 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Returns the current half-open search occurrence in stream coordinates.
+    ///
+    /// Yields nil under the alternate screen: match anchors are absolute stream rows over
+    /// scrollback, but the alt projection restarts at row 0, so a retained scrollback match
+    /// would land on unrelated alt-screen content. Mirrors `revealSearchMatchIfNeeded`.
     public var activeSearchMatchRange: TerminalTextRange? {
-        search.flatMap { publicRange($0.range) }
+        guard inactivePrimaryScreen == nil else { return nil }
+        return search?.range.flatMap(publicRange)
+    }
+
+    /// Reports the active search's live match count and selected index, or nil when
+    /// no search is active (never begun, cleared, or an empty needle).
+    ///
+    /// Recomputed from the same scan navigation uses, so it never disagrees with the
+    /// selected match. Suppressed under the alternate screen for the reason on
+    /// `activeSearchMatchRange`.
+    public var searchStatus: TerminalSearchStatus? {
+        guard inactivePrimaryScreen == nil, let search else { return nil }
+        let matches = searchMatches(for: search.query)
+        let selected = search.range
+            .flatMap(matches.firstIndex(of:))
+            .map { matches.count - 1 - $0 }
+        return TerminalSearchStatus(total: matches.count, selected: selected)
     }
 
     /// Selects both endpoint cells after clamping them into the active stream.
@@ -2152,59 +2182,61 @@ public struct Terminal: Equatable, Sendable {
         recordDamage(since: before)
     }
 
-    /// Selects the newest literal match, or clears search state when none exists.
+    /// Selects the newest literal match, keeping a non-matching needle as an empty search.
+    ///
+    /// An empty needle is not a search at all and drops the state entirely; a non-empty
+    /// needle that matches nothing stays active with no occurrence so the caller can
+    /// distinguish "found nothing" from "not searching".
     @discardableResult
     public mutating func beginSearch(_ query: String) -> Bool {
-        let previousViewport = viewportState
-        guard query.isEmpty == false, let match = searchMatches(for: query).last else {
+        let before = damageActionSnapshot
+        guard query.isEmpty == false else {
             search = nil
+            recordDamage(since: before)
             return false
         }
+        let match = searchMatches(for: query).last
         search = SearchState(query: query, range: match)
         revealSearchMatchIfNeeded()
-        if viewportState != previousViewport {
-            recordPresentationFullDamage()
-        }
-        return true
+        recordDamage(since: before)
+        return match != nil
     }
 
     /// Moves to the next older match without wrapping or disturbing an end match.
     @discardableResult
     public mutating func searchNext() -> Bool {
-        guard let search else { return false }
+        guard let search, let range = search.range else { return false }
         let matches = searchMatches(for: search.query)
-        guard let current = matches.firstIndex(of: search.range), current > 0 else {
+        guard let current = matches.firstIndex(of: range), current > 0 else {
             return false
         }
-        let previousViewport = viewportState
+        let before = damageActionSnapshot
         self.search?.range = matches[current - 1]
         revealSearchMatchIfNeeded()
-        if viewportState != previousViewport {
-            recordPresentationFullDamage()
-        }
+        recordDamage(since: before)
         return true
     }
 
     /// Moves to the previous newer match without wrapping or disturbing an end match.
     @discardableResult
     public mutating func searchPrevious() -> Bool {
-        guard let search else { return false }
+        guard let search, let range = search.range else { return false }
         let matches = searchMatches(for: search.query)
-        guard let current = matches.firstIndex(of: search.range), current + 1 < matches.count else {
+        guard let current = matches.firstIndex(of: range), current + 1 < matches.count else {
             return false
         }
-        let previousViewport = viewportState
+        let before = damageActionSnapshot
         self.search?.range = matches[current + 1]
         revealSearchMatchIfNeeded()
-        if viewportState != previousViewport {
-            recordPresentationFullDamage()
-        }
+        recordDamage(since: before)
         return true
     }
 
     /// Clears the query and its active occurrence together.
     public mutating func clearSearch() {
+        let before = damageActionSnapshot
         search = nil
+        recordDamage(since: before)
     }
 
     private func projectedHistoryText(from stream: [GridRow]) -> String {
@@ -2238,7 +2270,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func revealSearchMatchIfNeeded() {
-        guard inactivePrimaryScreen == nil, let match = search?.range else { return }
+        guard inactivePrimaryScreen == nil, let match = search.flatMap(\.range) else { return }
         let projection = scrollProjection
         let top = evictedRowCount + projection.topRow
         let target: Int
@@ -2641,7 +2673,7 @@ public struct Terminal: Equatable, Sendable {
         if let selection, range(selection, intersects: rows) {
             self.selection = nil
         }
-        if let search, range(search.range, intersects: rows) {
+        if let match = search?.range, range(match, intersects: rows) {
             self.search = nil
         }
         if let hoveredLinkState, range(hoveredLinkState.range, intersects: rows) {
@@ -2689,7 +2721,7 @@ public struct Terminal: Equatable, Sendable {
                 self.selection = selection
             }
         }
-        if let search, search.range.start < firstRetained {
+        if let match = search?.range, match.start < firstRetained {
             self.search = nil
         }
         if let hoveredLinkState, hoveredLinkState.range.start < firstRetained {
@@ -2976,9 +3008,9 @@ public struct Terminal: Equatable, Sendable {
                 oldColumnCount: oldColumnCount
             )
         }
-        let searchAttachments = search.map {
+        let searchAttachments = search?.range.map {
             attachments(
-                for: $0.range,
+                for: $0,
                 in: oldUnits,
                 rowMetadata: reconstruction.rowMetadata,
                 oldColumnCount: oldColumnCount
