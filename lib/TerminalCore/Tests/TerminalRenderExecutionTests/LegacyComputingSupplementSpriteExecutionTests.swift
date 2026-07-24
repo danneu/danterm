@@ -11,10 +11,9 @@ struct LegacyComputingSupplementSpriteExecutionTests {
     func exactMembership() {
         let expected = Set(LegacyComputingSupplementSprite.implementedRanges.flatMap { Array($0) })
         for value in UInt32(0x1CC00)...UInt32(0x1CEBF) {
-            let actual = LegacyComputingSupplementSprite.pattern(for: [Unicode.Scalar(value)!]) != nil
+            let actual = LegacyComputingSupplementSprite.pattern(for: Unicode.Scalar(value)!) != nil
             #expect(actual == expected.contains(value))
         }
-        #expect(LegacyComputingSupplementSprite.pattern(for: ["\u{1CD00}", "\u{FE0F}"]) == nil)
     }
 
     @Test("Every subgroup scalar decodes in exact Unicode order")
@@ -98,7 +97,7 @@ struct LegacyComputingSupplementSpriteExecutionTests {
     }
 
     private func pattern(_ value: UInt32) -> LegacySupplementPattern? {
-        LegacyComputingSupplementSprite.pattern(for: [Unicode.Scalar(value)!])
+        LegacyComputingSupplementSprite.pattern(for: Unicode.Scalar(value)!)
     }
 
     private func piece(

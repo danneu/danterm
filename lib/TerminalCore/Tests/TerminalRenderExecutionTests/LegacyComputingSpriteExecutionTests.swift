@@ -14,13 +14,11 @@ struct LegacyComputingSpriteExecutionTests {
             .union(UInt32(0x1FBCE)...UInt32(0x1FBEF))
         for value in UInt32(0x1FAFF)...UInt32(0x1FBF0) {
             #expect(
-                (LegacyComputingSprite.pattern(for: [Unicode.Scalar(value)!]) != nil)
+                (LegacyComputingSprite.pattern(for: Unicode.Scalar(value)!) != nil)
                     == supported.contains(value),
                 Comment(rawValue: "U+\(String(value, radix: 16, uppercase: true))")
             )
         }
-        #expect(LegacyComputingSprite.pattern(for: ["\u{1FB00}", "\u{FE0F}"]) == nil)
-        #expect(LegacyComputingSprite.pattern(for: []) == nil)
     }
 
     @Test("Representative shape classes render cell-locally at scales 1 and 2", arguments: [1.0, 2.0])

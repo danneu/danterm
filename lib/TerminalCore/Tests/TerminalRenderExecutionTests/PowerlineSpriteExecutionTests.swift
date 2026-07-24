@@ -14,13 +14,11 @@ struct PowerlineSpriteExecutionTests {
             .union([0xE0D2, 0xE0D4])
         for value in UInt32(0xE0AF)...UInt32(0xE0D5) {
             #expect(
-                (PowerlineSprite.pattern(for: [Unicode.Scalar(value)!]) != nil)
+                (PowerlineSprite.pattern(for: Unicode.Scalar(value)!) != nil)
                     == supported.contains(value),
                 Comment(rawValue: "U+\(String(value, radix: 16, uppercase: true))")
             )
         }
-        #expect(PowerlineSprite.pattern(for: ["\u{E0B0}", "\u{FE0F}"]) == nil)
-        #expect(PowerlineSprite.pattern(for: []) == nil)
     }
 
     @Test("Every supported scalar maps exhaustively in Ghostty order")
@@ -35,11 +33,11 @@ struct PowerlineSpriteExecutionTests {
         ]
         for (offset, pattern) in patterns.enumerated() {
             #expect(PowerlineSprite.pattern(
-                for: [Unicode.Scalar(0xE0B0 + offset)!]
+                for: Unicode.Scalar(0xE0B0 + offset)!
             ) == pattern)
         }
-        #expect(PowerlineSprite.pattern(for: ["\u{E0D2}"]) == .leftCap)
-        #expect(PowerlineSprite.pattern(for: ["\u{E0D4}"]) == .rightCap)
+        #expect(PowerlineSprite.pattern(for: "\u{E0D2}") == .leftCap)
+        #expect(PowerlineSprite.pattern(for: "\u{E0D4}") == .rightCap)
     }
 
     @Test("All glyphs render in the foreground, clip to their cell, and isolate adjacency", arguments: [1.0, 2.0])

@@ -13,17 +13,15 @@ enum BrailleSprite {
     /// Coarse routing span for the classifier switch; exact membership stays in `pattern(for:)`.
     static let coarseRange: ClosedRange<UInt32> = 0x2800...0x28FF
 
-    static func pattern(for scalars: [Unicode.Scalar]) -> UInt8? {
-        guard scalars.count == 1, let scalar = scalars.first,
-              (0x2800...0x28FF).contains(scalar.value)
-        else {
+    static func pattern(for scalar: Unicode.Scalar) -> UInt8? {
+        guard (0x2800...0x28FF).contains(scalar.value) else {
             return nil
         }
         return UInt8(scalar.value - 0x2800)
     }
 
-    static func dots(for scalars: [Unicode.Scalar]) -> [BrailleDot]? {
-        guard let pattern = pattern(for: scalars) else { return nil }
+    static func dots(for scalar: Unicode.Scalar) -> [BrailleDot]? {
+        guard let pattern = pattern(for: scalar) else { return nil }
         return (0..<8).compactMap { bit in
             guard pattern & (1 << bit) != 0 else { return nil }
             return dot(forBit: bit)
@@ -36,7 +34,7 @@ enum BrailleSprite {
         column: Int,
         metrics: TerminalRenderMetrics
     ) -> [CGRect] {
-        guard let pattern = pattern(for: [scalar]) else { return [] }
+        guard let pattern = pattern(for: scalar) else { return [] }
         var rects: [CGRect] = []
         rects.reserveCapacity(pattern.nonzeroBitCount)
         appendRects(

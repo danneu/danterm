@@ -14,8 +14,8 @@ enum PowerlineSprite {
     /// in `pattern(for:)`; interior gaps return nil there and fall through to the font path.
     static let coarseRange: ClosedRange<UInt32> = 0xE0B0...0xE0D4
 
-    static func pattern(for scalars: [Unicode.Scalar]) -> PowerlinePattern? {
-        guard scalars.count == 1, let value = scalars.first?.value else { return nil }
+    static func pattern(for scalar: Unicode.Scalar) -> PowerlinePattern? {
+        let value = scalar.value
         return switch value {
         case 0xE0B0: .rightHard
         case 0xE0B1: .rightThin

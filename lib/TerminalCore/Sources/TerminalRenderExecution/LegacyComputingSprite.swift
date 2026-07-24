@@ -8,8 +8,8 @@ enum LegacyComputingSprite {
     /// decoded in `pattern(for:)`; interior gaps return nil there and fall through to the font path.
     static let coarseRange: ClosedRange<UInt32> = 0x1FB00...0x1FBEF
 
-    static func pattern(for scalars: [Unicode.Scalar]) -> LegacyComputingPattern? {
-        guard scalars.count == 1, let value = scalars.first?.value else { return nil }
+    static func pattern(for scalar: Unicode.Scalar) -> LegacyComputingPattern? {
+        let value = scalar.value
         let supported = (0x1FB00...0x1FBAF).contains(value)
             || (0x1FBBD...0x1FBBF).contains(value)
             || (0x1FBCE...0x1FBEF).contains(value)

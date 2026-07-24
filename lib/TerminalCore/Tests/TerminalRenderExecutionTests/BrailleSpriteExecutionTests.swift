@@ -9,12 +9,11 @@ import TerminalRenderPlanning
 struct BrailleSpriteExecutionTests {
     @Test("Sprite membership is exactly one scalar in the Unicode braille block")
     func exactSupportedSet() {
-        #expect(BrailleSprite.dots(for: ["\u{2800}"]) == [])
-        #expect(BrailleSprite.dots(for: ["\u{28FF}"])?.count == 8)
-        #expect(BrailleSprite.dots(for: ["\u{27FF}"]) == nil)
-        #expect(BrailleSprite.dots(for: ["\u{2900}"]) == nil)
-        #expect(BrailleSprite.dots(for: ["\u{1F600}"]) == nil)
-        #expect(BrailleSprite.dots(for: ["\u{2801}", "\u{FE0F}"]) == nil)
+        #expect(BrailleSprite.dots(for: "\u{2800}") == [])
+        #expect(BrailleSprite.dots(for: "\u{28FF}")?.count == 8)
+        #expect(BrailleSprite.dots(for: "\u{27FF}") == nil)
+        #expect(BrailleSprite.dots(for: "\u{2900}") == nil)
+        #expect(BrailleSprite.dots(for: "\u{1F600}") == nil)
     }
 
     @Test(
@@ -32,7 +31,7 @@ struct BrailleSpriteExecutionTests {
     )
     func unicodeDotLayout(sample: BrailleBitSample) {
         #expect(
-            BrailleSprite.dots(for: [sample.scalar])
+            BrailleSprite.dots(for: sample.scalar)
                 == [BrailleDot(column: sample.column, row: sample.row)]
         )
     }

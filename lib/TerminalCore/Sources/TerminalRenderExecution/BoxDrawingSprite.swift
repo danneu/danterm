@@ -7,10 +7,9 @@ enum BoxDrawingSprite {
     /// Coarse routing span for the classifier switch; exact membership stays in `pattern(for:)`.
     static let coarseRange: ClosedRange<UInt32> = 0x2500...0x257F
 
-    static func pattern(for scalars: [Unicode.Scalar]) -> BoxDrawingPattern? {
-        guard scalars.count == 1, let value = scalars.first?.value,
-              (0x2500...0x257F).contains(value)
-        else { return nil }
+    static func pattern(for scalar: Unicode.Scalar) -> BoxDrawingPattern? {
+        let value = scalar.value
+        guard (0x2500...0x257F).contains(value) else { return nil }
         if let lines = lineMappings[Int(value - 0x2500)] { return .lines(lines) }
         return switch value {
         case 0x2504: .dashed(axis: .horizontal, weight: .light, count: 3)

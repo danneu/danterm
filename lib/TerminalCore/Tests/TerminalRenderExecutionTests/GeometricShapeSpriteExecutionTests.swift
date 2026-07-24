@@ -13,13 +13,11 @@ struct GeometricShapeSpriteExecutionTests {
         let supported = Set([0x25E2, 0x25E3, 0x25E4, 0x25E5, 0x25F8, 0x25F9, 0x25FA, 0x25FF])
         for value in UInt32(0x25E1)...UInt32(0x2600) {
             #expect(
-                (GeometricShapeSprite.pattern(for: [Unicode.Scalar(value)!]) != nil)
+                (GeometricShapeSprite.pattern(for: Unicode.Scalar(value)!) != nil)
                     == supported.contains(Int(value)),
                 Comment(rawValue: "U+\(String(value, radix: 16, uppercase: true))")
             )
         }
-        #expect(GeometricShapeSprite.pattern(for: ["\u{25E2}", "\u{FE0F}"]) == nil)
-        #expect(GeometricShapeSprite.pattern(for: ["\u{25E2}", "\u{25FF}"]) == nil)
     }
 
     @Test("Every supported scalar maps exhaustively to its corner and style")
@@ -35,8 +33,34 @@ struct GeometricShapeSpriteExecutionTests {
             ("\u{25FF}", .init(corner: .bottomRight, style: .outlined)),
         ]
         for (scalar, pattern) in expected {
-            #expect(GeometricShapeSprite.pattern(for: [scalar]) == pattern)
+            #expect(GeometricShapeSprite.pattern(for: scalar) == pattern)
         }
+    }
+
+    @Test("A geometric-shape scalar plus a variation selector is not reduced to its first scalar")
+    func variationSelectorTakesFontPath() throws {
+        // Intent: a multi-scalar cell whose first scalar is a procedural geometric
+        //   shape must not be reduced to that scalar and drawn as the sprite; the
+        //   cell must take the font/fallback path instead.
+        // Why it exists: the executor's `count == 1` gate is the sole guard that
+        //   keeps multi-scalar graphemes off the procedural path. Once the family
+        //   classifiers take a single scalar, that guarantee can no longer be
+        //   expressed at the `pattern(for:)` unit level (the old multi-scalar-array
+        //   assertions this replaces), so it needs an executor-level test.
+        // Scenario: rendering "\u{25E2}\u{FE0F}" (bottom-right corner + emoji
+        //   variation selector) must differ from the bare "\u{25E2}", which draws
+        //   the procedural filled corner triangle.
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
+        let cell = cellRect(row: 0, column: 0, metrics: metrics)
+        let bare = try renderBitmap(
+            plan: makePlan(input: "\u{25E2}", columns: 2, rows: 1),
+            metrics: metrics
+        )
+        let withSelector = try renderBitmap(
+            plan: makePlan(input: "\u{25E2}\u{FE0F}", columns: 2, rows: 1),
+            metrics: metrics
+        )
+        #expect(bare.pixels(in: cell) != withSelector.pixels(in: cell))
     }
 
     @Test("All triangles use their foreground, remain contained, and isolate adjacent cells", arguments: [1.0, 2.0])

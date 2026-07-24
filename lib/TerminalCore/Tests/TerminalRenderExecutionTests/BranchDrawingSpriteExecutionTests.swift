@@ -12,19 +12,17 @@ struct BranchDrawingSpriteExecutionTests {
     func exactMembership() {
         for value in UInt32(0xF5CF)...UInt32(0xF60E) {
             #expect(
-                (BranchDrawingSprite.pattern(for: [Unicode.Scalar(value)!]) != nil)
+                (BranchDrawingSprite.pattern(for: Unicode.Scalar(value)!) != nil)
                     == (0xF5D0...0xF60D).contains(value)
             )
         }
-        #expect(BranchDrawingSprite.pattern(for: []) == nil)
-        #expect(BranchDrawingSprite.pattern(for: ["\u{F5D0}", "\u{FE0F}"]) == nil)
     }
 
     @Test("All 62 scalars map exhaustively in Ghostty order")
     func exhaustiveMapping() {
         for offset in 0..<30 {
             #expect(BranchDrawingSprite.pattern(
-                for: [Unicode.Scalar(0xF5D0 + offset)!]
+                for: Unicode.Scalar(0xF5D0 + offset)!
             ) == .line(BranchLinePattern(rawValue: offset)!))
         }
         let masks: [Set<BranchDirection>] = [
@@ -39,7 +37,7 @@ struct BranchDrawingSpriteExecutionTests {
             for pairOffset in 0...1 {
                 let offset = 30 + pair * 2 + pairOffset
                 #expect(BranchDrawingSprite.pattern(
-                    for: [Unicode.Scalar(0xF5D0 + offset)!]
+                    for: Unicode.Scalar(0xF5D0 + offset)!
                 ) == .node(.init(
                     directions: directions,
                     filled: pairOffset == 0

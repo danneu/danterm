@@ -11,11 +11,10 @@ struct BlockElementSpriteExecutionTests {
     @Test("Sprite membership is exactly one scalar in the Block Elements range")
     func exactSupportedSet() {
         for value in UInt32(0x2580)...UInt32(0x259F) {
-            #expect(BlockElementSprite.pattern(for: [Unicode.Scalar(value)!]) != nil)
+            #expect(BlockElementSprite.pattern(for: Unicode.Scalar(value)!) != nil)
         }
-        #expect(BlockElementSprite.pattern(for: ["\u{257F}"]) == nil)
-        #expect(BlockElementSprite.pattern(for: ["\u{25A0}"]) == nil)
-        #expect(BlockElementSprite.pattern(for: ["\u{2588}", "\u{FE0F}"]) == nil)
+        #expect(BlockElementSprite.pattern(for: "\u{257F}") == nil)
+        #expect(BlockElementSprite.pattern(for: "\u{25A0}") == nil)
     }
 
     @Test("Every Block Elements scalar decodes to its Unicode shape")
@@ -57,7 +56,7 @@ struct BlockElementSpriteExecutionTests {
 
         for (offset, pattern) in expected.enumerated() {
             let scalar = Unicode.Scalar(0x2580 + UInt32(offset))!
-            #expect(BlockElementSprite.pattern(for: [scalar]) == pattern)
+            #expect(BlockElementSprite.pattern(for: scalar) == pattern)
         }
     }
 

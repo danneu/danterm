@@ -15,8 +15,8 @@ enum LegacyComputingSupplementSprite {
     /// there and fall through to the font path.
     static let coarseRange: ClosedRange<UInt32> = 0x1CC1B...0x1CEAF
 
-    static func pattern(for scalars: [Unicode.Scalar]) -> LegacySupplementPattern? {
-        guard scalars.count == 1, let value = scalars.first?.value else { return nil }
+    static func pattern(for scalar: Unicode.Scalar) -> LegacySupplementPattern? {
+        let value = scalar.value
         switch value {
         case 0x1CC1B...0x1CC1E: return .box(UInt8(value - 0x1CC1B))
         case 0x1CC21...0x1CC2F: return .separatedQuadrants(UInt8(value - 0x1CC20))

@@ -20,8 +20,8 @@ enum GeometricShapeSprite {
     /// in `pattern(for:)`; interior gaps return nil there and fall through to the font path.
     static let coarseRange: ClosedRange<UInt32> = 0x25E2...0x25FF
 
-    static func pattern(for scalars: [Unicode.Scalar]) -> GeometricShapePattern? {
-        guard scalars.count == 1, let value = scalars.first?.value else { return nil }
+    static func pattern(for scalar: Unicode.Scalar) -> GeometricShapePattern? {
+        let value = scalar.value
         return switch value {
         case 0x25E2: GeometricShapePattern(corner: .bottomRight, style: .filled)
         case 0x25E3: GeometricShapePattern(corner: .bottomLeft, style: .filled)

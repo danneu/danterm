@@ -13,10 +13,9 @@ enum BranchDrawingSprite {
     /// Coarse routing span for the classifier switch; exact membership stays in `pattern(for:)`.
     static let coarseRange: ClosedRange<UInt32> = 0xF5D0...0xF60D
 
-    static func pattern(for scalars: [Unicode.Scalar]) -> BranchDrawingPattern? {
-        guard scalars.count == 1, let value = scalars.first?.value,
-              (0xF5D0...0xF60D).contains(value)
-        else { return nil }
+    static func pattern(for scalar: Unicode.Scalar) -> BranchDrawingPattern? {
+        let value = scalar.value
+        guard (0xF5D0...0xF60D).contains(value) else { return nil }
         let offset = Int(value - 0xF5D0)
         if offset < 30 {
             return BranchLinePattern(rawValue: offset).map(BranchDrawingPattern.line)

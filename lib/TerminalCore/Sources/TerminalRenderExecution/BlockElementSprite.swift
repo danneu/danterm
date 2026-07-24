@@ -7,10 +7,9 @@ enum BlockElementSprite {
     /// Coarse routing span for the classifier switch; exact membership stays in `pattern(for:)`.
     static let coarseRange: ClosedRange<UInt32> = 0x2580...0x259F
 
-    static func pattern(for scalars: [Unicode.Scalar]) -> BlockElementPattern? {
-        guard scalars.count == 1, let value = scalars.first?.value,
-              (0x2580...0x259F).contains(value)
-        else {
+    static func pattern(for scalar: Unicode.Scalar) -> BlockElementPattern? {
+        let value = scalar.value
+        guard (0x2580...0x259F).contains(value) else {
             return nil
         }
 
