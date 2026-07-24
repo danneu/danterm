@@ -32,6 +32,7 @@ APP_COMPATIBILITY_FIELDS = (
     "toolchain",
     "buildConfiguration",
     "geometry",
+    "terminalConfiguration",
     "profilingActive",
     "iterations",
 )
@@ -40,6 +41,7 @@ CORE_COMPATIBILITY_FIELDS = (
     "benchmarkMethod",
     "workload",
     "fixture",
+    "geometry",
     "buildConfiguration",
     "toolchain",
     "machine",
@@ -230,8 +232,8 @@ def refuse_profiled_history():
 def target_geometry():
     """Return the grid every raw harness run must report."""
     return {
-        "columns": int(os.environ.get("DANTERM_TERMINAL_BENCHMARK_COLUMNS", "80")),
-        "rows": int(os.environ.get("DANTERM_TERMINAL_BENCHMARK_ROWS", "24")),
+        "columns": int(os.environ.get("DANTERM_TERMINAL_BENCHMARK_COLUMNS", "179")),
+        "rows": int(os.environ.get("DANTERM_TERMINAL_BENCHMARK_ROWS", "66")),
     }
 
 
@@ -315,6 +317,7 @@ def make_result(workload, backend, runs, comment=None):
         result["comment"] = comment
     if backend == "swift-core":
         result["benchmarkMethod"] = CORE_BENCHMARK_METHOD
+        result["geometry"] = target_geometry()
         result["summary"] = {
             "iterations": iteration_count,
             "batchCount": runs["batchCount"],
@@ -325,6 +328,15 @@ def make_result(workload, backend, runs, comment=None):
             "macOS": command_output("sw_vers", "-productVersion"),
             "displayScale": runs[0]["displayScale"],
             "geometry": runs[0]["geometry"],
+            "terminalConfiguration": (
+                {
+                    "identity": "swift-system-monospaced-13pt-built-in-defaults-v1",
+                    "font": "system-monospaced",
+                    "fontSizePoints": 13,
+                }
+                if backend == "swift"
+                else {"identity": "ghostty-isolated-built-in-defaults-v1"}
+            ),
             "summary": summarize_runs(runs),
         })
     return result

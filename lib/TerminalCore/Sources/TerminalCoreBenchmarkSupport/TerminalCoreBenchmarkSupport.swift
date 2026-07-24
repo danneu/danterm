@@ -57,7 +57,7 @@ public func decodeBenchmarkChunks(_ data: Data) throws -> [[UInt8]] {
 public func measureFeedBatch(
     chunks: [[UInt8]],
     executionCount: Int,
-    makeTerminal: () -> Terminal? = { Terminal(columns: 80, rows: 24) },
+    makeTerminal: () -> Terminal? = { Terminal(columns: 179, rows: 66) },
     now: () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }
 ) -> UInt64 {
     var total: UInt64 = 0

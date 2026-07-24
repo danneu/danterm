@@ -17,12 +17,13 @@ WORKLOADS = (
     "incremental-mixed",
 )
 DIRECTIONS = ("aa", "slower", "faster")
+CANONICAL_GEOMETRY = {"columns": 179, "rows": 66}
 BLOCK_CONTRACTS = {
     "terminal-feed": {
         "metric": "feed-nanoseconds-per-fresh-terminal-execution",
         "measuredUnit": "duration-stable-fixed-execution-batch",
         "minimumBlockNanoseconds": 1_000_000_000,
-        "reset": "fresh-80x24-terminal-per-execution",
+        "reset": "fresh-179x66-terminal-per-execution",
     },
     "scrollback-stream": {
         "metric": "final-draw-nanoseconds-per-fixture-replay",
@@ -529,7 +530,7 @@ def collect_scrollback_stream(blocks, *, run_block):
             "scrollback-stream-v1-25000-lines"
         ):
             _append_reason(reasons, f"{prefix}-wrong-fixture")
-        if artifact.get("geometry") != {"columns": 80, "rows": 24}:
+        if artifact.get("geometry") != CANONICAL_GEOMETRY:
             _append_reason(reasons, f"{prefix}-wrong-geometry")
         if process_id is None or process_id in process_ids:
             _append_reason(reasons, f"{prefix}-app-process-not-fresh")
@@ -612,8 +613,8 @@ def make_scrollback_stream_runner(arm_roots):
         environment = dict(os.environ)
         environment.update({
             "DANTERM_BENCHMARK_BUNDLE_SUFFIX": f".{arm}",
-            "DANTERM_TERMINAL_BENCHMARK_COLUMNS": "80",
-            "DANTERM_TERMINAL_BENCHMARK_ROWS": "24",
+            "DANTERM_TERMINAL_BENCHMARK_COLUMNS": str(CANONICAL_GEOMETRY["columns"]),
+            "DANTERM_TERMINAL_BENCHMARK_ROWS": str(CANONICAL_GEOMETRY["rows"]),
         })
         completed = subprocess.run(
             [
@@ -684,7 +685,7 @@ def collect_content_churn(blocks, *, run_block):
             _append_reason(reasons, f"{prefix}-wrong-workload")
         if artifact.get("fixtureIdentity") != "full-screen-content-churn":
             _append_reason(reasons, f"{prefix}-wrong-fixture")
-        if artifact.get("geometry") != {"columns": 80, "rows": 24}:
+        if artifact.get("geometry") != CANONICAL_GEOMETRY:
             _append_reason(reasons, f"{prefix}-wrong-geometry")
 
         arm = planned["physicalArm"]
@@ -728,7 +729,12 @@ def collect_content_churn(blocks, *, run_block):
             or any(not isinstance(value, int) for value in durations)
         ):
             _append_reason(reasons, f"{prefix}-cumulative-draw-mismatch")
-        if len(dirty_rows) != 50 or any(value != 24 for value in dirty_rows):
+        expected_dirty_rows = artifact.get("geometry", {}).get("rows")
+        if (
+            expected_dirty_rows != CANONICAL_GEOMETRY["rows"]
+            or len(dirty_rows) != 50
+            or any(value != expected_dirty_rows for value in dirty_rows)
+        ):
             _append_reason(reasons, f"{prefix}-incomplete-full-row-damage")
         if producer.get("event") != "producer-final-write-returned":
             _append_reason(reasons, f"{prefix}-missing-producer-write")

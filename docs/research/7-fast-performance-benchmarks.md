@@ -67,6 +67,40 @@ The worktree was at `eb95e13` when this research started. No new benchmark
 was run for this initial survey; F1's figures come from committed records in
 `benchmarks/results/terminal-redraw.jsonl` and the harness sources.
 
+## Current execution boundary
+
+The next research task is the Phase 4 migration from 80x24 to the canonical
+179x66 grid. Do not collect, generate, or inspect held-out validation evidence
+before that migration and its recalibration are complete.
+
+The completed 80x24 work proves the runner shape, workload boundaries,
+calibration method, estimator choices, and approximate runtime feasibility. It
+does not freeze production pair counts or thresholds. Geometry can change
+per-block cost, variance, damage selectivity, and the relative ranking of
+optimizations, so the 80x24 D3/D4 numbers are provisional inputs to the
+179x66 calibration rather than a decision rule eligible for held-out
+validation.
+
+The required order from here is:
+
+1. Reproduce and strictly enforce 179x66 for every geometry-sensitive
+   workload, including creating a fresh 179x66 terminal for core feed.
+2. Replace fixed 24-row assertions with contracts derived from the achieved
+   66-row grid; preserve the incremental workload's deterministic changed-row
+   contract.
+3. Record the frozen geometry and compatibility identity and fail on any
+   mismatch.
+4. Rerun the workload pilots and calibration at 179x66, including live
+   wall-time measurement, then refreeze D3 and D4.
+5. Generate a new held-out manifest with fresh, non-overlapping seeds only
+   after that freeze.
+6. Run held-out accuracy, symmetry, and drift validation at 179x66.
+
+Any existing 80x24 held-out manifest remains unopened and superseded. The
+optional 80x24-versus-179x66 ranking comparison may happen after the canonical
+runner works, but it must not delay the migration or influence the canonical
+decision rule.
+
 ## Performance workload ladder
 
 The routine suite has five workloads, each retained for one distinct
@@ -202,8 +236,9 @@ The runner shape under the null hypothesis:
    not be simultaneously visible.
 6. After N block pairs -- candidate N chosen from the Phase 2
    persistent-runner pilot (the Phase 1 old-data decomposition is
-   orientation only) and the final value frozen through Phase 3 calibration
-   and held-out validation -- report paired per-block differences: median ratio, sign
+   orientation only) and the final value frozen by canonical-geometry
+   calibration before held-out validation -- report paired per-block
+   differences: median ratio, sign
    consistency, raw samples, detected outliers without silent deletion,
    machine-state flags, every invalidation reason, and total wall time
    alongside measured time.
@@ -216,8 +251,10 @@ The runner shape under the null hypothesis:
 A/A validation is nearly free in this design: install the same binary as
 both arms and the entire pipeline exercises itself against a true null.
 
-No block length, block-pair count, decision threshold, or equivalence band
-is selected yet. Those numbers come from F3 and F8, not convention.
+No canonical block length, block-pair count, decision threshold, or
+equivalence band is selected yet. F7/F8 developed and exercised the selection
+method at 80x24; the canonical values come from rerunning that method at
+179x66, not from convention or from carrying the old values forward.
 
 ## Task ledger
 
@@ -260,7 +297,7 @@ is selected yet. Those numbers come from F3 and F8, not convention.
 - [x] Collect a pilot series from the persistent paired prototype and apply
   the Kalibera-Jones decomposition to it; select block duration and
   candidate N values from this pilot, superseding the Phase 1 orientation
-  numbers, before Phase 3 validation begins; record in F7.
+  numbers, before calibration-method development begins; record in F7.
 - [x] Measure the prototype's end-to-end `quick` wall time and its phase
   decomposition (build, assemble/sign, launch, converge, warm-up, blocks,
   teardown) against the D4 candidate budget; record in F7.
@@ -273,6 +310,9 @@ is selected yet. Those numbers come from F3 and F8, not convention.
 
 ### Phase 3 -- validate the decision rule
 
+- [x] Develop and freeze an initial five-workload calibration method at
+  80x24. Treat its pair counts, thresholds, and runtime projections as
+  provisional method-development evidence that must be superseded at 179x66.
 - [x] Predefine the required false-positive, inconclusive, and
   detection-power rates (from D1) before any trials run. Trial counts are
   sized to those targets, not vice versa: zero false positives in 50 A/A
@@ -280,10 +320,53 @@ is selected yet. Those numbers come from F3 and F8, not convention.
 - [x] Run a calibration set of A/A and injected-change trials to choose
   block length, block-pair counts, decision thresholds, equivalence band,
   and outlier policy; freeze the rule in D3.
-- [ ] Measure final false-positive, inconclusive, and detection rates on a
-  separate held-out set of A/A and injected-change trials, run only after
-  the rule is frozen; record in F8. Tuning and validation must never share
-  trials.
+- [x] Set the `quick` and `confirm` wall-time budgets in D4 from measured
+  prototype runtimes. Retain the budgets across the geometry migration, but
+  remeasure whether the recalibrated 179x66 rules meet them.
+
+### Phase 4 -- geometry and compatibility identity
+
+Per D5 the geometry is now a fixed constant on one machine, not a dynamically
+display-matched window, so this phase shrinks from a display-identification
+subsystem to choosing and validating a constant.
+
+- [x] Freeze the canonical grid constant at 179x66 (the measured full-viewport
+  DanTerm grid, chrome included) and size the benchmark window to reproduce
+  it. Confirm a windowed (non-fullscreen-Space) DanTerm filling the screen
+  reproduces 179x66 -- if the reference was captured with the menu bar hidden,
+  the windowed row count could shift by about one -- and that the window stays
+  fully visible and unoccluded for a complete run; record the checked AppKit
+  sizing calls and the settling behavior in F9. No display-identity
+  interrogation, no frame-vs-visibleFrame matching, no dynamic-mode reading.
+- [x] Derive the achieved grid from the settled window and replace fixed `24`
+  damage assertions with the achieved row count, so the damage contracts hold
+  at the new grid.
+- [x] Record the (now trivial) compatibility identity as a constant: the
+  frozen grid, font/config, backing scale, backend, fixture, build, OS, and
+  toolchain -- plus the machine, since results are machine-specific by
+  decision. Fail rather than silently running at a different grid than the
+  frozen constant.
+- [ ] Recalibrate block size and the per-workload pair counts and thresholds
+  at the fixed large grid, superseding the 80x24 F7 and Phase 3 calibration
+  numbers. Include terminal feed at 179x66: although it does not render,
+  terminal construction, grid mutation, scrolling, damage tracking, and
+  memory behavior depend on geometry. This is the first empirical task
+  (rerunning the existing calibration machinery), not a new statistical
+  design exercise.
+- [ ] Refreeze D3 and D4 from the 179x66 evidence. Only this freeze authorizes
+  creation of a fresh held-out manifest.
+- [ ] Optional: compare 80x24 and the fixed large grid on at least two known
+  render changes; keep 80x24 as a secondary fast diagnostic only if it ever
+  ranks a change differently. No longer a gate on graduation.
+
+### Phase 5 -- validate the canonical decision rule
+
+- [ ] Generate a new held-out manifest only after the 179x66 D3/D4 freeze,
+  using fresh seeds disjoint from every calibration and superseded manifest.
+  Never open or reuse an 80x24 held-out manifest.
+- [ ] Measure final false-positive, inconclusive, and detection rates on the
+  separate held-out set of A/A and injected-change trials; record in F8.
+  Tuning and validation must never share trials.
 - [ ] Verify decision symmetry and drift robustness on the frozen rule:
   reversing A/B labels must reverse the reported effect without changing
   its magnitude beyond expected noise, and a controlled within-run drift
@@ -293,42 +376,10 @@ is selected yet. Those numbers come from F3 and F8, not convention.
   the held-out F8 targets -- and any adaptive rule must be validated
   against optional-stopping bias by simulating its actual peeking schedule,
   not just its final decision.
-- [x] Set the `quick` and `confirm` wall-time budgets in D4 from measured
-  prototype runtimes.
 
-### Phase 4 -- geometry and compatibility identity
+### Phase 6 -- Ghostty reference (severable)
 
-Per D5 the geometry is now a fixed constant on one machine, not a dynamically
-display-matched window, so this phase shrinks from a display-identification
-subsystem to choosing and validating a constant.
-
-- [ ] Freeze the canonical grid constant at 179x66 (the measured full-viewport
-  DanTerm grid, chrome included) and size the benchmark window to reproduce
-  it. Confirm a windowed (non-fullscreen-Space) DanTerm filling the screen
-  reproduces 179x66 -- if the reference was captured with the menu bar hidden,
-  the windowed row count could shift by about one -- and that the window stays
-  fully visible and unoccluded for a complete run; record the checked AppKit
-  sizing calls and the settling behavior in F9. No display-identity
-  interrogation, no frame-vs-visibleFrame matching, no dynamic-mode reading.
-- [ ] Derive the achieved grid from the settled window and replace fixed `24`
-  damage assertions with the achieved row count, so the damage contracts hold
-  at the new grid.
-- [ ] Record the (now trivial) compatibility identity as a constant: the
-  frozen grid, font/config, backing scale, backend, fixture, build, OS, and
-  toolchain -- plus the machine, since results are machine-specific by
-  decision. Fail rather than silently running at a different grid than the
-  frozen constant.
-- [ ] Recalibrate block size and the per-workload pair counts and thresholds
-  at the fixed large grid, superseding the 80x24 F7/F8 numbers. This is the
-  first empirical implementation task (rerunning the existing calibration
-  scripts), not new research.
-- [ ] Optional: compare 80x24 and the fixed large grid on at least two known
-  render changes; keep 80x24 as a secondary fast diagnostic only if it ever
-  ranks a change differently. No longer a gate on graduation.
-
-### Phase 5 -- Ghostty reference (severable)
-
-This phase must not block graduation: Phases 1-4 can graduate to an
+This phase must not block graduation: Phases 1-5 can graduate to an
 implementation plan and ship without a Ghostty baseline.
 
 - [ ] Enumerate observable timing seams in the pinned libghostty C API and
@@ -341,7 +392,7 @@ implementation plan and ship without a Ghostty baseline.
   explicitly reject per-draw equivalence and retain throughput as the only
   cross-backend baseline.
 
-### Phase 6 -- graduate and verify
+### Phase 7 -- graduate and verify
 
 - [ ] Decide whether old JSONL history is archived, migrated as legacy, or
   deleted; never compare numbers across the method/schema boundary.
@@ -811,7 +862,7 @@ implementation plan and ship without a Ghostty baseline.
   paired noise did not meet H3's rejection condition, while sequential
   alternation would knowingly reintroduce launch cost and process-level
   variance. Retain sequential alternation as the fallback if the
-  counterbalanced F7 pilot or held-out Phase 3 validation reveals
+  counterbalanced F7 pilot or canonical held-out Phase 5 validation reveals
   coexistence-dependent noise.
 - Next action: validate immutable baseline/candidate source and binary
   snapshot identity, completing the remaining F4 task.
@@ -954,14 +1005,18 @@ implementation plan and ship without a Ghostty baseline.
   `profilingActive: false`, correcting the earlier prototype identity that
   unconditionally said true. Paired decisions therefore cannot consume a
   profile identity without violating both flags.
-- Follow-up: F8 runs the disjoint Phase 3 calibration set and freezes D3
-  before exposing any held-out validation trial.
+- Follow-up: Phase 4 moves all workloads to 179x66 and reruns the calibration
+  machinery before D3/D4 are refrozen. No held-out validation trial may be
+  generated or exposed before that canonical-geometry freeze.
 
-### F8 -- calibration freezes the fixed-N decision rule
+### F8 -- 80x24 calibration develops the fixed-N decision rule
 
-- Status: Five-workload `quick` and `confirm` rules frozen. The
-  variance-reduced confirm design clears D1 and D4; held-out validation
-  remains unopened and is next.
+- Status: The five-workload calibration method and provisional 80x24 `quick`
+  and `confirm` rules are complete. The variance-reduced confirm design
+  cleared D1 and D4 at 80x24, but D5 superseded that geometry before any
+  held-out evidence was opened. Phase 4 migration and recalibration at
+  179x66 are next; only the resulting refrozen rules are eligible for
+  held-out validation.
 - Date and investigator: 2026-07-24, Codex.
 - Live calibration source: a new calibration-only A/A run collected 96 valid
   50-draw content-churn blocks in 92.44 seconds. The fixed
@@ -1029,19 +1084,19 @@ implementation plan and ship without a Ghostty baseline.
   replacement only after a new seed is supplied and rejects incomplete result
   sets, changed trial identities, and calibration-seed reuse; its behavioral
   tests are in `scripts/tests/terminal_benchmark_validation_test.py`.
-- Blocker discovered before opening held-out evidence: D3 currently defines
-  every block as 50 completed draws, but D2's pure `Terminal.feed` workload
-  deliberately has no rendering, and the PTY/scrollback workload measures a
-  different app/session boundary. Moreover, calibration measured only
-  content churn. The five-workload held-out cells therefore do not yet have
-  calibrated block units or evidence that content-churn N and thresholds
-  control their error rates. Applying the content-churn rule to them would
-  violate D1's per-workload requirement rather than validate it.
+- First blocker discovered before opening held-out evidence: D3 initially
+  defined every block as 50 completed draws, but D2's pure `Terminal.feed`
+  workload deliberately has no rendering, and the PTY/scrollback workload
+  measures a different app/session boundary. Moreover, calibration measured
+  only content churn. The five-workload held-out cells therefore did not yet
+  have calibrated block units or evidence that content-churn N and thresholds
+  controlled their error rates. Applying the content-churn rule to them would
+  have violated D1's per-workload requirement rather than validated it.
 - Workload-specific block contract, defined before further evidence:
 
   | Workload | Timed block and normalization | Reset boundary |
   |---|---|---|
-  | Terminal feed | One duration-stable fixed-execution batch lasting at least 1 second; report cumulative `Terminal.feed` nanoseconds divided by the fixed execution count. | Construct a fresh 80x24 `Terminal` before every execution; corpus framing and chunks remain fixed; batch-count calibration stays outside reported samples. |
+  | Terminal feed | One duration-stable fixed-execution batch lasting at least 1 second; report cumulative `Terminal.feed` nanoseconds divided by the fixed execution count. | Construct a fresh terminal at the canonical grid before every execution; corpus framing and chunks remain fixed; batch-count calibration stays outside reported samples. |
   | Scrollback stream | One complete replay of the fixed 25,000-line fixture; report start-marker parse through the completed draw containing the expected final state. | Launch a fresh optimized app and terminal session for every block, converge geometry, and settle before the start marker. Teardown follows completion and is outside timing. |
   | Content churn | 50 serialized exact completed draws; report cumulative synchronous draw nanoseconds divided by 50. | Settle the dense screen before the block; acknowledge every sequence only after its matching draw completes. |
   | Style churn | 50 serialized exact completed draws; report cumulative synchronous draw nanoseconds divided by 50. | Same settled-screen and exact-acknowledgment boundary as content churn. |
@@ -1053,6 +1108,13 @@ implementation plan and ship without a Ghostty baseline.
   `scripts/terminal-benchmark-validation.py` now emits these contracts in
   schema 2 manifests, with behavioral coverage in its test file. The old
   schema 1 held-out manifest is obsolete and must remain unopened.
+- Canonical-geometry blocker discovered after the calibration method froze:
+  all live series in this finding used 80x24, while D5 now selects 179x66.
+  The evidence below remains useful for runner and statistical-method
+  development, but none of its pair counts, thresholds, damage-row
+  assertions, runtime projections, or held-out manifests is final. Phase 4
+  must reproduce 179x66, rerun the workload series, and refreeze D3/D4 before
+  held-out collection begins.
 - Terminal-feed contract pilot: one release `TerminalCoreBenchmark` process
   calibrated the fixed execution count once, then collected 32 sequential
   duration-stable A/A blocks under four repetitions of `ABBABAAB`. All blocks
@@ -1379,10 +1441,57 @@ implementation plan and ship without a Ghostty baseline.
   artifacts. Reuse of a process or pane across physical arms, or a changed
   process or pane within one arm, invalidates the attempt. Behavioral coverage
   is in `scripts/tests/terminal_benchmark_validation_test.py`.
-- Next task: implement the manifest-driven style-churn collector with the same
-  settled 50-draw persistent boundary while enforcing fixed visible content
-  and style-only mutation. Then add incremental-mixed before starting held-out
-  collection.
+- Next task superseded by Phase 4: the 80x24 validation machinery remains
+  unopened. Recalibrate all five workloads at 179x66 before completing any
+  held-out collector or generating a replacement manifest.
+
+### F9 -- the Swift benchmark reproduces and enforces the canonical 179x66 grid
+
+- The benchmark harness, suite, sustained profiling identities, core-feed
+  terminal factory, and validation collectors now default to the fixed
+  179x66 grid. Environment overrides remain available only for explicit
+  diagnostics; canonical collection rejects any artifact whose achieved grid
+  differs from 179x66.
+- The AppKit sizing path remains deliberately small. After pane creation,
+  `TerminalBenchmarkGeometryController` reads the backend's achieved columns,
+  rows, and cell point size. Every 20 ms it adjusts `NSWindow.setContentSize`
+  by only the cell-sized difference between achieved and target columns/rows,
+  then stops when both match. The producer independently reads the live PTY
+  size and does not acknowledge geometry or emit workload bytes until it sees
+  exactly 179x66.
+- The end-to-end Swift GUI proof on 2026-07-24 converged an ordinary benchmark
+  window to 179x66 at backing scale 2 and completed the 25,000-line scrollback
+  replay. The app-side block samples were visible, on-screen, low-power mode
+  off, and thermal state nominal at both start and completion. Producer-write
+  elapsed was 353,473,709 ns and final-draw elapsed was 372,788,917 ns in the
+  first canonical proof; a second cached-build proof also passed. Evidence is
+  under `.build/terminal-benchmark-runs/2026-07-24-115939-37331/artifacts/`
+  and `.build/terminal-benchmark-runs/2026-07-24-120109-38604/artifacts/`.
+- Full-screen draw validation no longer assumes 24 rows. It requires every
+  measured draw's dirty-row count to equal the rows in the achieved canonical
+  geometry. Incremental mixed remains four deterministic center rows; the
+  app-side glyph-halo contract remains exactly six dirty rows at 179x66.
+- Compatible app history now includes an explicit terminal-configuration
+  identity for the Swift system-monospaced 13-point built-in default, alongside
+  the already recorded grid, backing scale, backend, fixture, source commit,
+  release configuration, OS, toolchain, and machine model/chip. A mismatch in
+  any compatibility field prevents a delta rather than silently comparing
+  unlike runs.
+- A first non-history core-feed pilot confirmed that the release benchmark
+  emits the canonical geometry in its compatibility identity and creates a
+  fresh 179x66 terminal for every execution. On the styled-screen-redraw
+  corpus, three duration-stable samples selected two executions per sample
+  and measured 826,717,187 ns, 826,786,396 ns, and 829,575,875 ns per
+  execution. The complete cached-build command took 11.28 seconds wall time.
+  This is feasibility evidence only; it is not the cross-workload calibration
+  and does not refreeze D3 or D4.
+- Ghostty did not acknowledge 179x66 before the current 20-second harness
+  timeout. That does not block Phase 4: D6 makes Ghostty a severable Phase 6
+  comparison, while canonical calibration is for the Swift engine. Preserve
+  the failure as a Phase 6 input rather than weakening the Swift geometry or
+  extending the calibration boundary.
+- Next task: rerun the five workload pilots and calibration at 179x66, measure
+  live wall time, and refreeze D3/D4 before generating any held-out manifest.
 
 ## Decision log
 
@@ -1448,7 +1557,8 @@ implementation plan and ship without a Ghostty baseline.
     - Zero wrong-direction decisions in 60 trials bounds that failure rate
       below 4.87%. Any wrong-direction result therefore fails the safety
       gate even when the power and inconclusive counts would otherwise pass.
-  - These held-out trials are generated only after D3 freezes the rule.
+  - These held-out trials are generated only after D3 freezes the rule at
+    the canonical 179x66 geometry.
     Calibration trials are disjoint, are never counted toward these
     denominators, and cannot be added selectively after results are
     inspected. An invalidated machine-state trial has no decision and is
@@ -1557,9 +1667,10 @@ implementation plan and ship without a Ghostty baseline.
 
 ### D3 -- block design and decision rule
 
-- Status: Five-workload workload-specific fixed-N rules frozen; ready for
-  held-out validation.
-- Decision:
+- Status: Estimator, workload-contract, and fixed-N methodology frozen at
+  80x24; geometry-dependent pair counts and thresholds are provisional and
+  must be refrozen from 179x66 evidence before held-out validation.
+- Provisional 80x24 decision:
   - A measured block uses the workload-specific timed unit, normalization,
     and reset boundary in F8. The three draw workloads contain 50 exact
     completed draws. Terminal feed uses a duration-stable fresh-terminal
@@ -1608,15 +1719,20 @@ implementation plan and ship without a Ghostty baseline.
   condition. Incremental mixed had the largest paired SD at 4.928%, versus
   0.541% for terminal feed, 1.439% for scrollback, 2.922% for content churn,
   and 3.017% for style churn.
-- Validation boundary: no held-out evidence may be opened until the
-  cross-workload D3 rule freezes. Any later D3 change discards all held-out
-  trials collected under the superseded rule and restarts Phase 3 with new
-  seeds.
+- Validation boundary: no held-out evidence may be generated or opened until
+  the cross-workload D3 rule is refrozen at 179x66. The geometry migration is
+  an expected D3 change, so every 80x24 held-out manifest is superseded even
+  though its outcomes were never collected. Generate a new manifest with
+  fresh seeds only after the canonical freeze. Any later D3 change likewise
+  discards held-out trials collected under the superseded rule and restarts
+  validation with new seeds.
 
 ### D4 -- workflow runtime budgets
 
-- Status: Frozen; common-N and workload-specific median confirm designs
-  rejected for routine runtime, variance-reduced confirm accepted.
+- Status: Budgets frozen. The common-N and workload-specific median confirm
+  designs were rejected and the variance-reduced confirm method was accepted
+  at 80x24, but its pair counts and runtime result must be remeasured and
+  refrozen at 179x66.
 - Budgets: under 60 seconds for one `quick` workload
   comparison and under 5 minutes for the complete `confirm` suite, including
   cached build and harness overhead.
@@ -1631,8 +1747,10 @@ implementation plan and ship without a Ghostty baseline.
   setup. The frozen winsorized confirm suite projects to 281.54 seconds
   (4 minutes 41.5 seconds), below the five-minute budget; its 126 pairs are
   about 47% faster than the 534-second workload-specific median confirm
-  projection. Held-out execution must record live wall time and cannot change
-  these frozen budgets.
+  projection. These are provisional 80x24 results, not evidence that 179x66
+  meets the budgets. Canonical-geometry calibration must measure live wall
+  time and may change pair counts or thresholds, but it cannot relax these
+  frozen budgets. Held-out execution must also record live wall time.
 
 ### D5 -- canonical render geometry
 
@@ -1670,15 +1788,23 @@ implementation plan and ship without a Ghostty baseline.
   diagnostic if the Phase 4 ranking comparison later shows it is worth
   keeping; it is no longer a portability hedge, since portability is out of
   scope.
-- Consequence: leaving 80x24 invalidates the F7/F8 block-size and threshold
-  calibration, which was all measured at 80x24. Recalibrating at the fixed
-  large grid (rerunning the existing calibration scripts) is the first
-  empirical task of the implementation, not new research.
+- Consequence: leaving 80x24 invalidates the F7 and Phase 3 block-size and
+  threshold calibration, which was all measured at 80x24. It also invalidates the
+  associated D3/D4 freeze and every predeclared 80x24 held-out manifest.
+  Recalibrating at the fixed large grid (rerunning the existing calibration
+  machinery) is the immediate next empirical task, before held-out
+  validation, not a new statistical design exercise.
+- Terminal-feed consequence: use a fresh 179x66 `Terminal` for every fixed
+  execution. Rendering is absent, but grid allocation and mutation,
+  scrolling, damage tracking, and memory behavior are geometry-sensitive.
 - Still open (Phase 4, minor): confirm 179x66 is reproduced by a windowed
   (non-fullscreen-Space) DanTerm filling the screen -- if the reference was
   captured with the system menu bar hidden, the windowed row count could shift
   by about one -- and that the window at that grid stays fully visible and
   unoccluded across a full run.
+- Next action: implement and verify the fixed 179x66 geometry, update damage
+  contracts, rerun all workload calibration and live runtime measurements,
+  then refreeze D3/D4. Do not generate or inspect held-out evidence first.
 
 ### D6 -- Ghostty comparison boundary
 
@@ -1758,5 +1884,8 @@ Investigation in progress. The leading direction is a persistent, paired,
 interleaved A/B runner over two coexisting suffixed-bundle apps, windows
 sized to a fixed large grid (179x66, the measured full-viewport DanTerm grid
 on the built-in Retina screen; D5), with a small fixed block count sized from
-measured variance and validated by A/A and injected-change trials. Adaptive statistics are an escalation path, not the plan. No
-benchmark implementation or canonical history has changed.
+measured variance and validated by A/A and injected-change trials. The
+immediate work is geometry migration and recalibration; held-out validation
+comes only after the 179x66 D3/D4 freeze. Adaptive statistics are an
+escalation path, not the plan. No benchmark implementation or canonical
+history has changed.

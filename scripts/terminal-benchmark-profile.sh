@@ -42,17 +42,17 @@ case "$WORKLOAD" in
         redraw_updates=0
         ;;
     full-screen-content-churn)
-        fixture_identity="full-screen-content-churn-v1-serialized-80x24"
+        fixture_identity="full-screen-content-churn-v2-serialized-179x66"
         reset_behavior="full-screen deterministic setup plus excluded settling draw before serialized draws"
         redraw_updates=1000000
         ;;
     full-screen-style-churn)
-        fixture_identity="full-screen-style-churn-v1-serialized-80x24"
+        fixture_identity="full-screen-style-churn-v2-serialized-179x66"
         reset_behavior="full-screen deterministic setup plus excluded settling draw before serialized draws"
         redraw_updates=1000000
         ;;
     full-screen-incremental-mixed-churn)
-        fixture_identity="full-screen-incremental-mixed-churn-v1-four-rows-six-damage-80x24"
+        fixture_identity="full-screen-incremental-mixed-churn-v2-four-rows-six-damage-179x66"
         reset_behavior="dense deterministic setup plus excluded settling draw before four-row content-and-style updates with six-row glyph-halo damage"
         redraw_updates=1000000
         ;;
@@ -100,6 +100,7 @@ jq --arg fixtureIdentity "$fixture_identity" --arg resetBehavior "$reset_behavio
     --arg dirtyStateSHA256 "$dirty_state_sha256" --arg artifactRoot "$PROFILE_ROOT" \
     '. + {
         schemaVersion: 2,
+        geometry: .geometry,
         fixtureIdentity: $fixtureIdentity,
         resetBehavior: $resetBehavior,
         binarySHA256: $binarySHA256,

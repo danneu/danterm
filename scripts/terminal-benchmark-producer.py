@@ -105,7 +105,7 @@ def sprite_coverage_churn_content(sequence, row, width):
     return "".join(cells)
 
 
-def redraw_screen(workload, sequence, columns=80, rows=24):
+def redraw_screen(workload, sequence, columns=179, rows=66):
     """Build one dense pseudo-TUI frame without scrolling or last-column writes."""
     if workload not in REDRAW_WORKLOADS and workload != "full-screen-incremental-mixed-churn":
         raise ValueError(f"unknown redraw workload: {workload}")
@@ -157,7 +157,7 @@ def incremental_mixed_rows(rows):
     return tuple(range(first, min(rows, first + 4)))
 
 
-def incremental_mixed_screen(sequence, columns=80, rows=24):
+def incremental_mixed_screen(sequence, columns=179, rows=66):
     """Change content and style on a deterministic subset of a settled screen."""
     title = f"DANTERM-BENCH-REDRAW-{sequence:06d}"
     lines = [f"\x1b]0;{title}\x07"]

@@ -34,14 +34,14 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
         )
 
     def test_localized_draw_setup_fills_the_grid_without_triggering_autowrap(self):
-        payload = PRODUCER.localized_draw_initial_screen("START-MARKER", 80, 24)
+        payload = PRODUCER.localized_draw_initial_screen("START-MARKER", 179, 66)
         visible_rows = [
             re.sub(rb"\x1b\[[0-9;]*[A-Za-z]", b"", row)
             for row in payload.removeprefix(b"\x1b[2J\x1b[H").split(b"\r\n")
         ]
 
-        self.assertEqual(len(visible_rows), 24)
-        self.assertTrue(all(len(row) == 79 for row in visible_rows))
+        self.assertEqual(len(visible_rows), 66)
+        self.assertTrue(all(len(row) == 178 for row in visible_rows))
         self.assertIn(b"START-MARKER", visible_rows[-1])
 
     def test_localized_draw_workload_waits_for_each_completed_draw_before_next_write(self):
@@ -63,10 +63,12 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
             [0, 1, 2],
         )
 
-    def test_redraw_frames_fill_24_rows_without_scrolling_or_autowrap(self):
+    def test_redraw_frames_fill_66_rows_without_scrolling_or_autowrap(self):
         for workload in PRODUCER.REDRAW_WORKLOADS:
             with self.subTest(workload=workload):
-                payload = PRODUCER.redraw_screen(workload, sequence=3)
+                payload = PRODUCER.redraw_screen(
+                    workload, sequence=3, columns=179, rows=66
+                )
                 body = payload.split(b"\x07\x1b[H", 1)[1]
                 rows = body.split(b"\r\n")
                 visible = [
@@ -74,8 +76,8 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
                     for row in rows
                 ]
 
-                self.assertEqual(len(visible), 24)
-                self.assertTrue(all(len(row) == 79 for row in visible))
+                self.assertEqual(len(visible), 66)
+                self.assertTrue(all(len(row) == 178 for row in visible))
                 self.assertNotIn(b"\x1b[2J", payload)
                 self.assertFalse(payload.endswith(b"\r\n"))
 
@@ -95,13 +97,13 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
         self.assertNotEqual(styles(style_first), styles(style_second))
 
     def test_incremental_mixed_churn_changes_content_and_style_in_a_row_subset(self):
-        first = PRODUCER.incremental_mixed_screen(sequence=1, columns=80, rows=24)
-        second = PRODUCER.incremental_mixed_screen(sequence=2, columns=80, rows=24)
+        first = PRODUCER.incremental_mixed_screen(sequence=1, columns=179, rows=66)
+        second = PRODUCER.incremental_mixed_screen(sequence=2, columns=179, rows=66)
 
         self.assertNotEqual(first, second)
         self.assertIn(b"\x1b]0;DANTERM-BENCH-REDRAW-000001\x07", first)
         self.assertNotIn(b"\x1b[2J", first)
-        self.assertEqual(PRODUCER.incremental_mixed_rows(24), (10, 11, 12, 13))
+        self.assertEqual(PRODUCER.incremental_mixed_rows(66), (31, 32, 33, 34))
 
     def test_symbol_churn_models_btop_with_ninety_percent_braille(self):
         # Intent: the symbol workload remains the deterministic proxy for the
@@ -123,9 +125,9 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
         box_drawing = sum("\u2500" <= character <= "\u257f" for character in visible)
         braille = sum("\u2800" <= character <= "\u28ff" for character in visible)
 
-        self.assertEqual(len(visible), 79 * 24)
-        self.assertEqual(braille, 1_706)
-        self.assertEqual(box_drawing, 190)
+        self.assertEqual(len(visible), 178 * 66)
+        self.assertEqual(braille, 10_573)
+        self.assertEqual(box_drawing, 1_175)
         self.assertNotEqual(strip_styles(first), strip_styles(second))
         self.assertEqual(styles(first), styles(second))
 
@@ -151,11 +153,11 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
         geometric = sum("\u25a0" <= character <= "\u25ff" for character in visible)
         braille = sum("\u2800" <= character <= "\u28ff" for character in visible)
 
-        self.assertEqual(len(visible), 79 * 24)
-        self.assertEqual(box_drawing, 474)
-        self.assertEqual(blocks, 474)
-        self.assertEqual(geometric, 474)
-        self.assertEqual(braille, 474)
+        self.assertEqual(len(visible), 178 * 66)
+        self.assertEqual(box_drawing, 2_937)
+        self.assertEqual(blocks, 2_937)
+        self.assertEqual(geometric, 2_937)
+        self.assertEqual(braille, 2_937)
         self.assertNotEqual(strip_styles(first), strip_styles(second))
         self.assertEqual(styles(first), styles(second))
 

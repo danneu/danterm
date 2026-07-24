@@ -41,7 +41,12 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
             "displayScale": 2.0,
             "toolchain": "Swift 6.1",
             "buildConfiguration": "release",
-            "geometry": {"columns": 80, "rows": 24},
+            "geometry": {"columns": 179, "rows": 66},
+            "terminalConfiguration": {
+                "identity": "swift-system-monospaced-13pt-built-in-defaults-v1",
+                "font": "system-monospaced",
+                "fontSizePoints": 13,
+            },
             "profilingActive": False,
             "iterations": iterations,
             "summary": {
@@ -138,6 +143,7 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
             "profilingActive": False,
             "iterations": 3,
             "benchmarkMethod": "fresh-terminal-batch-v1",
+            "geometry": {"columns": 179, "rows": 66},
             "comment": "after damage bitset",
         }
         previous = {**current, "comment": "baseline", "commit": "previous"}
@@ -145,7 +151,7 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
             **current,
             "backend": "swift",
             "displayScale": 2,
-            "geometry": {"columns": 80, "rows": 24},
+            "geometry": {"columns": 179, "rows": 66},
             "macOS": "26.5",
             "commit": "app",
         }
@@ -207,7 +213,8 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
             },
         )
         self.assertEqual(result["benchmarkMethod"], "fresh-terminal-batch-v1")
-        for field in ("displayScale", "geometry", "macOS"):
+        self.assertEqual(result["geometry"], {"columns": 179, "rows": 66})
+        for field in ("displayScale", "macOS"):
             self.assertNotIn(field, result)
 
     def test_core_runner_length_frames_fixture_chunks_for_the_swift_harness(self):
@@ -332,6 +339,11 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
             "toolchain": "Swift 6.1",
             "buildConfiguration": "release",
             "geometry": {"windowWidth": 1000, "windowHeight": 600},
+            "terminalConfiguration": {
+                "identity": "swift-system-monospaced-13pt-built-in-defaults-v1",
+                "font": "system-monospaced",
+                "fontSizePoints": 13,
+            },
             "profilingActive": False,
             "iterations": 3,
         }
@@ -380,7 +392,7 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
         })
 
         with mock.patch.object(SUITE, "command_output", return_value=raw):
-            with self.assertRaisesRegex(SystemExit, "required 80x24, reported 94x35"):
+            with self.assertRaisesRegex(SystemExit, "required 179x66, reported 94x35"):
                 SUITE.run_workload("scrollback-stream", "swift", 1)
 
     def test_older_schema_record_is_not_a_compatible_baseline(self):
@@ -394,7 +406,12 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
             "displayScale": 2.0,
             "toolchain": "Swift 6.1",
             "buildConfiguration": "release",
-            "geometry": {"columns": 80, "rows": 24},
+            "geometry": {"columns": 179, "rows": 66},
+            "terminalConfiguration": {
+                "identity": "swift-system-monospaced-13pt-built-in-defaults-v1",
+                "font": "system-monospaced",
+                "fontSizePoints": 13,
+            },
             "profilingActive": False,
             "iterations": 3,
         }
@@ -412,7 +429,12 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
             "displayScale": 2.0,
             "toolchain": "Swift 6.1",
             "buildConfiguration": "release",
-            "geometry": {"columns": 80, "rows": 24},
+            "geometry": {"columns": 179, "rows": 66},
+            "terminalConfiguration": {
+                "identity": "swift-system-monospaced-13pt-built-in-defaults-v1",
+                "font": "system-monospaced",
+                "fontSizePoints": 13,
+            },
             "profilingActive": False,
             "iterations": 3,
         }

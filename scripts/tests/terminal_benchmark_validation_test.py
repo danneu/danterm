@@ -109,7 +109,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 "metric": "feed-nanoseconds-per-fresh-terminal-execution",
                 "measuredUnit": "duration-stable-fixed-execution-batch",
                 "minimumBlockNanoseconds": 1_000_000_000,
-                "reset": "fresh-80x24-terminal-per-execution",
+                "reset": "fresh-179x66-terminal-per-execution",
             },
         )
         self.assertEqual(
@@ -440,7 +440,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 "fixtureIdentity": "scrollback-stream-v1-25000-lines",
                 "processId": 100 + ordinal,
                 "sessionId": f"pane-{ordinal}",
-                "geometry": {"columns": 80, "rows": 24},
+                "geometry": {"columns": 179, "rows": 66},
                 "producerWrite": {
                     "event": "producer-final-write-returned",
                     "elapsedNanoseconds": 290_000_000 + ordinal,
@@ -496,7 +496,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
             "fixtureIdentity": "wrong-fixture",
             "processId": 101,
             "sessionId": "pane-1",
-            "geometry": {"columns": 80, "rows": 24},
+            "geometry": {"columns": 179, "rows": 66},
             "producerWrite": {
                 "event": "producer-final-write-returned",
                 "elapsedNanoseconds": 310_000_000,
@@ -553,7 +553,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 "fixtureIdentity": "full-screen-content-churn",
                 "processId": {"a": 101, "b": 202}[arm],
                 "sessionId": {"a": "pane-a", "b": "pane-b"}[arm],
-                "geometry": {"columns": 80, "rows": 24},
+                "geometry": {"columns": 179, "rows": 66},
                 "resetEvidence": {
                     "denseSetupAndStartDrawCompleted": True,
                     "settlingDrawCompleted": True,
@@ -573,7 +573,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                     "cumulativeDrawNanoseconds": sum(durations),
                     "drawSequences": list(range(1, 51)),
                     "drawDurationsNanoseconds": durations,
-                    "dirtyRowCounts": [24] * 50,
+                    "dirtyRowCounts": [66] * 50,
                     "machineStateSamples": [{
                         "activeSpaceChanged": False,
                         "lowPowerMode": False,
@@ -611,7 +611,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
             "fixtureIdentity": "full-screen-content-churn",
             "processId": 101,
             "sessionId": "pane-a",
-            "geometry": {"columns": 80, "rows": 24},
+            "geometry": {"columns": 179, "rows": 66},
             "resetEvidence": {
                 "denseSetupAndStartDrawCompleted": True,
                 "settlingDrawCompleted": False,
@@ -630,7 +630,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 "cumulativeDrawNanoseconds": 15_000_000,
                 "drawSequences": list(range(1, 50)),
                 "drawDurationsNanoseconds": [300_000] * 49,
-                "dirtyRowCounts": [24] * 48 + [23],
+                "dirtyRowCounts": [66] * 48 + [65],
                 "machineStateSamples": [],
             },
         }

@@ -20,7 +20,7 @@ Benchmark recipe options use `name=value` spelling and may appear in any
 order, for example `just benchmark backend=ghostty save=1` or
 `just benchmark-one workload=unicode-wrapping backend=swift save=0`.
 
-Every run converges the terminal to an 80x24 grid before emitting workload
+Every run converges the terminal to the canonical 179x66 grid before emitting workload
 bytes. Override the target for a diagnostic run with
 `DANTERM_TERMINAL_BENCHMARK_COLUMNS` and
 `DANTERM_TERMINAL_BENCHMARK_ROWS`; both must be positive integers. A target
@@ -58,7 +58,7 @@ acknowledgments, so intermediate terminal states may coalesce. It measures
 consumption and backpressure rather than presentation of every submitted state.
 
 Use `just benchmark-redraw` when the question is the cost of presenting every
-complete 80x24 state. It runs content-only, style-only, and mixed pseudo-TUI
+complete 179x66 state. It runs content-only, style-only, and mixed pseudo-TUI
 churn by default; select one with `workload=full-screen-content-churn`,
 `workload=full-screen-style-churn`, or `workload=full-screen-mixed-churn`.
 Options `save=0|1` and `comment=` use the same completion-before-confirmation
@@ -77,7 +77,7 @@ It reports min/median/max draw count, nanoseconds per draw, cumulative draw
 time, and dirty rows per draw. Confirmed unprofiled results enter
 `benchmarks/results/terminal-redraw.jsonl`; deltas require an exact match on
 fixture, method, machine, macOS, display scale, Swift toolchain, release
-configuration, 80x24 geometry, batch count, and profiling state. The duration
+configuration, 179x66 geometry, batch count, and profiling state. The duration
 floor remains recorded as methodology but is not a compatibility key because
 the reported comparison is normalized nanoseconds per completed draw.
 
