@@ -134,6 +134,10 @@ a material text regression against these baselines.
 
 ## Candidate direction, pending evidence
 
+**Resolved: this candidate was selected and shipped as commit `a785d45` (see
+Decision D1).** The forward-looking framing below is preserved as the original
+reasoning that led there; it is no longer open.
+
 If H1 is confirmed as material, the preferred shape is single-scalar range
 routing:
 
@@ -149,9 +153,8 @@ same eight-family chain. Direct routing avoids duplicated checks, helps
 unsupported non-ASCII cells and real sprites as well as ASCII, and keeps the
 number of invoked family classifiers bounded at one.
 
-This remains a candidate, not a selected implementation. Controlled evidence
-may show that a smaller ASCII-only guard is sufficient or that classification
-is not the dominant cost.
+[Superseded: F3 confirmed classification is the dominant cost, and D1 selected
+this routing shape over the ASCII-only guard. Shipped as `a785d45`.]
 
 ## Task ledger
 
@@ -173,48 +176,51 @@ is not the dominant cost.
 
 ### Phase 2 -- attribute the text-path regression
 
-- [ ] Collect two textual profiles of a sprite-free text workload and record
-      both artifact paths.
-- [ ] Confirm the workload truly contains no supported sprite scalars.
-- [ ] Record repeated concrete hot work, call paths, thread, and available
+- [x] Collect two textual profiles of a sprite-free text workload and record
+      both artifact paths. (F2; scrollback-stream, the only profilable workload.)
+- [x] Confirm the workload truly contains no supported sprite scalars.
+- [x] Record repeated concrete hot work, call paths, thread, and available
       sample or own-time evidence in Finding F2.
-- [ ] List competing interpretations, including classifier calls, per-run
+- [x] List competing interpretations, including classifier calls, per-run
       accumulator setup, CoreText work, and measurement noise.
-- [ ] Create the smallest diagnostic experiment that bypasses only sprite
+- [x] Create the smallest diagnostic experiment that bypasses only sprite
       classification for provably ineligible single-scalar cells. Do not retain it
-      as the production fix merely because it is convenient.
-- [ ] Run focused behavioral tests and `just test` for the diagnostic change.
-- [ ] Rerun content, style, and mixed churn unprofiled without saving the
+      as the production fix merely because it is convenient. (F3 `< 0x2500` guard.)
+- [x] Run focused behavioral tests and `just test` for the diagnostic change.
+- [x] Rerun content, style, and mixed churn unprofiled without saving the
       diagnostic result as canonical history.
-- [ ] Record recovered time and percentage for each text workload in Finding
-      F3, then revert or supersede the diagnostic experiment.
-- [ ] Decide whether H1 is confirmed, partially confirmed, or rejected.
+- [x] Record recovered time and percentage for each text workload in Finding
+      F3, then revert or supersede the diagnostic experiment. (Reverted.)
+- [x] Decide whether H1 is confirmed, partially confirmed, or rejected.
+      (Confirmed material.)
 
 ### Phase 3 -- choose the text-path fix
 
-- [ ] If H1 is material, compare at least these candidates against the measured
+- [x] If H1 is material, compare at least these candidates against the measured
       cost: an ASCII-only guard, direct single-scalar family routing, and a
       centralized exact classification result.
-- [ ] For each candidate, record expected benefit, correctness risk,
+- [x] For each candidate, record expected benefit, correctness risk,
       synchronization risk as families change, and effect on unsupported Unicode,
       multi-scalar cells, wide cells, and real sprites.
-- [ ] Identify the smallest structure-insensitive behavioral coverage needed:
+- [x] Identify the smallest structure-insensitive behavioral coverage needed:
       supported-family classification, range boundaries and gaps, multi-scalar
       fallback, wide-cell placement, and unchanged visible rendering.
-- [ ] Write the evidence summary and recommended first production change in
+- [x] Write the evidence summary and recommended first production change in
       Decision D1.
-- [ ] Pause for direction review before implementing the production fix.
-- [ ] Write the failing behavioral test first where the chosen change alters a
+- [x] Pause for direction review before implementing the production fix.
+- [x] Write the failing behavioral test first where the chosen change alters a
       testable contract; verify the expected failure before changing production
-      code.
-- [ ] Implement only the selected text-path fix.
-- [ ] Run focused package tests and `just test`.
-- [ ] Rerun content, style, mixed, symbol, and sprite-coverage churn unprofiled
+      code. (N/A: routing is behavior-preserving -- the failing proof is the
+      established redraw regression and F3 benchmark; existing family tests
+      already pin the invariant. See D1's test-coverage audit.)
+- [x] Implement only the selected text-path fix.
+- [x] Run focused package tests and `just test`.
+- [x] Rerun content, style, mixed, symbol, and sprite-coverage churn unprofiled
       under compatible conditions.
-- [ ] Accept the fix only if behavior remains correct, the target regression
+- [x] Accept the fix only if behavior remains correct, the target regression
       improves materially, and symbol/sprite workloads do not incur an unexplained
       material loss.
-- [ ] Record the final evidence and disposition in Decision D1.
+- [x] Record the final evidence and disposition in Decision D1.
 
 ### Phase 4 -- isolate the symbol-path regression
 
@@ -256,50 +262,11 @@ is not the dominant cost.
       `benchmarks/results/*.jsonl`. (Zero `profilingActive:true` records.)
 - [x] Summarize recovered regressions, accepted tradeoffs, and remaining
       uncertainties in the Outcome section.
-- [ ] Update `agent-docs/terminal-performance.md` only if the investigation
+- [x] Update `agent-docs/terminal-performance.md` only if the investigation
       reveals a reusable methodology or workload rule not already documented.
-
-## Outcome
-
-Both regressions introduced by the procedural terminal-sprite series are fixed,
-and the canonical stationary `d19103f` rerun confirms every workload at or below
-its trustworthy baseline. Canonical medians (ns per completed draw, `save=1`,
-unprofiled, M1 Pro, 80x24, release):
-
-| Workload                            | Baseline  | Canonical `d19103f` |  Delta |
-| ----------------------------------- | --------: | ------------------: | -----: |
-| `full-screen-content-churn`         |   324,141 |             305,240 | -5.8%  |
-| `full-screen-style-churn`           |   320,814 |             302,798 | -5.6%  |
-| `full-screen-mixed-churn`           |   331,802 |             307,196 | -7.4%  |
-| `full-screen-symbol-churn`          |   332,237 |             329,032 | -1.0%  |
-| `full-screen-sprite-coverage-churn` | 1,132,792 |           1,081,186 | -4.6%  |
-
-(Text baselines are the `0698376` records; symbol uses the reproducible `6d0306d`
-baseline; sprite-coverage uses the post-sprite `b6c98ad` record, since its
-`0698376` value predates procedural sprites and reflects the old fallback path.)
-
-- **Text-path regression (H1 -> D1).** Per-cell sprite classification walked an
-  eight-family chain for every cell including sprite-free text. Fixed by direct
-  single-scalar family routing (commit `a785d45`). Text workloads recovered past
-  their baselines.
-- **Symbol-path regression (H2 -> F4/D2).** Isolated by a commit ladder to a
-  single commit, `d357dc3`, whose `BraillePixelLayout` refactor allocated two
-  `[Int]` arrays per braille cell (~3400 allocations/draw on the 90%-braille
-  workload). Fixed by building the layout lazily once per draw (commit `d19103f`).
-  Symbol churn recovered ~34% back to its pre-regression cost.
-- **Rejected hypothesis (H3).** No text residual survived D1; the canonical rerun
-  confirms text workloads below baseline, so per-run accumulator setup is not a
-  demonstrated cost and was not optimized.
-- **Refuted mechanisms.** Box Drawing classification inserted before Braille
-  (noise on the ladder) and larger square-dot fill area (hoist recovered 88% with
-  identical geometry) were both eliminated as causes of the symbol regression.
-- **Accepted tradeoff / provenance caveats.** The `b6c98ad` exploratory records
-  carry a non-reproducible source stamp (HEAD moved mid-run); they are retained
-  as investigation evidence, and the canonical baseline going forward is the
-  stationary `d19103f` set. The intended square-dot braille geometry from
-  `d357dc3` is preserved unchanged; only its build frequency was corrected.
-- **Remaining uncertainty.** None material. The former ~6% F4 residual is closed
-  (symbol at 329,032 <= 332,237 baseline).
+      (Documented the loop-profiler limitation: it cannot drive serialized
+      `benchmark-redraw` workloads; use commit isolation plus paired unprofiled
+      redraw runs instead.)
 
 ## Findings log
 
@@ -308,8 +275,9 @@ append a correction and mark the earlier interpretation superseded.
 
 ### F1 -- reproducible post-sprite baseline
 
-- Status: transcription complete; a fresh stationary post-sprite rerun with
-  matching batch targets is still owed before F1 is a canonical baseline.
+- Status: complete. Transcription done, and the owed fresh stationary rerun was
+  since captured as the canonical `d19103f` set (see the Outcome section); F1's
+  `b6c98ad` records are retained as the exploratory investigation baseline.
 - Date and investigator: 2026-07-23
 - Commit and worktree state: records stamped `b6c98ad`; HEAD moved during the
   run for the unrelated Cmd-A whole-stream selection commit. The commit does
@@ -355,10 +323,11 @@ append a correction and mark the earlier interpretation superseded.
   compatibility field (`REDRAW_COMPATIBILITY_FIELDS`) because results are
   normalized per completed draw, so this difference is worth recording but does
   not by itself invalidate the comparison. The `b6c98ad` non-reproducible stamp
-  (HEAD moved during the run) remains the standing reason to prefer a fresh
-  stationary rerun before treating F1 as canonical.
-- Next action: Phase 2 -- capture a second sprite-free text profile and attribute
-  the text-path regression (F2).
+  (HEAD moved during the run) was the standing reason to prefer a fresh
+  stationary rerun before treating F1 as canonical; that rerun is now the
+  `d19103f` canonical set, so F1's records stand as exploratory baseline only.
+- Next action: none outstanding. [Historical: led to Phase 2 (F2). The owed
+  canonical rerun is now the `d19103f` set in the Outcome section.]
 
 ### F2 -- text-path profiles
 
@@ -412,10 +381,10 @@ append a correction and mark the earlier interpretation superseded.
   Sparse inlined frames plus a parse-bound workload mean magnitude must come
   from a controlled unprofiled bypass on the redraw workloads, not from the
   sampler.
-- Next action: propose the smallest one-variable diagnostic that bypasses only
-  sprite classification for provably ineligible single-scalar cells, run it
-  against `content`/`style`/`mixed` churn unprofiled, and record recovered time
-  in F3 (pause for agreement before implementing).
+- Next action: resolved. [Historical: led to the F3 diagnostic guard, then D1.]
+  Proposed the smallest one-variable diagnostic that bypasses only sprite
+  classification for provably ineligible single-scalar cells, ran it against
+  `content`/`style`/`mixed` churn unprofiled, and recorded recovered time in F3.
 
 ### F3 -- classification isolation experiment
 
@@ -542,9 +511,9 @@ append a correction and mark the earlier interpretation superseded.
   pre-regression baseline (332k) is unattributed; it is small and plausibly the
   intended slightly-larger dot fill plus the single retained per-draw layout
   build. Not worth isolating unless a later target needs it.
-- Next action: Decision D2 -- select the smallest production fix that removes the
-  per-cell layout allocation while preserving square-dot geometry, then pause for
-  direction before implementing.
+- Next action: resolved via Decision D2 -- selected the lazy per-draw braille
+  layout (commit `d19103f`), which removes the per-cell layout allocation while
+  preserving square-dot geometry.
 
 ## Decision log
 
@@ -787,6 +756,10 @@ append a correction and mark the earlier interpretation superseded.
 
 ## Existing profile evidence
 
+[Superseded by F2 (two profiles captured and cross-checked) and by the F3/F4
+controlled isolation experiments. Retained for provenance; the "requires a second
+profile" note below is historical and no longer open.]
+
 One textual profile already exists:
 
 ```text
@@ -802,8 +775,8 @@ into `drawTextRuns`, so sparse named frames cannot quantify its total cost.
 
 This is evidence that sprite-free text executes sprite classification. It is
 not enough by itself to establish a stable bottleneck or attribute the 13.8%
-content-churn delta. Phase 2 requires a second profile and a controlled
-unprofiled isolation experiment.
+content-churn delta. Phase 2 required a second profile and a controlled
+unprofiled isolation experiment -- both since done (F2, F3), so this is resolved.
 
 ## Open questions and caveats
 
@@ -826,4 +799,47 @@ unprofiled isolation experiment.
 
 ## Outcome
 
-Investigation in progress.
+Closed. Both regressions introduced by the procedural terminal-sprite series are
+fixed, and the canonical stationary `d19103f` rerun confirms every workload at or
+below its trustworthy baseline. Canonical medians (ns per completed draw,
+`save=1`, unprofiled, M1 Pro, 80x24, release):
+
+| Workload                            | Baseline  | Canonical `d19103f` |  Delta |
+| ----------------------------------- | --------: | ------------------: | -----: |
+| `full-screen-content-churn`         |   324,141 |             305,240 | -5.8%  |
+| `full-screen-style-churn`           |   320,814 |             302,798 | -5.6%  |
+| `full-screen-mixed-churn`           |   331,802 |             307,196 | -7.4%  |
+| `full-screen-symbol-churn`          |   332,237 |             329,032 | -1.0%  |
+| `full-screen-sprite-coverage-churn` | 1,132,792 |           1,081,186 | -4.6%  |
+
+(Text baselines are the `0698376` records; symbol uses the reproducible `6d0306d`
+baseline; sprite-coverage uses the post-sprite `b6c98ad` record, since its
+`0698376` value predates procedural sprites and reflects the old fallback path.)
+
+- **Text-path regression (H1 -> D1).** Per-cell sprite classification walked an
+  eight-family chain for every cell including sprite-free text. Fixed by direct
+  single-scalar family routing (commit `a785d45`). Text workloads recovered past
+  their baselines.
+- **Symbol-path regression (H2 -> F4/D2).** Isolated by a commit ladder to a
+  single commit, `d357dc3`, whose `BraillePixelLayout` refactor allocated two
+  `[Int]` arrays per braille cell (~3400 allocations/draw on the 90%-braille
+  workload). Fixed by building the layout lazily once per draw (commit `d19103f`).
+  Symbol churn recovered ~34% back to its pre-regression cost.
+- **Rejected hypothesis (H3).** No text residual survived D1; the canonical rerun
+  confirms text workloads below baseline, so per-run accumulator setup is not a
+  demonstrated cost and was not optimized.
+- **Refuted mechanisms.** Box Drawing classification inserted before Braille
+  (noise on the ladder) and larger square-dot fill area (hoist recovered 88% with
+  identical geometry) were both eliminated as causes of the symbol regression.
+- **Accepted tradeoff / provenance caveats.** The `b6c98ad` exploratory records
+  carry a non-reproducible source stamp (HEAD moved mid-run); they are retained
+  as investigation evidence, and the canonical baseline going forward is the
+  stationary `d19103f` set. The intended square-dot braille geometry from
+  `d357dc3` is preserved unchanged; only its build frequency was corrected.
+- **Reusable methodology.** The loop/sample profiler cannot drive serialized
+  `benchmark-redraw` workloads (it times out waiting for benchmark geometry); it
+  targets streaming app workloads. Redraw regressions were attributed instead by
+  commit-ladder isolation plus paired unprofiled redraw runs -- now documented in
+  `agent-docs/terminal-performance.md`.
+- **Remaining uncertainty.** None material. The former ~6% F4 residual is closed
+  (symbol at 329,032 <= 332,237 baseline).
