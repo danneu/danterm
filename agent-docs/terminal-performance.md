@@ -34,15 +34,27 @@ its recorded executable SHA-256 and Mach-O UUID before it can supply a measured
 block. Comparing a baseline that resolves to the candidate's own tree is refused
 rather than run.
 
-The workload ladder:
+The workload ladder. Pick the narrowest workload that still contains the cost
+you are trying to move; a workload that does not contain it will answer
+`equivalent` no matter how good the change is.
 
-| Workload | Performance question |
-| --- | --- |
-| `terminal-feed` | Parsing, grid mutation, Unicode handling, damage policy |
-| `scrollback-stream` | PTY backpressure, actor hops, snapshots, scrolling, retention |
-| `content-churn` | Glyph lookup, shaping, text-run construction, content replacement |
-| `style-churn` | Attribute, color, and style-only replacement |
-| `incremental-mixed` | Localized content/style damage without full-window work |
+| Workload | Question it answers | What one block runs | Reach for it when |
+| --- | --- | --- | --- |
+| `terminal-feed` | Did parsing, grid mutation, and damage calculation get cheaper? | The four committed corpora framed into one stream, fed into a fresh 179x66 `Terminal`. No PTY, no window, no drawing. | `Terminal.feed` or other pure terminal-state work is hot. |
+| `scrollback-stream` | Did sustained output get cheaper end to end? | A fresh app and terminal session per block replays 25,000 numbered lines through a real PTY, timed to the final completed draw. | PTY chunking, actor hops, snapshot delivery, backpressure, scrolling, or retention is hot. |
+| `content-churn` | Did replacing screen *content* get cheaper? | 50 serialized full-screen 179x66 frames; text changes every frame, style is frozen. | Glyph lookup, shaping, or text-run construction is hot. |
+| `style-churn` | Did replacing *attributes* get cheaper? | 50 serialized full-screen frames; text is frozen, only truecolor fg/bg change. | Attribute or color handling is hot and no new glyphs are involved. |
+| `incremental-mixed` | Does small damage stay small? | 50 serialized updates touching 4 rows of an already-settled dense screen. | You suspect localized updates are doing full-window work. |
+
+Every draw block is serialized: one write, then wait for that exact completed
+draw before the next write. Nothing coalesces, so the per-draw number is a real
+draw rather than an amortized one.
+
+The three draw workloads deliberately freeze one axis each. A change that helps
+`content-churn` but not `style-churn` moved glyph work; one that helps both
+moved something under them. `incremental-mixed` is the only workload that can
+catch damage-scoping regressions, and it carries the most pairs (6 in `confirm`)
+because it is also the noisiest.
 
 Each mode lays out its complete position-balanced schedule at the frozen pair
 count before the first block runs, then applies the frozen median symmetric rule
@@ -113,17 +125,10 @@ PTY bytes, read chunk boundaries, update cadence, snapshot consumption, or
 drawing. Do not assume a core microbenchmark represents an app regression when
 the observed cost sits outside the core.
 
-Choose the narrowest paired workload that still contains the measured
-bottleneck:
-
-| Level | Measures | Appropriate when |
-|---|---|---|
-| `terminal-feed` | Parser, grid mutation, and damage calculation | `Terminal.feed` or other pure terminal-state work is hot. |
-| `scrollback-stream` | PTY chunking, actor hops, snapshot delivery, and backpressure | Scheduling, chunk boundaries, or snapshot production is hot. |
-| `content-churn`, `style-churn`, `incremental-mixed` | Render planning, CoreText work, and AppKit drawing | Main-thread planning or rendering is hot. |
-
-A change that should affect the core and the app can be confirmed at both
-boundaries with `benchmark-confirm`.
+Then pick the narrowest paired workload that still contains the measured
+bottleneck, using the workload ladder table above. A change that should affect
+the core and the app can be confirmed at both boundaries with
+`benchmark-confirm`.
 
 ## Investigate and report before optimizing
 
