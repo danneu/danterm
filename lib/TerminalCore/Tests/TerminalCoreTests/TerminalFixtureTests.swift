@@ -110,7 +110,7 @@ struct TerminalFixtureTests {
         #expect(manifest.pinnedCommit == "934bc2fbf21800ac3458a499df8820ca5fb45fd3")
         #expect(Set(manifest.recordedDeviations) == [
             "DanTerm clears pending wrap and open grapheme attachment on every recognized valid scroll/edit operation.",
-            "DanTerm pushes scrollback only for full-screen upward scrolls; bounded regions and line edits never retain vacated rows.",
+            "DanTerm retains rows scrolled off the top of a region anchored at row 0 (libvterm's premove rule) but never retains rows vacated by line edits.",
             "DanTerm retains default and indexed colors semantically instead of resolving libvterm palette RGB values.",
             "Pinned libvterm lacks SGR 58/59 and mishandles 38:2::r:g:b; DanTerm deliberately consumes both correctly.",
             "Raw ground-state C1 bytes and UTF-8 encodings beyond U+10FFFF are replaced by U+FFFD using maximal-subpart recovery.",

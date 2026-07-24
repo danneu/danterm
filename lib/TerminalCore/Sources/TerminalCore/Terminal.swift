@@ -4668,7 +4668,7 @@ public struct Terminal: Equatable, Sendable {
             moveAndFillRows(
                 in: region,
                 by: -1,
-                pushesToScrollback: scrollRegion == nil && inactivePrimaryScreen == nil,
+                pushesToScrollback: retainsRowsScrolledOffTop,
                 preservesTrailingWrap: preservingWrapClaim,
                 invalidatesInspection: false
             )
@@ -4682,6 +4682,17 @@ public struct Terminal: Equatable, Sendable {
 
     private var activeScrollRegion: Range<Int> {
         scrollRegion ?? 0..<rowCount
+    }
+
+    // xterm/kitty/Ghostty retain a row scrolled off the top whenever the region is
+    // anchored at row 0 and spans the full width, even with a bottom margin set
+    // (.ghostty-src/src/terminal/Terminal.zig:1466). Inline-viewport TUIs (codex's
+    // ratatui composer) depend on it: they pin a footer with `CSI 1;N r` and scroll
+    // their transcript out the top expecting it to land in scrollback. We implement
+    // no DECSLRM left/right margins, so full width is trivially true. Applies only
+    // to the two upward-scroll paths; mid-screen shuffles still discard.
+    private var retainsRowsScrolledOffTop: Bool {
+        activeScrollRegion.lowerBound == 0 && inactivePrimaryScreen == nil
     }
 
     private mutating func setScrollRegion(_ parameters: [UInt16]) {
@@ -4706,7 +4717,7 @@ public struct Terminal: Equatable, Sendable {
         moveAndFillRows(
             in: activeScrollRegion,
             by: -amount,
-            pushesToScrollback: scrollRegion == nil && inactivePrimaryScreen == nil
+            pushesToScrollback: retainsRowsScrolledOffTop
         )
     }
 

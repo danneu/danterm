@@ -15,7 +15,7 @@ struct TerminalScrollRegionTests {
         let fixtures: [(sequence: String, screen: String, scrollback: Int)] = [
             ("\u{1B}[2;3r", "A \nC \n  \nD ", 0),
             ("\u{1B}[2r", "A \nC \nD \n  ", 0),
-            ("\u{1B}[;3r", "B \nC \n  \nD ", 0),
+            ("\u{1B}[;3r", "B \nC \n  \nD ", 1),
             ("\u{1B}[r", "B \nC \nD \n  ", 1),
             ("\u{1B}[0;0r", "B \nC \nD \n  ", 1),
             ("\u{1B}[5;2r", "B \nC \nD \n  ", 1),
@@ -98,10 +98,11 @@ struct TerminalScrollRegionTests {
 
     @Test("SU and SD clamp counts, ignore cursor location, and apply strict history policy")
     func scrollUpDownSemantics() throws {
-        // Intent: prove scroll counts clamp to the region and history receives
-        //   only rows vacated by a full-screen upward scroll.
-        // Why it exists: bounded TUI repaint regions must not pollute scrollback,
-        //   while a large full-screen SU must retain source rows rather than blanks.
+        // Intent: prove scroll counts clamp to the region and that history receives
+        //   rows only from an upward scroll whose region starts at row 0.
+        // Why it exists: a region whose top margin sits below row 0 must not pollute
+        //   scrollback, while a large full-screen SU must retain source rows rather
+        //   than blanks.
         // Scenario: a screen is cleared with CSI 100 S, then a footer-bounded TUI
         //   scrolls the same number of rows in both directions with its cursor outside.
         var full = try labeledTerminal(columns: 2, rows: 3)
@@ -150,8 +151,11 @@ struct TerminalScrollRegionTests {
         //   destroyed or displaced across viewport and scrollback boundaries.
         // Why it exists: stale claims merge unrelated rows in fullHistoryText, and
         //   stale spacer heads violate the structural wide-cell contract.
-        // Scenario: bounded SU and SD cut logical lines above, below, and across
-        //   the retained-history seam used by a scrolled shell transcript.
+        // Scenario: bounded SU, SD, and DL cut logical lines above, below, and
+        //   across the retained-history seam of a scrolled shell transcript. The
+        //   history seam uses DL rather than SU because an upward scroll out of a
+        //   row-0-anchored region now retains its top row instead of destroying
+        //   it, so DL is the remaining way to orphan a scrollback wrap claim.
         var aboveRegion = try #require(Terminal(columns: 3, rows: 4))
         aboveRegion.feed(Array("ABCDEFG".utf8))
         #expect(aboveRegion.geometry.rows[0].isSoftWrapped)
@@ -170,7 +174,7 @@ struct TerminalScrollRegionTests {
         var historySeam = try #require(Terminal(columns: 3, rows: 3))
         historySeam.feed(Array("ABCDEFGHIJ".utf8))
         #expect(historySeam.scrollbackRow(at: 0)?.isSoftWrapped == true)
-        historySeam.feed(Array("\u{1B}[1;2r\u{1B}[S".utf8))
+        historySeam.feed(Array("\u{1B}[1;2r\u{1B}[M".utf8))
         #expect(historySeam.scrollbackRow(at: 0)?.isSoftWrapped == false)
         #expect(historySeam.fullHistoryText == "ABC\nGHI\n\nJ")
         expectValidGrid(historySeam)

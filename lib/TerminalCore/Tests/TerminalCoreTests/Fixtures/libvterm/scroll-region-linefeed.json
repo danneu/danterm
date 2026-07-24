@@ -7,9 +7,7 @@
     "upstreamCase": "Linefeed in DECSTBM; Linefeed outside DECSTBM",
     "license": "MIT",
     "licenseNotice": "LICENSE.libvterm.txt",
-    "recordedDeviations": [
-      "DanTerm does not push scrollback for a top-anchored bounded region."
-    ]
+    "recordedDeviations": []
   },
   "initial": { "columns": 4, "rows": 4 },
   "events": [
@@ -19,7 +17,7 @@
       "expect": {
         "viewportText": "B   \nC   \n    \nD   ",
         "cursor": { "row": 2, "column": 0, "pendingWrap": false },
-        "scrollbackCount": 0
+        "scrollbackCount": 1
       }
     },
     { "type": "feed", "text": "\u001b[4H\n" },
@@ -28,7 +26,7 @@
       "expect": {
         "viewportText": "B   \nC   \n    \nD   ",
         "cursor": { "row": 3, "column": 0, "pendingWrap": false },
-        "scrollbackCount": 0
+        "scrollbackCount": 1
       }
     }
   ]

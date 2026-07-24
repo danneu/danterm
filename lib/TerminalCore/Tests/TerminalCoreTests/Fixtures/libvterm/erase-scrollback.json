@@ -37,7 +37,7 @@
       "expect": {
         "viewportText": "c   \n    \nd   ",
         "cursor": { "row": 1, "column": 1, "pendingWrap": false },
-        "scrollbackCount": 0
+        "scrollbackCount": 1
       }
     }
   ]
