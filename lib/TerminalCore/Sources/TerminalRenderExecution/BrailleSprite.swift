@@ -53,15 +53,38 @@ enum BrailleSprite {
         metrics: TerminalRenderMetrics,
         to rects: inout [CGRect]
     ) {
+        let layout = BrailleSpriteGeometry.layout(
+            cellWidthPixels: metrics.cellWidthPixels,
+            cellHeightPixels: metrics.cellHeightPixels
+        )
+        appendRects(
+            pattern: pattern,
+            row: row,
+            column: column,
+            metrics: metrics,
+            layout: layout,
+            to: &rects
+        )
+    }
+
+    /// Emits braille dot rects against a caller-supplied layout. The draw loop
+    /// builds the layout once per draw (it depends only on `metrics`, which is
+    /// constant across a draw) and reuses it for every braille cell, so the hot
+    /// path pays no per-cell `BraillePixelLayout` allocation. The convenience
+    /// `appendRects(...)` overload above builds the layout itself for off-hot-path
+    /// callers.
+    static func appendRects(
+        pattern: UInt8,
+        row: Int,
+        column: Int,
+        metrics: TerminalRenderMetrics,
+        layout: BraillePixelLayout,
+        to rects: inout [CGRect]
+    ) {
         let scale = metrics.displayScale
         let cellWidth = metrics.cellWidthPixels
-        let cellHeight = metrics.cellHeightPixels
-        let layout = BrailleSpriteGeometry.layout(
-            cellWidthPixels: cellWidth,
-            cellHeightPixels: cellHeight
-        )
         let cellX = column * cellWidth
-        let cellY = row * cellHeight
+        let cellY = row * metrics.cellHeightPixels
 
         for bit in 0..<8 where pattern & (1 << bit) != 0 {
             let dot = dot(forBit: bit)

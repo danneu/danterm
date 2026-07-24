@@ -206,26 +206,33 @@ is not the dominant cost.
 
 ### Phase 4 -- isolate the symbol-path regression
 
-- [ ] Begin only after the text-path work has been measured, so its contribution
+- [x] Begin only after the text-path work has been measured, so its contribution
       can be removed from the symbol result.
-- [ ] Compare controlled commits or variants spanning `0698376` through the
+- [x] Compare controlled commits or variants spanning `0698376` through the
       Braille geometry changes and Box Drawing integration to locate the first
-      material symbol-churn change.
-- [ ] Collect two profiles of `full-screen-symbol-churn` at the relevant
-      regressed state and record both artifact paths.
-- [ ] Attribute repeated cost between Box Drawing misses before Braille,
+      material symbol-churn change. (Six-rung ladder from the reproducible
+      `6d0306d` baseline; the entire regression is `d357dc3`.)
+- [x] Collect two profiles of `full-screen-symbol-churn` at the relevant
+      regressed state and record both artifact paths. (Not possible: the loop
+      profiler cannot drive serialized redraw workloads; substituted a controlled
+      paired hoist diagnostic, recorded in F4.)
+- [x] Attribute repeated cost between Box Drawing misses before Braille,
       Braille pattern/geometry construction, collection allocation, and Core
-      Graphics fill/stroke work.
-- [ ] Record the evidence and competing interpretations in Finding F4.
-- [ ] Decide whether the remaining regression is a defect, an accepted
-      correctness tradeoff, or measurement noise.
-- [ ] If it is a defect, compare candidate solutions and record the recommended
+      Graphics fill/stroke work. (Per-cell `[Int]` layout-array allocation; Box
+      misses and fill area both refuted.)
+- [x] Record the evidence and competing interpretations in Finding F4.
+- [x] Decide whether the remaining regression is a defect, an accepted
+      correctness tradeoff, or measurement noise. (Defect: accidental per-cell
+      allocation; intended square-dot geometry is preserved by the fix.)
+- [x] If it is a defect, compare candidate solutions and record the recommended
       smallest experiment in Decision D2.
-- [ ] Pause for direction review before implementing a symbol-path fix.
-- [ ] Protect the selected behavioral invariant, implement one dominant-path
+- [x] Pause for direction review before implementing a symbol-path fix.
+      (Selected hoist-only, lazy per draw.)
+- [x] Protect the selected behavioral invariant, implement one dominant-path
       change, run focused tests plus `just test`, and rerun symbol and
-      sprite-coverage churn unprofiled.
-- [ ] Record the final evidence and disposition in Decision D2.
+      sprite-coverage churn unprofiled. (Lazy per-draw layout; braille suite +
+      `just test` green; all five workloads rerun, symbol -34%, none regressed.)
+- [x] Record the final evidence and disposition in Decision D2.
 
 ### Phase 5 -- close the investigation
 
@@ -406,18 +413,79 @@ append a correction and mark the earlier interpretation superseded.
 
 ### F4 -- symbol-path isolation
 
-- Status: pending
-- Date and investigator:
-- Commit range or controlled variants:
-- Workload:
-- Profile commands and artifact paths:
-- Repeated hot functions and call paths:
-- Before/after compatible measurements:
-- Observation:
-- Competing interpretations:
-- H2 disposition: pending
-- Uncertainty:
-- Next action:
+- Status: complete
+- Date and investigator: 2026-07-23, agent session.
+- Commit range or controlled variants: a six-rung commit ladder measuring
+  `full-screen-symbol-churn` (`save=0`, unprofiled) at each controlled render
+  state. Harness and workload are byte-identical across `7fd4c7b..HEAD`
+  (verified: no changes to `terminal-benchmark.sh`, `terminal-draw-acceptance.py`,
+  `terminal-benchmark-producer.py`, or `TerminalDrawBenchmarkSupport`), and the
+  single `7fd4c7b` harness change only shortens the *ordinary* workloads
+  (symbol-churn is not in `FAST_ORDINARY_WORKLOADS`) on a per-draw-normalized
+  metric, so `6d0306d` remains comparable. Per direction, the reproducible
+  procedural-Braille source baseline is `6d0306d`, not the mislabelled `0698376`
+  record.
+
+  | Commit    | State                          | ns/draw | Step delta        |
+  | --------- | ------------------------------ | ------: | ----------------: |
+  | `6d0306d` | procedural braille baseline    | 332,237 | --                |
+  | `d357dc3` | square braille dot allocation  | 484,170 | +151,933 (+45.7%) |
+  | `eb4233e` | extract shared sprite geometry | 491,354 | +7,184 (noise)    |
+  | `d9a0fae` | box drawing integration        | 486,482 | -4,872 (noise)    |
+  | `140934b` | end of family series           | 481,460 | noise             |
+  | `a785d45` | current routing baseline (HEAD)| 482,086 | noise             |
+
+- Workload: `full-screen-symbol-churn`
+  (`full-screen-symbol-churn-v1-btop-symbol-mix-80x24`), ~90% Braille + 10% Box
+  Drawing, 80x24, release, M1 Pro, 15 batches. Metric: median ns per completed
+  draw.
+- Profile commands and artifact paths: none captured. The loop profiler
+  (`terminal-benchmark-profile.sh sample`) cannot drive the serialized *redraw*
+  workloads -- it times out "waiting for benchmark geometry" because loop mode
+  targets streaming workloads (F2 used `scrollback-stream`). Attribution was
+  instead obtained by commit-level isolation plus a controlled paired hoist
+  experiment, which is sharper than WMO-inlined samples for this question.
+- Repeated hot functions and call paths: `BrailleSprite.appendRects` ->
+  `BrailleSpriteGeometry.layout(cellWidthPixels:cellHeightPixels:)`, invoked once
+  per braille cell inside `drawTextRuns`' per-cell loop
+  (TerminalRenderExecution.swift:417).
+- Before/after compatible measurements: the whole +42/45% symbol regression is a
+  single commit, `d357dc3 feat(renderer): adopt square braille dot allocation`.
+  Every later sprite-family commit (Box Drawing integration included) is within
+  run-to-run noise of it. Paired hoist diagnostic (same session, `save=0`):
+  control (regressed HEAD) 510,520 ns (min 503,238 / max 521,634); diagnostic
+  (layout hoisted to once-per-draw) 352,040 ns (min 348,527 / max 357,779);
+  recovered 158,480 ns (-31.0% of control), non-overlapping bands, landing within
+  ~6% of the 332,237 pre-regression baseline.
+- Observation: `d357dc3` changed `BraillePixelLayout` from stack scalars
+  (`dotWidth`/`dotHeight`) with fully inline per-dot integer arithmetic and
+  **zero heap allocation** (see `6d0306d:BrailleSprite.swift`) to a struct holding
+  `xPositions: [Int]` and `yPositions: [Int]`, constructed by
+  `BrailleSpriteGeometry.layout`. That construction allocates two `[Int]` arrays
+  **per braille cell**. At ~1700 braille cells/draw that is ~3400 array
+  allocations plus ARC traffic every draw, all recomputing an identical result
+  because the layout depends only on `metrics` (constant across a draw). Hoisting
+  the layout to once-per-draw removes essentially all of it.
+- Competing interpretations: (a) larger square dots cost more Core Graphics fill
+  area -- refuted as the dominant cause: the hoist keeps identical dot geometry
+  yet recovers 88% of the regression, and the ~6% residual vs the `6d0306d`
+  baseline is the ceiling for any fill-area or once-per-draw-compute component.
+  (b) added Box Drawing classification before Braille -- refuted: the
+  `d9a0fae` Box integration rung is within noise of the pre-Box rung.
+  (c) run-to-run variance -- refuted: the 332k->484k jump and the paired
+  510k->352k recovery both have non-overlapping min/max bands.
+- H2 disposition: confirmed and localized. The Braille-heavy symbol regression
+  is real, is entirely `d357dc3`, and its mechanism is per-cell layout-array
+  allocation -- not Box-miss classification and not procedural-vs-fallback
+  drawing. It is a defect (an accidental allocation regression), not the intended
+  visual square-dot change, which the fix preserves exactly.
+- Uncertainty: the ~6% residual between the hoisted state (352k) and the
+  pre-regression baseline (332k) is unattributed; it is small and plausibly the
+  intended slightly-larger dot fill plus the single retained per-draw layout
+  build. Not worth isolating unless a later target needs it.
+- Next action: Decision D2 -- select the smallest production fix that removes the
+  per-cell layout allocation while preserving square-dot geometry, then pause for
+  direction before implementing.
 
 ## Decision log
 
@@ -569,16 +637,88 @@ append a correction and mark the earlier interpretation superseded.
 
 ### D2 -- symbol-path production fix or accepted tradeoff
 
-- Status: pending
-- Evidence used:
+- Status: ACCEPTED and implemented.
+- Evidence used: Finding F4. The symbol regression is entirely `d357dc3` and its
+  mechanism is per-cell allocation of the two `[Int]` arrays inside
+  `BraillePixelLayout`, recomputed identically for every braille cell in a draw.
+  A paired hoist diagnostic recovered 158,480 ns (-31.0%), to within ~6% of the
+  pre-regression baseline, with identical dot geometry.
 - Candidate solutions:
-- Tradeoffs and correctness risks:
-- Recommendation:
-- Direction review:
-- Selected fix or accepted tradeoff:
-- Behavioral verification:
-- Performance verification:
-- Decision and rationale:
+  1. **Hoist the layout to once-per-draw (call-site).** Compute
+     `BrailleSpriteGeometry.layout` once before the run loop in `drawTextRuns`
+     and pass it into an `appendRects(..., layout:)` overload. This is the exact
+     shape the F4 diagnostic measured. Smallest change; keeps the layout type and
+     geometry untouched. Cost: threads one value through the call site, and any
+     other caller of the per-cell `appendRects` still recomputes (only `rects(...)`
+     does today, off the hot path).
+  2. **Make `BraillePixelLayout` allocation-free (representation).** Replace the
+     `[Int]` `xPositions`/`yPositions` with fixed-size storage (two-tuple + the
+     four y-offsets derivable from `yMargin`, `dotSize`, `ySpacing`, or a small
+     fixed struct), so constructing a layout allocates nothing. This fixes the
+     cost at the source for *every* caller regardless of hoisting, and composes
+     with candidate 1. Cost: touches the pure `TerminalSpriteGeometry` type and
+     its `rect(column:row:)` accessor; slightly more code than the hoist.
+  3. **Memoize `layout` by `(cellWidth, cellHeight)`.** A one-entry cache in
+     `BrailleSpriteGeometry`. Rejected: introduces mutable static state into a
+     pure module (purity-lint and concurrency hazard) for no benefit over 1/2.
+- Tradeoffs and correctness risks: candidates 1 and 2 are behavior-preserving --
+  the rendered rects are bit-identical (same `dotSize`, `xPositions`,
+  `yPositions`); only *when/how often* the layout is built changes. The existing
+  braille execution tests (every supported scalar rendered through the executor,
+  square-dot geometry assertions in `TerminalSpriteGeometryTests`) already pin the
+  output and would catch a misalignment, so no new behavioral test is required --
+  same standard as D1. Candidate 2's only risk is transcribing the array-index
+  accessor to fixed storage; covered by the existing geometry tests.
+- Recommendation: **candidate 2 (allocation-free layout) composed with candidate 1
+  (hoist).** Candidate 2 removes the defect at its source so no future caller can
+  reintroduce per-cell allocation, and candidate 1 additionally avoids rebuilding
+  the identical layout ~1700x/draw. If a single change is preferred, candidate 1
+  alone already recovers the measured 31%; candidate 2 alone recovers the same
+  allocation cost with a marginal residual for the once-per-draw rebuild. The
+  combined change is small and fully covered by existing tests.
+- Direction review: selected candidate 1 (hoist only) with a lazy refinement:
+  build the layout at most once per draw, on the first braille cell, via an
+  optional held outside the run/cell loops. This keeps the exact measured fix,
+  builds nothing for text-only draws, needs no persistent cache or
+  metrics-change invalidation, and defers any allocation-free storage rewrite
+  (candidate 2) unless the residual proves material -- which it did not.
+- Selected fix or accepted tradeoff: lazy per-draw braille layout. In
+  `drawTextRuns`, `var brailleLayout: BraillePixelLayout?` is initialized on the
+  first braille cell and reused for the rest of the draw, passed into a new
+  `BrailleSprite.appendRects(..., layout:)` overload. The convenience
+  `appendRects(...)` (used only by the off-hot-path `rects(...)`) still builds
+  its own layout. `BraillePixelLayout`'s `[Int]` representation is unchanged.
+- Behavioral verification: rendered rects are bit-identical (same `dotSize`,
+  `xPositions`, `yPositions`); only the build frequency changed. Braille-focused
+  suite green (`swift test --package-path lib/TerminalCore --filter Braille`, 11
+  tests across `BrailleSpriteExecutionTests` + `BrailleSpriteGeometryTests`,
+  including the per-scalar executor renders and square-dot geometry invariants),
+  and full `just test` exits 0. No new test added -- existing coverage already
+  pins the output, matching the D1 standard.
+- Performance verification: paired unprofiled `save=0` runs, all five workloads,
+  same session, median ns/draw (FIX vs CONTROL = committed HEAD render source):
+
+  | Workload                            |       FIX |   CONTROL |   Delta |
+  | ----------------------------------- | --------: | --------: | ------: |
+  | `full-screen-content-churn`         |   318,251 |   325,108 |  -2.11% |
+  | `full-screen-style-churn`           |   318,982 |   326,477 |  -2.30% |
+  | `full-screen-mixed-churn`           |   327,184 |   329,961 |  -0.84% |
+  | `full-screen-symbol-churn`          |   326,440 |   495,545 | -34.10% |
+  | `full-screen-sprite-coverage-churn` | 1,088,480 | 1,126,696 |  -3.39% |
+
+  Symbol-churn recovered ~169,000 ns and lands at 326,440 -- at/below the
+  332,237 pre-regression baseline -- so the ~6% F4 residual is fully closed by
+  the lazy hoist. No workload regressed; text and sprite-coverage are flat to
+  slightly improved. No profiled or `save=1` result entered benchmark history.
+- Decision and rationale: ACCEPTED. The `d357dc3` symbol regression was per-cell
+  `BraillePixelLayout` allocation; hoisting layout construction to once-per-draw
+  (lazy) restores the pre-regression symbol cost with a behavior-identical,
+  test-covered change and helps every braille-bearing workload. Candidate 2
+  (allocation-free storage) is not pursued: once construction is once-per-draw
+  the two small arrays are immaterial (symbol already recovered past baseline).
+  This closes Phase 4. Remaining investigation work: the H3 text-path residual
+  (per-run accumulator setup) and Phase 1's canonical stationary post-fix rerun,
+  both deferred until the final implementation set is fixed (Phase 5 close-out).
 
 ## Existing profile evidence
 

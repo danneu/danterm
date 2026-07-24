@@ -334,6 +334,11 @@ private extension CGContext {
         let italicFont = metrics.font(bold: false, italic: true)
         let boldItalicFont = metrics.font(bold: true, italic: true)
         var colors: [UInt32: CGColor] = [:]
+        // Built lazily on the first braille cell and reused for the rest of the
+        // draw: the braille dot layout depends only on `metrics` (constant across
+        // a draw), so this pays at most one `BraillePixelLayout` construction per
+        // draw that contains braille, and none for text-only draws.
+        var brailleLayout: BraillePixelLayout?
 
         for run in runs {
             let font = switch (run.bold, run.italic) {
@@ -415,11 +420,17 @@ private extension CGContext {
                         }
                     case 0x2800...0x28FF:
                         if let pattern = BrailleSprite.pattern(for: cell.scalars) {
+                            let layout = brailleLayout ?? BrailleSpriteGeometry.layout(
+                                cellWidthPixels: metrics.cellWidthPixels,
+                                cellHeightPixels: metrics.cellHeightPixels
+                            )
+                            brailleLayout = layout
                             BrailleSprite.appendRects(
                                 pattern: pattern,
                                 row: run.row,
                                 column: column,
                                 metrics: metrics,
+                                layout: layout,
                                 to: &spriteRects
                             )
                             classifiedAsSprite = true
