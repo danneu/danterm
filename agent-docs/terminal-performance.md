@@ -20,6 +20,15 @@ session, which is what cancels the machine drift that a stored record cannot.
 all five. Both require an explicit baseline revision -- anything `git rev-parse`
 accepts. Neither infers it from `HEAD`, merge-base, history, or the candidate.
 
+The common case is an uncommitted experiment measured against the commit it
+started from:
+
+    just benchmark-quick baseline=HEAD workload=content-churn
+
+Nothing is stashed, committed, or checked out to do this. If you have committed
+since starting the experiment, `HEAD` is no longer where you began -- note the
+pre-change revision before you start and name it explicitly.
+
 The candidate is an immutable snapshot of the complete current working tree:
 tracked changes plus non-ignored untracked files, captured through a scratch
 index that leaves your own index untouched. Before either arm builds, the
@@ -64,6 +73,23 @@ invalid block -- lost geometry, an occluded window, battery power, thermal
 pressure, low-power mode, missing damage or draw acknowledgment -- invalidates
 the whole invocation; the evidence is kept, but a new decision needs a fresh
 complete run.
+
+### Read the result
+
+    content-churn: faster (-3.20% symmetric median of 2 pairs)
+
+| Verdict | Meaning | Do this |
+| --- | --- | --- |
+| `faster` / `slower` | The estimate cleared that workload's frozen directional threshold. | Believe it. Record the decision-bearing values in the commit or plan. |
+| `equivalent` | The estimate sits inside the equivalence band. | The change did nothing measurable *at this boundary*. Before concluding it did nothing at all, confirm the workload actually contains the cost you moved. |
+| `inconclusive` | Neither cleared the threshold nor fell inside the band. | Escalate `quick` to `confirm`, which measures more pairs at a tighter threshold. Do not rerun `quick` hoping for a different roll -- the pair count is frozen precisely so results cannot be shopped for. |
+
+An invalid invocation is not a verdict and never becomes one by retrying. It
+means a stated measurement condition failed, so fix the condition -- put the
+machine on AC power, stop covering or unfocusing the benchmark windows, let it
+cool -- and run again from scratch. While a comparison runs, leave the machine
+otherwise idle: the windows must stay visible and unoccluded for every measured
+block, and competing load biases both arms unequally.
 
 Every invocation writes its complete evidence to
 `.build/terminal-benchmark-comparisons/<mode>/<run>/run.json`: both source and
