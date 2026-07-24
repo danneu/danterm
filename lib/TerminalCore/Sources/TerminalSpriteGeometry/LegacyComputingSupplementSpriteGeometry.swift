@@ -167,18 +167,22 @@ public enum LegacyComputingSupplementSpriteGeometry {
         }
     }
 
+    // Compile-time-constant quarter-grid spans for the 32 sixteenth blocks. Hoisted to
+    // `static let` so each per-cell draw reuses one shared instance rather than
+    // rebuilding the array literal.
+    private static let sixteenthRanges: [(Int, Int, Int, Int)] = [
+        (0,1,0,1),(1,2,0,1),(2,3,0,1),(3,4,0,1),
+        (0,1,1,2),(1,2,1,2),(2,3,1,2),(3,4,1,2),
+        (0,1,2,3),(1,2,2,3),(2,3,2,3),(3,4,2,3),
+        (0,1,3,4),(1,2,3,4),(2,3,3,4),(3,4,3,4),
+        (2,4,3,4),(1,4,3,4),(0,3,3,4),(0,2,3,4),
+        (0,1,2,4),(0,1,1,4),(0,1,0,3),(0,1,0,2),
+        (0,2,0,1),(0,3,0,1),(1,4,0,1),(2,4,0,1),
+        (3,4,0,2),(3,4,0,3),(3,4,1,4),(3,4,2,4),
+    ]
+
     private static func sixteenth(index: Int, width: Int, height: Int) -> [SpritePixelRect] {
-        let ranges: [(Int, Int, Int, Int)] = [
-            (0,1,0,1),(1,2,0,1),(2,3,0,1),(3,4,0,1),
-            (0,1,1,2),(1,2,1,2),(2,3,1,2),(3,4,1,2),
-            (0,1,2,3),(1,2,2,3),(2,3,2,3),(3,4,2,3),
-            (0,1,3,4),(1,2,3,4),(2,3,3,4),(3,4,3,4),
-            (2,4,3,4),(1,4,3,4),(0,3,3,4),(0,2,3,4),
-            (0,1,2,4),(0,1,1,4),(0,1,0,3),(0,1,0,2),
-            (0,2,0,1),(0,3,0,1),(1,4,0,1),(2,4,0,1),
-            (3,4,0,2),(3,4,0,3),(3,4,1,4),(3,4,2,4),
-        ]
-        let range = ranges[index]
+        let range = sixteenthRanges[index]
         let x0 = range.0 * width / 4, x1 = range.1 * width / 4
         let y0 = range.2 * height / 4, y1 = range.3 * height / 4
         return [SpritePixelRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)]

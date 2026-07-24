@@ -161,4 +161,4 @@ obligations above.
 ## Commit progress
 - [x] 1. GeometricShapePixelTriangle: fixed scalar vertices, not a collection
 - [x] 2. BranchNodePattern.directions: a direction bitmask, not Set<BranchDirection>
-- [ ] 3. Hoist compile-time-constant Legacy tables to static let
+- [x] 3. Hoist compile-time-constant Legacy tables to static let

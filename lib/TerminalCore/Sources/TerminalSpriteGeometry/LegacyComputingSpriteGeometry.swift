@@ -29,6 +29,36 @@ public enum LegacyComputingTopology: Equatable, Hashable, Sendable {
     case cellDiagonals(segments: String)
     case legacyCircle(shape: String)
 
+    // Compile-time-constant decode tables. Hoisted to `static let` so classifying a
+    // scalar reuses one shared instance instead of rebuilding an array literal per call.
+    private static let blockPolicies = [
+        "left-eighth+lower-eighth", "left-eighth+upper-eighth",
+        "right-eighth+upper-eighth", "right-eighth+lower-eighth",
+        "upper-eighth+lower-eighth", "horizontal-eighths-1-3-5-8",
+        "upper-quarter", "upper-three-eighths", "upper-five-eighths",
+        "upper-three-quarters", "upper-seven-eighths", "right-quarter",
+        "right-three-eighths", "right-five-eighths", "right-three-quarters",
+        "right-seven-eighths", "medium-left-half", "medium-right-half",
+        "medium-upper-half", "medium-lower-half", "medium-full",
+        "medium-full+solid-upper", "medium-full+solid-lower", "empty",
+        "medium-full+solid-right", "checker-even", "checker-odd",
+        "horizontal-bands-second-fourth",
+    ]
+    private static let cornerDiagonalMasks = [1, 2, 4, 8, 5, 10, 12, 3, 9, 6, 14, 13, 11, 7, 15]
+    private static let cellDiagonalSegments = [
+        "MR-LL", "UR-ML", "UL-MR", "ML-LR",
+        "UL-LC", "UC-LR", "UR-LC", "UC-LL",
+        "UL-MC+MC-UR", "UR-MC+MC-LR", "LL-MC+MC-LR", "UL-MC+MC-LL",
+        "UL-LC+LC-UR", "UR-ML+ML-LR", "LL-UC+UC-LR", "UL-MR+MR-LL",
+    ]
+    private static let legacyCircleShapes = [
+        "outline-top", "outline-right", "outline-bottom", "outline-left",
+        "upper-centered-half-block", "lower-centered-half-block",
+        "middle-left-half-block", "middle-right-half-block",
+        "filled-top", "filled-right", "filled-bottom", "filled-left",
+        "filled-top-right", "filled-bottom-left", "filled-bottom-right", "filled-top-left",
+    ]
+
     static func decode(_ value: UInt32) -> Self {
         switch value {
         case 0x1FB00...0x1FB3B:
@@ -43,20 +73,7 @@ public enum LegacyComputingTopology: Equatable, Hashable, Sendable {
         case 0x1FB76...0x1FB7B:
             return .horizontalEighth(index: Int(value - 0x1FB76) + 1)
         case 0x1FB7C...0x1FB97:
-            let policies = [
-                "left-eighth+lower-eighth", "left-eighth+upper-eighth",
-                "right-eighth+upper-eighth", "right-eighth+lower-eighth",
-                "upper-eighth+lower-eighth", "horizontal-eighths-1-3-5-8",
-                "upper-quarter", "upper-three-eighths", "upper-five-eighths",
-                "upper-three-quarters", "upper-seven-eighths", "right-quarter",
-                "right-three-eighths", "right-five-eighths", "right-three-quarters",
-                "right-seven-eighths", "medium-left-half", "medium-right-half",
-                "medium-upper-half", "medium-lower-half", "medium-full",
-                "medium-full+solid-upper", "medium-full+solid-lower", "empty",
-                "medium-full+solid-right", "checker-even", "checker-odd",
-                "horizontal-bands-second-fourth",
-            ]
-            return .legacyBlock(policy: policies[Int(value - 0x1FB7C)])
+            return .legacyBlock(policy: blockPolicies[Int(value - 0x1FB7C)])
         case 0x1FB98...0x1FB99:
             return .diagonalFill(ascending: value == 0x1FB98)
         case 0x1FB9A...0x1FB9B:
@@ -64,8 +81,7 @@ public enum LegacyComputingTopology: Equatable, Hashable, Sendable {
         case 0x1FB9C...0x1FB9F:
             return .shadedCorner(index: Int(value - 0x1FB9C))
         case 0x1FBA0...0x1FBAE:
-            let masks = [1, 2, 4, 8, 5, 10, 12, 3, 9, 6, 14, 13, 11, 7, 15]
-            return .cornerDiagonals(mask: masks[Int(value - 0x1FBA0)])
+            return .cornerDiagonals(mask: cornerDiagonalMasks[Int(value - 0x1FBA0)])
         case 0x1FBAF:
             return .mixedCross
         case 0x1FBBD...0x1FBBF:
@@ -73,22 +89,9 @@ public enum LegacyComputingTopology: Equatable, Hashable, Sendable {
         case 0x1FBCE...0x1FBCF:
             return .fractionalLeft(thirds: value == 0x1FBCE ? 2 : 1)
         case 0x1FBD0...0x1FBDF:
-            let segments = [
-                "MR-LL", "UR-ML", "UL-MR", "ML-LR",
-                "UL-LC", "UC-LR", "UR-LC", "UC-LL",
-                "UL-MC+MC-UR", "UR-MC+MC-LR", "LL-MC+MC-LR", "UL-MC+MC-LL",
-                "UL-LC+LC-UR", "UR-ML+ML-LR", "LL-UC+UC-LR", "UL-MR+MR-LL",
-            ]
-            return .cellDiagonals(segments: segments[Int(value - 0x1FBD0)])
+            return .cellDiagonals(segments: cellDiagonalSegments[Int(value - 0x1FBD0)])
         default:
-            let shapes = [
-                "outline-top", "outline-right", "outline-bottom", "outline-left",
-                "upper-centered-half-block", "lower-centered-half-block",
-                "middle-left-half-block", "middle-right-half-block",
-                "filled-top", "filled-right", "filled-bottom", "filled-left",
-                "filled-top-right", "filled-bottom-left", "filled-bottom-right", "filled-top-left",
-            ]
-            return .legacyCircle(shape: shapes[Int(value - 0x1FBE0)])
+            return .legacyCircle(shape: legacyCircleShapes[Int(value - 0x1FBE0)])
         }
     }
 }
@@ -119,6 +122,13 @@ public enum LegacyComputingSpriteGeometry {
         "########.#..", "#####.##.##.", ".##..#......", "###..#......",
         ".##..#..#...", "###.##..#...", ".##.##..#..#", "######..#...",
     ]
+
+    // Compile-time-constant run tables. Hoisted to `static let` so each per-cell draw
+    // reuses one shared instance instead of rebuilding an array literal.
+    private static let boxEdgePairs = [(0, 3), (0, 1), (2, 1), (2, 3), (1, 3)]
+    private static let horizontalEighthBands = [0, 2, 4, 7]
+    private static let partialEighthCounts = [2, 3, 5, 6, 7]
+    private static let cornerDiagonalMasks = [1, 2, 4, 8, 5, 10, 12, 3, 9, 6, 14, 13, 11, 7, 15]
 
     public static func runs(
         pattern: LegacyComputingPattern,
@@ -263,20 +273,20 @@ public enum LegacyComputingSpriteGeometry {
             let n = Int(value - 0x1FB76) + 1
             fill(0, width, n * height / 8, (n + 1) * height / 8)
         case 0x1FB7C...0x1FB80:
-            let edgePairs = [(0, 3), (0, 1), (2, 1), (2, 3), (1, 3)]
-            for edge in [edgePairs[Int(value - 0x1FB7C)].0, edgePairs[Int(value - 0x1FB7C)].1] {
+            let edgePair = Self.boxEdgePairs[Int(value - 0x1FB7C)]
+            for edge in [edgePair.0, edgePair.1] {
                 if edge == 0 { fill(0, max(1, width / 8), 0, height) }
                 if edge == 1 { fill(0, width, 0, max(1, height / 8)) }
                 if edge == 2 { fill(width - max(1, width / 8), width, 0, height) }
                 if edge == 3 { fill(0, width, height - max(1, height / 8), height) }
             }
         case 0x1FB81:
-            for n in [0, 2, 4, 7] { fill(0, width, n * height / 8, (n + 1) * height / 8) }
+            for n in Self.horizontalEighthBands { fill(0, width, n * height / 8, (n + 1) * height / 8) }
         case 0x1FB82...0x1FB86:
-            let eighths = [2, 3, 5, 6, 7][Int(value - 0x1FB82)]
+            let eighths = Self.partialEighthCounts[Int(value - 0x1FB82)]
             fill(0, width, 0, eighths * height / 8)
         case 0x1FB87...0x1FB8B:
-            let eighths = [2, 3, 5, 6, 7][Int(value - 0x1FB87)]
+            let eighths = Self.partialEighthCounts[Int(value - 0x1FB87)]
             fill(width - eighths * width / 8, width, 0, height)
         case 0x1FB8C...0x1FB8F:
             let alpha: UInt8 = 128
@@ -323,8 +333,7 @@ public enum LegacyComputingSpriteGeometry {
             let points = cornerTriangles[Int(value - 0x1FB9C)]
             triangle(points[0], points[1], points[2], alpha: 128)
         case 0x1FBA0...0x1FBAE:
-            let masks = [1, 2, 4, 8, 5, 10, 12, 3, 9, 6, 14, 13, 11, 7, 15]
-            let mask = masks[Int(value - 0x1FBA0)]
+            let mask = Self.cornerDiagonalMasks[Int(value - 0x1FBA0)]
             let cx = Double((width + 1) / 2), cy = Double((height + 1) / 2)
             if mask & 1 != 0 { line(cx, 0, 0, cy) }
             if mask & 2 != 0 { line(cx, 0, Double(width), cy) }
