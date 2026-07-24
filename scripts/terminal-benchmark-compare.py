@@ -1,0 +1,427 @@
+#!/usr/bin/env python3
+"""Run one paired baseline-vs-candidate benchmark comparison and decide it once.
+
+This is the whole of `benchmark-quick` and `benchmark-confirm` above the source
+layer: it selects the workloads a mode measures, lays out a position-balanced
+ABBA/BAAB schedule at the frozen fixed pair count, binds the two immutable arm
+roots to physical slots, collects blocks through the tested workload collectors,
+and applies the frozen median symmetric rule exactly once. It owns the two
+properties that keep a directional claim honest -- the schedule's size is fixed
+before any measurement exists (so there is nothing to peek at or extend), and a
+single invalid block voids the entire invocation rather than the block. Source
+snapshotting and build caching belong to `terminal_benchmark_snapshot`; the
+workload stimuli, machine-state validation, and persistent app lifecycles belong
+to the collectors this module calls. Nothing here writes durable history: each
+invocation's complete evidence lands in its own artifact directory.
+"""
+import argparse
+import importlib.util
+import json
+import pathlib
+import sys
+import time
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+def _load(name, relative):
+    spec = importlib.util.spec_from_file_location(name, ROOT / relative)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+SNAPSHOT = _load(
+    "terminal_benchmark_snapshot", "scripts/terminal_benchmark_snapshot.py"
+)
+VALIDATION = _load(
+    "terminal_benchmark_validation", "scripts/terminal-benchmark-validation.py"
+)
+CALIBRATION = _load(
+    "terminal_benchmark_calibration", "scripts/terminal-benchmark-calibration.py"
+)
+
+MODES = ("quick", "confirm")
+# The normalized per-block quantity each collector reports. Pairing reads only
+# these, so a workload can never be paired on a cumulative total that means
+# something different from its calibrated metric.
+BLOCK_METRICS = {
+    "terminal-feed": "feedDurationNanoseconds",
+    "scrollback-stream": "finalDrawNanoseconds",
+    "content-churn": "drawNanosecondsPerDraw",
+    "style-churn": "drawNanosecondsPerDraw",
+    "incremental-mixed": "drawNanosecondsPerDraw",
+}
+# Alternated across quartets so neither source sits first in every group of four.
+QUARTET_PATTERNS = ("ABBA", "BAAB")
+
+
+def decision_rule(mode):
+    """Expose the frozen rule for one mode, which is calibration output and not a tunable."""
+    if mode not in VALIDATION.DECISION_RULES:
+        raise ValueError(f"unknown comparison mode: {mode}")
+    return VALIDATION.DECISION_RULES[mode]
+
+
+def resolve_workloads(mode, workload=None):
+    """Fix which workloads an invocation measures before any of them run."""
+    decision_rule(mode)
+    if mode == "confirm":
+        if workload is not None:
+            raise ValueError(
+                "confirm always runs the complete five-workload ladder; "
+                "use quick to select a single workload"
+            )
+        return VALIDATION.WORKLOADS
+    if workload is None:
+        raise ValueError(
+            "quick requires workload=<name>; it measures exactly one workload"
+        )
+    if workload not in VALIDATION.WORKLOADS:
+        raise ValueError(
+            f"unknown workload {workload}; expected one of "
+            f"{', '.join(VALIDATION.WORKLOADS)}"
+        )
+    return (workload,)
+
+
+def physical_candidate_arm(candidate_tree):
+    """Pick the candidate's physical slot reproducibly from the candidate's own identity.
+
+    Both arms launch once per invocation, so the slot cannot alternate within a
+    run. Deriving it from the tree keeps the assignment inspectable and
+    reproducible while still varying across candidates, instead of pinning the
+    candidate to one slot forever.
+    """
+    return "a" if int(candidate_tree, 16) & 1 else "b"
+
+
+def make_schedule(mode, workloads, *, physical_candidate_arm):
+    """Lay out every block of the invocation up front at the frozen fixed pair count."""
+    rule = decision_rule(mode)
+    if physical_candidate_arm not in ("a", "b"):
+        raise ValueError(
+            f"unknown physical candidate arm: {physical_candidate_arm}"
+        )
+    baseline_arm = "a" if physical_candidate_arm == "b" else "b"
+    schedule = {}
+    for workload in workloads:
+        if workload not in rule["workloads"]:
+            raise ValueError(f"unknown workload {workload} for mode {mode}")
+        pair_count = rule["workloads"][workload]["pairCount"]
+        if pair_count <= 0 or pair_count % 2:
+            raise ValueError(
+                f"{mode}/{workload} pair count must form complete quartets"
+            )
+        blocks = []
+        for quartet in range(pair_count // 2):
+            for role in QUARTET_PATTERNS[quartet % len(QUARTET_PATTERNS)]:
+                blocks.append({
+                    "measurementRole": role,
+                    "physicalArm": (
+                        physical_candidate_arm if role == "B" else baseline_arm
+                    ),
+                    "quartet": quartet,
+                })
+        schedule[workload] = blocks
+    return schedule
+
+
+def paired_differences(workload, raw_blocks):
+    """Reduce a collected block series to its adjacent source-oriented paired differences."""
+    if workload not in BLOCK_METRICS:
+        raise ValueError(f"unknown workload {workload}")
+    if not raw_blocks or len(raw_blocks) % 2:
+        raise ValueError(
+            f"{workload} pairing requires a non-empty even block series"
+        )
+    metric = BLOCK_METRICS[workload]
+    differences = []
+    for offset in range(0, len(raw_blocks), 2):
+        pair = raw_blocks[offset:offset + 2]
+        by_role = {block["measurementRole"]: block for block in pair}
+        if set(by_role) != {"A", "B"}:
+            raise ValueError(
+                f"{workload} block pair at offset {offset} is not one "
+                "baseline and one candidate block"
+            )
+        differences.append(
+            CALIBRATION.symmetric_difference(
+                by_role["A"][metric], by_role["B"][metric]
+            )
+        )
+    return differences
+
+
+def decide_workload(mode, workload, differences):
+    """Apply the frozen fixed-N median rule, refusing any other number of pairs."""
+    rule = decision_rule(mode)
+    if workload not in rule["workloads"]:
+        raise ValueError(f"unknown workload {workload} for mode {mode}")
+    workload_rule = rule["workloads"][workload]
+    if len(differences) != workload_rule["pairCount"]:
+        raise ValueError(
+            f"{mode}/{workload} decides on exactly "
+            f"{workload_rule['pairCount']} pairs, received {len(differences)}"
+        )
+    return CALIBRATION.decide(
+        differences,
+        workload_rule["directionalThresholdPercent"],
+        rule["equivalenceBandPercent"],
+        estimator=rule["estimator"],
+    )
+
+
+def summarize_comparison(mode, evidence):
+    """Decide a complete invocation, or none of it, and keep every raw block either way."""
+    reasons = list(evidence.get("invalidationReasons", []))
+    eligible = bool(evidence.get("valid")) and not reasons
+    workloads = {}
+    for workload, workload_evidence in evidence["workloads"].items():
+        raw_blocks = workload_evidence["rawBlocks"]
+        differences = paired_differences(workload, raw_blocks) if eligible else None
+        workloads[workload] = {
+            "rawBlocks": raw_blocks,
+            "invalidationReasons": list(
+                workload_evidence.get("invalidationReasons", [])
+            ),
+            "pairedSymmetricPercent": differences,
+            "decision": (
+                decide_workload(mode, workload, differences)
+                if eligible
+                else None
+            ),
+        }
+    return {
+        "mode": mode,
+        "decisionEligible": eligible,
+        "invalidationReasons": reasons,
+        "workloads": workloads,
+    }
+
+
+def render_decisions(summary):
+    """Render the verdict in the operator's terms: baseline versus candidate."""
+    if not summary["decisionEligible"]:
+        lines = [
+            f"{summary['mode']}: no decision -- this invocation is invalid.",
+            "  Every raw block is retained; a new decision needs a fresh "
+            "complete invocation.",
+        ]
+        lines.extend(f"  {reason}" for reason in summary["invalidationReasons"])
+        return "\n".join(lines)
+    lines = [f"{summary['mode']}: candidate versus baseline"]
+    for workload, result in summary["workloads"].items():
+        decision = result["decision"]
+        lines.append(
+            f"  {workload}: {decision['decision']} "
+            f"({decision['estimatePercent']:+.2f}% symmetric median of "
+            f"{decision['sampleCount']} pairs)"
+        )
+        if decision["outlierIndices"]:
+            lines.append(
+                "    flagged outlier pairs (retained in the estimate): "
+                + ", ".join(str(index) for index in decision["outlierIndices"])
+            )
+    return "\n".join(lines)
+
+
+def _describe_arms(arms):
+    lines = ["Arm build products:"]
+    for role, arm in arms.items():
+        lines.append(
+            f"  {role:9s} {'cached' if arm['cacheHit'] else 'built'} "
+            f"{arm['root']}"
+        )
+    return "\n".join(lines)
+
+
+def _run_directory(artifacts_root, mode, candidate_tree):
+    """Give every invocation its own directory, since no run may overwrite another's evidence."""
+    parent = pathlib.Path(artifacts_root) / mode
+    parent.mkdir(parents=True, exist_ok=True)
+    prefix = candidate_tree[:12]
+    ordinal = 0
+    while True:
+        directory = parent / f"{prefix}-{ordinal:04d}"
+        if not directory.exists():
+            directory.mkdir()
+            return directory
+        ordinal += 1
+
+
+def production_collectors(schedule, attempt_directory, *, arm_roots, repository_root):
+    """Bind the tested workload collectors to two immutable arm roots.
+
+    `repository_root` here is the baseline arm root, not the operator's checkout:
+    the stimulus fixtures and producer script must come from a named immutable
+    revision so both arms are driven by the same one, and so a working-tree edit
+    cannot silently redefine a workload mid-comparison.
+    """
+    repository_root = pathlib.Path(repository_root)
+    if "terminal-feed" in schedule:
+        sample_state = VALIDATION.make_terminal_feed_state_sampler(
+            pathlib.Path(attempt_directory) / "terminal-feed-state"
+        )
+    else:
+        sample_state = dict
+    return VALIDATION.make_production_collectors(
+        schedule,
+        attempt_directory,
+        arm_roots=arm_roots,
+        repository_root=repository_root,
+        sample_state=sample_state,
+    )
+
+
+def run_comparison(
+    *,
+    mode,
+    baseline_revision,
+    workload,
+    repository_root,
+    cache_root,
+    artifacts_root,
+    resolve_baseline=None,
+    snapshot_candidate=None,
+    materialize=None,
+    make_collectors=production_collectors,
+    emit=print,
+    monotonic=time.monotonic,
+):
+    """Perform one complete comparison: report the sources, measure, decide once, record."""
+    resolve_baseline = resolve_baseline or SNAPSHOT.resolve_baseline
+    snapshot_candidate = snapshot_candidate or SNAPSHOT.snapshot_candidate
+    materialize = materialize or SNAPSHOT.materialize_arm
+    workloads = resolve_workloads(mode, workload)
+
+    started = monotonic()
+    baseline = resolve_baseline(repository_root, baseline_revision)
+    candidate = snapshot_candidate(repository_root)
+    # Before either build: what each arm will contain, so a wrong baseline or a
+    # stray captured path is caught while cancelling is still free.
+    emit(SNAPSHOT.describe_sources(baseline, candidate))
+    if baseline["tree"] == candidate["tree"]:
+        # Both arms would resolve to one cache entry, so every block would measure
+        # the same binary and the run would report a confident "equivalent" for a
+        # change it never contained.
+        raise ValueError(
+            f"baseline {baseline['revision']} and the candidate working tree are "
+            f"the same tree ({baseline['tree']}); there is nothing to compare"
+        )
+    snapshot_finished = monotonic()
+
+    arms = {
+        "baseline": materialize(repository_root, baseline, cache_root=cache_root),
+        "candidate": materialize(repository_root, candidate, cache_root=cache_root),
+    }
+    emit(_describe_arms(arms))
+    build_finished = monotonic()
+
+    candidate_arm = physical_candidate_arm(candidate["tree"])
+    baseline_arm = "a" if candidate_arm == "b" else "b"
+    arm_roots = {
+        candidate_arm: arms["candidate"]["root"],
+        baseline_arm: arms["baseline"]["root"],
+    }
+    schedule = make_schedule(
+        mode, workloads, physical_candidate_arm=candidate_arm
+    )
+    artifacts = _run_directory(artifacts_root, mode, candidate["tree"])
+    collectors, close = make_collectors(
+        schedule,
+        artifacts,
+        arm_roots=arm_roots,
+        repository_root=arms["baseline"]["root"],
+    )
+    try:
+        evidence = VALIDATION.collect_attempt(schedule, collectors=collectors)
+    finally:
+        close()
+    comparison_finished = monotonic()
+
+    summary = summarize_comparison(mode, evidence)
+    emit(render_decisions(summary))
+    timings = {
+        "snapshotSeconds": snapshot_finished - started,
+        "cachePopulationSeconds": build_finished - snapshot_finished,
+        "cachedComparisonSeconds": comparison_finished - build_finished,
+        "totalSeconds": monotonic() - started,
+    }
+    record = {
+        "schemaVersion": 1,
+        "mode": mode,
+        "baseline": baseline,
+        "candidate": candidate,
+        "arms": arms,
+        "physicalCandidateArm": candidate_arm,
+        "schedule": schedule,
+        "decisionRule": decision_rule(mode),
+        "blockContracts": VALIDATION.BLOCK_CONTRACTS,
+        "summary": summary,
+        "timings": timings,
+    }
+    (artifacts / "run.json").write_text(
+        json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    emit(
+        f"Artifacts: {artifacts}\n"
+        f"  snapshot {timings['snapshotSeconds']:.1f}s"
+        f" | cache {timings['cachePopulationSeconds']:.1f}s"
+        f" | comparison {timings['cachedComparisonSeconds']:.1f}s"
+        f" | total {timings['totalSeconds']:.1f}s"
+    )
+    return {
+        "mode": mode,
+        "baseline": baseline,
+        "candidate": candidate,
+        "arms": arms,
+        "physicalCandidateArm": candidate_arm,
+        "schedule": schedule,
+        "summary": summary,
+        "timings": timings,
+        "artifacts": str(artifacts),
+    }
+
+
+def main(argv=None, *, stderr=None):
+    """Run one comparison and exit non-zero when the invocation produced no decision."""
+    stderr = sys.stderr if stderr is None else stderr
+    parser = argparse.ArgumentParser()
+    parser.add_argument("mode", choices=MODES)
+    parser.add_argument("--baseline", required=True)
+    parser.add_argument("--workload", default=None)
+    parser.add_argument("--repository-root", type=pathlib.Path, default=ROOT)
+    parser.add_argument(
+        "--cache-root",
+        type=pathlib.Path,
+        default=ROOT / ".build" / "terminal-benchmark-arms",
+    )
+    parser.add_argument(
+        "--artifacts-root",
+        type=pathlib.Path,
+        default=ROOT / ".build" / "terminal-benchmark-comparisons",
+    )
+    arguments = parser.parse_args(argv)
+    # Mode/workload selection is the one failure an operator hits by typing, so it
+    # reports as a usage error rather than a traceback. Everything after this point
+    # failing loudly is the point.
+    try:
+        resolve_workloads(arguments.mode, arguments.workload)
+    except ValueError as error:
+        stderr.write(f"error: {error}\n")
+        return 2
+    result = run_comparison(
+        mode=arguments.mode,
+        baseline_revision=arguments.baseline,
+        workload=arguments.workload,
+        repository_root=arguments.repository_root,
+        cache_root=arguments.cache_root,
+        artifacts_root=arguments.artifacts_root,
+    )
+    return 0 if result["summary"]["decisionEligible"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -274,7 +274,7 @@ test-terminal-benchmark-gui` recipe alongside the existing
 
 ## Commit progress
 - [x] 1. Immutable source snapshot and verified build-product cache
-- [ ] 2. Paired quick/confirm comparison runner and frozen decision report
+- [x] 2. Paired quick/confirm comparison runner and frozen decision report
 - [ ] 3. Replace the unpaired benchmark surface with the paired recipes
 
 ## Implementation notes
@@ -295,3 +295,31 @@ test-terminal-benchmark-gui` recipe alongside the existing
 - The candidate snapshot's scratch index lives in a `tempfile` directory, not
   under `.git/`. This branch is developed in a linked `git worktree`, where
   `.git` is a file and any path beneath it fails to open.
+- The runner owns its own `make_schedule` instead of reusing the research
+  collector's `make_collection_plan`. That function is built around held-out
+  machinery the plan scopes to research -- predeclared trials and replacement
+  seeds -- and I8 removes replacement from the routine path entirely. The
+  production schedule alternates ABBA/BAAB deterministically per quartet rather
+  than drawing them from a seed: both are inside the space the calibration
+  resampled, and the deterministic form is exactly balanced rather than balanced
+  in expectation, and reproducible without seed bookkeeping.
+- The physical slot holding the candidate is derived from the candidate tree's
+  own identity (`int(tree, 16) & 1`). Both arms launch once per invocation, so
+  the slot cannot alternate within a run without relaunching the persistent
+  apps; deriving it keeps the assignment reproducible, reported, and varying
+  across candidates instead of pinning the candidate to one slot forever.
+- The collectors receive the *baseline* arm root as their `repository_root`, so
+  the stimulus fixtures and producer script come from a named immutable
+  revision. Both arms are then driven by the same stimulus, and a working-tree
+  edit to a fixture cannot silently redefine a workload mid-comparison.
+- `build_arm` gained a fourth product: `TerminalCoreBenchmark` in
+  `lib/TerminalCore`. The terminal-feed workload runs that package through
+  `swift run` at SwiftPM's default build path, which the app-bundle prebuild
+  never touched -- so before this, a "cache hit" still compiled TerminalCore
+  inside the timed comparison phase and charged it to PO8's 60-second quick
+  budget. `FeedPrebuildContractTests` pins the prebuild against the feed
+  runner's invocation, including the absence of `--build-path`.
+- A comparison whose baseline and candidate resolve to the same tree is
+  refused rather than run. Both arms would key one cache entry, so every block
+  would measure the identical binary and the command would answer `equivalent`
+  with full confidence for a change it never contained.

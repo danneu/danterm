@@ -54,6 +54,7 @@ test:
     ./scripts/tests/terminal-viability-harness_test.sh
     ./scripts/tests/terminal-benchmark-harness_test.sh
     python3 ./scripts/tests/terminal_benchmark_snapshot_test.py
+    python3 ./scripts/tests/terminal_benchmark_compare_test.py
     python3 ./scripts/tests/terminal_benchmark_producer_test.py
     python3 ./scripts/tests/terminal_benchmark_suite_test.py
     python3 ./scripts/tests/terminal_draw_acceptance_test.py

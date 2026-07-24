@@ -28,6 +28,10 @@ BUILD_PATH_SUFFIX = ".build/terminal-benchmark-swiftpm"
 # Build inputs `git archive` cannot carry: .gitignore excludes them, but no arm
 # links without them. Their content is part of every cache key.
 IGNORED_PREREQUISITES = ("lib/GhosttyKit.xcframework", "lib/ghostty-themes")
+# The terminal-feed workload runs this product out of its own package rather than
+# the app bundle, so an arm is only fully cached once it is compiled too.
+TERMINAL_FEED_PACKAGE = "lib/TerminalCore"
+TERMINAL_FEED_PRODUCT = "TerminalCoreBenchmark"
 
 
 def _git(repository_root, *arguments, check=True):
@@ -286,10 +290,26 @@ def build_arm(root):
             [*bootstrap, "--show-bin-path"], check=True, capture_output=True, text=True
         ).stdout.strip()
     )
+    # The terminal-feed workload measures this separate package through `swift run`,
+    # which uses SwiftPM's default build path. Prebuilding it here with the same
+    # flags keeps the feed comparison a cached launch instead of a compile charged
+    # to the timed phase.
+    feed = [
+        "swift", "build",
+        "--package-path", str(root / TERMINAL_FEED_PACKAGE),
+        "--configuration", CONFIGURATION,
+    ]
+    subprocess.run([*feed, "--product", TERMINAL_FEED_PRODUCT], check=True)
+    feed_bin_path = pathlib.Path(
+        subprocess.run(
+            [*feed, "--show-bin-path"], check=True, capture_output=True, text=True
+        ).stdout.strip()
+    )
     return [
         bin_path / "DanTerm",
         bin_path / "DanTermCLI",
         bootstrap_bin_path / "PTYSessionBootstrap",
+        feed_bin_path / TERMINAL_FEED_PRODUCT,
     ]
 
 

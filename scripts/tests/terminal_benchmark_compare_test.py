@@ -1,0 +1,841 @@
+#!/usr/bin/env python3
+"""Behavioral tests for the paired quick/confirm comparison runner and its frozen rule."""
+import importlib.util
+import inspect
+import io
+import json
+import pathlib
+import statistics
+import tempfile
+import unittest
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+
+def _load(name, relative):
+    spec = importlib.util.spec_from_file_location(name, ROOT / relative)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+COMPARE = _load("terminal_benchmark_compare", "scripts/terminal-benchmark-compare.py")
+VALIDATION = _load(
+    "terminal_benchmark_validation", "scripts/terminal-benchmark-validation.py"
+)
+
+
+def block_value(workload, value):
+    """Spell one collected block's normalized metric the way its collector reports it."""
+    return {COMPARE.BLOCK_METRICS[workload]: value}
+
+
+def raw_blocks(workload, schedule, values):
+    """Attach measured values to a planned schedule in block order."""
+    return [
+        {"index": index, **planned, **block_value(workload, value)}
+        for index, (planned, value) in enumerate(zip(schedule, values))
+    ]
+
+
+def workload_evidence(workload, schedule, values, reasons=()):
+    return {
+        "workload": workload,
+        "rawBlocks": raw_blocks(workload, schedule, values),
+        "valid": not reasons,
+        "invalidationReasons": list(reasons),
+    }
+
+
+def collection(evidence_by_workload):
+    """Shape workload evidence the way the research collector's collect_attempt does."""
+    reasons = [
+        f"{workload}:{reason}"
+        for workload, evidence in evidence_by_workload.items()
+        for reason in evidence["invalidationReasons"]
+    ]
+    return {
+        "workloads": dict(evidence_by_workload),
+        "valid": not reasons,
+        "invalidationReasons": reasons,
+    }
+
+
+def constant_pair_values(workload, schedule, difference_percent):
+    """Produce block values whose every adjacent pair has an exact symmetric difference."""
+    baseline = 1_000_000.0
+    ratio = (200.0 + difference_percent) / (200.0 - difference_percent)
+    return [
+        baseline * ratio if planned["measurementRole"] == "B" else baseline
+        for planned in schedule
+    ]
+
+
+class WorkloadSelectionTests(unittest.TestCase):
+    def test_quick_selects_exactly_one_named_workload(self):
+        # Intent: `quick` measures one workload and refuses to guess which.
+        # Why it exists: the 60-second quick budget only holds for a single
+        #   workload, and silently defaulting to one would attach the operator's
+        #   directional claim to a path they did not choose.
+        # Scenario: an operator runs benchmark-quick with, and without, workload=.
+        for workload in VALIDATION.WORKLOADS:
+            self.assertEqual(
+                COMPARE.resolve_workloads("quick", workload), (workload,)
+            )
+        with self.assertRaises(ValueError):
+            COMPARE.resolve_workloads("quick", None)
+        with self.assertRaises(ValueError):
+            COMPARE.resolve_workloads("quick", "no-such-workload")
+
+    def test_confirm_runs_the_complete_five_workload_ladder(self):
+        self.assertEqual(
+            COMPARE.resolve_workloads("confirm", None), VALIDATION.WORKLOADS
+        )
+        with self.assertRaises(ValueError):
+            COMPARE.resolve_workloads("confirm", "terminal-feed")
+
+    def test_unknown_modes_are_rejected(self):
+        with self.assertRaises(ValueError):
+            COMPARE.resolve_workloads("exhaustive", "terminal-feed")
+
+
+class ScheduleTests(unittest.TestCase):
+    def test_every_schedule_uses_the_frozen_fixed_pair_count(self):
+        # Intent: block counts come from the frozen decision table, not from the runner.
+        # Why it exists: I2 forbids early stopping and optional peeking; the only
+        #   protection against both is that the schedule's size is fixed before any
+        #   measurement exists.
+        # Scenario: quick and confirm schedules are built for every workload.
+        for mode, rule in VALIDATION.DECISION_RULES.items():
+            for workload, workload_rule in rule["workloads"].items():
+                schedule = COMPARE.make_schedule(
+                    mode, (workload,), physical_candidate_arm="b"
+                )[workload]
+                self.assertEqual(
+                    len(schedule), workload_rule["pairCount"] * 2,
+                    f"{mode}/{workload}",
+                )
+
+    def test_every_quartet_is_position_balanced(self):
+        # Intent: each group of four blocks is ABBA or BAAB, so source assignment
+        #   is balanced against block order.
+        # Why it exists: I3 forbids confounding source assignment with block order;
+        #   an unbalanced run would let warm-up or drift masquerade as a difference.
+        # Scenario: the largest frozen schedule (confirm incremental-mixed, six
+        #   pairs) is inspected quartet by quartet.
+        schedule = COMPARE.make_schedule(
+            "confirm", ("incremental-mixed",), physical_candidate_arm="b"
+        )["incremental-mixed"]
+        self.assertEqual(len(schedule) % 4, 0)
+        for offset in range(0, len(schedule), 4):
+            quartet = [
+                planned["measurementRole"]
+                for planned in schedule[offset:offset + 4]
+            ]
+            self.assertIn("".join(quartet), {"ABBA", "BAAB"})
+            self.assertEqual(sorted(quartet), ["A", "A", "B", "B"])
+
+    def test_adjacent_blocks_form_complete_baseline_candidate_pairs(self):
+        for mode in VALIDATION.DECISION_RULES:
+            for workload in VALIDATION.WORKLOADS:
+                schedule = COMPARE.make_schedule(
+                    mode, (workload,), physical_candidate_arm="a"
+                )[workload]
+                for offset in range(0, len(schedule), 2):
+                    roles = {
+                        planned["measurementRole"]
+                        for planned in schedule[offset:offset + 2]
+                    }
+                    self.assertEqual(roles, {"A", "B"}, f"{mode}/{workload}")
+
+    def test_the_candidate_role_always_occupies_the_chosen_physical_arm(self):
+        # Intent: the measured candidate source is the one bound to the physical
+        #   arm the invocation selected, for every block.
+        # Why it exists: a single mis-mapped block would silently swap the two
+        #   sources inside one pair and invert that pair's sign.
+        # Scenario: schedules are built for both physical assignments.
+        for candidate_arm, baseline_arm in (("a", "b"), ("b", "a")):
+            schedule = COMPARE.make_schedule(
+                "confirm",
+                ("scrollback-stream",),
+                physical_candidate_arm=candidate_arm,
+            )["scrollback-stream"]
+            for planned in schedule:
+                expected = (
+                    candidate_arm
+                    if planned["measurementRole"] == "B"
+                    else baseline_arm
+                )
+                self.assertEqual(planned["physicalArm"], expected)
+
+    def test_confirm_schedules_every_workload_in_one_invocation(self):
+        schedule = COMPARE.make_schedule(
+            "confirm", VALIDATION.WORKLOADS, physical_candidate_arm="b"
+        )
+        self.assertEqual(tuple(schedule), VALIDATION.WORKLOADS)
+
+    def test_the_physical_candidate_arm_is_derived_from_the_candidate_tree(self):
+        # Intent: which physical slot holds the candidate is a reproducible
+        #   function of the candidate's tree identity, not a constant.
+        # Why it exists: I3 forbids confounding source assignment with physical
+        #   position. Both arms are launched once per invocation, so the slot
+        #   cannot alternate within a run; deriving it from the tree keeps the
+        #   assignment reproducible, reportable, and varying across candidates.
+        # Scenario: two candidate trees with opposite leading-digit parity.
+        self.assertEqual(COMPARE.physical_candidate_arm("a" * 39 + "1"), "a")
+        self.assertEqual(COMPARE.physical_candidate_arm("a" * 39 + "0"), "b")
+        self.assertEqual(
+            COMPARE.physical_candidate_arm("deadbeef" + "0" * 32),
+            COMPARE.physical_candidate_arm("deadbeef" + "0" * 32),
+        )
+
+
+class PairedDifferenceTests(unittest.TestCase):
+    def test_a_slower_candidate_produces_a_positive_symmetric_difference(self):
+        # Intent: pair orientation is source-oriented -- positive means the
+        #   candidate is slower than the baseline.
+        # Why it exists: the frozen rule's sign carries the entire directional
+        #   claim; an inverted pair would report every regression as a speedup.
+        # Scenario: a candidate block measures 10% slower than its baseline block.
+        schedule = COMPARE.make_schedule(
+            "quick", ("content-churn",), physical_candidate_arm="b"
+        )["content-churn"]
+        values = [
+            1_100_000.0 if planned["measurementRole"] == "B" else 1_000_000.0
+            for planned in schedule
+        ]
+        differences = COMPARE.paired_differences(
+            "content-churn", raw_blocks("content-churn", schedule, values)
+        )
+        self.assertEqual(len(differences), 2)
+        for difference in differences:
+            self.assertAlmostEqual(difference, 200.0 * 100_000 / 2_100_000)
+
+    def test_a_faster_candidate_produces_a_negative_symmetric_difference(self):
+        schedule = COMPARE.make_schedule(
+            "quick", ("terminal-feed",), physical_candidate_arm="a"
+        )["terminal-feed"]
+        values = [
+            900_000.0 if planned["measurementRole"] == "B" else 1_000_000.0
+            for planned in schedule
+        ]
+        differences = COMPARE.paired_differences(
+            "terminal-feed", raw_blocks("terminal-feed", schedule, values)
+        )
+        for difference in differences:
+            self.assertLess(difference, 0)
+
+    def test_pairing_reads_each_workloads_own_normalized_metric(self):
+        # Intent: every workload is paired on the metric its collector normalizes,
+        #   never on a raw cumulative total.
+        # Why it exists: I4 requires each workload to keep its own normalization;
+        #   pairing a per-draw workload on a cumulative field would compare
+        #   different quantities across arms.
+        # Scenario: each workload's blocks carry only its own metric key.
+        for workload in VALIDATION.WORKLOADS:
+            schedule = COMPARE.make_schedule(
+                "quick", (workload,), physical_candidate_arm="b"
+            )[workload]
+            blocks = raw_blocks(workload, schedule, [1_000_000.0] * len(schedule))
+            self.assertEqual(
+                COMPARE.paired_differences(workload, blocks),
+                [0.0] * (len(schedule) // 2),
+            )
+
+    def test_incomplete_or_unpaired_block_series_are_rejected(self):
+        schedule = COMPARE.make_schedule(
+            "quick", ("style-churn",), physical_candidate_arm="b"
+        )["style-churn"]
+        blocks = raw_blocks("style-churn", schedule, [1.0] * len(schedule))
+        with self.assertRaises(ValueError):
+            COMPARE.paired_differences("style-churn", blocks[:-1])
+        unpaired = [dict(block) for block in blocks]
+        unpaired[1]["measurementRole"] = unpaired[0]["measurementRole"]
+        with self.assertRaises(ValueError):
+            COMPARE.paired_differences("style-churn", unpaired)
+
+
+class FrozenDecisionTests(unittest.TestCase):
+    def test_the_frozen_table_matches_the_plans_decision_contract(self):
+        # Intent: the runner decides with exactly the calibrated pair counts,
+        #   thresholds, and equivalence bands the plan freezes.
+        # Why it exists: AR2 makes these values machine-specific calibration
+        #   output; a drifted constant would silently invalidate every claim the
+        #   command makes without any test failing elsewhere.
+        # Scenario: the frozen table in the plan is restated here and compared.
+        expected = {
+            "quick": (1.0, {
+                "terminal-feed": (2, 4.5),
+                "scrollback-stream": (2, 4.05),
+                "content-churn": (2, 4.05),
+                "style-churn": (2, 4.05),
+                "incremental-mixed": (2, 3.8),
+            }),
+            "confirm": (0.75, {
+                "terminal-feed": (2, 2.5),
+                "scrollback-stream": (4, 1.85),
+                "content-churn": (4, 2.15),
+                "style-churn": (4, 2.0),
+                "incremental-mixed": (6, 1.85),
+            }),
+        }
+        for mode, (equivalence, workloads) in expected.items():
+            rule = COMPARE.decision_rule(mode)
+            self.assertEqual(rule["equivalenceBandPercent"], equivalence)
+            self.assertEqual(rule["estimator"], "median")
+            for workload, (pairs, threshold) in workloads.items():
+                self.assertEqual(
+                    (
+                        rule["workloads"][workload]["pairCount"],
+                        rule["workloads"][workload]["directionalThresholdPercent"],
+                    ),
+                    (pairs, threshold),
+                    f"{mode}/{workload}",
+                )
+
+    def test_every_classification_is_reachable_for_every_mode_and_workload(self):
+        # Intent: each frozen cell classifies slower, faster, equivalent, and
+        #   inconclusive at the exact boundaries the plan states.
+        # Why it exists: PO2 requires the decision rule to be proven at its
+        #   boundaries rather than only in its interior, because a `>` written
+        #   where the plan says "at or beyond" changes real verdicts.
+        # Scenario: deterministic pair series placed exactly on each boundary.
+        for mode in ("quick", "confirm"):
+            rule = COMPARE.decision_rule(mode)
+            equivalence = rule["equivalenceBandPercent"]
+            for workload, workload_rule in rule["workloads"].items():
+                threshold = workload_rule["directionalThresholdPercent"]
+                pair_count = workload_rule["pairCount"]
+                midpoint = (equivalence + threshold) / 2
+                cases = {
+                    threshold: "slower",
+                    -threshold: "faster",
+                    threshold + 1.0: "slower",
+                    -threshold - 1.0: "faster",
+                    equivalence: "equivalent",
+                    -equivalence: "equivalent",
+                    0.0: "equivalent",
+                    midpoint: "inconclusive",
+                    -midpoint: "inconclusive",
+                }
+                for estimate, expected in cases.items():
+                    decision = COMPARE.decide_workload(
+                        mode, workload, [estimate] * pair_count
+                    )
+                    self.assertEqual(
+                        decision["decision"], expected,
+                        f"{mode}/{workload} at {estimate}",
+                    )
+                    self.assertAlmostEqual(
+                        decision["estimatePercent"], estimate
+                    )
+
+    def test_a_decision_requires_exactly_the_frozen_number_of_pairs(self):
+        # Intent: neither a short nor a long pair series can produce a decision.
+        # Why it exists: I2 forbids early stopping and selective extension; the
+        #   fixed-N rule is only fixed if the runner refuses any other N.
+        # Scenario: a confirm incremental-mixed decision is attempted with five
+        #   and seven pairs instead of the frozen six.
+        for pair_count in (5, 7):
+            with self.assertRaises(ValueError):
+                COMPARE.decide_workload(
+                    "confirm", "incremental-mixed", [0.0] * pair_count
+                )
+
+    def test_detected_outliers_are_reported_without_being_deleted(self):
+        # Intent: an extreme pair is flagged but still counted in the estimate.
+        # Why it exists: I2 forbids silent outlier deletion -- the calibrated
+        #   error rates belong to the median of all pairs, not to a trimmed set.
+        # Scenario: one confirm content-churn pair is wildly larger than its three
+        #   siblings.
+        values = [1.0, 1.0, 1.0, 50.0]
+        decision = COMPARE.decide_workload("confirm", "content-churn", values)
+        self.assertEqual(decision["outlierIndices"], [3])
+        self.assertEqual(decision["sampleCount"], 4)
+        self.assertEqual(decision["usedSampleCount"], 4)
+        self.assertAlmostEqual(
+            decision["estimatePercent"], statistics.median(values)
+        )
+
+
+class InvalidationTests(unittest.TestCase):
+    def _quick_evidence(self, workload, reasons=()):
+        schedule = COMPARE.make_schedule(
+            "quick", (workload,), physical_candidate_arm="b"
+        )[workload]
+        values = constant_pair_values(workload, schedule, 9.0)
+        return schedule, collection({
+            workload: workload_evidence(workload, schedule, values, reasons)
+        })
+
+    def test_a_valid_invocation_decides_every_scheduled_workload(self):
+        schedule, evidence = self._quick_evidence("content-churn")
+        summary = COMPARE.summarize_comparison("quick", evidence)
+
+        self.assertTrue(summary["decisionEligible"])
+        self.assertEqual(
+            summary["workloads"]["content-churn"]["decision"]["decision"],
+            "slower",
+        )
+        self.assertEqual(
+            len(summary["workloads"]["content-churn"]["rawBlocks"]),
+            len(schedule),
+        )
+
+    def test_an_invalid_block_at_any_position_voids_the_whole_invocation(self):
+        # Intent: one invalid block anywhere in the schedule leaves the entire
+        #   invocation without a decision, while keeping all of its evidence.
+        # Why it exists: I8 makes invalidation whole-invocation. Deciding from the
+        #   surviving blocks would silently change the pair count the calibrated
+        #   thresholds assume, and re-running only the bad block would reintroduce
+        #   the selective-rerun path I2 forbids.
+        # Scenario: each schedule position in turn fails its machine-state check.
+        workload = "incremental-mixed"
+        schedule = COMPARE.make_schedule(
+            "confirm", (workload,), physical_candidate_arm="a"
+        )[workload]
+        values = constant_pair_values(workload, schedule, 9.0)
+        for position in range(len(schedule)):
+            reason = f"block-{position}-thermal-pressure-serious"
+            evidence = collection({
+                workload: workload_evidence(
+                    workload, schedule, values, [reason]
+                )
+            })
+
+            summary = COMPARE.summarize_comparison("confirm", evidence)
+
+            self.assertFalse(summary["decisionEligible"], position)
+            self.assertIsNone(
+                summary["workloads"][workload]["decision"], position
+            )
+            self.assertEqual(
+                summary["invalidationReasons"], [f"{workload}:{reason}"]
+            )
+            self.assertEqual(
+                len(summary["workloads"][workload]["rawBlocks"]),
+                len(schedule),
+                position,
+            )
+
+    def test_one_invalid_workload_voids_the_other_confirm_workloads(self):
+        # Intent: a confirm suite reports no decision for any workload once any
+        #   single workload is invalid.
+        # Why it exists: I8 scopes invalidation to the invocation, not to the
+        #   workload; reporting the four clean workloads would let an operator
+        #   harvest a decision from a run the contract already rejected.
+        # Scenario: scrollback-stream is occluded while the other four are clean.
+        evidence_by_workload = {}
+        for workload in VALIDATION.WORKLOADS:
+            schedule = COMPARE.make_schedule(
+                "confirm", (workload,), physical_candidate_arm="b"
+            )[workload]
+            values = constant_pair_values(workload, schedule, 0.0)
+            reasons = (
+                ["block-1-window-occluded"]
+                if workload == "scrollback-stream"
+                else []
+            )
+            evidence_by_workload[workload] = workload_evidence(
+                workload, schedule, values, reasons
+            )
+
+        summary = COMPARE.summarize_comparison(
+            "confirm", collection(evidence_by_workload)
+        )
+
+        self.assertFalse(summary["decisionEligible"])
+        for workload in VALIDATION.WORKLOADS:
+            self.assertIsNone(summary["workloads"][workload]["decision"])
+            self.assertTrue(summary["workloads"][workload]["rawBlocks"])
+
+    def test_an_invalid_invocation_reports_no_decision_in_its_render(self):
+        _, evidence = self._quick_evidence(
+            "style-churn", ["block-0-not-on-ac-power"]
+        )
+        summary = COMPARE.summarize_comparison("quick", evidence)
+
+        rendered = COMPARE.render_decisions(summary)
+
+        self.assertIn("no decision", rendered.lower())
+        self.assertIn("block-0-not-on-ac-power", rendered)
+
+
+class ReportTests(unittest.TestCase):
+    def test_the_decision_report_is_source_oriented(self):
+        # Intent: the operator-facing verdict speaks in baseline/candidate terms.
+        # Why it exists: PO1 requires the final report to stay source-oriented.
+        #   Physical arms are an internal scheduling detail; naming them in the
+        #   verdict invites the operator to read a position as a source.
+        # Scenario: a valid quick comparison is rendered.
+        workload = "terminal-feed"
+        schedule = COMPARE.make_schedule(
+            "quick", (workload,), physical_candidate_arm="a"
+        )[workload]
+        values = constant_pair_values(workload, schedule, -6.0)
+        summary = COMPARE.summarize_comparison(
+            "quick",
+            collection({workload: workload_evidence(workload, schedule, values)}),
+        )
+
+        rendered = COMPARE.render_decisions(summary)
+
+        self.assertIn("candidate", rendered.lower())
+        self.assertIn("faster", rendered)
+        self.assertNotIn("physical arm", rendered.lower())
+
+
+class RunComparisonTests(unittest.TestCase):
+    def setUp(self):
+        self.events = []
+        self.baseline = {
+            "role": "baseline",
+            "revision": "HEAD~1",
+            "commit": "c" * 40,
+            "tree": "1" * 40,
+        }
+        self.candidate = {
+            "role": "candidate",
+            "baseCommit": "d" * 40,
+            "tree": "4" + "0" * 39,
+            "paths": ["app/TerminalView.swift", "plans/wip/note.md"],
+        }
+
+    def _materialize(self, repository_root, snapshot, *, cache_root, **kwargs):
+        self.events.append(("materialize", snapshot["role"]))
+        return {
+            "role": snapshot["role"],
+            "snapshot": snapshot,
+            "cacheKey": snapshot["tree"],
+            "cacheHit": True,
+            "root": str(pathlib.Path(cache_root) / snapshot["role"] / "source"),
+            "binaries": [],
+        }
+
+    def _run(self, *, artifacts_root, cache_root, difference_percent=0.0,
+             reasons_by_workload=None, mode="quick", workload="content-churn"):
+        reasons_by_workload = reasons_by_workload or {}
+        self.collector_calls = []
+
+        def make_collectors(schedule, attempt_directory, *, arm_roots, **kwargs):
+            self.events.append(("collect", dict(arm_roots)))
+
+            def collector_for(name):
+                def collect(blocks):
+                    self.collector_calls.append(name)
+                    values = constant_pair_values(
+                        name, blocks, difference_percent
+                    )
+                    return workload_evidence(
+                        name, blocks, values,
+                        reasons_by_workload.get(name, []),
+                    )
+                return collect
+
+            return {name: collector_for(name) for name in schedule}, lambda: None
+
+        clock = iter(range(0, 200, 1))
+        return COMPARE.run_comparison(
+            mode=mode,
+            baseline_revision="HEAD~1",
+            workload=workload,
+            repository_root=ROOT,
+            cache_root=cache_root,
+            artifacts_root=artifacts_root,
+            resolve_baseline=lambda root, revision: self.baseline,
+            snapshot_candidate=lambda root: self.candidate,
+            materialize=self._materialize,
+            make_collectors=make_collectors,
+            emit=lambda text: self.events.append(("emit", text)),
+            monotonic=lambda: float(next(clock)),
+        )
+
+    def test_both_source_identities_are_reported_before_anything_is_built(self):
+        # Intent: the operator sees exactly what each arm will contain before the
+        #   command spends any time building or measuring it.
+        # Why it exists: PO1 requires both tree identities and every captured
+        #   candidate path to be reported before building, so a surprising
+        #   snapshot (a stray untracked file, the wrong baseline) is caught while
+        #   cancelling is still free.
+        # Scenario: a quick comparison whose candidate captured two paths.
+        with tempfile.TemporaryDirectory() as directory:
+            self._run(
+                artifacts_root=pathlib.Path(directory) / "artifacts",
+                cache_root=pathlib.Path(directory) / "cache",
+            )
+
+        kinds = [kind for kind, _ in self.events]
+        first_materialize = kinds.index("materialize")
+        preamble = "\n".join(
+            payload for kind, payload in self.events[:first_materialize]
+            if kind == "emit"
+        )
+        self.assertIn(self.baseline["tree"], preamble)
+        self.assertIn(self.candidate["tree"], preamble)
+        for path in self.candidate["paths"]:
+            self.assertIn(path, preamble)
+
+    def test_each_source_is_materialized_into_its_own_arm_root(self):
+        # Intent: baseline and candidate never share a source or build directory.
+        # Why it exists: I1 requires each measured binary to come from its own
+        #   immutable tree; a shared root would let one arm's build products
+        #   answer for the other.
+        # Scenario: a quick comparison materializes both arms.
+        with tempfile.TemporaryDirectory() as directory:
+            result = self._run(
+                artifacts_root=pathlib.Path(directory) / "artifacts",
+                cache_root=pathlib.Path(directory) / "cache",
+            )
+
+        roots = {arm["role"]: arm["root"] for arm in result["arms"].values()}
+        self.assertEqual(len(set(roots.values())), 2)
+        self.assertEqual(
+            [role for kind, role in self.events if kind == "materialize"],
+            ["baseline", "candidate"],
+        )
+
+    def test_the_candidate_source_is_bound_to_its_derived_physical_arm(self):
+        # Intent: the physical arm the schedule assigns to the candidate is the
+        #   arm the collectors actually launch the candidate build in.
+        # Why it exists: the schedule's role labels only mean something if the
+        #   arm-to-root binding agrees with them; a mismatch would invert every
+        #   pair while leaving the report internally consistent.
+        # Scenario: a candidate tree whose identity selects physical arm b.
+        with tempfile.TemporaryDirectory() as directory:
+            result = self._run(
+                artifacts_root=pathlib.Path(directory) / "artifacts",
+                cache_root=pathlib.Path(directory) / "cache",
+            )
+
+        expected_arm = COMPARE.physical_candidate_arm(self.candidate["tree"])
+        self.assertEqual(result["physicalCandidateArm"], expected_arm)
+        arm_roots = next(
+            payload for kind, payload in self.events if kind == "collect"
+        )
+        self.assertEqual(
+            arm_roots[expected_arm], result["arms"]["candidate"]["root"]
+        )
+        self.assertEqual(len(set(arm_roots.values())), 2)
+
+    def test_phase_and_total_wall_times_are_reported_separately(self):
+        # Intent: snapshot, cache population, cached comparison, and total command
+        #   time are each reported as their own number.
+        # Why it exists: PO8's budgets apply only to the cached comparison phase.
+        #   A single total would let a cold compile hide inside the number the
+        #   60-second and five-minute budgets are checked against.
+        # Scenario: any completed quick comparison.
+        with tempfile.TemporaryDirectory() as directory:
+            result = self._run(
+                artifacts_root=pathlib.Path(directory) / "artifacts",
+                cache_root=pathlib.Path(directory) / "cache",
+            )
+
+        timings = result["timings"]
+        for phase in (
+            "snapshotSeconds",
+            "cachePopulationSeconds",
+            "cachedComparisonSeconds",
+            "totalSeconds",
+        ):
+            self.assertIsInstance(timings[phase], float, phase)
+        self.assertGreaterEqual(
+            timings["totalSeconds"], timings["cachedComparisonSeconds"]
+        )
+
+    def test_every_invocation_retains_its_complete_evidence_on_disk(self):
+        # Intent: one artifact directory per run holds identities, schedule, raw
+        #   blocks, the frozen rule, the decision, and the timings.
+        # Why it exists: I5 removes durable benchmark history, so the per-run
+        #   artifact is the only place a decision's evidence survives; a missing
+        #   field there cannot be recovered later.
+        # Scenario: a completed quick comparison writes its run record.
+        with tempfile.TemporaryDirectory() as directory:
+            result = self._run(
+                artifacts_root=pathlib.Path(directory) / "artifacts",
+                cache_root=pathlib.Path(directory) / "cache",
+                difference_percent=9.0,
+            )
+            record = json.loads(
+                pathlib.Path(result["artifacts"], "run.json").read_text()
+            )
+
+        self.assertEqual(record["baseline"]["tree"], self.baseline["tree"])
+        self.assertEqual(record["candidate"]["paths"], self.candidate["paths"])
+        self.assertEqual(record["mode"], "quick")
+        self.assertTrue(record["schedule"]["content-churn"])
+        self.assertTrue(
+            record["summary"]["workloads"]["content-churn"]["rawBlocks"]
+        )
+        self.assertEqual(
+            record["summary"]["workloads"]["content-churn"]["decision"]["decision"],
+            "slower",
+        )
+        self.assertEqual(
+            record["decisionRule"], COMPARE.decision_rule("quick")
+        )
+        self.assertIn("totalSeconds", record["timings"])
+
+    def test_an_invalid_block_stops_the_run_without_a_replacement_attempt(self):
+        # Intent: an invalid workload ends the invocation with no decision and no
+        #   second collection of anything.
+        # Why it exists: I8 forbids replacement blocks and partial continuation;
+        #   a retry loop would quietly convert an invalid run into a valid-looking
+        #   one and reintroduce the selective-rerun path.
+        # Scenario: the only scheduled workload reports an occluded window.
+        with tempfile.TemporaryDirectory() as directory:
+            result = self._run(
+                artifacts_root=pathlib.Path(directory) / "artifacts",
+                cache_root=pathlib.Path(directory) / "cache",
+                reasons_by_workload={"content-churn": ["block-2-window-occluded"]},
+            )
+            record = json.loads(
+                pathlib.Path(result["artifacts"], "run.json").read_text()
+            )
+
+        self.assertFalse(result["summary"]["decisionEligible"])
+        self.assertEqual(self.collector_calls, ["content-churn"])
+        self.assertEqual(
+            record["summary"]["invalidationReasons"],
+            ["content-churn:block-2-window-occluded"],
+        )
+        self.assertTrue(
+            record["summary"]["workloads"]["content-churn"]["rawBlocks"]
+        )
+
+    def test_confirm_collects_all_five_workloads_in_one_invocation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = self._run(
+                artifacts_root=pathlib.Path(directory) / "artifacts",
+                cache_root=pathlib.Path(directory) / "cache",
+                mode="confirm",
+                workload=None,
+            )
+
+        self.assertEqual(
+            sorted(self.collector_calls), sorted(VALIDATION.WORKLOADS)
+        )
+        self.assertTrue(result["summary"]["decisionEligible"])
+
+    def test_a_candidate_identical_to_its_baseline_is_refused(self):
+        # Intent: a comparison whose two sides resolve to the same tree stops
+        #   instead of measuring one build against itself.
+        # Why it exists: both arms key the same cache entry, so every block would
+        #   run the identical binary and the command would answer "equivalent"
+        #   with full confidence for a change it never contained -- the most
+        #   convincing wrong answer this runner can produce.
+        # Scenario: an operator passes baseline=HEAD with a clean working tree.
+        self.candidate = {**self.candidate, "tree": self.baseline["tree"], "paths": []}
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(ValueError) as raised:
+                self._run(
+                    artifacts_root=pathlib.Path(directory) / "artifacts",
+                    cache_root=pathlib.Path(directory) / "cache",
+                )
+
+        self.assertIn("nothing to compare", str(raised.exception))
+        self.assertNotIn("materialize", [kind for kind, _ in self.events])
+
+    def test_the_baseline_revision_is_resolved_once_for_the_whole_invocation(self):
+        # Intent: a confirm run resolves its baseline a single time.
+        # Why it exists: I1 requires every workload in one invocation to compare
+        #   the same immutable pair; re-resolving mid-run would let a concurrent
+        #   branch move redefine what "baseline" meant partway through.
+        # Scenario: a five-workload confirm run counts baseline resolutions.
+        resolutions = []
+        original = self.baseline
+
+        def resolve(root, revision):
+            resolutions.append(revision)
+            return original
+
+        with tempfile.TemporaryDirectory() as directory:
+            clock = iter(range(0, 200))
+
+            def make_collectors(schedule, attempt_directory, *, arm_roots, **kwargs):
+                return {
+                    name: (
+                        lambda blocks, name=name: workload_evidence(
+                            name, blocks,
+                            constant_pair_values(name, blocks, 0.0),
+                        )
+                    )
+                    for name in schedule
+                }, lambda: None
+
+            COMPARE.run_comparison(
+                mode="confirm",
+                baseline_revision="v1.2.3",
+                workload=None,
+                repository_root=ROOT,
+                cache_root=pathlib.Path(directory) / "cache",
+                artifacts_root=pathlib.Path(directory) / "artifacts",
+                resolve_baseline=resolve,
+                snapshot_candidate=lambda root: self.candidate,
+                materialize=self._materialize,
+                make_collectors=make_collectors,
+                emit=lambda text: None,
+                monotonic=lambda: float(next(clock)),
+            )
+
+        self.assertEqual(resolutions, ["v1.2.3"])
+
+
+class FeedPrebuildContractTests(unittest.TestCase):
+    def test_the_cache_prebuilds_the_package_the_feed_workload_runs(self):
+        # Intent: the arm cache compiles the terminal-feed benchmark product with
+        #   exactly the package, configuration, and build path `swift run` will
+        #   look in when the workload executes.
+        # Why it exists: terminal-feed measures a separate package through
+        #   `swift run`, which uses SwiftPM's default build path. If the prebuild
+        #   diverges, every "cache hit" silently compiles inside the timed phase
+        #   and the 60-second quick budget measures a build.
+        # Scenario: the cache's prebuild is compared against the feed runner.
+        runner_source = inspect.getsource(VALIDATION.make_terminal_feed_runner)
+        build_source = inspect.getsource(COMPARE.SNAPSHOT.build_arm)
+
+        self.assertIn('"lib" / "TerminalCore"', runner_source)
+        self.assertEqual(COMPARE.SNAPSHOT.TERMINAL_FEED_PACKAGE, "lib/TerminalCore")
+        self.assertIn(COMPARE.SNAPSHOT.TERMINAL_FEED_PRODUCT, runner_source)
+        self.assertIn("TERMINAL_FEED_PRODUCT", build_source)
+        self.assertIn("TERMINAL_FEED_PACKAGE", build_source)
+        # `swift run` resolves the default build path, so the prebuild must not
+        # redirect this package's products with --build-path.
+        self.assertNotIn("--build-path", runner_source)
+        feed_build = build_source.split("TERMINAL_FEED_PACKAGE")[1].split("]")[0]
+        self.assertNotIn("--build-path", feed_build)
+        self.assertIn(COMPARE.SNAPSHOT.CONFIGURATION, runner_source)
+
+
+class CommandLineTests(unittest.TestCase):
+    def test_a_mistyped_workload_selection_reports_a_usage_error(self):
+        # Intent: naming no workload for quick, or one for confirm, exits with a
+        #   usage error instead of a traceback -- and without starting a run.
+        # Why it exists: selection is the one failure an operator reaches by
+        #   typing, and a traceback here would read as a broken command rather
+        #   than a fixable invocation.
+        # Scenario: `benchmark-quick` is run without workload=.
+        errors = io.StringIO()
+
+        status = COMPARE.main(
+            ["quick", "--baseline", "HEAD~1"], stderr=errors
+        )
+
+        self.assertEqual(status, 2)
+        self.assertIn("quick requires workload=", errors.getvalue())
+
+    def test_confirm_rejects_a_workload_argument_as_a_usage_error(self):
+        errors = io.StringIO()
+
+        status = COMPARE.main(
+            ["confirm", "--baseline", "HEAD~1", "--workload", "style-churn"],
+            stderr=errors,
+        )
+
+        self.assertEqual(status, 2)
+        self.assertIn("complete five-workload ladder", errors.getvalue())
+
+
+if __name__ == "__main__":
+    unittest.main()
