@@ -23,8 +23,10 @@ public func clipFramePlan(
         rows: plan.rows,
         defaultBackground: plan.defaultBackground,
         selectionBackground: plan.selectionBackground,
+        searchMatchBackground: plan.searchMatchBackground,
         backgroundRuns: plan.backgroundRuns.filter { rows.contains($0.row) },
         selectionRuns: plan.selectionRuns.filter { rows.contains($0.row) },
+        searchMatchRuns: plan.searchMatchRuns.filter { rows.contains($0.row) },
         textRuns: plan.textRuns.filter { rows.contains($0.row) },
         decorationRuns: plan.decorationRuns.filter { rows.contains($0.row) },
         cursor: plan.cursor.flatMap { rows.contains($0.row) ? $0 : nil }
@@ -86,8 +88,15 @@ private struct FramePlanner {
             rows: geometry.rows.count,
             defaultBackground: presentation.theme.defaultBackground,
             selectionBackground: presentation.theme.selectionBackground,
+            searchMatchBackground: presentation.theme.searchMatchBackground,
             backgroundRuns: backgroundRuns(cells),
-            selectionRuns: selectionRuns(
+            selectionRuns: highlightRuns(
+                for: terminal.selectionRange,
+                columns: geometry.columns,
+                rows: geometry.rows.count
+            ),
+            searchMatchRuns: highlightRuns(
+                for: terminal.activeSearchMatchRange,
                 columns: geometry.columns,
                 rows: geometry.rows.count
             ),
@@ -105,8 +114,17 @@ private struct FramePlanner {
         )
     }
 
-    private func selectionRuns(columns: Int, rows: Int) -> [RenderSelectionRun] {
-        guard let selection = terminal.selectionRange,
+    /// Clips one half-open stream range to the viewport as row-major overlay runs.
+    ///
+    /// Shared by the selection and search-match channels: both are stream-coordinate
+    /// bands over the same projection, and drawing them from one clip is what keeps a
+    /// match from landing a row off the selection covering the same text.
+    private func highlightRuns(
+        for range: TerminalTextRange?,
+        columns: Int,
+        rows: Int
+    ) -> [RenderSelectionRun] {
+        guard let selection = range,
               selection.start != selection.end,
               columns > 0,
               rows > 0

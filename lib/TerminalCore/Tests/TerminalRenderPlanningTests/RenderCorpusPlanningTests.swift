@@ -164,7 +164,8 @@ struct RenderCorpusPlanningTests {
               retained.columns == clipped.columns,
               retained.rows == clipped.rows,
               retained.defaultBackground == clipped.defaultBackground,
-              retained.selectionBackground == clipped.selectionBackground
+              retained.selectionBackground == clipped.selectionBackground,
+              retained.searchMatchBackground == clipped.searchMatchBackground
         else {
             return clipped
         }
@@ -174,6 +175,7 @@ struct RenderCorpusPlanningTests {
             rows: retained.rows,
             defaultBackground: retained.defaultBackground,
             selectionBackground: retained.selectionBackground,
+            searchMatchBackground: retained.searchMatchBackground,
             backgroundRuns: (0..<retained.rows).flatMap { row in
                 rows.contains(row)
                     ? clipped.backgroundRuns.filter { $0.row == row }
@@ -183,6 +185,11 @@ struct RenderCorpusPlanningTests {
                 rows.contains(row)
                     ? clipped.selectionRuns.filter { $0.row == row }
                     : retained.selectionRuns.filter { $0.row == row }
+            },
+            searchMatchRuns: (0..<retained.rows).flatMap { row in
+                rows.contains(row)
+                    ? clipped.searchMatchRuns.filter { $0.row == row }
+                    : retained.searchMatchRuns.filter { $0.row == row }
             },
             textRuns: (0..<retained.rows).flatMap { row in
                 rows.contains(row)

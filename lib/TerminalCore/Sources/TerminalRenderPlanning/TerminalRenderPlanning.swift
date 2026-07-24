@@ -37,6 +37,11 @@ public struct RenderTheme: Equatable, Sendable {
     /// Background overlay used to distinguish the current local selection.
     public let selectionBackground: RenderColor
 
+    /// Background overlay for the active find match. Deliberately unlike
+    /// `selectionBackground`: the two can cover the same cells, and the whole point of
+    /// the match highlight is to be findable among selected text.
+    public let searchMatchBackground: RenderColor
+
     /// Filled-block cursor color applied before run coalescing.
     public let cursor: RenderColor
 
@@ -66,6 +71,7 @@ public struct RenderTheme: Equatable, Sendable {
         defaultForeground: RenderColor(red: 229, green: 229, blue: 229),
         defaultBackground: RenderColor(red: 0, green: 0, blue: 0),
         selectionBackground: RenderColor(red: 56, green: 88, blue: 140),
+        searchMatchBackground: RenderColor(red: 175, green: 128, blue: 20),
         cursor: RenderColor(red: 229, green: 229, blue: 229),
         cursorText: RenderColor(red: 0, green: 0, blue: 0)
     )
@@ -75,6 +81,7 @@ public struct RenderTheme: Equatable, Sendable {
         defaultForeground: RenderColor,
         defaultBackground: RenderColor,
         selectionBackground: RenderColor,
+        searchMatchBackground: RenderColor,
         cursor: RenderColor,
         cursorText: RenderColor
     ) {
@@ -82,6 +89,7 @@ public struct RenderTheme: Equatable, Sendable {
         self.defaultForeground = defaultForeground
         self.defaultBackground = defaultBackground
         self.selectionBackground = selectionBackground
+        self.searchMatchBackground = searchMatchBackground
         self.cursor = cursor
         self.cursorText = cursorText
     }
@@ -126,11 +134,18 @@ public struct RenderFramePlan: Equatable, Sendable {
     /// Concrete color used for every local-selection overlay span.
     public let selectionBackground: RenderColor
 
+    /// Concrete color used for the active find match's overlay spans.
+    public let searchMatchBackground: RenderColor
+
     /// Non-default background spans in canonical row-major order.
     public let backgroundRuns: [RenderBackgroundRun]
 
     /// Local-selection overlay spans in canonical row-major order.
     public let selectionRuns: [RenderSelectionRun]
+
+    /// Active-find-match overlay spans in canonical row-major order. Drawn after
+    /// `selectionRuns`, so an overlap reads as the match.
+    public let searchMatchRuns: [RenderSelectionRun]
 
     /// Glyph-bearing spans in canonical row-major order.
     public let textRuns: [RenderTextRun]
@@ -146,8 +161,10 @@ public struct RenderFramePlan: Equatable, Sendable {
         rows: Int,
         defaultBackground: RenderColor,
         selectionBackground: RenderColor,
+        searchMatchBackground: RenderColor,
         backgroundRuns: [RenderBackgroundRun],
         selectionRuns: [RenderSelectionRun],
+        searchMatchRuns: [RenderSelectionRun],
         textRuns: [RenderTextRun],
         decorationRuns: [RenderDecorationRun],
         cursor: RenderCursor?
@@ -156,8 +173,10 @@ public struct RenderFramePlan: Equatable, Sendable {
         self.rows = rows
         self.defaultBackground = defaultBackground
         self.selectionBackground = selectionBackground
+        self.searchMatchBackground = searchMatchBackground
         self.backgroundRuns = backgroundRuns
         self.selectionRuns = selectionRuns
+        self.searchMatchRuns = searchMatchRuns
         self.textRuns = textRuns
         self.decorationRuns = decorationRuns
         self.cursor = cursor

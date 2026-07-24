@@ -211,6 +211,18 @@ public func drawRenderFrame(
         ))
     }
 
+    // After selection: where the two overlap, the match the user just navigated to is
+    // the one that has to be visible.
+    context.setFillColor(plan.searchMatchBackground.cgColor(in: colorSpace))
+    for run in plan.searchMatchRuns {
+        context.fill(CGRect(
+            x: CGFloat(run.startColumn) * metrics.cellSize.width,
+            y: CGFloat(run.row) * metrics.cellSize.height,
+            width: CGFloat(run.columnCount) * metrics.cellSize.width,
+            height: metrics.cellSize.height
+        ))
+    }
+
     context.drawTextRuns(
         plan.textRuns,
         metrics: metrics,

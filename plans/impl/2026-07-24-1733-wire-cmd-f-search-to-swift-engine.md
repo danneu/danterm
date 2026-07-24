@@ -226,7 +226,7 @@ Pure plumbing, same shape as the Cmd-A slice: no new core search machinery.
 
 - [x] 1. feat(engine): search-status read and search-mutation damage accounting (PO1, PO3 engine tests)
 - [x] 1b. refactor(engine): make search status a total enum and re-attach navigation after a failed needle (PO1 re-attach case)
-- [ ] 2. feat(renderer): second highlight channel for the active search match (PO2, PO2b)
+- [x] 2. feat(renderer): second highlight channel for the active search match (PO2, PO2b)
 - [ ] 3. feat(host): enqueue search begin/navigate/clear with status callback (PO3 host tests)
 - [ ] 4. feat(app): implement backend search stubs and Cmd-G/Cmd-Shift-G accelerators (PO4, PO5)
 
@@ -274,3 +274,11 @@ Pure plumbing, same shape as the Cmd-A slice: no new core search machinery.
   wedge navigation the same way. Only the nil case is tested: the eviction/damage paths
   (`Terminal.swift` scrollback trim and row-damage invalidation) drop the whole search
   state, so a stale non-nil range is defensive rather than behaviorally reachable today.
+- Commit 2: match runs reuse `RenderSelectionRun` rather than introducing a parallel run
+  type -- the struct is already a bare row band with no selection-specific field -- and
+  the selection clip loop became a shared `highlightRuns(for:columns:rows:)`. That keeps
+  the two channels clipping identically, which is the cheapest way to guarantee I4's "no
+  corruption" half. The third-highlight-kind follow-up in this plan still stands: at that
+  point the type wants renaming, not copying.
+- Commit 2: `assertCanonical` now checks match runs the way it checks selection runs, so
+  the corpus sweep covers the new layer's ordering and bounds for free.

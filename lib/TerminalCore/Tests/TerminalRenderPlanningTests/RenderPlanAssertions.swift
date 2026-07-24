@@ -54,6 +54,24 @@ func assertCanonical(
         previousSelection = run
     }
 
+    var previousMatch: RenderSelectionRun?
+    for run in plan.searchMatchRuns {
+        #expect(run.row >= 0 && run.row < plan.rows, sourceLocation: sourceLocation)
+        #expect(run.startColumn >= 0, sourceLocation: sourceLocation)
+        #expect(run.columnCount > 0, sourceLocation: sourceLocation)
+        #expect(run.startColumn + run.columnCount <= plan.columns, sourceLocation: sourceLocation)
+        if let previousMatch {
+            #expect(
+                run.row > previousMatch.row
+                    || (run.row == previousMatch.row
+                        && run.startColumn >= previousMatch.startColumn
+                            + previousMatch.columnCount),
+                sourceLocation: sourceLocation
+            )
+        }
+        previousMatch = run
+    }
+
     var previousText: RenderTextRun?
     for run in plan.textRuns {
         let width = run.cells.reduce(0) { $0 + $1.columnWidth }
