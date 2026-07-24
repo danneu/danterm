@@ -1266,7 +1266,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 resolve_pane=lambda _identity: "pane-a",
                 send_input=send_input,
                 front_app=lambda pid: self.assertEqual(pid, 101),
-                wait_for_path=lambda path: self.assertTrue(path.exists()),
+                wait_for_path=lambda path, **_options: self.assertTrue(path.exists()),
             )
 
             artifact = runner("a")
@@ -1340,7 +1340,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 workload="full-screen-style-churn",
                 output=output,
                 popen=popen,
-                wait_for_path=lambda path: self.assertTrue(path.exists()),
+                wait_for_path=lambda path, **_options: self.assertTrue(path.exists()),
             )
             identities = lifecycle.start()
             lifecycle.close()
@@ -1365,6 +1365,55 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 [[signal.SIGINT], [signal.SIGINT]],
             )
             self.assertEqual([process.waits for process in processes], [[30], [30]])
+
+    def test_arm_startup_outwaits_a_cold_build_and_aborts_on_a_dead_arm(self):
+        # Intent: waiting for an arm's identity file allows enough time for the
+        #   harness to compile, sign, launch, and converge geometry, while still
+        #   failing immediately if that arm's process dies.
+        # Why it exists: startup shared the 30s budget meant for a measured
+        #   block's draw acknowledgment. The identity file is only written after a
+        #   full release build, so a cold cache timed out at 30s and killed the
+        #   whole invocation for a reason unrelated to the code under test. A
+        #   longer budget is only safe with a liveness check, so both are pinned
+        #   here together.
+        # Scenario: `just benchmark-confirm baseline=HEAD` on 2026-07-24 died with
+        #   `TimeoutError: .../content-churn/a-identity.json` after its harness
+        #   log showed `Build complete! (31.46s)` -- 1.5 seconds over the budget.
+        observed = {}
+
+        class DeadProcess:
+            def poll(self):
+                return 1
+
+            def send_signal(self, _signal):
+                return None
+
+            def wait(self, timeout):
+                return 1
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+
+            def wait_for_path(path, timeout_seconds=30, abort_if=None):
+                observed["timeout"] = timeout_seconds
+                observed["aborted"] = abort_if is not None and abort_if()
+                raise RuntimeError(f"process exited before writing {path}")
+
+            lifecycle = VALIDATION.PersistentDrawArms(
+                {"a": root, "b": root},
+                workload="full-screen-content-churn",
+                output=root / "out",
+                popen=lambda _command, **_options: DeadProcess(),
+                wait_for_path=wait_for_path,
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "process exited"):
+                lifecycle.start()
+
+        # A cold two-package release build alone runs past a minute, so the budget
+        # has to clear that by a wide margin rather than by seconds.
+        self.assertGreaterEqual(observed["timeout"], 300)
+        self.assertTrue(observed["aborted"])
 
     def test_persistent_arm_lifecycle_rejects_wrong_identity_before_collection(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1401,7 +1450,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 workload="full-screen-content-churn",
                 output=root / "out",
                 popen=popen,
-                wait_for_path=lambda path: None,
+                wait_for_path=lambda path, **_options: None,
             )
 
             with self.assertRaisesRegex(ValueError, "wrong geometry"):

@@ -751,10 +751,21 @@ def make_scrollback_stream_runner(arm_roots):
     return run
 
 
-def _wait_for_path(path, timeout_seconds=30):
+# A measured block's acknowledgment is seconds of work, so 30s means "the app
+# stopped answering". Arm startup is a different question: the harness compiles,
+# signs, launches, and converges geometry before it writes its identity, which is
+# minutes on a cold cache. Sharing one budget silently made a cold build a
+# failure, so startup gets its own ceiling and relies on `abort_if` -- not on a
+# short timeout -- to notice an arm that died.
+PERSISTENT_STARTUP_TIMEOUT_SECONDS = 600
+
+
+def _wait_for_path(path, timeout_seconds=30, abort_if=None):
     """Bound every persistent block so a lost app acknowledgment cannot hang a trial."""
     deadline = time.monotonic() + timeout_seconds
     while not path.exists():
+        if abort_if is not None and abort_if():
+            raise RuntimeError(f"process exited before writing {path}")
         if time.monotonic() >= deadline:
             raise TimeoutError(str(path))
         time.sleep(0.02)
@@ -885,7 +896,11 @@ class PersistentDrawArms:
                 )
                 self.processes[arm] = process
                 self.logs[arm] = log
-                self.wait_for_path(identity_path)
+                self.wait_for_path(
+                    identity_path,
+                    timeout_seconds=PERSISTENT_STARTUP_TIMEOUT_SECONDS,
+                    abort_if=lambda: process.poll() is not None,
+                )
                 identity = json.loads(identity_path.read_text())
                 if process.poll() is not None:
                     raise RuntimeError(
