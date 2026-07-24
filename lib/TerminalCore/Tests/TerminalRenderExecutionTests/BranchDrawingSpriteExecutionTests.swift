@@ -25,7 +25,7 @@ struct BranchDrawingSpriteExecutionTests {
                 for: Unicode.Scalar(0xF5D0 + offset)!
             ) == .line(BranchLinePattern(rawValue: offset)!))
         }
-        let masks: [Set<BranchDirection>] = [
+        let masks: [BranchDirections] = [
             [], [.right], [.left], [.left, .right],
             [.down], [.up], [.up, .down], [.right, .down],
             [.left, .down], [.up, .right], [.up, .left],

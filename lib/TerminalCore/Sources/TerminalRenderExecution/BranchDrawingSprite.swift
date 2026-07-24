@@ -13,6 +13,12 @@ enum BranchDrawingSprite {
     /// Coarse routing span for the classifier switch; exact membership stays in `pattern(for:)`.
     static let coarseRange: ClosedRange<UInt32> = 0xF5D0...0xF60D
 
+    /// Per-node-pair connector masks in `BranchDirections` bit order
+    /// (up=1/right=2/down=4/left=8), indexed by `nodeIndex / 2`.
+    private static let nodeMasks: [UInt8] = [
+        0, 2, 8, 10, 4, 1, 5, 6, 12, 3, 9, 7, 13, 14, 11, 15,
+    ]
+
     static func pattern(for scalar: Unicode.Scalar) -> BranchDrawingPattern? {
         let value = scalar.value
         guard (0xF5D0...0xF60D).contains(value) else { return nil }
@@ -21,21 +27,9 @@ enum BranchDrawingSprite {
             return BranchLinePattern(rawValue: offset).map(BranchDrawingPattern.line)
         }
         let nodeIndex = offset - 30
-        let masks: [UInt8] = [
-            0, 2, 8, 10, 4, 1, 5, 6, 12, 3, 9, 7, 13, 14, 11, 15,
-        ]
         let pair = nodeIndex / 2
         let filled = nodeIndex.isMultiple(of: 2)
-        let mask = masks[pair]
-        let directions = Set(BranchDirection.allCases.filter { direction in
-            let bit: UInt8 = switch direction {
-            case .up: 1
-            case .right: 2
-            case .down: 4
-            case .left: 8
-            }
-            return mask & bit != 0
-        })
+        let directions = BranchDirections(rawValue: nodeMasks[pair])
         return .node(.init(directions: directions, filled: filled))
     }
 

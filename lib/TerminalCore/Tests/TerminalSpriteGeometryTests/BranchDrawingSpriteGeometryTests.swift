@@ -88,7 +88,7 @@ struct BranchDrawingSpriteGeometryTests {
     @Test("Node connectors touch requested edges and share the circle axes")
     func nodeConnectivity() throws {
         let geometry = BranchDrawingSpriteGeometry.geometry(
-            pattern: .node(.init(directions: Set(BranchDirection.allCases), filled: false)),
+            pattern: .node(.init(directions: [.up, .right, .down, .left], filled: false)),
             cellWidthPixels: 9, cellHeightPixels: 17, lightStrokePixels: 1
         )
         let node = try #require(geometry.node)
@@ -125,9 +125,7 @@ private func nodePatterns() -> [BranchDrawingPattern] {
     (0..<16).flatMap { mask in
         [true, false].map { filled in
             .node(.init(
-                directions: Set(BranchDirection.allCases.filter {
-                    mask & (1 << Int($0.rawValue)) != 0
-                }),
+                directions: BranchDirections(rawValue: UInt8(mask)),
                 filled: filled
             ))
         }

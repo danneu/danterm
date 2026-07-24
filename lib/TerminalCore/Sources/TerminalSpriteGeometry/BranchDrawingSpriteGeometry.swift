@@ -3,6 +3,33 @@
 /// Cardinal directions used by branch lines and node connectors.
 public enum BranchDirection: UInt8, CaseIterable, Equatable, Sendable {
     case up, right, down, left
+
+    /// This direction's single bit in a `BranchDirections` mask.
+    public var mask: BranchDirections {
+        switch self {
+        case .up: .up
+        case .right: .right
+        case .down: .down
+        case .left: .left
+        }
+    }
+}
+
+/// The cardinal edges carrying a connector on a Branch Drawing node, as a fixed
+/// value-type bitmask over a four-element universe. Bit convention matches the
+/// classifier's mask table (up=1/right=2/down=4/left=8); mirrors
+/// `BlockElementQuadrants` and drops the per-value `Set` allocation.
+public struct BranchDirections: OptionSet, Sendable {
+    public let rawValue: UInt8
+
+    public init(rawValue: UInt8) {
+        self.rawValue = rawValue
+    }
+
+    public static let up = Self(rawValue: 1 << 0)
+    public static let right = Self(rawValue: 1 << 1)
+    public static let down = Self(rawValue: 1 << 2)
+    public static let left = Self(rawValue: 1 << 3)
 }
 
 /// The 30 non-node branch glyphs, ordered exactly as U+F5D0...U+F5ED.
@@ -20,10 +47,10 @@ public enum BranchLinePattern: Int, CaseIterable, Equatable, Sendable {
 
 /// One of the 32 circle-node variants, with an optional connector at each edge.
 public struct BranchNodePattern: Equatable, Sendable {
-    public let directions: Set<BranchDirection>
+    public let directions: BranchDirections
     public let filled: Bool
 
-    public init(directions: Set<BranchDirection>, filled: Bool) {
+    public init(directions: BranchDirections, filled: Bool) {
         self.directions = directions
         self.filled = filled
     }
@@ -134,7 +161,7 @@ public enum BranchDrawingSpriteGeometry {
                     rects.append(.init(rect: .init(x: x0, y: y0, width: x1 - x0, height: y1 - y0)))
                 }
             }
-            for direction in BranchDirection.allCases where pattern.directions.contains(direction) {
+            for direction in BranchDirection.allCases where pattern.directions.contains(direction.mask) {
                 append(direction)
             }
             return BranchPixelGeometry(
