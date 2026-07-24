@@ -67,7 +67,7 @@ final class TerminalBenchmarkStateRecorder {
     }
 
     func observeDrawState() {
-        guard isWindowVisible() == false else { return }
+        guard isWindowPresentedLocally() == false else { return }
         record(reason: "draw-while-occluded")
     }
 
@@ -100,11 +100,24 @@ final class TerminalBenchmarkStateRecorder {
         try? data.write(to: URL(fileURLWithPath: stateResultPath), options: .atomic)
     }
 
-    private func isWindowVisible() -> Bool {
+    /// The occlusion and containment half of the visibility contract, using only in-process
+    /// AppKit state. Split out because `observeDrawState()` runs on every draw and the
+    /// WindowServer round-trip below cost ~30% of main-thread busy time in the
+    /// full-screen-content-churn profile -- more than the drawing it was policing. AppKit
+    /// keeps `occlusionState` current from the same notification that drives
+    /// `windowDidChangeOcclusionState()`, so the per-draw tripwire still fires on a real
+    /// occlusion; `record()` keeps the full check, so every sample that reaches validation
+    /// still carries the WindowServer confirmation.
+    private func isWindowPresentedLocally() -> Bool {
         guard let window, window.occlusionState.contains(.visible) else { return false }
         guard let screenVisibleFrame = window.screen?.visibleFrame,
               screenVisibleFrame.contains(window.frame)
         else { return false }
+        return true
+    }
+
+    private func isWindowVisible() -> Bool {
+        guard isWindowPresentedLocally(), let window else { return false }
         guard let windows = CGWindowListCopyWindowInfo(
             [.optionIncludingWindow],
             CGWindowID(window.windowNumber)
