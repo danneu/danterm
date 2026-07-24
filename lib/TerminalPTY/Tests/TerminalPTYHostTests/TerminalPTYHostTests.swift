@@ -979,6 +979,83 @@ struct TerminalPTYHostTests {
         await host.close()
     }
 
+    @Test("search begin, navigate, and clear publish frames and report status", .timeLimit(.minutes(1)))
+    func ownerSearchMutationsPublishAndReportStatus() async throws {
+        // Intent: each enqueued search mutation lands on the owner queue, republishes a
+        //   frame so the moved highlight redraws, and reports the resulting status.
+        // Why it exists: the highlight is planned from the owner's terminal value, so a
+        //   mutation that never publishes leaves the previous match painted on screen.
+        // Scenario: a pane holding two occurrences of a needle is searched, walked to the
+        //   older match, then cleared.
+        let host = try makeHost(captureTransitions: false)
+        // Octal-escaped so the needle never appears in the echoed command line itself.
+        let command = "printf '\\150it\\nmiss\\n\\150it\\n'; exec \(try probeExecutable()) hold \"$0\""
+        await host.start(makeLaunchInput(command: command))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let statuses = AsyncStream<TerminalSearchStatus?>.makeStream()
+        var iterator = statuses.stream.makeAsyncIterator()
+        let report: @Sendable (TerminalSearchStatus?) -> Void = { statuses.continuation.yield($0) }
+        let baseline = (await host.resourceSnapshot()).emittedUpdateSignalCount
+
+        host.beginSearch("hit", onStatus: report)
+        #expect(try #require(await iterator.next()) == .matched(selected: 0, total: 2))
+        let afterBegin = (await host.resourceSnapshot()).emittedUpdateSignalCount
+        #expect(afterBegin == baseline + 1)
+        #expect(host.fencedSnapshot().activeSearchMatchRange != nil)
+
+        host.searchNext(onStatus: report)
+        #expect(try #require(await iterator.next()) == .matched(selected: 1, total: 2))
+        let afterNext = (await host.resourceSnapshot()).emittedUpdateSignalCount
+        #expect(afterNext == afterBegin + 1)
+
+        host.searchPrevious(onStatus: report)
+        #expect(try #require(await iterator.next()) == .matched(selected: 0, total: 2))
+        let afterPrevious = (await host.resourceSnapshot()).emittedUpdateSignalCount
+        #expect(afterPrevious == afterNext + 1)
+
+        host.clearSearch(onStatus: report)
+        #expect(await iterator.next() == .some(nil))
+        #expect((await host.resourceSnapshot()).emittedUpdateSignalCount == afterPrevious + 1)
+        #expect(host.fencedSnapshot().activeSearchMatchRange == nil)
+        await host.close()
+    }
+
+    @Test("search mutations that change nothing still report status", .timeLimit(.minutes(1)))
+    func ownerUnchangingSearchMutationsStillReportStatus() async throws {
+        // Intent: a repeated failed needle and a navigate at the end of the match list
+        //   report status even though the terminal value is untouched.
+        // Why it exists: the status report sits above the `terminal != previousTerminal`
+        //   early return. Below it, the overlay's counter would silently stop updating
+        //   exactly when the user needs to be told the search found nothing / cannot move.
+        // Scenario: typing a needle with no matches, then re-typing it; and pressing
+        //   Cmd-G on the only match.
+        let host = try makeHost(captureTransitions: false)
+        // Octal-escaped so the needle never appears in the echoed command line itself.
+        let command = "printf '\\150it\\n'; exec \(try probeExecutable()) hold \"$0\""
+        await host.start(makeLaunchInput(command: command))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let statuses = AsyncStream<TerminalSearchStatus?>.makeStream()
+        var iterator = statuses.stream.makeAsyncIterator()
+        let report: @Sendable (TerminalSearchStatus?) -> Void = { statuses.continuation.yield($0) }
+
+        host.beginSearch("zzz", onStatus: report)
+        #expect(try #require(await iterator.next()) == .empty)
+        let afterFirstMiss = (await host.resourceSnapshot()).emittedUpdateSignalCount
+
+        host.beginSearch("zzz", onStatus: report)
+        #expect(try #require(await iterator.next()) == .empty)
+        #expect((await host.resourceSnapshot()).emittedUpdateSignalCount == afterFirstMiss)
+
+        host.beginSearch("hit", onStatus: report)
+        #expect(try #require(await iterator.next()) == .matched(selected: 0, total: 1))
+        let afterHit = (await host.resourceSnapshot()).emittedUpdateSignalCount
+
+        host.searchNext(onStatus: report)
+        #expect(try #require(await iterator.next()) == .matched(selected: 0, total: 1))
+        #expect((await host.resourceSnapshot()).emittedUpdateSignalCount == afterHit)
+        await host.close()
+    }
+
     @Test("cancelled result and output waits resume promptly without teardown", .timeLimit(.minutes(1)))
     func cancelledWaitsResumePromptly() async throws {
         // Intent: cancelling a task suspended in waitForResult/waitForOutput

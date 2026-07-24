@@ -287,6 +287,46 @@ public actor TerminalPTYHost {
         }
     }
 
+    /// Enqueues a new search needle and reports the status the owner ends up in.
+    nonisolated public func beginSearch(
+        _ query: String,
+        onStatus: @escaping @Sendable (TerminalSearchStatus?) -> Void = { _ in }
+    ) {
+        enqueueSearch(.begin(query), onStatus: onStatus)
+    }
+
+    /// Enqueues a step to the next-older match on the same FIFO as output.
+    nonisolated public func searchNext(
+        onStatus: @escaping @Sendable (TerminalSearchStatus?) -> Void = { _ in }
+    ) {
+        enqueueSearch(.next, onStatus: onStatus)
+    }
+
+    /// Enqueues a step to the next-newer match on the same FIFO as output.
+    nonisolated public func searchPrevious(
+        onStatus: @escaping @Sendable (TerminalSearchStatus?) -> Void = { _ in }
+    ) {
+        enqueueSearch(.previous, onStatus: onStatus)
+    }
+
+    /// Enqueues dropping the search, which also removes the active-match highlight.
+    nonisolated public func clearSearch(
+        onStatus: @escaping @Sendable (TerminalSearchStatus?) -> Void = { _ in }
+    ) {
+        enqueueSearch(.clear, onStatus: onStatus)
+    }
+
+    nonisolated private func enqueueSearch(
+        _ mutation: SearchMutation,
+        onStatus: @escaping @Sendable (TerminalSearchStatus?) -> Void
+    ) {
+        queue.async { [weak self] in
+            self?.assumeIsolated { owner in
+                owner.applySearch(mutation, onStatus: onStatus)
+            }
+        }
+    }
+
     /// Enqueues normalized fractional wheel input for atomic route and mode selection.
     nonisolated public func sendWheel(_ event: TerminalWheelEvent) {
         queue.async { [weak self] in
@@ -629,6 +669,35 @@ public actor TerminalPTYHost {
         guard teardownFinished == false else { return }
         let previousTerminal = terminal
         terminal.clearSelection()
+        guard terminal != previousTerminal else { return }
+        markUpdatePending()
+        publishPendingUpdate()
+    }
+
+    /// The four search mutations, as one Sendable value so the enqueue can cross the queue.
+    private enum SearchMutation: Sendable {
+        case begin(String)
+        case next
+        case previous
+        case clear
+    }
+
+    private func applySearch(
+        _ mutation: SearchMutation,
+        onStatus: @Sendable (TerminalSearchStatus?) -> Void
+    ) {
+        guard teardownFinished == false else { return }
+        let previousTerminal = terminal
+        switch mutation {
+        case .begin(let query): _ = terminal.beginSearch(query)
+        case .next: _ = terminal.searchNext()
+        case .previous: _ = terminal.searchPrevious()
+        case .clear: terminal.clearSearch()
+        }
+        // Above the change guard on purpose: a repeated failed needle and a navigate at
+        // either end mutate nothing, and those are exactly the moments the overlay's
+        // counter has to be told where the search stands.
+        onStatus(terminal.searchStatus)
         guard terminal != previousTerminal else { return }
         markUpdatePending()
         publishPendingUpdate()

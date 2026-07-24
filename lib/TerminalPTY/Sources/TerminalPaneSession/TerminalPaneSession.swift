@@ -85,6 +85,10 @@ public final class TerminalPaneSessionController {
     /// Receives a click-time-revalidated HTTP(S) target on the main actor.
     public var onOpenLink: ((TerminalHyperlink) -> Void)?
 
+    /// Receives the owner's search status after every begin/navigate/clear, including the
+    /// ones that mutate nothing -- the find overlay's counter is driven entirely from here.
+    public var onSearchStatus: ((TerminalSearchStatus?) -> Void)?
+
     /// Releases the backend registry entry only after this host's native teardown completes.
     public var onTeardownCompleted: (@MainActor @Sendable () -> Void)?
 
@@ -347,6 +351,39 @@ public final class TerminalPaneSessionController {
         host.selectAll()
     }
 
+    /// Enqueues a new search needle on the sole terminal owner.
+    public func beginSearch(_ query: String) {
+        guard isTornDown == false else { return }
+        host.beginSearch(query, onStatus: searchStatusRelay())
+    }
+
+    /// Enqueues a step to the next-older match on the sole terminal owner.
+    public func searchNext() {
+        guard isTornDown == false else { return }
+        host.searchNext(onStatus: searchStatusRelay())
+    }
+
+    /// Enqueues a step to the next-newer match on the sole terminal owner.
+    public func searchPrevious() {
+        guard isTornDown == false else { return }
+        host.searchPrevious(onStatus: searchStatusRelay())
+    }
+
+    /// Enqueues dropping the search, which also removes the active-match highlight.
+    public func clearSearch() {
+        guard isTornDown == false else { return }
+        host.clearSearch(onStatus: searchStatusRelay())
+    }
+
+    private func searchStatusRelay() -> @Sendable (TerminalSearchStatus?) -> Void {
+        { [weak self] status in
+            Task { @MainActor [weak self] in
+                guard let self, self.isTornDown == false else { return }
+                self.onSearchStatus?(status)
+            }
+        }
+    }
+
     /// Returns primary-screen history for persistence consumers that exclude transient screens.
     public func readPrimaryHistoryText() -> String {
         cachedTerminal.primaryHistoryText
@@ -424,6 +461,7 @@ public final class TerminalPaneSessionController {
         onPrimaryHistoryMutation = nil
         onPaneMenu = nil
         onOpenLink = nil
+        onSearchStatus = nil
         let onTeardownCompleted = takeTeardownCompletion()
         consumeTask?.cancel()
         consumeTask = nil

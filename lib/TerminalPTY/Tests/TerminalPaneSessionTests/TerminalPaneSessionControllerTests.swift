@@ -1189,6 +1189,34 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
+    @Test("controller search enqueues report status on the main actor", .timeLimit(.minutes(1)))
+    func controllerSearchReportsStatus() async throws {
+        // Intent: the controller's search wrappers reach the owner and hop the owner's
+        //   status report back onto the main actor for the find overlay.
+        // Why it exists: the status callback fires on the host queue; delivering it
+        //   without the hop would touch main-actor view state off the main actor.
+        let host = try makeHost()
+        // Octal-escaped so the needle never appears in the echoed command line itself.
+        let command = "printf '\\150it\\n'; exec \(try probeExecutable()) hold \"$0\""
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: command)
+        )
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let statuses = AsyncStream<TerminalSearchStatus?>.makeStream()
+        var iterator = statuses.stream.makeAsyncIterator()
+        controller.onSearchStatus = { statuses.continuation.yield($0) }
+
+        controller.beginSearch("hit")
+        #expect(try #require(await iterator.next()) == .matched(selected: 0, total: 1))
+
+        controller.clearSearch()
+        #expect(await iterator.next() == .some(nil))
+
+        controller.tearDown()
+        await host.close()
+    }
+
     @Test("captured controller navigation and semantic input replay exactly", .timeLimit(.minutes(1)))
     func controllerNavigationCaptureEquality() async throws {
         // Intent: preserve owner-ordered viewport and normalized input events through capture.

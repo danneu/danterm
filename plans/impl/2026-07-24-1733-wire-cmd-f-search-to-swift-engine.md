@@ -227,7 +227,7 @@ Pure plumbing, same shape as the Cmd-A slice: no new core search machinery.
 - [x] 1. feat(engine): search-status read and search-mutation damage accounting (PO1, PO3 engine tests)
 - [x] 1b. refactor(engine): make search status a total enum and re-attach navigation after a failed needle (PO1 re-attach case)
 - [x] 2. feat(renderer): second highlight channel for the active search match (PO2, PO2b)
-- [ ] 3. feat(host): enqueue search begin/navigate/clear with status callback (PO3 host tests)
+- [x] 3. feat(host): enqueue search begin/navigate/clear with status callback (PO3 host tests)
 - [ ] 4. feat(app): implement backend search stubs and Cmd-G/Cmd-Shift-G accelerators (PO4, PO5)
 
 ## Implementation notes
@@ -282,3 +282,15 @@ Pure plumbing, same shape as the Cmd-A slice: no new core search machinery.
   point the type wants renaming, not copying.
 - Commit 2: `assertCanonical` now checks match runs the way it checks selection runs, so
   the corpus sweep covers the new layer's ordering and bounds for free.
+- Commit 3: the four enqueues share one `applySearch(_:onStatus:)` taking a private
+  `SearchMutation` enum rather than each getting its own `apply*` like
+  `clearSelection`/`selectAll`. The bodies would otherwise be four copies of the same
+  snapshot/mutate/report/publish sequence, and the enum keeps the value crossing
+  `queue.async` Sendable without a `@Sendable` mutation closure.
+- Commit 3: added one `TerminalPaneSessionController` test beyond PO3's host-level
+  obligation. The controller wrappers are not bare passthroughs like `clearSelection` --
+  they add the `onSearchStatus` relay and its MainActor hop -- so the hop is real new
+  machinery worth pinning.
+- Commit 3: the host test needles are printed with an octal escape (`\150it`) because the
+  login shell echoes the launch command line into the same scrollback the engine searches,
+  so a literal needle in the command inflates the match count.
