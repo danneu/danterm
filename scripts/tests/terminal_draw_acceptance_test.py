@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Behavioral tests for localized real-draw benchmark calibration and reporting."""
+"""Behavioral tests for localized real-draw microbenchmark calibration and reporting."""
 import importlib.util
-import json
+import io
 import pathlib
 import sys
-import tempfile
 import unittest
 from unittest import mock
 
@@ -64,146 +63,53 @@ class TerminalDrawAcceptanceTests(unittest.TestCase):
                 expected_updates=3,
             )
 
-    def test_redraw_arguments_select_all_or_one_workload_and_save_policy(self):
+    def test_arguments_accept_positional_and_named_batch_and_floor_spellings(self):
+        self.assertEqual(ACCEPTANCE.parse_arguments(["15", "400"]), (15, 400))
         self.assertEqual(
-            ACCEPTANCE.parse_arguments([
-                "workload=full-screen-style-churn",
-                "save=1",
-                "comment=baseline",
-            ])[:3],
-            ("full-screen-style-churn", True, "baseline"),
+            ACCEPTANCE.parse_arguments(["batches=20", "target_ms=125"]),
+            (20, 125),
         )
-        self.assertEqual(
-            ACCEPTANCE.parse_arguments(["save=0"])[:3],
-            (None, False, None),
-        )
-        self.assertEqual(
-            ACCEPTANCE.parse_arguments(["15", "400"])[3:],
-            (15, 400, False),
-        )
-        self.assertIsNone(
-            ACCEPTANCE.parse_arguments(["redraw=1"])[4],
-        )
-        self.assertTrue(
-            ACCEPTANCE.parse_arguments(["redraw=1"])[5],
-        )
-        self.assertEqual(
-            ACCEPTANCE.parse_arguments([
-                "workload=full-screen-symbol-churn",
-                "save=0",
-            ])[:2],
-            ("full-screen-symbol-churn", False),
-        )
-        self.assertEqual(
-            ACCEPTANCE.REDRAW_IDENTITIES["full-screen-symbol-churn"],
-            "full-screen-symbol-churn-v1-btop-symbol-mix-80x24",
-        )
-        self.assertEqual(
-            ACCEPTANCE.REDRAW_IDENTITIES["full-screen-sprite-coverage-churn"],
-            "full-screen-sprite-coverage-churn-v1-curated-candidates-80x24",
-        )
+        self.assertEqual(ACCEPTANCE.parse_arguments([]), (15, None))
+        with self.assertRaisesRegex(ValueError, "batches must be >=2"):
+            ACCEPTANCE.parse_arguments(["1"])
 
-    def test_latest_committed_requires_every_redraw_compatibility_field(self):
-        current = {
-            field: field for field in ACCEPTANCE.REDRAW_COMPATIBILITY_FIELDS
+    def test_history_and_save_arguments_are_no_longer_accepted(self):
+        # Intent: the surviving microbenchmark rejects every argument that used to
+        #   route a result into durable redraw history.
+        # Why it exists: pins I5 at the operator's fingertips -- a stale
+        #   `workload=`/`save=`/`comment=`/`redraw=1` invocation must fail loudly
+        #   rather than silently degrade into an unrecorded diagnostic run.
+        for argument in (
+            "redraw=1",
+            "workload=full-screen-content-churn",
+            "save=1",
+            "comment=baseline",
+        ):
+            with self.assertRaisesRegex(ValueError, "unknown argument"):
+                ACCEPTANCE.parse_arguments([argument])
+
+    def test_report_is_diagnostic_only_and_writes_no_history(self):
+        # Intent: a completed microbenchmark run prints one self-describing
+        #   diagnostic report and touches no durable file.
+        # Why it exists: guards I5 at the module boundary -- the module keeps no
+        #   history path and no staging promotion, so there is nothing a future
+        #   caller could re-point at a committed JSONL.
+        batch = {
+            "cumulativeDrawNanoseconds": 500_000_000,
+            "drawCount": 10,
+            "dirtyRowCounts": [1] * 10,
         }
-        compatible = {**current, "commit": "compatible", "summary": {}}
-        incompatible = {**compatible, "displayScale": "different", "commit": "wrong"}
-        completed = mock.Mock(
-            returncode=0,
-            stdout="\n".join((json.dumps(compatible), json.dumps(incompatible))),
-        )
+        stdout = io.StringIO()
 
-        with mock.patch.object(ACCEPTANCE.subprocess, "run", return_value=completed):
-            self.assertEqual(ACCEPTANCE.latest_committed(current)["commit"], "compatible")
+        with mock.patch.object(sys, "argv", ["draw", "2"]), mock.patch.object(
+            ACCEPTANCE, "run_batch", side_effect=(batch, batch, batch)
+        ), mock.patch.object(sys, "stdout", stdout):
+            ACCEPTANCE.main()
 
-    def test_duration_floor_does_not_split_normalized_redraw_history(self):
-        self.assertNotIn(
-            "targetBatchNanoseconds",
-            ACCEPTANCE.REDRAW_COMPATIBILITY_FIELDS,
-        )
-
-    def test_fast_ordinary_workloads_use_a_shorter_default_duration_floor(self):
-        self.assertEqual(
-            ACCEPTANCE.target_milliseconds_for(
-                "full-screen-content-churn",
-                requested=None,
-            ),
-            50,
-        )
-        self.assertEqual(
-            ACCEPTANCE.target_milliseconds_for(
-                "full-screen-style-churn",
-                requested=None,
-            ),
-            50,
-        )
-        self.assertEqual(
-            ACCEPTANCE.target_milliseconds_for(
-                "full-screen-mixed-churn",
-                requested=None,
-            ),
-            50,
-        )
-        self.assertEqual(
-            ACCEPTANCE.target_milliseconds_for(
-                "full-screen-symbol-churn",
-                requested=None,
-            ),
-            400,
-        )
-        self.assertEqual(
-            ACCEPTANCE.target_milliseconds_for(
-                "full-screen-content-churn",
-                requested=125,
-            ),
-            125,
-        )
-
-    def test_serialized_results_are_stable_exact_staged_bytes(self):
-        result = {"workload": "full-screen-mixed-churn", "summary": {"median": 12}}
-        serialized = ACCEPTANCE.serialize_result(result)
-
-        with tempfile.TemporaryDirectory() as directory:
-            path = pathlib.Path(directory) / "staged.jsonl"
-            path.write_text(serialized, encoding="utf-8")
-            self.assertEqual(path.read_bytes(), serialized.encode())
-
-    def test_redraw_rejects_a_measured_batch_below_the_duration_floor(self):
-        warmup = {
-            "cumulativeDrawNanoseconds": 100,
-            "drawCount": 1,
-            "dirtyRowCounts": [24],
-        }
-        short = {
-            "cumulativeDrawNanoseconds": 399_999_999,
-            "drawCount": 5_000_000,
-            "dirtyRowCounts": [24],
-        }
-
-        with mock.patch.object(ACCEPTANCE, "run_batch", side_effect=(warmup, short)):
-            with self.assertRaisesRegex(SystemExit, "fell below draw-work duration floor"):
-                ACCEPTANCE.run_redraw("full-screen-content-churn", 2, 400)
-
-    def test_saved_history_uses_the_exact_completed_staged_bytes(self):
-        result = {"workload": "full-screen-content-churn", "summary": {}}
-        with tempfile.TemporaryDirectory() as directory:
-            root = pathlib.Path(directory)
-            staging = root / "staging"
-            history = root / "history.jsonl"
-            with mock.patch.object(sys, "argv", ["suite", "save=1"]), mock.patch.object(
-                ACCEPTANCE, "STAGING_ROOT", staging
-            ), mock.patch.object(ACCEPTANCE, "HISTORY_PATH", history), mock.patch.object(
-                ACCEPTANCE, "REDRAW_WORKLOADS", ("full-screen-content-churn",)
-            ), mock.patch.object(
-                ACCEPTANCE, "run_redraw", return_value=result
-            ), mock.patch.object(
-                ACCEPTANCE, "latest_committed", return_value=None
-            ):
-                ACCEPTANCE.main()
-
-            staged = next(staging.glob("*.jsonl"))
-            self.assertEqual(history.read_bytes(), staged.read_bytes())
+        self.assertIn('"historyEligible": false', stdout.getvalue())
+        self.assertIn('"decisionEligible": false', stdout.getvalue())
+        self.assertFalse(hasattr(ACCEPTANCE, "HISTORY_PATH"))
+        self.assertFalse(hasattr(ACCEPTANCE, "latest_committed"))
 
 
 if __name__ == "__main__":

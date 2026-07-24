@@ -85,11 +85,11 @@ component, compatibility, and quality gates in the roadmap.
 The engine began with intentionally straightforward implementations. This
 index records the places where profiling justified additional complexity so a
 future reader can distinguish deliberate performance machinery from incidental
-cleverness. Percentages are approximate reductions in median duration on the
-committed 80x24 benchmark records. Each percentage is incremental: it compares
-that change with the best compatible result recorded before it, not with the
-original naive baseline. They are evidence for orientation, not permanent
-performance guarantees.
+cleverness. Percentages are approximate reductions in median duration measured
+when each change landed, relative to the code immediately before it rather than
+to the original naive baseline. They are historical orientation, not
+reproducible measurements or permanent performance guarantees; a current claim
+comes from `just benchmark-quick` / `just benchmark-confirm`.
 
 - **[Bounded damage bitset](../plans/impl/2026-07-22-1736-terminal-core-feed-throughput-recovery.md)
   -- about 20% faster core feed.** A reusable viewport-

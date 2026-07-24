@@ -30,7 +30,6 @@ PROFILE_ROOT="$REPO_ROOT/.build/terminal-benchmark-profiles/$(date +%Y-%m-%d-%H%
 IDENTITY_PATH="$PROFILE_ROOT/identity.json"
 HARNESS_IDENTITY_PATH="$PROFILE_ROOT/harness-identity.json"
 HARNESS_LOG="$PROFILE_ROOT/harness.log"
-HISTORY_PATH="$REPO_ROOT/benchmarks/results/terminal-app.jsonl"
 HARNESS_PID=""
 mkdir -p "$PROFILE_ROOT"
 trap 'terminate_owned_pid "$HARNESS_PID"' EXIT INT TERM
@@ -62,7 +61,6 @@ case "$WORKLOAD" in
         ;;
 esac
 
-shasum -a 256 "$HISTORY_PATH" >"$PROFILE_ROOT/history-before.sha256"
 DANTERM_BENCHMARK_MODE=loop DANTERM_BENCHMARK_PROFILING=1 \
     DANTERM_BENCHMARK_IDENTITY_PATH="$HARNESS_IDENTITY_PATH" \
     DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES="$redraw_updates" \
@@ -83,7 +81,7 @@ nm -nm "$binary" >"$PROFILE_ROOT/symbols.txt"
 binary_sha256="$(shasum -a 256 "$binary" | awk '{print $1}')"
 mach_o_uuid="$(dwarfdump --uuid "$binary" | awk 'NR == 1 {print $2}')"
 source_commit="$(git -C "$REPO_ROOT" rev-parse HEAD)"
-source_tree="$(git -C "$REPO_ROOT" rev-parse HEAD^{tree})"
+source_tree="$(git -C "$REPO_ROOT" rev-parse "HEAD^{tree}")"
 dirty_state_sha256="$(
     {
         git -C "$REPO_ROOT" diff --binary HEAD
@@ -146,5 +144,3 @@ case "$MODE" in
         echo "Trace export: $PROFILE_ROOT/trace-toc.xml"
         ;;
 esac
-shasum -a 256 "$HISTORY_PATH" >"$PROFILE_ROOT/history-after.sha256"
-cmp "$PROFILE_ROOT/history-before.sha256" "$PROFILE_ROOT/history-after.sha256"

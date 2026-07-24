@@ -275,7 +275,7 @@ test-terminal-benchmark-gui` recipe alongside the existing
 ## Commit progress
 - [x] 1. Immutable source snapshot and verified build-product cache
 - [x] 2. Paired quick/confirm comparison runner and frozen decision report
-- [ ] 3. Replace the unpaired benchmark surface with the paired recipes
+- [x] 3. Replace the unpaired benchmark surface with the paired recipes
 
 ## Implementation notes
 
@@ -323,3 +323,48 @@ test-terminal-benchmark-gui` recipe alongside the existing
   refused rather than run. Both arms would key one cache entry, so every block
   would measure the identical binary and the command would answer `equivalent`
   with full confidence for a change it never contained.
+- The two comparison recipes take `just`'s named positional parameters and
+  strip the `baseline=`/`workload=` prefix with `trim_start_matches`, mirroring
+  how the profiling recipes strip theirs in shell. The command-contract test
+  asserts the composed command line through `just --dry-run` rather than
+  grepping the recipe body, so it proves the documented spelling actually
+  reaches the runner.
+- `just test-terminal-benchmark-gui` drives the same `production_collectors`
+  binding `benchmark-quick` uses, with both physical arms pointed at the working
+  checkout. The GUI-dependent contract (PO3/PO4) is about workload evidence and
+  process ownership, not about comparing two sources, so one tree is enough and
+  the recipe produces no decision.
+- PO4's "an unrelated DanTerm instance remains untouched" needs a second live
+  instance the run does not own. The harness's bundle-suffix allowlist gained a
+  fourth reserved value, `.bystander`, rather than being opened to a pattern:
+  the closed set is what keeps the measured arms inside the calibrated
+  namespace, and the proof needs exactly one namespace outside it.
+- The GUI proof immediately earned its keep: the persistent draw runner sent the
+  block-starting `Enter` as `danterm pane input --pane <id> Enter`, which the CLI
+  grammar rejects without a `--` separator, so every draw workload failed on the
+  real path. The hermetic suite could not see it because it mocks `send_input`.
+  Fixed in `make_persistent_draw_runner` with the mocked expectation updated to
+  match.
+- `benchmark-draw-app` keeps only its localized draw path. The serialized
+  redraw workloads it also drove existed to write `terminal-redraw.jsonl` at
+  80x24; the paired `content-churn`, `style-churn`, and `incremental-mixed`
+  workloads now answer that question at 179x66.
+
+## Follow Up
+
+- PO8's budgets are still unmeasured: no complete `benchmark-quick` or
+  `benchmark-confirm` invocation has been run end to end on the calibrated
+  machine, so the under-60-second and under-five-minute cached-path claims rest
+  on the research timings rather than on the production commands. The first real
+  optimization (PO7) should record the reported snapshot / cache / comparison /
+  total phase times alongside its decision.
+- `scripts/terminal-benchmark.sh` still accepts the `full-screen-symbol-churn`
+  and `full-screen-sprite-coverage-churn` workloads, whose fixture identities are
+  80x24 and which no recipe now reaches. Decide whether to port them to 179x66
+  as paired workloads or delete them with their app-side fixtures.
+- `make_scrollback_stream_runner` (`scripts/terminal-benchmark-validation.py:715`)
+  launches each block's fresh app with a per-arm `.a`/`.b` bundle suffix, while
+  the persistent draw arms share the empty namespace the calibration froze. The
+  two never coexist, so the namespace bias RI2 describes should not apply -- but
+  the difference is worth confirming against the calibration record before the
+  next threshold refresh.

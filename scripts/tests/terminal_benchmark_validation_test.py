@@ -1247,7 +1247,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
 
             def send_input(_identity, pane, arguments):
                 sent.append((pane, arguments))
-                if arguments == ["Enter"]:
+                if arguments == ["--", "Enter"]:
                     (artifacts / "start-draw-ack").touch()
                     (artifacts / "ready-draw-ack").touch()
                     (artifacts / "producer-write.json").write_text(json.dumps({
@@ -1288,7 +1288,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 sent[0][1][-1],
             )
             self.assertFalse((artifacts / "localized-draw-000000").exists())
-            self.assertEqual(sent[1], ("pane-a", ["Enter"]))
+            self.assertEqual(sent[1], ("pane-a", ["--", "Enter"]))
 
     def test_persistent_arm_lifecycle_uses_shared_bundle_and_closes_owned_harnesses(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -1,87 +1,83 @@
 # Terminal Performance Benchmarking and Profiling
 
 Use these commands when measuring or optimizing DanTerm's real terminal path.
-They build an optimized app with a unique bundle identity and isolated home,
-temporary, and IPC state. Each command owns only the app it launches and never
-selects or terminates another DanTerm instance.
+They build optimized apps with isolated home, temporary, and IPC state. Each
+command owns only the processes it launches and never selects or terminates
+another DanTerm instance.
 
-## Measure first
+The question these commands answer is always "did this code change make the
+relevant terminal path faster or slower?" -- never "is this faster than it was
+last week". There is no benchmark history: every directional claim compares an
+explicit baseline revision with the current working tree inside one machine
+session, which is what cancels the machine drift that a stored record cannot.
 
-Run `just benchmark` for repeated Swift corpus measurements, or `just
-benchmark-one <workload>` for one workload with the same multi-iteration
-aggregation. Each command reports current timings and compatible committed
-deltas, then asks whether to save the completed run. Pass `save=1` to save
-without prompting or `save=0` to decline up front. Saving uses the already
-completed run; it never reruns the benchmark. Confirmed unprofiled results enter
-`benchmarks/results/terminal-app.jsonl`. The Mac must be connected to AC power
-before either benchmark command will start.
+## Decide a change with a paired comparison
 
-Benchmark recipe options use `name=value` spelling and may appear in any
-order, for example `just benchmark backend=ghostty save=1` or
-`just benchmark-one workload=unicode-wrapping backend=swift save=0`.
+    just benchmark-quick baseline=<revision> workload=<workload>
+    just benchmark-confirm baseline=<revision>
 
-Every run converges the terminal to the canonical 179x66 grid before emitting workload
-bytes. Override the target for a diagnostic run with
-`DANTERM_TERMINAL_BENCHMARK_COLUMNS` and
-`DANTERM_TERMINAL_BENCHMARK_ROWS`; both must be positive integers. A target
-that the window cannot reach fails before measurement and reports the required
-and observed grids instead of recording a result.
+`benchmark-quick` compares one selected workload; `benchmark-confirm` compares
+all five. Both require an explicit baseline revision -- anything `git rev-parse`
+accepts. Neither infers it from `HEAD`, merge-base, history, or the candidate.
 
-Deltas use the latest committed entry with the same backend, fixture, machine,
-macOS version, display scale, Swift toolchain, release configuration, geometry,
-schema, profiling state, and iteration count. Omitting `backend` selects Swift.
-Use `backend=ghostty` explicitly only to establish or refresh the Ghostty
-baseline: after changing the pinned Ghostty version, benchmark fixtures,
-protocol or schema, or an environment compatibility field. A deliberate
-Swift-to-Ghostty comparison requires every compatibility field except backend
-to match.
+The candidate is an immutable snapshot of the complete current working tree:
+tracked changes plus non-ignored untracked files, captured through a scratch
+index that leaves your own index untouched. Before either arm builds, the
+command prints the resolved baseline commit and tree, the candidate base commit
+and tree, and every captured candidate path. Read that list: it is the cheapest
+moment to notice a wrong baseline or a stray file.
 
-The committed corpus stays deliberately small. Each workload has one dominant
-performance question recorded alongside its identity and provenance in
-`benchmarks/fixtures/terminal-app.json`; tests pin those questions so fixture
-changes cannot silently change what a result is meant to measure:
+Both arms build only from their exported immutable trees in disjoint source and
+build directories, and build products are cached by source tree identity, build
+configuration, toolchain, and ignored-prerequisite digests. A cache hit re-proves
+its recorded executable SHA-256 and Mach-O UUID before it can supply a measured
+block. Comparing a baseline that resolves to the candidate's own tree is refused
+rather than run.
 
-- `scrollback-stream`: sustained output, viewport scrolling, and retention.
-- `styled-screen-redraw`: complete styled TUI frame replacement.
-- `unicode-wrapping`: complex text width, wrapping, and rendering.
-- `incremental-screen-updates`: localized TUI mutation without full-screen work.
+The workload ladder:
 
-The imported Alacritty Vim recordings remain terminal-correctness fixtures, not
-primary real-app performance workloads.
+| Workload | Performance question |
+| --- | --- |
+| `terminal-feed` | Parsing, grid mutation, Unicode handling, damage policy |
+| `scrollback-stream` | PTY backpressure, actor hops, snapshots, scrolling, retention |
+| `content-churn` | Glyph lookup, shaping, text-run construction, content replacement |
+| `style-churn` | Attribute, color, and style-only replacement |
+| `incremental-mixed` | Localized content/style damage without full-window work |
 
-Producer-write elapsed ends when the producer's final PTY write returns. It
-measures PTY backpressure and drain performance, not parsing or rendering.
-Final-draw elapsed is Swift-only and measures from app-side start-marker parsing
-through completion of the draw that consumed the acknowledged final frame.
-The `styled-screen-redraw` producer intentionally runs without per-frame
-acknowledgments, so intermediate terminal states may coalesce. It measures
-consumption and backpressure rather than presentation of every submitted state.
+Each mode lays out its complete position-balanced schedule at the frozen pair
+count before the first block runs, then applies the frozen median symmetric rule
+exactly once: `faster`, `slower`, `equivalent`, or `inconclusive`. There is no
+early stopping, no rerun of a valid block, and no partial decision. A single
+invalid block -- lost geometry, an occluded window, battery power, thermal
+pressure, low-power mode, missing damage or draw acknowledgment -- invalidates
+the whole invocation; the evidence is kept, but a new decision needs a fresh
+complete run.
 
-Use `just benchmark-redraw` when the question is the cost of presenting every
-complete 179x66 state. It runs content-only, style-only, and mixed pseudo-TUI
-churn by default; select one with `workload=full-screen-content-churn`,
-`workload=full-screen-style-churn`, or `workload=full-screen-mixed-churn`.
-Options `save=0|1` and `comment=` use the same completion-before-confirmation
-contract as the corpus suite. Each measured update waits for its exact
-completed draw, every full-screen draw must damage all 66 achieved rows, and
-sequence metadata stays in the terminal title rather than visible grid content.
+Every invocation writes its complete evidence to
+`.build/terminal-benchmark-comparisons/<mode>/<run>/run.json`: both source and
+binary identities, the schedule, raw and normalized blocks, the decision rule,
+the decision, flagged outliers, invalidations, and phase timings. `.build/` is
+disposable, so when a result justifies an engineering change, record the
+decision-bearing values inline in the commit or plan -- mode, workload, both
+tree identities, the median symmetric estimate, and the classification -- and
+cite the artifact path only as a supplementary pointer.
 
-The full recording run excludes warm-up and calibration, then runs 15 fresh
-optimized app batches. The content-only, style-only, and mixed workloads use at
-least 50 ms of cumulative synchronous draw work per batch; at their ordinary
-speed this still provides roughly 150-250 completed draws in each independent
-sample without paying for thousands of serialized producer acknowledgments.
-The slower symbol workloads retain the 400 ms floor. `target_ms=` explicitly
-overrides either default for diagnostics.
-It reports min/median/max draw count, nanoseconds per draw, cumulative draw
-time, and dirty rows per draw. Confirmed unprofiled results enter
-`benchmarks/results/terminal-redraw.jsonl`; deltas require an exact match on
-fixture, method, machine, macOS, display scale, Swift toolchain, release
-configuration, 179x66 geometry, batch count, and profiling state. The duration
-floor remains recorded as methodology but is not a compatibility key because
-the reported comparison is normalized nanoseconds per completed draw.
+Expect a cached quick comparison to finish in under 60 seconds and a cached
+confirm suite in under five minutes. The first run against a new tree pays for
+compilation, which the command reports separately from the comparison phase.
+
+The thresholds are calibrated for a fully visible, unoccluded 179x66 window on
+one MacBook on AC power. Changing the machine, geometry, workload contract, or
+decision rule requires recalibrating before directional claims resume.
+
+Run `quick` for the routine question. Run `confirm` when the quick result is
+close, the change crosses workload boundaries, or the decision warrants the
+stronger five-workload evidence.
 
 ## Choose a profiler
+
+Profiling is diagnostic only. It builds from the local checkout, runs one
+isolated sustained workload, and cannot decide anything.
 
 Start with `just benchmark-sample scrollback-stream seconds=15`. The textual
 profile is quick to search and usually identifies a dominant stack. Use
@@ -91,10 +87,22 @@ needed. Both attach by numeric pid from the isolated harness identity file;
 they do not find a process by name or automate Instruments.app.
 
 Use `just benchmark-loop scrollback-stream backend=swift` when attaching another
-command-line diagnostic tool. It prints the identity JSON and continues until
-interrupted. The file records the exact pid, workload, backend, app binary, and
-run diagnostics. Stop it with Ctrl-C; the harness then terminates only its own
-app.
+command-line diagnostic tool. It prints the identity JSON -- pid, workload,
+backend, executable SHA-256, Mach-O UUID, source identity -- and continues until
+interrupted. Stop it with Ctrl-C; the harness then terminates only its own app.
+
+If attachment is refused, grant Developer Tools access to the invoking terminal
+in System Settings and retry. The benchmark app is ad-hoc signed with
+`get-task-allow`; the harness verifies the entitlement before launch. `xctrace`
+also uses `--no-prompt`, so a permission problem fails with diagnostics instead
+of waiting for UI.
+
+## Microbenchmarks
+
+`just benchmark-draw` and `just benchmark-draw-app` measure CoreText drawing and
+localized real-app draw cost. Their output is diagnostic: it is unpaired, it is
+not recorded, and it cannot support a cross-session regression claim. Use them
+to inspect a hot path, then decide with `benchmark-quick`.
 
 ## Choose the benchmark boundary from the profile
 
@@ -105,55 +113,34 @@ PTY bytes, read chunk boundaries, update cadence, snapshot consumption, or
 drawing. Do not assume a core microbenchmark represents an app regression when
 the observed cost sits outside the core.
 
-Choose the narrowest benchmark level that still contains the measured
+Choose the narrowest paired workload that still contains the measured
 bottleneck:
 
 | Level | Measures | Appropriate when |
 |---|---|---|
-| Core microbenchmark | Parser, grid mutation, and damage calculation | `Terminal.feed` or other pure terminal-state work is hot. |
-| Session/package benchmark | PTY chunking, actor hops, snapshot delivery, and backpressure | Scheduling, chunk boundaries, or snapshot production is hot. |
-| Optimized app benchmark | Render planning, CoreText work, and AppKit drawing | Main-thread planning or rendering is hot. |
+| `terminal-feed` | Parser, grid mutation, and damage calculation | `Terminal.feed` or other pure terminal-state work is hot. |
+| `scrollback-stream` | PTY chunking, actor hops, snapshot delivery, and backpressure | Scheduling, chunk boundaries, or snapshot production is hot. |
+| `content-churn`, `style-churn`, `incremental-mixed` | Render planning, CoreText work, and AppKit drawing | Main-thread planning or rendering is hot. |
 
-When practical, replay one neutral deterministic fixture at multiple levels. A
-fast core benchmark alongside a slow app benchmark is useful evidence that the
-optimization belongs above the core; an app rerun also confirms that a core
-improvement affects the user-visible path. Name the fixture for the behavior it
-exercises, such as incremental styled-row selection, rather than for the
-application that exposed it.
+A change that should affect the core and the app can be confirmed at both
+boundaries with `benchmark-confirm`.
 
 ## Investigate and report before optimizing
 
-Before choosing a workload, inspect `benchmarks/results/terminal-app.jsonl` for
-the latest mutually compatible Swift and Ghostty results. Compare only entries
-whose compatibility fields match as described above, and use their median
-producer-write values to rank regressions; compare final-draw values only
-between backends that expose that metric.
-
-Profile workloads in an order driven by the current compatible benchmark
-results. Start with the largest regression or the workload most relevant to the
-reported problem. When there is no stronger signal, use this default order:
-
-1. `styled-screen-redraw` -- full-frame planning and drawing.
-2. `incremental-screen-updates` -- damage propagation, coalescing, and PTY
-   backpressure.
-3. `unicode-wrapping` -- decoding, width calculation, wrapping, and glyph work.
-4. `scrollback-stream` -- sustained mutation, retention, copying, and viewport
-   updates.
-
-Collect at least two textual profiles before treating a sampled stack as a
-stable bottleneck. Use a Time Profiler trace when samples cannot distinguish
-CPU cost from scheduling, actor contention, or main-thread stalls.
+Profile workloads in an order driven by the reported problem, starting with the
+workload nearest the observed symptom. Collect at least two textual profiles
+before treating a sampled stack as a stable bottleneck. Use a Time Profiler
+trace when samples cannot distinguish CPU cost from scheduling, actor
+contention, or main-thread stalls.
 
 Before changing code, report the findings to the user and pause to brainstorm
 the solution. The report should contain:
 
-- Workload and compatible unprofiled baseline.
+- The workload at the bottleneck's narrowest valid boundary.
 - Profiles collected and their artifact paths.
 - Top concrete bottlenecks, ordered by expected impact.
 - Evidence for each bottleneck: hot functions, own-time or sample share, thread,
   call path, and whether it appeared across profiles.
-- Which benchmark phase the evidence explains: producer backpressure, final
-  draw, or both.
 - Any important uncertainty or competing interpretation.
 - Two or three candidate solutions for the leading bottleneck.
 - Tradeoffs and correctness risks for each candidate.
@@ -168,42 +155,36 @@ CoreText line.
 Do not implement an optimization until the user has had an opportunity to
 review the evidence and choose or revise the proposed direction.
 
-After agreeing on a direction, change one dominant path at a time. Protect the
-behavioral invariant with structure-insensitive tests, run the relevant package
-tests and `just test`, then rerun the same unprofiled workload under compatible
-conditions. Profiled runs are diagnostic evidence and must not be saved as
-benchmark history.
+## Optimize safely
 
-If attachment is refused, grant Developer Tools access to the invoking terminal
-in System Settings and retry. The benchmark app is ad-hoc signed with
-`get-task-allow`; the harness verifies the entitlement before launch. `xctrace`
-also uses `--no-prompt`, so a permission problem fails with diagnostics instead
-of waiting for UI.
+Note the pre-change revision before you start -- that is the baseline the
+comparison needs. Change one dominant path at a time, protect the behavioral
+invariant with structure-insensitive tests, run the relevant package tests and
+`just test`, then run `just benchmark-quick baseline=<pre-change revision>
+workload=<workload>` and let the paired result accept, reject, or revise the
+experiment. Record its decision-bearing values in the commit or plan.
 
-## Artifacts and history
+## Artifacts
 
-- Committed history: `benchmarks/results/terminal-app.jsonl`.
-- Serialized complete-draw history:
-  `benchmarks/results/terminal-redraw.jsonl`.
-- Completed runs awaiting confirmation: `.build/terminal-benchmark-staged/`.
-  Only confirmed runs enter committed history; declined and failed partial runs
-  remain here for inspection or manual promotion.
+- Paired comparison evidence, one directory per invocation:
+  `.build/terminal-benchmark-comparisons/<mode>/<run>/`.
+- Cached immutable arm source and build products:
+  `.build/terminal-benchmark-arms/`.
 - Per-run app logs and measurement evidence:
   `.build/terminal-benchmark-runs/<run>/artifacts/`.
 - Identity, harness log, textual profiles, traces, exported trace data, an
   `nm` symbol listing, and a copy of the symbol-bearing executable:
   `.build/terminal-benchmark-profiles/<run>/`.
 
-Profiled runs are diagnostic evidence only. They never enter committed history;
-the history command refuses to run when profiling is active. Preserve a useful
-profile directory while investigating, but do not commit it.
+Everything above lives under the disposable `.build/` tree that `just clean`
+removes. Nothing is committed, and no command appends to a durable record.
 
-## Optimize safely
+## GUI contract proof
 
-Use the profile to choose one hot path, then run the behavioral tests for the
-layer changed: parser and terminal state changes belong in `TerminalCore` tests,
-PTY or backpressure changes in `TerminalPTY`, and damage/render planning changes
-in their focused package tests plus the AppKit UI harness when visible geometry
-is affected. Run `just test` as the repository gate. Finally, rerun the
-unprofiled benchmark under compatible conditions. Only the unprofiled result is
-valid performance history.
+`just test-terminal-benchmark-gui` is the opt-in proof that the measured
+workloads still hold their GUI-dependent contract: canonical geometry, complete
+window containment and non-occlusion throughout measured blocks, per-workload
+reset and damage evidence, process-scoped activation, and ownership limited to
+the apps the run launched. It needs a logged-in GUI session with Accessibility
+access and takes several minutes, so it stays out of `just test` alongside
+`just test-terminal-viability`.

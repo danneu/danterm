@@ -968,7 +968,9 @@ def make_persistent_draw_runner(
             f"python3 {shlex.quote(str(root / 'scripts' / 'terminal-benchmark-producer.py'))}"
         )
         send_input(identity, pane, ["--literal", "--", command])
-        send_input(identity, pane, ["Enter"])
+        # `--` is required: the CLI's `pane input` grammar ends its options there,
+        # and without it the key token is rejected as a usage error.
+        send_input(identity, pane, ["--", "Enter"])
 
         result_path = artifacts / "final-draw.json"
         producer_path = artifacts / "producer-write.json"

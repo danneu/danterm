@@ -48,9 +48,12 @@ case "$MODE" in
     measure|loop|persistent) ;;
     *) echo "Unknown benchmark mode: $MODE" >&2; exit 2 ;;
 esac
+# Closed set: the paired arms share the empty namespace the calibration froze,
+# .a/.b remain for per-block scrollback isolation, and .bystander is reserved for
+# the GUI ownership proof's deliberately unrelated instance.
 case "$BUNDLE_SUFFIX" in
-    ""|.a|.b) ;;
-    *) echo "Benchmark bundle suffix must be empty, .a, or .b" >&2; exit 2 ;;
+    ""|.a|.b|.bystander) ;;
+    *) echo "Benchmark bundle suffix must be empty, .a, .b, or .bystander" >&2; exit 2 ;;
 esac
 if [[ "$MODE" != "measure" && -z "$PROFILE_IDENTITY_PATH" ]]; then
     echo "Persistent benchmark modes require DANTERM_BENCHMARK_IDENTITY_PATH" >&2

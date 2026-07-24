@@ -53,10 +53,10 @@ test:
     ./scripts/tests/terminal-characterization-harness_test.sh
     ./scripts/tests/terminal-viability-harness_test.sh
     ./scripts/tests/terminal-benchmark-harness_test.sh
+    ./scripts/tests/terminal-benchmark-commands_test.sh
     python3 ./scripts/tests/terminal_benchmark_snapshot_test.py
     python3 ./scripts/tests/terminal_benchmark_compare_test.py
     python3 ./scripts/tests/terminal_benchmark_producer_test.py
-    python3 ./scripts/tests/terminal_benchmark_suite_test.py
     python3 ./scripts/tests/terminal_draw_acceptance_test.py
     ./scripts/tests/test-terminal-pty_test.sh
     ./scripts/tests/shell-integration_test.sh
@@ -78,17 +78,20 @@ test-terminal-characterization:
 test-terminal-viability:
     ./scripts/terminal-viability.sh
 
-# Benchmark one workload; options accept backend=, workload=, and save= in any order.
-benchmark-one *args:
-    python3 ./scripts/terminal-benchmark-suite.py default-workload=scrollback-stream {{args}}
+# Run the opt-in paired-benchmark GUI contract proof (requires GUI + Accessibility)
+test-terminal-benchmark-gui:
+    python3 ./scripts/terminal-benchmark-gui-contract.py
 
-# Benchmark the corpus; options accept backend= and save= in any order.
-benchmark *args:
-    python3 ./scripts/terminal-benchmark-suite.py {{args}}
+# Compare one workload between a named baseline revision and the working tree.
+benchmark-quick baseline workload:
+    python3 ./scripts/terminal-benchmark-compare.py quick \
+        --baseline "{{ trim_start_matches(baseline, 'baseline=') }}" \
+        --workload "{{ trim_start_matches(workload, 'workload=') }}"
 
-# Benchmark Terminal.feed headlessly; options accept workload=, comment=, and save=.
-benchmark-core *args:
-    python3 ./scripts/terminal-benchmark-suite.py backend=swift-core {{args}}
+# Compare all five routine workloads between a named baseline revision and the working tree.
+benchmark-confirm baseline:
+    python3 ./scripts/terminal-benchmark-compare.py confirm \
+        --baseline "{{ trim_start_matches(baseline, 'baseline=') }}"
 
 # Benchmark full-frame and damage-clipped CoreText drawing headlessly.
 benchmark-draw iterations="15":
@@ -101,10 +104,6 @@ preview-glyphs:
 # Benchmark fixed-row updates through the real optimized AppKit draw path.
 benchmark-draw-app batches="15" target_ms="400":
     python3 ./scripts/terminal-draw-acceptance.py {{batches}} {{target_ms}}
-
-# Benchmark serialized complete redraws; options accept workload=, save=, and comment=.
-benchmark-redraw *args:
-    python3 ./scripts/terminal-draw-acceptance.py redraw=1 {{args}}
 
 # Run one isolated workload continuously and publish its exact app pid.
 benchmark-loop workload="scrollback-stream" backend="swift":

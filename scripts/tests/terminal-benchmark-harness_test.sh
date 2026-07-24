@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Contract tests for benchmark ownership, backend scope, and marker protocol.
+# Every assertion greps for literal shell source text, so single quotes are
+# deliberate throughout and SC2016 does not apply.
+# shellcheck disable=SC2016
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 HARNESS="$ROOT/scripts/terminal-benchmark.sh"
 PRODUCER="$ROOT/scripts/terminal-benchmark-producer.py"
-SUITE="$ROOT/scripts/terminal-benchmark-suite.py"
 PROFILE="$ROOT/scripts/terminal-benchmark-profile.sh"
-STATE="$ROOT/scripts/terminal-benchmark-state.py"
 
 grep -q 'DANTERM_TERMINAL_BACKEND="$BACKEND"' "$HARNESS"
 grep -q 'terminate_owned_pid "$APP_PID"' "$HARNESS"
@@ -27,13 +28,6 @@ grep -q 'displayScale' "$HARNESS"
 grep -q 'DANTERM_TERMINAL_BENCHMARK >&2' "$HARNESS"
 grep -q 'deadline=$((SECONDS + 20))' "$HARNESS"
 grep -q 'front_owned_app "$APP_PID"' "$HARNESS"
-grep -q 'terminal-benchmark-suite.py' "$ROOT/justfile"
-grep -q 'benchmark \*args:' "$ROOT/justfile"
-grep -q 'benchmark-one \*args:' "$ROOT/justfile"
-grep -q 'default-workload=scrollback-stream' "$ROOT/justfile"
-grep -q 'terminal-benchmark-suite.py {{args}}' "$ROOT/justfile"
-grep -q '"benchmarks" / "results"' "$SUITE"
-grep -q 'DANTERM_BENCHMARK_PROFILING' "$SUITE"
 grep -q 'DANTERM_BENCHMARK_MODE' "$HARNESS"
 grep -q 'measure|loop|persistent' "$HARNESS"
 grep -q 'DANTERM_TERMINAL_BENCHMARK_COLUMNS="$TARGET_COLUMNS"' "$HARNESS"
@@ -55,11 +49,9 @@ grep -q 'fixtureIdentity' "$PROFILE"
 grep -q 'resetBehavior' "$PROFILE"
 grep -q 'geometry' "$PROFILE"
 grep -q 'profile-command.txt' "$PROFILE"
-grep -q 'history-before.sha256' "$PROFILE"
-grep -q 'history-after.sha256' "$PROFILE"
-grep -q 'cmp "$PROFILE_ROOT/history-before.sha256" "$PROFILE_ROOT/history-after.sha256"' "$PROFILE"
 grep -q 'get-task-allow' "$ROOT/scripts/terminal-benchmark-entitlements.plist"
 grep -q 'DANTERM_BENCHMARK_BUNDLE_SUFFIX' "$HARNESS"
+grep -q '""|.a|.b|.bystander' "$HARNESS"
 grep -q 'DANTERM_BENCHMARK_PHASE_LOG' "$HARNESS"
 grep -q 'record_phase "build-start"' "$HARNESS"
 grep -q 'record_phase "build-complete"' "$HARNESS"
@@ -86,7 +78,6 @@ fi
 grep -q 'benchmark-loop' "$ROOT/justfile"
 grep -q 'benchmark-sample' "$ROOT/justfile"
 grep -q 'benchmark-trace' "$ROOT/justfile"
-grep -q 'benchmark-redraw' "$ROOT/justfile"
 grep -q 'observeTitle(title)' "$ROOT/app/SwiftTerminalSessionView.swift"
 grep -q 'pendingRedrawSequence' "$ROOT/app/TerminalBenchmark.swift"
 grep -q 'profilesIncrementalMixedDamage ? 6 : plan.rows' "$ROOT/app/TerminalBenchmark.swift"
