@@ -122,6 +122,16 @@ before/after comparison does not isolate it from classification. If an H1
 experiment recovers only part of the text regression, per-run setup is the next
 common-path mechanism to measure.
 
+**Status: REJECTED -- not reproduced.** The canonical stationary `d19103f` rerun
+(save=1, stamped `d19103f`) puts every ASCII text workload *below* its trustworthy
+baseline -- content 305,240 vs 324,141 (-5.8%), style 302,798 vs 320,814 (-5.6%),
+mixed 307,196 vs 331,802 (-7.4%) -- and symbol at 329,032 vs the 332,237
+reproducible baseline (-1.0%). There is no demonstrated text residual left to
+isolate, so H3's premise (per-run accumulator setup adds material common-path
+cost) is unsupported: optimizing empty accumulator initialization with no measured
+regression would be speculative. Reopen H3 only if a future stationary run reveals
+a material text regression against these baselines.
+
 ## Candidate direction, pending evidence
 
 If H1 is confirmed as material, the preferred shape is single-scalar range
@@ -147,14 +157,16 @@ is not the dominant cost.
 
 ### Phase 1 -- establish trustworthy baselines
 
-- [ ] For future runs, confirm the worktree and HEAD remain stationary for the
+- [x] For future runs, confirm the worktree and HEAD remain stationary for the
   duration of each run; record the commit and cleanliness in the findings log.
+  (The canonical `d19103f` rerun compiled committed render/harness source with
+  HEAD fixed at `d19103f`; records stamp that commit -- see the Outcome section.)
 - [x] Confirm that the unrelated `b6c98ad` Cmd-A selection commit does not
   touch the measured renderer, sprite implementation, workload generator, or
   benchmark harness.
 - [x] Accept the five unprofiled `b6c98ad` JSONL records as the trustworthy
   post-sprite investigation baseline despite the source-stamp caveat.
-- [ ] Record the compatible baseline medians, variation, draw counts, and JSONL
+- [x] Record the compatible baseline medians, variation, draw counts, and JSONL
   locations in Finding F1.
 - [x] Decide that the consistent 11-16% text regressions and 42% symbol
   regression are strong enough to continue to attribution.
@@ -236,14 +248,58 @@ is not the dominant cost.
 
 ### Phase 5 -- close the investigation
 
-- [ ] Rerun all five redraw workloads from the final clean commit.
-- [ ] Save only compatible, unprofiled results chosen as canonical history.
-- [ ] Confirm no profiled or diagnostic result entered
-      `benchmarks/results/*.jsonl`.
-- [ ] Summarize recovered regressions, accepted tradeoffs, and remaining
+- [x] Rerun all five redraw workloads from the final clean commit. (Stationary
+      `d19103f`, `save=1`; see the Outcome section.)
+- [x] Save only compatible, unprofiled results chosen as canonical history.
+      (Five `d19103f` records, all `profilingActive:false`.)
+- [x] Confirm no profiled or diagnostic result entered
+      `benchmarks/results/*.jsonl`. (Zero `profilingActive:true` records.)
+- [x] Summarize recovered regressions, accepted tradeoffs, and remaining
       uncertainties in the Outcome section.
 - [ ] Update `agent-docs/terminal-performance.md` only if the investigation
       reveals a reusable methodology or workload rule not already documented.
+
+## Outcome
+
+Both regressions introduced by the procedural terminal-sprite series are fixed,
+and the canonical stationary `d19103f` rerun confirms every workload at or below
+its trustworthy baseline. Canonical medians (ns per completed draw, `save=1`,
+unprofiled, M1 Pro, 80x24, release):
+
+| Workload                            | Baseline  | Canonical `d19103f` |  Delta |
+| ----------------------------------- | --------: | ------------------: | -----: |
+| `full-screen-content-churn`         |   324,141 |             305,240 | -5.8%  |
+| `full-screen-style-churn`           |   320,814 |             302,798 | -5.6%  |
+| `full-screen-mixed-churn`           |   331,802 |             307,196 | -7.4%  |
+| `full-screen-symbol-churn`          |   332,237 |             329,032 | -1.0%  |
+| `full-screen-sprite-coverage-churn` | 1,132,792 |           1,081,186 | -4.6%  |
+
+(Text baselines are the `0698376` records; symbol uses the reproducible `6d0306d`
+baseline; sprite-coverage uses the post-sprite `b6c98ad` record, since its
+`0698376` value predates procedural sprites and reflects the old fallback path.)
+
+- **Text-path regression (H1 -> D1).** Per-cell sprite classification walked an
+  eight-family chain for every cell including sprite-free text. Fixed by direct
+  single-scalar family routing (commit `a785d45`). Text workloads recovered past
+  their baselines.
+- **Symbol-path regression (H2 -> F4/D2).** Isolated by a commit ladder to a
+  single commit, `d357dc3`, whose `BraillePixelLayout` refactor allocated two
+  `[Int]` arrays per braille cell (~3400 allocations/draw on the 90%-braille
+  workload). Fixed by building the layout lazily once per draw (commit `d19103f`).
+  Symbol churn recovered ~34% back to its pre-regression cost.
+- **Rejected hypothesis (H3).** No text residual survived D1; the canonical rerun
+  confirms text workloads below baseline, so per-run accumulator setup is not a
+  demonstrated cost and was not optimized.
+- **Refuted mechanisms.** Box Drawing classification inserted before Braille
+  (noise on the ladder) and larger square-dot fill area (hoist recovered 88% with
+  identical geometry) were both eliminated as causes of the symbol regression.
+- **Accepted tradeoff / provenance caveats.** The `b6c98ad` exploratory records
+  carry a non-reproducible source stamp (HEAD moved mid-run); they are retained
+  as investigation evidence, and the canonical baseline going forward is the
+  stationary `d19103f` set. The intended square-dot braille geometry from
+  `d357dc3` is preserved unchanged; only its build frequency was corrected.
+- **Remaining uncertainty.** None material. The former ~6% F4 residual is closed
+  (symbol at 329,032 <= 332,237 baseline).
 
 ## Findings log
 
@@ -410,6 +466,9 @@ append a correction and mark the earlier interpretation superseded.
   direct single-scalar family routing vs centralized exact classification)
   against this measured cost, then pause for a direction decision (D1) before
   implementing. Consider a follow-on isolation for the H3 residual.
+  [Superseded: after D1 routing landed, the D1/D2 paired text measurements sit at
+  or below the trustworthy baselines, so no residual remains demonstrated; the H3
+  follow-on is downgraded to conditional -- see H3's status note and D2.]
 
 ### F4 -- symbol-path isolation
 
@@ -624,7 +683,9 @@ append a correction and mark the earlier interpretation superseded.
   | symbol          | 516,451 (491,785..519,904; 1006) | 489,429 (483,107..494,107; 950)  | 27,022 ns  | -5.23 |
   | sprite-coverage | 1,223,122 (1,208,830..1,240,287; 384) | 1,155,057 (1,140,611..1,170,575; 425) | 68,065 ns | -5.57 |
   All five workloads improved and none regressed. Text recovery (7.8-9.9%)
-  covers most of the F1 11-16% text-regression band; the residual is left to H3.
+  covers the F1 11-16% text-regression band and lands the text workloads at or
+  below their baselines, so no residual is demonstrated (H3 is conditional -- see
+  its status note).
   Symbol and sprite-coverage also improved (~5%) because sprite cells now invoke
   one family instead of walking the chain, but symbol's large regression versus
   the pre-sprite baseline is unaffected and remains Phase 4 work. No profiled or
@@ -632,8 +693,9 @@ append a correction and mark the earlier interpretation superseded.
 - Decision and rationale: ACCEPTED. Behavior is preserved (full suite green),
   the target text regression improves materially, and no workload incurs an
   unexplained loss. Routing is the production text-path fix. Next: Phase 4
-  symbol-path isolation, and a follow-on H3 (per-run accumulator setup)
-  isolation now that the H1 fix is the clean baseline.
+  symbol-path isolation. (H3 per-run accumulator isolation was expected here as a
+  follow-on, but the post-routing text measurements leave no demonstrated
+  residual, so it is now conditional -- see H3's status note.)
 
 ### D2 -- symbol-path production fix or accepted tradeoff
 
@@ -716,9 +778,12 @@ append a correction and mark the earlier interpretation superseded.
   test-covered change and helps every braille-bearing workload. Candidate 2
   (allocation-free storage) is not pursued: once construction is once-per-draw
   the two small arrays are immaterial (symbol already recovered past baseline).
-  This closes Phase 4. Remaining investigation work: the H3 text-path residual
-  (per-run accumulator setup) and Phase 1's canonical stationary post-fix rerun,
-  both deferred until the final implementation set is fixed (Phase 5 close-out).
+  This closes Phase 4. Remaining investigation work: the canonical stationary
+  `d19103f` rerun (Phase 1 / Phase 5). H3 (per-run accumulator setup) is now an
+  unsupported hypothesis -- the D1/D2 text measurements sit at or below their
+  baselines with no demonstrated residual -- so it is not scheduled work; it is
+  rejected as not reproduced if the canonical rerun confirms those measurements,
+  and reopened only if that run reveals a material text regression.
 
 ## Existing profile evidence
 
