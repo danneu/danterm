@@ -294,6 +294,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         editMenu.addItem(withTitle: "Select All", action: #selector(NSResponder.selectAll(_:)), keyEquivalent: "a")
         editMenu.addItem(NSMenuItem.separator())
         editMenu.addItem(withTitle: "Find", action: #selector(findInTerminal(_:)), keyEquivalent: "f")
+        editMenu.addItem(withTitle: "Find Next", action: #selector(findNextInTerminal(_:)), keyEquivalent: "g")
+        let findPreviousItem = NSMenuItem(title: "Find Previous", action: #selector(findPreviousInTerminal(_:)), keyEquivalent: "G")
+        findPreviousItem.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(findPreviousItem)
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
 
@@ -604,6 +608,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
 
     @objc func findInTerminal(_ sender: Any?) {
         runtime.send(.startSearch)
+    }
+
+    @objc func findNextInTerminal(_ sender: Any?) {
+        runtime.send(.navigateFocusedSearch(direction: .next))
+    }
+
+    @objc func findPreviousInTerminal(_ sender: Any?) {
+        runtime.send(.navigateFocusedSearch(direction: .previous))
     }
 
     @objc func toggleThemeBrowser(_ sender: Any?) {

@@ -228,7 +228,7 @@ Pure plumbing, same shape as the Cmd-A slice: no new core search machinery.
 - [x] 1b. refactor(engine): make search status a total enum and re-attach navigation after a failed needle (PO1 re-attach case)
 - [x] 2. feat(renderer): second highlight channel for the active search match (PO2, PO2b)
 - [x] 3. feat(host): enqueue search begin/navigate/clear with status callback (PO3 host tests)
-- [ ] 4. feat(app): implement backend search stubs and Cmd-G/Cmd-Shift-G accelerators (PO4, PO5)
+- [x] 4. feat(app): implement backend search stubs and Cmd-G/Cmd-Shift-G accelerators (PO4, PO5)
 
 ## Implementation notes
 
@@ -294,3 +294,16 @@ Pure plumbing, same shape as the Cmd-A slice: no new core search machinery.
 - Commit 3: the host test needles are printed with an octal escape (`\150it`) because the
   login shell echoes the launch command line into the same scrollback the engine searches,
   so a literal needle in the command inflates the match count.
+- Commit 4: `navigateFocusedSearch` delegates to the existing `.searchNavigate(paneId:)`
+  case rather than re-implementing the guard, so I6's "no active search -> no commands"
+  behavior has exactly one definition. The paneless case only resolves the focused pane.
+- Commit 4: `startSearch()` emits `.searchStarted("")` rather than replaying a retained
+  needle. Core's `ghosttyStartSearch` ignores an empty needle, so re-opening Cmd-F keeps
+  the previous needle in the field -- but the engine's search was cleared by the prior
+  `endSearch`, so the counter reads `--/--` with no highlight until the user types. That
+  matches the plan's "typing searches history live" flow; re-arming the engine from the
+  retained needle on open would be new behavior the plan does not call for.
+- Commit 4: PO5 is manual and outside `just test`. The dev bundle was built and installed
+  (`just build`), but the interactive pass -- Cmd-F, live typing, Enter/Shift-Enter,
+  Cmd-G/Cmd-Shift-G, counter, highlight vs selection color, Escape focus return -- was not
+  driven and remains for the user.

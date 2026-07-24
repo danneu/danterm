@@ -30,6 +30,40 @@ import Testing
         #expect(model.searchState.isEmpty, "should not create search state")
     }
 
+    @Test("navigateFocusedSearch forwards to the focused pane's active search")
+    func navigateFocusedSearchForwardsToFocusedPane() {
+        // Intent: the paneless navigate msg resolves the focused pane and emits
+        //   sendSearchNavigate for it in the requested direction.
+        // Why it exists: Cmd-G/Cmd-Shift-G fire from the menu bar with no pane in
+        //   hand, so the resolution has to happen in the pure core the same way
+        //   `.startSearch` does it.
+        var model = makeModel()
+        createTab(&model)
+        let paneId = selectedTab(in: model)!.focusedPaneId
+        update(&model, .ghosttyStartSearch(paneId: paneId, needle: "hit"))
+
+        let commands = update(&model, .navigateFocusedSearch(direction: .previous))
+        #expect(hasEffect(commands) {
+            if case .sendSearchNavigate(let pid, let direction) = $0 {
+                return pid == paneId && direction == .previous
+            }
+            return false
+        }, "expected sendSearchNavigate")
+    }
+
+    @Test("navigateFocusedSearch is a no-op without an active search")
+    func navigateFocusedSearchNoOpWithoutActiveSearch() {
+        // Intent: Cmd-G on a pane with no open find overlay emits nothing.
+        // Why it exists: I6 -- the menu items stay enabled, so the guard is the
+        //   only thing keeping a stray Cmd-G from driving engine search state
+        //   behind the user's back.
+        var model = makeModel()
+        createTab(&model)
+
+        let commands = update(&model, .navigateFocusedSearch(direction: .next))
+        #expect(commands.isEmpty, "expected no commands without search state")
+    }
+
     @Test("ghosttyStartSearch creates SearchModel and emits focus")
     func ghosttyStartSearchCreatesSearchModelEmitsFocus() {
         // Intent: ghosttyStartSearch installs searchState for the pane and

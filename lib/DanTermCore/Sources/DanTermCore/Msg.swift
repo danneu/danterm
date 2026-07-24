@@ -143,6 +143,9 @@ enum Msg {
     case startSearch
     case searchNeedleChanged(paneId: PaneId, needle: String)
     case searchNavigate(paneId: PaneId, direction: SearchDirection)
+    /// Cmd-G / Cmd-Shift-G: the menu bar has no pane in hand, so the focused pane is
+    /// resolved in `update` the way `.startSearch` resolves it.
+    case navigateFocusedSearch(direction: SearchDirection)
     case endSearch(paneId: PaneId)
     // Ghostty search callbacks
     case ghosttyStartSearch(paneId: PaneId, needle: String)

@@ -120,6 +120,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         controller.onOpenLink = { [weak self] link in
             self?.openLink(link)
         }
+        controller.onSearchStatus = { [weak self] status in
+            self?.publish(status)
+        }
         controller.onSessionEnded = { [weak self] result in
             onSessionEnded?(result)
             self?.callbackGate.emit(.closeRequested)
@@ -444,10 +447,32 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
 
     func applyTheme(_ themeName: String) {}
     func clearTheme() {}
-    func startSearch() {}
-    func setSearchNeedle(_ needle: String) {}
-    func navigateSearch(_ direction: SearchDirection) {}
-    func endSearch() {}
+    func startSearch() {
+        // Synchronous on purpose: `.searchStarted` is what creates the pane's
+        // searchState and mounts the overlay, so it cannot wait on an engine round-trip.
+        callbackGate.emit(.searchStarted(""))
+    }
+
+    func setSearchNeedle(_ needle: String) {
+        // An empty needle is "no search", not a search for nothing -- clearing also
+        // drops the active-match highlight.
+        if needle.isEmpty {
+            controller.clearSearch()
+        } else {
+            controller.beginSearch(needle)
+        }
+    }
+
+    func navigateSearch(_ direction: SearchDirection) {
+        switch direction {
+        case .next: controller.searchNext()
+        case .previous: controller.searchPrevious()
+        }
+    }
+
+    func endSearch() {
+        controller.clearSearch()
+    }
 
     func readViewportText() -> String? {
         controller.synchronizeState()
@@ -578,6 +603,23 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
                     }
                 }))
             }
+        }
+    }
+
+    /// Maps the engine's total search status onto the overlay's two independently
+    /// nullable counter fields: no search reads `--/--`, a needle that matches
+    /// nothing reads `-/0`, and a live match reads `selected + 1`/`total`.
+    private func publish(_ status: TerminalSearchStatus?) {
+        switch status {
+        case nil:
+            callbackGate.emit(.searchTotal(nil))
+            callbackGate.emit(.searchSelected(nil))
+        case .empty:
+            callbackGate.emit(.searchTotal(0))
+            callbackGate.emit(.searchSelected(nil))
+        case let .matched(selected, total):
+            callbackGate.emit(.searchTotal(total))
+            callbackGate.emit(.searchSelected(selected))
         }
     }
 

@@ -1169,6 +1169,12 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         guard model.searchState[paneId] != nil else { return [] }
         return [.sendSearchNavigate(paneId: paneId, direction: direction)]
 
+    case .navigateFocusedSearch(let direction):
+        // The menu items stay enabled, so Cmd-G with no open overlay lands here and
+        // must do nothing rather than drive engine search state invisibly.
+        guard let tab = selectedTab(in: model) else { return [] }
+        return update(&model, .searchNavigate(paneId: tab.focusedPaneId, direction: direction), env: env)
+
     case .endSearch(let paneId):
         guard model.searchState[paneId] != nil else { return [] }
         model.searchState.removeValue(forKey: paneId)
