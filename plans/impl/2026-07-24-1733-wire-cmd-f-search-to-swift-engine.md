@@ -225,7 +225,7 @@ Pure plumbing, same shape as the Cmd-A slice: no new core search machinery.
 ## Commit progress
 
 - [x] 1. feat(engine): search-status read and search-mutation damage accounting (PO1, PO3 engine tests)
-- [ ] 1b. refactor(engine): make search status a total enum and re-attach navigation after a failed needle (PO1 re-attach case)
+- [x] 1b. refactor(engine): make search status a total enum and re-attach navigation after a failed needle (PO1 re-attach case)
 - [ ] 2. feat(renderer): second highlight channel for the active search match (PO2, PO2b)
 - [ ] 3. feat(host): enqueue search begin/navigate/clear with status callback (PO3 host tests)
 - [ ] 4. feat(app): implement backend search stubs and Cmd-G/Cmd-Shift-G accelerators (PO4, PO5)
@@ -261,3 +261,16 @@ Pure plumbing, same shape as the Cmd-A slice: no new core search machinery.
   Side effect: a search mutation while scrolled back now records presentation-only
   full damage where it previously recorded none -- a redundant redraw, and the only
   correct answer since viewport-relative match rows are not computable while browsing.
+- Commit 1b: the total enum forces an answer the plan left open -- what `searchStatus`
+  reports when matches exist but the retained occurrence does not identify one (a failed
+  needle that output later satisfied; the read is non-mutating, so it cannot re-attach
+  itself). It reports `.matched(selected: 0, total:)`, i.e. the newest match, which is
+  exactly the one the next `searchNext`/`searchPrevious` adopts, so the counter never
+  disagrees with where navigation is about to land. For that brief window
+  `activeSearchMatchRange` is still nil, so the counter reads 1/N with no highlight
+  until the user navigates -- strictly better than the `-/1` dead end Decision 1 names.
+- Commit 1b: the re-attach triggers on any occurrence the live scan does not contain,
+  not only on a nil one -- same rationale, and a stale-but-non-nil range would otherwise
+  wedge navigation the same way. Only the nil case is tested: the eviction/damage paths
+  (`Terminal.swift` scrollback trim and row-damage invalidation) drop the whole search
+  state, so a stale non-nil range is defensive rather than behaviorally reachable today.

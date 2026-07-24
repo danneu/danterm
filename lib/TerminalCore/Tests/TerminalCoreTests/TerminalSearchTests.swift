@@ -117,33 +117,33 @@ struct TerminalSearchTests {
         #expect(terminal.searchStatus == nil)
         var moved = terminal.beginSearch("hit")
         #expect(moved)
-        #expect(terminal.searchStatus == TerminalSearchStatus(total: 3, selected: 0))
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 3))
         moved = terminal.searchNext()
         #expect(moved)
-        #expect(terminal.searchStatus == TerminalSearchStatus(total: 3, selected: 1))
+        #expect(terminal.searchStatus == .matched(selected: 1, total: 3))
         moved = terminal.searchNext()
         #expect(moved)
-        #expect(terminal.searchStatus == TerminalSearchStatus(total: 3, selected: 2))
+        #expect(terminal.searchStatus == .matched(selected: 2, total: 3))
         moved = terminal.searchNext()
         #expect(moved == false)
-        #expect(terminal.searchStatus == TerminalSearchStatus(total: 3, selected: 2))
+        #expect(terminal.searchStatus == .matched(selected: 2, total: 3))
         moved = terminal.searchPrevious()
         #expect(moved)
-        #expect(terminal.searchStatus == TerminalSearchStatus(total: 3, selected: 1))
+        #expect(terminal.searchStatus == .matched(selected: 1, total: 3))
         moved = terminal.searchPrevious()
         #expect(moved)
-        #expect(terminal.searchStatus == TerminalSearchStatus(total: 3, selected: 0))
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 3))
         moved = terminal.searchPrevious()
         #expect(moved == false)
-        #expect(terminal.searchStatus == TerminalSearchStatus(total: 3, selected: 0))
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 3))
     }
 
     @Test("a needle that matches nothing reports an empty status, and clearing reports none")
     func statusDistinguishesFailedSearchFromNoSearch() throws {
         // Intent: a non-empty needle with no occurrences stays an active search
-        //   reporting total 0 / selected nil, while an empty needle or an explicit
-        //   clear reports no status at all.
-        // Why it exists: the overlay renders `-/0` for the failed-search pair and
+        //   reporting `.empty`, while an empty needle or an explicit clear reports
+        //   no status at all.
+        // Why it exists: the overlay renders `-/0` for the failed-search status and
         //   nothing for a nil status; collapsing the two would make a failed search
         //   indistinguishable from a closed one.
         var terminal = try #require(Terminal(columns: 8, rows: 2))
@@ -151,13 +151,13 @@ struct TerminalSearchTests {
 
         var moved = terminal.beginSearch("nope")
         #expect(moved == false)
-        #expect(terminal.searchStatus == TerminalSearchStatus(total: 0, selected: nil))
+        #expect(terminal.searchStatus == .empty)
         #expect(terminal.activeSearchMatchRange == nil)
         moved = terminal.searchNext()
         #expect(moved == false)
         moved = terminal.searchPrevious()
         #expect(moved == false)
-        #expect(terminal.searchStatus == TerminalSearchStatus(total: 0, selected: nil))
+        #expect(terminal.searchStatus == .empty)
 
         terminal.clearSearch()
         #expect(terminal.searchStatus == nil)
@@ -165,6 +165,34 @@ struct TerminalSearchTests {
         moved = terminal.beginSearch("")
         #expect(moved == false)
         #expect(terminal.searchStatus == nil)
+    }
+
+    @Test("navigating a failed search adopts the newest match once output supplies one")
+    func navigationReattachesAfterAFailedNeedleStartsMatching() throws {
+        // Intent: a needle that matched nothing when it was typed, followed by output
+        //   containing it, has the next `searchNext`/`searchPrevious` adopt the newest
+        //   match instead of refusing to move.
+        // Why it exists: without the re-attach the engine sits in "matches exist but
+        //   none is selected" -- the overlay shows a count with no highlight and Cmd-G
+        //   does nothing until the user retypes a character. That state is exactly what
+        //   the total status enum forbids, so navigation has to close it.
+        var terminal = try #require(Terminal(columns: 8, rows: 4))
+        terminal.feed(Array("zzz".utf8))
+
+        let found = terminal.beginSearch("hit")
+        #expect(found == false)
+        #expect(terminal.searchStatus == .empty)
+
+        // The status read has no occurrence to point at yet, so it names the match the
+        // re-attach below is about to select rather than an unselected count.
+        terminal.feed(Array("\r\nhit".utf8))
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
+        #expect(terminal.activeSearchMatchRange == nil)
+
+        let moved = terminal.searchNext()
+        #expect(moved)
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
+        #expect(terminal.activeSearchMatchRange?.start.row == 1)
     }
 
     @Test("the alternate screen suppresses both search reads")
@@ -190,7 +218,7 @@ struct TerminalSearchTests {
         terminal.feed(Array("\u{1B}[?1049l".utf8))
         let found = terminal.beginSearch("hit")
         #expect(found)
-        #expect(terminal.searchStatus == TerminalSearchStatus(total: 1, selected: 0))
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
         #expect(terminal.activeSearchMatchRange != nil)
     }
 

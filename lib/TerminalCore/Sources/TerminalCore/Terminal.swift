@@ -1714,13 +1714,18 @@ public struct Terminal: Equatable, Sendable {
     /// Recomputed from the same scan navigation uses, so it never disagrees with the
     /// selected match. Suppressed under the alternate screen for the reason on
     /// `activeSearchMatchRange`.
+    ///
+    /// When the retained occurrence is stale or absent -- output arrived while a failed
+    /// search was open, or the selected match was overwritten -- this reports the newest
+    /// match, which is exactly the one the next navigation re-attaches to.
     public var searchStatus: TerminalSearchStatus? {
         guard inactivePrimaryScreen == nil, let search else { return nil }
         let matches = searchMatches(for: search.query)
+        guard matches.isEmpty == false else { return .empty }
         let selected = search.range
             .flatMap(matches.firstIndex(of:))
             .map { matches.count - 1 - $0 }
-        return TerminalSearchStatus(total: matches.count, selected: selected)
+        return .matched(selected: selected ?? 0, total: matches.count)
     }
 
     /// Selects both endpoint cells after clamping them into the active stream.
@@ -2205,11 +2210,12 @@ public struct Terminal: Equatable, Sendable {
     /// Moves to the next older match without wrapping or disturbing an end match.
     @discardableResult
     public mutating func searchNext() -> Bool {
-        guard let search, let range = search.range else { return false }
+        guard let search else { return false }
         let matches = searchMatches(for: search.query)
-        guard let current = matches.firstIndex(of: range), current > 0 else {
-            return false
+        guard let current = search.range.flatMap(matches.firstIndex(of:)) else {
+            return reattachToNewestMatch(among: matches)
         }
+        guard current > 0 else { return false }
         let before = damageActionSnapshot
         self.search?.range = matches[current - 1]
         revealSearchMatchIfNeeded()
@@ -2220,13 +2226,28 @@ public struct Terminal: Equatable, Sendable {
     /// Moves to the previous newer match without wrapping or disturbing an end match.
     @discardableResult
     public mutating func searchPrevious() -> Bool {
-        guard let search, let range = search.range else { return false }
+        guard let search else { return false }
         let matches = searchMatches(for: search.query)
-        guard let current = matches.firstIndex(of: range), current + 1 < matches.count else {
-            return false
+        guard let current = search.range.flatMap(matches.firstIndex(of:)) else {
+            return reattachToNewestMatch(among: matches)
         }
+        guard current + 1 < matches.count else { return false }
         let before = damageActionSnapshot
         self.search?.range = matches[current + 1]
+        revealSearchMatchIfNeeded()
+        recordDamage(since: before)
+        return true
+    }
+
+    /// Selects the newest match for a search whose occurrence is missing or stale.
+    ///
+    /// Reached when output arrives under a failed needle, or overwrites the selected
+    /// match: without it the engine would stay in "matches exist, none selected" and
+    /// navigation would refuse to move until the user retyped the needle.
+    private mutating func reattachToNewestMatch(among matches: [TextAnchorRange]) -> Bool {
+        guard let newest = matches.last else { return false }
+        let before = damageActionSnapshot
+        search?.range = newest
         revealSearchMatchIfNeeded()
         recordDamage(since: before)
         return true
