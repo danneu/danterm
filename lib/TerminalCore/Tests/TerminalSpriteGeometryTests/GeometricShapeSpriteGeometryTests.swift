@@ -23,7 +23,7 @@ struct GeometricShapeSpriteGeometryTests {
             cellHeightPixels: sample.height,
             strokeWidthPixels: 1
         )
-        #expect(topLeft?.points == [
+        #expect(topLeft?.vertices == [
             SpritePixelPoint(x: 0, y: 0),
             SpritePixelPoint(x: 0, y: sample.height),
             SpritePixelPoint(x: sample.width, y: 0),
@@ -37,7 +37,7 @@ struct GeometricShapeSpriteGeometryTests {
                 cellHeightPixels: sample.height,
                 strokeWidthPixels: 1
             )
-            #expect(triangle?.points == topLeft?.points.map {
+            #expect(triangle?.vertices == topLeft?.vertices.map {
                 $0.transformed(
                     horizontal: corner.isRight,
                     vertical: corner.isBottom,
@@ -116,10 +116,10 @@ struct GeometricShapeSpriteGeometryTests {
                         strokeWidthPixels: 1
                     )
                     #expect(first == second, context)
-                    #expect(first?.points.allSatisfy {
+                    #expect(first?.vertices.allSatisfy {
                         (0...width).contains($0.x) && (0...height).contains($0.y)
                     } == true, context)
-                    #expect(first?.points == topLeft?.points.map {
+                    #expect(first?.vertices == topLeft?.vertices.map {
                         $0.transformed(
                             horizontal: corner.isRight,
                             vertical: corner.isBottom,
@@ -138,6 +138,13 @@ struct TriangleGeometrySample: Sendable, CustomTestStringConvertible {
     let height: Int
 
     var testDescription: String { "\(width)x\(height)" }
+}
+
+private extension GeometricShapePixelTriangle {
+    // Packages the three scalar vertices into an array so tests can assert the
+    // closed-path order and positions; the collection lives only in the test, off
+    // the hot draw path.
+    var vertices: [SpritePixelPoint] { [v0, v1, v2] }
 }
 
 private extension SpritePixelPoint {

@@ -585,13 +585,13 @@ private extension CGContext {
         metrics: TerminalRenderMetrics
     ) {
         let scale = metrics.displayScale
-        let points = triangle.geometry.points.map {
+        let origin = triangle.cellOrigin
+        func cgPoint(_ point: SpritePixelPoint) -> CGPoint {
             CGPoint(
-                x: triangle.cellOrigin.x + CGFloat($0.x) / scale,
-                y: triangle.cellOrigin.y + CGFloat($0.y) / scale
+                x: origin.x + CGFloat(point.x) / scale,
+                y: origin.y + CGFloat(point.y) / scale
             )
         }
-        guard let first = points.first else { return }
         let cellRect = CGRect(
             origin: triangle.cellOrigin,
             size: metrics.cellSize
@@ -603,10 +603,9 @@ private extension CGContext {
         setShouldAntialias(true)
         setAllowsAntialiasing(true)
         beginPath()
-        move(to: first)
-        for point in points.dropFirst() {
-            addLine(to: point)
-        }
+        move(to: cgPoint(triangle.geometry.v0))
+        addLine(to: cgPoint(triangle.geometry.v1))
+        addLine(to: cgPoint(triangle.geometry.v2))
         closePath()
 
         switch triangle.geometry.renderStyle {

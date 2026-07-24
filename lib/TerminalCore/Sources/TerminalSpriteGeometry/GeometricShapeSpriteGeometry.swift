@@ -21,12 +21,27 @@ public enum GeometricShapeRenderStyle: Equatable, Sendable {
 }
 
 /// Carries one closed triangle path and its scarcity-resolved rendering behavior.
+///
+/// A corner triangle is by definition exactly three vertices, so they are stored as
+/// three fixed scalar fields in closed-path order (`v0` is the right-angle corner;
+/// `v0 -> v1 -> v2 -> v0` closes the path). This encodes the fixed arity in the type
+/// and keeps the per-cell draw path free of the array/`map` allocations a collection
+/// field would force.
 public struct GeometricShapePixelTriangle: Equatable, Sendable {
-    public let points: [SpritePixelPoint]
+    public let v0: SpritePixelPoint
+    public let v1: SpritePixelPoint
+    public let v2: SpritePixelPoint
     public let renderStyle: GeometricShapeRenderStyle
 
-    public init(points: [SpritePixelPoint], renderStyle: GeometricShapeRenderStyle) {
-        self.points = points
+    public init(
+        v0: SpritePixelPoint,
+        v1: SpritePixelPoint,
+        v2: SpritePixelPoint,
+        renderStyle: GeometricShapeRenderStyle
+    ) {
+        self.v0 = v0
+        self.v1 = v1
+        self.v2 = v2
         self.renderStyle = renderStyle
     }
 }
@@ -44,19 +59,19 @@ public enum GeometricShapeSpriteGeometry {
         precondition(strokeWidthPixels > 0)
         guard cellWidthPixels > 0 && cellHeightPixels > 0 else { return nil }
 
-        let canonical = [
-            SpritePixelPoint(x: 0, y: 0),
-            SpritePixelPoint(x: 0, y: cellHeightPixels),
-            SpritePixelPoint(x: cellWidthPixels, y: 0),
-        ]
         let horizontalMirror = corner == .topRight || corner == .bottomRight
         let verticalMirror = corner == .bottomLeft || corner == .bottomRight
-        let points = canonical.map { point in
+        // Mirror each canonical vertex in place -- no intermediate array or mapped
+        // collection, so the debug-build draw path stays allocation-free.
+        func place(x: Int, y: Int) -> SpritePixelPoint {
             SpritePixelPoint(
-                x: horizontalMirror ? cellWidthPixels - point.x : point.x,
-                y: verticalMirror ? cellHeightPixels - point.y : point.y
+                x: horizontalMirror ? cellWidthPixels - x : x,
+                y: verticalMirror ? cellHeightPixels - y : y
             )
         }
+        let v0 = place(x: 0, y: 0)
+        let v1 = place(x: 0, y: cellHeightPixels)
+        let v2 = place(x: cellWidthPixels, y: 0)
         let renderStyle: GeometricShapeRenderStyle
         if style == .filled
             || cellWidthPixels <= strokeWidthPixels
@@ -67,19 +82,21 @@ public enum GeometricShapeSpriteGeometry {
             renderStyle = .innerStroke(widthPixels: strokeWidthPixels)
         }
 
-        assert(points.count == 3)
-        assert(Set(points.map(\.x)) == Set([0, cellWidthPixels]))
-        assert(Set(points.map(\.y)) == Set([0, cellHeightPixels]))
-        assert(points.allSatisfy {
-            (0...cellWidthPixels).contains($0.x)
-                && (0...cellHeightPixels).contains($0.y)
-        })
+        // The two legs share the right-angle corner's x/y, and the opposite ends
+        // span the cell -- compared directly on the scalars, no collection built.
+        assert(v0.x == v1.x)
+        assert(v0.y == v2.y)
+        assert((v0.x == 0 && v2.x == cellWidthPixels) || (v0.x == cellWidthPixels && v2.x == 0))
+        assert((v0.y == 0 && v1.y == cellHeightPixels) || (v0.y == cellHeightPixels && v1.y == 0))
+        assert((0...cellWidthPixels).contains(v0.x) && (0...cellHeightPixels).contains(v0.y))
+        assert((0...cellWidthPixels).contains(v1.x) && (0...cellHeightPixels).contains(v1.y))
+        assert((0...cellWidthPixels).contains(v2.x) && (0...cellHeightPixels).contains(v2.y))
         if case let .innerStroke(widthPixels) = renderStyle {
             assert(widthPixels > 0)
             assert(widthPixels < cellWidthPixels)
             assert(widthPixels < cellHeightPixels)
         }
 
-        return GeometricShapePixelTriangle(points: points, renderStyle: renderStyle)
+        return GeometricShapePixelTriangle(v0: v0, v1: v1, v2: v2, renderStyle: renderStyle)
     }
 }
