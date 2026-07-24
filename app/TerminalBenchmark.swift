@@ -102,6 +102,9 @@ final class TerminalBenchmarkStateRecorder {
 
     private func isWindowVisible() -> Bool {
         guard let window, window.occlusionState.contains(.visible) else { return false }
+        guard let screenVisibleFrame = window.screen?.visibleFrame,
+              screenVisibleFrame.contains(window.frame)
+        else { return false }
         guard let windows = CGWindowListCopyWindowInfo(
             [.optionIncludingWindow],
             CGWindowID(window.windowNumber)
@@ -173,6 +176,12 @@ final class TerminalBenchmarkGeometryController {
     private func convergeOnce() {
         guard let window, let geometry = session()?.benchmarkGeometry else { return }
         guard geometry.columns != targetColumns || geometry.rows != targetRows else {
+            if let screenVisibleFrame = window.screen?.visibleFrame {
+                window.setFrameTopLeftPoint(NSPoint(
+                    x: screenVisibleFrame.minX,
+                    y: screenVisibleFrame.maxY
+                ))
+            }
             timer?.invalidate()
             timer = nil
             return

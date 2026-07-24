@@ -69,49 +69,35 @@ was run for this initial survey; F1's figures come from committed records in
 
 ## Current execution boundary
 
-The next research task is the Phase 4 migration from 80x24 to the canonical
-179x66 grid. Do not collect, generate, or inspect held-out validation evidence
-before that migration and its recalibration are complete.
+The 179x66 runner, workload contracts, median decision rules, and runtime
+budgets are calibrated and ready to graduate. The production benchmark is
+calibration-backed, not independently held-out-certified.
 
-The completed 80x24 work proves the runner shape, workload boundaries,
-calibration method, estimator choices, and approximate runtime feasibility. It
-does not freeze production pair counts or thresholds. Geometry can change
-per-block cost, variance, damage selectivity, and the relative ranking of
-optimizations, so the 80x24 D3/D4 numbers are provisional inputs to the
-179x66 calibration rather than a decision rule eligible for held-out
-validation.
+The planned held-out certification required 1,560 GUI attempts: 26 condition
+cells with 60 trials each. At the observed collection cost of about 24 seconds
+per attempt, that is roughly 10.4 hours before invalid replacements. That cost
+is disproportionate to the everyday engineering decision this system serves.
+The partially collected opaque manifest remains preserved, but its campaign is
+retired without opening conditions or outcomes. Do not resume it as a
+graduation gate.
 
-The required order from here is:
-
-1. Reproduce and strictly enforce 179x66 for every geometry-sensitive
-   workload, including creating a fresh 179x66 terminal for core feed.
-2. Replace fixed 24-row assertions with contracts derived from the achieved
-   66-row grid; preserve the incremental workload's deterministic changed-row
-   contract.
-3. Record the frozen geometry and compatibility identity and fail on any
-   mismatch.
-4. Rerun the workload pilots and calibration at 179x66, including live
-   wall-time measurement, then refreeze D3 and D4.
-5. Generate a new held-out manifest with fresh, non-overlapping seeds only
-   after that freeze.
-6. Run held-out accuracy, symmetry, and drift validation at 179x66.
-
-Any existing 80x24 held-out manifest remains unopened and superseded. The
-optional 80x24-versus-179x66 ranking comparison may happen after the canonical
-runner works, but it must not delay the migration or influence the canonical
-decision rule.
+Independent held-out certification remains optional future research if actual
+use exposes a questionable decision or if a publication-grade error-rate claim
+becomes valuable. Until then, describe the frozen rates as calibration results,
+retain raw paired evidence for each real comparison, and use `confirm` for
+close or consequential results.
 
 ## Performance workload ladder
 
 The routine suite has five workloads, each retained for one distinct
 performance question:
 
-| Level | Workload | Question it answers |
-|---|---|---|
-| Core | Terminal feed | How quickly does the pure parser/grid/damage path consume representative terminal input? |
-| Session/app | Scrollback stream | How quickly does sustained PTY output travel through backpressure, actor hops, snapshots, scrolling, and retention? |
-| Serialized draw | Screen-sized content churn | How expensive is replacing the visible text while styling remains stable? |
-| Serialized draw | Screen-sized style churn | How expensive is restyling stable visible text? |
+| Level           | Workload                               | Question it answers                                                                                                  |
+| --------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Core            | Terminal feed                          | How quickly does the pure parser/grid/damage path consume representative terminal input?                             |
+| Session/app     | Scrollback stream                      | How quickly does sustained PTY output travel through backpressure, actor hops, snapshots, scrolling, and retention?  |
+| Serialized draw | Screen-sized content churn             | How expensive is replacing the visible text while styling remains stable?                                            |
+| Serialized draw | Screen-sized style churn               | How expensive is restyling stable visible text?                                                                      |
 | Serialized draw | Screen-sized incremental mixed updates | Does localized damage avoid full-window work when a deterministic subset of cells changes in both content and style? |
 
 `quick` runs the one workload selected for the code path under investigation.
@@ -261,68 +247,68 @@ method at 80x24; the canonical values come from rerunning that method at
 ### Phase 1 -- size the design from measured variance
 
 - [x] Extract raw batch values from committed history and staged artifacts
-  (or rerun two unchanged commits if needed) and decompose variance into
-  within-block, between-block, and between-launch components, following the
-  Kalibera-Jones repetition-sizing method; record in F3. This decomposition
-  is preliminary orientation only: the old fresh-launch records cannot
-  reveal persistent-process block variance, A/B covariance, reset
-  carryover, or alternation effects. Final block duration and candidate N
-  values come from the Phase 2 pilot series, not from this data.
+      (or rerun two unchanged commits if needed) and decompose variance into
+      within-block, between-block, and between-launch components, following the
+      Kalibera-Jones repetition-sizing method; record in F3. This decomposition
+      is preliminary orientation only: the old fresh-launch records cannot
+      reveal persistent-process block variance, A/B covariance, reset
+      carryover, or alternation effects. Final block duration and candidate N
+      values come from the Phase 2 pilot series, not from this data.
 - [x] Define minimum effects of interest: the smallest regression worth
-  blocking in `quick` and the smallest worth recording in `confirm`; record
-  the user-facing rationale in D1.
+      blocking in `quick` and the smallest worth recording in `confirm`; record
+      the user-facing rationale in D1.
 - [x] Validate that the five selected ladder workloads exercise the distinct
-  questions recorded in D2; keep specialized symbol, sprite, Unicode, and
-  full-window mixed cases outside the routine suite unless evidence shows one
-  changes an optimization decision.
+      questions recorded in D2; keep specialized symbol, sprite, Unicode, and
+      full-window mixed cases outside the routine suite unless evidence shows one
+      changes an optimization decision.
 
 ### Phase 2 -- prototype the paired runner
 
 - [x] Prove two suffixed-bundle apps coexist cleanly: isolated homes, IPC
-  namespaces, no focus or notification cross-talk, no shared-state
-  collisions; record the constraints and any required launch ordering in F4.
+      namespaces, no focus or notification cross-talk, no shared-state
+      collisions; record the constraints and any required launch ordering in F4.
 - [x] Prototype persistent-process measured blocks with untimed resets;
-  verify reset completeness via terminal state, draw counts, damage, and
-  acknowledgment sequences in F5.
+      verify reset completeness via terminal state, draw counts, damage, and
+      acknowledgment sequences in F5.
 - [x] Implement machine-state capture (thermal state, low-power
-  mode) and the per-block occlusion assertion; demonstrate a block being
-  invalidated by a Space switch and by a thermal-pressure flag.
+      mode) and the per-block occlusion assertion; demonstrate a block being
+      invalidated by a Space switch and by a thermal-pressure flag.
 - [x] Compare A/A noise with both apps alive vs one app alive (H3); record
-  in F6 and select coexistence or sequential alternation.
+      in F6 and select coexistence or sequential alternation.
 - [x] Select and validate an immutable baseline/candidate build strategy:
-  how HEAD, a named ref, and a dirty working tree are each snapshotted and
-  built without source or artifact interference, with exact source identity
-  (including dirty-state identity) recorded, and with proof that each
-  suffixed bundle contains the intended binary; record in F4.
+      how HEAD, a named ref, and a dirty working tree are each snapshotted and
+      built without source or artifact interference, with exact source identity
+      (including dirty-state identity) recorded, and with proof that each
+      suffixed bundle contains the intended binary; record in F4.
 - [x] Collect a pilot series from the persistent paired prototype and apply
-  the Kalibera-Jones decomposition to it; select block duration and
-  candidate N values from this pilot, superseding the Phase 1 orientation
-  numbers, before calibration-method development begins; record in F7.
+      the Kalibera-Jones decomposition to it; select block duration and
+      candidate N values from this pilot, superseding the Phase 1 orientation
+      numbers, before calibration-method development begins; record in F7.
 - [x] Measure the prototype's end-to-end `quick` wall time and its phase
-  decomposition (build, assemble/sign, launch, converge, warm-up, blocks,
-  teardown) against the D4 candidate budget; record in F7.
+      decomposition (build, assemble/sign, launch, converge, warm-up, blocks,
+      teardown) against the D4 candidate budget; record in F7.
 - [x] Prototype sustained single-candidate profiling for every surviving
-  workload using the same fixture, geometry, reset behavior, and optimized
-  binary as measured runs. Verify exact PID attachment with `sample` and
-  `xctrace`, publish identity for external tools, preserve symbols and
-  profiling artifacts, and prove profiled results cannot enter paired
-  decisions or history; record in F7.
+      workload using the same fixture, geometry, reset behavior, and optimized
+      binary as measured runs. Verify exact PID attachment with `sample` and
+      `xctrace`, publish identity for external tools, preserve symbols and
+      profiling artifacts, and prove profiled results cannot enter paired
+      decisions or history; record in F7.
 
 ### Phase 3 -- validate the decision rule
 
 - [x] Develop and freeze an initial five-workload calibration method at
-  80x24. Treat its pair counts, thresholds, and runtime projections as
-  provisional method-development evidence that must be superseded at 179x66.
+      80x24. Treat its pair counts, thresholds, and runtime projections as
+      provisional method-development evidence that must be superseded at 179x66.
 - [x] Predefine the required false-positive, inconclusive, and
-  detection-power rates (from D1) before any trials run. Trial counts are
-  sized to those targets, not vice versa: zero false positives in 50 A/A
-  trials still only bounds the rate below roughly 6% at 95% confidence.
+      detection-power rates (from D1) before any trials run. Trial counts are
+      sized to those targets, not vice versa: zero false positives in 50 A/A
+      trials still only bounds the rate below roughly 6% at 95% confidence.
 - [x] Run a calibration set of A/A and injected-change trials to choose
-  block length, block-pair counts, decision thresholds, equivalence band,
-  and outlier policy; freeze the rule in D3.
+      block length, block-pair counts, decision thresholds, equivalence band,
+      and outlier policy; freeze the rule in D3.
 - [x] Set the `quick` and `confirm` wall-time budgets in D4 from measured
-  prototype runtimes. Retain the budgets across the geometry migration, but
-  remeasure whether the recalibrated 179x66 rules meet them.
+      prototype runtimes. Retain the budgets across the geometry migration, but
+      remeasure whether the recalibrated 179x66 rules meet them.
 
 ### Phase 4 -- geometry and compatibility identity
 
@@ -331,85 +317,81 @@ display-matched window, so this phase shrinks from a display-identification
 subsystem to choosing and validating a constant.
 
 - [x] Freeze the canonical grid constant at 179x66 (the measured full-viewport
-  DanTerm grid, chrome included) and size the benchmark window to reproduce
-  it. Confirm a windowed (non-fullscreen-Space) DanTerm filling the screen
-  reproduces 179x66 -- if the reference was captured with the menu bar hidden,
-  the windowed row count could shift by about one -- and that the window stays
-  fully visible and unoccluded for a complete run; record the checked AppKit
-  sizing calls and the settling behavior in F9. No display-identity
-  interrogation, no frame-vs-visibleFrame matching, no dynamic-mode reading.
+      DanTerm grid, chrome included) and size the benchmark window to reproduce
+      it. Confirm a windowed (non-fullscreen-Space) DanTerm filling the screen
+      reproduces 179x66 -- if the reference was captured with the menu bar hidden,
+      the windowed row count could shift by about one -- and that the window stays
+      fully visible and unoccluded for a complete run; record the checked AppKit
+      sizing calls and the settling behavior in F9. No display-identity
+      interrogation, no frame-vs-visibleFrame matching, no dynamic-mode reading.
 - [x] Derive the achieved grid from the settled window and replace fixed `24`
-  damage assertions with the achieved row count, so the damage contracts hold
-  at the new grid.
+      damage assertions with the achieved row count, so the damage contracts hold
+      at the new grid.
 - [x] Record the (now trivial) compatibility identity as a constant: the
-  frozen grid, font/config, backing scale, backend, fixture, build, OS, and
-  toolchain -- plus the machine, since results are machine-specific by
-  decision. Fail rather than silently running at a different grid than the
-  frozen constant.
-- [ ] Recalibrate block size and the per-workload pair counts and thresholds
-  at the fixed large grid, superseding the 80x24 F7 and Phase 3 calibration
-  numbers. Include terminal feed at 179x66: although it does not render,
-  terminal construction, grid mutation, scrolling, damage tracking, and
-  memory behavior depend on geometry. This is the first empirical task
-  (rerunning the existing calibration machinery), not a new statistical
-  design exercise.
-- [ ] Refreeze D3 and D4 from the 179x66 evidence. Only this freeze authorizes
-  creation of a fresh held-out manifest.
-- [ ] Optional: compare 80x24 and the fixed large grid on at least two known
-  render changes; keep 80x24 as a secondary fast diagnostic only if it ever
-  ranks a change differently. No longer a gate on graduation.
+      frozen grid, font/config, backing scale, backend, fixture, build, OS, and
+      toolchain -- plus the machine, since results are machine-specific by
+      decision. Fail rather than silently running at a different grid than the
+      frozen constant.
+- [x] Recalibrate block size and the per-workload pair counts and thresholds
+      at the fixed large grid, superseding the 80x24 F7 and Phase 3 calibration
+      numbers. Include terminal feed at 179x66: although it does not render,
+      terminal construction, grid mutation, scrolling, damage tracking, and
+      memory behavior depend on geometry. This is the first empirical task
+      (rerunning the existing calibration machinery), not a new statistical
+      design exercise.
+- [x] Refreeze D3 and D4 from the 179x66 evidence. Only this freeze authorizes
+      creation of a fresh held-out manifest.
 
 ### Phase 5 -- validate the canonical decision rule
 
-- [ ] Generate a new held-out manifest only after the 179x66 D3/D4 freeze,
-  using fresh seeds disjoint from every calibration and superseded manifest.
-  Never open or reuse an 80x24 held-out manifest.
-- [ ] Measure final false-positive, inconclusive, and detection rates on the
-  separate held-out set of A/A and injected-change trials; record in F8.
-  Tuning and validation must never share trials.
-- [ ] Verify decision symmetry and drift robustness on the frozen rule:
-  reversing A/B labels must reverse the reported effect without changing
-  its magnitude beyond expected noise, and a controlled within-run drift
-  must not systematically favor either arm under the selected
-  counterbalancing scheme; record in F8.
-- [ ] Escalate to an adaptive design only if the frozen fixed design fails
-  the held-out F8 targets -- and any adaptive rule must be validated
-  against optional-stopping bias by simulating its actual peeking schedule,
-  not just its final decision.
+- [x] Generate a new held-out manifest only after the 179x66 D3/D4 freeze,
+      using fresh seeds disjoint from every calibration and superseded manifest.
+      Never open or reuse an 80x24 held-out manifest.
+- [x] Retire the 1,560-attempt held-out campaign as disproportionate to local
+      engineering use. Preserve its partial opaque evidence without evaluating
+      conditions or outcomes, and do not claim independent held-out
+      certification.
+- [ ] Optional future research: measure independent held-out error rates,
+      symmetry, and drift robustness only if real benchmark use exposes a
+      questionable decision or a publication-grade certification becomes
+      valuable. Any such campaign needs a newly justified sample budget and
+      fresh manifest; do not resume or selectively extend the retired one.
 
 ### Phase 6 -- Ghostty reference (severable)
 
-This phase must not block graduation: Phases 1-5 can graduate to an
+This phase must not block graduation: Phases 1-4 can graduate to an
 implementation plan and ship without a Ghostty baseline.
 
 - [ ] Enumerate observable timing seams in the pinned libghostty C API and
-  DanTerm's Ghostty surface integration without guessing callback semantics;
-  record viable boundaries in F10.
+      DanTerm's Ghostty surface integration without guessing callback semantics;
+      record viable boundaries in F10.
 - [ ] Run the same screen-sized synchronized-output fixture against both
-  backends and compare producer throughput and backpressure at matched
-  geometry; select the durable target metric in D6.
+      backends and compare producer throughput and backpressure at matched
+      geometry; select the durable target metric in D6.
 - [ ] If Ghostty exposes no validated completed-presentation signal,
-  explicitly reject per-draw equivalence and retain throughput as the only
-  cross-backend baseline.
+      explicitly reject per-draw equivalence and retain throughput as the only
+      cross-backend baseline.
 
 ### Phase 7 -- graduate and verify
 
-- [ ] Decide whether old JSONL history is archived, migrated as legacy, or
-  deleted; never compare numbers across the method/schema boundary.
+- [x] Delete the old JSONL histories when their active readers and writers are
+      replaced; do not archive or migrate measurements that cannot be compared
+      across the method/schema boundary. Give the paired method a separate
+      versioned history.
 - [ ] Audit behavioral coverage for fixture reset, exact completed draws,
-  window geometry and occlusion guards, machine-state flags, paired
-  reporting, profiling identity and history exclusion, and history
-  compatibility -- plus the contracts Phases 2-3 establish empirically, so
-  they cannot regress silently: source/binary identity (each suffixed bundle
-  contains the intended snapshot), arm isolation, position-balanced schedule
-  generation (every completed run is balanced), and the frozen decision rule
-  against deterministic sample fixtures. Tests must assert observable
-  contracts, not helper structure.
-- [ ] Graduate the accepted runner and schema to an implementation plan,
-  then update `agent-docs/terminal-performance.md` as part of that
-  implementation.
+      window geometry and occlusion guards, machine-state flags, paired
+      reporting, profiling identity and history exclusion, and history
+      compatibility -- plus the contracts Phases 2-3 establish empirically, so
+      they cannot regress silently: source/binary identity (each suffixed bundle
+      contains the intended snapshot), arm isolation, position-balanced schedule
+      generation (every completed run is balanced), and the frozen decision rule
+      against deterministic sample fixtures. Tests must assert observable
+      contracts, not helper structure.
+- [x] Graduate the accepted runner and schema to
+      `plans/wip/fast-paired-performance-benchmarks.md`; update
+      `agent-docs/terminal-performance.md` as part of that implementation.
 - [ ] Close this research with measured old/new suite runtime, A/A error
-  rate, known-change detection power, and the Ghostty baseline status.
+      rate, known-change detection power, and the Ghostty baseline status.
 
 ## Findings log
 
@@ -430,14 +412,15 @@ implementation plan and ship without a Ghostty baseline.
   measured drawing inside command spans of roughly 85-95 s, with min-to-max
   batch-normalized ranges of 14.3%, 7.0%, and 10.8% of median:
 
-  | Workload | Median | Min to max | Range relative to median |
-  |---|---:|---:|---:|
-  | Content churn | 305,240 ns | 279,228-322,761 ns | 14.3% |
-  | Style churn | 302,798 ns | 295,431-316,530 ns | 7.0% |
-  | Mixed churn | 307,196 ns | 286,339-319,536 ns | 10.8% |
+  | Workload      |     Median |         Min to max | Range relative to median |
+  | ------------- | ---------: | -----------------: | -----------------------: |
+  | Content churn | 305,240 ns | 279,228-322,761 ns |                    14.3% |
+  | Style churn   | 302,798 ns | 295,431-316,530 ns |                     7.0% |
+  | Mixed churn   | 307,196 ns | 286,339-319,536 ns |                    10.8% |
 
   The ranges are not confidence intervals, but they reject the assumption
   that 15 fresh launches make small percentage changes trustworthy.
+
 - Observation: nearly all wall time is harness lifecycle repeated per batch,
   and even 15 fresh launches leave ranges too wide to trust small deltas
   against history.
@@ -512,16 +495,17 @@ implementation plan and ship without a Ghostty baseline.
   levels the old harness actually repeats.
 - Measurements:
 
-  | Series | Draws per launch | Overall mean | Within-launch SD (CV) | Fresh-launch SD (CV) | Launch-mean range |
-  |---|---:|---:|---:|---:|---:|
-  | 1 | 233 | 304,821 ns | 20,604 ns (6.76%) | 6,543 ns (2.15%) | 294,539-319,581 ns |
-  | 2 | 226 | 308,124 ns | 21,053 ns (6.83%) | 6,642 ns (2.16%) | 297,607-320,219 ns |
+  | Series | Draws per launch | Overall mean | Within-launch SD (CV) | Fresh-launch SD (CV) |  Launch-mean range |
+  | ------ | ---------------: | -----------: | --------------------: | -------------------: | -----------------: |
+  | 1      |              233 |   304,821 ns |     20,604 ns (6.76%) |     6,543 ns (2.15%) | 294,539-319,581 ns |
+  | 2      |              226 |   308,124 ns |     21,053 ns (6.83%) |     6,642 ns (2.16%) | 297,607-320,219 ns |
 
   The two series means differ by 1.08%. Treating that difference as a third
   nested variance level would yield an estimated series SD of about 0.52%
   after subtracting the variance of 15 launch means, but two series provide
   only one degree of freedom, so that number is not a credible component
   estimate.
+
 - Observation: averaging roughly 230 draws makes the within-launch
   contribution to a launch mean only about 1.4 microseconds, while the
   estimated fresh-launch component remains about 6.6 microseconds. More draws
@@ -569,10 +553,10 @@ implementation plan and ship without a Ghostty baseline.
   while the isolation and focus probes ran.
 - Filesystem and IPC evidence:
 
-  | Arm | Bundle id | Runtime root | Control socket |
-  |---|---|---|---|
-  | A | `com.danneu.danterm-terminal-benchmark.a` | `/tmp/dtb.ehTwdK` | `/tmp/dtb.ehTwdK/home/Library/Caches/com.danneu.danterm-terminal-benchmark.a/control.sock` |
-  | B | `com.danneu.danterm-terminal-benchmark.b` | `/tmp/dtb.aYaFMU` | `/tmp/dtb.aYaFMU/home/Library/Caches/com.danneu.danterm-terminal-benchmark.b/control.sock` |
+  | Arm | Bundle id                                 | Runtime root      | Control socket                                                                             |
+  | --- | ----------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------ |
+  | A   | `com.danneu.danterm-terminal-benchmark.a` | `/tmp/dtb.ehTwdK` | `/tmp/dtb.ehTwdK/home/Library/Caches/com.danneu.danterm-terminal-benchmark.a/control.sock` |
+  | B   | `com.danneu.danterm-terminal-benchmark.b` | `/tmp/dtb.aYaFMU` | `/tmp/dtb.aYaFMU/home/Library/Caches/com.danneu.danterm-terminal-benchmark.b/control.sock` |
 
   Each path probe also placed Application Support, config, recovery, replay,
   and temporary data under its arm's runtime root. `lsof` showed each process
@@ -580,6 +564,7 @@ implementation plan and ship without a Ghostty baseline.
   teardown; the probes remain in
   `.build/terminal-benchmark-runs/2026-07-24-001340-66307/artifacts` and
   `.build/terminal-benchmark-runs/2026-07-24-001355-66719/artifacts`.
+
 - Shared-state collision probe: both IPC models began with one tab. Creating
   an `A-ISOLATION-PROBE` tab through A's helper and socket changed A from one
   tab to two while B remained at one. This proves the suffix/home/socket
@@ -699,19 +684,20 @@ implementation plan and ship without a Ghostty baseline.
   initial invalidation, and settling are outside the measured block.
 - Results:
 
-  | Check | Block 1 | Block 2 |
-  |---|---:|---:|
-  | App PID | 72500 | 72500 |
-  | Geometry | 80x24 | 80x24 |
-  | Completed draws | 5 | 5 |
-  | Dirty rows per draw | 24, 24, 24, 24, 24 | 24, 24, 24, 24, 24 |
-  | Expected final state | `DANTERM-BENCH-FINAL-STATE-72128` | `DANTERM-BENCH-FINAL-STATE-72128` |
-  | Producer interval | 39,255,500 ns | 45,321,125 ns |
-  | Parse-to-final-draw interval | 53,385,666 ns | 61,125,917 ns |
-  | Cumulative synchronous draw time | 1,385,541 ns | 1,337,792 ns |
+  | Check                            |                           Block 1 |                           Block 2 |
+  | -------------------------------- | --------------------------------: | --------------------------------: |
+  | App PID                          |                             72500 |                             72500 |
+  | Geometry                         |                             80x24 |                             80x24 |
+  | Completed draws                  |                                 5 |                                 5 |
+  | Dirty rows per draw              |                24, 24, 24, 24, 24 |                24, 24, 24, 24, 24 |
+  | Expected final state             | `DANTERM-BENCH-FINAL-STATE-72128` | `DANTERM-BENCH-FINAL-STATE-72128` |
+  | Producer interval                |                     39,255,500 ns |                     45,321,125 ns |
+  | Parse-to-final-draw interval     |                     53,385,666 ns |                     61,125,917 ns |
+  | Cumulative synchronous draw time |                      1,385,541 ns |                      1,337,792 ns |
 
   The cumulative draw totals differ by 3.45%; two blocks are a protocol proof,
   not a variance or carryover conclusion.
+
 - Completeness evidence:
   - Terminal state: both blocks reached the same completion frame containing
     the same expected final-state fence after the completion reset sequence.
@@ -832,15 +818,16 @@ implementation plan and ship without a Ghostty baseline.
   are its sample SD and median absolute difference.
 - Results:
 
-  | Condition | Blocks / pairs | Block CV | Paired-difference SD | Median absolute paired difference |
-  |---|---:|---:|---:|---:|
-  | One app alive | 20 / 10 | 1.609% | 1.755% | 1.485% |
-  | Idle `.b` app also alive | 20 / 10 | 1.296% | 1.480% | 0.898% |
+  | Condition                | Blocks / pairs | Block CV | Paired-difference SD | Median absolute paired difference |
+  | ------------------------ | -------------: | -------: | -------------------: | --------------------------------: |
+  | One app alive            |        20 / 10 |   1.609% |               1.755% |                            1.485% |
+  | Idle `.b` app also alive |        20 / 10 |   1.296% |               1.480% |                            0.898% |
 
   The coexistence-to-single paired-SD ratio is 0.844. A deterministic
   100,000-resample pair bootstrap gives a wide 95% percentile interval of
   0.396-1.478. The point estimate therefore shows no widening, but the pilot
   is too small to establish a tight equivalence bound.
+
 - Raw symmetric pair differences:
   - One app alive: -1.597%, -0.105%, -3.518%, -2.250%, 1.618%, 0.732%,
     0.164%, 1.373%, 0.124%, -2.483%.
@@ -889,10 +876,10 @@ implementation plan and ship without a Ghostty baseline.
 - Block-length comparison:
 
   | Draws per block | Median cumulative draw work | Median producer block | Block-mean CV | Paired-difference SD |
-  |---:|---:|---:|---:|---:|
-  | 25 | 7.30 ms | 208.65 ms | 2.43% | 2.37% |
-  | 50 | 15.11 ms | 419.99 ms | 2.07% | 2.29% |
-  | 100 | 30.46 ms | 848.63 ms | 2.25% | 2.53% |
+  | --------------: | --------------------------: | --------------------: | ------------: | -------------------: |
+  |              25 |                     7.30 ms |             208.65 ms |         2.43% |                2.37% |
+  |              50 |                    15.11 ms |             419.99 ms |         2.07% |                2.29% |
+  |             100 |                    30.46 ms |             848.63 ms |         2.25% |                2.53% |
 
   Producer block time includes the serialized write/draw acknowledgment
   round trips; cumulative synchronous AppKit draw work is the comparison
@@ -900,6 +887,7 @@ implementation plan and ship without a Ghostty baseline.
   block or paired noise. Twenty-five draws was faster but had the widest
   block-mean distribution. Select 50 draws, approximately 420 ms of measured
   producer time and 15 ms of synchronous draw work on this machine.
+
 - Kalibera-Jones decomposition: a balanced nested random-effects ANOVA on the
   second series used draws within blocks within persistent processes.
   Relative to the 301,164 ns grand mean, the within-block draw component was
@@ -957,18 +945,19 @@ implementation plan and ship without a Ghostty baseline.
   available.
 - Sustained profiling workload coverage:
 
-  | D2 question | Sustained target and reset boundary | Live proof |
-  |---|---|---|
-  | Terminal feed | Optimized `TerminalCoreBenchmark` repeatedly creates a fresh 80x24 `Terminal` and feeds the same deterministic composite of the four committed corpus streams. Rendering and PTY work remain absent. | `sample` attached to PID 43976. |
-  | Scrollback stream | The isolated optimized app continuously replays the committed 25,000-line fixture after geometry convergence; the app/session and steady-state caches intentionally persist. | `sample` attached to PID 41120. |
-  | Content churn | The serialized redraw fixture performs its deterministic full-screen setup and excluded settling draw, then sustains exact draw-acknowledged content changes. | `sample` attached to PID 34896. |
-  | Style churn | The matching setup/reset sustains exact draw-acknowledged style changes with fixed visible content. | `xctrace` Time Profiler attached to PID 35410. |
-  | Incremental mixed updates | A dense deterministic setup and excluded settling draw precede content and RGB-style changes on rows 10-13 without a clear-screen operation. The renderer's required one-row glyph halo produces exact six-row damage. | `sample` attached to PID 47321. |
+  | D2 question               | Sustained target and reset boundary                                                                                                                                                                                    | Live proof                                     |
+  | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+  | Terminal feed             | Optimized `TerminalCoreBenchmark` repeatedly creates a fresh 80x24 `Terminal` and feeds the same deterministic composite of the four committed corpus streams. Rendering and PTY work remain absent.                   | `sample` attached to PID 43976.                |
+  | Scrollback stream         | The isolated optimized app continuously replays the committed 25,000-line fixture after geometry convergence; the app/session and steady-state caches intentionally persist.                                           | `sample` attached to PID 41120.                |
+  | Content churn             | The serialized redraw fixture performs its deterministic full-screen setup and excluded settling draw, then sustains exact draw-acknowledged content changes.                                                          | `sample` attached to PID 34896.                |
+  | Style churn               | The matching setup/reset sustains exact draw-acknowledged style changes with fixed visible content.                                                                                                                    | `xctrace` Time Profiler attached to PID 35410. |
+  | Incremental mixed updates | A dense deterministic setup and excluded settling draw precede content and RGB-style changes on rows 10-13 without a clear-screen operation. The renderer's required one-row glyph halo produces exact six-row damage. | `sample` attached to PID 47321.                |
 
   The prototype uses 80x24 because that is the geometry of the Phase 2
   measured-block implementation. It proves parity with those measured runs,
   not D2's eventual screen-sized geometry; the production runner must apply
   the same mechanism after its screen-sized geometry is implemented.
+
 - Attachment and identity proof: `sample.txt` names the same numeric PID
   published by each identity. The exported xctrace table of contents names
   PID 35410 and the exact bundle executable path from its identity.
@@ -1005,18 +994,14 @@ implementation plan and ship without a Ghostty baseline.
   `profilingActive: false`, correcting the earlier prototype identity that
   unconditionally said true. Paired decisions therefore cannot consume a
   profile identity without violating both flags.
-- Follow-up: Phase 4 moves all workloads to 179x66 and reruns the calibration
-  machinery before D3/D4 are refrozen. No held-out validation trial may be
-  generated or exposed before that canonical-geometry freeze.
+- Follow-up completed in F9: Phase 4 moved every workload to 179x66 and
+  refroze D3/D4 before any held-out validation trial was generated or exposed.
 
 ### F8 -- 80x24 calibration develops the fixed-N decision rule
 
-- Status: The five-workload calibration method and provisional 80x24 `quick`
-  and `confirm` rules are complete. The variance-reduced confirm design
-  cleared D1 and D4 at 80x24, but D5 superseded that geometry before any
-  held-out evidence was opened. Phase 4 migration and recalibration at
-  179x66 are next; only the resulting refrozen rules are eligible for
-  held-out validation.
+- Status: Complete historical calibration. D5 superseded these 80x24 rules
+  before any held-out evidence was opened; F9 contains the frozen 179x66
+  replacement.
 - Date and investigator: 2026-07-24, Codex.
 - Live calibration source: a new calibration-only A/A run collected 96 valid
   50-draw content-churn blocks in 92.44 seconds. The fixed
@@ -1042,10 +1027,10 @@ implementation plan and ship without a Ghostty baseline.
   held-out trials remain the only pass/fail evidence for D1.
 - Content-churn-only candidate grid result:
 
-  | Mode | Pairs | Directional threshold | Equivalence band | A/A false positive | Positive power / inconclusive | Negative power / inconclusive | Wrong direction |
-  |---|---:|---:|---:|---:|---:|---:|---:|
-  | `quick` | 8 | 2.75% | 1.00% | 3.811% | 92.261% / 7.387% | 94.782% / 5.218% | 0% |
-  | `confirm` | 80 | 1.75% | 0.75% | 0.640% per workload; <=3.200% suite union bound | 90.336% / 9.663% | 96.019% / 3.980% | 0% |
+  | Mode      | Pairs | Directional threshold | Equivalence band |                              A/A false positive | Positive power / inconclusive | Negative power / inconclusive | Wrong direction |
+  | --------- | ----: | --------------------: | ---------------: | ----------------------------------------------: | ----------------------------: | ----------------------------: | --------------: |
+  | `quick`   |     8 |                 2.75% |            1.00% |                                          3.811% |              92.261% / 7.387% |              94.782% / 5.218% |              0% |
+  | `confirm` |    80 |                 1.75% |            0.75% | 0.640% per workload; <=3.200% suite union bound |              90.336% / 9.663% |              96.019% / 3.980% |              0% |
 
   Both rows clear D1's calibration targets. The earlier 24-pair confirm
   candidate failed: at a 1.75% threshold it produced about 7% A/A false
@@ -1057,6 +1042,7 @@ implementation plan and ship without a Ghostty baseline.
   directions retain at least 90% power and at most 10% inconclusive results.
   This table is retained as superseded calibration history; the five-workload
   result below owns D3.
+
 - Content-churn analysis: each block contributes cumulative synchronous draw
   time divided by its exact draw count. Each adjacent A/B pair becomes
   `200 * (candidate - baseline) / (candidate + baseline)`. The trial
@@ -1094,13 +1080,13 @@ implementation plan and ship without a Ghostty baseline.
   have violated D1's per-workload requirement rather than validated it.
 - Workload-specific block contract, defined before further evidence:
 
-  | Workload | Timed block and normalization | Reset boundary |
-  |---|---|---|
-  | Terminal feed | One duration-stable fixed-execution batch lasting at least 1 second; report cumulative `Terminal.feed` nanoseconds divided by the fixed execution count. | Construct a fresh terminal at the canonical grid before every execution; corpus framing and chunks remain fixed; batch-count calibration stays outside reported samples. |
-  | Scrollback stream | One complete replay of the fixed 25,000-line fixture; report start-marker parse through the completed draw containing the expected final state. | Launch a fresh optimized app and terminal session for every block, converge geometry, and settle before the start marker. Teardown follows completion and is outside timing. |
-  | Content churn | 50 serialized exact completed draws; report cumulative synchronous draw nanoseconds divided by 50. | Settle the dense screen before the block; acknowledge every sequence only after its matching draw completes. |
-  | Style churn | 50 serialized exact completed draws; report cumulative synchronous draw nanoseconds divided by 50. | Same settled-screen and exact-acknowledgment boundary as content churn. |
-  | Incremental mixed | 50 serialized exact completed draws; report cumulative synchronous draw nanoseconds divided by 50. | Settle the dense screen before the block; require every draw's damage to match the deterministic changed-row subset. |
+  | Workload          | Timed block and normalization                                                                                                                            | Reset boundary                                                                                                                                                               |
+  | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Terminal feed     | One duration-stable fixed-execution batch lasting at least 1 second; report cumulative `Terminal.feed` nanoseconds divided by the fixed execution count. | Construct a fresh terminal at the canonical grid before every execution; corpus framing and chunks remain fixed; batch-count calibration stays outside reported samples.     |
+  | Scrollback stream | One complete replay of the fixed 25,000-line fixture; report start-marker parse through the completed draw containing the expected final state.          | Launch a fresh optimized app and terminal session for every block, converge geometry, and settle before the start marker. Teardown follows completion and is outside timing. |
+  | Content churn     | 50 serialized exact completed draws; report cumulative synchronous draw nanoseconds divided by 50.                                                       | Settle the dense screen before the block; acknowledge every sequence only after its matching draw completes.                                                                 |
+  | Style churn       | 50 serialized exact completed draws; report cumulative synchronous draw nanoseconds divided by 50.                                                       | Same settled-screen and exact-acknowledgment boundary as content churn.                                                                                                      |
+  | Incremental mixed | 50 serialized exact completed draws; report cumulative synchronous draw nanoseconds divided by 50.                                                       | Settle the dense screen before the block; require every draw's damage to match the deterministic changed-row subset.                                                         |
 
   Setup, reset, settling, focus changes, arm switches, and teardown remain
   outside timing for every workload. A paired comparison may combine only
@@ -1108,6 +1094,7 @@ implementation plan and ship without a Ghostty baseline.
   `scripts/terminal-benchmark-validation.py` now emits these contracts in
   schema 2 manifests, with behavioral coverage in its test file. The old
   schema 1 held-out manifest is obsolete and must remain unopened.
+
 - Canonical-geometry blocker discovered after the calibration method froze:
   all live series in this finding used 80x24, while D5 now selects 179x66.
   The evidence below remains useful for runner and statistical-method
@@ -1205,20 +1192,21 @@ implementation plan and ship without a Ghostty baseline.
   deliberately simple; it slightly overcharges fixed draw setup at high N
   and undercharges it at low N.
 
-  | Workload | 12-pair `quick` | 240-pair `confirm` |
-  |---|---:|---:|
-  | Terminal feed | >=30.70 s | >=613.92 s |
-  | Scrollback stream | 137.66 s | 2,753.29 s |
-  | Content churn | 23.11 s | 462.21 s |
-  | Style churn | 23.08 s | 461.55 s |
-  | Incremental mixed | 22.97 s | 459.34 s |
-  | Complete five-workload suite | >=237.52 s | >=4,750.31 s |
+  | Workload                     | 12-pair `quick` | 240-pair `confirm` |
+  | ---------------------------- | --------------: | -----------------: |
+  | Terminal feed                |       >=30.70 s |         >=613.92 s |
+  | Scrollback stream            |        137.66 s |         2,753.29 s |
+  | Content churn                |         23.11 s |           462.21 s |
+  | Style churn                  |         23.08 s |           461.55 s |
+  | Incremental mixed            |         22.97 s |           459.34 s |
+  | Complete five-workload suite |      >=237.52 s |       >=4,750.31 s |
 
   Thus the common rule misses the candidate budget in both forms that matter:
   one scrollback `quick` comparison takes about 2.3 minutes rather than under
   60 seconds, and the complete `confirm` suite takes about 79.2 minutes rather
   than under 5 minutes. The estimates are sufficient to reject the design;
   spending that time on a live common-N run would not change the decision.
+
 - New calibration design, selected before collecting more evidence: retain
   each workload's fixed block contract, median symmetric paired estimator,
   complete-quartet resampling, physical-arm reversal, equivalence semantics,
@@ -1239,9 +1227,9 @@ implementation plan and ship without a Ghostty baseline.
   median distribution changes sharply across that narrow interval, so these
   remain screening estimates rather than a frozen result.
 
-  | Mode | Feed | Scrollback | Content | Style | Incremental |
-  |---|---:|---:|---:|---:|---:|
-  | `quick` pairs / threshold | 2 / 2.50% | 2 / 2.50% | 4 / 3.25% | 4 / 3.25% | 12 / 3.25% |
+  | Mode                        |      Feed | Scrollback |    Content |      Style | Incremental |
+  | --------------------------- | --------: | ---------: | ---------: | ---------: | ----------: |
+  | `quick` pairs / threshold   | 2 / 2.50% |  2 / 2.50% |  4 / 3.25% |  4 / 3.25% |  12 / 3.25% |
   | `confirm` pairs / threshold | 2 / 1.00% | 12 / 1.75% | 80 / 1.75% | 24 / 2.00% | 100 / 1.60% |
 
   Quick screening false-positive rates were 0%, 0%, 4.020%, 3.560%, and
@@ -1251,6 +1239,7 @@ implementation plan and ship without a Ghostty baseline.
   Worst confirm directional detection was 90.02% and worst nondirectional
   rate was 9.98%. No screened cell made a wrong-direction decision above
   D1's limit.
+
 - Screened-rule runtime projection: the workload-specific quick suite is
   about 66 seconds total, and every individual quick comparison is under 23
   seconds before feed setup. The confirm suite is about 534 seconds (8.9
@@ -1274,9 +1263,9 @@ implementation plan and ship without a Ghostty baseline.
   nondirectional results. The other nine cells retained their screened
   parameters.
 
-  | Mode | Feed | Scrollback | Content | Style | Incremental |
-  |---|---:|---:|---:|---:|---:|
-  | `quick` pairs / threshold | 2 / 2.50% | 2 / 2.50% | 4 / 3.20% | 4 / 3.25% | 12 / 3.25% |
+  | Mode                        |      Feed | Scrollback |    Content |      Style | Incremental |
+  | --------------------------- | --------: | ---------: | ---------: | ---------: | ----------: |
+  | `quick` pairs / threshold   | 2 / 2.50% |  2 / 2.50% |  4 / 3.20% |  4 / 3.25% |  12 / 3.25% |
   | `confirm` pairs / threshold | 2 / 1.00% | 12 / 1.75% | 80 / 1.75% | 24 / 2.00% | 100 / 1.60% |
 
   Final quick A/A false-positive rates were 0%, 0%, 4.514%, 3.365%, and
@@ -1288,6 +1277,7 @@ implementation plan and ship without a Ghostty baseline.
   D1. Seeds, condition counts, rates, suite summaries, and the content-quick
   amendment are preserved in
   `.build/terminal-benchmark-phase3-workload-specific-calibration/2026-07-24/report.json`.
+
 - D4 outcome: pair counts did not change from screening, so the calibrated
   projections remain about 66 seconds for a complete quick suite and 534
   seconds (8.9 minutes) for confirm. The confirm rule misses D4's five-minute
@@ -1304,7 +1294,7 @@ implementation plan and ship without a Ghostty baseline.
     denominator while bounding tail leverage. Counts remain positive
     multiples of two.
   - Screen confirm pair counts `2, 4, 6, 8, 12, 16, 24, 32, 40, 48, 64, 80,
-    100` and directional thresholds from 0.80% through 2.50% in 0.05-point
+100` and directional thresholds from 0.80% through 2.50% in 0.05-point
     increments, retaining the +/-0.75% equivalence band. A cell is eligible
     only when both 3% directions have at least 90% detection, at most 10%
     nondirectional results, and no more than D1's wrong-direction limit.
@@ -1323,6 +1313,7 @@ implementation plan and ship without a Ghostty baseline.
   `winsorized_mean` and the estimator-selectable decision path live in
   `scripts/terminal-benchmark-calibration.py`; its behavioral test fixes the
   tail count, clamping, and all-observation mean.
+
 - Variance-reduced confirm screen: the predeclared 2,275 cells received 5,000
   deterministic trials per A/A and injected-effect condition. Threshold-grid
   analysis reused each pair count's resampled estimates without changing its
@@ -1330,13 +1321,13 @@ implementation plan and ship without a Ghostty baseline.
   an independently calibrated cell. Suite selection enumerated the eligible
   fixed-count choices under the 5% A/A union bound and selected:
 
-  | Workload | Pairs | Threshold | A/A false positive | Positive detection / nondirectional | Negative detection / nondirectional |
-  |---|---:|---:|---:|---:|---:|
-  | Terminal feed | 2 | 2.50% | 0% | 94.44% / 5.56% | 93.82% / 6.18% |
-  | Scrollback stream | 4 | 2.15% | 0% | 90.66% / 9.34% | 91.06% / 8.94% |
-  | Content churn | 48 | 1.65% | 4.28% | 91.14% / 8.86% | 93.90% / 6.10% |
-  | Style churn | 32 | 2.00% | 0.22% | 90.42% / 9.58% | 92.30% / 7.70% |
-  | Incremental mixed | 40 | 2.10% | 0.20% | 90.64% / 9.36% | 92.14% / 7.86% |
+  | Workload          | Pairs | Threshold | A/A false positive | Positive detection / nondirectional | Negative detection / nondirectional |
+  | ----------------- | ----: | --------: | -----------------: | ----------------------------------: | ----------------------------------: |
+  | Terminal feed     |     2 |     2.50% |                 0% |                      94.44% / 5.56% |                      93.82% / 6.18% |
+  | Scrollback stream |     4 |     2.15% |                 0% |                      90.66% / 9.34% |                      91.06% / 8.94% |
+  | Content churn     |    48 |     1.65% |              4.28% |                      91.14% / 8.86% |                      93.90% / 6.10% |
+  | Style churn       |    32 |     2.00% |              0.22% |                      90.42% / 9.58% |                      92.30% / 7.70% |
+  | Incremental mixed |    40 |     2.10% |              0.20% |                      90.64% / 9.36% |                      92.14% / 7.86% |
 
   The conservative A/A sum is 4.70%; no selected cell made a wrong-direction
   decision. The 126-pair suite projects to 281.54 seconds (4 minutes 41.5
@@ -1346,17 +1337,18 @@ implementation plan and ship without a Ghostty baseline.
   `.build/terminal-benchmark-phase3-winsorized-screen/2026-07-24/report.json`;
   the reproducible runner is
   `scripts/terminal-benchmark-winsorized-screen.py`.
+
 - Variance-reduced confirm freeze: exactly the five screened cells received
   100,000 deterministic trials per condition with fresh seeds `20262100`
   through `20262104`. No parameter was changed after screening.
 
-  | Workload | Pairs | Threshold | A/A false positive | Positive detection / nondirectional | Negative detection / nondirectional |
-  |---|---:|---:|---:|---:|---:|
-  | Terminal feed | 2 | 2.50% | 0% | 93.849% / 6.151% | 93.792% / 6.208% |
-  | Scrollback stream | 4 | 2.15% | 0% | 90.751% / 9.249% | 91.318% / 8.682% |
-  | Content churn | 48 | 1.65% | 4.192% | 91.622% / 8.378% | 93.647% / 6.353% |
-  | Style churn | 32 | 2.00% | 0.233% | 90.359% / 9.641% | 92.564% / 7.436% |
-  | Incremental mixed | 40 | 2.10% | 0.157% | 90.470% / 9.530% | 92.409% / 7.591% |
+  | Workload          | Pairs | Threshold | A/A false positive | Positive detection / nondirectional | Negative detection / nondirectional |
+  | ----------------- | ----: | --------: | -----------------: | ----------------------------------: | ----------------------------------: |
+  | Terminal feed     |     2 |     2.50% |                 0% |                    93.849% / 6.151% |                    93.792% / 6.208% |
+  | Scrollback stream |     4 |     2.15% |                 0% |                    90.751% / 9.249% |                    91.318% / 8.682% |
+  | Content churn     |    48 |     1.65% |             4.192% |                    91.622% / 8.378% |                    93.647% / 6.353% |
+  | Style churn       |    32 |     2.00% |             0.233% |                    90.359% / 9.641% |                    92.564% / 7.436% |
+  | Incremental mixed |    40 |     2.10% |             0.157% |                    90.470% / 9.530% |                    92.409% / 7.591% |
 
   The conservative A/A sum is 4.582%, worst detection is 90.359%, worst
   nondirectional rate is 9.641%, and wrong-direction rate is 0%. The
@@ -1366,6 +1358,7 @@ implementation plan and ship without a Ghostty baseline.
   `.build/terminal-benchmark-phase3-winsorized-calibration/2026-07-24/report.json`;
   the reproducible runner is
   `scripts/terminal-benchmark-winsorized-freeze.py`.
+
 - Superseded held-out schema 2 manifest: after D3 and D4 froze, manifest seed
   `2026072403` generated 1,560 unique trial identities and seeds: 900 quick
   trials and 660 confirm suite trials across 26 cells of exactly 60 trials.
@@ -1490,8 +1483,197 @@ implementation plan and ship without a Ghostty baseline.
   comparison, while canonical calibration is for the Swift engine. Preserve
   the failure as a Phase 6 input rather than weakening the Swift geometry or
   extending the calibration boundary.
-- Next task: rerun the five workload pilots and calibration at 179x66, measure
-  live wall time, and refreeze D3/D4 before generating any held-out manifest.
+- Full-containment correction: the first persistent content series exposed a
+  flaw in the GUI proof after visual inspection. Both 179x66 windows were
+  offset from the display's top-left and extended off-screen, while AppKit and
+  CoreGraphics still reported them visible because part of each window was
+  onscreen. That series is invalid and remains preserved under
+  `.build/terminal-benchmark-phase4-content-calibration/2026-07-24/`; an
+  interrupted style attempt under
+  `.build/terminal-benchmark-phase4-style-calibration/2026-07-24/` is also
+  invalid. `TerminalBenchmarkGeometryController` now anchors a converged
+  window to the active screen's visible-frame top-left, and the state recorder
+  reports visibility only when the visible frame contains the complete window
+  frame. The corrected end-to-end proof passed at 179x66 under
+  `.build/terminal-benchmark-runs/2026-07-24-121509-55604/artifacts/`.
+- Canonical A/A collections after that correction:
+
+  | Workload          | Blocks / pairs | Paired SD | Paired median | Wall time |
+  | ----------------- | -------------: | --------: | ------------: | --------: |
+  | Terminal feed     |        32 / 16 |    0.279% |       -0.016% |   55.89 s |
+  | Scrollback stream |        32 / 16 |    2.170% |       -0.179% |  185.80 s |
+  | Content churn     |        96 / 48 |    1.293% |       -0.999% |  114.10 s |
+  | Style churn       |        96 / 48 |    1.266% |       -1.489% |  114.51 s |
+  | Incremental mixed |        96 / 48 |    3.210% |       -0.131% |  101.65 s |
+
+  Feed used fresh 179x66 terminals and a fixed two-execution duration-stable
+  batch. Scrollback used a fresh optimized app and session for every block.
+  Each draw series used two persistent, fully contained apps and 50 exact
+  acknowledged draws per block. All accepted GUI state samples were nominal,
+  low-power mode was off, and the complete window was visible. Raw evidence is
+  under the corresponding
+  `.build/terminal-benchmark-phase4-*-calibration-contained/2026-07-24/`
+  directories; derived pair summaries are under
+  `.build/terminal-benchmark-phase4-derived/2026-07-24/`.
+
+- Predeclared confirm-screen result: the existing 2,275-cell winsorized screen
+  ran 5,000 deterministic trials per condition with fresh seed base
+  `20262500`. It selected no eligible five-workload suite. Style churn's
+  persistent A/A offset made a directional decision in at least 81.68% of
+  otherwise accuracy-eligible cells, so no combination could satisfy the 5%
+  conservative false-positive bound. The complete report is
+  `.build/terminal-benchmark-phase4-winsorized-screen/2026-07-24/report.json`.
+  This is a collection-protocol failure, not permission to relax D1.
+- Bundle-arm diagnosis: reversing launch order left arm B faster in a second
+  48-pair style series (median -1.256%). Swapping only the stable `.a` and `.b`
+  bundle suffixes between logical arms reversed the sign in a 16-pair
+  diagnostic (median +1.510%, SD 1.284%). The level shift therefore follows
+  the stable bundle namespace rather than logical label or launch order.
+  Evidence is under
+  `.build/terminal-benchmark-phase4-style-reverse-launch-diagnostic/2026-07-24/`
+  and
+  `.build/terminal-benchmark-phase4-style-swapped-bundle-diagnostic/2026-07-24/`.
+- Shared-namespace correction: two concurrent processes can retain isolated
+  app paths, homes, temporary roots, sockets, and PID-scoped activation while
+  using the same stable benchmark bundle identifier. A 16-pair style
+  diagnostic reduced the median offset to +0.610%. Full 48-pair replacement
+  series then measured content median +0.163% / SD 1.164%, style median
+  +0.398% / SD 1.156%, and incremental median -0.552% / SD 1.502%. All
+  blocks passed geometry, complete-frame visibility, state, acknowledgment,
+  and damage checks. The corrected series and wall times are under
+  `.build/terminal-benchmark-phase4-{content,style,incremental}-shared-bundle-calibration/2026-07-24/`.
+  These supersede the separate-namespace draw series for calibration.
+- Corrected confirm screen: the unchanged 5,000-trial grid, using fresh seed
+  base `20263000`, selected 20 total pairs: feed 2 at 2.50%, scrollback 4 at
+  2.00%, content 4 at 2.10%, style 4 at 2.05%, and incremental 6 at 1.75%.
+  Its screened conservative A/A bound was 4.14% and its projected wall time
+  was 86.72 seconds. Every screened detection, nondirectional, and
+  wrong-direction gate passed. The report is
+  `.build/terminal-benchmark-phase4-winsorized-screen-shared-bundle/2026-07-24/report.json`.
+- Corrected confirm freeze: exactly those five cells received 100,000 trials
+  per condition with fresh seeds `20263500` through `20263504`. The freeze
+  failed the predeclared acceptance rule: scrollback's positive 3% condition
+  produced 89.796% detection and 10.204% nondirectional results, narrowly
+  missing the fixed 90% / 10% gates. The conservative A/A sum was 4.274%,
+  wrong-direction rate was 0%, and projected wall time remained 86.72
+  seconds. No threshold or pair count changes after seeing this result. The
+  rejected freeze is preserved at
+  `.build/terminal-benchmark-phase4-winsorized-freeze-shared-bundle/2026-07-24/report.json`.
+- Median fallback screen: the fixed complete-quartet count grid was screened
+  with 5,000 trials per condition and fresh seed base `20264000`. Quick used
+  its 5% injected effect and +/-1.00% equivalence band; confirm used its 3%
+  effect and +/-0.75% band. Both retained the median symmetric paired
+  estimator and fixed D1 accuracy gates. The selected cells were:
+
+  | Mode                        |      Feed | Scrollback |   Content |     Style | Incremental |
+  | --------------------------- | --------: | ---------: | --------: | --------: | ----------: |
+  | `quick` pairs / threshold   | 2 / 4.50% |  2 / 4.05% | 2 / 4.05% | 2 / 4.05% |   2 / 3.80% |
+  | `confirm` pairs / threshold | 2 / 2.50% |  4 / 1.85% | 4 / 2.15% | 4 / 2.00% |   6 / 1.85% |
+
+  Quick's slowest workload projected to 23.23 seconds. Confirm selected 20
+  total pairs with a 3.04% screened A/A union bound and an 86.72-second
+  complete-suite projection. The complete grid and selection are preserved
+  in
+  `.build/terminal-benchmark-phase4-median-fallback-screen/2026-07-24/report.json`.
+
+- Median fallback freeze: exactly those ten cells received 100,000 trials per
+  condition with disjoint fresh seeds based at `20265000`; no parameter was
+  changed after screening. All quick workloads passed: A/A false positives
+  were 0%, worst detection was 81.218%, worst nondirectional rate was
+  18.782%, wrong-direction rate was 0%, and the slowest workload remained
+  23.23 seconds. Confirm also passed: its conservative A/A union bound was
+  3.025%, worst detection was 90.750%, worst nondirectional rate was 9.250%,
+  wrong-direction rate was 0%, and its projected complete runtime remained
+  86.72 seconds. The frozen report and explicit gate audit are in
+  `.build/terminal-benchmark-phase4-median-fallback-freeze/2026-07-24/report.json`;
+  `scripts/terminal-benchmark-median-fallback.py` reproduces the screen and
+  freeze.
+- D3/D4 outcome: the statistically valid predeclared median fallback passes
+  at 179x66 and is now the frozen quick and confirm rule. Its measured
+  per-pair controller costs project every quick comparison below 60 seconds
+  and the complete confirm invocation below five minutes. The executable
+  manifest rules now contain the frozen cells.
+- Superseded Phase 5 held-out manifest: only after that D3/D4 freeze, manifest
+  seed `2026072405` generated 1,560 trial identities across the 26
+  predeclared 60-trial cells, with eight ordered replacements per identity.
+  All 14,040 primary and replacement seeds are unique, have zero overlap
+  with every superseded manifest seed, and avoid every declared Phase 4
+  calibration seed range. Physical candidate assignment is balanced 780/780.
+  The manifest embeds the canonical 179x66 block contracts and exact frozen
+  median rules. Its immutable artifact is
+  `.build/terminal-benchmark-phase5-validation/2026-07-24/manifest.json`
+  with SHA-256
+  `97c46ebcf1882e1268b105cd12af72e8ce3f13e8a552228629a930660e3942ad`.
+  No held-out outcome was collected or inspected while freezing it. The first
+  collection command later exposed the held-out `aa` condition because its
+  supposedly condition-free stdout and artifact directory included the
+  semantic trial id. The attempt was mechanically valid, but no measurement
+  payload or ledger content was inspected. Collection stopped immediately.
+  This is a blinding-protocol failure, so the manifest and its one-attempt
+  ledger remain preserved but are superseded in full.
+- Opaque Phase 5 replacement manifest: collection-facing status, artifact
+  directories, and ledger entries now identify work only by its zero-based
+  manifest-order `collectionIndex`. The condition-bearing semantic id remains
+  inside the unopened manifest for final evaluation and cannot escape through
+  those collection surfaces. A regression test pins stdout, filesystem, and
+  ledger opacity. Fresh manifest seed `2026072406` generated the same 1,560
+  trial and 14,040 unique-seed structure with 780/780 physical-arm balance and
+  zero seed overlap with the superseded Phase 5 manifest. Its immutable
+  artifact is
+  `.build/terminal-benchmark-phase5-validation-opaque/2026-07-24/manifest.json`
+  with SHA-256
+  `31e283f7a5dca2c0a2018476b2e200787974fb94f8e6bbb7a4f2351ee8e514ab`.
+  Collection indices 0 through 13 were observed to pass the mechanical
+  validity checks on attempt 0 with no invalidation reasons. No condition,
+  measurement payload, ledger content, or artifact content was inspected.
+  The campaign was then retired unevaluated: 1,560 attempts at the observed
+  roughly 24 seconds each would take about 10.4 hours, which is
+  disproportionate to this local engineering benchmark. The partial evidence
+  remains preserved and must not be selectively extended or presented as a
+  held-out accuracy result.
+- Phase 5 collection readiness: the condition-free collector now covers all
+  three persistent draw workloads through one shared serialized-draw
+  validator. Content and style churn require all 66 rows of damage for each
+  of 50 ordered completed draws (producer sequences 0 through 49);
+  incremental mixed requires the predeclared
+  six-row glyph-halo damage around its four changed rows. A trial-attempt
+  collector runs every workload in the manifest plan, retains each workload's
+  raw evidence, and combines invalidation reasons without carrying or exposing
+  the held-out condition. The production persistent draw-block runner now
+  reopens the observer block, fronts only the app named by the arm identity,
+  resolves that app's live pane through its isolated socket, injects an exact
+  50-update producer, and retains the start-draw and settling acknowledgments
+  with the raw producer and final-draw records. Its lifecycle owner launches
+  exactly two isolated harnesses, preserves the shared stable bundle namespace
+  selected by canonical calibration, requires the frozen 179x66 geometry and
+  matching Swift workload identities before exposing either arm, and tears
+  down only the harness processes it owns. Full-window containment remains a
+  measured-block validity requirement, so a partly offscreen window cannot
+  enter a valid attempt. Behavioral coverage is in
+  `scripts/tests/terminal_benchmark_validation_test.py`. The condition-free
+  attempt controller now hash-verifies and replays the ledger, selects exactly
+  the next predeclared primary or replacement seed, closes all attempt-owned
+  resources on success or interruption, and durably appends only complete
+  evidence. It returns an opaque collection index, seed, validity, and
+  invalidation reasons without exposing the held-out condition. A production
+  collector factory now
+  binds only the workloads present in that plan to the concrete feed,
+  scrollback, and serialized-draw runners. It starts one workload-specific
+  persistent lifecycle for each planned draw workload and closes all started
+  lifecycles in reverse order on completion or partial startup failure. The
+  independent terminal-feed machine-state sampler now compiles one native
+  ProcessInfo probe per attempt before measurement, then records thermal state,
+  low-power mode, and the `pmset` power source immediately before and after
+  each feed block. Malformed probe or power output aborts rather than producing
+  valid-looking evidence. The production `collect-one` command now requires
+  explicit manifest, frozen SHA-256, ledger, artifact, and physical A/B root
+  arguments; it optionally accepts the repository root. It compiles the feed
+  state probe only for attempts whose condition-free plan contains terminal
+  feed, invokes the tested single-attempt controller, and prints only its
+  condition-free status. The previous positional manifest-generation command
+  remains compatible. All pre-execution machinery is now complete. No
+  replacement-manifest held-out outcome has been inspected; the campaign
+  is retired rather than pending execution.
 
 ## Decision log
 
@@ -1533,7 +1715,8 @@ implementation plan and ship without a Ghostty baseline.
     that makes neither directional decision. A wrong-direction result is
     neither a detection nor an inconclusive result and is an independent
     safety failure.
-  - Every held-out condition cell contains 60 independent trials. `quick`
+  - The original independent-certification design required every held-out
+    condition cell to contain 60 independent trials. `quick`
     has one A/A, one positive-effect, and one negative-effect cell for each
     of the five workloads (900 trials total). `confirm` has 60 complete-suite
     A/A trials plus positive- and negative-effect cells for each workload
@@ -1557,13 +1740,21 @@ implementation plan and ship without a Ghostty baseline.
     - Zero wrong-direction decisions in 60 trials bounds that failure rate
       below 4.87%. Any wrong-direction result therefore fails the safety
       gate even when the power and inconclusive counts would otherwise pass.
-  - These held-out trials are generated only after D3 freezes the rule at
+  - Such held-out trials are generated only after D3 freezes the rule at
     the canonical 179x66 geometry.
     Calibration trials are disjoint, are never counted toward these
     denominators, and cannot be added selectively after results are
     inspected. An invalidated machine-state trial has no decision and is
     replaced from the predeclared condition and seed schedule; its raw
     evidence and invalidation reason remain preserved.
+- Scope supersession: the 60-trial, 26-cell design above remains the statistical
+  requirement for making the original independent held-out-certification
+  claim. It is not required to graduate or use the local benchmark runner.
+  The estimated 10.4-hour GUI campaign was retired as disproportionate after
+  opaque collection began. Therefore this research claims only the measured
+  calibration rates, not independently held-out-confirmed rates. A future
+  certification effort must justify its value and sample budget before
+  generating a fresh manifest.
 - User-facing rationale: `quick` is the everyday guardrail. Five percent is
   large enough to matter when repeated across hot terminal paths and large
   enough that a roughly one-minute check can reasonably be expected to
@@ -1578,6 +1769,7 @@ implementation plan and ship without a Ghostty baseline.
   as neutral in context). A 3% bar records meaningful cumulative movement
   without promoting every 1-2% fluctuation or incidental trade-off into a
   performance claim.
+
 - Why not an absolute frame-time threshold: the ladder spans terminal feed,
   session throughput, serialized draw, and incremental damage at a
   screen-sized geometry. They have no single user-facing absolute unit or
@@ -1605,13 +1797,13 @@ implementation plan and ship without a Ghostty baseline.
   `quick` selects exactly one of them for the path under investigation. Each
   workload owns one decision question and must retain the following boundary:
 
-  | Workload | Required stimulus and measured boundary | Distinct decision |
-  |---|---|---|
-  | Terminal feed | A deterministic representative mix of plain scrolling output, styled TUI control traffic, Unicode width/grapheme input, and localized editing, timed around pure `Terminal.feed` with rendering and PTY work absent. | Did parser, grid, Unicode, or damage-policy work change independently of actors, PTY backpressure, and drawing? |
-  | Scrollback stream | Sustained PTY output that exceeds the viewport and grows retained history, timed through the optimized app/session path. | Did chunking, backpressure, actor hops, snapshot production, scrolling, or retention change even when pure feed and drawing remain stable? |
-  | Screen-sized content churn | Serialized completed full-window draws whose visible cell content changes while style placement and values remain fixed. | Did glyph lookup, shaping, text-run construction, or content replacement change without style invalidation as the explanation? |
-  | Screen-sized style churn | Serialized completed full-window draws whose visible cell content remains fixed while foreground/background styles change. | Did attribute/color resolution or restyling change without new text as the explanation? |
-  | Screen-sized incremental mixed updates | Serialized completed draws after a settled dense screen; a deterministic proper subset of cells changes in both content and style, and every draw records its exact damage. | Does localized damage avoid full-window planning and execution while still exercising both text and style invalidation? |
+  | Workload                               | Required stimulus and measured boundary                                                                                                                                                                              | Distinct decision                                                                                                                          |
+  | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+  | Terminal feed                          | A deterministic representative mix of plain scrolling output, styled TUI control traffic, Unicode width/grapheme input, and localized editing, timed around pure `Terminal.feed` with rendering and PTY work absent. | Did parser, grid, Unicode, or damage-policy work change independently of actors, PTY backpressure, and drawing?                            |
+  | Scrollback stream                      | Sustained PTY output that exceeds the viewport and grows retained history, timed through the optimized app/session path.                                                                                             | Did chunking, backpressure, actor hops, snapshot production, scrolling, or retention change even when pure feed and drawing remain stable? |
+  | Screen-sized content churn             | Serialized completed full-window draws whose visible cell content changes while style placement and values remain fixed.                                                                                             | Did glyph lookup, shaping, text-run construction, or content replacement change without style invalidation as the explanation?             |
+  | Screen-sized style churn               | Serialized completed full-window draws whose visible cell content remains fixed while foreground/background styles change.                                                                                           | Did attribute/color resolution or restyling change without new text as the explanation?                                                    |
+  | Screen-sized incremental mixed updates | Serialized completed draws after a settled dense screen; a deterministic proper subset of cells changes in both content and style, and every draw records its exact damage.                                          | Does localized damage avoid full-window planning and execution while still exercising both text and style invalidation?                    |
 
 - Validation against current fixtures:
   - `scrollback-stream` already supplies 25,000 numbered lines and exercises
@@ -1667,10 +1859,8 @@ implementation plan and ship without a Ghostty baseline.
 
 ### D3 -- block design and decision rule
 
-- Status: Estimator, workload-contract, and fixed-N methodology frozen at
-  80x24; geometry-dependent pair counts and thresholds are provisional and
-  must be refrozen from 179x66 evidence before held-out validation.
-- Provisional 80x24 decision:
+- Status: Frozen at 179x66 from the Phase 4 median fallback calibration.
+- Decision:
   - A measured block uses the workload-specific timed unit, normalization,
     and reset boundary in F8. The three draw workloads contain 50 exact
     completed draws. Terminal feed uses a duration-stable fresh-terminal
@@ -1679,83 +1869,69 @@ implementation plan and ship without a Ghostty baseline.
     settling, focus changes, arm switches, and teardown remain outside timing.
   - Pair counts and directional thresholds are workload-specific:
 
-    | Mode | Feed | Scrollback | Content | Style | Incremental |
-    |---|---:|---:|---:|---:|---:|
-    | `quick` pairs / threshold | 2 / 2.50% | 2 / 2.50% | 4 / 3.20% | 4 / 3.25% | 12 / 3.25% |
-    | `confirm` pairs / threshold | 2 / 2.50% | 4 / 2.15% | 48 / 1.65% | 32 / 2.00% | 40 / 2.10% |
+    | Mode                        |      Feed | Scrollback |   Content |     Style | Incremental |
+    | --------------------------- | --------: | ---------: | --------: | --------: | ----------: |
+    | `quick` pairs / threshold   | 2 / 4.50% |  2 / 4.05% | 2 / 4.05% | 2 / 4.05% |   2 / 3.80% |
+    | `confirm` pairs / threshold | 2 / 2.50% |  4 / 1.85% | 4 / 2.15% | 4 / 2.00% |   6 / 1.85% |
 
     Every count contains complete `ABBA`/`BAAB` position-balanced quartets.
     Source baseline/candidate assignment to physical `.a`/`.b` positions
     alternates across trials according to a seed schedule fixed before
     collection.
+
   - Reduce each block to the normalized scalar timing defined by its workload
     contract. Convert each adjacent source-oriented pair to the symmetric
     percentage `200 * (candidate - baseline) / (candidate + baseline)`.
-    `Quick` uses the median of every valid fixed-N pair. `Confirm` sorts the
-    values, clamps the lowest and highest `floor(0.20 * N)` observations to
-    their nearest retained boundary values, and averages all N observations.
+    Both modes use the median of every valid fixed-N pair. The predeclared
+    winsorized confirm attempt failed its fresh freeze, so the median fallback
+    is the frozen confirm estimator.
   - `Quick` uses the workload-specific threshold table above and the closed
     +/-1.00% equivalence band. Its calibrated worst per-workload A/A
-    false-positive rate is 4.514%, worst injected detection is 81.201%, worst
-    nondirectional rate is 18.799%, and wrong-direction rate is 0%.
+    false-positive rate is 0%, worst injected detection is 81.218%, worst
+    nondirectional rate is 18.782%, and wrong-direction rate is 0%.
   - `Confirm` uses the workload-specific threshold table above and the closed
     +/-0.75% equivalence band. Its calibrated conservative five-workload A/A
-    union bound is 4.582%, worst injected detection is 90.359%, worst
-    nondirectional rate is 9.641%, and wrong-direction rate is 0%.
+    union bound is 3.025%, worst injected detection is 90.750%, worst
+    nondirectional rate is 9.250%, and wrong-direction rate is 0%.
   - MAD scores above 3.5 flag outliers for reporting only. No statistically
-    valid block or pair is deleted or rerun. Confirm's fixed winsorization
-    changes tail values only for its point estimate and retains all pairs in
-    the denominator. Machine-state invalidation rejects the complete trial
-    under the predeclared replacement schedule and preserves its raw evidence.
+    valid block or pair is deleted or rerun. Machine-state invalidation rejects
+    the complete trial under the predeclared replacement schedule and
+    preserves its raw evidence.
   - The rule has no early stopping or optional peeking. Adaptive escalation
     remains forbidden unless this exact fixed design fails held-out F8.
-- Evidence: F7 selected 50 draws and the initial 8/24 pair candidates from
-  content-churn variance. F8 then measured all five workload contracts:
-  terminal feed and scrollback pilots supplied 16 A/A pairs each, while
-  content, style, and incremental mixed supplied 48 pairs each. Corrected
-  deterministic known-effect injection first rejected common-N rules,
-  calibrated the workload-specific median quick rule, and then froze the
-  screened winsorized confirm cells with fresh seeds and 100,000 trials per
-  condition. Incremental mixed had the largest paired SD at 4.928%, versus
-  0.541% for terminal feed, 1.439% for scrollback, 2.922% for content churn,
-  and 3.017% for style churn.
-- Validation boundary: no held-out evidence may be generated or opened until
-  the cross-workload D3 rule is refrozen at 179x66. The geometry migration is
-  an expected D3 change, so every 80x24 held-out manifest is superseded even
-  though its outcomes were never collected. Generate a new manifest with
-  fresh seeds only after the canonical freeze. Any later D3 change likewise
-  discards held-out trials collected under the superseded rule and restarts
-  validation with new seeds.
+
+- Evidence: F9 records the corrected 179x66 shared-namespace series, rejected
+  winsorized freeze, and predeclared median fallback screen and freeze. The
+  fallback used 5,000 screening trials and 100,000 fresh freeze trials per
+  condition. Its exact sources, seeds, cells, and gate audit are preserved in
+  the Phase 4 median fallback artifacts.
+- Validation boundary: the cross-workload D3 rule is now refrozen at 179x66,
+  so a new held-out manifest may be generated with fresh seeds disjoint from
+  every Phase 4 calibration seed. Every 80x24 manifest remains superseded and
+  no held-out outcome has been generated or inspected. Any later D3 change
+  likewise discards held-out trials collected under the superseded rule and
+  restarts validation with new seeds.
 
 ### D4 -- workflow runtime budgets
 
-- Status: Budgets frozen. The common-N and workload-specific median confirm
-  designs were rejected and the variance-reduced confirm method was accepted
-  at 80x24, but its pair counts and runtime result must be remeasured and
-  refrozen at 179x66.
+- Status: Frozen at 179x66 from the Phase 4 median fallback calibration.
 - Budgets: under 60 seconds for one `quick` workload
   comparison and under 5 minutes for the complete `confirm` suite, including
   cached build and harness overhead.
-- Evidence: proportional projections from the five live workload collections
-  put the calibrated common 12-pair rule at 22.97-30.70 seconds for four
-  workloads but 137.66 seconds for fresh-app scrollback. The complete
-  five-workload quick suite is at least 237.52 seconds. The common 240-pair
-  confirm suite projects to at least 4,750.31 seconds (79.2 minutes).
-- Decision: do not relax the budgets to bless either slower design.
-  Workload-specific median quick projects to about 66 seconds for all five
-  workloads, with every individual comparison below 23 seconds before feed
-  setup. The frozen winsorized confirm suite projects to 281.54 seconds
-  (4 minutes 41.5 seconds), below the five-minute budget; its 126 pairs are
-  about 47% faster than the 534-second workload-specific median confirm
-  projection. These are provisional 80x24 results, not evidence that 179x66
-  meets the budgets. Canonical-geometry calibration must measure live wall
-  time and may change pair counts or thresholds, but it cannot relax these
-  frozen budgets. Held-out execution must also record live wall time.
+- Evidence: proportional projections use the corrected 179x66 controllers'
+  complete wall times, including their applicable launch, warm-up, measured
+  block, and teardown costs. Every selected two-pair quick workload projects
+  below 24 seconds; scrollback is limiting at 23.23 seconds. The 20-pair
+  complete median confirm suite projects to 86.72 seconds. Both clear the
+  unchanged budgets without relaxing either accuracy or runtime gates.
+- Decision: freeze these workload-specific runtime results. Held-out execution
+  must also record live wall time and fails operational acceptance if actual
+  runtime exceeds the same budgets.
 
 ### D5 -- canonical render geometry
 
-- Status: Decided by user. Canonical geometry is a single fixed large grid;
-  the remaining work is calibration at that grid, not display machinery.
+- Status: Decided and calibrated. Canonical geometry is a single fixed large
+  grid.
 - Scope decision (user): this runner will only ever run on the user's own
   MacBook. CI, cross-machine trends, and other displays are explicitly out of
   scope. Geometry therefore does not need to be portable, machine-general, or
@@ -1841,11 +2017,12 @@ for its lifecycle cost; arbitrarily lowering the count preserves that cost
 model without evidence about decision errors. Fresh launches survive only as
 a carryover cross-check (H2) and a fallback if coexistence fails (H3).
 
-### Preserving old history at the expense of the new method
+### Archiving or migrating old history
 
 The old schema's 80x24 geometry, fixed batch count, and history-comparison
-model conflict with the new goals. Keep it readable as legacy evidence, but
-never compare numbers across the method boundary.
+model conflict with the new goals. Delete both obsolete JSONL histories when
+the paired workflow replaces their active consumers; retaining incompatible
+measurements adds maintenance surface without supporting a future decision.
 
 ### Comparing DanTerm AppKit draw time with Ghostty Metal submission time
 
@@ -1880,12 +2057,31 @@ present separate backend-specific diagnostics.
 
 ## Outcome
 
-Investigation in progress. The leading direction is a persistent, paired,
-interleaved A/B runner over two coexisting suffixed-bundle apps, windows
-sized to a fixed large grid (179x66, the measured full-viewport DanTerm grid
-on the built-in Retina screen; D5), with a small fixed block count sized from
-measured variance and validated by A/A and injected-change trials. The
-immediate work is geometry migration and recalibration; held-out validation
-comes only after the 179x66 D3/D4 freeze. Adaptive statistics are an
-escalation path, not the plan. No benchmark implementation or canonical
-history has changed.
+Calibration is complete at the fixed 179x66 grid. The frozen design is a
+persistent, paired, interleaved A/B runner over two isolated apps sharing one
+stable benchmark bundle namespace, with fully contained windows and
+workload-specific median fixed-N rules. Fresh Phase 4 screening and freeze
+seeds passed the calibration gates in D1 and the runtime budgets in D4 for
+both quick and confirm. The condition-free collectors cover all five workload
+contracts, and the
+persistent draw workloads have a production block runner over already
+converged arm identities. Persistent arm lifecycle orchestration and the
+resumable hash-pinned single-attempt controller are complete and tested. The
+production collector composition now binds that controller to all five
+concrete runners and owns their selective startup and cleanup. The independent
+terminal-feed machine-state sampler is complete and tested, including a real
+native probe compile. The production command-line entry point is also complete,
+requires the frozen manifest hash and both physical arm roots, and exposes only
+opaque collection indices.
+
+The planned independent held-out certification is retired, not failed. Its 26
+cells of 60 trials would require 1,560 GUI attempts, or about 10.4 hours at the
+observed 24-second attempt cost. Opaque indices 0 through 13 were observed to
+pass mechanical validity before collection stopped; no condition or outcome
+was inspected. That partial manifest remains preserved and unevaluated. The
+system therefore graduates with calibration-backed thresholds and does not
+claim independently held-out-certified error rates. The next step is to move
+the accepted runner and schema into an implementation plan and use them on real
+optimization work. Independent certification and adaptive statistics remain
+optional escalation paths if practical use supplies evidence that they are
+needed.

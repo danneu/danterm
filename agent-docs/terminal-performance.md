@@ -63,8 +63,8 @@ churn by default; select one with `workload=full-screen-content-churn`,
 `workload=full-screen-style-churn`, or `workload=full-screen-mixed-churn`.
 Options `save=0|1` and `comment=` use the same completion-before-confirmation
 contract as the corpus suite. Each measured update waits for its exact
-completed draw, every draw must damage all 24 rows, and sequence metadata stays
-in the terminal title rather than visible grid content.
+completed draw, every full-screen draw must damage all 66 achieved rows, and
+sequence metadata stays in the terminal title rather than visible grid content.
 
 The full recording run excludes warm-up and calibration, then runs 15 fresh
 optimized app batches. The content-only, style-only, and mixed workloads use at

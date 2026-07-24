@@ -2,8 +2,11 @@
 """Behavioral tests for held-out paired benchmark validation."""
 import importlib.util
 import hashlib
+import io
 import json
 import pathlib
+import signal
+import subprocess
 import tempfile
 import unittest
 
@@ -59,16 +62,17 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         }
         ledger = []
 
-        first = VALIDATION.next_attempt(trial, ledger)
+        first = VALIDATION.next_attempt(trial, ledger, collection_index=0)
         VALIDATION.record_attempt(
             ledger,
             trial=trial,
+            collection_index=0,
             seed=first["seed"],
             valid=False,
             evidence={"block": "raw-first"},
             invalidation_reasons=["ac-power-changed"],
         )
-        second = VALIDATION.next_attempt(trial, ledger)
+        second = VALIDATION.next_attempt(trial, ledger, collection_index=0)
 
         self.assertEqual(first, {"attempt": 0, "seed": 11})
         self.assertEqual(second, {"attempt": 1, "seed": 12})
@@ -81,6 +85,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         VALIDATION.record_attempt(
             valid_ledger,
             trial=trial,
+            collection_index=0,
             seed=11,
             valid=True,
             evidence={"block": "raw"},
@@ -88,16 +93,16 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(ValueError, "already has a valid result"):
-            VALIDATION.next_attempt(trial, valid_ledger)
+            VALIDATION.next_attempt(trial, valid_ledger, collection_index=0)
         with self.assertRaisesRegex(ValueError, "replacement schedule exhausted"):
             VALIDATION.next_attempt(trial, [{
-                "trialId": trial["id"],
+                "collectionIndex": 0,
                 "attempt": 0,
                 "seed": 11,
                 "valid": False,
                 "evidence": {"block": "raw"},
                 "invalidationReasons": ["thermal-state-changed"],
-            }])
+            }], collection_index=0)
 
     def test_manifest_freezes_workload_specific_block_contracts(self):
         manifest = VALIDATION.make_manifest(seed=2026072402, trials_per_cell=60)
@@ -136,15 +141,15 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         self.assertEqual(rules["quick"]["equivalenceBandPercent"], 1.0)
         self.assertEqual(
             rules["quick"]["workloads"]["content-churn"],
-            {"pairCount": 4, "directionalThresholdPercent": 3.2},
+            {"pairCount": 2, "directionalThresholdPercent": 4.05},
         )
         self.assertEqual(
-            rules["confirm"]["estimator"], "winsorized-mean-20",
+            rules["confirm"]["estimator"], "median",
         )
         self.assertEqual(rules["confirm"]["equivalenceBandPercent"], 0.75)
         self.assertEqual(
             rules["confirm"]["workloads"]["incremental-mixed"],
-            {"pairCount": 40, "directionalThresholdPercent": 2.1},
+            {"pairCount": 6, "directionalThresholdPercent": 1.85},
         )
 
     def test_quick_cell_applies_frozen_acceptance_counts(self):
@@ -291,6 +296,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 ledger_path,
                 loaded["ledger"],
                 trial=first["trial"],
+                collection_index=first["collectionIndex"],
                 seed=first["seed"],
                 valid=False,
                 evidence={"rawBlocks": [{"durationNanoseconds": 10}]},
@@ -322,7 +328,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         )
         trial = manifest["quick"][0]
         bad_entry = {
-            "trialId": trial["id"],
+            "collectionIndex": 0,
             "attempt": 1,
             "seed": trial["replacementSeeds"][0],
             "valid": False,
@@ -422,6 +428,81 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
         )
         self.assertEqual(evidence["rawBlocks"][0]["sampleDurationNanoseconds"],
                          900_000_000)
+
+    def test_terminal_feed_state_sampler_compiles_once_and_samples_process_and_power_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            calls = []
+
+            def run(command, **kwargs):
+                calls.append((command, kwargs))
+                if command[0:2] == ["xcrun", "swiftc"]:
+                    return subprocess.CompletedProcess(command, 0, "", "")
+                if command[0] == str(root / "terminal-feed-state-probe"):
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        '{"thermalState":"nominal","lowPowerMode":false}\n',
+                        "",
+                    )
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    "Now drawing from 'AC Power'\n"
+                    " -InternalBattery-0\t100%; discharging; present: true\n",
+                    "",
+                )
+
+            sample = VALIDATION.make_terminal_feed_state_sampler(
+                root,
+                source_path=root / "probe.swift",
+                run_command=run,
+            )
+            first = sample()
+            second = sample()
+
+            self.assertEqual(first, {
+                "powerSource": "AC Power",
+                "thermalState": "nominal",
+                "lowPowerMode": False,
+            })
+            self.assertEqual(second, first)
+            self.assertEqual(
+                [call[0][0:2] for call in calls].count(["xcrun", "swiftc"]),
+                1,
+            )
+            self.assertEqual(
+                [call[0] for call in calls[1:]],
+                [
+                    [str(root / "terminal-feed-state-probe")],
+                    ["pmset", "-g", "batt"],
+                    [str(root / "terminal-feed-state-probe")],
+                    ["pmset", "-g", "batt"],
+                ],
+            )
+
+    def test_terminal_feed_state_sampler_rejects_unrecognized_power_output(self):
+        def run(command, **_kwargs):
+            if command[0:2] == ["xcrun", "swiftc"]:
+                return subprocess.CompletedProcess(command, 0, "", "")
+            if command[0].endswith("terminal-feed-state-probe"):
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    '{"thermalState":"nominal","lowPowerMode":false}',
+                    "",
+                )
+            return subprocess.CompletedProcess(command, 0, "power unavailable", "")
+
+        with tempfile.TemporaryDirectory() as directory:
+            sample = VALIDATION.make_terminal_feed_state_sampler(
+                directory,
+                source_path=pathlib.Path(directory) / "probe.swift",
+                run_command=run,
+            )
+
+            with self.assertRaisesRegex(ValueError, "power source"):
+                sample()
 
     def test_scrollback_collector_retains_fresh_session_marker_to_draw_evidence(self):
         blocks = [
@@ -571,7 +652,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                     "elapsedNanoseconds": 410_000_000,
                     "drawCount": 50,
                     "cumulativeDrawNanoseconds": sum(durations),
-                    "drawSequences": list(range(1, 51)),
+                    "drawSequences": list(range(50)),
                     "drawDurationsNanoseconds": durations,
                     "dirtyRowCounts": [66] * 50,
                     "machineStateSamples": [{
@@ -628,7 +709,7 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 "elapsedNanoseconds": 410_000_000,
                 "drawCount": 49,
                 "cumulativeDrawNanoseconds": 15_000_000,
-                "drawSequences": list(range(1, 50)),
+                "drawSequences": list(range(49)),
                 "drawDurationsNanoseconds": [300_000] * 49,
                 "dirtyRowCounts": [66] * 48 + [65],
                 "machineStateSamples": [],
@@ -653,6 +734,712 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 "block-0-missing-machine-state",
             ],
         )
+
+    def test_style_churn_collector_requires_full_screen_damage(self):
+        artifact = self._draw_churn_artifact(
+            workload="full-screen-style-churn",
+            fixture="full-screen-style-churn",
+            dirty_rows=66,
+        )
+
+        evidence = VALIDATION.collect_style_churn(
+            [{"measurementRole": "A", "physicalArm": "a"}],
+            run_block=lambda arm: artifact,
+        )
+
+        self.assertTrue(evidence["valid"])
+        self.assertEqual(evidence["workload"], "style-churn")
+        self.assertEqual(
+            evidence["rawBlocks"][0]["drawNanosecondsPerDraw"],
+            300_000,
+        )
+
+    def test_incremental_mixed_collector_requires_six_row_halo_damage(self):
+        artifact = self._draw_churn_artifact(
+            workload="full-screen-incremental-mixed-churn",
+            fixture=(
+                "full-screen-incremental-mixed-churn-"
+                "v2-four-rows-six-damage-179x66"
+            ),
+            dirty_rows=6,
+        )
+
+        evidence = VALIDATION.collect_incremental_mixed(
+            [{"measurementRole": "A", "physicalArm": "a"}],
+            run_block=lambda arm: artifact,
+        )
+
+        self.assertTrue(evidence["valid"])
+        self.assertEqual(evidence["workload"], "incremental-mixed")
+        artifact["finalDraw"]["dirtyRowCounts"][-1] = 4
+        invalid = VALIDATION.collect_incremental_mixed(
+            [{"measurementRole": "A", "physicalArm": "a"}],
+            run_block=lambda arm: artifact,
+        )
+        self.assertEqual(
+            invalid["invalidationReasons"],
+            ["block-0-wrong-damage-row-count"],
+        )
+
+    def test_attempt_collector_runs_every_planned_workload_without_exposing_condition(self):
+        calls = []
+        plan = {
+            workload: [{"measurementRole": "A", "physicalArm": "a"}]
+            for workload in VALIDATION.WORKLOADS
+        }
+        collectors = {}
+        for workload in VALIDATION.WORKLOADS:
+            def collect(blocks, workload=workload):
+                calls.append((workload, blocks))
+                return {
+                    "workload": workload,
+                    "rawBlocks": [{"measurementRole": "A"}],
+                    "valid": workload != "style-churn",
+                    "invalidationReasons": (
+                        ["block-0-window-occluded"]
+                        if workload == "style-churn" else []
+                    ),
+                }
+            collectors[workload] = collect
+
+        evidence = VALIDATION.collect_attempt(plan, collectors=collectors)
+
+        self.assertEqual([workload for workload, _ in calls], list(plan))
+        self.assertNotIn("condition", str(evidence))
+        self.assertFalse(evidence["valid"])
+        self.assertEqual(
+            evidence["invalidationReasons"],
+            ["style-churn:block-0-window-occluded"],
+        )
+        self.assertEqual(set(evidence["workloads"]), set(plan))
+
+    def test_collect_next_attempt_hash_pins_appends_and_returns_condition_free_status(self):
+        manifest = VALIDATION.make_manifest(
+            seed=2026072402,
+            trials_per_cell=1,
+            replacements_per_trial=1,
+        )
+        manifest_bytes = (
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+        ).encode()
+        expected_hash = hashlib.sha256(manifest_bytes).hexdigest()
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            manifest_path = root / "manifest.json"
+            ledger_path = root / "attempts.jsonl"
+            manifest_path.write_bytes(manifest_bytes)
+            closed = []
+
+            def make_collectors(plan, attempt_directory):
+                self.assertEqual(set(plan), {"terminal-feed"})
+                self.assertEqual(
+                    attempt_directory.name,
+                    "collection-000000-attempt-00",
+                )
+                return ({
+                    "terminal-feed": lambda blocks: {
+                        "workload": "terminal-feed",
+                        "rawBlocks": [{**blocks[0], "durationNanoseconds": 10}],
+                        "valid": True,
+                        "invalidationReasons": [],
+                    },
+                }, lambda: closed.append(True))
+
+            status = VALIDATION.collect_next_attempt(
+                manifest_path,
+                ledger_path,
+                expected_manifest_sha256=expected_hash,
+                artifacts_root=root / "artifacts",
+                make_collectors=make_collectors,
+            )
+
+            self.assertEqual(status["collectionIndex"], 0)
+            self.assertEqual(status["attempt"], 0)
+            self.assertEqual(status["seed"], manifest["quick"][0]["seed"])
+            self.assertTrue(status["valid"])
+            self.assertNotIn("condition", json.dumps(status))
+            self.assertEqual(closed, [True])
+            entries = [
+                json.loads(line)
+                for line in ledger_path.read_text().splitlines()
+            ]
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(
+                entries[0]["collectionIndex"],
+                status["collectionIndex"],
+            )
+
+    def test_collect_next_attempt_keeps_semantic_trial_identity_out_of_collection_surfaces(self):
+        manifest = VALIDATION.make_manifest(
+            seed=2026072402,
+            trials_per_cell=1,
+            replacements_per_trial=1,
+        )
+        manifest_bytes = (
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+        ).encode()
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            manifest_path = root / "manifest.json"
+            ledger_path = root / "attempts.jsonl"
+            manifest_path.write_bytes(manifest_bytes)
+            attempt_directories = []
+
+            def make_collectors(plan, attempt_directory):
+                attempt_directories.append(attempt_directory)
+                return ({
+                    "terminal-feed": lambda blocks: {
+                        "workload": "terminal-feed",
+                        "rawBlocks": blocks,
+                        "valid": True,
+                        "invalidationReasons": [],
+                    },
+                }, lambda: None)
+
+            status = VALIDATION.collect_next_attempt(
+                manifest_path,
+                ledger_path,
+                expected_manifest_sha256=hashlib.sha256(
+                    manifest_bytes
+                ).hexdigest(),
+                artifacts_root=root / "artifacts",
+                make_collectors=make_collectors,
+            )
+
+            collection_surfaces = json.dumps({
+                "status": status,
+                "artifact": attempt_directories[0].name,
+                "ledger": json.loads(ledger_path.read_text()),
+            })
+            semantic_id = manifest["quick"][0]["id"]
+            self.assertNotIn(semantic_id, collection_surfaces)
+            self.assertNotIn(manifest["quick"][0]["condition"], collection_surfaces)
+            self.assertNotIn("trialId", collection_surfaces)
+            self.assertEqual(status["collectionIndex"], 0)
+            self.assertEqual(
+                attempt_directories[0].name,
+                "collection-000000-attempt-00",
+            )
+
+    def test_collect_next_attempt_closes_without_appending_incomplete_evidence(self):
+        manifest = VALIDATION.make_manifest(
+            seed=2026072402,
+            trials_per_cell=1,
+            replacements_per_trial=1,
+        )
+        manifest_bytes = (
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n"
+        ).encode()
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            manifest_path = root / "manifest.json"
+            ledger_path = root / "attempts.jsonl"
+            manifest_path.write_bytes(manifest_bytes)
+            closed = []
+
+            def make_collectors(_plan, _attempt_directory):
+                def fail(_blocks):
+                    raise RuntimeError("interrupted block")
+
+                return ({
+                    "terminal-feed": fail,
+                }, lambda: closed.append(True))
+
+            with self.assertRaisesRegex(RuntimeError, "interrupted block"):
+                VALIDATION.collect_next_attempt(
+                    manifest_path,
+                    ledger_path,
+                    expected_manifest_sha256=hashlib.sha256(
+                        manifest_bytes
+                    ).hexdigest(),
+                    artifacts_root=root / "artifacts",
+                    make_collectors=make_collectors,
+                )
+
+            self.assertEqual(closed, [True])
+            self.assertFalse(ledger_path.exists())
+
+    def test_collect_one_command_binds_production_dependencies_and_prints_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            calls = []
+            stdout = io.StringIO()
+
+            def collect(
+                manifest_path,
+                ledger_path,
+                *,
+                expected_manifest_sha256,
+                artifacts_root,
+                make_collectors,
+            ):
+                plan = {"terminal-feed": [{"physicalArm": "a"}]}
+                attempt_directory = artifacts_root / "attempt-00"
+                collectors, close = make_collectors(plan, attempt_directory)
+                calls.append((
+                    manifest_path,
+                    ledger_path,
+                    expected_manifest_sha256,
+                    artifacts_root,
+                    collectors,
+                    close,
+                ))
+                return {
+                    "complete": False,
+                    "collectionIndex": 0,
+                    "valid": True,
+                }
+
+            def make_sampler(output):
+                calls.append(("sampler", output))
+                return lambda: {"thermalState": "nominal"}
+
+            def make_production(
+                plan,
+                attempt_directory,
+                *,
+                arm_roots,
+                repository_root,
+                sample_state,
+            ):
+                calls.append((
+                    "production",
+                    plan,
+                    attempt_directory,
+                    arm_roots,
+                    repository_root,
+                    sample_state(),
+                ))
+                return {"terminal-feed": object()}, lambda: None
+
+            exit_code = VALIDATION.main(
+                [
+                    "collect-one",
+                    "--manifest", str(root / "manifest.json"),
+                    "--manifest-sha256", "frozen-hash",
+                    "--ledger", str(root / "attempts.jsonl"),
+                    "--artifacts", str(root / "artifacts"),
+                    "--arm-a-root", str(root / "a"),
+                    "--arm-b-root", str(root / "b"),
+                    "--repository-root", str(root / "repository"),
+                ],
+                collect_next=collect,
+                state_sampler_factory=make_sampler,
+                production_collectors_factory=make_production,
+                stdout=stdout,
+            )
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(
+                json.loads(stdout.getvalue()),
+                {
+                    "complete": False,
+                    "collectionIndex": 0,
+                    "valid": True,
+                },
+            )
+            self.assertEqual(calls[0][0], "sampler")
+            self.assertEqual(
+                calls[0][1],
+                root / "artifacts" / "attempt-00" / "terminal-feed-state",
+            )
+            self.assertEqual(calls[1][0], "production")
+            self.assertEqual(
+                calls[1][3],
+                {"a": root / "a", "b": root / "b"},
+            )
+            self.assertEqual(calls[2][2], "frozen-hash")
+
+    def test_collect_one_command_does_not_compile_feed_probe_for_draw_only_plan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+
+            def collect(
+                _manifest,
+                _ledger,
+                *,
+                expected_manifest_sha256,
+                artifacts_root,
+                make_collectors,
+            ):
+                collectors, close = make_collectors(
+                    {"style-churn": [{"physicalArm": "b"}]},
+                    artifacts_root / "attempt-00",
+                )
+                close()
+                self.assertEqual(set(collectors), {"style-churn"})
+                return {"complete": True}
+
+            VALIDATION.main(
+                [
+                    "collect-one",
+                    "--manifest", str(root / "manifest.json"),
+                    "--manifest-sha256", "frozen-hash",
+                    "--ledger", str(root / "attempts.jsonl"),
+                    "--artifacts", str(root / "artifacts"),
+                    "--arm-a-root", str(root / "a"),
+                    "--arm-b-root", str(root / "b"),
+                ],
+                collect_next=collect,
+                state_sampler_factory=lambda _output: self.fail(
+                    "draw-only attempts must not compile the feed state probe"
+                ),
+                production_collectors_factory=lambda *args, **kwargs: (
+                    {"style-churn": object()},
+                    lambda: None,
+                ),
+                stdout=io.StringIO(),
+            )
+
+    def test_production_collectors_bind_only_the_planned_feed_workload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            feed_runs = []
+
+            collectors, close = VALIDATION.make_production_collectors(
+                {"terminal-feed": [{"physicalArm": "a"}]},
+                root / "attempt",
+                arm_roots={"a": root / "a", "b": root / "b"},
+                repository_root=root,
+                sample_state=lambda: {"state": "sample"},
+                load_feed_fixture=lambda _root: b"framed",
+                feed_runner_factory=lambda roots, fixture: (
+                    lambda arm, *, execution_count: feed_runs.append(
+                        (roots, fixture, arm, execution_count)
+                    )
+                ),
+                lifecycle_factory=lambda *args, **kwargs: self.fail(
+                    "feed-only collection must not launch draw apps"
+                ),
+            )
+
+            close()
+
+            self.assertEqual(set(collectors), {"terminal-feed"})
+            self.assertEqual(feed_runs, [])
+
+    def test_production_collectors_start_workload_specific_draw_lifecycles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            started = []
+            closed = []
+
+            class Lifecycle:
+                def __init__(self, _roots, *, workload, output):
+                    self.workload = workload
+                    self.output = output
+
+                def start(self):
+                    started.append((self.workload, self.output.name))
+                    return {
+                        "a": {"pid": len(started) * 10 + 1},
+                        "b": {"pid": len(started) * 10 + 2},
+                    }
+
+                def close(self):
+                    closed.append(self.workload)
+
+            plan = {
+                "content-churn": [{"physicalArm": "a"}],
+                "style-churn": [{"physicalArm": "b"}],
+                "incremental-mixed": [{"physicalArm": "a"}],
+            }
+            collectors, close = VALIDATION.make_production_collectors(
+                plan,
+                root / "attempt",
+                arm_roots={"a": root / "a", "b": root / "b"},
+                repository_root=root,
+                sample_state=lambda: {},
+                lifecycle_factory=Lifecycle,
+                draw_runner_factory=lambda identities, *, workload, root: (
+                    lambda arm: {
+                        "identityPid": identities[arm]["pid"],
+                        "workload": workload,
+                    }
+                ),
+            )
+
+            close()
+
+            self.assertEqual(set(collectors), set(plan))
+            self.assertEqual(
+                [item[0] for item in started],
+                [
+                    "full-screen-content-churn",
+                    "full-screen-style-churn",
+                    "full-screen-incremental-mixed-churn",
+                ],
+            )
+            self.assertEqual(
+                closed,
+                [
+                    "full-screen-incremental-mixed-churn",
+                    "full-screen-style-churn",
+                    "full-screen-content-churn",
+                ],
+            )
+
+    def test_production_collectors_close_started_lifecycle_on_startup_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            closed = []
+
+            class Lifecycle:
+                def __init__(self, _roots, *, workload, output):
+                    self.workload = workload
+
+                def start(self):
+                    if self.workload == "full-screen-style-churn":
+                        raise RuntimeError("style startup failed")
+                    return {"a": {"pid": 1}, "b": {"pid": 2}}
+
+                def close(self):
+                    closed.append(self.workload)
+
+            with self.assertRaisesRegex(RuntimeError, "style startup failed"):
+                VALIDATION.make_production_collectors(
+                    {
+                        "content-churn": [{"physicalArm": "a"}],
+                        "style-churn": [{"physicalArm": "b"}],
+                    },
+                    root / "attempt",
+                    arm_roots={"a": root / "a", "b": root / "b"},
+                    repository_root=root,
+                    sample_state=lambda: {},
+                    lifecycle_factory=Lifecycle,
+                    draw_runner_factory=lambda *args, **kwargs: lambda arm: {},
+                )
+
+            self.assertEqual(
+                closed,
+                [
+                    "full-screen-style-churn",
+                    "full-screen-content-churn",
+                ],
+            )
+
+    def test_persistent_draw_runner_reopens_block_and_retains_reset_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            artifacts = root / "artifacts"
+            artifacts.mkdir()
+            stale = (
+                "start-ack",
+                "start-draw-ack",
+                "ready-draw-ack",
+                "final-draw.json",
+                "block-state.json",
+                "producer-write.json",
+                "localized-draw-000000",
+            )
+            for name in stale:
+                (artifacts / name).write_text("stale")
+            identity = {
+                "pid": 101,
+                "artifacts": str(artifacts),
+                "binary": str(root / "DanTerm Benchmark.app/Contents/MacOS/DanTerm Benchmark"),
+                "geometry": {"columns": 179, "rows": 66},
+            }
+            sent = []
+
+            def send_input(_identity, pane, arguments):
+                sent.append((pane, arguments))
+                if arguments == ["Enter"]:
+                    (artifacts / "start-draw-ack").touch()
+                    (artifacts / "ready-draw-ack").touch()
+                    (artifacts / "producer-write.json").write_text(json.dumps({
+                        "event": "producer-final-write-returned",
+                        "elapsedNanoseconds": 20,
+                    }))
+                    (artifacts / "final-draw.json").write_text(json.dumps({
+                        "event": "final-draw-completed",
+                        "drawCount": 50,
+                    }))
+
+            runner = VALIDATION.make_persistent_draw_runner(
+                {"a": identity, "b": {**identity, "pid": 202}},
+                workload="full-screen-style-churn",
+                root=root,
+                resolve_pane=lambda _identity: "pane-a",
+                send_input=send_input,
+                front_app=lambda pid: self.assertEqual(pid, 101),
+                wait_for_path=lambda path: self.assertTrue(path.exists()),
+            )
+
+            artifact = runner("a")
+
+            self.assertEqual(artifact["processId"], 101)
+            self.assertEqual(artifact["sessionId"], "pane-a")
+            self.assertEqual(artifact["workload"], "full-screen-style-churn")
+            self.assertEqual(artifact["fixtureIdentity"], "full-screen-style-churn")
+            self.assertEqual(
+                artifact["resetEvidence"],
+                {
+                    "denseSetupAndStartDrawCompleted": True,
+                    "settlingDrawCompleted": True,
+                },
+            )
+            self.assertTrue(artifact["finalDraw"]["available"])
+            self.assertIn(
+                "DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES=50",
+                sent[0][1][-1],
+            )
+            self.assertFalse((artifacts / "localized-draw-000000").exists())
+            self.assertEqual(sent[1], ("pane-a", ["Enter"]))
+
+    def test_persistent_arm_lifecycle_uses_shared_bundle_and_closes_owned_harnesses(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            output = root / "collection"
+            launches = []
+            processes = []
+
+            class Process:
+                def __init__(self):
+                    self.signals = []
+                    self.waits = []
+
+                def poll(self):
+                    return None
+
+                def send_signal(self, value):
+                    self.signals.append(value)
+
+                def wait(self, timeout):
+                    self.waits.append(timeout)
+                    return 0
+
+            def popen(command, **options):
+                arm = ("a" if options["env"]["DANTERM_BENCHMARK_IDENTITY_PATH"]
+                       .endswith("a-identity.json") else "b")
+                process = Process()
+                processes.append(process)
+                launches.append((arm, command, options))
+                identity_path = pathlib.Path(
+                    options["env"]["DANTERM_BENCHMARK_IDENTITY_PATH"]
+                )
+                identity_path.write_text(json.dumps({
+                    "schemaVersion": 1,
+                    "pid": 100 + len(processes),
+                    "workload": "full-screen-style-churn",
+                    "backend": "swift",
+                    "binary": str(
+                        root / f"{arm}.app/Contents/MacOS/DanTerm Benchmark"
+                    ),
+                    "artifacts": str(root / f"{arm}-artifacts"),
+                    "geometry": {"columns": 179, "rows": 66},
+                    "profilingActive": False,
+                }))
+                return process
+
+            lifecycle = VALIDATION.PersistentDrawArms(
+                {"a": root / "arm-a", "b": root / "arm-b"},
+                workload="full-screen-style-churn",
+                output=output,
+                popen=popen,
+                wait_for_path=lambda path: self.assertTrue(path.exists()),
+            )
+            identities = lifecycle.start()
+            lifecycle.close()
+
+            self.assertEqual(set(identities), {"a", "b"})
+            self.assertEqual(
+                [launch[2]["env"]["DANTERM_BENCHMARK_BUNDLE_SUFFIX"]
+                 for launch in launches],
+                ["", ""],
+            )
+            self.assertTrue(all(
+                launch[2]["env"]["DANTERM_BENCHMARK_MODE"] == "persistent"
+                for launch in launches
+            ))
+            self.assertTrue(all(
+                launch[2]["env"]["DANTERM_TERMINAL_BENCHMARK_COLUMNS"] == "179"
+                and launch[2]["env"]["DANTERM_TERMINAL_BENCHMARK_ROWS"] == "66"
+                for launch in launches
+            ))
+            self.assertEqual(
+                [process.signals for process in processes],
+                [[signal.SIGINT], [signal.SIGINT]],
+            )
+            self.assertEqual([process.waits for process in processes], [[30], [30]])
+
+    def test_persistent_arm_lifecycle_rejects_wrong_identity_before_collection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+
+            class Process:
+                def poll(self):
+                    return None
+
+                def send_signal(self, _value):
+                    pass
+
+                def wait(self, timeout):
+                    return 0
+
+            def popen(_command, **options):
+                identity_path = pathlib.Path(
+                    options["env"]["DANTERM_BENCHMARK_IDENTITY_PATH"]
+                )
+                identity_path.write_text(json.dumps({
+                    "schemaVersion": 1,
+                    "pid": 101,
+                    "workload": "full-screen-content-churn",
+                    "backend": "swift",
+                    "binary": "/tmp/app",
+                    "artifacts": "/tmp/artifacts",
+                    "geometry": {"columns": 179, "rows": 65},
+                    "profilingActive": False,
+                }))
+                return Process()
+
+            lifecycle = VALIDATION.PersistentDrawArms(
+                {"a": root, "b": root},
+                workload="full-screen-content-churn",
+                output=root / "out",
+                popen=popen,
+                wait_for_path=lambda path: None,
+            )
+
+            with self.assertRaisesRegex(ValueError, "wrong geometry"):
+                lifecycle.start()
+
+    def _draw_churn_artifact(self, *, workload, fixture, dirty_rows):
+        durations = [300_000] * 50
+        return {
+            "backend": "swift",
+            "workload": workload,
+            "fixtureIdentity": fixture,
+            "processId": 101,
+            "sessionId": "pane-a",
+            "geometry": {"columns": 179, "rows": 66},
+            "resetEvidence": {
+                "denseSetupAndStartDrawCompleted": True,
+                "settlingDrawCompleted": True,
+            },
+            "producerWrite": {
+                "event": "producer-final-write-returned",
+                "elapsedNanoseconds": 400_000_000,
+            },
+            "finalDraw": {
+                "available": True,
+                "event": "final-draw-completed",
+                "drawCount": 50,
+                "cumulativeDrawNanoseconds": sum(durations),
+                "drawSequences": list(range(50)),
+                "drawDurationsNanoseconds": durations,
+                "dirtyRowCounts": [dirty_rows] * 50,
+                "machineStateSamples": [{
+                    "activeSpaceChanged": False,
+                    "lowPowerMode": False,
+                    "thermalState": "nominal",
+                    "visible": True,
+                }],
+            },
+        }
 
 
 if __name__ == "__main__":

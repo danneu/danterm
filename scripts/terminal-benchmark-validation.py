@@ -6,7 +6,11 @@ import json
 import os
 import pathlib
 import random
+import shlex
+import signal
 import subprocess
+import sys
+import time
 
 
 WORKLOADS = (
@@ -18,6 +22,9 @@ WORKLOADS = (
 )
 DIRECTIONS = ("aa", "slower", "faster")
 CANONICAL_GEOMETRY = {"columns": 179, "rows": 66}
+TERMINAL_FEED_STATE_PROBE = (
+    pathlib.Path(__file__).with_name("terminal-benchmark-state-probe.swift")
+)
 BLOCK_CONTRACTS = {
     "terminal-feed": {
         "metric": "feed-nanoseconds-per-fresh-terminal-execution",
@@ -57,29 +64,29 @@ DECISION_RULES = {
         "workloads": {
             "terminal-feed": {
                 "pairCount": 2,
-                "directionalThresholdPercent": 2.5,
+                "directionalThresholdPercent": 4.5,
             },
             "scrollback-stream": {
                 "pairCount": 2,
-                "directionalThresholdPercent": 2.5,
+                "directionalThresholdPercent": 4.05,
             },
             "content-churn": {
-                "pairCount": 4,
-                "directionalThresholdPercent": 3.2,
+                "pairCount": 2,
+                "directionalThresholdPercent": 4.05,
             },
             "style-churn": {
-                "pairCount": 4,
-                "directionalThresholdPercent": 3.25,
+                "pairCount": 2,
+                "directionalThresholdPercent": 4.05,
             },
             "incremental-mixed": {
-                "pairCount": 12,
-                "directionalThresholdPercent": 3.25,
+                "pairCount": 2,
+                "directionalThresholdPercent": 3.8,
             },
         },
     },
     "confirm": {
         "effectPercent": 3,
-        "estimator": "winsorized-mean-20",
+        "estimator": "median",
         "equivalenceBandPercent": 0.75,
         "workloads": {
             "terminal-feed": {
@@ -88,19 +95,19 @@ DECISION_RULES = {
             },
             "scrollback-stream": {
                 "pairCount": 4,
-                "directionalThresholdPercent": 2.15,
+                "directionalThresholdPercent": 1.85,
             },
             "content-churn": {
-                "pairCount": 48,
-                "directionalThresholdPercent": 1.65,
+                "pairCount": 4,
+                "directionalThresholdPercent": 2.15,
             },
             "style-churn": {
-                "pairCount": 32,
+                "pairCount": 4,
                 "directionalThresholdPercent": 2.0,
             },
             "incremental-mixed": {
-                "pairCount": 40,
-                "directionalThresholdPercent": 2.1,
+                "pairCount": 6,
+                "directionalThresholdPercent": 1.85,
             },
         },
     },
@@ -170,32 +177,45 @@ def make_manifest(*, seed, trials_per_cell=60, replacements_per_trial=8):
     }
 
 
-def next_attempt(trial, ledger):
+def next_attempt(trial, ledger, *, collection_index):
     """Consume one trial's primary and replacement seeds strictly in declaration order."""
-    attempts = [entry for entry in ledger if entry["trialId"] == trial["id"]]
+    attempts = [
+        entry for entry in ledger
+        if entry["collectionIndex"] == collection_index
+    ]
     if any(entry["valid"] for entry in attempts):
-        raise ValueError(f"{trial['id']} already has a valid result")
+        raise ValueError("collection identity already has a valid result")
     seeds = [trial["seed"], *trial["replacementSeeds"]]
     if len(attempts) >= len(seeds):
-        raise ValueError(f"{trial['id']} replacement schedule exhausted")
+        raise ValueError("collection identity replacement schedule exhausted")
     return {"attempt": len(attempts), "seed": seeds[len(attempts)]}
 
 
 def record_attempt(
-    ledger, *, trial, seed, valid, evidence, invalidation_reasons
+    ledger,
+    *,
+    trial,
+    collection_index,
+    seed,
+    valid,
+    evidence,
+    invalidation_reasons,
 ):
     """Append raw evidence without deleting invalid attempts or permitting seed skips."""
-    expected = next_attempt(trial, ledger)
+    expected = next_attempt(
+        trial, ledger, collection_index=collection_index
+    )
     if seed != expected["seed"]:
         raise ValueError(
-            f"{trial['id']} expected seed {expected['seed']}, received {seed}"
+            f"collection identity expected seed {expected['seed']}, "
+            f"received {seed}"
         )
     if valid and invalidation_reasons:
         raise ValueError("valid attempts cannot have invalidation reasons")
     if not valid and not invalidation_reasons:
         raise ValueError("invalid attempts require an invalidation reason")
     entry = {
-        "trialId": trial["id"],
+        "collectionIndex": collection_index,
         "attempt": expected["attempt"],
         "seed": seed,
         "valid": valid,
@@ -242,10 +262,17 @@ def make_collection_plan(manifest, trial, seed):
     return plan
 
 
+def _ordered_trials(manifest):
+    return [
+        trial
+        for mode in ("quick", "confirm")
+        for trial in manifest[mode]
+    ]
+
+
 def _trials_by_id(manifest):
     trials = {}
-    for mode in ("quick", "confirm"):
-        for trial in manifest[mode]:
+    for trial in _ordered_trials(manifest):
             if trial["id"] in trials:
                 raise ValueError(f"duplicate manifest trial id {trial['id']}")
             trials[trial["id"]] = trial
@@ -266,7 +293,8 @@ def load_collection(manifest_path, ledger_path, *, expected_manifest_sha256=None
             f"expected {expected_manifest_sha256}, received {actual_hash}"
         )
     manifest = json.loads(manifest_bytes)
-    trials = _trials_by_id(manifest)
+    trials = _ordered_trials(manifest)
+    _trials_by_id(manifest)
     ledger = []
     ledger_path = pathlib.Path(ledger_path)
     if ledger_path.exists():
@@ -275,14 +303,16 @@ def load_collection(manifest_path, ledger_path, *, expected_manifest_sha256=None
         ):
             try:
                 entry = json.loads(line)
-                trial = trials[entry["trialId"]]
-            except (json.JSONDecodeError, KeyError) as error:
+                collection_index = entry["collectionIndex"]
+                trial = trials[collection_index]
+            except (json.JSONDecodeError, KeyError, IndexError, TypeError) as error:
                 raise ValueError(
                     f"invalid ledger entry on line {line_number}"
                 ) from error
             expected_entry = record_attempt(
                 ledger,
                 trial=trial,
+                collection_index=collection_index,
                 seed=entry["seed"],
                 valid=entry["valid"],
                 evidence=entry["evidence"],
@@ -301,21 +331,23 @@ def load_collection(manifest_path, ledger_path, *, expected_manifest_sha256=None
 
 def next_collection_attempt(manifest, ledger):
     """Resume the first incomplete manifest identity in its frozen order."""
-    valid_trial_ids = {
-        entry["trialId"] for entry in ledger if entry["valid"]
+    valid_collection_indices = {
+        entry["collectionIndex"] for entry in ledger if entry["valid"]
     }
-    for mode in ("quick", "confirm"):
-        for trial in manifest[mode]:
-            if trial["id"] not in valid_trial_ids:
-                attempt = next_attempt(trial, ledger)
-                return {
-                    "trial": trial,
-                    "attempt": attempt["attempt"],
-                    "seed": attempt["seed"],
-                    "plan": make_collection_plan(
-                        manifest, trial, attempt["seed"]
-                    ),
-                }
+    for collection_index, trial in enumerate(_ordered_trials(manifest)):
+        if collection_index not in valid_collection_indices:
+            attempt = next_attempt(
+                trial, ledger, collection_index=collection_index
+            )
+            return {
+                "trial": trial,
+                "collectionIndex": collection_index,
+                "attempt": attempt["attempt"],
+                "seed": attempt["seed"],
+                "plan": make_collection_plan(
+                    manifest, trial, attempt["seed"]
+                ),
+            }
     return None
 
 
@@ -324,6 +356,7 @@ def append_collection_attempt(
     ledger,
     *,
     trial,
+    collection_index,
     seed,
     valid,
     evidence,
@@ -334,6 +367,7 @@ def append_collection_attempt(
     entry = record_attempt(
         prospective,
         trial=trial,
+        collection_index=collection_index,
         seed=seed,
         valid=valid,
         evidence=evidence,
@@ -439,6 +473,72 @@ def collect_terminal_feed(
         "valid": not reasons,
         "invalidationReasons": reasons,
     }
+
+
+def _power_source(pmset_output):
+    marker = "Now drawing from '"
+    for line in pmset_output.splitlines():
+        if line.startswith(marker) and line.endswith("'"):
+            power_source = line[len(marker):-1]
+            if power_source:
+                return power_source
+    raise ValueError("pmset did not report a recognizable power source")
+
+
+def make_terminal_feed_state_sampler(
+    output_directory,
+    *,
+    source_path=TERMINAL_FEED_STATE_PROBE,
+    run_command=subprocess.run,
+):
+    """Compile one native probe, then sample feed-block state outside the app."""
+    output_directory = pathlib.Path(output_directory)
+    output_directory.mkdir(parents=True, exist_ok=True)
+    binary = output_directory / "terminal-feed-state-probe"
+    run_command(
+        [
+            "xcrun",
+            "swiftc",
+            str(source_path),
+            "-O",
+            "-o",
+            str(binary),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    def sample():
+        process_result = run_command(
+            [str(binary)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        try:
+            process_state = json.loads(process_result.stdout)
+        except json.JSONDecodeError as error:
+            raise ValueError("state probe returned invalid JSON") from error
+        thermal = process_state.get("thermalState")
+        low_power = process_state.get("lowPowerMode")
+        if thermal not in {"nominal", "fair", "serious", "critical", "unknown"}:
+            raise ValueError("state probe returned an invalid thermal state")
+        if not isinstance(low_power, bool):
+            raise ValueError("state probe returned an invalid low-power state")
+        power_result = run_command(
+            ["pmset", "-g", "batt"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return {
+            "powerSource": _power_source(power_result.stdout),
+            "thermalState": thermal,
+            "lowPowerMode": low_power,
+        }
+
+    return sample
 
 
 def terminal_feed_fixture(root):
@@ -642,16 +742,280 @@ def make_scrollback_stream_runner(arm_roots):
     return run
 
 
-def collect_content_churn(blocks, *, run_block):
-    """Collect persistent serialized redraws at the post-settling measurement seam."""
+def _wait_for_path(path, timeout_seconds=30):
+    """Bound every persistent block so a lost app acknowledgment cannot hang a trial."""
+    deadline = time.monotonic() + timeout_seconds
+    while not path.exists():
+        if time.monotonic() >= deadline:
+            raise TimeoutError(str(path))
+        time.sleep(0.02)
+
+
+def _persistent_cli(identity, *arguments):
+    """Address only the isolated app described by a persistent harness identity."""
+    binary = pathlib.Path(identity["binary"])
+    cli = binary.parent.parent / "Helpers" / "danterm"
+    probe = json.loads(
+        (pathlib.Path(identity["artifacts"]) / "path-probe.json").read_text()
+    )
+    environment = dict(os.environ)
+    environment["DANTERM_SOCK"] = probe["socket"]
+    return subprocess.run(
+        [str(cli), *arguments],
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+
+def _persistent_pane(identity):
+    """Resolve the live focused pane instead of carrying a stale session identifier."""
+    model = json.loads(_persistent_cli(identity, "ls"))
+    selected = model["selectedTabId"]
+    for group in model["groups"]:
+        for tab in group["tabs"]:
+            if tab["id"] == selected:
+                return tab["focusedPaneId"]
+    raise RuntimeError("persistent benchmark pane not found")
+
+
+def _send_persistent_input(identity, pane, arguments):
+    """Inject one producer command through the owning benchmark app's CLI socket."""
+    _persistent_cli(identity, "pane", "input", "--pane", pane, *arguments)
+
+
+def _front_persistent_app(pid):
+    """Make the owned benchmark window visible before sampling machine state."""
+    subprocess.run(
+        [
+            "/usr/bin/osascript",
+            "-e",
+            "tell application \"System Events\" to set frontmost of first process "
+            f"whose unix id is {pid} to true",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+class PersistentDrawArms:
+    """Own two isolated persistent harnesses that share the calibrated bundle identity."""
+
+    def __init__(
+        self,
+        arm_roots,
+        *,
+        workload,
+        output,
+        popen=subprocess.Popen,
+        wait_for_path=_wait_for_path,
+    ):
+        self.roots = {
+            arm: pathlib.Path(root) for arm, root in arm_roots.items()
+        }
+        if set(self.roots) != {"a", "b"}:
+            raise ValueError("persistent lifecycle requires physical arms a and b")
+        if workload not in (
+            "full-screen-content-churn",
+            "full-screen-style-churn",
+            "full-screen-incremental-mixed-churn",
+        ):
+            raise ValueError(f"unsupported persistent draw workload {workload}")
+        self.workload = workload
+        self.output = pathlib.Path(output)
+        self.popen = popen
+        self.wait_for_path = wait_for_path
+        self.processes = {}
+        self.logs = {}
+        self.identities = {}
+
+    def start(self):
+        """Launch and validate both arms before exposing either to collection."""
+        if self.processes:
+            raise RuntimeError("persistent lifecycle already started")
+        self.output.mkdir(parents=True, exist_ok=True)
+        try:
+            for arm in ("a", "b"):
+                identity_path = self.output / f"{arm}-identity.json"
+                identity_path.unlink(missing_ok=True)
+                log = (self.output / f"{arm}-harness.log").open(
+                    "w", encoding="utf-8"
+                )
+                environment = dict(os.environ)
+                environment.update({
+                    "DANTERM_BENCHMARK_MODE": "persistent",
+                    # The frozen calibration removed the stable .a/.b namespace
+                    # offset while retaining per-launch homes, sockets, and paths.
+                    "DANTERM_BENCHMARK_BUNDLE_SUFFIX": "",
+                    "DANTERM_BENCHMARK_IDENTITY_PATH": str(identity_path),
+                    "DANTERM_TERMINAL_BENCHMARK_COLUMNS": str(
+                        CANONICAL_GEOMETRY["columns"]
+                    ),
+                    "DANTERM_TERMINAL_BENCHMARK_ROWS": str(
+                        CANONICAL_GEOMETRY["rows"]
+                    ),
+                    "DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES": "50",
+                })
+                process = self.popen(
+                    [
+                        str(
+                            self.roots[arm]
+                            / "scripts"
+                            / "terminal-benchmark.sh"
+                        ),
+                        self.workload,
+                        "swift",
+                    ],
+                    cwd=self.roots[arm],
+                    env=environment,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                self.processes[arm] = process
+                self.logs[arm] = log
+                self.wait_for_path(identity_path)
+                identity = json.loads(identity_path.read_text())
+                if process.poll() is not None:
+                    raise RuntimeError(
+                        f"persistent arm {arm} exited during startup"
+                    )
+                if identity.get("backend") != "swift":
+                    raise ValueError(f"persistent arm {arm} has wrong backend")
+                if identity.get("workload") != self.workload:
+                    raise ValueError(f"persistent arm {arm} has wrong workload")
+                if identity.get("geometry") != CANONICAL_GEOMETRY:
+                    raise ValueError(f"persistent arm {arm} has wrong geometry")
+                if not isinstance(identity.get("pid"), int):
+                    raise ValueError(f"persistent arm {arm} has invalid pid")
+                self.identities[arm] = identity
+            if (
+                self.identities["a"]["pid"]
+                == self.identities["b"]["pid"]
+            ):
+                raise ValueError("persistent arms share an app process")
+            return dict(self.identities)
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self):
+        """Stop only harness processes launched by this lifecycle owner."""
+        for process in self.processes.values():
+            if process.poll() is None:
+                process.send_signal(signal.SIGINT)
+        for process in self.processes.values():
+            try:
+                process.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+        for log in self.logs.values():
+            log.close()
+        self.processes.clear()
+        self.logs.clear()
+
+
+def make_persistent_draw_runner(
+    identities,
+    *,
+    workload,
+    root,
+    resolve_pane=_persistent_pane,
+    send_input=_send_persistent_input,
+    front_app=_front_persistent_app,
+    wait_for_path=_wait_for_path,
+):
+    """Bind redraw blocks to two already-converged persistent app arms."""
+    if set(identities) != {"a", "b"}:
+        raise ValueError("persistent draw runner requires physical arms a and b")
+    fixture_identities = {
+        "full-screen-content-churn": "full-screen-content-churn",
+        "full-screen-style-churn": "full-screen-style-churn",
+        "full-screen-incremental-mixed-churn": (
+            "full-screen-incremental-mixed-churn-"
+            "v2-four-rows-six-damage-179x66"
+        ),
+    }
+    if workload not in fixture_identities:
+        raise ValueError(f"unsupported persistent draw workload {workload}")
+    root = pathlib.Path(root)
+
+    def run(arm):
+        if arm not in identities:
+            raise ValueError(f"unknown persistent draw physical arm {arm}")
+        identity = identities[arm]
+        artifacts = pathlib.Path(identity["artifacts"])
+        for name in (
+            "start-ack",
+            "start-draw-ack",
+            "ready-draw-ack",
+            "final-draw.json",
+            "block-state.json",
+            "producer-write.json",
+        ):
+            (artifacts / name).unlink(missing_ok=True)
+        for path in artifacts.glob("localized-draw-*"):
+            path.unlink()
+
+        front_app(identity["pid"])
+        pane = resolve_pane(identity)
+        command = (
+            "DANTERM_BENCHMARK_MODE=measure "
+            "DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES=50 "
+            f"python3 {shlex.quote(str(root / 'scripts' / 'terminal-benchmark-producer.py'))}"
+        )
+        send_input(identity, pane, ["--literal", "--", command])
+        send_input(identity, pane, ["Enter"])
+
+        result_path = artifacts / "final-draw.json"
+        producer_path = artifacts / "producer-write.json"
+        wait_for_path(result_path)
+        wait_for_path(producer_path)
+        draw = json.loads(result_path.read_text())
+        producer = json.loads(producer_path.read_text())
+        return {
+            "schemaVersion": 1,
+            "backend": "swift",
+            "workload": workload,
+            "fixtureIdentity": fixture_identities[workload],
+            "processId": identity["pid"],
+            "sessionId": pane,
+            "geometry": identity["geometry"],
+            "resetEvidence": {
+                "denseSetupAndStartDrawCompleted":
+                    (artifacts / "start-draw-ack").exists(),
+                "settlingDrawCompleted":
+                    (artifacts / "ready-draw-ack").exists(),
+            },
+            "producerWrite": producer,
+            "finalDraw": {**draw, "available": True},
+        }
+
+    return run
+
+
+def _collect_draw_churn(
+    blocks,
+    *,
+    workload,
+    artifact_workload,
+    fixture_identity,
+    expected_dirty_rows,
+    damage_reason,
+    run_block,
+):
+    """Enforce the shared serialized-draw contract with workload-specific damage."""
     if not blocks:
-        raise ValueError("content-churn collection requires at least one block")
+        raise ValueError(f"{workload} collection requires at least one block")
     raw_blocks = []
     reasons = []
     arm_identities = {}
     process_owners = {}
     session_owners = {}
-    expected_sequences = list(range(1, 51))
+    expected_sequences = list(range(50))
     for index, planned in enumerate(blocks):
         artifact = run_block(planned["physicalArm"])
         prefix = f"block-{index}"
@@ -681,9 +1045,9 @@ def collect_content_churn(blocks, *, run_block):
 
         if artifact.get("backend") != "swift":
             _append_reason(reasons, f"{prefix}-wrong-backend")
-        if artifact.get("workload") != "full-screen-content-churn":
+        if artifact.get("workload") != artifact_workload:
             _append_reason(reasons, f"{prefix}-wrong-workload")
-        if artifact.get("fixtureIdentity") != "full-screen-content-churn":
+        if artifact.get("fixtureIdentity") != fixture_identity:
             _append_reason(reasons, f"{prefix}-wrong-fixture")
         if artifact.get("geometry") != CANONICAL_GEOMETRY:
             _append_reason(reasons, f"{prefix}-wrong-geometry")
@@ -729,13 +1093,11 @@ def collect_content_churn(blocks, *, run_block):
             or any(not isinstance(value, int) for value in durations)
         ):
             _append_reason(reasons, f"{prefix}-cumulative-draw-mismatch")
-        expected_dirty_rows = artifact.get("geometry", {}).get("rows")
         if (
-            expected_dirty_rows != CANONICAL_GEOMETRY["rows"]
-            or len(dirty_rows) != 50
+            len(dirty_rows) != 50
             or any(value != expected_dirty_rows for value in dirty_rows)
         ):
-            _append_reason(reasons, f"{prefix}-incomplete-full-row-damage")
+            _append_reason(reasons, f"{prefix}-{damage_reason}")
         if producer.get("event") != "producer-final-write-returned":
             _append_reason(reasons, f"{prefix}-missing-producer-write")
         for sample in draw.get("machineStateSamples", []):
@@ -754,12 +1116,220 @@ def collect_content_churn(blocks, *, run_block):
             _append_reason(reasons, f"{prefix}-missing-machine-state")
 
     return {
-        "workload": "content-churn",
-        "fixtureIdentity": "full-screen-content-churn",
+        "workload": workload,
+        "fixtureIdentity": fixture_identity,
         "rawBlocks": raw_blocks,
         "valid": not reasons,
         "invalidationReasons": reasons,
     }
+
+
+def collect_content_churn(blocks, *, run_block):
+    """Collect persistent content redraws at the post-settling measurement seam."""
+    return _collect_draw_churn(
+        blocks,
+        workload="content-churn",
+        artifact_workload="full-screen-content-churn",
+        fixture_identity="full-screen-content-churn",
+        expected_dirty_rows=CANONICAL_GEOMETRY["rows"],
+        damage_reason="incomplete-full-row-damage",
+        run_block=run_block,
+    )
+
+
+def collect_style_churn(blocks, *, run_block):
+    """Collect persistent style-only redraws with complete viewport damage."""
+    return _collect_draw_churn(
+        blocks,
+        workload="style-churn",
+        artifact_workload="full-screen-style-churn",
+        fixture_identity="full-screen-style-churn",
+        expected_dirty_rows=CANONICAL_GEOMETRY["rows"],
+        damage_reason="incomplete-full-row-damage",
+        run_block=run_block,
+    )
+
+
+def collect_incremental_mixed(blocks, *, run_block):
+    """Collect persistent incremental redraws with the fixed glyph-halo damage."""
+    return _collect_draw_churn(
+        blocks,
+        workload="incremental-mixed",
+        artifact_workload="full-screen-incremental-mixed-churn",
+        fixture_identity=(
+            "full-screen-incremental-mixed-churn-"
+            "v2-four-rows-six-damage-179x66"
+        ),
+        expected_dirty_rows=6,
+        damage_reason="wrong-damage-row-count",
+        run_block=run_block,
+    )
+
+
+def collect_attempt(plan, *, collectors):
+    """Collect one condition-free manifest plan and preserve all workload evidence."""
+    unknown = set(plan) - set(WORKLOADS)
+    missing = set(plan) - set(collectors)
+    if unknown:
+        raise ValueError(f"unknown planned workloads: {sorted(unknown)}")
+    if missing:
+        raise ValueError(f"missing workload collectors: {sorted(missing)}")
+    evidence = {}
+    reasons = []
+    for workload, blocks in plan.items():
+        workload_evidence = collectors[workload](blocks)
+        if workload_evidence.get("workload") != workload:
+            raise ValueError(f"{workload} collector returned mismatched evidence")
+        evidence[workload] = workload_evidence
+        for reason in workload_evidence.get("invalidationReasons", []):
+            reasons.append(f"{workload}:{reason}")
+    return {
+        "workloads": evidence,
+        "valid": not reasons,
+        "invalidationReasons": reasons,
+    }
+
+
+def collect_next_attempt(
+    manifest_path,
+    ledger_path,
+    *,
+    expected_manifest_sha256,
+    artifacts_root,
+    make_collectors,
+):
+    """Collect and durably record exactly one hash-pinned resumable attempt."""
+    collection = load_collection(
+        manifest_path,
+        ledger_path,
+        expected_manifest_sha256=expected_manifest_sha256,
+    )
+    pending = next_collection_attempt(
+        collection["manifest"], collection["ledger"]
+    )
+    if pending is None:
+        return {"complete": True}
+
+    attempt_name = (
+        f"collection-{pending['collectionIndex']:06d}"
+        f"-attempt-{pending['attempt']:02d}"
+    )
+    attempt_directory = pathlib.Path(artifacts_root) / attempt_name
+    attempt_directory.mkdir(parents=True, exist_ok=True)
+    collectors, close = make_collectors(
+        pending["plan"], attempt_directory
+    )
+    try:
+        evidence = collect_attempt(
+            pending["plan"], collectors=collectors
+        )
+    finally:
+        close()
+
+    entry = append_collection_attempt(
+        ledger_path,
+        collection["ledger"],
+        trial=pending["trial"],
+        collection_index=pending["collectionIndex"],
+        seed=pending["seed"],
+        valid=evidence["valid"],
+        evidence=evidence,
+        invalidation_reasons=evidence["invalidationReasons"],
+    )
+    return {
+        "complete": False,
+        "collectionIndex": entry["collectionIndex"],
+        "attempt": entry["attempt"],
+        "seed": entry["seed"],
+        "valid": entry["valid"],
+        "invalidationReasons": entry["invalidationReasons"],
+    }
+
+
+def make_production_collectors(
+    plan,
+    attempt_directory,
+    *,
+    arm_roots,
+    repository_root,
+    sample_state,
+    load_feed_fixture=terminal_feed_fixture,
+    feed_runner_factory=make_terminal_feed_runner,
+    scrollback_runner_factory=make_scrollback_stream_runner,
+    lifecycle_factory=PersistentDrawArms,
+    draw_runner_factory=make_persistent_draw_runner,
+):
+    """Bind a pending plan to production runners while owning all persistent apps."""
+    unknown = set(plan) - set(WORKLOADS)
+    if unknown:
+        raise ValueError(f"unknown planned workloads: {sorted(unknown)}")
+    attempt_directory = pathlib.Path(attempt_directory)
+    repository_root = pathlib.Path(repository_root)
+    collectors = {}
+    lifecycles = []
+
+    def close():
+        for lifecycle in reversed(lifecycles):
+            lifecycle.close()
+
+    draw_workloads = {
+        "content-churn": (
+            "full-screen-content-churn",
+            collect_content_churn,
+        ),
+        "style-churn": (
+            "full-screen-style-churn",
+            collect_style_churn,
+        ),
+        "incremental-mixed": (
+            "full-screen-incremental-mixed-churn",
+            collect_incremental_mixed,
+        ),
+    }
+    try:
+        if "terminal-feed" in plan:
+            feed_runner = feed_runner_factory(
+                arm_roots, load_feed_fixture(repository_root)
+            )
+            collectors["terminal-feed"] = lambda blocks: collect_terminal_feed(
+                blocks,
+                minimum_block_nanoseconds=BLOCK_CONTRACTS[
+                    "terminal-feed"
+                ]["minimumBlockNanoseconds"],
+                run_benchmark=feed_runner,
+                sample_state=sample_state,
+            )
+        if "scrollback-stream" in plan:
+            scrollback_runner = scrollback_runner_factory(arm_roots)
+            collectors["scrollback-stream"] = (
+                lambda blocks: collect_scrollback_stream(
+                    blocks, run_block=scrollback_runner
+                )
+            )
+        for planned_workload, (app_workload, collector) in draw_workloads.items():
+            if planned_workload not in plan:
+                continue
+            lifecycle = lifecycle_factory(
+                arm_roots,
+                workload=app_workload,
+                output=attempt_directory / planned_workload,
+            )
+            lifecycles.append(lifecycle)
+            identities = lifecycle.start()
+            runner = draw_runner_factory(
+                identities,
+                workload=app_workload,
+                root=repository_root,
+            )
+            collectors[planned_workload] = (
+                lambda blocks, collect=collector, run=runner: collect(
+                    blocks, run_block=run
+                )
+            )
+    except BaseException:
+        close()
+        raise
+    return collectors, close
 
 
 def _counts(decisions, expected_direction):
@@ -857,16 +1427,85 @@ def validate_results(manifest, results, *, calibration_seeds):
     return True
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("output", type=pathlib.Path)
-    parser.add_argument("--seed", type=int, default=2026072404)
-    arguments = parser.parse_args()
-    manifest = make_manifest(seed=arguments.seed)
-    arguments.output.write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+def _collect_one(
+    arguments,
+    *,
+    collect_next,
+    state_sampler_factory,
+    production_collectors_factory,
+):
+    def bind_collectors(plan, attempt_directory):
+        if "terminal-feed" in plan:
+            sample_state = state_sampler_factory(
+                attempt_directory / "terminal-feed-state"
+            )
+        else:
+            sample_state = lambda: {}
+        return production_collectors_factory(
+            plan,
+            attempt_directory,
+            arm_roots={
+                "a": arguments.arm_a_root,
+                "b": arguments.arm_b_root,
+            },
+            repository_root=arguments.repository_root,
+            sample_state=sample_state,
+        )
+
+    return collect_next(
+        arguments.manifest,
+        arguments.ledger,
+        expected_manifest_sha256=arguments.manifest_sha256,
+        artifacts_root=arguments.artifacts,
+        make_collectors=bind_collectors,
     )
+
+
+def main(
+    argv=None,
+    *,
+    collect_next=collect_next_attempt,
+    state_sampler_factory=make_terminal_feed_state_sampler,
+    production_collectors_factory=make_production_collectors,
+    stdout=None,
+):
+    """Generate a manifest or collect one hash-pinned production attempt."""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    stdout = sys.stdout if stdout is None else stdout
+    if not argv or argv[0] != "collect-one":
+        parser = argparse.ArgumentParser()
+        parser.add_argument("output", type=pathlib.Path)
+        parser.add_argument("--seed", type=int, default=2026072404)
+        arguments = parser.parse_args(argv)
+        manifest = make_manifest(seed=arguments.seed)
+        arguments.output.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return 0
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("command", choices=("collect-one",))
+    parser.add_argument("--manifest", type=pathlib.Path, required=True)
+    parser.add_argument("--manifest-sha256", required=True)
+    parser.add_argument("--ledger", type=pathlib.Path, required=True)
+    parser.add_argument("--artifacts", type=pathlib.Path, required=True)
+    parser.add_argument("--arm-a-root", type=pathlib.Path, required=True)
+    parser.add_argument("--arm-b-root", type=pathlib.Path, required=True)
+    parser.add_argument(
+        "--repository-root",
+        type=pathlib.Path,
+        default=pathlib.Path.cwd(),
+    )
+    arguments = parser.parse_args(argv)
+    status = _collect_one(
+        arguments,
+        collect_next=collect_next,
+        state_sampler_factory=state_sampler_factory,
+        production_collectors_factory=production_collectors_factory,
+    )
+    stdout.write(json.dumps(status, sort_keys=True) + "\n")
+    return 0
 
 
 if __name__ == "__main__":

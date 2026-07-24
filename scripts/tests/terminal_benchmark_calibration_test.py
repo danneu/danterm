@@ -14,9 +14,45 @@ SPEC = importlib.util.spec_from_file_location(
 )
 CALIBRATION = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CALIBRATION)
+FALLBACK_PATH = ROOT / "scripts" / "terminal-benchmark-median-fallback.py"
 
 
 class TerminalBenchmarkCalibrationTests(unittest.TestCase):
+    def test_phase4_median_fallback_preserves_predeclared_modes_and_sources(self):
+        spec = importlib.util.spec_from_file_location(
+            "terminal_benchmark_median_fallback",
+            FALLBACK_PATH,
+        )
+        fallback = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fallback)
+
+        self.assertEqual(fallback.MODES["quick"]["effectPercent"], 5)
+        self.assertEqual(fallback.MODES["quick"]["equivalenceBandPercent"], 1.0)
+        self.assertEqual(fallback.MODES["confirm"]["effectPercent"], 3)
+        self.assertEqual(fallback.MODES["confirm"]["equivalenceBandPercent"], 0.75)
+        self.assertEqual(
+            fallback.WORKLOADS["contentChurn"]["source"],
+            ".build/terminal-benchmark-phase4-content-shared-bundle-calibration/"
+            "2026-07-24/blocks.jsonl",
+        )
+
+        failing_quick = {
+            "conditions": {
+                "aa": {"falsePositiveRate": 0.051},
+                "positive": {
+                    "detectionRate": 0.9,
+                    "inconclusiveRate": 0.1,
+                    "wrongDirectionRate": 0.0,
+                },
+                "negative": {
+                    "detectionRate": 0.9,
+                    "inconclusiveRate": 0.1,
+                    "wrongDirectionRate": 0.0,
+                },
+            },
+        }
+        self.assertFalse(fallback.cell_is_eligible(failing_quick, "quick"))
+
     def test_winsorized_mean_clamps_twenty_percent_of_each_tail(self):
         values = [-100.0, 0.0, 1.0, 10.0, 100.0]
 
