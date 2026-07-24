@@ -42,14 +42,28 @@ Evidence for load-bearing premises:
 Pure plumbing, same shape as the Cmd-A slice: no new core search machinery.
 
 1. **Engine counter API.** Add a public search-status read on `Terminal`
-   reporting total match count and the selected match's index, derived on
+   reporting the live match count and the selected match's index, derived on
    demand from the existing private match scan (no stored derived state).
    Index orientation: newest match is selected on `beginSearch` and reads as
    1/N; walking older increments — matching macOS Find feel. Existing
-   begin/next/previous signatures are unchanged. Zero matches (non-empty needle
-   that matches nothing) reports `total = 0`, `selected = nil`; the overlay
-   already renders that pair as `-/0` (`SearchOverlayView.swift:152-156`), the
-   intended failed-search display.
+   begin/next/previous signatures are unchanged.
+
+   The status type is a **total enum** — `.empty` (a non-empty needle that
+   currently matches nothing) and `.matched(selected: Int, total: Int)` — so
+   `selected >= total`, a negative total, and "matches exist but none selected"
+   are unrepresentable rather than merely untested. An optional-`Int` pair would
+   leave those states constructible at every call site and defend the invariant
+   with review attention instead of the compiler. A `nil` status means no search
+   at all. Boundary mapping for Decision 4: `nil` -> `(total: nil, selected: nil)`
+   (the overlay's `--/--`), `.empty` -> `(0, nil)` (its `-/0` failed-search
+   display, `SearchOverlayView.swift:152-156`), `.matched` -> `(total, selected)`.
+
+   Totality requires one behavior change: when the active needle found nothing
+   but the live scan now has matches — output arrived while a failed search was
+   still open — `searchNext`/`searchPrevious` adopt the newest match instead of
+   returning false. Without it the engine can sit in "matches exist, none
+   selected": the overlay shows `-/1` and Cmd-G does nothing until the user
+   types another character.
 2. **Highlight the active match only**, as a proper second highlight channel
    through the render pipeline: a theme color for search matches (distinct
    from selection background) and match runs planned from
@@ -91,8 +105,12 @@ Pure plumbing, same shape as the Cmd-A slice: no new core search machinery.
   reports `topRow: 0, windowRows: rowCount` — so an unguarded scrollback match
   would paint over unrelated alt-screen content at the same numeric row. This
   is the guard `revealSearchMatchIfNeeded` already carries, made consistent.
-- I2: Search status is consistent: selected index is always in `0..<total`,
-  and navigation at either end (no wrap) leaves status unchanged.
+- I2: Search status is consistent, and consistency is carried by the type
+  rather than by discipline: `selected` is always in `0..<total` because the
+  status enum cannot express otherwise; "matches exist with none selected"
+  cannot arise, because navigation re-attaches to the newest match when a
+  failed needle starts matching; and navigation at either end (no wrap) leaves
+  status unchanged.
 - I3: The active-match highlight always corresponds to
   `activeSearchMatchRange`, clipped to the viewport; an off-viewport match
   produces no runs.
@@ -113,9 +131,13 @@ Pure plumbing, same shape as the Cmd-A slice: no new core search machinery.
 
 - PO1 (I1, I2): engine tests in `TerminalSearchTests.swift` — status nil with
   no search and after clear; count/index across begin, next, previous, and
-  no-wrap edges; a zero-match needle reports `total = 0`, `selected = nil`;
-  and a needle matching only pre-`less` scrollback while the alternate screen
-  is active reports nil status.
+  no-wrap edges; a zero-match needle reports `.empty`; a needle matching only
+  pre-`less` scrollback while the alternate screen is active reports nil status;
+  and — the re-attach case — a needle that matched nothing, followed by output
+  containing it, has the next `searchNext` adopt the newest match and report
+  `.matched(selected: 0, total: 1)` instead of staying unselected. The
+  `selected < total` half of I2 needs no test: the enum makes its negation
+  unrepresentable.
 - PO2 (I3, I4): planning tests in `TerminalRenderPlanningTests` — match runs
   for in-viewport and off-viewport active matches; selection and match runs
   coexisting; the alt-screen case of PO1 plans no match runs; and a plan
@@ -168,8 +190,8 @@ Pure plumbing, same shape as the Cmd-A slice: no new core search machinery.
 
 ## Implementation discretion
 
-- Exact shape/name of the engine status type and of the paneless navigate
-  msg.
+- Exact name of the paneless navigate msg, and the case/parameter spelling of
+  the status enum (its totality is not discretionary — see Decision 1).
 
 ## Critical files
 
@@ -193,9 +215,9 @@ Pure plumbing, same shape as the Cmd-A slice: no new core search machinery.
   boundary. Leave `ghosttyConfigReloaded`/`ghosttyPrefsRefreshed` alone (genuinely
   Ghostty-coupled). Best done as its own tiny commit, not bundled with the feature.
 - [ ] Replace `SearchModel.total`/`selected` (two independently-nullable Ints,
-  which allow the impossible "selected without total" state) with a single
-  optional counter pair fed by one msg — matching how the engine produces them
-  atomically.
+  which allow the impossible "selected without total" state) with one optional
+  field fed by one msg, mirroring the engine's total status enum — the app layer
+  is currently the only place left where the impossible pair is representable.
 - [ ] If a third highlight kind ever appears, generalize the run type
   (`RenderSelectionRun` is really a generic row band) instead of adding a
   fourth parallel array.
@@ -203,6 +225,7 @@ Pure plumbing, same shape as the Cmd-A slice: no new core search machinery.
 ## Commit progress
 
 - [x] 1. feat(engine): search-status read and search-mutation damage accounting (PO1, PO3 engine tests)
+- [ ] 1b. refactor(engine): make search status a total enum and re-attach navigation after a failed needle (PO1 re-attach case)
 - [ ] 2. feat(renderer): second highlight channel for the active search match (PO2, PO2b)
 - [ ] 3. feat(host): enqueue search begin/navigate/clear with status callback (PO3 host tests)
 - [ ] 4. feat(app): implement backend search stubs and Cmd-G/Cmd-Shift-G accelerators (PO4, PO5)
@@ -218,6 +241,20 @@ Pure plumbing, same shape as the Cmd-A slice: no new core search machinery.
   a frame. Decision 3's unconditional status callback is still required and still
   correct (a repeated no-match keystroke mutates nothing on the second try).
   An empty needle remains "not a search" and drops the state entirely.
+- Commit 1b exists because commit 1 shipped the status as a struct
+  (`TerminalSearchStatus(total: Int, selected: Int?)`, its own file) before
+  Decision 1 called for a total enum. The struct's public memberwise init makes
+  `total: 0, selected: 5` and `total: -1` constructible, and `total > 0,
+  selected == nil` is not merely constructible but *reachable*: `beginSearch`
+  retains a non-matching needle as `SearchState(query:, range: nil)`, the status
+  read rescans live, so output arriving under a failed search yields matches
+  with no selection. 1b converts the type, adds the re-attach to
+  `searchNext`/`searchPrevious`, and updates the commit-1 tests' expected values
+  (`TerminalSearchStatus(total: 3, selected: 0)` -> `.matched(selected: 0, total: 3)`,
+  `(total: 0, selected: nil)` -> `.empty`). Engine-only and self-contained — it
+  must land before commit 3, which is the first consumer of the type. Keeping it
+  a separate commit rather than amending commit 1 keeps the shipped damage-accounting
+  work reviewable on its own.
 - Commit 1: the four mutations now route damage through the existing
   `recordDamage(since:)` snapshot diff (with the search range added to
   `DamageActionSnapshot`) rather than each hand-rolling a `viewportState` compare.
