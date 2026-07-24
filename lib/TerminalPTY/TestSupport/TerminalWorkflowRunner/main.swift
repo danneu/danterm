@@ -104,7 +104,6 @@ private enum TerminalWorkflowRunner {
                 terminalProgramVersion: "workflow-test"
             ),
             bootstrapExecutable: bootstrap,
-            machineHostname: ProcessInfo.processInfo.environment["DANTERM_MACHINE_HOSTNAME"],
             captureTransitions: true
         )
         var semanticEvents: [TerminalSemanticEvent] = []

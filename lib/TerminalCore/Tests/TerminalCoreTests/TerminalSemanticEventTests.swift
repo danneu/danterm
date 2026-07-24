@@ -30,6 +30,60 @@ struct TerminalSemanticEventTests {
         #expect(terminal.drainSemanticEvents().isEmpty)
     }
 
+    @Test(
+        "OSC 7 accepts the macOS spellings of this machine's host",
+        arguments: [
+            ("mac", "localhost"),
+            ("mac", "mac"),
+            ("mac", "MaC"),
+            ("mac", "mac."),
+            ("mac", "mac.local"),
+            ("mac", "MAC.Local."),
+            ("mac.local", "mac"),
+            ("mac.local", "mac.local"),
+            ("mac.corp.example", "mac.corp.example"),
+        ]
+    )
+    func cwdHostSpellingsAccepted(machineHostname: String, reportedHost: String) throws {
+        // Intent: the accept side of the OSC 7 host rule -- `localhost` plus this
+        //   machine's name modulo ASCII case, one trailing dot, and a `.local` label,
+        //   in either direction.
+        // Why it exists: macOS hands the app `macbook.local` while the shells report
+        //   `macbook`, so byte equality dropped every report and left `pane.cwd` nil.
+        var terminal = try #require(
+            Terminal(columns: 20, rows: 2, machineHostname: machineHostname)
+        )
+        terminal.feed(Array("\u{1B}]7;file://\(reportedHost)/tmp\u{7}".utf8))
+        #expect(terminal.drainSemanticEvents() == [.workingDirectory("/tmp")])
+    }
+
+    @Test(
+        "OSC 7 rejects hosts that only share this machine's first label",
+        arguments: ["mac.evil.com", "macbook", "remote.local", ".local", "", "localhost.evil.com"]
+    )
+    func cwdForeignHostsRejected(reportedHost: String) throws {
+        // Intent: the reject side of the same rule -- the tolerance is scoped to the
+        //   suffixes macOS manufactures, not a general "first label matches" match.
+        // Why it exists: a laxer rule would let `mac.evil.com` over an ssh session set
+        //   this pane's cwd and the next pane's spawn directory.
+        var terminal = try #require(Terminal(columns: 20, rows: 2, machineHostname: "mac"))
+        terminal.feed(Array("\u{1B}]7;file://\(reportedHost)/tmp\u{7}".utf8))
+        #expect(terminal.drainSemanticEvents().isEmpty)
+    }
+
+    @Test("a terminal given no machine hostname accepts only localhost")
+    func cwdWithoutMachineHostname() throws {
+        // Intent: absent a machine identity, `localhost` is the only local host.
+        // Why it exists: the embedder decides this terminal's machine identity, and the
+        //   core has no ambient source to fall back on. Pinning the nil case keeps that a
+        //   deliberate value rather than something a later default could quietly widen.
+        var terminal = try #require(Terminal(columns: 20, rows: 2))
+        terminal.feed(Array("\u{1B}]7;file://mac/tmp\u{7}".utf8))
+        #expect(terminal.drainSemanticEvents().isEmpty)
+        terminal.feed(Array("\u{1B}]7;file://localhost/tmp\u{7}".utf8))
+        #expect(terminal.drainSemanticEvents() == [.workingDirectory("/tmp")])
+    }
+
     @Test("standalone BEL is a bell while OSC BEL only terminates the OSC")
     func bellMeaning() throws {
         var terminal = try #require(Terminal(columns: 20, rows: 2))

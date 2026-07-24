@@ -131,6 +131,34 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
+    @Test("a default-constructed pane accepts an OSC 7 report naming this machine", .timeLimit(.minutes(1)))
+    func defaultPaneAcceptsThisMachinesCwdReport() async throws {
+        // Intent: with nobody passing a hostname -- exactly how the app constructs a pane --
+        //   a cwd report carrying this machine's real name is accepted.
+        // Why it exists: the app used to supply its own ambient hostname, and the harness
+        //   injected a hand-matched one, so no test ever exercised the default. Every
+        //   production pane's cwd came back nil.
+        // Scenario: the shell emits `OSC 7;file://<hostname>/tmp/pane`, as fish/zsh/bash do
+        //   on every directory change.
+        let hostname = try #require(MachineHostname.posix)
+        let host = try makeHost()
+        let command = "printf '\\033]7;file://\(hostname)/tmp/pane\\007'; exec sleep 30"
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: command)
+        )
+        let batches = AsyncStream<[TerminalSemanticEvent]>.makeStream(
+            bufferingPolicy: .bufferingNewest(1)
+        )
+        var iterator = batches.stream.makeAsyncIterator()
+        controller.onSemanticEvents = { batches.continuation.yield($0) }
+
+        #expect(await iterator.next() == [.workingDirectory("/tmp/pane")])
+
+        controller.tearDown()
+        await host.close()
+    }
+
     @Test("natural exit delivers semantic events before session end", .timeLimit(.minutes(1)))
     func naturalExitOrdersSemanticEventsBeforeEnd() async throws {
         // Intent: publish output semantics before the same drain reports the child exit.
@@ -858,7 +886,7 @@ struct TerminalPaneSessionControllerTests {
         controller.synchronizeState()
 
         let recording = try #require(controller.capturedRecording(test: "viability-pane"))
-        let replayed = try recording.replay()
+        let replayed = try recording.replay(machineHostname: MachineHostname.posix)
         #expect(recording.provenance == .danTerm(test: "viability-pane"))
         #expect(replayed.geometry.columns == 96)
         #expect(replayed.geometry.rows.count == 28)
@@ -1239,7 +1267,7 @@ struct TerminalPaneSessionControllerTests {
         #expect(shiftDownClickCounts.contains(1))
         #expect(shiftDownClickCounts.contains(2))
         #expect(shiftDownClickCounts.contains(3))
-        var replayed = try recording.replay()
+        var replayed = try recording.replay(machineHostname: MachineHostname.posix)
         _ = replayed.drainDamage()
         var consumed = controller.terminalSnapshot()
         _ = consumed.drainDamage()

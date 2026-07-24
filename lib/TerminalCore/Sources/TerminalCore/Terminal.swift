@@ -1068,12 +1068,39 @@ public struct Terminal: Equatable, Sendable {
         else { return nil }
         let hostBytes = Array(bytes[prefix.count..<slash])
         guard let host = strictlyDecodedUTF8(hostBytes),
-              host == "localhost" || (machineHostname != nil && host == machineHostname)
+              Self.namesThisMachine(host, machineHostname: machineHostname)
         else { return nil }
         guard let decodedPathBytes = percentDecoded(Array(bytes[slash...])),
               let path = strictlyDecodedUTF8(decodedPathBytes)
         else { return nil }
         return path
+    }
+
+    /// Decides whether an OSC 7 URI host names this machine. Tolerant of exactly the
+    /// spellings macOS manufactures -- ASCII case, one trailing dot, and a trailing
+    /// `.local` label -- because the shells report the POSIX hostname while several
+    /// system APIs return the mDNS form, and byte equality silently drops every report
+    /// when the two diverge. Deliberately not a "first label matches" rule, which would
+    /// accept `mac.evil.com` from an ssh session. A nil `machineHostname` means the
+    /// embedder supplied no machine identity, so only `localhost` is local.
+    private static func namesThisMachine(_ host: String, machineHostname: String?) -> Bool {
+        if host == "localhost" { return true }
+        guard let machineHostname else { return false }
+        let normalized = normalizedHost(host)
+        return !normalized.isEmpty && normalized == normalizedHost(machineHostname)
+    }
+
+    private static func normalizedHost(_ host: String) -> [UInt8] {
+        var bytes = Array(host.utf8)
+        for index in bytes.indices where (0x41...0x5A).contains(bytes[index]) {
+            bytes[index] += 0x20
+        }
+        if bytes.last == 0x2E { bytes.removeLast() }
+        let localSuffix = Array(".local".utf8)
+        if bytes.count > localSuffix.count, bytes.suffix(localSuffix.count).elementsEqual(localSuffix) {
+            bytes.removeLast(localSuffix.count)
+        }
+        return bytes
     }
 
     private func percentDecoded(_ bytes: [UInt8]) -> [UInt8]? {

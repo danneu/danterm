@@ -335,7 +335,7 @@ struct TerminalPTYHostTests {
             events: (await host.transitions()).map(\.recordingEvent)
         )
 
-        #expect(try recording.replay() == (await host.snapshot()))
+        #expect(try recording.replay(machineHostname: MachineHostname.posix) == (await host.snapshot()))
     }
 
     @Test("a late update consumer receives one conflated final state before termination", .timeLimit(.minutes(1)))
@@ -471,7 +471,7 @@ struct TerminalPTYHostTests {
         try recorder.writeIfRequested(name: "pty-output-resize-output")
         let decoded = try JSONDecoder().decode(NeutralTerminalRecording.self, from: encoded)
 
-        #expect(try decoded.replay() == (await host.snapshot()))
+        #expect(try decoded.replay(machineHostname: MachineHostname.posix) == (await host.snapshot()))
         let resizeIndex = try #require(transitions.firstIndex {
             if case .resize = $0 { true } else { false }
         })
@@ -877,7 +877,7 @@ struct TerminalPTYHostTests {
 
         #expect(snapshot.selectedText == "alpha")
         #expect(await host.inputWrites().count == baseline)
-        #expect(try recording.replay() == snapshot)
+        #expect(try recording.replay(machineHostname: MachineHostname.posix) == snapshot)
         await host.close()
     }
 
@@ -949,7 +949,7 @@ struct TerminalPTYHostTests {
 
         #expect(snapshot.scrollProjection.isFollowing)
         #expect(transitions.contains(.scrollToBottom))
-        #expect(try recording.replay() == snapshot)
+        #expect(try recording.replay(machineHostname: MachineHostname.posix) == snapshot)
 
         await host.close()
     }

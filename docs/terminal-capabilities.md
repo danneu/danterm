@@ -124,6 +124,13 @@ under "Protocols" above. The denied list is explicit, including DA2, DECRQSS,
 XTGETTCAP, clipboard reads, Kitty OSC 99, 8-bit replies, and audible
 or visual bell effects.
 
+`OSC 7` accepts a `file://` URI whose host is `localhost`, or names this machine
+ignoring ASCII case, one trailing dot, and a trailing `.local` label; any other
+host leaves the pane's directory unchanged. The machine's name is its POSIX
+hostname -- the value the shells themselves interpolate -- so the `.local`
+tolerance covers only the mDNS spelling macOS manufactures, not a general
+first-label match (`mac.evil.com` stays rejected).
+
 `CSI > q` and `CSI > 0 q` return `DCS >|DanTerm <version> ST`. The accepted
 desktop notification forms are `OSC 9;<body>` and
 `OSC 777;notify;<title>;<body>`. The OSC 777 body may contain semicolons.

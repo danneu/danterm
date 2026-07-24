@@ -147,7 +147,7 @@ public actor TerminalPTYHost {
     public init(
         initialDimensions: TerminalDimensions,
         bootstrapExecutable: String,
-        machineHostname: String? = nil,
+        machineHostname: String? = MachineHostname.posix,
         programVersion: String = "dev"
     ) throws {
         try self.init(
@@ -162,7 +162,7 @@ public actor TerminalPTYHost {
     package init(
         initialDimensions: TerminalDimensions,
         bootstrapExecutable: String,
-        machineHostname: String? = nil,
+        machineHostname: String? = MachineHostname.posix,
         programVersion: String = "dev",
         captureTransitions: Bool
     ) throws {

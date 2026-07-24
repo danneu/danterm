@@ -149,7 +149,6 @@ HOME="$home_dir" PATH="$WORKFLOW_PATH:/usr/bin:/bin:/usr/sbin" \
     DANTERM_FZF="$(PATH="$WORKFLOW_PATH" command -v fzf)" \
     DANTERM_ASCIINEMA="$(PATH="$WORKFLOW_PATH" command -v asciinema)" \
     DANTERM_REPO_ROOT="$REPO_ROOT" \
-    DANTERM_MACHINE_HOSTNAME="$(hostname)" \
     DANTERM_WORKFLOW_SSH_CONFIG="$ssh_dir/config" \
     "$runner" "$run_dir" "$bootstrap" > "$run_dir/runner.stdout" 2> "$run_dir/runner.stderr"
 runner_status=$?

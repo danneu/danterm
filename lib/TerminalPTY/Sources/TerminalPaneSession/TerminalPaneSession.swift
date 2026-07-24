@@ -99,7 +99,7 @@ public final class TerminalPaneSessionController {
         configuration: TerminalPaneLaunchConfiguration,
         bootstrapExecutable: String,
         isVisible: Bool = true,
-        machineHostname: String? = nil
+        machineHostname: String? = MachineHostname.posix
     ) throws {
         let host = try TerminalPTYHost(
             initialDimensions: configuration.initialDimensions,
@@ -116,7 +116,7 @@ public final class TerminalPaneSessionController {
         configuration: TerminalPaneLaunchConfiguration,
         bootstrapExecutable: String,
         isVisible: Bool = true,
-        machineHostname: String? = nil,
+        machineHostname: String? = MachineHostname.posix,
         captureTransitions: Bool
     ) throws {
         let host = try TerminalPTYHost(
@@ -133,7 +133,7 @@ public final class TerminalPaneSessionController {
         configuration: TerminalPaneLaunchConfiguration,
         bootstrapExecutable: String,
         isVisible: Bool = true,
-        machineHostname: String? = nil,
+        machineHostname: String? = MachineHostname.posix,
         captureTransitions: Bool
     ) throws {
         let host = try TerminalPTYHost(

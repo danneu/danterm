@@ -524,11 +524,21 @@ public struct NeutralTerminalRecording: Codable, Equatable, Sendable {
     }
 
     /// Replays through TerminalCore and exposes each ordered checkpoint to corpus assertions.
+    ///
+    /// `machineHostname` is the machine identity the replay terminal is configured with. It
+    /// stays nil for neutral fixtures, which carry no host-specific bytes; a caller comparing
+    /// a replay against a live pane's snapshot must pass the identity that pane was built
+    /// with, or the two terminals differ on configuration alone.
     public func replay(
+        machineHostname: String? = nil,
         inspect: (_ eventIndex: Int, _ terminal: Terminal) throws -> Void = { _, _ in }
     ) throws -> Terminal {
         guard version == 1,
-              let initialTerminal = Terminal(columns: initial.columns, rows: initial.rows)
+              let initialTerminal = Terminal(
+                  columns: initial.columns,
+                  rows: initial.rows,
+                  machineHostname: machineHostname
+              )
         else {
             throw NeutralTerminalRecordingError.invalidDimensions
         }
