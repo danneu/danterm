@@ -63,10 +63,10 @@ struct BrailleSpriteGeometryTests {
 
         #expect(layout.dotSize == sample.dotSize)
         if let xPositions = sample.xPositions {
-            #expect(layout.xPositions == xPositions)
+            #expect((0..<2).map { layout.rect(column: $0, row: 0).x } == xPositions)
         }
         if let yPositions = sample.yPositions {
-            #expect(layout.yPositions == yPositions)
+            #expect((0..<4).map { layout.rect(column: 0, row: $0).y } == yPositions)
         }
     }
 
@@ -116,24 +116,26 @@ struct BrailleSpriteGeometryTests {
                 }
 
                 guard layout.dotSize > 0 else { continue }
+                let xPositions = (0..<2).map { layout.rect(column: $0, row: 0).x }
+                let yPositions = (0..<4).map { layout.rect(column: 0, row: $0).y }
                 #expect(
-                    layout.xPositions[0] < layout.xPositions[1]
+                    xPositions[0] < xPositions[1]
                     && zip(
-                        layout.yPositions,
-                        layout.yPositions.dropFirst()
+                        yPositions,
+                        yPositions.dropFirst()
                     ).allSatisfy(<)
-                    && layout.xPositions[0] + layout.dotSize <= layout.xPositions[1]
+                    && xPositions[0] + layout.dotSize <= xPositions[1]
                     && zip(
-                        layout.yPositions,
-                        layout.yPositions.dropFirst()
+                        yPositions,
+                        yPositions.dropFirst()
                     ).allSatisfy {
                         $0 + layout.dotSize <= $1
                     },
                     context
                 )
                 let verticalGaps = zip(
-                    layout.yPositions,
-                    layout.yPositions.dropFirst()
+                    yPositions,
+                    yPositions.dropFirst()
                 ).map { $1 - ($0 + layout.dotSize) }
                 #expect(Set(verticalGaps).count == 1, context)
             }
