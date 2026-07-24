@@ -25,9 +25,13 @@ started from:
 
     just benchmark-quick baseline=HEAD workload=content-churn
 
-Nothing is stashed, committed, or checked out to do this. If you have committed
-since starting the experiment, `HEAD` is no longer where you began -- note the
-pre-change revision before you start and name it explicitly.
+Nothing is stashed, committed, or checked out to do this. The baseline is any
+revision `git rev-parse` accepts -- `HEAD~5`, a SHA, a tag, a branch -- so the
+working tree can be compared against an arbitrarily old point. The wider the
+gap, the more the verdict attributes to everything in between rather than to
+your change alone. If you have committed since starting the experiment, `HEAD`
+is no longer where you began; note the pre-change revision before you start and
+name it explicitly.
 
 The candidate is an immutable snapshot of the complete current working tree:
 tracked changes plus non-ignored untracked files, captured through a scratch
@@ -111,6 +115,40 @@ decision rule requires recalibrating before directional claims resume.
 Run `quick` for the routine question. Run `confirm` when the quick result is
 close, the change crosses workload boundaries, or the decision warrants the
 stronger five-workload evidence.
+
+## When to measure
+
+Running a comparison on your own initiative is welcome -- you do not need to be
+asked. What follows is about reading the result honestly, not about permission.
+
+Know what each mode can see before you spend one. `quick` decides at 2 pairs per
+workload with directional thresholds of 3.8-4.5% and a 1.0% equivalence band;
+`confirm` uses 2-6 pairs at 1.85-2.5% with a 0.75% band. So `quick` cannot
+distinguish a 2% regression from noise -- it reports `inconclusive`, which is the
+absence of an answer. Neither mode can license "no regression"; they can only
+license "no regression above my threshold."
+
+Measure when you have a hypothesis the result would settle:
+
+- You intend to claim a change is faster. Run `quick`, then `confirm` before the
+  claim goes anywhere durable.
+- You are changing a path a profile just named as hot. You have a specific
+  prediction; a comparison accepts or rejects it.
+- You are refactoring the feed or render path and "this changes no performance"
+  is itself part of the claim. Only `confirm` has the sensitivity to support
+  that; `quick` returning `equivalent` does not.
+
+Sanity-checking a change you are merely unsure about is a legitimate reason to
+run one, and an `equivalent` at `confirm`'s thresholds is real evidence. Two
+things to keep straight when you do. First, a comparison answers "is this tree
+different from that tree" -- it is not a regression watch, and there is no stored
+history to watch against. Second, an `inconclusive` or an invalid invocation
+leaves you exactly where you started: say so plainly rather than reporting that
+the change was benchmarked and looked fine.
+
+When the honest answer is that you have no hypothesis yet, profile the
+suspicious path instead. That is the cheaper question and usually the one you
+actually have.
 
 ## Choose a profiler
 
