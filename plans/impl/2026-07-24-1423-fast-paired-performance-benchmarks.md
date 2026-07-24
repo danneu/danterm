@@ -352,12 +352,17 @@ test-terminal-benchmark-gui` recipe alongside the existing
 
 ## Follow Up
 
-- PO8's budgets are still unmeasured: no complete `benchmark-quick` or
-  `benchmark-confirm` invocation has been run end to end on the calibrated
-  machine, so the under-60-second and under-five-minute cached-path claims rest
-  on the research timings rather than on the production commands. The first real
-  optimization (PO7) should record the reported snapshot / cache / comparison /
-  total phase times alongside its decision.
+- ~~PO8's budgets are still unmeasured.~~ Resolved for `confirm`: the first
+  complete production invocation (`just benchmark-confirm baseline=HEAD~1`, a
+  script-only diff) reported snapshot 0.2s, cache population 120.5s, cached
+  comparison 115.6s, total 236.3s. The cached path is therefore about 116s
+  against the five-minute budget, and even a cold two-arm build finishes inside
+  it. The measured comparison phase runs longer than the research projection of
+  86.7s, so the margin is real but not large. Evidence:
+  `.build/terminal-benchmark-comparisons/confirm/7df4e271c7ae-0000/run.json`.
+  The same run doubled as an end-to-end check on the decision rule: all five
+  workloads returned `equivalent` (-0.64% to +0.42%) for a diff that changes no
+  app code. `quick`'s under-60-second budget is still unmeasured.
 - ~~`scripts/terminal-benchmark.sh` still accepts the `full-screen-symbol-churn`
   and `full-screen-sprite-coverage-churn` workloads.~~ Resolved: both workloads
   and the orphaned `full-screen-mixed-churn` are deleted, the harness gate is a
