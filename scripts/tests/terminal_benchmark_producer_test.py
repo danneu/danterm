@@ -94,6 +94,15 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
         self.assertEqual(strip_styles(style_first), strip_styles(style_second))
         self.assertNotEqual(styles(style_first), styles(style_second))
 
+    def test_incremental_mixed_churn_changes_content_and_style_in_a_row_subset(self):
+        first = PRODUCER.incremental_mixed_screen(sequence=1, columns=80, rows=24)
+        second = PRODUCER.incremental_mixed_screen(sequence=2, columns=80, rows=24)
+
+        self.assertNotEqual(first, second)
+        self.assertIn(b"\x1b]0;DANTERM-BENCH-REDRAW-000001\x07", first)
+        self.assertNotIn(b"\x1b[2J", first)
+        self.assertEqual(PRODUCER.incremental_mixed_rows(24), (10, 11, 12, 13))
+
     def test_symbol_churn_models_btop_with_ninety_percent_braille(self):
         # Intent: the symbol workload remains the deterministic proxy for the
         #   measured btop regression: 90% braille and 10% box drawing.
@@ -236,6 +245,29 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
                     self.assertLess(events.index("clock"), events.index(payload_write))
                 else:
                     self.assertNotIn("clock", events)
+
+    def test_persistent_mode_converges_and_returns_without_starting_a_block(self):
+        events = []
+
+        PRODUCER.run_workload(
+            mode="persistent",
+            target=os.terminal_size((80, 24)),
+            terminal_size=lambda: os.terminal_size((80, 24)),
+            monotonic=lambda: 0,
+            monotonic_ns=lambda: events.append("clock") or 0,
+            sleep=lambda _interval: None,
+            write=lambda chunk: events.append(("write", chunk)),
+            workload_chunks=lambda: (b"payload",),
+            await_start_ack=lambda: events.append("start-ack"),
+            await_draw_result=lambda: events.append("draw-result"),
+            acknowledge_geometry=lambda: events.append("geometry-ready"),
+            write_result=lambda _elapsed, _geometry: events.append("result"),
+            backend="swift",
+            start_marker=b"start\n",
+            completion=b"complete\n",
+        )
+
+        self.assertEqual(events, ["geometry-ready"])
 
 
 if __name__ == "__main__":

@@ -199,8 +199,6 @@ class TerminalDrawAcceptanceTests(unittest.TestCase):
                 ACCEPTANCE, "run_redraw", return_value=result
             ), mock.patch.object(
                 ACCEPTANCE, "latest_committed", return_value=None
-            ), mock.patch.object(
-                ACCEPTANCE, "require_ac_power"
             ):
                 ACCEPTANCE.main()
 

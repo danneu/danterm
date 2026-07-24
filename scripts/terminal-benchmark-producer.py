@@ -107,8 +107,10 @@ def sprite_coverage_churn_content(sequence, row, width):
 
 def redraw_screen(workload, sequence, columns=80, rows=24):
     """Build one dense pseudo-TUI frame without scrolling or last-column writes."""
-    if workload not in REDRAW_WORKLOADS:
+    if workload not in REDRAW_WORKLOADS and workload != "full-screen-incremental-mixed-churn":
         raise ValueError(f"unknown redraw workload: {workload}")
+    if workload == "full-screen-incremental-mixed-churn" and sequence >= 0:
+        return incremental_mixed_screen(sequence, columns, rows)
     title = (
         f"DANTERM-BENCH-REDRAW-{sequence:06d}"
         if sequence >= 0
@@ -146,6 +148,32 @@ def redraw_screen(workload, sequence, columns=80, rows=24):
         )
         if row != rows - 1:
             lines.append("\r\n")
+    return "".join(lines).encode()
+
+
+def incremental_mixed_rows(rows):
+    """Choose a stable contiguous subset whose glyph halo remains bounded."""
+    first = max(2, rows // 2 - 2)
+    return tuple(range(first, min(rows, first + 4)))
+
+
+def incremental_mixed_screen(sequence, columns=80, rows=24):
+    """Change content and style on a deterministic subset of a settled screen."""
+    title = f"DANTERM-BENCH-REDRAW-{sequence:06d}"
+    lines = [f"\x1b]0;{title}\x07"]
+    width = columns - 1
+    for row in incremental_mixed_rows(rows):
+        red = 40 + (sequence * 17 + row * 11) % 180
+        green = 40 + (sequence * 23 + row * 13) % 180
+        blue = 40 + (sequence * 29 + row * 7) % 180
+        content = (
+            f" {row:02d}  incremental item {(sequence * 31 + row * 7) % 10000:04d} "
+            f"style {(sequence + row) % 97:02d}"
+        ).ljust(width, ".")[:width]
+        lines.append(
+            f"\x1b[{row};1H\x1b[38;2;{red};{green};{blue}m"
+            f"{content}\x1b[0m"
+        )
     return "".join(lines).encode()
 
 
@@ -196,6 +224,8 @@ def run_workload(
     """Run a benchmark only after geometry convergence, keeping the wait untimed."""
     achieved = wait_for_target_geometry(target, terminal_size, monotonic, sleep)
     acknowledge_geometry()
+    if mode == "persistent":
+        return
     if mode == "loop":
         iterations = 0
         while max_loop_iterations is None or iterations < max_loop_iterations:
@@ -279,6 +309,8 @@ def main():
                 target, lambda: os.get_terminal_size(1), time.monotonic, time.sleep
             )
             Path(geometry_ready).touch()
+            if environment.get("DANTERM_BENCHMARK_MODE") == "persistent":
+                return
             if redraw_update_count > 0:
                 write_all(1, redraw_screen(workload_name, -1, target.columns, target.lines))
                 write_all(

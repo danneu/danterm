@@ -22,6 +22,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     var previousSessionCrashed: Bool = false     // true if session.json lock was still present
     #if DANTERM_TERMINAL_BENCHMARK
     private var benchmarkGeometryController: TerminalBenchmarkGeometryController?
+    private var benchmarkStateRecorder: TerminalBenchmarkStateRecorder?
     #endif
     /// Set by the .terminate effect before calling NSApp.terminate to bypass the
     /// applicationShouldTerminate safety net (user already confirmed).
@@ -190,6 +191,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
             session: { [weak benchmarkRuntime] in benchmarkRuntime?.surfaces.values.first }
         )
         benchmarkGeometryController?.start()
+        benchmarkStateRecorder = TerminalBenchmarkStateRecorder(
+            window: window,
+            environment: ProcessInfo.processInfo.environment
+        )
+        TerminalBenchmarkObserver.shared?.stateRecorder = benchmarkStateRecorder
         #endif
 
         #if !DANTERM_TERMINAL_CHARACTERIZATION && !DANTERM_TERMINAL_BENCHMARK
@@ -198,7 +204,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         notifCenter.delegate = self
         #endif
 
-        #if !DANTERM_TERMINAL_BENCHMARK
+        #if DANTERM_TERMINAL_BENCHMARK
+        NSApp.activate()
+        #else
         NSApp.activate(ignoringOtherApps: true)
         #endif
 
@@ -739,6 +747,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     // renderer visibility.
     func windowDidChangeOcclusionState(_ notification: Notification) {
         guard notification.object is NSWindow else { return }
+        #if DANTERM_TERMINAL_BENCHMARK
+        benchmarkStateRecorder?.windowDidChangeOcclusionState()
+        #endif
         runtime?.syncSurfaceVisibility()
     }
 

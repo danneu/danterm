@@ -28,27 +28,92 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROFILE_ROOT="$REPO_ROOT/.build/terminal-benchmark-profiles/$(date +%Y-%m-%d-%H%M%S)-$$"
 IDENTITY_PATH="$PROFILE_ROOT/identity.json"
+HARNESS_IDENTITY_PATH="$PROFILE_ROOT/harness-identity.json"
 HARNESS_LOG="$PROFILE_ROOT/harness.log"
+HISTORY_PATH="$REPO_ROOT/benchmarks/results/terminal-app.jsonl"
 HARNESS_PID=""
 mkdir -p "$PROFILE_ROOT"
 trap 'terminate_owned_pid "$HARNESS_PID"' EXIT INT TERM
 
+case "$WORKLOAD" in
+    scrollback-stream)
+        fixture_identity="$(jq -er '.workloads["scrollback-stream"].identity' "$REPO_ROOT/benchmarks/fixtures/terminal-app.json")"
+        reset_behavior="fresh deterministic corpus replay; steady-state app/session caches intentionally persist"
+        redraw_updates=0
+        ;;
+    full-screen-content-churn)
+        fixture_identity="full-screen-content-churn-v1-serialized-80x24"
+        reset_behavior="full-screen deterministic setup plus excluded settling draw before serialized draws"
+        redraw_updates=1000000
+        ;;
+    full-screen-style-churn)
+        fixture_identity="full-screen-style-churn-v1-serialized-80x24"
+        reset_behavior="full-screen deterministic setup plus excluded settling draw before serialized draws"
+        redraw_updates=1000000
+        ;;
+    full-screen-incremental-mixed-churn)
+        fixture_identity="full-screen-incremental-mixed-churn-v1-four-rows-six-damage-80x24"
+        reset_behavior="dense deterministic setup plus excluded settling draw before four-row content-and-style updates with six-row glyph-halo damage"
+        redraw_updates=1000000
+        ;;
+    *)
+        echo "Unsupported sustained app profiling workload: $WORKLOAD" >&2
+        exit 2
+        ;;
+esac
+
+shasum -a 256 "$HISTORY_PATH" >"$PROFILE_ROOT/history-before.sha256"
 DANTERM_BENCHMARK_MODE=loop DANTERM_BENCHMARK_PROFILING=1 \
-    DANTERM_BENCHMARK_IDENTITY_PATH="$IDENTITY_PATH" \
+    DANTERM_BENCHMARK_IDENTITY_PATH="$HARNESS_IDENTITY_PATH" \
+    DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES="$redraw_updates" \
     "$SCRIPT_DIR/terminal-benchmark.sh" "$WORKLOAD" "$BACKEND" >"$HARNESS_LOG" 2>&1 &
 HARNESS_PID=$!
 deadline=$((SECONDS + 120))
-while [[ ! -f "$IDENTITY_PATH" ]]; do
+while [[ ! -f "$HARNESS_IDENTITY_PATH" ]]; do
     kill -0 "$HARNESS_PID" 2>/dev/null || { echo "Profiling benchmark failed; see $HARNESS_LOG" >&2; exit 1; }
     (( SECONDS < deadline )) || { echo "Timed out waiting for profiling identity; see $HARNESS_LOG" >&2; exit 1; }
     sleep 0.1
 done
 
-target_pid="$(jq -er '.pid' "$IDENTITY_PATH")"
-binary="$(jq -er '.binary' "$IDENTITY_PATH")"
+target_pid="$(jq -er '.pid' "$HARNESS_IDENTITY_PATH")"
+binary="$(jq -er '.binary' "$HARNESS_IDENTITY_PATH")"
 kill -0 "$target_pid" 2>/dev/null || { echo "Published profiling pid is no longer running" >&2; exit 1; }
 cp "$binary" "$PROFILE_ROOT/DanTerm-Benchmark-symbols"
 nm -nm "$binary" >"$PROFILE_ROOT/symbols.txt"
+binary_sha256="$(shasum -a 256 "$binary" | awk '{print $1}')"
+mach_o_uuid="$(dwarfdump --uuid "$binary" | awk 'NR == 1 {print $2}')"
+source_commit="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+source_tree="$(git -C "$REPO_ROOT" rev-parse HEAD^{tree})"
+dirty_state_sha256="$(
+    {
+        git -C "$REPO_ROOT" diff --binary HEAD
+        git -C "$REPO_ROOT" ls-files --others --exclude-standard |
+            while IFS= read -r path; do
+                printf '%s\n' "$path"
+                shasum -a 256 "$REPO_ROOT/$path"
+            done
+    } | shasum -a 256 | awk '{print $1}'
+)"
+jq --arg fixtureIdentity "$fixture_identity" --arg resetBehavior "$reset_behavior" \
+    --arg binarySHA256 "$binary_sha256" --arg machOUUID "$mach_o_uuid" \
+    --arg sourceCommit "$source_commit" --arg sourceTree "$source_tree" \
+    --arg dirtyStateSHA256 "$dirty_state_sha256" --arg artifactRoot "$PROFILE_ROOT" \
+    '. + {
+        schemaVersion: 2,
+        fixtureIdentity: $fixtureIdentity,
+        resetBehavior: $resetBehavior,
+        binarySHA256: $binarySHA256,
+        machOUUID: $machOUUID,
+        sourceIdentity: {
+            commit: $sourceCommit,
+            sourceTree: $sourceTree,
+            dirtyStateSHA256: $dirtyStateSHA256
+        },
+        artifactRoot: $artifactRoot,
+        decisionEligible: false,
+        historyEligible: false,
+        profiledTimingsAreDiagnosticOnly: true
+    }' "$HARNESS_IDENTITY_PATH" >"$IDENTITY_PATH"
 
 case "$MODE" in
     loop)
@@ -58,6 +123,8 @@ case "$MODE" in
         ;;
     sample)
         command -v sample >/dev/null || { echo "sample is unavailable on this macOS host" >&2; exit 1; }
+        printf 'sample %s %s -mayDie -fullPaths -file %s\n' \
+            "$target_pid" "$DURATION" "$PROFILE_ROOT/sample.txt" >"$PROFILE_ROOT/profile-command.txt"
         if ! sample "$target_pid" "$DURATION" -mayDie -fullPaths -file "$PROFILE_ROOT/sample.txt"; then
             echo "sample could not attach to pid $target_pid. Grant Developer Tools access to this shell and retry." >&2
             exit 1
@@ -66,6 +133,8 @@ case "$MODE" in
         ;;
     trace)
         command -v xcrun >/dev/null || { echo "xcrun is unavailable; install Xcode command-line tools" >&2; exit 1; }
+        printf 'xcrun xctrace record --no-prompt --template %s --attach %s --time-limit %ss --output %s\n' \
+            "$TEMPLATE" "$target_pid" "$DURATION" "$PROFILE_ROOT/profile.trace" >"$PROFILE_ROOT/profile-command.txt"
         if ! xcrun xctrace record --no-prompt --template "$TEMPLATE" --attach "$target_pid" \
             --time-limit "${DURATION}s" --output "$PROFILE_ROOT/profile.trace"; then
             echo "xctrace could not attach to pid $target_pid. Grant Developer Tools access to this shell and retry." >&2
@@ -76,3 +145,5 @@ case "$MODE" in
         echo "Trace export: $PROFILE_ROOT/trace-toc.xml"
         ;;
 esac
+shasum -a 256 "$HISTORY_PATH" >"$PROFILE_ROOT/history-after.sha256"
+cmp "$PROFILE_ROOT/history-before.sha256" "$PROFILE_ROOT/history-after.sha256"

@@ -227,13 +227,6 @@ def refuse_profiled_history():
         raise SystemExit("Profiled runs cannot enter benchmark history")
 
 
-def require_ac_power():
-    """Keep battery power-management changes out of comparable benchmark runs."""
-    power_status = command_output("pmset", "-g", "batt")
-    if "Now drawing from 'AC Power'" not in power_status:
-        raise SystemExit("Benchmark requires AC power; plug in this Mac and retry")
-
-
 def target_geometry():
     """Return the grid every raw harness run must report."""
     return {
@@ -355,8 +348,6 @@ def main():
         backend, workload_filter, save, comment = parse_arguments(sys.argv[1:])
     except ValueError as error:
         raise SystemExit(str(error)) from error
-    if backend != "swift-core":
-        require_ac_power()
     iterations = int(os.environ.get("DANTERM_BENCHMARK_ITERATIONS", "3"))
     if iterations < 2:
         raise SystemExit("DANTERM_BENCHMARK_ITERATIONS must be at least 2")

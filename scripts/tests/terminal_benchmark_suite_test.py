@@ -122,18 +122,6 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "Profiled runs cannot enter benchmark history"):
                 SUITE.refuse_profiled_history()
 
-    def test_ac_power_is_required_before_benchmarking(self):
-        with mock.patch.object(
-            SUITE, "command_output", return_value="Now drawing from 'Battery Power'"
-        ):
-            with self.assertRaisesRegex(SystemExit, "Benchmark requires AC power"):
-                SUITE.require_ac_power()
-
-        with mock.patch.object(
-            SUITE, "command_output", return_value="Now drawing from 'AC Power'"
-        ):
-            SUITE.require_ac_power()
-
     def test_backend_accepts_just_named_argument_spelling(self):
         self.assertEqual(SUITE.parse_backend("backend=swift"), "swift")
         self.assertEqual(SUITE.parse_backend("backend=swift-core"), "swift-core")
@@ -493,10 +481,9 @@ class TerminalBenchmarkSuiteTests(unittest.TestCase):
             mock.patch.object(SUITE, "latest_committed", return_value=None),
             mock.patch.object(SUITE, "report"),
             mock.patch("builtins.input", return_value=answer),
-            mock.patch.object(SUITE, "require_ac_power"),
         )
         error = None
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6] as report, patches[7] as prompt, patches[8]:
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6] as report, patches[7] as prompt:
             try:
                 SUITE.main()
             except SystemExit as caught:

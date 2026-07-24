@@ -57,4 +57,16 @@ struct TerminalCoreBenchmarkSupportTests {
 
         #expect(try decodeBenchmarkChunks(framed) == [Array("abc".utf8), Array("de".utf8)])
     }
+
+    @Test("sustained feed recreates the measured terminal boundary each cycle")
+    func sustainedFeedRecreatesTerminalEachCycle() {
+        var batches = 0
+
+        let completed = runSustainedFeed(maximumCycles: 3) {
+            batches += 1
+        }
+
+        #expect(completed == 3)
+        #expect(batches == 3)
+    }
 }

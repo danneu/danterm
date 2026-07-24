@@ -74,6 +74,20 @@ public func measureFeedBatch(
     return total
 }
 
+/// Repeats the same fresh-terminal feed boundary for profiler attachment.
+@discardableResult
+public func runSustainedFeed(
+    maximumCycles: Int? = nil,
+    feedCycle: () -> Void
+) -> Int {
+    var completed = 0
+    while maximumCycles.map({ completed < $0 }) ?? true {
+        feedCycle()
+        completed += 1
+    }
+    return completed
+}
+
 /// Calibrates outside the reported samples, then retries with one fixed batch until every sample meets the floor.
 public func measureDurationStableFeed(
     iterations: Int,

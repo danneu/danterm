@@ -182,12 +182,6 @@ def environment_identity():
     }
 
 
-def require_ac_power():
-    """Keep power-management changes out of persistent benchmark comparisons."""
-    if "Now drawing from 'AC Power'" not in command_output("pmset", "-g", "batt"):
-        raise SystemExit("Benchmark requires AC power; plug in this Mac and retry")
-
-
 def make_redraw_result(workload, report, raw_batch):
     """Freeze one compatible redraw result after every measured batch succeeds."""
     identity = environment_identity()
@@ -283,7 +277,6 @@ def main():
     if redraw_mode:
         if os.environ.get("DANTERM_BENCHMARK_PROFILING") == "1":
             raise SystemExit("Profiled runs cannot enter benchmark history")
-        require_ac_power()
         workloads = (workload,) if workload else REDRAW_WORKLOADS
         STAGING_ROOT.mkdir(parents=True, exist_ok=True)
         staged = STAGING_ROOT / (

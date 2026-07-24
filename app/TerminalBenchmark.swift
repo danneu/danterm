@@ -6,6 +6,123 @@ import TerminalRenderExecution
 import TerminalRenderPlanning
 
 #if DANTERM_TERMINAL_BENCHMARK
+/// Captures every machine or visibility state that can invalidate a measured block.
+@MainActor
+final class TerminalBenchmarkStateRecorder {
+    private weak var window: NSWindow?
+    private let thermalStateOverride: String?
+    private let stateResultPath: String?
+    private var recording = false
+    private(set) var samples: [[String: Any]] = []
+    nonisolated(unsafe) private var notificationTokens: [(NotificationCenter, NSObjectProtocol)] = []
+
+    init(window: NSWindow, environment: [String: String]) {
+        self.window = window
+        self.thermalStateOverride = environment["DANTERM_BENCHMARK_THERMAL_STATE_OVERRIDE"]
+            .flatMap { $0.isEmpty ? nil : $0 }
+        self.stateResultPath = environment["DANTERM_TERMINAL_BENCHMARK_STATE_RESULT"]
+        let center = NotificationCenter.default
+        for name in [
+            ProcessInfo.thermalStateDidChangeNotification,
+            Notification.Name.NSProcessInfoPowerStateDidChange,
+        ] {
+            let token = center.addObserver(
+                forName: name,
+                object: ProcessInfo.processInfo,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.record(reason: "machine-state-change")
+                }
+            }
+            notificationTokens.append((center, token))
+        }
+        let workspaceCenter = NSWorkspace.shared.notificationCenter
+        let workspaceToken = workspaceCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.record(reason: "active-space-change", activeSpaceChanged: true)
+            }
+        }
+        notificationTokens.append((workspaceCenter, workspaceToken))
+    }
+
+    deinit {
+        for (center, token) in notificationTokens {
+            center.removeObserver(token)
+        }
+    }
+
+    func beginBlock() {
+        samples = []
+        recording = true
+        record(reason: "start")
+    }
+
+    func windowDidChangeOcclusionState() {
+        record(reason: "occlusion-change")
+    }
+
+    func observeDrawState() {
+        guard isWindowVisible() == false else { return }
+        record(reason: "draw-while-occluded")
+    }
+
+    func finishBlock() -> [[String: Any]] {
+        record(reason: "completion")
+        recording = false
+        return samples
+    }
+
+    private func record(reason: String, activeSpaceChanged: Bool = false) {
+        guard recording else { return }
+        let info = ProcessInfo.processInfo
+        samples.append([
+            "reason": reason,
+            "activeSpaceChanged": activeSpaceChanged,
+            "visible": isWindowVisible(),
+            "thermalState": thermalStateOverride ?? thermalStateName(info.thermalState),
+            "lowPowerMode": info.isLowPowerModeEnabled,
+        ])
+        checkpointSamples()
+    }
+
+    private func checkpointSamples() {
+        guard let stateResultPath,
+              let data = try? JSONSerialization.data(
+                  withJSONObject: ["machineStateSamples": samples],
+                  options: [.sortedKeys]
+              )
+        else { return }
+        try? data.write(to: URL(fileURLWithPath: stateResultPath), options: .atomic)
+    }
+
+    private func isWindowVisible() -> Bool {
+        guard let window, window.occlusionState.contains(.visible) else { return false }
+        guard let windows = CGWindowListCopyWindowInfo(
+            [.optionIncludingWindow],
+            CGWindowID(window.windowNumber)
+        ) as? [[String: Any]],
+        let windowInfo = windows.first,
+        let onScreen = windowInfo[kCGWindowIsOnscreen as String] as? Bool
+        else { return false }
+        return onScreen
+    }
+
+    private func thermalStateName(_ state: ProcessInfo.ThermalState) -> String {
+        switch state {
+        case .nominal: "nominal"
+        case .fair: "fair"
+        case .serious: "serious"
+        case .critical: "critical"
+        @unknown default: "unknown"
+        }
+    }
+}
+
 /// Carries one backend's achieved grid and point-sized cells across the narrow session seam.
 struct TerminalBenchmarkGeometry: Equatable {
     let columns: Int
@@ -83,6 +200,7 @@ final class TerminalBenchmarkObserver {
     private let readyDrawAcknowledgmentPath: String?
     private let localizedDrawAcknowledgmentPrefix: String?
     private let resultPath: String
+    private let profilesIncrementalMixedDamage: Bool
     private var startNanoseconds: UInt64?
     private var completed = false
     private var localizedSequences = Set<Int>()
@@ -91,6 +209,7 @@ final class TerminalBenchmarkObserver {
     private var pendingRedrawSequence: Int?
     private var publishedRedrawSequence: Int?
     private var redrawSequences = Set<Int>()
+    var stateRecorder: TerminalBenchmarkStateRecorder?
 
     init?(environment: [String: String]) {
         guard let startMarker = environment["DANTERM_TERMINAL_BENCHMARK_START_MARKER"],
@@ -110,10 +229,14 @@ final class TerminalBenchmarkObserver {
         self.localizedDrawAcknowledgmentPrefix =
             environment["DANTERM_TERMINAL_BENCHMARK_LOCALIZED_DRAW_ACK_PREFIX"]
         self.resultPath = resultPath
+        self.profilesIncrementalMixedDamage =
+            environment["DANTERM_TERMINAL_BENCHMARK_WORKLOAD"]
+                == "full-screen-incremental-mixed-churn"
     }
 
     /// Records the app-side observation before a newly parsed frame becomes drawable.
     func observePublishedFrame(_ plan: RenderFramePlan) {
+        reopenCompletedBlockIfRequested()
         if let pendingRedrawSequence {
             publishedRedrawSequence = pendingRedrawSequence
             self.pendingRedrawSequence = nil
@@ -121,7 +244,23 @@ final class TerminalBenchmarkObserver {
         let text = frameText(plan)
         guard startNanoseconds == nil, text.contains(startMarker) else { return }
         startNanoseconds = DispatchTime.now().uptimeNanoseconds
+        stateRecorder?.beginBlock()
         FileManager.default.createFile(atPath: startAcknowledgmentPath, contents: Data())
+    }
+
+    private func reopenCompletedBlockIfRequested() {
+        guard completed,
+              FileManager.default.fileExists(atPath: resultPath) == false,
+              FileManager.default.fileExists(atPath: startAcknowledgmentPath) == false
+        else { return }
+        startNanoseconds = nil
+        completed = false
+        localizedSequences = []
+        localizedDrawDurations = []
+        localizedDirtyRowCounts = []
+        pendingRedrawSequence = nil
+        publishedRedrawSequence = nil
+        redrawSequences = []
     }
 
     /// Associates benchmark-only OSC title metadata with the next published full-screen frame.
@@ -135,7 +274,7 @@ final class TerminalBenchmarkObserver {
 
     /// Tells the view to retry when AppKit merged a published full redraw with older partial damage.
     var needsPublishedRedraw: Bool {
-        publishedRedrawSequence != nil
+        publishedRedrawSequence != nil && profilesIncrementalMixedDamage == false
     }
 
     /// Acknowledges the consumed frame only after its synchronous drawing work returns.
@@ -146,6 +285,7 @@ final class TerminalBenchmarkObserver {
         drawDurationNanoseconds: UInt64
     ) {
         guard completed == false, let startNanoseconds else { return }
+        stateRecorder?.observeDrawState()
         let text = frameText(plan)
         if text.contains(startMarker), let startDrawAcknowledgmentPath {
             FileManager.default.createFile(
@@ -181,7 +321,7 @@ final class TerminalBenchmarkObserver {
             rowCount: plan.rows
         )
         if let sequence = publishedRedrawSequence,
-           redrawDirtyRowCount == plan.rows,
+           redrawDirtyRowCount == (profilesIncrementalMixedDamage ? 6 : plan.rows),
            redrawSequences.insert(sequence).inserted
         {
             publishedRedrawSequence = nil
@@ -201,11 +341,15 @@ final class TerminalBenchmarkObserver {
             "clock": "dispatch-uptime-nanoseconds",
             "elapsedNanoseconds": elapsed,
             "event": "final-draw-completed",
+            "startMarker": startMarker,
             "expectedFinalState": expectedFinalState,
+            "machineStateSamples": stateRecorder?.finishBlock() ?? [],
         ]
         if localizedDrawDurations.isEmpty == false {
             object["cumulativeDrawNanoseconds"] = localizedDrawDurations.reduce(0, +)
             object["drawCount"] = localizedDrawDurations.count
+            object["drawSequences"] = redrawSequences.sorted()
+            object["drawDurationsNanoseconds"] = localizedDrawDurations
             object["dirtyRowCounts"] = localizedDirtyRowCounts
         }
         do {

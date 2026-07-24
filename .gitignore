@@ -21,3 +21,4 @@ build/
 .swiftpm/
 Package.resolved
 /scripts/__pycache__
+/scripts/tests/__pycache__
