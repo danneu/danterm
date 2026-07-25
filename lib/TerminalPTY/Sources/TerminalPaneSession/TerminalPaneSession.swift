@@ -1,5 +1,8 @@
 // Main-actor pane policy that turns one PTY host's conflated updates into cached
 // inspection text, complete render plans, child-ended evidence, and one exit notification.
+#if DANTERM_TERMINAL_BENCHMARK
+import Dispatch
+#endif
 import PaneLifecycle
 import TerminalCore
 import TerminalCoreRecording
@@ -97,6 +100,16 @@ public final class TerminalPaneSessionController {
 
     /// Damage paired with `currentPlan` at its most recent publication.
     public private(set) var currentDamage: TerminalDamage?
+
+    #if DANTERM_TERMINAL_BENCHMARK
+    /// Cost of the `planFrame` call that produced `currentPlan`, for the benchmark
+    /// observer to read when the resulting frame is published.
+    ///
+    /// Planning runs here on the PTY-output path, not inside `draw(_:)`, so the
+    /// harness's draw timer cannot see it. Exposing the measurement at its source
+    /// is what lets a planner change be attributed at all. Benchmark builds only.
+    public private(set) var lastPlanDurationNanoseconds: UInt64 = 0
+    #endif
 
     /// Creates and starts the sole PTY host owned by this pane controller.
     public convenience init(
@@ -560,6 +573,9 @@ public final class TerminalPaneSessionController {
         guard terminal != lastPlannedTerminal else { return }
         let presentation = terminal.presentation
         guard presentation.isSynchronizedOutputActive == false || didChildExit else { return }
+        #if DANTERM_TERMINAL_BENCHMARK
+        let planStartedNanoseconds = DispatchTime.now().uptimeNanoseconds
+        #endif
         let plan = planFrame(
             for: terminal,
             presentation: RenderPresentation(
@@ -568,6 +584,10 @@ public final class TerminalPaneSessionController {
                 cursorShape: presentation.cursorShape
             )
         )
+        #if DANTERM_TERMINAL_BENCHMARK
+        lastPlanDurationNanoseconds =
+            DispatchTime.now().uptimeNanoseconds - planStartedNanoseconds
+        #endif
         lastPlannedTerminal = terminal
         currentPlan = plan
         currentDamage = pendingDamage

@@ -675,7 +675,10 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         recordTerminalCharacterizationPlanDelivery()
         #endif
         #if DANTERM_TERMINAL_BENCHMARK
-        TerminalBenchmarkObserver.shared?.observePublishedFrame(frame.plan)
+        TerminalBenchmarkObserver.shared?.observePublishedFrame(
+            frame.plan,
+            planDurationNanoseconds: controller.lastPlanDurationNanoseconds
+        )
         #endif
         publishedFrame = (frame.plan, metrics)
         if frame.damage.isFull {

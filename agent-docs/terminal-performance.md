@@ -88,6 +88,36 @@ complete run.
 | `equivalent` | The estimate sits inside the equivalence band. | The change did nothing measurable *at this boundary*. Before concluding it did nothing at all, confirm the workload actually contains the cost you moved. |
 | `inconclusive` | Neither cleared the threshold nor fell inside the band. | Escalate `quick` to `confirm`, which measures more pairs at a tighter threshold. Do not rerun `quick` hoping for a different roll -- the pair count is frozen precisely so results cannot be shopped for. |
 
+### The plan-time line carries no verdict
+
+    content-churn: equivalent (+0.11% symmetric median of 2 pairs)
+        plan time: -18.40% symmetric median of 2 pairs (descriptive, no verdict -- uncalibrated)
+
+The three serialized-draw workloads decide on `drawNanosecondsPerDraw`, which
+brackets only clipping and drawing inside `draw(_:)`. Frame planning does not
+run there -- `planFrame` runs on the PTY-output path, when a pane applies child
+output -- so **the draw verdict cannot see a planner change at all**. It is not
+that planning is a small term in that number; it is not in that number.
+
+That is not a small blind spot. Measured on this machine, one accepted draw
+costs about 0.9M ns to draw and 1.16M ns to plan on `content-churn`, and about
+0.16M ns to draw against the same 1.15M ns to plan on `incremental-mixed`.
+Planning is the larger cost in both, and it barely moves when damage shrinks
+from 66 rows to 6, because the planner plans the whole viewport regardless.
+
+So each of those workloads also reports a plan-time estimate, normalized over
+the same 50 accepted draws. Read it as evidence, not as a decision:
+
+- It has **no calibrated thresholds** and therefore no `faster` / `slower` /
+  `equivalent` classification. Do not invent one, and do not treat a large
+  percentage as a verdict on its own.
+- It is **absent whenever either arm lacks it**, which is the normal case when
+  the baseline revision predates the timer. A missing plan line never
+  invalidates the draw verdict.
+- Judging a planner change means reading this line. Judging a drawing change
+  means reading the verdict. A change that moves only planning will correctly
+  read `equivalent` on all three draw verdicts.
+
 An invalid invocation is not a verdict and never becomes one by retrying. It
 means a stated measurement condition failed, so fix the condition -- put the
 machine on AC power, stop covering or unfocusing the benchmark windows, let it

@@ -837,5 +837,138 @@ class CommandLineTests(unittest.TestCase):
         self.assertIn("complete five-workload ladder", errors.getvalue())
 
 
+class AuxiliaryPlanMetricTests(unittest.TestCase):
+    """The descriptive plan-time estimate, which reports but never decides."""
+
+    def _blocks(self, workload, schedule, draw_percent, plan_percent):
+        draw_values = constant_pair_values(workload, schedule, draw_percent)
+        plan_values = constant_pair_values(workload, schedule, plan_percent)
+        blocks = raw_blocks(workload, schedule, draw_values)
+        metric = COMPARE.AUXILIARY_BLOCK_METRICS[workload]
+        for block, plan_value in zip(blocks, plan_values):
+            block[metric] = plan_value
+        return blocks
+
+    def _evidence(self, blocks, workload):
+        return collection({
+            workload: {
+                "workload": workload,
+                "rawBlocks": blocks,
+                "valid": True,
+                "invalidationReasons": [],
+            }
+        })
+
+    def test_the_plan_estimate_is_reported_for_every_draw_workload(self):
+        # Intent: each serialized-draw workload reports a symmetric plan-time
+        #   estimate next to its draw verdict.
+        # Why it exists: `drawDurationNanoseconds` brackets only clip + draw, so
+        #   the draw metric structurally cannot observe `planFrame`. Without a
+        #   second reported quantity a planner change is unmeasurable, which is
+        #   how an O(n^2) coalescing fix classified `equivalent` on all three of
+        #   these workloads.
+        # Scenario: spec-first -- a candidate that plans 20% faster while drawing
+        #   at exactly baseline speed.
+        for workload in ("content-churn", "style-churn", "incremental-mixed"):
+            with self.subTest(workload=workload):
+                schedule = COMPARE.make_schedule(
+                    "quick", (workload,), physical_candidate_arm="b"
+                )[workload]
+                blocks = self._blocks(workload, schedule, 0.0, -20.0)
+
+                differences = COMPARE.auxiliary_differences(workload, blocks)
+
+                self.assertEqual(len(differences), len(schedule) // 2)
+                self.assertAlmostEqual(statistics.median(differences), -20.0)
+
+    def test_the_plan_estimate_never_changes_the_draw_verdict(self):
+        # Intent: adding plan-time evidence leaves the frozen decision rule's
+        #   output bit-identical.
+        # Why it exists: the plan metric is uncalibrated, so it must be additive.
+        #   If it could move a verdict it would silently redefine the decision
+        #   rule that `terminal-performance.md` freezes against recalibration.
+        # Scenario: spec-first -- a large plan-time regression alongside an
+        #   unchanged draw time must still read as an unchanged draw time.
+        workload = "content-churn"
+        schedule = COMPARE.make_schedule(
+            "quick", (workload,), physical_candidate_arm="b"
+        )[workload]
+        without_plan = raw_blocks(
+            workload, schedule, constant_pair_values(workload, schedule, 9.0)
+        )
+        with_plan = self._blocks(workload, schedule, 9.0, 150.0)
+
+        bare = COMPARE.summarize_comparison("quick", self._evidence(without_plan, workload))
+        annotated = COMPARE.summarize_comparison("quick", self._evidence(with_plan, workload))
+
+        self.assertEqual(
+            annotated["workloads"][workload]["decision"],
+            bare["workloads"][workload]["decision"],
+        )
+        self.assertIsNone(bare["workloads"][workload]["auxiliary"])
+        self.assertEqual(
+            annotated["workloads"][workload]["auxiliary"]["metric"],
+            "planNanosecondsPerDraw",
+        )
+
+    def test_blocks_without_plan_evidence_report_no_estimate(self):
+        # Intent: artifacts collected before the plan timer existed still pair,
+        #   decide, and render, reporting no plan estimate at all.
+        # Why it exists: the paired harness compares one revision against another,
+        #   so a baseline arm predating the timer is the normal case for the first
+        #   several comparisons. Failing or fabricating a zero there would either
+        #   block the comparison or invent an effect.
+        # Scenario: spec-first -- baseline blocks carry no plan metric.
+        workload = "style-churn"
+        schedule = COMPARE.make_schedule(
+            "quick", (workload,), physical_candidate_arm="b"
+        )[workload]
+        blocks = self._blocks(workload, schedule, 5.0, -10.0)
+        for block in blocks:
+            if block["measurementRole"] == "A":
+                del block["planNanosecondsPerDraw"]
+
+        summary = COMPARE.summarize_comparison("quick", self._evidence(blocks, workload))
+
+        self.assertIsNone(COMPARE.auxiliary_differences(workload, blocks))
+        self.assertIsNone(summary["workloads"][workload]["auxiliary"])
+        self.assertIn("style-churn: slower", COMPARE.render_decisions(summary))
+
+    def test_the_render_marks_the_plan_estimate_as_carrying_no_verdict(self):
+        # Intent: the rendered plan line states that it is descriptive.
+        # Why it exists: every other percentage in this report carries a
+        #   calibrated classification. An unlabeled fourth number invites reading
+        #   the plan estimate as a verdict it has no thresholds to support.
+        # Scenario: spec-first -- an operator reads a quick comparison.
+        workload = "incremental-mixed"
+        schedule = COMPARE.make_schedule(
+            "quick", (workload,), physical_candidate_arm="b"
+        )[workload]
+        blocks = self._blocks(workload, schedule, 0.0, -30.0)
+
+        render = COMPARE.render_decisions(
+            COMPARE.summarize_comparison("quick", self._evidence(blocks, workload))
+        )
+
+        self.assertIn("plan time", render)
+        self.assertIn("-30.00%", render)
+        self.assertIn("no verdict", render)
+
+    def test_only_the_serialized_draw_workloads_carry_a_plan_metric(self):
+        # Intent: the auxiliary table covers exactly the workloads whose decision
+        #   metric excludes planning.
+        # Why it exists: `terminal-feed` never runs this app and `scrollback-stream`
+        #   decides on a wall clock that already contains planning, so a plan
+        #   estimate there would be redundant at best and double-counted at worst.
+        # Scenario: spec-first -- the frozen table is read directly.
+        self.assertEqual(
+            set(COMPARE.AUXILIARY_BLOCK_METRICS),
+            {"content-churn", "style-churn", "incremental-mixed"},
+        )
+        self.assertTrue(
+            set(COMPARE.AUXILIARY_BLOCK_METRICS) <= set(COMPARE.BLOCK_METRICS)
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

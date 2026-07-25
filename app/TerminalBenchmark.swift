@@ -228,6 +228,16 @@ final class TerminalBenchmarkObserver {
     private var localizedSequences = Set<Int>()
     private var localizedDrawDurations: [UInt64] = []
     private var localizedDirtyRowCounts: [Int] = []
+    /// Planning cost published since the last accepted draw, and how many
+    /// `planFrame` calls it covers.
+    ///
+    /// Accumulated rather than latched because AppKit can coalesce several
+    /// published frames into one draw; summing attributes every plan the block
+    /// actually paid for instead of silently discarding the superseded ones.
+    private var pendingPlanNanoseconds: UInt64 = 0
+    private var pendingPlanFrameCount = 0
+    private var acceptedPlanDurations: [UInt64] = []
+    private var acceptedPlanFrameCount = 0
     private var pendingRedrawSequence: Int?
     private var publishedRedrawSequence: Int?
     private var redrawSequences = Set<Int>()
@@ -257,8 +267,16 @@ final class TerminalBenchmarkObserver {
     }
 
     /// Records the app-side observation before a newly parsed frame becomes drawable.
-    func observePublishedFrame(_ plan: RenderFramePlan) {
+    ///
+    /// `planDurationNanoseconds` is the cost of the `planFrame` call that produced
+    /// this plan. It is collected here because planning happens on the PTY-output
+    /// path, outside the draw timer that produces `drawDurationNanoseconds`.
+    func observePublishedFrame(_ plan: RenderFramePlan, planDurationNanoseconds: UInt64 = 0) {
         reopenCompletedBlockIfRequested()
+        if startNanoseconds != nil, completed == false {
+            pendingPlanNanoseconds += planDurationNanoseconds
+            pendingPlanFrameCount += 1
+        }
         if let pendingRedrawSequence {
             publishedRedrawSequence = pendingRedrawSequence
             self.pendingRedrawSequence = nil
@@ -280,6 +298,10 @@ final class TerminalBenchmarkObserver {
         localizedSequences = []
         localizedDrawDurations = []
         localizedDirtyRowCounts = []
+        pendingPlanNanoseconds = 0
+        pendingPlanFrameCount = 0
+        acceptedPlanDurations = []
+        acceptedPlanFrameCount = 0
         pendingRedrawSequence = nil
         publishedRedrawSequence = nil
         redrawSequences = []
@@ -327,6 +349,7 @@ final class TerminalBenchmarkObserver {
            localizedSequences.insert(sequence).inserted
         {
             localizedDrawDurations.append(drawDurationNanoseconds)
+            acceptPendingPlan()
             localizedDirtyRowCounts.append(
                 dirtyRowCount(for: dirtyRect, metrics: metrics, rowCount: plan.rows)
             )
@@ -348,6 +371,7 @@ final class TerminalBenchmarkObserver {
         {
             publishedRedrawSequence = nil
             localizedDrawDurations.append(drawDurationNanoseconds)
+            acceptPendingPlan()
             localizedDirtyRowCounts.append(redrawDirtyRowCount)
             if let localizedDrawAcknowledgmentPrefix {
                 FileManager.default.createFile(
@@ -373,6 +397,13 @@ final class TerminalBenchmarkObserver {
             object["drawSequences"] = redrawSequences.sorted()
             object["drawDurationsNanoseconds"] = localizedDrawDurations
             object["dirtyRowCounts"] = localizedDirtyRowCounts
+            // Reported beside the draw numbers, never folded into them: planning
+            // is outside the draw timer, so adding it would redefine the metric
+            // the decision thresholds are calibrated for.
+            object["cumulativePlanNanoseconds"] = acceptedPlanDurations.reduce(0, +)
+            object["planCount"] = acceptedPlanDurations.count
+            object["planFrameCount"] = acceptedPlanFrameCount
+            object["planDurationsNanoseconds"] = acceptedPlanDurations
         }
         do {
             let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
@@ -380,6 +411,18 @@ final class TerminalBenchmarkObserver {
         } catch {
             print("[benchmark] Failed to write final-draw result: \(error)")
         }
+    }
+
+    /// Attributes the planning done since the previous accepted draw to this one.
+    ///
+    /// Called from every site that appends a draw duration, so `planDurations`
+    /// stays index-aligned with `drawDurations` and both normalize by the same
+    /// accepted-draw count.
+    private func acceptPendingPlan() {
+        acceptedPlanDurations.append(pendingPlanNanoseconds)
+        acceptedPlanFrameCount += pendingPlanFrameCount
+        pendingPlanNanoseconds = 0
+        pendingPlanFrameCount = 0
     }
 
     private func localizedSequence(in text: String) -> Int? {

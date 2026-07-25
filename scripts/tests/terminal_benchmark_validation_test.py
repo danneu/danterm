@@ -754,6 +754,69 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
             300_000,
         )
 
+    def test_draw_churn_collectors_normalize_reported_plan_time_per_draw(self):
+        # Intent: when the app reports plan timings, each block carries a
+        #   `planNanosecondsPerDraw` normalized over the same 50 draws as
+        #   `drawNanosecondsPerDraw`.
+        # Why it exists: the serialized-draw metric brackets only clipping and
+        #   drawing, so planner work is invisible to it. Normalizing plan time
+        #   by the same divisor is what makes the two directly comparable rather
+        #   than two quantities with different denominators.
+        # Scenario: spec-first -- a block whose 50 accepted draws each cost
+        #   300us to draw and 900us to plan.
+        for collect, workload, fixture, dirty_rows in (
+            (VALIDATION.collect_content_churn, "full-screen-content-churn",
+             "full-screen-content-churn", 66),
+            (VALIDATION.collect_style_churn, "full-screen-style-churn",
+             "full-screen-style-churn", 66),
+            (VALIDATION.collect_incremental_mixed,
+             "full-screen-incremental-mixed-churn",
+             "full-screen-incremental-mixed-churn-"
+             "v2-four-rows-six-damage-179x66", 6),
+        ):
+            with self.subTest(workload=workload):
+                artifact = self._draw_churn_artifact(
+                    workload=workload, fixture=fixture, dirty_rows=dirty_rows
+                )
+                plans = [900_000] * 50
+                artifact["finalDraw"]["planCount"] = 50
+                artifact["finalDraw"]["cumulativePlanNanoseconds"] = sum(plans)
+                artifact["finalDraw"]["planDurationsNanoseconds"] = plans
+
+                evidence = collect(
+                    [{"measurementRole": "A", "physicalArm": "a"}],
+                    run_block=lambda arm: artifact,
+                )
+
+                self.assertTrue(evidence["valid"])
+                self.assertEqual(
+                    evidence["rawBlocks"][0]["planNanosecondsPerDraw"], 900_000
+                )
+
+    def test_a_block_without_plan_timings_stays_valid_and_reports_none(self):
+        # Intent: an artifact produced before the plan timer existed collects,
+        #   validates, and simply reports no plan metric.
+        # Why it exists: every paired comparison builds its baseline arm from an
+        #   older revision, so missing plan evidence is the normal state of one
+        #   arm rather than an error. Inventing a zero would fabricate an effect
+        #   and adding an invalidation reason would void real comparisons.
+        # Scenario: spec-first -- the exact artifact shape the app emitted before
+        #   this change.
+        artifact = self._draw_churn_artifact(
+            workload="full-screen-content-churn",
+            fixture="full-screen-content-churn",
+            dirty_rows=66,
+        )
+
+        evidence = VALIDATION.collect_content_churn(
+            [{"measurementRole": "A", "physicalArm": "a"}],
+            run_block=lambda arm: artifact,
+        )
+
+        self.assertTrue(evidence["valid"])
+        self.assertEqual(evidence["invalidationReasons"], [])
+        self.assertIsNone(evidence["rawBlocks"][0]["planNanosecondsPerDraw"])
+
     def test_incremental_mixed_collector_requires_six_row_halo_damage(self):
         artifact = self._draw_churn_artifact(
             workload="full-screen-incremental-mixed-churn",

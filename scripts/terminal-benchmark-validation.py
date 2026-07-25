@@ -1056,6 +1056,17 @@ def _collect_draw_churn(
             if isinstance(cumulative, int) and draw.get("drawCount") == 50
             else None
         )
+        # Reported, never validated. Planning happens on the PTY-output path, so
+        # the serialized-draw contract above says nothing about it, and an arm
+        # built before the plan timer existed legitimately reports none of these
+        # fields -- making its absence a block failure would void every
+        # comparison whose baseline predates it.
+        cumulative_plan = draw.get("cumulativePlanNanoseconds")
+        normalized_plan = (
+            cumulative_plan // 50
+            if isinstance(cumulative_plan, int) and draw.get("planCount") == 50
+            else None
+        )
         block = {
             "index": index,
             **planned,
@@ -1064,6 +1075,7 @@ def _collect_draw_churn(
             "resetEvidence": reset,
             "drawCount": draw.get("drawCount"),
             "drawNanosecondsPerDraw": normalized,
+            "planNanosecondsPerDraw": normalized_plan,
             "machineStateSamples": draw.get("machineStateSamples", []),
             "artifact": artifact,
         }

@@ -18,6 +18,7 @@ import argparse
 import importlib.util
 import json
 import pathlib
+import statistics
 import sys
 import time
 
@@ -52,6 +53,17 @@ BLOCK_METRICS = {
     "content-churn": "drawNanosecondsPerDraw",
     "style-churn": "drawNanosecondsPerDraw",
     "incremental-mixed": "drawNanosecondsPerDraw",
+}
+# Reported beside the verdict, never used to reach one. The serialized-draw
+# metric above brackets only clipping and drawing, so it structurally cannot
+# observe `planFrame`, which runs on the PTY-output path instead. These blocks
+# therefore carry a second quantity for planner work. It has no calibrated
+# thresholds and deliberately gets no classification: adding one would redefine
+# the decision rule that recalibration protects.
+AUXILIARY_BLOCK_METRICS = {
+    "content-churn": "planNanosecondsPerDraw",
+    "style-churn": "planNanosecondsPerDraw",
+    "incremental-mixed": "planNanosecondsPerDraw",
 }
 # Alternated across quartets so neither source sits first in every group of four.
 QUARTET_PATTERNS = ("ABBA", "BAAB")
@@ -154,6 +166,47 @@ def paired_differences(workload, raw_blocks):
     return differences
 
 
+def auxiliary_differences(workload, raw_blocks):
+    """Pair the plan-time metric the same way, or report nothing when it is absent.
+
+    Returns None rather than raising or substituting zero: a baseline arm built
+    from a revision that predates the plan timer legitimately has no such
+    evidence, and that must not block the draw verdict for the same blocks.
+    """
+    metric = AUXILIARY_BLOCK_METRICS.get(workload)
+    if metric is None or not raw_blocks or len(raw_blocks) % 2:
+        return None
+    if any(block.get(metric) is None for block in raw_blocks):
+        return None
+    differences = []
+    for offset in range(0, len(raw_blocks), 2):
+        by_role = {
+            block["measurementRole"]: block
+            for block in raw_blocks[offset:offset + 2]
+        }
+        if set(by_role) != {"A", "B"}:
+            return None
+        differences.append(
+            CALIBRATION.symmetric_difference(
+                by_role["A"][metric], by_role["B"][metric]
+            )
+        )
+    return differences
+
+
+def summarize_auxiliary(workload, raw_blocks):
+    """Describe the plan-time evidence without classifying it."""
+    differences = auxiliary_differences(workload, raw_blocks)
+    if not differences:
+        return None
+    return {
+        "metric": AUXILIARY_BLOCK_METRICS[workload],
+        "pairedSymmetricPercent": differences,
+        "estimatePercent": statistics.median(differences),
+        "sampleCount": len(differences),
+    }
+
+
 def decide_workload(mode, workload, differences):
     """Apply the frozen fixed-N median rule, refusing any other number of pairs."""
     rule = decision_rule(mode)
@@ -192,6 +245,9 @@ def summarize_comparison(mode, evidence):
                 if eligible
                 else None
             ),
+            "auxiliary": (
+                summarize_auxiliary(workload, raw_blocks) if eligible else None
+            ),
         }
     return {
         "mode": mode,
@@ -223,6 +279,13 @@ def render_decisions(summary):
             lines.append(
                 "    flagged outlier pairs (retained in the estimate): "
                 + ", ".join(str(index) for index in decision["outlierIndices"])
+            )
+        auxiliary = result.get("auxiliary")
+        if auxiliary:
+            lines.append(
+                f"    plan time: {auxiliary['estimatePercent']:+.2f}% symmetric "
+                f"median of {auxiliary['sampleCount']} pairs "
+                "(descriptive, no verdict -- uncalibrated)"
             )
     return "\n".join(lines)
 
