@@ -2,6 +2,7 @@
 // It resizes the window to a requested grid, then observes the exact Swift frame
 // consumed by draw without adding hooks to TerminalCore.
 import Cocoa
+import TerminalBenchmarkMarkers
 import TerminalRenderExecution
 import TerminalRenderPlanning
 
@@ -241,6 +242,9 @@ final class TerminalBenchmarkObserver {
     private var pendingRedrawSequence: Int?
     private var publishedRedrawSequence: Int?
     private var redrawSequences = Set<Int>()
+    /// Retained for the lifetime of the observer, not built per frame: it holds
+    /// the scratch buffer that keeps marker detection off the allocator.
+    private var markerScanner: TerminalBenchmarkMarkerScanner
     var stateRecorder: TerminalBenchmarkStateRecorder?
 
     init?(environment: [String: String]) {
@@ -261,6 +265,11 @@ final class TerminalBenchmarkObserver {
         self.localizedDrawAcknowledgmentPrefix =
             environment["DANTERM_TERMINAL_BENCHMARK_LOCALIZED_DRAW_ACK_PREFIX"]
         self.resultPath = resultPath
+        self.markerScanner = TerminalBenchmarkMarkerScanner(
+            startMarker: startMarker,
+            completionMarker: completionMarker,
+            expectedFinalState: expectedFinalState
+        )
         self.profilesIncrementalMixedDamage =
             environment["DANTERM_TERMINAL_BENCHMARK_WORKLOAD"]
                 == "full-screen-incremental-mixed-churn"
@@ -281,11 +290,14 @@ final class TerminalBenchmarkObserver {
             publishedRedrawSequence = pendingRedrawSequence
             self.pendingRedrawSequence = nil
         }
-        let text = frameText(plan)
-        guard startNanoseconds == nil, text.contains(startMarker) else { return }
+        // Ordered so the scan is skipped once the block is running: after start
+        // there is nothing on this path a scan could still decide, and the
+        // publish path sees every parsed frame, not just the drawn ones.
+        guard startNanoseconds == nil else { return }
+        guard scanMarkers(plan).containsStartMarker else { return }
         startNanoseconds = DispatchTime.now().uptimeNanoseconds
         stateRecorder?.beginBlock()
-        FileManager.default.createFile(atPath: startAcknowledgmentPath, contents: Data())
+        writeAcknowledgment(atPath: startAcknowledgmentPath)
     }
 
     private func reopenCompletedBlockIfRequested() {
@@ -330,22 +342,16 @@ final class TerminalBenchmarkObserver {
     ) {
         guard completed == false, let startNanoseconds else { return }
         stateRecorder?.observeDrawState()
-        let text = frameText(plan)
-        if text.contains(startMarker), let startDrawAcknowledgmentPath {
-            FileManager.default.createFile(
-                atPath: startDrawAcknowledgmentPath,
-                contents: Data()
-            )
+        let markers = scanMarkers(plan)
+        if markers.containsStartMarker, let startDrawAcknowledgmentPath {
+            writeAcknowledgment(atPath: startDrawAcknowledgmentPath)
         }
-        if text.contains("DANTERM-BENCH-LOCALIZED-READY"),
+        if markers.containsLocalizedReady,
            let readyDrawAcknowledgmentPath
         {
-            FileManager.default.createFile(
-                atPath: readyDrawAcknowledgmentPath,
-                contents: Data()
-            )
+            writeAcknowledgment(atPath: readyDrawAcknowledgmentPath)
         }
-        if let sequence = localizedSequence(in: text),
+        if let sequence = markers.localizedSequence,
            localizedSequences.insert(sequence).inserted
         {
             localizedDrawDurations.append(drawDurationNanoseconds)
@@ -354,9 +360,8 @@ final class TerminalBenchmarkObserver {
                 dirtyRowCount(for: dirtyRect, metrics: metrics, rowCount: plan.rows)
             )
             if let localizedDrawAcknowledgmentPrefix {
-                FileManager.default.createFile(
-                    atPath: "\(localizedDrawAcknowledgmentPrefix)-\(String(format: "%06d", sequence))",
-                    contents: Data()
+                writeAcknowledgment(
+                    atPath: "\(localizedDrawAcknowledgmentPrefix)-\(String(format: "%06d", sequence))"
                 )
             }
         }
@@ -374,13 +379,12 @@ final class TerminalBenchmarkObserver {
             acceptPendingPlan()
             localizedDirtyRowCounts.append(redrawDirtyRowCount)
             if let localizedDrawAcknowledgmentPrefix {
-                FileManager.default.createFile(
-                    atPath: "\(localizedDrawAcknowledgmentPrefix)-\(String(format: "%06d", sequence))",
-                    contents: Data()
+                writeAcknowledgment(
+                    atPath: "\(localizedDrawAcknowledgmentPrefix)-\(String(format: "%06d", sequence))"
                 )
             }
         }
-        guard text.contains(completionMarker), text.contains(expectedFinalState) else { return }
+        guard markers.containsCompletionMarker, markers.containsExpectedFinalState else { return }
         completed = true
         let elapsed = DispatchTime.now().uptimeNanoseconds - startNanoseconds
         var object: [String: Any] = [
@@ -413,6 +417,23 @@ final class TerminalBenchmarkObserver {
         }
     }
 
+    /// Creates the empty file the producer is blocking on, as cheaply as the
+    /// filesystem allows.
+    ///
+    /// `FileManager.createFile` performs a full atomic write -- protected
+    /// temporary file, then `rename`, plus a `URL` construction and an `lstat`
+    /// -- which made it the largest remaining piece of the observer's
+    /// main-thread cost once marker scanning stopped dominating. These files are
+    /// zero-byte existence flags, so there is no content for atomicity to
+    /// protect and a bare create is equivalent.
+    private func writeAcknowledgment(atPath path: String) {
+        let descriptor = path.withCString {
+            open($0, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+        }
+        guard descriptor >= 0 else { return }
+        close(descriptor)
+    }
+
     /// Attributes the planning done since the previous accepted draw to this one.
     ///
     /// Called from every site that appends a draw duration, so `planDurations`
@@ -425,10 +446,15 @@ final class TerminalBenchmarkObserver {
         pendingPlanFrameCount = 0
     }
 
-    private func localizedSequence(in text: String) -> Int? {
-        guard let marker = text.range(of: "DANTERM-BENCH-LOCALIZED-") else { return nil }
-        let suffix = text[marker.upperBound...].prefix(6)
-        return suffix.count == 6 ? Int(suffix) : nil
+    /// Finds every marker this frame carries in one pass over the plan's runs.
+    ///
+    /// The whole plan is handed across in one concrete call so the traversal
+    /// stays inside the scanner's module, where it specializes. Plan order is
+    /// used as-is because `FramePlanner` emits runs row-major and
+    /// `clipFramePlan` only filters, so the sort this used to perform could
+    /// never reorder anything.
+    private func scanMarkers(_ plan: RenderFramePlan) -> TerminalBenchmarkMarkerScan {
+        markerScanner.scan(plan)
     }
 
     private func dirtyRowCount(
@@ -440,15 +466,6 @@ final class TerminalBenchmarkObserver {
         let first = min(rowCount, max(0, Int(floor(rect.minY / metrics.cellSize.height))))
         let end = min(rowCount, max(0, Int(ceil(rect.maxY / metrics.cellSize.height))))
         return max(0, end - first)
-    }
-
-    private func frameText(_ plan: RenderFramePlan) -> String {
-        plan.textRuns
-            .sorted { ($0.row, $0.startColumn) < ($1.row, $1.startColumn) }
-            .map { run in
-                run.cells.flatMap(\.scalars).map(String.init).joined()
-            }
-            .joined(separator: "\n")
     }
 }
 #endif

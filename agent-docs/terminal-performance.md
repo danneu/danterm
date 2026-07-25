@@ -210,6 +210,35 @@ localized real-app draw cost. Their output is diagnostic: it is unpaired, it is
 not recorded, and it cannot support a cross-session regression claim. Use them
 to inspect a hot path, then decide with `benchmark-quick`.
 
+### Keep the observer out of the profile
+
+`TerminalBenchmarkObserver` runs on the draw path, so its own cost shows up in
+every sample profile and inside `scrollback-stream`'s wall clock. It once cost
+more main-thread time than the drawing it exists to measure -- 18% of the thread
+in `full-screen-content-churn` and 22% in `full-screen-incremental-mixed-churn`,
+against 3.3% and 3.9% now. Three invariants keep it there; treat a profile where
+the observer is prominent again as a regression in the instrument, not a finding
+about the app.
+
+- **Marker detection never rebuilds the frame as a `String`.** It goes through
+  `TerminalBenchmarkMarkerScanner`, which scans the plan's scalars in place.
+  `scripts/tests/terminal-benchmark-harness_test.sh` fails if a `frameText`
+  helper reappears.
+- **The scan crosses the module boundary as one concrete call.** SwiftPM does
+  not specialize a library's generics for another module, so handing the runs
+  over as a lazy generic sequence replaced String cost with type-metadata and
+  unspecialized-iterator cost of the same size. `scan(_ plan:)` takes the whole
+  `RenderFramePlan` for that reason.
+- **Acknowledgments are bare `open`/`close`, not `FileManager.createFile`,**
+  which does a protected-temporary-file write plus `rename` for what is a
+  zero-byte existence flag.
+
+`TerminalBenchmarkMarkersTests` is the only automated cover for detection
+semantics, since `app/` has no test target; it checks the scan against a
+transcription of the replaced implementation. Changing detection means changing
+that test, and `just test-terminal-benchmark-gui` is what proves the
+acknowledgments still flow.
+
 ## Choose the benchmark boundary from the profile
 
 Use a real application or interactive scenario to discover the concrete hot

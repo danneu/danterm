@@ -91,6 +91,25 @@ grep -q 'lastPlanDurationNanoseconds' \
     "$ROOT/lib/TerminalPTY/Sources/TerminalPaneSession/TerminalPaneSession.swift"
 grep -q 'planDurationNanoseconds: controller.lastPlanDurationNanoseconds' \
     "$ROOT/app/SwiftTerminalSessionView.swift"
+# Marker detection must stay on the scanned-frame path and off the allocator.
+# The observer lives in app/, which no test target compiles, so these greps plus
+# TerminalBenchmarkMarkersTests are the only guard that the acknowledgments the
+# producer blocks on are still driven by what was actually drawn.
+grep -q 'import TerminalBenchmarkMarkers' "$ROOT/app/TerminalBenchmark.swift"
+grep -q 'markerScanner.scan(' "$ROOT/app/TerminalBenchmark.swift"
+grep -q 'markers.containsStartMarker' "$ROOT/app/TerminalBenchmark.swift"
+grep -q 'markers.containsLocalizedReady' "$ROOT/app/TerminalBenchmark.swift"
+grep -q 'markers.containsCompletionMarker' "$ROOT/app/TerminalBenchmark.swift"
+grep -q 'markers.containsExpectedFinalState' "$ROOT/app/TerminalBenchmark.swift"
+grep -q 'markers.localizedSequence' "$ROOT/app/TerminalBenchmark.swift"
+grep -q 'startDrawAcknowledgmentPath' "$ROOT/app/TerminalBenchmark.swift"
+grep -q 'readyDrawAcknowledgmentPath' "$ROOT/app/TerminalBenchmark.swift"
+# The per-scalar String join it replaced cost more main-thread time than the
+# drawing it measured; reintroducing it would silently re-inflate every profile.
+if grep -q 'func frameText' "$ROOT/app/TerminalBenchmark.swift"; then
+    echo "benchmark marker detection must not rebuild the frame as a String" >&2
+    exit 1
+fi
 awk '
     /#if DANTERM_TERMINAL_BENCHMARK/ {
         getline
