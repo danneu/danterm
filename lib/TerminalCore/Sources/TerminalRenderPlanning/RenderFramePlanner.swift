@@ -63,6 +63,56 @@ private struct TextCandidate {
     let italic: Bool
 }
 
+/// Accumulates the text run currently being coalesced so extending it appends a
+/// cell in place instead of rebuilding the whole run per candidate, which made
+/// both the copying and the width measurement quadratic in row length.
+///
+/// Being the payload of an `Optional` is the open/closed gate: there is no
+/// closed state to mistake for an open one, so continuation can only be
+/// considered while a run is genuinely open.
+private struct OpenTextRun {
+    let startColumn: Int
+    let foreground: RenderColor
+    let bold: Bool
+    let italic: Bool
+    private(set) var cells: [RenderTextCell]
+    /// Sum of `cells`' column widths, advanced with every append so continuity
+    /// never has to re-measure the run.
+    private(set) var width: Int
+
+    init(_ candidate: TextCandidate) {
+        startColumn = candidate.column
+        foreground = candidate.foreground
+        bold = candidate.bold
+        italic = candidate.italic
+        cells = [candidate.cell]
+        width = candidate.cell.columnWidth
+    }
+
+    func continues(with candidate: TextCandidate) -> Bool {
+        candidate.column == startColumn + width
+            && candidate.foreground == foreground
+            && candidate.bold == bold
+            && candidate.italic == italic
+    }
+
+    mutating func extend(with candidate: TextCandidate) {
+        cells.append(candidate.cell)
+        width += candidate.cell.columnWidth
+    }
+
+    func finished(row: Int) -> RenderTextRun {
+        RenderTextRun(
+            row: row,
+            startColumn: startColumn,
+            cells: cells,
+            foreground: foreground,
+            bold: bold,
+            italic: italic
+        )
+    }
+}
+
 /// Represents one decorated grid column before identical adjacent columns are
 /// folded into a non-overlapping executor-facing decoration run.
 private struct DecorationCandidate {
@@ -310,41 +360,18 @@ private struct FramePlanner {
                 )
             }
 
-            var current: RenderTextRun?
+            var open: OpenTextRun?
             for candidate in candidates {
-                if let run = current,
-                   candidate.column == run.startColumn + textWidth(run),
-                   candidate.foreground == run.foreground,
-                   candidate.bold == run.bold,
-                   candidate.italic == run.italic
-                {
-                    current = RenderTextRun(
-                        row: row,
-                        startColumn: run.startColumn,
-                        cells: run.cells + [candidate.cell],
-                        foreground: run.foreground,
-                        bold: run.bold,
-                        italic: run.italic
-                    )
+                if let run = open, run.continues(with: candidate) {
+                    open?.extend(with: candidate)
                 } else {
-                    if let current { result.append(current) }
-                    current = RenderTextRun(
-                        row: row,
-                        startColumn: candidate.column,
-                        cells: [candidate.cell],
-                        foreground: candidate.foreground,
-                        bold: candidate.bold,
-                        italic: candidate.italic
-                    )
+                    if let run = open { result.append(run.finished(row: row)) }
+                    open = OpenTextRun(candidate)
                 }
             }
-            if let current { result.append(current) }
+            if let run = open { result.append(run.finished(row: row)) }
         }
         return result
-    }
-
-    private func textWidth(_ run: RenderTextRun) -> Int {
-        run.cells.reduce(0) { $0 + $1.columnWidth }
     }
 
     private func decorationRuns(_ rows: [[PlannedCell]]) -> [RenderDecorationRun] {
