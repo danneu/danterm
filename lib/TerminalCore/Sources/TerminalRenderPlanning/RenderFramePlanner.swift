@@ -53,18 +53,8 @@ private struct CursorSpan {
     }
 }
 
-/// Represents a glyph cell before adjacent cells with identical shaping inputs
-/// are folded into an executor-facing text run.
-private struct TextCandidate {
-    let column: Int
-    let cell: RenderTextCell
-    let foreground: RenderColor
-    let bold: Bool
-    let italic: Bool
-}
-
 /// Accumulates the text run currently being coalesced so extending it appends a
-/// cell in place instead of rebuilding the whole run per candidate, which made
+/// cell in place instead of rebuilding the whole run per cell, which made
 /// both the copying and the width measurement quadratic in row length.
 ///
 /// Being the payload of an `Optional` is the open/closed gate: there is no
@@ -80,25 +70,25 @@ private struct OpenTextRun {
     /// never has to re-measure the run.
     private(set) var width: Int
 
-    init(_ candidate: TextCandidate) {
-        startColumn = candidate.column
-        foreground = candidate.foreground
-        bold = candidate.bold
-        italic = candidate.italic
-        cells = [candidate.cell]
-        width = candidate.cell.columnWidth
+    init(startColumn: Int, cell: RenderTextCell, style: ResolvedCellStyle) {
+        self.startColumn = startColumn
+        foreground = style.foreground
+        bold = style.bold
+        italic = style.italic
+        cells = [cell]
+        width = cell.columnWidth
     }
 
-    func continues(with candidate: TextCandidate) -> Bool {
-        candidate.column == startColumn + width
-            && candidate.foreground == foreground
-            && candidate.bold == bold
-            && candidate.italic == italic
+    func continues(at column: Int, style: ResolvedCellStyle) -> Bool {
+        column == startColumn + width
+            && style.foreground == foreground
+            && style.bold == bold
+            && style.italic == italic
     }
 
-    mutating func extend(with candidate: TextCandidate) {
-        cells.append(candidate.cell)
-        width += candidate.cell.columnWidth
+    mutating func extend(with cell: RenderTextCell) {
+        cells.append(cell)
+        width += cell.columnWidth
     }
 
     func finished(row: Int) -> RenderTextRun {
@@ -339,8 +329,14 @@ private struct FramePlanner {
     private func textRuns(_ rows: [[PlannedCell]]) -> [RenderTextRun] {
         var result: [RenderTextRun] = []
         for (row, cells) in rows.enumerated() {
-            let candidates = cells.enumerated().compactMap { column, cell -> TextCandidate? in
-                guard cell.style.hidden == false else { return nil }
+            // Cells that draw no glyph `continue` without reading or writing the
+            // accumulator, so a filtered cell can never flush or extend an open
+            // run -- a run spanning one splits only if the column arithmetic says
+            // so. The column comes from the enumeration rather than a counter of
+            // admitted cells, which is what keeps that arithmetic honest.
+            var open: OpenTextRun?
+            for (column, cell) in cells.enumerated() {
+                guard cell.style.hidden == false else { continue }
                 let width: Int
                 switch cell.kind {
                 case .narrow:
@@ -348,25 +344,16 @@ private struct FramePlanner {
                 case .wideHead:
                     width = 2
                 case .padding, .wideTail, .spacerHead:
-                    return nil
+                    continue
                 }
-                guard cell.scalars.isEmpty == false else { return nil }
-                return TextCandidate(
-                    column: column,
-                    cell: RenderTextCell(scalars: cell.scalars, columnWidth: width),
-                    foreground: cell.style.foreground,
-                    bold: cell.style.bold,
-                    italic: cell.style.italic
-                )
-            }
+                guard cell.scalars.isEmpty == false else { continue }
 
-            var open: OpenTextRun?
-            for candidate in candidates {
-                if let run = open, run.continues(with: candidate) {
-                    open?.extend(with: candidate)
+                let textCell = RenderTextCell(scalars: cell.scalars, columnWidth: width)
+                if let run = open, run.continues(at: column, style: cell.style) {
+                    open?.extend(with: textCell)
                 } else {
                     if let run = open { result.append(run.finished(row: row)) }
-                    open = OpenTextRun(candidate)
+                    open = OpenTextRun(startColumn: column, cell: textCell, style: cell.style)
                 }
             }
             if let run = open { result.append(run.finished(row: row)) }

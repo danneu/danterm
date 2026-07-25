@@ -124,7 +124,7 @@ new behavior.
   accumulator and running width; remove the now-unused width helper. Includes the
   PO1-PO4 tests, which must be written first and shown passing against the current
   implementation. Benchmark against `8a718dd` before moving on.
-- [ ] **2. Fuse candidate construction.** Build candidates inline in the
+- [x] **2. Fuse candidate construction.** Build candidates inline in the
   coalescing loop, removing the per-row intermediate array and its struct copies;
   drop the candidate type if nothing else uses it. Must preserve I4 -- a skipped
   cell continues the loop without touching accumulator state -- and must take each
@@ -161,3 +161,30 @@ new behavior.
   are not results. The `incremental-mixed` sign is not stable across runs
   (-2.55% quick vs +3.21% confirm), so that workload is unresolved rather than a
   measured regression, and no durable speed claim is made for this commit.
+- **Commit 1, post-commit re-measurement.** A fourth, valid `benchmark-confirm`
+  against `8a718dd` inverted the one `slower` verdict: `incremental-mixed`
+  `faster` (-3.65%, 4 flagged outliers) against the earlier `slower` (+3.21%),
+  with `content-churn` drifting `equivalent` -> `inconclusive` (+2.13%). Two
+  valid confirms with opposite signs at the same magnitude means that workload
+  does not resolve at this effect size; there is no regression and no win. Two
+  further sample profiles put `textRuns` self-time at 94 and 103 samples,
+  consistent with the earlier 130 / 137.
+- **Commit 2, kept without a speed claim.** The plan made commit 2 droppable if
+  it did not move the number, and it does not. Against the commit-1 tree,
+  `benchmark-confirm` returned `terminal-feed` (+0.05%), `scrollback-stream`
+  (+0.09%), and `style-churn` (+0.34%) `equivalent`, with `content-churn`
+  (+1.86%) and `incremental-mixed` (+1.45%) `inconclusive` -- every sign
+  non-negative. A `benchmark-quick` `faster` (-6.13%, 2 pairs) on
+  `incremental-mixed` did not reproduce under confirm and is not a result.
+  Sample profiles put `textRuns` self-time at 114 and 137 against commit 1's 94
+  and 103: flat to slightly worse, because the candidate closure was already
+  inlined into `textRuns`, so removing the intermediate array bought nothing
+  measurable. Kept on the user's call for its own merits -- one fewer type, one
+  fewer per-row allocation, and the filtering rule now sits beside the
+  coalescing it feeds -- explicitly not as a performance change.
+- **Commit 2, I4 and columns.** `OpenTextRun` now takes `ResolvedCellStyle`
+  directly instead of a candidate struct, which is what let `TextCandidate` go.
+  Filtered cells `continue` the loop without reading or writing `open`, and the
+  column comes from `cells.enumerated()` rather than a counter of admitted
+  cells, so the continuity arithmetic is unchanged. The PO1-PO4 tests from
+  commit 1 carried over unmodified and are the regression net for this.
