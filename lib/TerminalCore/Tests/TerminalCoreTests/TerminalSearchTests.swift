@@ -29,7 +29,7 @@ struct TerminalSearchTests {
         #expect(terminal.activeSearchMatchRange == nil)
     }
 
-    @Test("newest-first navigation exposes overlaps and stops without moving")
+    @Test("newest-first navigation exposes overlaps and wraps at both ends")
     func navigationAndOverlaps() throws {
         var terminal = try #require(Terminal(columns: 8, rows: 1))
         terminal.feed(Array("aaa aa".utf8))
@@ -43,20 +43,15 @@ struct TerminalSearchTests {
         moved = terminal.searchNext()
         #expect(moved)
         #expect(terminal.activeSearchMatchRange?.start.column == 0)
-        let oldest = terminal.activeSearchMatchRange
         moved = terminal.searchNext()
-        #expect(moved == false)
-        #expect(terminal.activeSearchMatchRange == oldest)
+        #expect(moved)
+        #expect(terminal.activeSearchMatchRange?.start.column == 4)
+        moved = terminal.searchPrevious()
+        #expect(moved)
+        #expect(terminal.activeSearchMatchRange?.start.column == 0)
         moved = terminal.searchPrevious()
         #expect(moved)
         #expect(terminal.activeSearchMatchRange?.start.column == 1)
-        moved = terminal.searchPrevious()
-        #expect(moved)
-        #expect(terminal.activeSearchMatchRange?.start.column == 4)
-        let newest = terminal.activeSearchMatchRange
-        moved = terminal.searchPrevious()
-        #expect(moved == false)
-        #expect(terminal.activeSearchMatchRange == newest)
     }
 
     @Test("search spans soft wraps and only requested hard boundaries")
@@ -99,8 +94,11 @@ struct TerminalSearchTests {
         moved = terminal.searchNext()
         #expect(moved)
         #expect(terminal.activeSearchMatchRange?.start.row == 1)
+        // Row 0's "hit" was overwritten with "zip", so row 1 is now the oldest
+        // match and stepping older wraps back to the newest.
         moved = terminal.searchNext()
-        #expect(moved == false)
+        #expect(moved)
+        #expect(terminal.activeSearchMatchRange?.start.row == 2)
     }
 
     @Test("search status counts matches and orients the newest as index zero")
@@ -109,8 +107,7 @@ struct TerminalSearchTests {
         //   match's index, with the newest match reading as index 0 so the overlay
         //   renders it as 1/N.
         // Why it exists: pins the index orientation the find overlay's `selected + 1`
-        //   counter depends on, and the no-wrap edges where navigation must leave
-        //   the status untouched.
+        //   counter depends on, and the wrap at both ends of the match list.
         var terminal = try #require(Terminal(columns: 8, rows: 4))
         terminal.feed(Array("hit\r\nzzz\r\nhit\r\nhit".utf8))
 
@@ -124,18 +121,17 @@ struct TerminalSearchTests {
         moved = terminal.searchNext()
         #expect(moved)
         #expect(terminal.searchStatus == .matched(selected: 2, total: 3))
+        // Past the oldest match, wrap around to the newest.
         moved = terminal.searchNext()
-        #expect(moved == false)
+        #expect(moved)
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 3))
+        // And back the other way: before the newest match, wrap to the oldest.
+        moved = terminal.searchPrevious()
+        #expect(moved)
         #expect(terminal.searchStatus == .matched(selected: 2, total: 3))
         moved = terminal.searchPrevious()
         #expect(moved)
         #expect(terminal.searchStatus == .matched(selected: 1, total: 3))
-        moved = terminal.searchPrevious()
-        #expect(moved)
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 3))
-        moved = terminal.searchPrevious()
-        #expect(moved == false)
-        #expect(terminal.searchStatus == .matched(selected: 0, total: 3))
     }
 
     @Test("a needle that matches nothing reports an empty status, and clearing reports none")

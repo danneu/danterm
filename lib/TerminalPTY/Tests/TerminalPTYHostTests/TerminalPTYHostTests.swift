@@ -1022,8 +1022,8 @@ struct TerminalPTYHostTests {
 
     @Test("search mutations that change nothing still report status", .timeLimit(.minutes(1)))
     func ownerUnchangingSearchMutationsStillReportStatus() async throws {
-        // Intent: a repeated failed needle and a navigate at the end of the match list
-        //   report status even though the terminal value is untouched.
+        // Intent: a repeated failed needle and a navigate with only one match report
+        //   status even though the terminal value is untouched.
         // Why it exists: the status report sits above the `terminal != previousTerminal`
         //   early return. Below it, the overlay's counter would silently stop updating
         //   exactly when the user needs to be told the search found nothing / cannot move.

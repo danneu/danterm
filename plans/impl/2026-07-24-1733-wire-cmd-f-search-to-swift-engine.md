@@ -307,3 +307,8 @@ Pure plumbing, same shape as the Cmd-A slice: no new core search machinery.
   (`just build`), but the interactive pass -- Cmd-F, live typing, Enter/Shift-Enter,
   Cmd-G/Cmd-Shift-G, counter, highlight vs selection color, Escape focus return -- was not
   driven and remains for the user.
+- Post-plan: I2's "navigation at either end (no wrap) leaves status unchanged" was
+  reversed on use. Enter at the oldest match and Shift-Enter at the newest felt broken
+  next to macOS Find, which wraps. `searchNext`/`searchPrevious` now wrap at both ends;
+  the rest of I2 (the enum's `selected < total`, the re-attach) is unaffected. Committed
+  separately from the plan's four commits.

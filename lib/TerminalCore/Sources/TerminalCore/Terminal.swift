@@ -2207,7 +2207,7 @@ public struct Terminal: Equatable, Sendable {
         return match != nil
     }
 
-    /// Moves to the next older match without wrapping or disturbing an end match.
+    /// Moves to the next older match, wrapping past the oldest back to the newest.
     @discardableResult
     public mutating func searchNext() -> Bool {
         guard let search else { return false }
@@ -2215,15 +2215,14 @@ public struct Terminal: Equatable, Sendable {
         guard let current = search.range.flatMap(matches.firstIndex(of:)) else {
             return reattachToNewestMatch(among: matches)
         }
-        guard current > 0 else { return false }
         let before = damageActionSnapshot
-        self.search?.range = matches[current - 1]
+        self.search?.range = current > 0 ? matches[current - 1] : matches[matches.count - 1]
         revealSearchMatchIfNeeded()
         recordDamage(since: before)
         return true
     }
 
-    /// Moves to the previous newer match without wrapping or disturbing an end match.
+    /// Moves to the previous newer match, wrapping past the newest back to the oldest.
     @discardableResult
     public mutating func searchPrevious() -> Bool {
         guard let search else { return false }
@@ -2231,9 +2230,8 @@ public struct Terminal: Equatable, Sendable {
         guard let current = search.range.flatMap(matches.firstIndex(of:)) else {
             return reattachToNewestMatch(among: matches)
         }
-        guard current + 1 < matches.count else { return false }
         let before = damageActionSnapshot
-        self.search?.range = matches[current + 1]
+        self.search?.range = current + 1 < matches.count ? matches[current + 1] : matches[0]
         revealSearchMatchIfNeeded()
         recordDamage(since: before)
         return true

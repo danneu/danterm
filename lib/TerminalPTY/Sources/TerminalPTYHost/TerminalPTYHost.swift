@@ -694,8 +694,8 @@ public actor TerminalPTYHost {
         case .previous: _ = terminal.searchPrevious()
         case .clear: terminal.clearSearch()
         }
-        // Above the change guard on purpose: a repeated failed needle and a navigate at
-        // either end mutate nothing, and those are exactly the moments the overlay's
+        // Above the change guard on purpose: a repeated failed needle and a navigate with
+        // only one match mutate nothing, and those are exactly the moments the overlay's
         // counter has to be told where the search stands.
         onStatus(terminal.searchStatus)
         guard terminal != previousTerminal else { return }
