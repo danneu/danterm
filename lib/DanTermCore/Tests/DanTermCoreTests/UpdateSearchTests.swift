@@ -15,7 +15,7 @@ import Testing
     func startSearchEmitsSendStartSearchForFocusedPane() {
         // Intent: startSearch emits sendStartSearch addressed to the
         //   focused pane and does NOT create searchState (that arrives via
-        //   the Ghostty callback).
+        //   the backend's searchStarted callback).
         // Why it exists: pins the two-step search activation (command
         //   first, model state on the callback).
         // Scenario: spec-first startSearch.
@@ -136,7 +136,7 @@ import Testing
 
     @Test("searchNavigate emits sendSearchNavigate")
     func searchNavigateEmitsSendSearchNavigate() {
-        // Intent: searchNavigate forwards the direction to Ghostty.
+        // Intent: searchNavigate forwards the direction to the pane's backend.
         // Why it exists: pins the navigation wiring.
         // Scenario: spec-first navigate.
         var model = makeModel()
