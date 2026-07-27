@@ -96,6 +96,12 @@ Research started: 2026-07-27.
 > excursion in one process produced the *smallest* paired deviation of the six,
 > which is the common-mode claim holding for separately built arms.
 >
+> **F23 then bounded the last risk:** shifting the hot library's code layout by
+> +4,888 bytes ahead of `drawRenderFrame`, semantics unchanged, left the paired
+> mean at -0.042% with a CI containing zero -- no detectable layout bias above
+> ~0.21%. That series was also noisier (level CV 3.99% vs 2.23%) yet paired SD
+> rose only to 0.830%, corroborating the cancellation.
+>
 > **Build the arms under distinct module names.** Swift classes register with the
 > ObjC runtime, which dedups globally even under `RTLD_LOCAL`; two builds of the
 > same module name collide and can silently run one arm's code for both.
@@ -622,9 +628,19 @@ series and re-freeze `DECISION_RULES` (Phase 6).
       comparison** -- F21 shows it inherits the 2.8-3.6% between-run drift.
       Arms must use **distinct module names** or the ObjC runtime dedups their
       classes and both may run one arm's code.
-- [ ] **Measure two arms built from genuinely different revisions.** F22 is A/A
-      from identical source; differing code layout between real revisions is the
-      remaining unmeasured risk before this gates a change.
+- [x] **Bound the code-layout risk** (F23). Shifting the hot library's layout by
+      +4,888 bytes ahead of `drawRenderFrame`, semantics held fixed, moved the
+      paired mean to -0.042% with a CI containing zero -- indistinguishable from
+      the unperturbed baseline. Bounds layout bias below ~0.21%; does not rule
+      out sub-0.2% effects.
+- [ ] **Productionize the headless interleaved comparison.** F21-F23 validate it;
+      it exists only as scratch code, so nothing in the repo can run it. Needs a
+      `scripts/` entry plus a justfile recipe, with the distinct-module-name
+      requirement (F22) enforced rather than remembered, and an A/A control run
+      as the self-check that catches ObjC class dedup.
+- [ ] **Measure two arms built from genuinely different revisions.** Lower-grade
+      risk after F23, but still the only untested step: a real revision changes
+      instruction mix and inlining, not just placement.
 - [ ] **Extend the threshold grid before any freeze.** F22 bottomed out at the
       grid floors (1.05% / 0.80%), so the instrument's actual resolution is
       unmeasured and the frozen grids cannot express it.
@@ -1977,6 +1993,52 @@ Degraded at `HEAD` = **148376**, span **33208**, **4.65%**, **6.26%**, 10/24.
 - **Evidence:** `~/danterm-benchmark-evidence/2026-07-27/headless-twoarm-pilot/`,
   including the arm source and driver under `source/`.
 
+### F23 -- shifting the hot library's code layout produces no measurable bias
+
+- **Status:** closed. The last technical risk on the headless route is bounded.
+  Still an A/A control -- no performance claim.
+- **Date:** 2026-07-27. Six processes x 8 ABBA rounds = 96 pairs.
+- **Why it was needed:** F22 compared two builds of *identical* source. The
+  failure mode that would invalidate a real A/B is code layout -- two revisions
+  placing the hot path at a different alignment and producing a spurious offset
+  that reads as a performance change. A different-revision comparison cannot
+  test this, because there a real effect and a layout artifact are
+  indistinguishable. So the perturbation is applied with semantics held fixed.
+- **Setup:** `lib/TerminalCore` copied twice; in copy B, 24 `@inline(never)
+  public` functions plus a public table were inserted into
+  `TerminalRenderExecution.swift` **immediately before `drawRenderFrame`**, so
+  everything from the hot function onward shifts address. `public` keeps the
+  linker from stripping them; they are never called, so the drawn work is
+  byte-for-byte the same. Each arm then built against its own copy.
+- **The shift is real and verified:** arm B's `__text` grew `0x60588` ->
+  `0x618A0`, **+4,888 bytes** ahead of the hot path.
+- **Result -- no detectable bias:**
+
+  | series | pairs | paired mean | paired SD | 95% CI on the mean | level CV |
+  | --- | --- | --- | --- | --- | --- |
+  | F22 baseline, identical source | 96 | -0.024% | 0.719% | [-0.167, +0.120] | 2.23% |
+  | **layout-perturbed arm B** | 96 | **-0.042%** | 0.830% | **[-0.208, +0.124]** | 3.99% |
+
+  The perturbed mean is -0.042%, its confidence interval contains zero, and it is
+  statistically indistinguishable from the unperturbed baseline.
+- **What this bounds, stated as a limit rather than a clean bill:** the test rules
+  out layout-induced bias larger than about **0.21%** -- the CI half-width. It
+  does **not** rule out sub-0.2% layout effects, and it exercises exactly one
+  perturbation shape at one insertion point. A real revision changes instruction
+  mix and inlining, not just placement.
+- **Incidental corroboration of the common-mode property:** this series was
+  *noisier* than F22's -- level CV 3.99% against 2.23%, with two processes near
+  725 ms against a ~665 ms floor -- yet paired SD rose only 0.719% -> 0.830%.
+  Nearly double the level drift bought a 15% widening of the paired statistic,
+  which is what strong common-mode cancellation looks like.
+- **Consequence:** the headless interleaved comparison is sound enough to
+  productionize. The remaining unknown is arms from genuinely different
+  revisions, which is now a lower-grade risk than it was: the mechanism by which
+  it would go wrong has been tested directly and did not fire.
+- **Evidence:**
+  `~/danterm-benchmark-evidence/2026-07-27/headless-layout-pilot/`, including the
+  exact perturbation as `perturbation.swift.txt`.
+
 ## Decision log
 
 ### D1 -- mechanism class: platform CPU frequency demotion of an under-occupied main thread
@@ -2485,3 +2547,23 @@ six. Level CV across processes is 2.23%; pooled paired SD over the 96 pairs is
 Analysis: each ABBA round yields two pairs -- `symmetric_difference(a1, b1)` and
 `symmetric_difference(b2, a2)` -- which is the production quartet shape, so the
 result feeds `calibrate_threshold_grid` directly.
+
+### F23 raw pilot -- layout-perturbed arm B (2026-07-27)
+
+Data plus the exact perturbation at
+`~/danterm-benchmark-evidence/2026-07-27/headless-layout-pilot/`.
+
+Recipe: copy `lib/TerminalCore` twice, keeping the `TerminalCore` **basename**
+under distinct parents -- SwiftPM takes a path dependency's identity from the
+directory name, so two copies named `coreA`/`coreB` fail to resolve
+`.product(package: "TerminalCore")`. Insert the padding immediately before
+`drawRenderFrame` in copy B, point each arm package at its own copy, build, then
+run the F22 driver unchanged.
+
+Confirm the shift landed with `otool -l <dylib> | grep -A3 'sectname __text'`:
+arm A `0x60588`, arm B `0x618A0`.
+
+| series | paired mean | paired SD | level CV |
+| --- | --- | --- | --- |
+| F22 baseline (identical source) | -0.024% | 0.719% | 2.23% |
+| layout-perturbed | -0.042% | 0.830% | 3.99% |
