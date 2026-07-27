@@ -426,6 +426,10 @@ public final class TerminalPaneSessionController {
     package func diagnosticCapture(test: String) -> TerminalPaneDiagnosticCapture {
         let state = host.fencedDiagnosticState()
         cachedTerminal = state.frameState.terminal
+        // The fence drains the host's damage, so this is the only route by which the
+        // terminal can advance without `consume` recording which rows moved. Folding it
+        // in keeps the planner's retained rows in lineage with `cachedTerminal`.
+        pendingDamage.formUnion(state.frameState.damage)
         return TerminalPaneDiagnosticCapture(
             terminal: state.frameState.terminal,
             recording: makeRecording(test: test, events: neutralEvents(state.transitions)),

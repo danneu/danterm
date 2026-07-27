@@ -946,6 +946,51 @@ struct TerminalPaneSessionControllerTests {
         #expect(controller.capturedRecording(test: "ordinary") == nil)
     }
 
+    @Test("a diagnostic capture between frames never strands its damage", .timeLimit(.minutes(1)))
+    func diagnosticCaptureFoldsDamageIntoTheNextPlan() async throws {
+        // Intent: output that only a diagnostic capture observed still reaches the next
+        //   published plan, which must equal a from-scratch plan of the same terminal.
+        // Why it exists: the capture fence drains the host's damage, so a capture taken
+        //   between frames is the one path that can advance the terminal without telling
+        //   the planner which rows moved. Row reuse turned that from harmless into a
+        //   stale-row bug: undamaged-looking rows get copied from a frame that predates
+        //   the captured output.
+        // Scenario: a harness captures diagnostics from a live pane mid-run, and the pane
+        //   keeps printing afterwards -- the rows written before the capture must not stay
+        //   frozen at their pre-capture content.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "printf '__READY__\\n'; cat")
+        )
+        var plans: [RenderFramePlan] = []
+        controller.onFrame = { plans.append($0.plan) }
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        controller.synchronizeState()
+
+        controller.sendText("__CAPTURED__\n")
+        #expect(await host.waitForOutput(containing: Array("__CAPTURED__".utf8)))
+        _ = controller.diagnosticCapture(test: "damage-fold")
+
+        controller.sendText("__AFTER__\n")
+        #expect(await host.waitForOutput(containing: Array("__AFTER__".utf8)))
+        controller.synchronizeState()
+
+        let finalTerminal = host.fencedSnapshot()
+        let expected = planFrame(
+            for: finalTerminal,
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: finalTerminal.presentation.isCursorVisible,
+                cursorShape: finalTerminal.presentation.cursorShape
+            )
+        )
+        #expect(try #require(plans.last) == expected)
+
+        controller.tearDown()
+        await host.close()
+    }
+
     @Test("capture disabled remains behaviorally inert", .timeLimit(.minutes(1)))
     func captureDisabledExposesNoRecording() async throws {
         // Intent: the default controller path completes a normal session without
