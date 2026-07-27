@@ -96,6 +96,13 @@ Research started: 2026-07-27.
 > excursion in one process produced the *smallest* paired deviation of the six,
 > which is the common-mode claim holding for separately built arms.
 >
+> **F24 is the necessary correction to all of this: these are A/A figures, and
+> they do not transfer to a real revision pair.** A positive control found two
+> order biases (one a defect in the harness, one in its own driver), and put the
+> honest resolution for a revision claim at **~0.5-1%**, not the numbers below.
+> Any claim needs `--both-directions`, and `orderBiasPercent` must be read before
+> `realEffectPercent` is believed.
+>
 > **F23 then bounded the last risk:** shifting the hot library's code layout by
 > +4,888 bytes ahead of `drawRenderFrame`, semantics unchanged, left the paired
 > mean at -0.042% with a CI containing zero -- no detectable layout bias above
@@ -2043,6 +2050,66 @@ Degraded at `HEAD` = **148376**, span **33208**, **4.65%**, **6.26%**, 10/24.
 - **Evidence:**
   `~/danterm-benchmark-evidence/2026-07-27/headless-layout-pilot/`, including the
   exact perturbation as `perturbation.swift.txt`.
+
+### F24 -- the positive control found two order biases; A/A precision badly overstates revision-pair precision
+
+- **Status:** closed as a correction. **This qualifies F21-F23**, which measured
+  only A/A nulls and therefore could not see any of what follows.
+- **Date:** 2026-07-27. Positive control against `d19103f`
+  (`perf(renderer): build braille dot layout once per draw`) vs its parent
+  `a785d45` -- chosen because the benchmark corpus contains braille glyphs, so the
+  commit lands inside the timed region.
+- **Why a positive control was owed:** every pilot to that point measured an
+  effect of *zero* and confirmed the instrument reported zero. None showed it
+  reports a real difference correctly.
+- **It immediately failed the swap test.** Forward (before -> after) read
+  **-1.797%** with all 16 pairs negative; swapping the arms read **+0.101%** with
+  mixed signs. A real difference must flip sign on swap. These disagree far
+  beyond their internal error bars, so the forward run's tidy unanimity was
+  measuring something other than the revision.
+- **Cause 1 -- warm-up asymmetry, a defect in this harness.**
+  `calibrate_batch_count` ran batches on the **baseline arm only**, warming it
+  while the candidate entered its first measured batch cold. Invisible to A/A,
+  where both arms hold identical code. Fixed by calibrating over both arms
+  (taking the max, which is symmetric in them) and running a discarded warm-up
+  batch on each.
+- **Cause 2 -- direction-order asymmetry, introduced by the first fix's own
+  driver.** Running forward then reverse put forward immediately after the
+  rebuild every time. Fixed by scheduling the direction runs **ABBA**
+  (forward, reverse, reverse, forward) -- the same counterbalancing the batch
+  schedule already applies within a round, lifted a level.
+- **Effect of each fix on the reported order bias**, which must sit near zero:
+
+  | harness state | order bias | real effect | reverse-direction spread |
+  | --- | --- | --- | --- |
+  | as shipped in `10f10a2` | +0.367% | -0.858% | 0.633% |
+  | + warm-up fix | -0.127% | -0.802% | 0.338% |
+  | + forward-first driver (regression) | +0.511% | -1.503% | -- |
+  | **+ ABBA direction schedule** | **+0.208%** | **-0.951%** | -- |
+
+  The real-effect estimate stayed stable across the fixes that removed bias
+  (-0.858 -> -0.802 -> -0.951) and moved sharply under the one that added bias
+  (-1.503), which is the signature of removing an artifact rather than moving the
+  signal.
+- **Headline correction: A/A precision does not transfer.** F21-F23's ~0.7%
+  paired SD and 0.256% ratio CV describe the instrument measuring *itself*. On a
+  real revision pair the estimate carries an order bias of 0.2-0.5% before
+  counterbalancing and shifts between measurement sessions by more than its
+  within-session spread (three consecutive runs agreed to SD 0.089% yet sat
+  0.5-0.7% away from an independently collected group). **The honest resolution
+  for a revision claim is ~0.5-1%, not the A/A figures.** That is still far better
+  than the GUI benchmark on this question, and it is not what F21-F23 implied.
+- **The A/A results themselves are not overturned.** They remain correct about
+  what they measured; the error was extrapolating them to a case they could not
+  test. An A/A control is necessary and cheap, and it is what catches the ObjC
+  class-dedup trap -- but it is not sufficient to qualify the instrument.
+- **Best current estimate for `d19103f`:** the candidate is **~0.9% faster**
+  (-0.951% counterbalanced, -0.802% from an independently collected interleaved
+  series). Reported as a measurement, not a verdict: no rule is frozen, and the
+  residual +0.208% bias is not proven to be zero.
+- **Standing rule added:** read `orderBiasPercent` before believing
+  `realEffectPercent`. A bias comparable to the effect means neither direction is
+  trustworthy.
 
 ## Decision log
 

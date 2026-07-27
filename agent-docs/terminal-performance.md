@@ -268,6 +268,27 @@ mark -- nor `clipFramePlan`'s own cost. A change that dirties too much looks fre
 here. Those questions stay with `benchmark-quick` on `incremental-mixed`, whose
 coarse verdict is still the only one that sees them.
 
+**Its A/A precision is not its precision on a revision pair.** Against itself it
+holds ~0.7% paired SD and a mean within 0.1% of zero. Comparing two *different*
+revisions is worse, and an A/A control cannot reveal by how much, because there
+both arms hold identical code. Measured on a real pair, a single-direction run
+carried an order bias around 0.2-0.5%, and the estimate shifts between
+measurement sessions by more than its within-session spread. Treat ~0.5-1% as
+the honest resolution for a revision claim, not the A/A figures.
+
+**A claim needs both directions, which is why the recipe passes
+`--both-directions` whenever a candidate checkout is given.** A real difference
+reverses when the arms swap slots; an order bias does not. The report splits them
+into `realEffectPercent` (claimable) and `orderBiasPercent` (diagnostic). The
+direction runs are themselves scheduled ABBA -- forward, reverse, reverse,
+forward -- because running forward first every time puts it immediately after the
+rebuild and reintroduces the asymmetry.
+
+**Read `orderBiasPercent` before believing `realEffectPercent`.** It should sit
+near zero. If it is comparable to the effect, the measurement is asymmetric and
+neither direction is trustworthy; that is the tool reporting its own failure
+rather than you having to suspect it.
+
 **No decision rule is frozen for it.** It reports statistics; `--threshold` is
 caller-supplied and labelled as such in the report. A frozen rule needs a
 screening pass a human signs off, per the calibration rules above.

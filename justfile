@@ -110,7 +110,7 @@ benchmark-draw iterations="15":
 #   just benchmark-headless-draw 8 /path/TerminalCore # compare against another checkout
 benchmark-headless-draw rounds="8" candidate_core="":
     python3 ./scripts/terminal-headless-draw-compare.py --rounds {{rounds}} \
-      {{ if candidate_core != "" { "--candidate-core " + candidate_core } else { "" } }}
+      {{ if candidate_core != "" { "--both-directions --candidate-core " + candidate_core } else { "" } }}
 
 # Build and open the unoptimized system-glyph versus sprite comparison app.
 preview-glyphs:

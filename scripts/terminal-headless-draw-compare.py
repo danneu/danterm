@@ -146,6 +146,26 @@ def summarize(quartets):
     }
 
 
+def antisymmetric_estimate(forward_percents, reverse_percents):
+    """Split a two-direction measurement into the part that reverses and the part that does not.
+
+    A real difference between two revisions flips sign when the arms swap slots; anything
+    that survives the swap -- load order, slot asymmetry -- does not. Reporting the two
+    separately is what stops an order bias being published as a performance claim. The first
+    positive control read -1.797% one way and +0.101% the other, so this is not hypothetical.
+    """
+    if not forward_percents or not reverse_percents:
+        raise ValueError("an antisymmetric estimate requires both comparison directions")
+    forward = statistics.fmean(forward_percents)
+    reverse = statistics.fmean(reverse_percents)
+    return {
+        "realEffectPercent": (forward - reverse) / 2,
+        "orderBiasPercent": (forward + reverse) / 2,
+        "forwardMeanPercent": forward,
+        "reverseMeanPercent": reverse,
+    }
+
+
 def build_arm(module_name, core_path, workspace):
     """Generate and compile one arm, returning the built dynamic library path."""
     package_root = workspace / module_name
@@ -190,12 +210,32 @@ class Arm:
         return self._library.arm_batch(count)
 
 
-def calibrate_batch_count(arm, target_nanoseconds=TARGET_BATCH_NANOSECONDS):
-    """Grow the batch until one exceeds the occupancy floor."""
-    count = 1
-    while arm.batch(count) < target_nanoseconds:
-        count *= 2
-    return count
+def calibrate_batch_count(arms, target_nanoseconds=TARGET_BATCH_NANOSECONDS):
+    """Pick one batch size that clears the occupancy floor for every arm.
+
+    Calibrating on the baseline arm alone made the batch size depend on comparison
+    direction, so swapping the arms changed the measurement instead of only its sign.
+    Taking the maximum over both arms is symmetric in them, which is what keeps a
+    forward and a reversed run comparable.
+    """
+    counts = []
+    for arm in arms:
+        count = 1
+        while arm.batch(count) < target_nanoseconds:
+            count *= 2
+        counts.append(count)
+    return max(counts)
+
+
+def warm_up(arms, batch_count):
+    """Run one discarded batch on every arm so none enters measurement cold.
+
+    Calibration used to leave only the baseline arm warm, biasing the paired
+    difference against whichever arm sat in the candidate slot. An A/A control
+    cannot reveal that, because there both arms hold identical code.
+    """
+    for arm in arms:
+        arm.batch(batch_count)
 
 
 def run_rounds(baseline, candidate, batch_count, rounds):
@@ -208,6 +248,58 @@ def run_rounds(baseline, candidate, batch_count, rounds):
         second_a = baseline.batch(batch_count)
         results.append({"a": [first_a, second_a], "b": [first_b, second_b]})
     return results
+
+
+def direction_schedule():
+    """Order the direction runs ABBA so neither is systematically measured first.
+
+    Running forward then reverse put forward immediately after the rebuild every time,
+    which is its own asymmetry: it reintroduced a +0.511% order bias after the warm-up
+    fix had removed a comparable one. This is the same counterbalancing the batch schedule
+    already applies within a round, lifted to the direction level.
+    """
+    return ["forward", "reverse", "reverse", "forward"]
+
+
+def run_both_directions(arguments):
+    """Measure both directions on an ABBA schedule, then report the antisymmetric estimate."""
+    pairs = {
+        "forward": (arguments.baseline_core, arguments.candidate_core),
+        "reverse": (arguments.candidate_core, arguments.baseline_core),
+    }
+    collected = {"forward": [], "reverse": []}
+    runs = []
+    for name in direction_schedule():
+        baseline, candidate = pairs[name]
+        completed = subprocess.run(
+            [
+                sys.executable, str(pathlib.Path(__file__).resolve()),
+                "--baseline-core", str(baseline),
+                "--candidate-core", str(candidate),
+                "--columns", str(arguments.columns),
+                "--rows", str(arguments.rows),
+                "--clip-rows", str(arguments.clip_rows),
+                "--rounds", str(arguments.rounds),
+            ],
+            check=True, capture_output=True, text=True,
+        )
+        report = json.loads(completed.stdout)
+        collected[name].extend(report["summary"]["pairedValuesPercent"])
+        runs.append({"direction": name, "report": report})
+    estimate = antisymmetric_estimate(collected["forward"], collected["reverse"])
+    return {
+        "schemaVersion": 1,
+        "mode": "both-directions",
+        "directionSchedule": direction_schedule(),
+        "estimate": estimate,
+        "runs": runs,
+        "note": (
+            "realEffectPercent is the claimable number: negative means the candidate "
+            "revision is faster. orderBiasPercent should sit near zero; a large value "
+            "means the measurement is asymmetric and neither direction can be trusted "
+            "on its own."
+        ),
+    }
 
 
 def main():
@@ -226,6 +318,12 @@ def main():
         help="rows of damage to clip to; 0 measures the full frame")
     parser.add_argument("--rounds", type=int, default=8)
     parser.add_argument(
+        "--both-directions", action="store_true",
+        help="measure forward and reversed, then report the antisymmetric estimate. "
+             "Required for any claim about two revisions: a single direction carries an "
+             "order bias that does not reverse with the arms. Runs as two processes "
+             "because dlopen caches within one, so load order cannot otherwise differ")
+    parser.add_argument(
         "--threshold", type=float, default=None,
         help="optional caller-supplied directional threshold in percent. No decision rule "
              "is frozen for this instrument, so omitting this reports statistics only")
@@ -235,6 +333,13 @@ def main():
     validate_module_names(BASELINE_MODULE, CANDIDATE_MODULE)
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
 
+    if arguments.both_directions:
+        json.dump(
+            run_both_directions(arguments), sys.stdout, indent=2, sort_keys=True
+        )
+        sys.stdout.write("\n")
+        return
+
     baseline_library = build_arm(BASELINE_MODULE, arguments.baseline_core, ARTIFACTS)
     candidate_library = build_arm(CANDIDATE_MODULE, arguments.candidate_core, ARTIFACTS)
 
@@ -243,7 +348,8 @@ def main():
     for arm in (baseline, candidate):
         arm.prepare(arguments.columns, arguments.rows, arguments.clip_rows)
 
-    batch_count = calibrate_batch_count(baseline)
+    batch_count = calibrate_batch_count([baseline, candidate])
+    warm_up([baseline, candidate], batch_count)
     rounds = run_rounds(baseline, candidate, batch_count, arguments.rounds)
     quartets = paired_quartets(rounds)
 
