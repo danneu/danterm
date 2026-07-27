@@ -184,22 +184,45 @@ dominates main-thread busy time while drawing is under 10% of it, so the net
 main-thread effect is very likely positive -- but that judgment is not a
 measured claim, and the calibrated axis says drawing got slower.
 
+## Follow Up outcomes
+
+All three follow-ups below were worked after this commit landed. Recorded here
+because two of them ended somewhere other than where they were headed.
+
+- **Re-materialization: measured and rejected.** Refreshing each reused row's
+  `cells` buffer alone moved nothing (`incremental-mixed` draw +8.49% against
+  the +8.65% this commit recorded). Refreshing the per-cell `scalars` arrays too
+  brought draw to +6.39% but cut the plan-time evidence from -147% to -73% on
+  the same quick invocation. The locality mechanism is real but the trade is
+  bad -- a quarter of the regression bought with half the win, still `slower` --
+  so the planner is unchanged. Whatever explains the remaining draw cost is not
+  the run storage's allocation age.
+- **Plan-time calibration: partially frozen.** `quick` now decides plan time for
+  `content-churn` and `style-churn` (2 pairs at +/-2.5%, A/A false positives
+  0.0000). Nothing else can: `confirm`'s 3% effect at 4 pairs reaches no
+  threshold that also holds false positives under 1%, and `incremental-mixed`'s
+  plan-time A/A spread is SD 5.75% over a -6.6%..+12.0% range. The -163.65%
+  plan-time evidence this commit recorded therefore stays descriptive, and
+  always will on that workload.
+- **`diagnosticCapture` damage gap: fixed.** It now folds the fenced state's
+  damage into `pendingDamage`, pinned by a controller test that captures mid-run
+  and asserts the next published plan equals a from-scratch plan.
+
 ## Follow Up
 
-- Re-materialize reused rows' run storage into fresh per-frame arrays and
-  re-measure `incremental-mixed`. Cell inspection -- the actual planning cost --
-  would still be skipped, so most of the -163.65% should survive while drawing
-  walks contiguous allocations again. This is the direct candidate fix for the
-  +8.65% draw regression this commit accepts.
-- Calibrate plan-time thresholds in the benchmark harness so planner changes get
-  a real verdict instead of descriptive evidence
-  (`agent-docs/terminal-performance.md`). This change is the second planner
-  change in a row whose primary effect no verdict can speak to.
-- `TerminalPaneSessionController.diagnosticCapture(test:)`
-  (`lib/TerminalPTY/Sources/TerminalPaneSession/TerminalPaneSession.swift:428`)
-  replaces `cachedTerminal` from `host.fencedDiagnosticState()` without folding
-  that state's damage into `pendingDamage`. Before row reuse this was harmless
-  because every frame replanned in full; now a diagnostic capture taken between
-  frames could leave the planner reusing rows for content it never saw damaged.
-  It is a `package` test seam, so no shipping path is affected, but the
-  invariant it breaks is now load-bearing.
+- `incremental-mixed` block collection is unreliable: four consecutive
+  collection runs each lost blocks in that workload and only that workload,
+  failing as `reset-not-settled` + `missing-producer-write`, as a `TimeoutError`
+  waiting for `final-draw.json`, and as a `JSONDecodeError` reading a
+  producer artifact that existed but was still empty. `content-churn` and
+  `style-churn` discarded zero quartets across the same runs. This is the same
+  failure that invalidated a real `benchmark-confirm` invocation during this
+  commit's own measurement, so it costs real comparisons, not just calibration.
+  The empty-artifact read at
+  `scripts/terminal-benchmark-validation.py:1004` is a plain
+  write/read race and is the concrete place to start.
+- A benchmark app can outlive the collection that launched it. When a block dies
+  mid-collection the lifecycle's `close()` does not always reap its app, leaving
+  a window on screen with no controller driving it. Harmless to a decision --
+  the invocation is already void -- but it misleads anyone watching the screen,
+  and the next run's windows stack behind it.

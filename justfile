@@ -56,6 +56,7 @@ test:
     ./scripts/tests/terminal-benchmark-commands_test.sh
     python3 ./scripts/tests/terminal_benchmark_snapshot_test.py
     python3 ./scripts/tests/terminal_benchmark_calibration_test.py
+    python3 ./scripts/tests/terminal_benchmark_plan_calibration_test.py
     python3 ./scripts/tests/terminal_benchmark_validation_test.py
     python3 ./scripts/tests/terminal_benchmark_compare_test.py
     python3 ./scripts/tests/terminal_benchmark_producer_test.py

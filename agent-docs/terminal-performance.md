@@ -88,10 +88,16 @@ complete run.
 | `equivalent` | The estimate sits inside the equivalence band. | The change did nothing measurable *at this boundary*. Before concluding it did nothing at all, confirm the workload actually contains the cost you moved. |
 | `inconclusive` | Neither cleared the threshold nor fell inside the band. | Escalate `quick` to `confirm`, which measures more pairs at a tighter threshold. Do not rerun `quick` hoping for a different roll -- the pair count is frozen precisely so results cannot be shopped for. |
 
-### The plan-time line carries no verdict
+### The plan-time line is decided separately
 
     content-churn: equivalent (+0.11% symmetric median of 2 pairs)
-        plan time: -18.40% symmetric median of 2 pairs (descriptive, no verdict -- uncalibrated)
+        plan time: -18.40% symmetric median of 2 pairs (faster)
+
+    incremental-mixed: equivalent (+0.31% symmetric median of 2 pairs)
+        plan time: -22.10% symmetric median of 2 pairs (descriptive, no verdict -- uncalibrated)
+
+The draw verdict and the plan line are decided separately and can disagree; a
+change that plans faster while drawing slower reports exactly that.
 
 The three serialized-draw workloads decide on `drawNanosecondsPerDraw`, which
 brackets only clipping and drawing inside `draw(_:)`. Frame planning does not
@@ -106,17 +112,43 @@ Planning is the larger cost in both, and it barely moves when damage shrinks
 from 66 rows to 6, because the planner plans the whole viewport regardless.
 
 So each of those workloads also reports a plan-time estimate, normalized over
-the same 50 accepted draws. Read it as evidence, not as a decision:
+the same 50 accepted draws:
 
-- It has **no calibrated thresholds** and therefore no `faster` / `slower` /
-  `equivalent` classification. Do not invent one, and do not treat a large
-  percentage as a verdict on its own.
-- It is **absent whenever either arm lacks it**, which is the normal case when
-  the baseline revision predates the timer. A missing plan line never
+- In `quick`, `content-churn` and `style-churn` carry **their own calibrated
+  rule** -- 2 pairs at +/-2.5%, equivalence band 1.0% -- and report a `faster` /
+  `slower` / `equivalent` / `inconclusive` classification for plan time, decided
+  independently of the draw verdict. The thresholds come from a plan-time A/A
+  series, not from the draw thresholds, because the two metrics have different
+  noise.
+- Everything else reports a bare percentage marked `no verdict`, and that is a
+  measured conclusion rather than unfinished work:
+  - `incremental-mixed` plans only a handful of damaged rows, so its per-draw
+    plan quantity is small and jittery: A/A spread SD 5.75% over a
+    -6.6%..+12.0% range. No threshold clears the gates.
+  - `confirm` claims a 3% effect at 4 pairs, and no threshold reaches it while
+    holding A/A false positives under 1% -- the best cell measured either
+    0.0198 false positives or 0.633 detection.
+
+  Do not read those percentages as decisions, and do not borrow a calibrated
+  workload's threshold for them.
+
+A plan rule is pinned to the pair count its mode already collects. Plan time is
+measured on the very same blocks as the draw metric, so it cannot buy itself a
+longer schedule, and a rule is refused rather than applied when the series
+length does not match the count it was calibrated at.
+- The line is **absent whenever either arm lacks it**, which is the normal case
+  when the baseline revision predates the timer. A missing plan line never
   invalidates the draw verdict.
 - Judging a planner change means reading this line. Judging a drawing change
-  means reading the verdict. A change that moves only planning will correctly
-  read `equivalent` on all three draw verdicts.
+  means reading the draw verdict. A change that moves only planning will
+  correctly read `equivalent` on all three draw verdicts.
+
+Recalibrate plan-time rules with
+`scripts/terminal-benchmark-plan-calibration.py --revision <rev>`, which
+collects an A/A series with both arms bound to one immutable root and reports
+the cheapest pair count and threshold clearing the gates. It never edits the
+frozen rules: a human moves
+`DECISION_RULES[mode]["planWorkloads"]` after reading the report.
 
 An invalid invocation is not a verdict and never becomes one by retrying. It
 means a stated measurement condition failed, so fix the condition -- put the

@@ -83,6 +83,31 @@ DECISION_RULES = {
                 "directionalThresholdPercent": 3.8,
             },
         },
+        # Plan-time rules, calibrated separately from the draw rules above and
+        # applied to the same blocks. A workload appears here only if a threshold
+        # cleared the accuracy gates at the pair count its draw rule already
+        # collects -- plan time rides those blocks and cannot buy more of them.
+        # `incremental-mixed` is absent because its plan-time A/A spread (SD
+        # 5.75%) clears nothing; see agent-docs/terminal-performance.md.
+        #
+        # Source: 24-pair A/A series at tree e72190b4d542, zero quartets
+        # discarded, 50,000 resampling trials per condition:
+        #   content-churn median -0.58%, SD 1.48%, range -3.06%..+1.49%
+        #     -> +/-2.5%, A/A false positives 0.0000, detection 1.0000 at 5%
+        #   style-churn   median -0.72%, SD 1.22%, range -2.67%..+1.46%
+        #     -> +/-2.5%, A/A false positives 0.0000, detection 0.9573 at 5%
+        "planWorkloads": {
+            "content-churn": {
+                "pairCount": 2,
+                "directionalThresholdPercent": 2.5,
+                "equivalenceBandPercent": 1.0,
+            },
+            "style-churn": {
+                "pairCount": 2,
+                "directionalThresholdPercent": 2.5,
+                "equivalenceBandPercent": 1.0,
+            },
+        },
     },
     "confirm": {
         "effectPercent": 3,

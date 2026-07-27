@@ -954,6 +954,111 @@ class AuxiliaryPlanMetricTests(unittest.TestCase):
         self.assertIn("-30.00%", render)
         self.assertIn("no verdict", render)
 
+    def test_a_calibrated_workload_classifies_its_plan_time(self):
+        # Intent: a workload with a frozen plan-time rule reports a verdict for
+        #   plan time, decided independently of the draw verdict.
+        # Why it exists: the plan metric was descriptive only because no rule
+        #   stood behind it. Once a rule exists, continuing to print a bare
+        #   percentage would waste calibrated evidence and keep every planner
+        #   change unattributable -- which is what made the last two planner
+        #   changes decidable only by eye.
+        # Scenario: spec-first -- a candidate that plans far faster while drawing
+        #   at exactly baseline speed.
+        workload = "content-churn"
+        rule = COMPARE.decision_rule("quick")["planWorkloads"][workload]
+        schedule = COMPARE.make_schedule(
+            "quick", (workload,), physical_candidate_arm="b"
+        )[workload]
+        self.assertEqual(len(schedule) // 2, rule["pairCount"])
+        blocks = self._blocks(workload, schedule, 0.0, -40.0)
+
+        summary = COMPARE.summarize_comparison("quick", self._evidence(blocks, workload))
+
+        auxiliary = summary["workloads"][workload]["auxiliary"]
+        self.assertEqual(auxiliary["decision"]["decision"], "faster")
+        self.assertEqual(summary["workloads"][workload]["decision"]["decision"], "equivalent")
+        render = COMPARE.render_decisions(summary)
+        self.assertIn("plan time", render)
+        self.assertIn("faster", render)
+        self.assertNotIn("no verdict", render)
+
+    def test_an_uncalibrated_workload_still_reports_plan_time_descriptively(self):
+        # Intent: a workload absent from the plan-time rule table reports its
+        #   estimate with no classification.
+        # Why it exists: `incremental-mixed` plans only a few damaged rows, and
+        #   its A/A plan-time spread (SD 5.75%, range -6.6%..+12.0%) clears no
+        #   threshold worth claiming. Falling back to another workload's rule
+        #   would manufacture verdicts from that noise.
+        # Scenario: spec-first -- an operator reads the workload whose plan timer
+        #   is too noisy to decide.
+        workload = "incremental-mixed"
+        self.assertNotIn(
+            workload, COMPARE.decision_rule("quick").get("planWorkloads", {})
+        )
+        schedule = COMPARE.make_schedule(
+            "quick", (workload,), physical_candidate_arm="b"
+        )[workload]
+        blocks = self._blocks(workload, schedule, 0.0, -40.0)
+
+        summary = COMPARE.summarize_comparison("quick", self._evidence(blocks, workload))
+
+        self.assertIsNone(summary["workloads"][workload]["auxiliary"]["decision"])
+        self.assertIn("no verdict", COMPARE.render_decisions(summary))
+
+    def test_a_plan_rule_never_decides_on_the_wrong_number_of_pairs(self):
+        # Intent: a plan rule applies only to a series of exactly the pair count
+        #   it was calibrated at.
+        # Why it exists: a rule's false-positive and detection rates were measured
+        #   at one fixed N. Applying it to a longer or shorter series would claim
+        #   error rates that series was never measured to have -- the same peeking
+        #   the fixed schedule exists to prevent.
+        # Scenario: spec-first -- a rule calibrated at 2 pairs meets a 4-pair
+        #   confirm series for the same workload.
+        workload = "content-churn"
+        schedule = COMPARE.make_schedule(
+            "confirm", (workload,), physical_candidate_arm="b"
+        )[workload]
+        blocks = self._blocks(workload, schedule, 0.0, -40.0)
+        confirm = COMPARE.VALIDATION.DECISION_RULES["confirm"]
+        self.assertNotIn("planWorkloads", confirm)
+        confirm["planWorkloads"] = {
+            workload: {
+                "pairCount": 2,
+                "directionalThresholdPercent": 2.5,
+                "equivalenceBandPercent": 1.0,
+            }
+        }
+        try:
+            self.assertNotEqual(len(schedule) // 2, 2)
+
+            summary = COMPARE.summarize_auxiliary("confirm", workload, blocks)
+
+            self.assertIsNone(summary["decision"])
+        finally:
+            del confirm["planWorkloads"]
+
+    def test_confirm_reports_plan_time_descriptively(self):
+        # Intent: confirm carries no plan-time rule for any workload and says so.
+        # Why it exists: its 4-pair schedule cannot detect the 3% effect it claims
+        #   at any threshold that also holds A/A false positives under 1% -- the
+        #   best cell measured 0.0198 false positives or 0.633 detection. Freezing
+        #   a rule there anyway would put the mode's stated accuracy in writing
+        #   without the evidence to back it.
+        # Scenario: spec-first -- an operator escalates to confirm and reads the
+        #   plan line.
+        workload = "content-churn"
+        schedule = COMPARE.make_schedule(
+            "confirm", (workload,), physical_candidate_arm="b"
+        )[workload]
+        blocks = self._blocks(workload, schedule, 0.0, -40.0)
+
+        summary = COMPARE.summarize_comparison(
+            "confirm", self._evidence(blocks, workload)
+        )
+
+        self.assertIsNone(summary["workloads"][workload]["auxiliary"]["decision"])
+        self.assertIn("no verdict", COMPARE.render_decisions(summary))
+
     def test_only_the_serialized_draw_workloads_carry_a_plan_metric(self):
         # Intent: the auxiliary table covers exactly the workloads whose decision
         #   metric excludes planning.

@@ -54,12 +54,13 @@ BLOCK_METRICS = {
     "style-churn": "drawNanosecondsPerDraw",
     "incremental-mixed": "drawNanosecondsPerDraw",
 }
-# Reported beside the verdict, never used to reach one. The serialized-draw
-# metric above brackets only clipping and drawing, so it structurally cannot
-# observe `planFrame`, which runs on the PTY-output path instead. These blocks
-# therefore carry a second quantity for planner work. It has no calibrated
-# thresholds and deliberately gets no classification: adding one would redefine
-# the decision rule that recalibration protects.
+# Reported beside the draw verdict and decided separately from it. The
+# serialized-draw metric above brackets only clipping and drawing, so it
+# structurally cannot observe `planFrame`, which runs on the PTY-output path
+# instead. These blocks therefore carry a second quantity for planner work,
+# classified against its own calibrated rule in `DECISION_RULES[mode]
+# ["planWorkloads"]` -- and left unclassified for any workload absent from that
+# table, which is the whole of what a missing plan-time rule means.
 AUXILIARY_BLOCK_METRICS = {
     "content-churn": "planNanosecondsPerDraw",
     "style-churn": "planNanosecondsPerDraw",
@@ -194,17 +195,34 @@ def auxiliary_differences(workload, raw_blocks):
     return differences
 
 
-def summarize_auxiliary(workload, raw_blocks):
-    """Describe the plan-time evidence without classifying it."""
+def summarize_auxiliary(mode, workload, raw_blocks):
+    """Classify the plan-time evidence where a calibrated rule exists, describe it where none does.
+
+    Both shapes coexist because plan-time noise is not uniform across workloads:
+    `incremental-mixed` measures a few damaged rows, so its per-draw plan time is
+    small and its A/A spread swamps any threshold worth claiming. Reporting an
+    unclassified number there is not a gap to be closed later -- it is the honest
+    reading of a metric no rule can stand behind.
+    """
     differences = auxiliary_differences(workload, raw_blocks)
     if not differences:
         return None
-    return {
+    summary = {
         "metric": AUXILIARY_BLOCK_METRICS[workload],
         "pairedSymmetricPercent": differences,
         "estimatePercent": statistics.median(differences),
         "sampleCount": len(differences),
+        "decision": None,
     }
+    rule = decision_rule(mode).get("planWorkloads", {}).get(workload)
+    if rule and len(differences) == rule["pairCount"]:
+        summary["decision"] = CALIBRATION.decide(
+            differences,
+            rule["directionalThresholdPercent"],
+            rule["equivalenceBandPercent"],
+            estimator=decision_rule(mode)["estimator"],
+        )
+    return summary
 
 
 def decide_workload(mode, workload, differences):
@@ -246,7 +264,9 @@ def summarize_comparison(mode, evidence):
                 else None
             ),
             "auxiliary": (
-                summarize_auxiliary(workload, raw_blocks) if eligible else None
+                summarize_auxiliary(mode, workload, raw_blocks)
+                if eligible
+                else None
             ),
         }
     return {
@@ -282,10 +302,15 @@ def render_decisions(summary):
             )
         auxiliary = result.get("auxiliary")
         if auxiliary:
+            plan_decision = auxiliary.get("decision")
+            qualifier = (
+                f"{plan_decision['decision']}"
+                if plan_decision
+                else "descriptive, no verdict -- uncalibrated"
+            )
             lines.append(
                 f"    plan time: {auxiliary['estimatePercent']:+.2f}% symmetric "
-                f"median of {auxiliary['sampleCount']} pairs "
-                "(descriptive, no verdict -- uncalibrated)"
+                f"median of {auxiliary['sampleCount']} pairs ({qualifier})"
             )
     return "\n".join(lines)
 
