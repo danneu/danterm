@@ -9,7 +9,9 @@ import TerminalCoreRecording
 struct RenderCorpusPlanningTests {
     @Test("Every neutral event can overlay logical damage into the next complete plan")
     func everyNeutralEventOverlaysDamage() throws {
-        // Intent: prove each event's logical damage covers every changed render row.
+        // Intent: prove each event's logical damage covers every changed render row, both
+        //   for a consumer overlaying clipped output and for the planner that reuses the
+        //   runs of undamaged rows.
         // Why it exists: producer examples cannot prove corpus-wide sufficiency across
         //   parser actions, alternate screens, resize, reflow, and viewport navigation.
         // Scenario: a retained pane applies only each event's damaged rows and must end
@@ -93,36 +95,58 @@ struct RenderCorpusPlanningTests {
         ))
         var interactionState = TerminalInteractionState()
         _ = terminal.drainDamage()
-        var retainedPlan = planFrame(
+        let initialPresentation = RenderPresentation(
+            theme: .dark,
+            isCursorVisible: terminal.presentation.isCursorVisible,
+            cursorShape: terminal.presentation.cursorShape
+        )
+        var retainedPlan = planFrame(for: terminal, presentation: initialPresentation)
+        // Second consumer of the same event stream: where `retainedPlan` proves damage
+        // is sufficient to overlay a clipped plan, this proves row reuse never needs
+        // more than damage either -- the planner keeps its own retained rows and must
+        // still land on the from-scratch plan after every event.
+        var reusingPlanner = PaneFramePlanner()
+        _ = reusingPlanner.planFrame(
             for: terminal,
-            presentation: .init(
-                theme: .dark,
-                isCursorVisible: terminal.presentation.isCursorVisible,
-                cursorShape: terminal.presentation.cursorShape
-            )
+            presentation: initialPresentation,
+            damage: .full
         )
 
         for (eventIndex, event) in recording.events.enumerated() {
             apply(event, to: &terminal, interactionState: &interactionState)
             let damage = terminal.drainDamage()
-            let completePlan = planFrame(
-                for: terminal,
-                presentation: .init(
-                    theme: .dark,
-                    isCursorVisible: terminal.presentation.isCursorVisible,
-                    cursorShape: terminal.presentation.cursorShape
-                )
+            let presentation = RenderPresentation(
+                theme: .dark,
+                isCursorVisible: terminal.presentation.isCursorVisible,
+                cursorShape: terminal.presentation.cursorShape
             )
+            let completePlan = planFrame(for: terminal, presentation: presentation)
+            let damageDescription = damage.isFull
+                ? "full"
+                : String(describing: damage.rows.sorted())
+            let context = "Fixture: \(fixtureName), event: \(eventIndex), "
+                + "damage: \(damageDescription)"
+
             let clippedPlan = clipFramePlan(completePlan, to: damage)
             retainedPlan = overlay(clippedPlan, damage: damage, on: retainedPlan)
             if retainedPlan != completePlan {
-                let damageDescription = damage.isFull
-                    ? "full"
-                    : String(describing: damage.rows.sorted())
-                let message = "Fixture: \(fixtureName), event: \(eventIndex), "
-                    + "damage: \(damageDescription)"
-                Issue.record(Comment(rawValue: message))
+                Issue.record(Comment(rawValue: context))
                 retainedPlan = completePlan
+            }
+
+            let reusedPlan = reusingPlanner.planFrame(
+                for: terminal,
+                presentation: presentation,
+                damage: damage
+            )
+            if reusedPlan != completePlan {
+                Issue.record(Comment(rawValue: "Row reuse diverged -- \(context)"))
+                reusingPlanner = PaneFramePlanner()
+                _ = reusingPlanner.planFrame(
+                    for: terminal,
+                    presentation: presentation,
+                    damage: .full
+                )
             }
         }
     }

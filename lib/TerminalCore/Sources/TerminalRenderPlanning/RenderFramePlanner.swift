@@ -8,7 +8,9 @@ public func planFrame(
     for terminal: Terminal,
     presentation: RenderPresentation
 ) -> RenderFramePlan {
-    FramePlanner(terminal: terminal, presentation: presentation).plan()
+    FramePlanner(terminal: terminal, presentation: presentation)
+        .plan(reusing: nil, damage: .full)
+        .plan
 }
 
 /// Narrows a complete retained frame to the visible rows a damage pass must draw.
@@ -31,6 +33,28 @@ public func clipFramePlan(
         decorationRuns: plan.decorationRuns.filter { rows.contains($0.row) },
         cursor: plan.cursor.flatMap { rows.contains($0.row) ? $0 : nil }
     )
+}
+
+/// Retains the three cell-derived layers split per viewport row so a later frame
+/// can copy an undamaged row's runs instead of re-inspecting its cells.
+///
+/// Row-major arrays rather than one flat plan: reuse is decided per row, and
+/// keeping the rows separate is what makes copying a row an array append instead
+/// of a filter over the whole frame. Only the cell-derived layers appear here --
+/// selection, search-match, and cursor are recomputed every frame.
+struct RetainedFrameRows: Sendable {
+    let columns: Int
+    let background: [[RenderBackgroundRun]]
+    let text: [[RenderTextRun]]
+    let decorations: [[RenderDecorationRun]]
+
+    var rowCount: Int { background.count }
+}
+
+/// Pairs a finished plan with the state a following frame needs to reuse its rows.
+struct PlannedFrame {
+    let plan: RenderFramePlan
+    let retained: RetainedFrameRows
 }
 
 /// Keeps one inspected cell's role, content, and resolved presentation together
@@ -114,34 +138,70 @@ private struct DecorationCandidate {
 
 /// Owns only one call's transient traversal state, preserving a stateless public
 /// planning boundary while keeping layer algorithms in one focused type.
-private struct FramePlanner {
+struct FramePlanner {
     let terminal: Terminal
     let presentation: RenderPresentation
 
-    func plan() -> RenderFramePlan {
+    /// Plans a complete viewport, replanning only rows `damage` marks when
+    /// `retained` describes the immediately preceding frame of the same stream.
+    ///
+    /// Callers own the lineage and presentation checks; this only refuses reuse
+    /// on the shape mismatches it can see for itself (full damage, changed grid).
+    func plan(reusing retained: RetainedFrameRows?, damage: TerminalDamage) -> PlannedFrame {
         let geometry = terminal.geometry
         let cursorSpan = normalizedCursor(in: geometry)
-        let cells = inspectedCells(geometry: geometry, cursorSpan: cursorSpan)
+        let rowCount = geometry.rows.count
 
-        return RenderFramePlan(
+        let reusable: RetainedFrameRows? =
+            if let retained,
+               damage.isFull == false,
+               retained.columns == geometry.columns,
+               retained.rowCount == rowCount
+            {
+                retained
+            } else {
+                nil
+            }
+
+        var background: [[RenderBackgroundRun]] = []
+        var text: [[RenderTextRun]] = []
+        var decorations: [[RenderDecorationRun]] = []
+        background.reserveCapacity(rowCount)
+        text.reserveCapacity(rowCount)
+        decorations.reserveCapacity(rowCount)
+
+        for row in 0..<rowCount {
+            if let reusable, damage.rows.contains(row) == false {
+                background.append(reusable.background[row])
+                text.append(reusable.text[row])
+                decorations.append(reusable.decorations[row])
+                continue
+            }
+            let cells = inspectedCells(row: row, geometry: geometry, cursorSpan: cursorSpan)
+            background.append(backgroundRuns(row: row, cells: cells))
+            text.append(textRuns(row: row, cells: cells))
+            decorations.append(decorationRuns(row: row, cells: cells))
+        }
+
+        let plan = RenderFramePlan(
             columns: geometry.columns,
-            rows: geometry.rows.count,
+            rows: rowCount,
             defaultBackground: presentation.theme.defaultBackground,
             selectionBackground: presentation.theme.selectionBackground,
             searchMatchBackground: presentation.theme.searchMatchBackground,
-            backgroundRuns: backgroundRuns(cells),
+            backgroundRuns: Array(background.joined()),
             selectionRuns: highlightRuns(
                 for: terminal.selectionRange,
                 columns: geometry.columns,
-                rows: geometry.rows.count
+                rows: rowCount
             ),
             searchMatchRuns: highlightRuns(
                 for: terminal.activeSearchMatchRange,
                 columns: geometry.columns,
-                rows: geometry.rows.count
+                rows: rowCount
             ),
-            textRuns: textRuns(cells),
-            decorationRuns: decorationRuns(cells),
+            textRuns: Array(text.joined()),
+            decorationRuns: Array(decorations.joined()),
             cursor: cursorSpan.map {
                 RenderCursor(
                     row: $0.row,
@@ -151,6 +211,15 @@ private struct FramePlanner {
                     color: presentation.theme.cursor
                 )
             }
+        )
+        return PlannedFrame(
+            plan: plan,
+            retained: RetainedFrameRows(
+                columns: geometry.columns,
+                background: background,
+                text: text,
+                decorations: decorations
+            )
         )
     }
 
@@ -215,45 +284,44 @@ private struct FramePlanner {
     }
 
     private func inspectedCells(
+        row: Int,
         geometry: TerminalGeometry,
         cursorSpan: CursorSpan?
-    ) -> [[PlannedCell]] {
-        geometry.rows.indices.map { row in
-            geometry.rows[row].cells.indices.map { column in
-                let inspected = terminal.cell(row: row, column: column)
-                let semanticStyle = inspected?.style ?? TerminalStyle()
-                var style = resolveCellStyle(semanticStyle, theme: presentation.theme)
-                if style.underline == .none, isHovered(row: row, column: column) {
-                    style = ResolvedCellStyle(
-                        foreground: style.foreground,
-                        background: style.background,
-                        bold: style.bold,
-                        italic: style.italic,
-                        underline: .single,
-                        underlineColor: style.foreground,
-                        hidden: style.hidden,
-                        strikethrough: style.strikethrough
-                    )
-                }
-                if presentation.cursorShape == .block,
-                   cursorSpan?.contains(row: row, column: column) == true {
-                    style = ResolvedCellStyle(
-                        foreground: presentation.theme.cursorText,
-                        background: presentation.theme.cursor,
-                        bold: style.bold,
-                        italic: style.italic,
-                        underline: style.underline,
-                        underlineColor: presentation.theme.cursorText,
-                        hidden: style.hidden,
-                        strikethrough: style.strikethrough
-                    )
-                }
-                return PlannedCell(
-                    kind: geometry.rows[row].cells[column].kind,
-                    scalars: inspected?.scalars ?? [],
-                    style: style
+    ) -> [PlannedCell] {
+        geometry.rows[row].cells.indices.map { column in
+            let inspected = terminal.cell(row: row, column: column)
+            let semanticStyle = inspected?.style ?? TerminalStyle()
+            var style = resolveCellStyle(semanticStyle, theme: presentation.theme)
+            if style.underline == .none, isHovered(row: row, column: column) {
+                style = ResolvedCellStyle(
+                    foreground: style.foreground,
+                    background: style.background,
+                    bold: style.bold,
+                    italic: style.italic,
+                    underline: .single,
+                    underlineColor: style.foreground,
+                    hidden: style.hidden,
+                    strikethrough: style.strikethrough
                 )
             }
+            if presentation.cursorShape == .block,
+               cursorSpan?.contains(row: row, column: column) == true {
+                style = ResolvedCellStyle(
+                    foreground: presentation.theme.cursorText,
+                    background: presentation.theme.cursor,
+                    bold: style.bold,
+                    italic: style.italic,
+                    underline: style.underline,
+                    underlineColor: presentation.theme.cursorText,
+                    hidden: style.hidden,
+                    strikethrough: style.strikethrough
+                )
+            }
+            return PlannedCell(
+                kind: geometry.rows[row].cells[column].kind,
+                scalars: inspected?.scalars ?? [],
+                style: style
+            )
         }
     }
 
@@ -266,44 +334,42 @@ private struct FramePlanner {
         return start..<end ~= column
     }
 
-    private func backgroundRuns(_ rows: [[PlannedCell]]) -> [RenderBackgroundRun] {
+    private func backgroundRuns(row: Int, cells: [PlannedCell]) -> [RenderBackgroundRun] {
         var result: [RenderBackgroundRun] = []
-        for (row, cells) in rows.enumerated() {
-            var startColumn: Int?
-            var color: RenderColor?
+        var startColumn: Int?
+        var color: RenderColor?
 
-            for (column, cell) in cells.enumerated() {
-                let cellColor = cell.style.background
-                guard cellColor != presentation.theme.defaultBackground else {
-                    appendBackgroundRun(
-                        row: row,
-                        endColumn: column,
-                        startColumn: &startColumn,
-                        color: &color,
-                        to: &result
-                    )
-                    continue
-                }
-                if color != cellColor {
-                    appendBackgroundRun(
-                        row: row,
-                        endColumn: column,
-                        startColumn: &startColumn,
-                        color: &color,
-                        to: &result
-                    )
-                    startColumn = column
-                    color = cellColor
-                }
+        for (column, cell) in cells.enumerated() {
+            let cellColor = cell.style.background
+            guard cellColor != presentation.theme.defaultBackground else {
+                appendBackgroundRun(
+                    row: row,
+                    endColumn: column,
+                    startColumn: &startColumn,
+                    color: &color,
+                    to: &result
+                )
+                continue
             }
-            appendBackgroundRun(
-                row: row,
-                endColumn: cells.count,
-                startColumn: &startColumn,
-                color: &color,
-                to: &result
-            )
+            if color != cellColor {
+                appendBackgroundRun(
+                    row: row,
+                    endColumn: column,
+                    startColumn: &startColumn,
+                    color: &color,
+                    to: &result
+                )
+                startColumn = column
+                color = cellColor
+            }
         }
+        appendBackgroundRun(
+            row: row,
+            endColumn: cells.count,
+            startColumn: &startColumn,
+            color: &color,
+            to: &result
+        )
         return result
     }
 
@@ -326,95 +392,91 @@ private struct FramePlanner {
         color = nil
     }
 
-    private func textRuns(_ rows: [[PlannedCell]]) -> [RenderTextRun] {
+    private func textRuns(row: Int, cells: [PlannedCell]) -> [RenderTextRun] {
         var result: [RenderTextRun] = []
-        for (row, cells) in rows.enumerated() {
-            // Cells that draw no glyph `continue` without reading or writing the
-            // accumulator, so a filtered cell can never flush or extend an open
-            // run -- a run spanning one splits only if the column arithmetic says
-            // so. The column comes from the enumeration rather than a counter of
-            // admitted cells, which is what keeps that arithmetic honest.
-            var open: OpenTextRun?
-            for (column, cell) in cells.enumerated() {
-                guard cell.style.hidden == false else { continue }
-                let width: Int
-                switch cell.kind {
-                case .narrow:
-                    width = 1
-                case .wideHead:
-                    width = 2
-                case .padding, .wideTail, .spacerHead:
-                    continue
-                }
-                guard cell.scalars.isEmpty == false else { continue }
-
-                let textCell = RenderTextCell(scalars: cell.scalars, columnWidth: width)
-                if let run = open, run.continues(at: column, style: cell.style) {
-                    open?.extend(with: textCell)
-                } else {
-                    if let run = open { result.append(run.finished(row: row)) }
-                    open = OpenTextRun(startColumn: column, cell: textCell, style: cell.style)
-                }
+        // Cells that draw no glyph `continue` without reading or writing the
+        // accumulator, so a filtered cell can never flush or extend an open
+        // run -- a run spanning one splits only if the column arithmetic says
+        // so. The column comes from the enumeration rather than a counter of
+        // admitted cells, which is what keeps that arithmetic honest.
+        var open: OpenTextRun?
+        for (column, cell) in cells.enumerated() {
+            guard cell.style.hidden == false else { continue }
+            let width: Int
+            switch cell.kind {
+            case .narrow:
+                width = 1
+            case .wideHead:
+                width = 2
+            case .padding, .wideTail, .spacerHead:
+                continue
             }
-            if let run = open { result.append(run.finished(row: row)) }
+            guard cell.scalars.isEmpty == false else { continue }
+
+            let textCell = RenderTextCell(scalars: cell.scalars, columnWidth: width)
+            if let run = open, run.continues(at: column, style: cell.style) {
+                open?.extend(with: textCell)
+            } else {
+                if let run = open { result.append(run.finished(row: row)) }
+                open = OpenTextRun(startColumn: column, cell: textCell, style: cell.style)
+            }
         }
+        if let run = open { result.append(run.finished(row: row)) }
         return result
     }
 
-    private func decorationRuns(_ rows: [[PlannedCell]]) -> [RenderDecorationRun] {
+    private func decorationRuns(row: Int, cells: [PlannedCell]) -> [RenderDecorationRun] {
         var result: [RenderDecorationRun] = []
-        for (row, cells) in rows.enumerated() {
-            let candidates = cells.enumerated().compactMap {
-                column, cell -> DecorationCandidate? in
-                guard cell.style.hidden == false else { return nil }
-                switch cell.kind {
-                case .narrow, .wideHead, .wideTail:
-                    break
-                case .padding, .spacerHead:
-                    return nil
-                }
-                let kinds = decorationKinds(for: cell.style)
-                guard kinds.isEmpty == false else { return nil }
-                return DecorationCandidate(
-                    column: column,
-                    kinds: kinds,
-                    color: cell.style.underline == .none
-                        ? cell.style.foreground
-                        : cell.style.underlineColor,
-                    strikethroughColor: cell.style.foreground
+        let candidates = cells.enumerated().compactMap {
+            column, cell -> DecorationCandidate? in
+            guard cell.style.hidden == false else { return nil }
+            switch cell.kind {
+            case .narrow, .wideHead, .wideTail:
+                break
+            case .padding, .spacerHead:
+                return nil
+            }
+            let kinds = decorationKinds(for: cell.style)
+            guard kinds.isEmpty == false else { return nil }
+            return DecorationCandidate(
+                column: column,
+                kinds: kinds,
+                color: cell.style.underline == .none
+                    ? cell.style.foreground
+                    : cell.style.underlineColor,
+                strikethroughColor: cell.style.foreground
+            )
+        }
+
+        var current: RenderDecorationRun?
+        for candidate in candidates {
+            if let run = current,
+               candidate.column == run.startColumn + run.columnCount,
+               candidate.kinds == run.kinds,
+               candidate.color == run.color,
+               candidate.strikethroughColor == run.strikethroughColor
+            {
+                current = RenderDecorationRun(
+                    row: row,
+                    startColumn: run.startColumn,
+                    columnCount: run.columnCount + 1,
+                    kinds: run.kinds,
+                    color: run.color,
+                    strikethroughColor: run.strikethroughColor
+                )
+            } else {
+                if let current { result.append(current) }
+                current = RenderDecorationRun(
+                    row: row,
+                    startColumn: candidate.column,
+                    columnCount: 1,
+                    kinds: candidate.kinds,
+                    color: candidate.color,
+                    strikethroughColor: candidate.strikethroughColor
                 )
             }
-
-            var current: RenderDecorationRun?
-            for candidate in candidates {
-                if let run = current,
-                   candidate.column == run.startColumn + run.columnCount,
-                   candidate.kinds == run.kinds,
-                   candidate.color == run.color,
-                   candidate.strikethroughColor == run.strikethroughColor
-                {
-                    current = RenderDecorationRun(
-                        row: row,
-                        startColumn: run.startColumn,
-                        columnCount: run.columnCount + 1,
-                        kinds: run.kinds,
-                        color: run.color,
-                        strikethroughColor: run.strikethroughColor
-                    )
-                } else {
-                    if let current { result.append(current) }
-                    current = RenderDecorationRun(
-                        row: row,
-                        startColumn: candidate.column,
-                        columnCount: 1,
-                        kinds: candidate.kinds,
-                        color: candidate.color,
-                        strikethroughColor: candidate.strikethroughColor
-                    )
-                }
-            }
-            if let current { result.append(current) }
         }
+        if let current { result.append(current) }
         return result
     }
 

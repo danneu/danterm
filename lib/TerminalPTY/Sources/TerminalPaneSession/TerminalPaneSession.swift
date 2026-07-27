@@ -51,6 +51,10 @@ public final class TerminalPaneSessionController {
     private var cachedTerminal: Terminal
     private let initialDimensions: TerminalDimensions
     private var lastPlannedTerminal: Terminal?
+    /// This pane's own frame stream, so undamaged rows are copied from the frame
+    /// this controller planned last rather than re-inspected. One planner per
+    /// controller is what keeps the retained rows and `pendingDamage` in lineage.
+    private var framePlanner = PaneFramePlanner()
     private var pendingDamage = TerminalDamage.none
     private var lastSubmittedDimensions: TerminalDimensions
     private var isVisible: Bool
@@ -576,13 +580,14 @@ public final class TerminalPaneSessionController {
         #if DANTERM_TERMINAL_BENCHMARK
         let planStartedNanoseconds = DispatchTime.now().uptimeNanoseconds
         #endif
-        let plan = planFrame(
+        let plan = framePlanner.planFrame(
             for: terminal,
             presentation: RenderPresentation(
                 theme: .dark,
                 isCursorVisible: presentation.isCursorVisible,
                 cursorShape: presentation.cursorShape
-            )
+            ),
+            damage: pendingDamage
         )
         #if DANTERM_TERMINAL_BENCHMARK
         lastPlanDurationNanoseconds =
