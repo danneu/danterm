@@ -64,15 +64,15 @@ struct TerminalBackendBoundaryTests {
             return false
         }
         assertSessionMessage(.searchStarted("needle"), paneId: paneId) {
-            if case .ghosttyStartSearch(let id, let needle) = $0 { return id == paneId && needle == "needle" }
+            if case .searchStarted(let id, let needle) = $0 { return id == paneId && needle == "needle" }
             return false
         }
         assertSessionMessage(.searchTotal(7), paneId: paneId) {
-            if case .ghosttySearchTotal(let id, let total) = $0 { return id == paneId && total == 7 }
+            if case .searchTotalReported(let id, let total) = $0 { return id == paneId && total == 7 }
             return false
         }
         assertSessionMessage(.searchSelected(nil), paneId: paneId) {
-            if case .ghosttySearchSelected(let id, let selected) = $0 { return id == paneId && selected == nil }
+            if case .searchSelectionReported(let id, let selected) = $0 { return id == paneId && selected == nil }
             return false
         }
         assertSessionMessage(.becameFirstResponder, paneId: paneId) {

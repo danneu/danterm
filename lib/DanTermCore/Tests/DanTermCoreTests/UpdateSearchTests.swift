@@ -1,8 +1,8 @@
 // Swift Testing migration of the legacy `tests/UpdateSearchTests.swift`
 // harness suite. Pins the search-domain Msg paths: startSearch /
-// ghosttyStartSearch (focus-field + searchState creation), needle changes
+// searchStarted (focus-field + searchState creation), needle changes
 // (stale total/selected reset), searchNavigate, endSearch teardown, the
-// ghosttySearchTotal / ghosttySearchSelected handlers (model-only, no
+// searchTotalReported / searchSelectionReported handlers (model-only, no
 // commands), and cleanup of searchState across closePane / closeTab /
 // surfaceCreationFailed / deleteGroup.
 import Foundation
@@ -40,7 +40,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .ghosttyStartSearch(paneId: paneId, needle: "hit"))
+        update(&model, .searchStarted(paneId: paneId, needle: "hit"))
 
         let commands = update(&model, .navigateFocusedSearch(direction: .previous))
         #expect(hasEffect(commands) {
@@ -64,17 +64,17 @@ import Testing
         #expect(commands.isEmpty, "expected no commands without search state")
     }
 
-    @Test("ghosttyStartSearch creates SearchModel and emits focus")
-    func ghosttyStartSearchCreatesSearchModelEmitsFocus() {
-        // Intent: ghosttyStartSearch installs searchState for the pane and
+    @Test("searchStarted creates SearchModel and emits focus")
+    func searchStartedCreatesSearchModelEmitsFocus() {
+        // Intent: searchStarted installs searchState for the pane and
         //   emits focusSearchField.
         // Why it exists: pins the callback-side wiring.
-        // Scenario: spec-first ghostty start.
+        // Scenario: spec-first backend start.
         var model = makeModel()
         createTab(&model)
         let tab = selectedTab(in: model)!
         let paneId = tab.focusedPaneId
-        let commands = update(&model, .ghosttyStartSearch(paneId: paneId, needle: ""))
+        let commands = update(&model, .searchStarted(paneId: paneId, needle: ""))
         #expect(model.searchState[paneId] != nil, "search state should exist")
         #expect(model.searchState[paneId]?.needle == "")
         #expect(hasEffect(commands) {
@@ -83,29 +83,29 @@ import Testing
         }, "expected focusSearchField")
     }
 
-    @Test("ghosttyStartSearch with needle sets needle in model")
-    func ghosttyStartSearchWithNeedleSetsNeedle() {
-        // Intent: ghosttyStartSearch carries the needle into searchState.
+    @Test("searchStarted with needle sets needle in model")
+    func searchStartedWithNeedleSetsNeedle() {
+        // Intent: searchStarted carries the needle into searchState.
         // Why it exists: pins the needle propagation on activation.
         // Scenario: spec-first needle-on-start.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .ghosttyStartSearch(paneId: paneId, needle: "hello"))
+        update(&model, .searchStarted(paneId: paneId, needle: "hello"))
         #expect(model.searchState[paneId]?.needle == "hello")
     }
 
-    @Test("ghosttyStartSearch when already active updates needle and re-emits focus")
-    func ghosttyStartSearchWhileActiveUpdatesNeedleRefocuses() {
-        // Intent: re-entering ghosttyStartSearch on an active pane updates
+    @Test("searchStarted when already active updates needle and re-emits focus")
+    func searchStartedWhileActiveUpdatesNeedleRefocuses() {
+        // Intent: re-entering searchStarted on an active pane updates
         //   the needle and re-emits focusSearchField.
         // Why it exists: pins the idempotent re-entry path.
         // Scenario: spec-first re-entry update.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .ghosttyStartSearch(paneId: paneId, needle: "first"))
-        let commands = update(&model, .ghosttyStartSearch(paneId: paneId, needle: "second"))
+        update(&model, .searchStarted(paneId: paneId, needle: "first"))
+        let commands = update(&model, .searchStarted(paneId: paneId, needle: "second"))
         #expect(model.searchState[paneId]?.needle == "second")
         #expect(hasEffect(commands) {
             if case .focusSearchField(let pid) = $0 { return pid == paneId }
@@ -123,7 +123,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .ghosttyStartSearch(paneId: paneId, needle: ""))
+        update(&model, .searchStarted(paneId: paneId, needle: ""))
         model.searchState[paneId]?.total = 5
         model.searchState[paneId]?.selected = 2
         let commands = update(&model, .searchNeedleChanged(paneId: paneId, needle: "new"))
@@ -144,7 +144,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .ghosttyStartSearch(paneId: paneId, needle: ""))
+        update(&model, .searchStarted(paneId: paneId, needle: ""))
         let commands = update(&model, .searchNavigate(paneId: paneId, direction: .next))
         #expect(hasEffect(commands) {
             if case .sendSearchNavigate(let pid, let dir) = $0 {
@@ -163,7 +163,7 @@ import Testing
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .ghosttyStartSearch(paneId: paneId, needle: "test"))
+        update(&model, .searchStarted(paneId: paneId, needle: "test"))
         let commands = update(&model, .endSearch(paneId: paneId))
         #expect(model.searchState[paneId] == nil, "search state should be removed")
         #expect(hasEffect(commands) {
@@ -188,33 +188,33 @@ import Testing
         #expect(commands.isEmpty, "should be no-op")
     }
 
-    @Test("ghosttySearchTotal updates total")
-    func ghosttySearchTotalUpdatesTotal() {
-        // Intent: ghosttySearchTotal stores total; emits no commands.
+    @Test("searchTotalReported updates total")
+    func searchTotalReportedUpdatesTotal() {
+        // Intent: searchTotalReported stores total; emits no commands.
         // Why it exists: pins the no-side-effect total update.
         // Scenario: spec-first total update.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .ghosttyStartSearch(paneId: paneId, needle: "x"))
-        let commands = update(&model, .ghosttySearchTotal(paneId: paneId, total: 42))
+        update(&model, .searchStarted(paneId: paneId, needle: "x"))
+        let commands = update(&model, .searchTotalReported(paneId: paneId, total: 42))
         #expect(model.searchState[paneId]?.total == 42)
-        #expect(commands.isEmpty, "ghosttySearchTotal emits no command")
+        #expect(commands.isEmpty, "searchTotalReported emits no command")
     }
 
-    @Test("ghosttySearchSelected updates selected")
-    func ghosttySearchSelectedUpdatesSelected() {
-        // Intent: ghosttySearchSelected stores selected; emits no
+    @Test("searchSelectionReported updates selected")
+    func searchSelectionReportedUpdatesSelected() {
+        // Intent: searchSelectionReported stores selected; emits no
         //   commands.
         // Why it exists: pins the no-side-effect selected update.
         // Scenario: spec-first selected update.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .ghosttyStartSearch(paneId: paneId, needle: "x"))
-        let commands = update(&model, .ghosttySearchSelected(paneId: paneId, selected: 3))
+        update(&model, .searchStarted(paneId: paneId, needle: "x"))
+        let commands = update(&model, .searchSelectionReported(paneId: paneId, selected: 3))
         #expect(model.searchState[paneId]?.selected == 3)
-        #expect(commands.isEmpty, "ghosttySearchSelected emits no command")
+        #expect(commands.isEmpty, "searchSelectionReported emits no command")
     }
 
     @Test("closePane cleans up search state")
@@ -226,7 +226,7 @@ import Testing
         createTab(&model)
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .ghosttyStartSearch(paneId: paneId, needle: "test"))
+        update(&model, .searchStarted(paneId: paneId, needle: "test"))
         #expect(model.searchState[paneId] != nil, "search state should exist before close")
         update(&model, .closePane(paneId: paneId))
         #expect(model.searchState[paneId] == nil, "search state should be cleaned up")
@@ -243,7 +243,7 @@ import Testing
         createTab(&model)
         let tabId = model.selectedTabId!
         let paneId = selectedTab(in: model)!.focusedPaneId
-        update(&model, .ghosttyStartSearch(paneId: paneId, needle: "test"))
+        update(&model, .searchStarted(paneId: paneId, needle: "test"))
         update(&model, .closeTab(id: tabId))
         #expect(model.searchState[paneId] == nil, "search state should be cleaned up on tab close")
     }

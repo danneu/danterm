@@ -147,10 +147,11 @@ enum Msg {
     /// resolved in `update` the way `.startSearch` resolves it.
     case navigateFocusedSearch(direction: SearchDirection)
     case endSearch(paneId: PaneId)
-    // Ghostty search callbacks
-    case ghosttyStartSearch(paneId: PaneId, needle: String)
-    case ghosttySearchTotal(paneId: PaneId, total: Int?)
-    case ghosttySearchSelected(paneId: PaneId, selected: Int?)
+    // Backend search callbacks: reported by whichever terminal engine owns the pane,
+    // never crossing the C boundary, so they carry no backend in their names.
+    case searchStarted(paneId: PaneId, needle: String)
+    case searchTotalReported(paneId: PaneId, total: Int?)
+    case searchSelectionReported(paneId: PaneId, selected: Int?)
 
     // TODO
     case toggleTodoPopover(paneId: PaneId)
@@ -210,7 +211,7 @@ extension Msg {
         // real but throttleable diff (tab title/subtitle, progress, the search
         // overlay's live "N/M" match count).
         case .surfaceTitle, .surfaceCwd, .surfaceProgress,
-             .ghosttySearchTotal, .ghosttySearchSelected:
+             .searchTotalReported, .searchSelectionReported:
             return true
         // Window/divider live-resize fires this every tick, but ContainerShape
         // drops split ratios (see ReconcileTests "split ratio is excluded"), so

@@ -1146,7 +1146,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         guard let tab = selectedTab(in: model) else { return [] }
         return [.sendStartSearch(paneId: tab.focusedPaneId)]
 
-    case .ghosttyStartSearch(let paneId, let needle):
+    case .searchStarted(let paneId, let needle):
         if model.searchState[paneId] == nil {
             model.searchState[paneId] = SearchModel()
         }
@@ -1182,13 +1182,13 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         // reconcilePaneChrome's `remove` tears the overlay down (no .hideSearchOverlay).
         return [.sendEndSearch(paneId: paneId), .makeFirstResponder(paneId: paneId)]
 
-    case .ghosttySearchTotal(let paneId, let total):
+    case .searchTotalReported(let paneId, let total):
         guard model.searchState[paneId] != nil else { return [] }
         model.searchState[paneId]?.total = total
         // reconcilePaneChrome re-renders the overlay's match count from this change.
         return []
 
-    case .ghosttySearchSelected(let paneId, let selected):
+    case .searchSelectionReported(let paneId, let selected):
         guard model.searchState[paneId] != nil else { return [] }
         model.searchState[paneId]?.selected = selected
         // reconcilePaneChrome re-renders the overlay's match count from this change.

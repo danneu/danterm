@@ -3072,7 +3072,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         #expect(desiredSearchOverlays(in: model)[paneId] == nil,
             "no active search -> no key")
 
-        update(&model, .ghosttyStartSearch(paneId: paneId, needle: "foo"))
+        update(&model, .searchStarted(paneId: paneId, needle: "foo"))
         model.searchState[paneId]?.total = 7
         model.searchState[paneId]?.selected = 2
         #expect(

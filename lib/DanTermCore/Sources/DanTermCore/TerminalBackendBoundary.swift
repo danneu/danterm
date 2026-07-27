@@ -71,11 +71,11 @@ func terminalMessage(for event: TerminalSessionEvent, paneId: PaneId) -> Msg {
     case .progress(let state):
         return .surfaceProgress(paneId: paneId, state: state)
     case .searchStarted(let needle):
-        return .ghosttyStartSearch(paneId: paneId, needle: needle)
+        return .searchStarted(paneId: paneId, needle: needle)
     case .searchTotal(let total):
-        return .ghosttySearchTotal(paneId: paneId, total: total)
+        return .searchTotalReported(paneId: paneId, total: total)
     case .searchSelected(let selected):
-        return .ghosttySearchSelected(paneId: paneId, selected: selected)
+        return .searchSelectionReported(paneId: paneId, selected: selected)
     case .becameFirstResponder:
         return .paneBecameFirstResponder(paneId: paneId)
     case .closeRequested:
