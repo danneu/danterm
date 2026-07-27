@@ -870,6 +870,7 @@ class PersistentDrawArms:
         output,
         popen=subprocess.Popen,
         wait_for_path=_wait_for_path,
+        kill=os.kill,
     ):
         self.roots = {
             arm: pathlib.Path(root) for arm, root in arm_roots.items()
@@ -886,6 +887,7 @@ class PersistentDrawArms:
         self.output = pathlib.Path(output)
         self.popen = popen
         self.wait_for_path = wait_for_path
+        self.kill = kill
         self.processes = {}
         self.logs = {}
         self.identities = {}
@@ -975,10 +977,36 @@ class PersistentDrawArms:
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=5)
+        self._stop_orphaned_apps()
         for log in self.logs.values():
             log.close()
         self.processes.clear()
         self.logs.clear()
+
+    def _stop_orphaned_apps(self):
+        """Stop any benchmark app whose wrapper died without tearing it down.
+
+        `close()` SIGKILLs a wrapper that outlives its grace period, and a
+        SIGKILLed shell never runs the EXIT trap that would stop the app it
+        launched. Ownership survives that because the identity file records the
+        app's own pid, which `start()` has already validated -- so this reaps
+        exactly the processes this lifecycle created and nothing else.
+
+        Liveness is probed first so a wrapper that did tear its app down is left
+        alone, which keeps a recycled pid from being signalled.
+        """
+        for identity in self.identities.values():
+            pid = identity.get("pid")
+            if not isinstance(pid, int):
+                continue
+            try:
+                self.kill(pid, 0)
+            except OSError:
+                continue
+            try:
+                self.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
 
 
 def make_persistent_draw_runner(

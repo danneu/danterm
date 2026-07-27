@@ -1509,6 +1509,150 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
             )
             self.assertEqual([process.waits for process in processes], [[30], [30]])
 
+    def test_close_stops_the_app_whose_wrapper_had_to_be_killed(self):
+        # Intent: closing a lifecycle whose harness wrapper does not exit on
+        #   SIGINT still stops the benchmark app that wrapper launched.
+        # Why it exists: `close()` SIGKILLs a wrapper that outlives its grace
+        #   period, and a SIGKILLed shell never runs the EXIT trap that would
+        #   terminate the app it owns. The app is then orphaned and keeps
+        #   running after the series that launched it has finished.
+        # Scenario: 2026-07-27, eight orphaned "DanTerm Benchmark" apps
+        #   accumulated across one afternoon of benchmark sessions and were
+        #   still running afterwards, adding uncontrolled background load to
+        #   every later series collected in that same session -- which is
+        #   exactly the condition the harness asks the operator to guarantee.
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            processes = []
+            killed = []
+            live_pids = set()
+
+            class StubbornProcess:
+                """A wrapper that ignores SIGINT and must be killed."""
+
+                def __init__(self):
+                    self.killed = False
+
+                def poll(self):
+                    return 0 if self.killed else None
+
+                def send_signal(self, value):
+                    pass
+
+                def wait(self, timeout):
+                    if not self.killed:
+                        raise subprocess.TimeoutExpired("harness", timeout)
+                    return -9
+
+                def kill(self):
+                    self.killed = True
+
+            def popen(command, **options):
+                arm = ("a" if options["env"]["DANTERM_BENCHMARK_IDENTITY_PATH"]
+                       .endswith("a-identity.json") else "b")
+                process = StubbornProcess()
+                processes.append(process)
+                pid = 100 + len(processes)
+                live_pids.add(pid)
+                pathlib.Path(
+                    options["env"]["DANTERM_BENCHMARK_IDENTITY_PATH"]
+                ).write_text(json.dumps({
+                    "schemaVersion": 1,
+                    "pid": pid,
+                    "workload": "full-screen-style-churn",
+                    "backend": "swift",
+                    "binary": str(
+                        root / f"{arm}.app/Contents/MacOS/DanTerm Benchmark"
+                    ),
+                    "artifacts": str(root / f"{arm}-artifacts"),
+                    "geometry": {"columns": 179, "rows": 66},
+                    "profilingActive": False,
+                }))
+                return process
+
+            def kill(pid, number):
+                if pid not in live_pids:
+                    raise ProcessLookupError(pid)
+                if number != 0:
+                    killed.append(pid)
+                    live_pids.discard(pid)
+
+            lifecycle = VALIDATION.PersistentDrawArms(
+                {"a": root / "arm-a", "b": root / "arm-b"},
+                workload="full-screen-style-churn",
+                output=root / "collection",
+                popen=popen,
+                wait_for_path=lambda path, **_options: self.assertTrue(path.exists()),
+                kill=kill,
+            )
+            lifecycle.start()
+            lifecycle.close()
+
+            self.assertEqual(sorted(killed), [101, 102])
+            self.assertEqual(live_pids, set())
+
+    def test_close_leaves_an_app_its_wrapper_already_stopped_alone(self):
+        # Intent: when the wrapper exits cleanly and tears down its own app,
+        #   close() does not signal that app's pid a second time.
+        # Why it exists: the orphan reaper kills by recorded pid, so it must
+        #   fire only for a pid that is still alive. Killing unconditionally
+        #   would risk signalling an unrelated process that reused the pid.
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            killed = []
+
+            class TidyProcess:
+                """A wrapper that exits on SIGINT, stopping its own app."""
+
+                def __init__(self):
+                    self.stopped = False
+
+                def poll(self):
+                    return 0 if self.stopped else None
+
+                def send_signal(self, value):
+                    self.stopped = True
+
+                def wait(self, timeout):
+                    return 0
+
+            def popen(command, **options):
+                arm = ("a" if options["env"]["DANTERM_BENCHMARK_IDENTITY_PATH"]
+                       .endswith("a-identity.json") else "b")
+                pathlib.Path(
+                    options["env"]["DANTERM_BENCHMARK_IDENTITY_PATH"]
+                ).write_text(json.dumps({
+                    "schemaVersion": 1,
+                    "pid": 200 if arm == "a" else 201,
+                    "workload": "full-screen-style-churn",
+                    "backend": "swift",
+                    "binary": str(
+                        root / f"{arm}.app/Contents/MacOS/DanTerm Benchmark"
+                    ),
+                    "artifacts": str(root / f"{arm}-artifacts"),
+                    "geometry": {"columns": 179, "rows": 66},
+                    "profilingActive": False,
+                }))
+                return TidyProcess()
+
+            def kill(pid, number):
+                if number == 0:
+                    raise ProcessLookupError(pid)
+                killed.append(pid)
+
+            lifecycle = VALIDATION.PersistentDrawArms(
+                {"a": root / "arm-a", "b": root / "arm-b"},
+                workload="full-screen-style-churn",
+                output=root / "collection",
+                popen=popen,
+                wait_for_path=lambda path, **_options: self.assertTrue(path.exists()),
+                kill=kill,
+            )
+            lifecycle.start()
+            lifecycle.close()
+
+            self.assertEqual(killed, [])
+
     def test_arm_startup_outwaits_a_cold_build_and_aborts_on_a_dead_arm(self):
         # Intent: waiting for an arm's identity file allows enough time for the
         #   harness to compile, sign, launch, and converge geometry, while still
