@@ -87,10 +87,23 @@ Research started: 2026-07-27.
 > interleave both arms' batches in one process.** Raw cross-run comparison
 > inherits the drift and buys nothing. Use 160x50, not 80x24 (4-5x more stable).
 >
+> **F22 then built and measured exactly that, and it works.** Two independently
+> compiled arms, `dlopen`ed into one driver and alternated ABBA, give **paired
+> SD 0.719%** with -0.023% bias -- against the GUI benchmark's 3.98% degraded and
+> 1.49% clean. At the frozen pair counts: `quick` **2 pairs @ 1.05%** (~5 s) and
+> `confirm` **6 pairs @ 0.80%** (~16 s), both detection 1.00, both bottoming out
+> on the predeclared threshold grid rather than on the measurement. A 6% level
+> excursion in one process produced the *smallest* paired deviation of the six,
+> which is the common-mode claim holding for separately built arms.
+>
+> **Build the arms under distinct module names.** Swift classes register with the
+> ObjC runtime, which dedups globally even under `RTLD_LOCAL`; two builds of the
+> same module name collide and can silently run one arm's code for both.
+>
 > It does **not** cover damage *generation* -- which rows `setNeedsDisplay` and
-> AppKit's coalescing mark dirty -- so the GUI benchmark stays for end-to-end
-> validation. The untested step is two separately compiled arms interleaved in
-> one process; that is the next pilot.
+> AppKit's coalescing mark dirty -- nor `clipFramePlan`'s own cost, so the GUI
+> benchmark stays for end-to-end validation. Remaining gap: F22 is an A/A pair
+> from identical source; arms from genuinely different revisions are unmeasured.
 >
 > ### Standing rules for anyone collecting data here
 >
@@ -602,14 +615,19 @@ series and re-freeze `DECISION_RULES` (Phase 6).
       idle time. It already exists as `TerminalDrawBenchmark` with a
       `damage-clipped` scenario, already runs at ~100% occupancy, and resolves
       **0.256%** ratio-wise at 160x50 -- far below the 3% `confirm` needs.
-- [ ] **Pilot two separately compiled arms interleaved in one process.** This is
-      the one untested assumption in F21: the drift cancels because all cells are
-      measured microseconds apart in one process, and it is unproven that two
-      independently built arms stay common-mode. Build both arms' draw paths into
-      one binary (or dlopen both), alternate batches, and report the ratio.
-      **Do not build a cross-process headless comparison** -- F21 shows it
-      inherits the 2.8-3.6% between-run drift and gains nothing over the GUI
-      benchmark.
+- [x] **Pilot two separately compiled arms interleaved in one process** (F22).
+      Done. Paired SD **0.719%**, bias -0.023%; `quick` 2 pairs @ 1.05%,
+      `confirm` 6 pairs @ 0.80%, both detection 1.00. The common-mode assumption
+      holds for independently built arms. **Do not build a cross-process headless
+      comparison** -- F21 shows it inherits the 2.8-3.6% between-run drift.
+      Arms must use **distinct module names** or the ObjC runtime dedups their
+      classes and both may run one arm's code.
+- [ ] **Measure two arms built from genuinely different revisions.** F22 is A/A
+      from identical source; differing code layout between real revisions is the
+      remaining unmeasured risk before this gates a change.
+- [ ] **Extend the threshold grid before any freeze.** F22 bottomed out at the
+      grid floors (1.05% / 0.80%), so the instrument's actual resolution is
+      unmeasured and the frozen grids cannot express it.
 - [ ] **Decide what the headless benchmark is allowed to decide.** It cannot see
       damage *generation* regressions (`setNeedsDisplay` / AppKit dirty-rect
       coalescing) or `clipFramePlan`'s own cost. Write the split down before it
@@ -1898,6 +1916,67 @@ Degraded at `HEAD` = **148376**, span **33208**, **4.65%**, **6.26%**, 10/24.
   across a longer series, a rebuild, or two separately compiled arms is untested,
   and two-arm interleaving is the specific thing that must be piloted next.
 
+### F22 -- two separately compiled arms interleaved in one process hold 0.72% paired SD; F21's assumption survives
+
+- **Status:** closed. The one untested assumption behind the headless route is
+  confirmed. This is an A/A control, so it validates the *measurement*, not any
+  performance claim.
+- **Date:** 2026-07-27. Six process launches x 8 ABBA rounds = 48 quartets / 96
+  pairs, no operator idle time, no screen takeover.
+- **Setup:** the same arm source built **twice, independently** (separate scratch
+  paths, distinct binaries) into two dynamic libraries, both `dlopen`ed
+  `RTLD_LOCAL` into one driver process, batches alternated **ABBA** per round to
+  match the production schedule. Each batch is auto-grown past 400 ms, so
+  occupancy stays ~100% and D1's mechanism cannot act. Timed region is
+  `drawRenderFrame` on a pre-clipped 4-row plan at 160x50.
+- **Headline: paired SD = 0.719%, mean bias -0.023%.** Against the GUI
+  benchmark's **3.98% degraded** and **1.49% clean 2026-07-24**. So an
+  interleaved two-arm headless comparison is ~5.5x tighter than the broken
+  instrument and ~2x tighter than the instrument was *before* it broke.
+- **The drift is still present and still cancels.** Absolute level across the six
+  processes was 686.6 / 687.0 / 692.1 / 686.0 / **728.4** / 685.0 ms -- a 2.23%
+  level CV, and run 5 is a ~6% excursion. Yet run 5's paired mean was **+0.108%**,
+  the *smallest* deviation of the six. A level excursion that would dominate a
+  cross-process comparison produced no paired effect at all. This is the F21
+  common-mode claim holding for independently compiled arms, which is exactly
+  what was unproven.
+- **Screened against the frozen rules** (production quartet shape, each ABBA
+  round yielding two pairs):
+
+  | mode | frozen GUI rule | headless interleaved |
+  | --- | --- | --- |
+  | `quick` (5% effect, detect >= 0.80) | 2 pairs @ 3.8% | **2 pairs @ 1.05%**, detect 1.00, ~5 s |
+  | `confirm` (3% effect, detect >= 0.90) | 6 pairs @ 1.85% | **6 pairs @ 0.80%**, detect 1.00, ~16 s |
+
+  At the *same pair counts as the frozen rules*, thresholds are ~2.3x tighter and
+  the run takes seconds instead of minutes. `confirm` is eligible from **2 pairs**
+  (0.95%), where the GUI benchmark needs 6 even when clean and ~100 when degraded
+  (F20).
+- **Both modes bottom out on the threshold grid, so the true capability is
+  better than measured.** 1.05% and 0.80% are the lowest values in `quick`'s and
+  `confirm`'s predeclared grids; the screen wanted to go lower and could not.
+  Do not quote these as the instrument's resolution -- they are floors imposed by
+  the grid, and a real freeze needs an extended grid.
+- **Implementation constraint discovered the hard way:** two builds of the same
+  Swift module cannot simply be `dlopen`ed together. Swift classes register with
+  the ObjC runtime, which dedups **globally regardless of `RTLD_LOCAL`**, and the
+  first attempt emitted `Class ... is implemented in both ...` -- meaning both
+  arms could silently execute one arm's code and turn any A/B into a tautology.
+  **The arms must be built under distinct module names** (`DrawArmA` /
+  `DrawArmB`); after renaming, the warning is gone. Any production implementation
+  inherits this requirement, and an A/A control is the check that catches it.
+- **What this does and does not establish.** It establishes that the measurement
+  is tight and unbiased between independently compiled arms, and the calibration's
+  injected-effect conditions show detection 1.00 at both 3% and 5%. It does
+  **not** establish coverage: F21's split still applies, so damage *generation*
+  regressions and `clipFramePlan`'s own cost remain invisible here.
+- **Caveat:** one machine, one session, ~5 minutes of measurement, and an A/A
+  pair built from identical source. Two arms built from genuinely *different*
+  revisions could differ in code layout in ways identical source cannot show.
+  That is the next thing to check before this gates a real change.
+- **Evidence:** `~/danterm-benchmark-evidence/2026-07-27/headless-twoarm-pilot/`,
+  including the arm source and driver under `source/`.
+
 ## Decision log
 
 ### D1 -- mechanism class: platform CPU frequency demotion of an under-occupied main thread
@@ -2187,10 +2266,22 @@ cancels because a ratio taken inside one process cancels it. So the remaining
 work is not "make the measurement quieter" but "get both arms into one process",
 and the open risk is whether two separately compiled arms stay common-mode.
 
-That leaves a coherent division of labour to confirm: the headless benchmark
-adjudicates the cost of drawing a scoped plan at 3% and below, and the GUI
-benchmark keeps the part headless cannot see -- whether the app marks the right
-rows dirty in the first place.
+**F22 closed that risk.** Two independently compiled arms interleaved ABBA in one
+process hold **0.719% paired SD** at -0.023% bias -- tighter than the GUI
+benchmark ever was, including before the regression. A 6% level excursion in one
+of the six processes produced the smallest paired deviation of the six, which is
+the common-mode property holding under exactly the condition that was unproven.
+At the frozen pair counts it supports 1.05% (`quick`, ~5 s) and 0.80%
+(`confirm`, ~16 s), and both figures are floors imposed by the predeclared
+threshold grid rather than by the measurement.
+
+So the division of labour is no longer speculative: the headless benchmark
+adjudicates the cost of drawing a scoped plan far below the 3% `confirm` needs,
+in seconds, and the GUI benchmark keeps the part headless cannot see -- whether
+the app marks the right rows dirty in the first place. What remains before this
+gates a real change is narrow and named: arms from genuinely different revisions
+rather than an A/A pair, and a threshold grid wide enough to express what the
+instrument can actually resolve.
 
 ## Scratch
 
@@ -2357,3 +2448,40 @@ makes an in-run ratio work:
 Analysis: divide each cell by its column median to get a per-run scale factor,
 then take ratios within a run. Residual CV after removing the scale factor is
 0.29-0.90%; the 160x50 clipped/full ratio is 0.256% without removing anything.
+
+### F22 raw pilot -- two interleaved arms, 6 processes x 8 ABBA rounds (2026-07-27)
+
+Data and full source at
+`~/danterm-benchmark-evidence/2026-07-27/headless-twoarm-pilot/`.
+
+Rebuild: one `Package.swift` per arm with the target renamed (`DrawArmA` /
+`DrawArmB` -- **required**, see F22), each built to its own `--scratch-path`, then
+a C driver `dlopen`s both `RTLD_LOCAL` and alternates ABBA batches.
+
+```sh
+for ARM in A B; do
+  (cd pilot$ARM && swift build -c release --scratch-path ../build-arm$ARM)
+done
+clang -O2 -o driver driver.c
+./driver armA.dylib armB.dylib 160 50 4 8    # columns rows clipRows rounds
+```
+
+Per-process paired symmetric % (B vs A), 8 rounds each, and the absolute level
+that shows the drift the pairing is cancelling:
+
+| process | paired mean | paired SD | level (ms) |
+| --- | --- | --- | --- |
+| 1 | -0.256% | 0.373% | 686.6 |
+| 2 | -0.602% | 0.557% | 687.0 |
+| 3 | -0.098% | 0.464% | 692.1 |
+| 4 | -0.006% | 0.609% | 686.0 |
+| 5 | **+0.108%** | 0.283% | **728.4** |
+| 6 | -0.022% | 0.359% | 685.0 |
+
+Process 5 carries a ~6% level excursion and the smallest paired deviation of the
+six. Level CV across processes is 2.23%; pooled paired SD over the 96 pairs is
+0.719%.
+
+Analysis: each ABBA round yields two pairs -- `symmetric_difference(a1, b1)` and
+`symmetric_difference(b2, a2)` -- which is the production quartet shape, so the
+result feeds `calibrate_threshold_grid` directly.
