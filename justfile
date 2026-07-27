@@ -62,6 +62,7 @@ test:
     python3 ./scripts/tests/terminal_benchmark_producer_test.py
     python3 ./scripts/tests/terminal_benchmark_workloads_test.py
     python3 ./scripts/tests/terminal_draw_acceptance_test.py
+    python3 ./scripts/tests/terminal_headless_draw_compare_test.py
     ./scripts/tests/test-terminal-pty_test.sh
     ./scripts/tests/shell-integration_test.sh
     ./scripts/tests/agent-notifications-live_test.py
@@ -100,6 +101,16 @@ benchmark-confirm baseline:
 # Benchmark full-frame and damage-clipped CoreText drawing headlessly.
 benchmark-draw iterations="15":
     swift run --package-path lib/TerminalCore -c release TerminalDrawBenchmark {{iterations}}
+
+# Compare two draw-path revisions headlessly, interleaved in one process. Measures drawing
+# an already-scoped plan only -- not damage generation, which stays with benchmark-quick.
+# Both parameters are positional (they have defaults, so `name=value` does not bind here):
+#   just benchmark-headless-draw                      # A/A control against this tree
+#   just benchmark-headless-draw 8                    # 8 rounds
+#   just benchmark-headless-draw 8 /path/TerminalCore # compare against another checkout
+benchmark-headless-draw rounds="8" candidate_core="":
+    python3 ./scripts/terminal-headless-draw-compare.py --rounds {{rounds}} \
+      {{ if candidate_core != "" { "--candidate-core " + candidate_core } else { "" } }}
 
 # Build and open the unoptimized system-glyph versus sprite comparison app.
 preview-glyphs:

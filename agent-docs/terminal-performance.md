@@ -242,6 +242,48 @@ localized real-app draw cost. Their output is diagnostic: it is unpaired, it is
 not recorded, and it cannot support a cross-session regression claim. Use them
 to inspect a hot path, then decide with `benchmark-quick`.
 
+### `just benchmark-headless-draw` -- paired, and precise where the GUI benchmark is not
+
+This one **is** paired, and it is the exception to "decide with `benchmark-quick`"
+for one specific question. It builds two draw arms as dynamic libraries from two
+`TerminalCore` checkouts, loads both into a single process, and alternates their
+batches ABBA.
+
+    just benchmark-headless-draw                        # A/A control on this tree
+    just benchmark-headless-draw 8 /path/TerminalCore   # 8 rounds against a checkout
+
+Parameters are positional -- they carry defaults, so `rounds=8` does not bind.
+
+**Why it exists.** `incremental-mixed` under `benchmark-quick` can no longer
+resolve a 3% change: the optimized main thread is ~96% idle during a block, macOS
+lowers its clock, and no collection-side fix removed it. Batching draws past a
+400 ms floor holds this benchmark's thread near 100% occupancy so the governor
+never demotes it, and interleaving cancels the drift that remains. Paired SD is
+~0.7% against the GUI benchmark's 3.98% degraded and 1.49% at its best.
+
+**What it cannot see, which is the important part.** The timed region is
+`drawRenderFrame` on an already-clipped plan. So it does **not** cover damage
+*generation* -- which rows `setNeedsDisplay` and AppKit's dirty-rect coalescing
+mark -- nor `clipFramePlan`'s own cost. A change that dirties too much looks free
+here. Those questions stay with `benchmark-quick` on `incremental-mixed`, whose
+coarse verdict is still the only one that sees them.
+
+**No decision rule is frozen for it.** It reports statistics; `--threshold` is
+caller-supplied and labelled as such in the report. A frozen rule needs a
+screening pass a human signs off, per the calibration rules above.
+
+**Two traps, both enforced in code rather than left to memory.** The arms must
+compile under different Swift module names, because Swift classes register with
+the ObjC runtime, which dedups by name across images even under `RTLD_LOCAL` --
+a collision makes both arms run one arm's code while still printing plausible
+numbers. And each `TerminalCore` checkout must keep that exact directory
+basename, since SwiftPM derives a path dependency's identity from it. Run the
+default A/A control after any change to the harness; a control that does not sit
+near 0% is the signal that one of these has broken.
+
+Evidence, limits and the pilots behind all of this: F21-F23 in
+[docs/research/8-benchmark-variance-regression.md](../docs/research/8-benchmark-variance-regression.md).
+
 ### Keep the observer out of the profile
 
 `TerminalBenchmarkObserver` runs on the draw path, so its own cost shows up in

@@ -633,11 +633,16 @@ series and re-freeze `DECISION_RULES` (Phase 6).
       paired mean to -0.042% with a CI containing zero -- indistinguishable from
       the unperturbed baseline. Bounds layout bias below ~0.21%; does not rule
       out sub-0.2% effects.
-- [ ] **Productionize the headless interleaved comparison.** F21-F23 validate it;
-      it exists only as scratch code, so nothing in the repo can run it. Needs a
-      `scripts/` entry plus a justfile recipe, with the distinct-module-name
-      requirement (F22) enforced rather than remembered, and an A/A control run
-      as the self-check that catches ObjC class dedup.
+- [x] **Productionize the headless interleaved comparison.** Shipped as
+      `just benchmark-headless-draw` ->
+      `scripts/terminal-headless-draw-compare.py` plus the arm source
+      `scripts/terminal-headless-draw-arm.swift`, with
+      `scripts/tests/terminal_headless_draw_compare_test.py` in the `just test`
+      gate. Both traps are enforced in code, not remembered: the module-name
+      guard (F22) and the `TerminalCore` basename requirement (F23) each raise
+      with the reason. Defaults to an A/A control; measured 0.694% paired SD on
+      first run, matching F22's 0.719%. Documented in
+      `agent-docs/terminal-performance.md`, including what it cannot see.
 - [ ] **Measure two arms built from genuinely different revisions.** Lower-grade
       risk after F23, but still the only untested step: a real revision changes
       instruction mix and inlining, not just placement.
