@@ -41,37 +41,56 @@ Research started: 2026-07-27.
 > | pin frequency or core affinity | **F14** -- it is frequency, and macOS exposes no userspace floor |
 > | **pacer holding occupancy constant** | **F17** -- built, measured twice, made it worse |
 >
-> ### Next action: recalibrate at higher pair counts (Phase 6)
+> ### Next action: recalibration helps `quick` only -- `confirm` is not cheaply recoverable (F20)
 >
-> Bootstrapped from the clean 2026-07-27 unpaced series, holding A/A false
-> positives at 5%:
+> **The earlier "48 pairs recovers 1.75%" recommendation is WITHDRAWN by F20.**
+> It was screened against only the A/A false-positive rate at a 5% injected
+> effect. `confirm`'s real gate is a **3% effect with detection >= 0.90**, and
+> under it 48 pairs is not eligible at all: the tightest threshold clearing A/A
+> FP is 2.05%, where detection is 0.71 and 29% of trials are inconclusive.
 >
-> | pairs | wall-clock | min threshold | detect @5% |
-> | --- | --- | --- | --- |
-> | 2 (current `quick`) | 0.2m | 5.85% | 0.53 |
-> | 6 (current `confirm`) | 0.5m | 4.00% | 0.89 |
-> | 10 | 0.9m | 3.45% | 0.97 |
-> | **48** | **4.2m** | **1.75%** | 1.00 |
+> Re-derived with the repo's own calibration machinery under each mode's real
+> gates -- and validated by reproducing the frozen 2-pair `quick` / 6-pair
+> `confirm` counts on the clean 2026-07-24 reference:
 >
-> **48 pairs recovers 1.75%, slightly better than the frozen 1.85% `confirm`;
-> 10 pairs gives 3.45%, better than the frozen 3.8% `quick`.** Wall-clock uses
-> the ~2.7 s per block observed in this session.
+> | mode | frozen | actual cost to beat it |
+> | --- | --- | --- |
+> | `quick` (5% effect, detect >= 0.80) | 2 pairs @ 3.8% | **12 pairs @ 3.25%**, ~1.1 min |
+> | `confirm` (3% effect, detect >= 0.90) | 6 pairs @ 1.85% | **100 pairs @ 1.65%**, detect 0.93, ~9 min |
 >
-> This clears the "no hacks" rule and is not R5: it *tightens* the threshold by
-> buying precision with time rather than widening it to cover the noise. Use
-> `scripts/terminal-benchmark-median-fallback.py`, which already screens
-> thresholds against pair counts. A human moves the frozen rule.
+> So: recalibration is cheap and works for `quick`. For `confirm` it costs ~17x
+> the wall-clock and lands *marginally* over the detection floor (0.93 vs 0.90)
+> on a single session's data, where F18 puts session variation at ~2x. **Treat
+> "recalibration restores `confirm`" as unproven.** `confirm` is the mode that
+> actually decides damage-scoping changes, so this materially strengthens the
+> case for the headless in-process benchmark below.
 >
-> ### The strategic option, if recalibration is not enough
+> Recalibration still clears the "no hacks" rule and is not R5 -- it buys
+> precision with time rather than widening a threshold. Use
+> `scripts/terminal-benchmark-median-fallback.py`. A human moves the frozen rule.
 >
-> Move damage-scoping regression detection to a **headless in-process draw
-> benchmark**. `clipFramePlan` and `drawRenderFrame` -- the entire region the draw
-> timer brackets -- live in the `TerminalRenderPlanning` and
-> `TerminalRenderExecution` **library** targets, not in `app/`, and
-> `TerminalCoreBenchmark` already exists as a headless executable product. In
-> process at 100% occupancy the governor never demotes, iterations are cheap, and
-> variance collapses to sampling noise. It loses AppKit, WindowServer and the
-> dirty-rect path, so keep the GUI benchmark for coarse end-to-end validation.
+> ### The strategic route, now measured rather than assumed (F21)
+>
+> Move damage-scoping regression detection to the **headless in-process draw
+> benchmark**. It **already exists**: `TerminalDrawBenchmark` in
+> `lib/TerminalCore`, run by `just benchmark-draw`, already has a
+> `damage-clipped` scenario and already batches to 400 ms so the thread stays
+> ~100% occupied and the governor never demotes.
+>
+> F21 measured it over six runs. Within-run CV is **0.58-0.85%**. Raw between-run
+> CV is **2.8-3.6%** -- no better than the GUI benchmark, because arms are
+> separate processes. But the drift is **common-mode** across all cells, so an
+> in-run **ratio** cancels it: 160x50 damage-clipped/full-frame has **CV 0.256%**
+> across six runs, and the clipped/full separation is 11.5x.
+>
+> **The design constraint is hard: compare ratio-wise within one process, or
+> interleave both arms' batches in one process.** Raw cross-run comparison
+> inherits the drift and buys nothing. Use 160x50, not 80x24 (4-5x more stable).
+>
+> It does **not** cover damage *generation* -- which rows `setNeedsDisplay` and
+> AppKit's coalescing mark dirty -- so the GUI benchmark stays for end-to-end
+> validation. The untested step is two separately compiled arms interleaved in
+> one process; that is the next pilot.
 >
 > ### Standing rules for anyone collecting data here
 >
@@ -93,9 +112,10 @@ Research started: 2026-07-27.
 > - `cc3918d fix(benchmark): stop a killed harness wrapper from orphaning its app`
 >   -- the F19 fix, committed with tests.
 > - The F17 pacer was **reverted**; it is refuted and deliberately not in the tree.
-> - Clean 2026-07-27 series on disk at `.build/rerun-paced/` and
->   `.build/rerun-unpaced/` (24 quartets x 2 workloads each). **`.build/` is
->   disposable -- copy before `just clean`.**
+> - Clean 2026-07-27 series **copied out of the disposable `.build/` tree** to
+>   `~/danterm-benchmark-evidence/2026-07-27/` -- the two rerun series plus all
+>   three 2026-07-24 reference workloads. That copy is the durable one; the
+>   `.build/rerun-{paced,unpaced}/` originals survive only until `just clean`.
 >
 > ### Related files
 >
@@ -138,9 +158,17 @@ hypotheses were rejected are in [Rejected](#rejected).
 - **An invalid block is not a data point.** The calibration path may retry whole
   quartets (it decides nothing); the comparison path may not. Do not import
   retries into `terminal-benchmark-compare.py`.
-- **Diagnostic tooling lives outside the repo** (session scratchpad) until a
-  direction gate selects it. Nothing in `scripts/` is modified to collect
-  evidence.
+- **Nothing in `scripts/` is modified to collect evidence.** Diagnostic tooling
+  stays out of the shipped scripts until a direction gate selects it.
+- **Do not hide working context in a private session scratchpad.** A scratchpad
+  dies with the session, so anything left there is lost at exactly the moment a
+  handoff needs it -- and a number whose driver did not survive cannot be
+  checked, only re-derived or trusted. This is not hypothetical: F20 overturned a
+  headline recommendation precisely because the driver behind it was gone. Put
+  in-flight drivers, one-off queries and raw readouts in [Scratch](#scratch) at
+  the bottom of this file. When something earns permanence, promote it to
+  [Reproduction recipes](#reproduction-recipes) or a finding and delete the
+  scratch copy.
 - **No performance claim about any commit** may be made from these series. They
   are unpaired, single-arm, A/A variance measurements. A directional claim needs
   `benchmark-quick`/`confirm`, which is exactly the instrument under repair.
@@ -538,14 +566,20 @@ series and re-freeze `DECISION_RULES` (Phase 6).
 
 ### Phase 6 -- recalibrate and close
 
-- [ ] **RECOMMENDED NEXT ACTION -- recalibrate at higher pair counts.**
-      Bootstrapped from the clean 2026-07-27 unpaced series: **48 pairs supports
-      a 1.75% threshold** (better than the frozen 1.85% `confirm`) at ~4.2 min,
-      and **10 pairs supports 3.45%** (better than the frozen 3.8% `quick`) at
-      ~0.9 min, both at a 5% A/A false-positive rate with detection >= 0.97 at a
-      5% effect. This buys precision with time rather than widening a threshold,
-      so it is not R5. Re-derive on a fresh series rather than trusting the
-      numbers above -- session variation is ~2x (F18).
+- [x] **Re-derive the pair-count table under the real per-mode gates** (F20).
+      Done as re-analysis, no machine time. The earlier 48-pair recommendation is
+      withdrawn: it used an FP-only gate at a 5% effect. Under the real gates
+      `quick` needs **12 pairs @ 3.25%** (~1.1 min) and `confirm` needs
+      **100 pairs @ 1.65%** at detection 0.93 (~9 min).
+- [ ] **Decide whether `confirm` is worth recalibrating at all.** At ~17x the
+      wall-clock for a marginal pass (0.93 against a 0.90 floor, single session,
+      ~2x session variation per F18), the honest options are: accept a slow
+      `confirm`, accept that `confirm` cannot decide `incremental-mixed` until
+      the instrument is repaired, or build the headless benchmark (Phase 7).
+      **This is a judgement call for a human, and it is the real next decision.**
+- [ ] Confirm the F20 numbers on a fresh **two-arm** series before any freeze --
+      session variation is ~2x (F18), and `confirm`'s 100-pair result is close
+      enough to its gate that a fresh series could move it either way.
 - [ ] Collect a fresh **two-arm** `incremental-mixed` A/A series matching the
       production shape (96 blocks / 48 pairs / 24 quartets).
 - [ ] Re-screen and re-freeze `DECISION_RULES` via
@@ -564,8 +598,22 @@ series and re-freeze `DECISION_RULES` (Phase 6).
       `close()` waits the full 30 s per arm and then SIGKILLs. Costs ~2 min of
       apparent hang per run and is the reason apps were orphaned at all. The
       orphan *consequence* is fixed and committed; this cause is not.
-- [ ] **Consider the headless in-process draw benchmark** (see the handoff). The
-      strategic alternative if recalibration proves insufficient.
+- [x] **Scope the headless in-process draw benchmark** (F21). Done, no machine
+      idle time. It already exists as `TerminalDrawBenchmark` with a
+      `damage-clipped` scenario, already runs at ~100% occupancy, and resolves
+      **0.256%** ratio-wise at 160x50 -- far below the 3% `confirm` needs.
+- [ ] **Pilot two separately compiled arms interleaved in one process.** This is
+      the one untested assumption in F21: the drift cancels because all cells are
+      measured microseconds apart in one process, and it is unproven that two
+      independently built arms stay common-mode. Build both arms' draw paths into
+      one binary (or dlopen both), alternate batches, and report the ratio.
+      **Do not build a cross-process headless comparison** -- F21 shows it
+      inherits the 2.8-3.6% between-run drift and gains nothing over the GUI
+      benchmark.
+- [ ] **Decide what the headless benchmark is allowed to decide.** It cannot see
+      damage *generation* regressions (`setNeedsDisplay` / AppKit dirty-rect
+      coalescing) or `clipFramePlan`'s own cost. Write the split down before it
+      is used to gate a change, so the GUI benchmark's remaining job is explicit.
 
 ## Reproduction recipes
 
@@ -577,7 +625,8 @@ handoff.
 
 | what | path | status |
 | --- | --- | --- |
-| 2026-07-24 reference series (the pre-regression anchor) | `.build/terminal-benchmark-phase4-{incremental,content,style}-shared-bundle-calibration/2026-07-24/blocks.jsonl` | `.build/` is disposable, **but all three workloads plus every 2026-07-27 probe were copied to the session scratchpad on 2026-07-27** -- see the warning below |
+| **durable copy of everything below** | `~/danterm-benchmark-evidence/2026-07-27/` | **survives `just clean`**; made 2026-07-27. Prefer this path |
+| 2026-07-24 reference series (the pre-regression anchor) | `.build/terminal-benchmark-phase4-{incremental,content,style}-shared-bundle-calibration/2026-07-24/blocks.jsonl` | `.build/` is disposable; copied to the durable path above |
 | single-arm series collected 2026-07-27 | `.build/terminal-benchmark-plan-calibration/c9562e10c053-{0000,0001}/blocks.json` | disposable |
 | bisect probes | `.build/terminal-benchmark-attribution/<tree>-NNNN/blocks.json` | disposable |
 | the five A/A comparison runs of F1 | `.build/terminal-benchmark-comparisons/quick/` | disposable |
@@ -695,6 +744,55 @@ Reference values (F11, F12, F13). A probe is **clean** if the draw ramp is withi
 
 For the older paired-SD and floor statistics, the F9-era snippet is preserved in
 this file's git history; F4, F9 and F10 already tabulate everything it computed.
+
+### Screening pair counts against the real gates (F20's readout)
+
+Use this before recommending any pair count. The trap F20 fell into is screening
+on the A/A false-positive rate alone: that sets only the *floor* on a threshold.
+Each mode's injected-effect detection gate sets the *ceiling*, and for `confirm`
+it is the binding one.
+
+The gates are not the same for the two modes -- take them from `MODES` in
+`scripts/terminal-benchmark-median-fallback.py`, do not assume:
+
+| mode | effect | detect >= | inconclusive <= | wrong direction <= |
+| --- | --- | --- | --- | --- |
+| `quick` | **5%** | 0.80 | 0.20 | 0.05 |
+| `confirm` | **3%** | 0.90 | 0.10 | 0.05 |
+
+A single-arm `blocks.json` loads into the same quartet form
+`calibration.load_quartets()` builds from a production JSONL series -- the
+schedule is ABBA per quartet either way, so pair on `measurementRole`:
+
+```python
+def load_single_arm_quartets(path, workload):
+    """Mirror load_quartets() over the single-arm blocks.json shape."""
+    quartets = []
+    for group in json.load(open(path))[workload]:
+        assert sorted(b["measurementRole"] for b in group) == ["A", "A", "B", "B"]
+        differences = []
+        for first, second in zip(group[::2], group[1::2]):
+            values = {}
+            for row in (first, second):
+                draw = row["artifact"]["finalDraw"]
+                values[row["measurementRole"]] = (
+                    draw["cumulativeDrawNanoseconds"] / draw["drawCount"])
+            differences.append(CAL.symmetric_difference(values["A"], values["B"]))
+        quartets.append(differences)
+    return quartets
+```
+
+Then run `CAL.calibrate_threshold_grid(quartets, pair_count=N, effect_percent=...,
+directional_thresholds=..., equivalence_band=..., trial_count=4000, seed=...,
+estimator="median")` at each count in `PAIR_COUNTS`, keep the reports passing
+*all four* gates, and take the **lowest** eligible `directionalThresholdPercent`.
+
+**Always validate the screen against the 2026-07-24 reference first.** A correct
+implementation reproduces the frozen rules: `quick` first eligible at 2 pairs,
+`confirm` first eligible at 6. If it does not, the screen is wrong, not the data.
+Widen the threshold grid if a degraded series returns "none eligible" at low
+counts -- `quick`'s default grid tops out at 4.55% and a 2-pair degraded screen
+needs ~5.5%.
 
 ### Detecting the staircase (F14's readout)
 
@@ -1675,6 +1773,131 @@ Degraded at `HEAD` = **148376**, span **33208**, **4.65%**, **6.26%**, 10/24.
   and its persistent-mode tail polls on `sleep 0.25`, where bash should run the
   trap within ~250 ms. Something defers or swallows it.
 
+### F20 -- the Phase 6 pair-count table was derived under the wrong gate; `confirm` needs ~100 pairs, not 48
+
+- **Status:** closed. Re-analysis only, no machine time.
+- **Date:** 2026-07-27, checking the handoff's recommended action before spending
+  a collection on it.
+- **What was wrong:** the handoff's table held **only** the A/A false-positive
+  rate at 5%, and scored detection against a **5% injected effect** for both
+  modes. The frozen calibration gates are stricter and mode-specific: `quick` is
+  5% effect / detection >= 0.80 / inconclusive <= 0.20, but **`confirm` is a 3%
+  effect / detection >= 0.90 / inconclusive <= 0.10**. Screening `confirm`
+  against a 5% effect with no detection gate makes it look far cheaper than it is.
+- **Method, and why it is trustworthy:** the repo's own
+  `terminal-benchmark-calibration.calibrate_threshold_grid` was run over the
+  frozen `PAIR_COUNTS` grid with each mode's real gates, taking the *lowest*
+  eligible threshold at each count (A/A FP <= 5% sets the floor; detection sets
+  the ceiling). Validated against the clean 2026-07-24 reference, where it
+  reproduces the frozen rules exactly: `quick` first eligible at **2 pairs** and
+  `confirm` first eligible at **6 pairs**, the two frozen counts, with the frozen
+  3.8% / 1.85% thresholds sitting above the computed floors.
+- **Reproducing the handoff's numbers confirms the diagnosis.** Re-running with
+  its method -- FP-only gate, 5% effect -- returns 2 -> 5.50%, 6 -> 3.95%,
+  10 -> 3.35%, 48 -> 2.00% against its published 5.85 / 4.00 / 3.45 / 1.75. The
+  shape matches within seed noise, so the gap is the gate, not the data.
+- **Corrected table** (same clean 2026-07-27 unpaced series, real gates):
+
+  | mode | frozen | handoff claim | **actual** |
+  | --- | --- | --- | --- |
+  | `quick` (5% effect, detect >= 0.80) | 2 pairs @ 3.8% | 10 pairs @ 3.45% | **12 pairs @ 3.25%** (~1.1 min) |
+  | `confirm` (3% effect, detect >= 0.90) | 6 pairs @ 1.85% | 48 pairs @ 1.75% | **100 pairs @ 1.65%**, detect 0.93 (~9 min) |
+
+- **48 pairs does not restore `confirm`, and not marginally.** At 48 pairs the
+  tightest threshold clearing A/A FP <= 5% is **2.05%**, and there detection at a
+  3% effect is **0.71** against the required 0.90, with **29% inconclusive**
+  against a 10% cap. The eligible band is empty at every count below 100.
+- **The `quick` half of the recommendation survives**, shifted: 12 pairs supports
+  3.25%, tighter than the frozen 3.8%, for ~1.1 min. It is 6x the pair count for
+  a modestly better threshold.
+- **`confirm` at 100 pairs is marginal, not comfortable.** Detection is 0.93
+  against a 0.90 floor, on one session's data, where F18 puts session-to-session
+  variation at ~2x. A fresh series could easily push it out of eligibility
+  entirely. Treat "recalibration restores `confirm`" as **unproven**, not as the
+  settled plan.
+- **Same-session control is clean**, so this is not a session artifact: the
+  `content-churn` arm of the same series has `confirm` eligible at **4 pairs @
+  1.45%** and `quick` at **2 pairs @ 1.90%**, both comfortably better than their
+  frozen rules.
+- **Consequence:** the handoff's headline ("48 pairs recovers 1.75%, slightly
+  better than the frozen 1.85% `confirm`") is withdrawn. Recalibration is still
+  the cheapest path for `quick`, but it does **not** cheaply restore `confirm`,
+  which is the mode that actually decides damage-scoping changes at the 3% effect
+  size those changes live at. This materially strengthens the case for the
+  headless in-process benchmark (Phase 7) over recalibration alone.
+
+### F21 -- the headless draw benchmark already exists, resolves far below 3%, but only ratio-wise
+
+- **Status:** closed as a scoping result. Phase 7's strategic option is viable and
+  much cheaper than assumed, with one hard design constraint.
+- **Date:** 2026-07-27. Six runs of the existing headless benchmark; no operator
+  idle time and no screen takeover.
+- **It does not need to be built.** `TerminalDrawBenchmark` is already an
+  executable product of `lib/TerminalCore`, run by `just benchmark-draw`, with
+  support in `TerminalDrawBenchmarkSupport`. It already has a **`damage-clipped`
+  scenario** clipping to 4 rows (the app's `incremental-mixed` uses 6), alongside
+  `full-frame`, across 80x24 and 160x50 grids.
+- **It already has the property D1 predicts matters.** `measureDurationStable`
+  auto-scales a batch until each sample exceeds 400 ms, then times whole batches.
+  The thread is ~100% occupied for the entire sample, so the governor never
+  demotes it -- the mechanism behind the whole regression is absent by
+  construction.
+- **Within-run precision is excellent:** per-draw CV across the 15 samples of a
+  run is **0.58-0.85%**, against the GUI benchmark's 17.41% per-draw CV.
+- **But raw between-run CV is 2.8-3.6%, which alone would not beat the GUI
+  benchmark.** Arms are separate processes, so a comparison sees the between-run
+  number, and 3% is exactly the effect size `confirm` must resolve. Measured
+  per-draw medians across six runs:
+
+  | cell | between-run CV | within-run CV |
+  | --- | --- | --- |
+  | 80x24 full-frame | 3.62% | 0.85% |
+  | 80x24 damage-clipped | 2.81% | 0.72% |
+  | 160x50 full-frame | 3.27% | 0.75% |
+  | 160x50 damage-clipped | 3.03% | 0.58% |
+
+- **The drift is common-mode, and that is the whole finding.** Every cell moves
+  together run to run -- run 4's four cells scaled 1.0897 / 1.0607 / 1.0689 /
+  1.0646, a single ~7% machine-state excursion, not four independent ones.
+  Dividing out one scale factor per run drops residual CV to **0.29-0.90%**, and
+  an in-run **ratio** does the same without needing to estimate anything:
+
+  | ratio | CV across 6 runs |
+  | --- | --- |
+  | 160x50 damage-clipped / full-frame | **0.256%** |
+  | 160x50 damage-clipped / 80x24 damage-clipped | 0.295% |
+  | 160x50 full-frame / 80x24 full-frame | 1.140% |
+  | 80x24 damage-clipped / full-frame | 1.357% |
+
+- **Design constraint, and it is not optional:** a headless comparison must be
+  **ratio-based within a single process**, or interleave both arms' batches in
+  one process. Comparing raw per-draw times across separately launched runs
+  inherits the 2.8-3.6% between-run drift and buys nothing. The GUI benchmark
+  cannot do this -- its arms are separate app processes -- which is precisely why
+  it cannot cancel the same drift.
+- **Prefer the large grid.** 160x50 ratios are 4-5x more stable than 80x24
+  (0.256% vs 1.357%), consistent with longer batches averaging more work per
+  sample. A production headless comparison should not use 80x24.
+- **Headroom against a damage-scoping regression is enormous.** The
+  damage-clipped/full-frame ratio at 160x50 is **0.0867** -- an 11.5x separation
+  measured with 0.256% CV. A regression that failed to narrow the plan would move
+  that ratio toward 1.0; even a 3% inflation of the clipped path is ~12 CV away.
+- **What it covers, and what it does not.** `clipFramePlan` is called once in
+  `PreparedDraw.init`, *outside* the timer, so:
+  - **Visible:** regressions in what `clipFramePlan` *produces* (retaining too
+    many rows inflates the drawn plan) and in `drawRenderFrame`'s cost.
+  - **Invisible:** the cost of `clipFramePlan` itself, which the app's draw timer
+    does bracket.
+  - **Invisible, and the more important gap:** *damage generation* -- which rows
+    get marked dirty via `setNeedsDisplay` and AppKit's dirty-rect coalescing.
+    Headless, the damage set is supplied by the harness. "The app dirties too
+    much" regressions stay GUI-only, so the GUI benchmark is not retired.
+- **Caveat:** six runs over ~4 minutes on one machine. The common-mode factor
+  drifted 0.983 -> 1.071 monotonically enough to look like warming, so the drift
+  itself is *not* solved -- it is made cancellable. Whether it stays common-mode
+  across a longer series, a rebuild, or two separately compiled arms is untested,
+  and two-arm interleaving is the specific thing that must be piloted next.
+
 ## Decision log
 
 ### D1 -- mechanism class: platform CPU frequency demotion of an under-occupied main thread
@@ -1936,13 +2159,201 @@ F15 (the ramp cancels in pairing) and F17 (removing it in collection hurts) --
 agree that **the ramp is a symptom, not the driver.** The quantity that breaks
 verdicts is block-to-block *level* variation (F16), and nothing tried moves it.
 
-**The recommended next action does not require answering that.** Recalibrating
-at higher pair counts restores the instrument with existing machinery: 48 pairs
-supports a 1.75% threshold, better than the frozen 1.85%, for ~4 minutes of
-collection. It buys precision with time instead of widening a threshold, so it
-satisfies the "no hacks" rule rather than evading it. See the handoff at the top
-of this file and Phase 6.
+**Recalibration was expected to route around that, and F20 shows it only half
+does.** Screened under each mode's real gates rather than an A/A false-positive
+rate alone, `quick` recovers cheaply -- 12 pairs supports 3.25%, tighter than the
+frozen 3.8%, for ~1.1 min. **`confirm` does not.** Its 3%-effect /
+detection >= 0.90 gate admits nothing below 100 pairs, and even there detection
+is 0.93 against a 0.90 floor on one session's data. Recalibration still buys
+precision with time rather than widening a threshold, so it satisfies the "no
+hacks" rule -- but it does not deliver a usable `confirm`, and `confirm` is the
+mode that decides damage-scoping changes at the effect size those changes live
+at.
 
-Finding what sets a block's level remains the open scientific question, and the
-headless in-process draw benchmark is the strategic answer if recalibration
-proves insufficient. Neither blocks restoring the instrument.
+That leaves the instrument **partially recoverable**: usable for coarse 5%
+screening, still unable to adjudicate a 3% change on `incremental-mixed`. Finding
+what sets a block's level remains the open scientific question. With
+recalibration now shown insufficient for `confirm`, the headless in-process draw
+benchmark is no longer merely the strategic fallback -- it is the only identified
+route back to a 3%-capable verdict on this workload.
+
+**F21 then showed that route is short.** The headless benchmark already exists,
+already has a damage-clipped scenario, and already runs at the ~100% occupancy
+that makes D1's mechanism inapplicable. Measured, it resolves **0.256%**
+ratio-wise -- an order of magnitude below the 3% `confirm` needs, against a
+regression signal with 11.5x of headroom. The catch is structural rather than
+mechanical: its between-run drift is as bad as the GUI benchmark's, and only
+cancels because a ratio taken inside one process cancels it. So the remaining
+work is not "make the measurement quieter" but "get both arms into one process",
+and the open risk is whether two separately compiled arms stay common-mode.
+
+That leaves a coherent division of labour to confirm: the headless benchmark
+adjudicates the cost of drawing a scoped plan at 3% and below, and the GUI
+benchmark keeps the part headless cannot see -- whether the app marks the right
+rows dirty in the first place.
+
+## Scratch
+
+**Ephemeral. Any agent may wipe this section, and a handoff should**, since
+scratch goes stale faster than anything else here. Nothing below is load-bearing:
+if a finding depends on it, that finding is under-documented -- promote the
+material to [Reproduction recipes](#reproduction-recipes) and delete it here.
+
+It exists because the alternative is worse. A private session scratchpad
+disappears at handoff, taking with it the drivers behind published numbers; F20
+is the case in point. Working material is cheaper to carry here and throw away
+than to reconstruct.
+
+Keep entries dated and attributed to the finding they served, so a later reader
+can tell live scaffolding from residue.
+
+### F20 driver -- pair-count screen under the real per-mode gates (2026-07-27)
+
+Superseded in spirit by the recipe in
+[Screening pair counts against the real gates](#screening-pair-counts-against-the-real-gates-f20s-readout),
+which carries the method and the validation requirement. This is the exact
+runnable form, kept only until someone needs the shape again.
+
+Usage: `python3 <file>.py <blocks.json> [workload] [trials]`. Validate against
+the 2026-07-24 reference before trusting a run: it must reproduce `quick` first
+eligible at 2 pairs and `confirm` at 6.
+
+```python
+#!/usr/bin/env python3
+"""Re-derive the Phase 6 pair-count/threshold table using the REPO's calibration
+machinery instead of the prior session's ad-hoc bootstrap.
+
+Loads a single-arm blocks.json (ABBA quartets, both slots bound to one root) into
+the same quartet-of-two-paired-differences form load_quartets() produces from a
+production JSONL series, then runs calibrate_threshold_grid at each pair count.
+"""
+import importlib.util
+import json
+import pathlib
+import sys
+
+ROOT = pathlib.Path("/Users/dan/Code/danterm-terminal-engine")
+spec = importlib.util.spec_from_file_location(
+    "cal", ROOT / "scripts/terminal-benchmark-calibration.py")
+CAL = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(CAL)
+
+PAIR_COUNTS = (2, 4, 6, 8, 12, 16, 24, 32, 40, 48, 64, 80, 100)
+
+
+def load_single_arm_quartets(path, workload):
+    """Mirror load_quartets() exactly, over the single-arm blocks.json shape."""
+    data = json.load(open(path))[workload]
+    quartets = []
+    for group in data:
+        if len(group) != 4:
+            raise ValueError("incomplete quartet")
+        if sorted(b["measurementRole"] for b in group) != ["A", "A", "B", "B"]:
+            raise ValueError("quartet is not two A and two B")
+        differences = []
+        for first, second in zip(group[::2], group[1::2]):
+            if first["measurementRole"] == second["measurementRole"]:
+                raise ValueError("adjacent pair shares a role")
+            values = {}
+            for row in (first, second):
+                draw = row["artifact"]["finalDraw"]
+                values[row["measurementRole"]] = (
+                    draw["cumulativeDrawNanoseconds"] / draw["drawCount"])
+            differences.append(CAL.symmetric_difference(values["A"], values["B"]))
+        quartets.append(differences)
+    return quartets
+
+
+# Same gates the frozen median-fallback screen applies.
+MODES = {
+    "quick": dict(effect=5, band=1.0, detect=0.80, nondir=0.20, wrong=0.05,
+                  grid=tuple(round(1.05 + 0.05 * i, 2) for i in range(70))),
+    "confirm": dict(effect=3, band=0.75, detect=0.90, nondir=0.10, wrong=0.05,
+                    grid=tuple(round(0.80 + 0.05 * i, 2) for i in range(35))),
+}
+
+
+def eligible(report, rule):
+    effects = (report["conditions"]["positive"], report["conditions"]["negative"])
+    return (report["conditions"]["aa"]["falsePositiveRate"] <= 0.05
+            and all(c["detectionRate"] >= rule["detect"]
+                    and c["inconclusiveRate"] <= rule["nondir"]
+                    and c["wrongDirectionRate"] <= rule["wrong"]
+                    for c in effects))
+
+
+def screen(quartets, mode, trials, seed_base, seconds_per_pair):
+    rule = MODES[mode]
+    rows = []
+    for index, count in enumerate(PAIR_COUNTS):
+        reports = CAL.calibrate_threshold_grid(
+            quartets, pair_count=count, effect_percent=rule["effect"],
+            directional_thresholds=rule["grid"], equivalence_band=rule["band"],
+            trial_count=trials, seed=seed_base + index, estimator="median")
+        ok = [r for r in reports if eligible(r, rule)]
+        if not ok:
+            rows.append((count, None, None, None))
+            continue
+        best = min(ok, key=lambda r: (r["directionalThresholdPercent"],
+                                      r["conditions"]["aa"]["falsePositiveRate"]))
+        rows.append((count, best["directionalThresholdPercent"],
+                     best["conditions"]["positive"]["detectionRate"],
+                     count * seconds_per_pair))
+    return rows
+
+
+if __name__ == "__main__":
+    path = sys.argv[1]
+    workload = sys.argv[2] if len(sys.argv) > 2 else "incremental-mixed"
+    trials = int(sys.argv[3]) if len(sys.argv) > 3 else 4000
+    quartets = load_single_arm_quartets(path, workload)
+    flat = [v for q in quartets for v in q]
+    import statistics as st
+    print(f"source: {path}")
+    print(f"workload: {workload}  quartets={len(quartets)} pairs={len(flat)}")
+    print(f"paired SD = {st.pstdev(flat):.2f}%   median |diff| = "
+          f"{st.median(abs(v) for v in flat):.2f}%")
+    # Per-block seconds observed this session; used only for the wall-clock column.
+    seconds_per_pair = 2 * 2.7
+    for mode in ("quick", "confirm"):
+        print(f"\n== {mode} (effect {MODES[mode]['effect']}%, "
+              f"detect>={MODES[mode]['detect']}, A/A FP<=5%) ==")
+        print(f"{'pairs':>6} {'min threshold':>14} {'detect':>8} {'wall (min)':>11}")
+        # Fixed per-mode seed offset: hash() on a str is randomized per process,
+        # so using it here would make the screen unreproducible run to run.
+        for count, threshold, detect, wall in screen(
+                quartets, mode, trials,
+                90_000 + (0 if mode == "quick" else 10_000), seconds_per_pair):
+            if threshold is None:
+                print(f"{count:>6} {'-- none eligible':>14}")
+            else:
+                print(f"{count:>6} {threshold:>13.2f}% {detect:>8.2f} "
+                      f"{wall/60:>11.1f}")
+```
+
+### F21 raw pilot -- headless draw benchmark, six runs (2026-07-27)
+
+Runs preserved at `~/danterm-benchmark-evidence/2026-07-27/headless-draw-pilot/`
+(`draw-run-1..6.json`). Regenerate with the release binary, not `swift run`:
+
+```sh
+BIN=$(swift build --package-path lib/TerminalCore -c release \
+  --product TerminalDrawBenchmark --show-bin-path)/TerminalDrawBenchmark
+for i in 1 2 3 4 5 6; do "$BIN" 15 > draw-run-$i.json; done
+```
+
+Per-draw medians (us). The point is the *columns moving together*, which is what
+makes an in-run ratio work:
+
+| run | 80x24 full | 80x24 clipped | 160x50 full | 160x50 clipped | scale |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 3605.5 | 714.7 | 15182.6 | 1316.4 | 0.987 |
+| 2 | 3593.9 | 713.5 | 15075.2 | 1311.2 | 0.983 |
+| 3 | 3627.6 | 713.7 | 15215.9 | 1319.1 | 0.989 |
+| 4 | 3952.3 | 769.0 | 16501.7 | 1424.0 | **1.071** |
+| 5 | 3626.1 | 735.3 | 15659.8 | 1356.2 | 1.011 |
+| 6 | 3816.8 | 745.4 | 15988.3 | 1381.4 | 1.037 |
+
+Analysis: divide each cell by its column median to get a per-run scale factor,
+then take ratios within a run. Residual CV after removing the scale factor is
+0.29-0.90%; the 160x50 clipped/full ratio is 0.256% without removing anything.
