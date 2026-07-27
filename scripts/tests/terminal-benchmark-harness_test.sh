@@ -51,7 +51,7 @@ grep -q 'geometry' "$PROFILE"
 grep -q 'profile-command.txt' "$PROFILE"
 grep -q 'get-task-allow' "$ROOT/scripts/terminal-benchmark-entitlements.plist"
 grep -q 'DANTERM_BENCHMARK_BUNDLE_SUFFIX' "$HARNESS"
-grep -q '""|.a|.b|.bystander' "$HARNESS"
+grep -q '""|.a|.b|.bystander|.isolation' "$HARNESS"
 grep -q 'DANTERM_BENCHMARK_PHASE_LOG' "$HARNESS"
 grep -q 'record_phase "build-start"' "$HARNESS"
 grep -q 'record_phase "build-complete"' "$HARNESS"
@@ -82,6 +82,32 @@ grep -q 'observeTitle(title)' "$ROOT/app/SwiftTerminalSessionView.swift"
 grep -q 'pendingRedrawSequence' "$ROOT/app/TerminalBenchmark.swift"
 grep -q 'profilesIncrementalMixedDamage ? 6 : plan.rows' "$ROOT/app/TerminalBenchmark.swift"
 grep -q 'reopenCompletedBlockIfRequested' "$ROOT/app/TerminalBenchmark.swift"
+# A block is opened only by a marker the frame itself wrote, and re-armed only
+# in the mode that reuses one app across blocks. A reused app keeps the previous
+# block's start, completion, and final-state markers standing on screen, so a
+# whole-plan scan let an unrelated frame open and instantly complete a block
+# nobody had started -- and the mode gate is what keeps the file checks off the
+# fresh-app workloads that measure the PTY-output path end to end.
+grep -q 'limitedToRows: damage.isFull ? nil : damage.rows' "$ROOT/app/TerminalBenchmark.swift"
+grep -q 'damage: frame.damage' "$ROOT/app/SwiftTerminalSessionView.swift"
+grep -q 'requiresSettlingDraw == false || observedSettlingDraw' "$ROOT/app/TerminalBenchmark.swift"
+grep -q 'DANTERM_BENCHMARK_MODE"\] == "persistent"' "$ROOT/app/TerminalBenchmark.swift"
+# The two block-boundary probes run once per published frame of an open block,
+# on the PTY-output path: they stay on `access` over a pre-encoded path.
+grep -q 'access($0.baseAddress!, F_OK)' "$ROOT/app/TerminalBenchmark.swift"
+if grep -q 'FileManager.default.fileExists' "$ROOT/app/TerminalBenchmark.swift"; then
+    echo "block-boundary probes must not take the FileManager path" >&2
+    exit 1
+fi
+grep -q 'DANTERM_BENCHMARK_MODE="$MODE"' "$HARNESS"
+# The producer's result is the one artifact a reader parses that the app does
+# not write atomically; `open(..., "w")` would publish a truncated file that
+# exists but cannot be parsed.
+grep -q 'os.replace(temporary, output)' "$PRODUCER"
+if grep -q 'open(output, "w"' "$PRODUCER"; then
+    echo "producer result must be published atomically, not truncated in place" >&2
+    exit 1
+fi
 # The plan timer must stay at its source and stay separate from the draw timer:
 # planning runs on the PTY-output path, so folding it into drawDurationNanoseconds
 # would redefine the calibrated decision metric instead of adding to it.

@@ -238,6 +238,61 @@ struct TerminalBenchmarkMarkersTests {
         #expect(planned == fromText)
     }
 
+    @Test("a row-limited scan sees only the rows the frame changed")
+    func rowLimitedScanSeesOnlyChangedRows() throws {
+        // Intent: `scan(_ plan:limitedToRows:)` reports only markers standing in
+        //   the rows it is given, and reports every marker when given none.
+        // Why it exists: a render plan carries the whole viewport, including
+        //   rows a frame did not touch, so scanning all of it makes a marker
+        //   left on screen by an earlier producer indistinguishable from one the
+        //   current frame just wrote. Limiting the scan to the damaged rows is
+        //   what makes "this frame wrote a marker" expressible at all.
+        // Scenario: a screen still showing a finished block's start marker, on
+        //   which a later frame changes one unrelated row -- the state that made
+        //   an idle benchmark app open a block nobody had started.
+        var terminal = try #require(Terminal(columns: 48, rows: 4))
+        terminal.feed(Array("\(Self.start)\r\nsecond\r\nthird\r\nfourth".utf8))
+        let plan = planFrame(
+            for: terminal,
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: false,
+                cursorShape: .block
+            )
+        )
+
+        var scanner = makeScanner()
+        #expect(scanner.scan(plan, limitedToRows: [2]).containsStartMarker == false)
+        #expect(scanner.scan(plan, limitedToRows: [0, 2]).containsStartMarker)
+        #expect(scanner.scan(plan, limitedToRows: []).containsStartMarker == false)
+        #expect(scanner.scan(plan, limitedToRows: nil) == scanner.scan(plan))
+        #expect(scanner.scan(plan, limitedToRows: nil).containsStartMarker)
+    }
+
+    @Test("a row-limited scan cannot match a marker across the rows it skipped")
+    func rowLimitedScanDoesNotMatchAcrossSkippedRows() throws {
+        // Intent: rows excluded from a limited scan leave a run separator behind
+        //   them, exactly as excluded-by-absence rows do in a full scan.
+        // Why it exists: the scan's text is defined as the runs joined by "\n",
+        //   and that definition is what stops a marker from being found across a
+        //   row boundary. Dropping rows by splicing their neighbors together
+        //   would invent adjacencies the screen never had.
+        var scanner = makeScanner()
+        let halves = ["DANTERM-BENCH-", "unrelated", "START-4242"]
+        var terminal = try #require(Terminal(columns: 48, rows: 3))
+        terminal.feed(Array(halves.joined(separator: "\r\n").utf8))
+        let plan = planFrame(
+            for: terminal,
+            presentation: RenderPresentation(
+                theme: .dark,
+                isCursorVisible: false,
+                cursorShape: .block
+            )
+        )
+
+        #expect(scanner.scan(plan, limitedToRows: [0, 2]).containsStartMarker == false)
+    }
+
     @Test("scanning accepts lazily flattened runs without materializing them")
     func scanningAcceptsLazilyFlattenedRuns() {
         // Intent: the generic signature admits the shape the observer actually

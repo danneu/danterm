@@ -112,6 +112,118 @@ def bystander_app(output):
         log.close()
 
 
+@contextlib.contextmanager
+def persistent_arm(output, workload, name, suffix):
+    """Run one persistent benchmark app the caller drives block by block."""
+    output.mkdir(parents=True, exist_ok=True)
+    identity_path = output / f"{name}-identity.json"
+    identity_path.unlink(missing_ok=True)
+    environment = dict(os.environ)
+    environment.update({
+        "DANTERM_BENCHMARK_MODE": "persistent",
+        "DANTERM_BENCHMARK_BUNDLE_SUFFIX": suffix,
+        "DANTERM_BENCHMARK_IDENTITY_PATH": str(identity_path),
+        "DANTERM_TERMINAL_BENCHMARK_COLUMNS": str(VALIDATION.CANONICAL_GEOMETRY["columns"]),
+        "DANTERM_TERMINAL_BENCHMARK_ROWS": str(VALIDATION.CANONICAL_GEOMETRY["rows"]),
+        "DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES": "50",
+    })
+    log = (output / f"{name}-harness.log").open("w", encoding="utf-8")
+    process = subprocess.Popen(
+        [str(ROOT / "scripts" / "terminal-benchmark.sh"), workload, "swift"],
+        cwd=ROOT,
+        env=environment,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        _wait_for_path(identity_path, timeout_seconds=600)
+        yield json.loads(identity_path.read_text())
+    finally:
+        if process.poll() is None:
+            process.send_signal(signal.SIGINT)
+            try:
+                process.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
+        log.close()
+
+
+def check_block_isolation(output):
+    """A block abandoned mid-flight must leave the next block in the same app clean.
+
+    The harness reuses one app across blocks and signals a new block only by
+    deleting that block's artifacts, so every piece of block state the app holds
+    -- start timestamp, acknowledged sequences, settling evidence -- has to be
+    re-armed on that signal alone. A block that ends without a final draw is the
+    case that exercises it, and no collection-level test can reach it: the
+    collectors only ever drive blocks that complete. `app/` has no test target,
+    so this is the only automated proof that the re-arm happens.
+    """
+    failures = []
+    workload = "full-screen-incremental-mixed-churn"
+    with persistent_arm(output, workload, "isolation", ".isolation") as identity:
+        artifacts = pathlib.Path(identity["artifacts"])
+        run_block = VALIDATION.make_persistent_draw_runner(
+            {"a": identity, "b": identity}, workload=workload, root=ROOT
+        )
+        settled = run_block("a")
+        if settled["finalDraw"].get("drawCount") != 50:
+            failures.append(
+                "block isolation: the app could not complete a plain block first"
+            )
+            return failures
+
+        # Abandon a block after the app has opened it: start a producer, wait
+        # for the app's start acknowledgment, then kill the producer before it
+        # can reach a final draw.
+        pane = VALIDATION._persistent_pane(identity)
+        for name in ("start-ack", "start-draw-ack", "ready-draw-ack",
+                     "final-draw.json", "block-state.json", "producer-write.json"):
+            (artifacts / name).unlink(missing_ok=True)
+        for path in artifacts.glob("localized-draw-*"):
+            path.unlink()
+        command = (
+            "DANTERM_BENCHMARK_MODE=measure "
+            "DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES=50 "
+            f"python3 {ROOT / 'scripts' / 'terminal-benchmark-producer.py'}"
+        )
+        VALIDATION._send_persistent_input(identity, pane, ["--literal", "--", command])
+        VALIDATION._send_persistent_input(identity, pane, ["--", "Enter"])
+        try:
+            _wait_for_path(artifacts / "start-ack", timeout_seconds=60)
+        except TimeoutError:
+            failures.append("block isolation: the abandoned block never opened")
+            return failures
+        VALIDATION._send_persistent_input(identity, pane, ["--", "C-c"])
+        time.sleep(1)
+
+        recovered = run_block("a")
+        evidence = recovered["resetEvidence"]
+        if not evidence.get("denseSetupAndStartDrawCompleted"):
+            failures.append(
+                "block isolation: the block after an abandoned one produced no "
+                "fresh start acknowledgment"
+            )
+        if not evidence.get("settlingDrawCompleted"):
+            failures.append(
+                "block isolation: the block after an abandoned one produced no "
+                "fresh settling acknowledgment"
+            )
+        if recovered["finalDraw"].get("drawCount") != 50:
+            failures.append(
+                "block isolation: the block after an abandoned one acknowledged "
+                f"{recovered['finalDraw'].get('drawCount')} draws, not 50"
+            )
+        if recovered["producerWrite"].get("event") != "producer-final-write-returned":
+            failures.append(
+                "block isolation: the block after an abandoned one did not reach "
+                f"its producer result: {recovered['producerWrite']}"
+            )
+    return failures
+
+
 def owned_app_pids(evidence):
     """Collect every app process the measured blocks reported as their own."""
     pids = set()
@@ -192,6 +304,8 @@ def run_contract(workloads, output):
         failures = check_ownership(evidence, bystander["pid"])
     failures.extend(check_geometry(evidence))
     failures.extend(check_containment(evidence))
+    if "incremental-mixed" in workloads:
+        failures.extend(check_block_isolation(output))
     failures.extend(
         f"invalid block evidence: {reason}"
         for reason in evidence["invalidationReasons"]

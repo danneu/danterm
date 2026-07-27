@@ -3,6 +3,7 @@
 // consumed by draw without adding hooks to TerminalCore.
 import Cocoa
 import TerminalBenchmarkMarkers
+import TerminalCore
 import TerminalRenderExecution
 import TerminalRenderPlanning
 
@@ -224,9 +225,18 @@ final class TerminalBenchmarkObserver {
     private let localizedDrawAcknowledgmentPrefix: String?
     private let resultPath: String
     private let profilesIncrementalMixedDamage: Bool
+    /// True when the producer sends a settling frame before its measured draws.
+    private let requiresSettlingDraw: Bool
+    /// True when one app serves many blocks and must re-arm between them.
+    private let reusesBlocks: Bool
+    /// The two block-boundary paths, encoded once: they are probed on every
+    /// published frame of an open block.
+    private let resultPathBytes: [CChar]
+    private let startAcknowledgmentPathBytes: [CChar]
     private var startNanoseconds: UInt64?
     private var completed = false
     private var localizedSequences = Set<Int>()
+    private var observedSettlingDraw = false
     private var localizedDrawDurations: [UInt64] = []
     private var localizedDirtyRowCounts: [Int] = []
     /// Planning cost published since the last accepted draw, and how many
@@ -273,6 +283,15 @@ final class TerminalBenchmarkObserver {
         self.profilesIncrementalMixedDamage =
             environment["DANTERM_TERMINAL_BENCHMARK_WORKLOAD"]
                 == "full-screen-incremental-mixed-churn"
+        let updateCount = { (name: String) in
+            environment[name].flatMap(Int.init) ?? 0
+        }
+        self.requiresSettlingDraw =
+            updateCount("DANTERM_TERMINAL_BENCHMARK_LOCALIZED_UPDATES") > 0
+            || updateCount("DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES") > 0
+        self.reusesBlocks = environment["DANTERM_BENCHMARK_MODE"] == "persistent"
+        self.resultPathBytes = resultPath.utf8CString.map { $0 }
+        self.startAcknowledgmentPathBytes = startAcknowledgmentPath.utf8CString.map { $0 }
     }
 
     /// Records the app-side observation before a newly parsed frame becomes drawable.
@@ -280,7 +299,13 @@ final class TerminalBenchmarkObserver {
     /// `planDurationNanoseconds` is the cost of the `planFrame` call that produced
     /// this plan. It is collected here because planning happens on the PTY-output
     /// path, outside the draw timer that produces `drawDurationNanoseconds`.
-    func observePublishedFrame(_ plan: RenderFramePlan, planDurationNanoseconds: UInt64 = 0) {
+    /// `damage` is the frame's own changed rows. It is what separates a marker
+    /// this frame wrote from one an earlier block left standing on the screen.
+    func observePublishedFrame(
+        _ plan: RenderFramePlan,
+        damage: TerminalDamage,
+        planDurationNanoseconds: UInt64 = 0
+    ) {
         reopenCompletedBlockIfRequested()
         if startNanoseconds != nil, completed == false {
             pendingPlanNanoseconds += planDurationNanoseconds
@@ -294,20 +319,39 @@ final class TerminalBenchmarkObserver {
         // there is nothing on this path a scan could still decide, and the
         // publish path sees every parsed frame, not just the drawn ones.
         guard startNanoseconds == nil else { return }
-        guard scanMarkers(plan).containsStartMarker else { return }
+        // Only the rows this frame changed can open a block. A plan carries the
+        // whole viewport, and a finished block leaves its start marker standing
+        // on the screen -- so scanning the whole plan let an unrelated frame
+        // (the harness echoing the next block's command) re-detect the previous
+        // block's marker and open a block no producer had started.
+        guard scanMarkers(plan, damage: damage).containsStartMarker else { return }
         startNanoseconds = DispatchTime.now().uptimeNanoseconds
         stateRecorder?.beginBlock()
         writeAcknowledgment(atPath: startAcknowledgmentPath)
     }
 
+    /// Ends whatever block is open when the harness deletes that block's
+    /// artifacts, which is the only new-block signal a reused app receives.
+    ///
+    /// Not gated on `completed`: a block that ends *without* a final draw would
+    /// otherwise strand its start timestamp and sequence sets into the next
+    /// block, which then fails too. Reached only in the persistent mode that
+    /// reuses one app across blocks -- a fresh-app run measures a single block
+    /// and never re-arms, so it pays nothing for this.
+    ///
+    /// Ungating it from `completed` is what puts these two probes on every
+    /// published frame of an open block, which is the PTY-output path -- so they
+    /// use `access` over a pre-encoded path rather than
+    /// `FileManager.fileExists`, which would build an `NSString` and take the
+    /// slower `stat` route once per frame for the same answer.
     private func reopenCompletedBlockIfRequested() {
-        guard completed,
-              FileManager.default.fileExists(atPath: resultPath) == false,
-              FileManager.default.fileExists(atPath: startAcknowledgmentPath) == false
+        guard reusesBlocks, completed || startNanoseconds != nil,
+              isAbsent(resultPathBytes), isAbsent(startAcknowledgmentPathBytes)
         else { return }
         startNanoseconds = nil
         completed = false
         localizedSequences = []
+        observedSettlingDraw = false
         localizedDrawDurations = []
         localizedDirtyRowCounts = []
         pendingPlanNanoseconds = 0
@@ -349,6 +393,7 @@ final class TerminalBenchmarkObserver {
         if markers.containsLocalizedReady,
            let readyDrawAcknowledgmentPath
         {
+            observedSettlingDraw = true
             writeAcknowledgment(atPath: readyDrawAcknowledgmentPath)
         }
         if let sequence = markers.localizedSequence,
@@ -385,6 +430,12 @@ final class TerminalBenchmarkObserver {
             }
         }
         guard markers.containsCompletionMarker, markers.containsExpectedFinalState else { return }
+        // A settling workload draws its settling frame before anything it
+        // measures, so a completion that arrives first cannot belong to this
+        // block: it is the previous block's completion text still on the
+        // screen. Accepting it would close the block before the producer's
+        // first write and strand every later acknowledgment.
+        guard requiresSettlingDraw == false || observedSettlingDraw else { return }
         completed = true
         let elapsed = DispatchTime.now().uptimeNanoseconds - startNanoseconds
         var object: [String: Any] = [
@@ -415,6 +466,12 @@ final class TerminalBenchmarkObserver {
         } catch {
             print("[benchmark] Failed to write final-draw result: \(error)")
         }
+    }
+
+    /// Reports whether one pre-encoded path is absent, at the cost of a single
+    /// syscall and no allocation.
+    private func isAbsent(_ path: [CChar]) -> Bool {
+        path.withUnsafeBufferPointer { access($0.baseAddress!, F_OK) != 0 }
     }
 
     /// Creates the empty file the producer is blocking on, as cheaply as the
@@ -455,6 +512,15 @@ final class TerminalBenchmarkObserver {
     /// never reorder anything.
     private func scanMarkers(_ plan: RenderFramePlan) -> TerminalBenchmarkMarkerScan {
         markerScanner.scan(plan)
+    }
+
+    /// Scans only what this frame changed, so a marker left standing by an
+    /// earlier block cannot answer for the current one.
+    private func scanMarkers(
+        _ plan: RenderFramePlan,
+        damage: TerminalDamage
+    ) -> TerminalBenchmarkMarkerScan {
+        markerScanner.scan(plan, limitedToRows: damage.isFull ? nil : damage.rows)
     }
 
     private func dirtyRowCount(

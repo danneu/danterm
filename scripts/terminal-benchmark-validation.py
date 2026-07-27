@@ -796,6 +796,20 @@ def _wait_for_path(path, timeout_seconds=30, abort_if=None):
         time.sleep(0.02)
 
 
+def _read_block_artifact(path, wait_for_path):
+    """Read one block artifact, turning an expired wait into recorded evidence.
+
+    The caller's contract is that an unreadable artifact invalidates its block,
+    not that it aborts the invocation -- so the absence is returned in the shape
+    the block assertions already judge.
+    """
+    try:
+        wait_for_path(path)
+    except TimeoutError:
+        return {"waitExpired": str(path)}
+    return json.loads(path.read_text())
+
+
 def _persistent_cli(identity, *arguments):
     """Address only the isolated app described by a persistent harness identity."""
     binary = pathlib.Path(identity["binary"])
@@ -1023,10 +1037,14 @@ def make_persistent_draw_runner(
 
         result_path = artifacts / "final-draw.json"
         producer_path = artifacts / "producer-write.json"
-        wait_for_path(result_path)
-        wait_for_path(producer_path)
-        draw = json.loads(result_path.read_text())
-        producer = json.loads(producer_path.read_text())
+        # An expired wait means the app or the producer stopped answering, which
+        # is exactly the failure the block's evidence exists to explain. Raising
+        # here would discard every other block in the invocation along with it,
+        # so the artifact records the absence instead: `available: false` fails
+        # `missing-final-completed-draw`, and an absent producer result fails
+        # `missing-producer-write`, so the block is still invalid either way.
+        draw = _read_block_artifact(result_path, wait_for_path)
+        producer = _read_block_artifact(producer_path, wait_for_path)
         return {
             "schemaVersion": 1,
             "backend": "swift",
@@ -1042,7 +1060,7 @@ def make_persistent_draw_runner(
                     (artifacts / "ready-draw-ack").exists(),
             },
             "producerWrite": producer,
-            "finalDraw": {**draw, "available": True},
+            "finalDraw": {**draw, "available": "waitExpired" not in draw},
         }
 
     return run

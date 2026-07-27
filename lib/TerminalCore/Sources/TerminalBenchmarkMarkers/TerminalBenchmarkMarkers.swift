@@ -102,11 +102,29 @@ public struct TerminalBenchmarkMarkerScanner {
     /// building it replaced. Keeping the traversal on this side of the module
     /// boundary is what makes it fast.
     public mutating func scan(_ plan: RenderFramePlan) -> TerminalBenchmarkMarkerScan {
+        scan(plan, limitedToRows: nil)
+    }
+
+    /// Scans one planned frame, optionally restricted to a set of viewport rows.
+    ///
+    /// A plan carries the whole viewport, so a marker an earlier producer left
+    /// on screen reads exactly like one the current frame wrote. Passing the
+    /// frame's damaged rows is what lets a caller ask the narrower question --
+    /// "did *this* frame write the marker" -- which is the only question with a
+    /// safe answer when one app serves many blocks. `nil` scans everything.
+    ///
+    /// Skipped rows still contribute their run separator, so the scanned text
+    /// never splices two rows into an adjacency the screen did not have.
+    public mutating func scan(
+        _ plan: RenderFramePlan,
+        limitedToRows rows: Set<Int>?
+    ) -> TerminalBenchmarkMarkerScan {
         buffer.removeAll(keepingCapacity: true)
         var needsSeparator = false
         for run in plan.textRuns {
             if needsSeparator { buffer.append("\n") }
             needsSeparator = true
+            guard rows == nil || rows!.contains(run.row) else { continue }
             for cell in run.cells {
                 buffer.append(contentsOf: cell.scalars)
             }

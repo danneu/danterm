@@ -2,6 +2,7 @@
 """Gate on target PTY geometry, then emit and time one deterministic workload."""
 import json
 import os
+import tempfile
 import time
 from pathlib import Path
 
@@ -208,6 +209,27 @@ def run_workload(
         await_draw_result()
 
 
+def write_json_result(output, payload):
+    """Publish one producer result so its existence implies its completeness.
+
+    The harness waits on `producer-write.json` existing and then parses it, and
+    the app writes `final-draw.json` concurrently -- so a destination truncated
+    by `open(..., "w")` before `json.dump` returns is a readable empty file. The
+    temporary is created in the destination's own directory because `os.replace`
+    is only atomic within one filesystem, and a serialization that raises must
+    leave the destination absent or its previous content intact.
+    """
+    directory = os.path.dirname(output) or "."
+    descriptor, temporary = tempfile.mkstemp(dir=directory, prefix=".producer-result-")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, sort_keys=True)
+        os.replace(temporary, output)
+    except BaseException:
+        os.unlink(temporary)
+        raise
+
+
 def wait_for_path(path, timeout_message):
     """Wait for one app-side benchmark acknowledgment with a bounded timeout."""
     deadline = time.monotonic() + 20
@@ -215,6 +237,31 @@ def wait_for_path(path, timeout_message):
         if time.monotonic() >= deadline:
             raise SystemExit(timeout_message)
         time.sleep(0.005)
+
+
+class AcknowledgmentLog:
+    """Record which app-side acknowledgments a block reached before it gave up.
+
+    A timeout message names only the acknowledgment that never arrived, which
+    reads the same whether the block never started or stalled after 49 draws.
+    The recorded set is what makes the two distinguishable in the run evidence.
+    """
+
+    def __init__(self, wait=None):
+        self.observed = []
+        self.awaiting = None
+        self._wait = wait if wait is not None else wait_for_path
+
+    def await_path(self, label, path, timeout_message):
+        """Block on one acknowledgment, leaving the label recorded either way."""
+        self.awaiting = label
+        self._wait(path, timeout_message)
+        self.observed.append(label)
+        self.awaiting = None
+
+    def evidence(self):
+        """Report the acknowledgments observed and the one still outstanding."""
+        return {"observed": list(self.observed), "awaiting": self.awaiting}
 
 
 def main():
@@ -254,14 +301,14 @@ def main():
     ).encode()
 
     def write_result(elapsed, geometry):
-        with open(output, "w", encoding="utf-8") as stream:
-            json.dump({
-                "clock": "python-monotonic-nanoseconds",
-                "elapsedNanoseconds": elapsed,
-                "event": "producer-final-write-returned",
-                "geometry": {"columns": geometry.columns, "rows": geometry.lines},
-            }, stream, sort_keys=True)
+        write_json_result(output, {
+            "clock": "python-monotonic-nanoseconds",
+            "elapsedNanoseconds": elapsed,
+            "event": "producer-final-write-returned",
+            "geometry": {"columns": geometry.columns, "rows": geometry.lines},
+        })
 
+    acknowledgments = AcknowledgmentLog()
     try:
         if localized_update_count > 0 or redraw_update_count > 0:
             achieved = wait_for_target_geometry(
@@ -288,15 +335,19 @@ def main():
                         target.lines,
                     ),
                 )
-            wait_for_path(
-                start_ack, "timed out waiting for app-side start-marker observation"
+            acknowledgments.await_path(
+                "start-ack",
+                start_ack,
+                "timed out waiting for app-side start-marker observation",
             )
-            wait_for_path(
+            acknowledgments.await_path(
+                "start-draw-ack",
                 environment["DANTERM_TERMINAL_BENCHMARK_START_DRAW_ACK"],
                 "timed out waiting for start frame draw",
             )
             write_all(1, localized_draw_ready(max(1, target.lines // 2)))
-            wait_for_path(
+            acknowledgments.await_path(
+                "ready-draw-ack",
                 environment["DANTERM_TERMINAL_BENCHMARK_READY_DRAW_ACK"],
                 "timed out waiting for localized settling draw",
             )
@@ -304,7 +355,8 @@ def main():
             acknowledgment_prefix = environment[
                 "DANTERM_TERMINAL_BENCHMARK_LOCALIZED_DRAW_ACK_PREFIX"
             ]
-            await_draw = lambda sequence: wait_for_path(
+            await_draw = lambda sequence: acknowledgments.await_path(
+                f"localized-draw-{sequence:06d}",
                 f"{acknowledgment_prefix}-{sequence:06d}",
                 f"timed out waiting for completed draw {sequence}",
             )
@@ -324,7 +376,11 @@ def main():
                 )
             write_all(1, completion)
             write_result(time.monotonic_ns() - started, achieved)
-            wait_for_path(draw_result, "timed out waiting for final draw acknowledgment")
+            acknowledgments.await_path(
+                "final-draw",
+                draw_result,
+                "timed out waiting for final draw acknowledgment",
+            )
             return
 
         run_workload(
@@ -336,11 +392,15 @@ def main():
             sleep=time.sleep,
             write=lambda chunk: write_all(1, chunk),
             workload_chunks=lambda: iter_bytes(root, workload),
-            await_start_ack=lambda: wait_for_path(
-                start_ack, "timed out waiting for app-side start-marker observation"
+            await_start_ack=lambda: acknowledgments.await_path(
+                "start-ack",
+                start_ack,
+                "timed out waiting for app-side start-marker observation",
             ),
-            await_draw_result=lambda: wait_for_path(
-                draw_result, "timed out waiting for final draw acknowledgment"
+            await_draw_result=lambda: acknowledgments.await_path(
+                "final-draw",
+                draw_result,
+                "timed out waiting for final draw acknowledgment",
             ),
             acknowledge_geometry=lambda: Path(geometry_ready).touch(),
             write_result=write_result,
@@ -349,8 +409,10 @@ def main():
             completion=completion,
         )
     except SystemExit as error:
-        with open(output, "w", encoding="utf-8") as stream:
-            json.dump({"error": str(error)}, stream, sort_keys=True)
+        write_json_result(output, {
+            "error": str(error),
+            "acknowledgments": acknowledgments.evidence(),
+        })
         raise
 
 

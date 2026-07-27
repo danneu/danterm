@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Behavioral tests for benchmark geometry gating and timing order."""
 import importlib.util
+import json
 import os
 import pathlib
 import re
 import sys
+import tempfile
 import unittest
+import unittest.mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -217,6 +220,90 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
                     self.assertLess(events.index("clock"), events.index(payload_write))
                 else:
                     self.assertNotIn("clock", events)
+
+    def test_acknowledgment_log_names_what_was_seen_and_what_it_gave_up_on(self):
+        # Intent: when a wait for an app-side acknowledgment expires, the log
+        #   says which acknowledgments had already arrived and which one it was
+        #   still waiting for.
+        # Why it exists: a lost acknowledgment used to be reported only as
+        #   "timed out waiting for <x>", which cannot distinguish a block that
+        #   never started from one that stalled midway. The recorded set is the
+        #   evidence that tells those apart in `run.json`.
+        awaited = []
+
+        def wait(path, timeout_message):
+            awaited.append(path)
+            if len(awaited) == 3:
+                raise SystemExit(timeout_message)
+
+        log = PRODUCER.AcknowledgmentLog(wait=wait)
+        log.await_path("start-ack", "/artifacts/start-ack", "no start")
+        log.await_path("start-draw-ack", "/artifacts/start-draw-ack", "no start draw")
+
+        self.assertEqual(log.evidence(), {
+            "observed": ["start-ack", "start-draw-ack"],
+            "awaiting": None,
+        })
+
+        with self.assertRaisesRegex(SystemExit, "no settling draw"):
+            log.await_path("ready-draw-ack", "/artifacts/ready-draw-ack", "no settling draw")
+
+        self.assertEqual(log.evidence(), {
+            "observed": ["start-ack", "start-draw-ack"],
+            "awaiting": "ready-draw-ack",
+        })
+
+    def test_result_write_leaves_no_temporary_and_lands_in_the_destination_directory(self):
+        # Intent: a successful result write publishes the payload at the
+        #   destination and leaves the directory otherwise exactly as it was.
+        # Why it exists: `os.replace` is only atomic within one filesystem, so
+        #   the temporary has to be created in the destination's own directory;
+        #   a temporary written to TMPDIR would silently degrade to a copy that
+        #   can tear. This pins the precondition the atomicity claim rests on.
+        with tempfile.TemporaryDirectory() as directory:
+            destination = pathlib.Path(directory) / "producer-write.json"
+            observed = []
+            real_replace = os.replace
+
+            def spy(source, target):
+                observed.append((pathlib.Path(source).parent, sorted(
+                    path.name for path in pathlib.Path(directory).iterdir()
+                )))
+                real_replace(source, target)
+
+            with unittest.mock.patch.object(PRODUCER.os, "replace", spy):
+                PRODUCER.write_json_result(str(destination), {"event": "ok"})
+
+            self.assertEqual(observed[0][0], pathlib.Path(directory))
+            self.assertEqual(json.loads(destination.read_text()), {"event": "ok"})
+            self.assertEqual(
+                [path.name for path in pathlib.Path(directory).iterdir()],
+                ["producer-write.json"],
+            )
+
+    def test_failed_serialization_never_truncates_the_destination(self):
+        # Intent: a payload that cannot be serialized leaves the destination
+        #   absent, or leaves pre-existing content byte-identical.
+        # Why it exists: `open(path, "w")` truncates before the first byte is
+        #   written, and the harness waits only on the destination's existence,
+        #   so a reader could observe a zero-byte file it then fails to parse.
+        #   Existence of the artifact must imply completeness of the artifact.
+        with tempfile.TemporaryDirectory() as directory:
+            destination = pathlib.Path(directory) / "producer-write.json"
+
+            with self.assertRaises(TypeError):
+                PRODUCER.write_json_result(str(destination), {"event": object()})
+            self.assertFalse(destination.exists())
+            self.assertEqual(list(pathlib.Path(directory).iterdir()), [])
+
+            PRODUCER.write_json_result(str(destination), {"event": "first"})
+            with self.assertRaises(TypeError):
+                PRODUCER.write_json_result(str(destination), {"event": object()})
+            self.assertEqual(json.loads(destination.read_text()), {"event": "first"})
+            self.assertEqual(
+                [path.name for path in pathlib.Path(directory).iterdir()],
+                ["producer-write.json"],
+            )
 
     def test_persistent_mode_converges_and_returns_without_starting_a_block(self):
         events = []

@@ -1353,6 +1353,86 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
             self.assertFalse((artifacts / "localized-draw-000000").exists())
             self.assertEqual(sent[1], ("pane-a", ["--", "Enter"]))
 
+    def test_wait_for_path_terminates_on_its_deadline_and_on_its_liveness_abort(self):
+        # Intent: both exits from `_wait_for_path` -- the deadline and the
+        #   process-death abort -- terminate, and each names the path it waited on.
+        # Why it exists: it is the single bound on every persistent-block wait,
+        #   and a wait that could not end would hang a whole collection run with
+        #   no evidence. It had no direct coverage.
+        with tempfile.TemporaryDirectory() as directory:
+            missing = pathlib.Path(directory) / "never-written"
+
+            with self.assertRaises(TimeoutError) as timed_out:
+                VALIDATION._wait_for_path(missing, timeout_seconds=0)
+            self.assertIn(str(missing), str(timed_out.exception))
+
+            with self.assertRaisesRegex(RuntimeError, "process exited before writing"):
+                VALIDATION._wait_for_path(
+                    missing, timeout_seconds=30, abort_if=lambda: True
+                )
+
+            present = pathlib.Path(directory) / "written"
+            present.touch()
+            self.assertIsNone(
+                VALIDATION._wait_for_path(present, timeout_seconds=0, abort_if=lambda: True)
+            )
+
+    def test_persistent_draw_runner_reports_an_unavailable_final_draw_instead_of_raising(self):
+        # Intent: when the app never writes `final-draw.json`, the runner returns
+        #   a block marked unavailable and the collector invalidates it, rather
+        #   than the wait raising and killing the whole invocation.
+        # Why it exists: the app failing to draw is the exact failure this
+        #   evidence exists to explain, and a traceback discards every other
+        #   block's evidence with it. The block must still be invalid.
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            artifacts = root / "artifacts"
+            artifacts.mkdir()
+            identity = {
+                "pid": 101,
+                "artifacts": str(artifacts),
+                "binary": str(root / "DanTerm Benchmark.app/Contents/MacOS/DanTerm Benchmark"),
+                "geometry": {"columns": 179, "rows": 66},
+            }
+
+            def send_input(_identity, _pane, arguments):
+                if arguments == ["--", "Enter"]:
+                    (artifacts / "start-draw-ack").touch()
+                    (artifacts / "producer-write.json").write_text(json.dumps({
+                        "error": "timed out waiting for localized settling draw",
+                    }))
+
+            def wait_for_path(path, **_options):
+                if path.exists():
+                    return None
+                raise TimeoutError(str(path))
+
+            runner = VALIDATION.make_persistent_draw_runner(
+                {"a": identity, "b": {**identity, "pid": 202}},
+                workload="full-screen-incremental-mixed-churn",
+                root=root,
+                resolve_pane=lambda _identity: "pane-a",
+                send_input=send_input,
+                front_app=lambda _pid: None,
+                wait_for_path=wait_for_path,
+            )
+
+            artifact = runner("a")
+
+            self.assertFalse(artifact["finalDraw"]["available"])
+            self.assertEqual(
+                artifact["producerWrite"]["error"],
+                "timed out waiting for localized settling draw",
+            )
+            evidence = VALIDATION.collect_incremental_mixed(
+                [{"measurementRole": "A", "physicalArm": "a", "quartet": 0}],
+                run_block=lambda _arm: artifact,
+            )
+            self.assertFalse(evidence["valid"])
+            self.assertIn(
+                "block-0-missing-final-completed-draw", evidence["invalidationReasons"]
+            )
+
     def test_persistent_arm_lifecycle_uses_shared_bundle_and_closes_owned_harnesses(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
