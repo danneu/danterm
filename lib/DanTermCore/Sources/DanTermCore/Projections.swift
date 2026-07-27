@@ -250,8 +250,7 @@ func desiredPaneToolbar(in model: AppModel, tally: UnreadAlertTally) -> [PaneId:
 /// overlays.
 struct SearchOverlayRender: Equatable {
   let needle: String
-  let total: Int?
-  let selected: Int?
+  let status: SearchMatchStatus?
 }
 
 /// Search-overlay projection: one `SearchOverlayRender` per pane *with active search*
@@ -261,7 +260,7 @@ struct SearchOverlayRender: Equatable {
 func desiredSearchOverlays(in model: AppModel) -> [PaneId: SearchOverlayRender] {
   var result: [PaneId: SearchOverlayRender] = [:]
   for (paneId, search) in model.searchState {
-    result[paneId] = SearchOverlayRender(needle: search.needle, total: search.total, selected: search.selected)
+    result[paneId] = SearchOverlayRender(needle: search.needle, status: search.status)
   }
   return result
 }

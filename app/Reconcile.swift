@@ -225,7 +225,7 @@ extension AppRuntime {
             )
         })
         applyDiff(desiredSearchOverlays(in: model), &caches.searchOverlay, apply: { paneId, render in
-            let search = SearchModel(needle: render.needle, total: render.total, selected: render.selected)
+            let search = SearchModel(needle: render.needle, status: render.status)
             findPaneWrapper(for: paneId)?.showSearchOverlay(search: search, runtime: self)
         }, remove: { paneId in
             findPaneWrapper(for: paneId)?.hideSearchOverlay()

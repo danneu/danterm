@@ -149,11 +149,12 @@ class SearchOverlayView: NSView, NSSearchFieldDelegate {
             counterLabel.stringValue = ""
             counterLabel.textColor = .secondaryLabelColor
             setCounterVisible(false)
-        } else if let total = search.total {
-            if let selected = search.selected {
-                counterLabel.stringValue = "\(selected + 1)/\(total)"
-            } else {
+        } else if let status = search.status {
+            switch status {
+            case .counted(let total):
                 counterLabel.stringValue = "-/\(total)"
+            case let .matched(selected, total):
+                counterLabel.stringValue = "\(selected + 1)/\(total)"
             }
             counterLabel.textColor = .secondaryLabelColor
             setCounterVisible(true)

@@ -1160,8 +1160,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
     case .searchNeedleChanged(let paneId, let needle):
         guard model.searchState[paneId] != nil else { return [] }
         model.searchState[paneId]?.needle = needle
-        model.searchState[paneId]?.total = nil
-        model.searchState[paneId]?.selected = nil
+        model.searchState[paneId]?.status = nil
         // The overlay re-renders from the searchState change via reconcilePaneChrome.
         return [.sendSearchNeedle(paneId: paneId, needle: needle)]
 
@@ -1184,13 +1183,21 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
 
     case .searchTotalReported(let paneId, let total):
         guard model.searchState[paneId] != nil else { return [] }
-        model.searchState[paneId]?.total = total
+        // Backends report the total first and the selection that goes with it second,
+        // so a fresh total supersedes any standing selection rather than keeping an
+        // index the new count may no longer contain.
+        model.searchState[paneId]?.status = total.map { .counted(total: $0) }
         // reconcilePaneChrome re-renders the overlay's match count from this change.
         return []
 
     case .searchSelectionReported(let paneId, let selected):
-        guard model.searchState[paneId] != nil else { return [] }
-        model.searchState[paneId]?.selected = selected
+        // A selection is only meaningful against a standing total; one arriving
+        // before any total is dropped, which is what keeps the impossible
+        // "selected without total" pair out of the model.
+        guard let status = model.searchState[paneId]?.status else { return [] }
+        model.searchState[paneId]?.status = selected.map {
+            .matched(selected: $0, total: status.total)
+        } ?? .counted(total: status.total)
         // reconcilePaneChrome re-renders the overlay's match count from this change.
         return []
 

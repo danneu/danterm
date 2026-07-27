@@ -3073,11 +3073,10 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
             "no active search -> no key")
 
         update(&model, .searchStarted(paneId: paneId, needle: "foo"))
-        model.searchState[paneId]?.total = 7
-        model.searchState[paneId]?.selected = 2
+        model.searchState[paneId]?.status = .matched(selected: 2, total: 7)
         #expect(
             desiredSearchOverlays(in: model)[paneId] ==
-            SearchOverlayRender(needle: "foo", total: 7, selected: 2),
+            SearchOverlayRender(needle: "foo", status: .matched(selected: 2, total: 7)),
             "active search keys the pane with needle + match counts")
 
         update(&model, .endSearch(paneId: paneId))

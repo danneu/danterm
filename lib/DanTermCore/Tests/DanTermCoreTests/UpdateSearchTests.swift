@@ -1,7 +1,7 @@
 // Swift Testing migration of the legacy `tests/UpdateSearchTests.swift`
 // harness suite. Pins the search-domain Msg paths: startSearch /
 // searchStarted (focus-field + searchState creation), needle changes
-// (stale total/selected reset), searchNavigate, endSearch teardown, the
+// (stale match-status reset), searchNavigate, endSearch teardown, the
 // searchTotalReported / searchSelectionReported handlers (model-only, no
 // commands), and cleanup of searchState across closePane / closeTab /
 // surfaceCreationFailed / deleteGroup.
@@ -113,10 +113,10 @@ import Testing
         }, "expected focusSearchField on re-entry")
     }
 
-    @Test("searchNeedleChanged updates needle and clears stale total/selected")
+    @Test("searchNeedleChanged updates needle and clears the stale match status")
     func searchNeedleChangedUpdatesNeedleClearsStaleCounts() {
-        // Intent: searchNeedleChanged installs the new needle, clears
-        //   total/selected, and emits sendSearchNeedle.
+        // Intent: searchNeedleChanged installs the new needle, clears the
+        //   match status, and emits sendSearchNeedle.
         // Why it exists: pins the "needle changed -> counts invalid"
         //   invariant.
         // Scenario: spec-first needle change.
@@ -124,12 +124,10 @@ import Testing
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .searchStarted(paneId: paneId, needle: ""))
-        model.searchState[paneId]?.total = 5
-        model.searchState[paneId]?.selected = 2
+        model.searchState[paneId]?.status = .matched(selected: 2, total: 5)
         let commands = update(&model, .searchNeedleChanged(paneId: paneId, needle: "new"))
         #expect(model.searchState[paneId]?.needle == "new")
-        #expect(model.searchState[paneId]?.total == nil, "total should be cleared")
-        #expect(model.searchState[paneId]?.selected == nil, "selected should be cleared")
+        #expect(model.searchState[paneId]?.status == nil, "status should be cleared")
         #expect(hasEffect(commands) {
             if case .sendSearchNeedle(let pid, let n) = $0 { return pid == paneId && n == "new" }
             return false
@@ -188,33 +186,58 @@ import Testing
         #expect(commands.isEmpty, "should be no-op")
     }
 
-    @Test("searchTotalReported updates total")
-    func searchTotalReportedUpdatesTotal() {
-        // Intent: searchTotalReported stores total; emits no commands.
-        // Why it exists: pins the no-side-effect total update.
-        // Scenario: spec-first total update.
+    @Test("a reported total counts matches without selecting one, and drops any selection")
+    func searchTotalReportedCountsWithoutSelecting() {
+        // Intent: searchTotalReported stores `.counted(total:)` -- a count with no
+        //   selection -- and emits no commands. A total arriving over an existing
+        //   selection drops it, and a nil total clears the status outright.
+        // Why it exists: backends report the total before the selection that goes
+        //   with it, so the intermediate "N matches, none selected yet" state is
+        //   real and the overlay renders it as `-/N`. A stale selection surviving a
+        //   new total would render a match index the new count no longer contains.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .searchStarted(paneId: paneId, needle: "x"))
+
         let commands = update(&model, .searchTotalReported(paneId: paneId, total: 42))
-        #expect(model.searchState[paneId]?.total == 42)
+        #expect(model.searchState[paneId]?.status == .counted(total: 42))
         #expect(commands.isEmpty, "searchTotalReported emits no command")
+
+        update(&model, .searchSelectionReported(paneId: paneId, selected: 3))
+        update(&model, .searchTotalReported(paneId: paneId, total: 2))
+        #expect(model.searchState[paneId]?.status == .counted(total: 2),
+            "a fresh total drops the selection it invalidated")
+
+        update(&model, .searchTotalReported(paneId: paneId, total: nil))
+        #expect(model.searchState[paneId]?.status == nil)
     }
 
-    @Test("searchSelectionReported updates selected")
-    func searchSelectionReportedUpdatesSelected() {
-        // Intent: searchSelectionReported stores selected; emits no
-        //   commands.
-        // Why it exists: pins the no-side-effect selected update.
-        // Scenario: spec-first selected update.
+    @Test("a reported selection pairs with the standing total, and is dropped without one")
+    func searchSelectionReportedPairsWithStandingTotal() {
+        // Intent: searchSelectionReported folds the index into the standing total as
+        //   `.matched(selected:total:)`, a nil selection falls back to `.counted`,
+        //   and a selection arriving before any total is discarded. No commands.
+        // Why it exists: the status is one field precisely so "selected with no
+        //   total" is unrepresentable; the discard is what keeps a stray
+        //   out-of-order callback from resurrecting that pair.
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .searchStarted(paneId: paneId, needle: "x"))
+
+        let orphan = update(&model, .searchSelectionReported(paneId: paneId, selected: 3))
+        #expect(model.searchState[paneId]?.status == nil, "no total yet -> nothing to select into")
+        #expect(orphan.isEmpty)
+
+        update(&model, .searchTotalReported(paneId: paneId, total: 42))
         let commands = update(&model, .searchSelectionReported(paneId: paneId, selected: 3))
-        #expect(model.searchState[paneId]?.selected == 3)
+        #expect(model.searchState[paneId]?.status == .matched(selected: 3, total: 42))
         #expect(commands.isEmpty, "searchSelectionReported emits no command")
+
+        update(&model, .searchSelectionReported(paneId: paneId, selected: nil))
+        #expect(model.searchState[paneId]?.status == .counted(total: 42),
+            "clearing the selection keeps the count")
     }
 
     @Test("closePane cleans up search state")

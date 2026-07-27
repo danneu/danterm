@@ -46,10 +46,28 @@ enum ProgressState: Equatable {
 
 // MARK: - Search
 
+/// The find overlay's match counter as one value, so "a selected match with no
+/// total" -- which two independent `Int?`s allowed -- cannot be represented. This
+/// mirrors the engine's own `TerminalSearchStatus`, with the extra `.counted` state
+/// for the window between a backend reporting the total and reporting which match
+/// it selected.
+enum SearchMatchStatus: Equatable {
+    /// Matches counted, none selected yet -- renders `-/N`. `total` is 0 for a
+    /// needle that matched nothing.
+    case counted(total: Int)
+    case matched(selected: Int, total: Int)
+
+    var total: Int {
+        switch self {
+        case .counted(let total): return total
+        case .matched(_, let total): return total
+        }
+    }
+}
+
 struct SearchModel: Equatable {
     var needle: String = ""
-    var total: Int?      // nil = unknown/not yet reported
-    var selected: Int?   // nil = no selection
+    var status: SearchMatchStatus?   // nil = nothing reported yet
 }
 
 // MARK: - Remote Session
