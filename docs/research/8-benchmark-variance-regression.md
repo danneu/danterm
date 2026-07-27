@@ -650,9 +650,17 @@ series and re-freeze `DECISION_RULES` (Phase 6).
       with the reason. Defaults to an A/A control; measured 0.694% paired SD on
       first run, matching F22's 0.719%. Documented in
       `agent-docs/terminal-performance.md`, including what it cannot see.
-- [ ] **Measure two arms built from genuinely different revisions.** Lower-grade
-      risk after F23, but still the only untested step: a real revision changes
-      instruction mix and inlining, not just placement.
+- [x] **Measure two arms built from genuinely different revisions** (F24). Done,
+      and it failed at first: the positive control exposed two order biases that
+      A/A could not see. Both fixed (`82614e7`); residual bias +0.208%.
+- [ ] **Drive the residual order bias toward zero, or bound it.** +0.208% after
+      counterbalancing is small but unexplained, and it is the floor on any
+      revision claim. Suspect load order -- the baseline library is always
+      `dlopen`ed first within a direction run.
+- [ ] **Establish rebuild-to-rebuild variance properly.** F24 saw the estimate
+      shift 0.5-0.7% between measurement groups while agreeing to SD 0.089%
+      within a group. Until that is characterized, a revision claim tighter than
+      ~1% is not supportable.
 - [ ] **Extend the threshold grid before any freeze.** F22 bottomed out at the
       grid floors (1.05% / 0.80%), so the instrument's actual resolution is
       unmeasured and the frozen grids cannot express it.
