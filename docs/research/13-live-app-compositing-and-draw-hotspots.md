@@ -2,8 +2,10 @@
 
 Research started: 2026-07-28. **Status: Phase 1 closed (F5, F6). Phase 2 closed
 and measured: R1+R1b (F7, H1 closed), R2 (F8, H2 closed), R4 (F9). Phase 3's
-gate is now open -- what it wants first is the F10 re-capture, which needs the
-user.**
+re-capture is done (F10): the draw subtree is down 30% from F1 and the
+compositing stall did not follow it down, so R3 is the largest remaining item
+and did not inherit Phase 2's effect. One task left here -- hand the evidence to
+doc 11, which owns the optimize-or-replace decision.**
 
 ## Purpose
 
@@ -374,7 +376,7 @@ test cases were run" -- a silent no-op that reads like a pass.
 | `benchmark-quick` | `just benchmark-quick <baseline-rev> <workload>` | **yes, in practice** | **run: F7, F9** (`content-churn` both times), from an agent shell with no GUI interaction. The "plausibly needs a GUI session" caveat recorded here is answered: it does not. ~157 s per workload cold; a repeat against the same pair of revisions reuses the arm cache and costs ~14 s, which is what makes a replicate pair set cheap (F9). |
 | `benchmark-confirm` | `just benchmark-confirm <baseline-rev>` | same as above | **run: F8.** Runs the full five-workload ladder. |
 | `benchmark-draw-app` | `just benchmark-draw-app` | needs AppKit | not run. Real draw path but not sampled at the compositor. |
-| live `sample` | above | needs a human | **run three times** -- F1, F6, F7. |
+| live `sample` | above | needs a human | **run four times** -- F1, F6, F7, F10. |
 
 Workload names for `benchmark-quick`: `terminal-feed`, `scrollback-stream`,
 `content-churn`, `style-churn`, `incremental-mixed`. Canonical geometry is
@@ -491,7 +493,15 @@ to compute bounding boxes**, and missing a 64-entry outline cache while doing it
 So the largest main-thread stall and the largest secondary-thread cost are the
 same phenomenon seen from two ends, and it sits on the critical path twice.
 
-Supporting evidence: F1.
+**F10 strengthens this from a direction F1 could not reach.** Across a capture where the main thread's draw subtree fell 30%, the
+`compute_dod_` share of the queue thread held at 42.2% against F1's 41.6%, and
+the whole chain down to the outline-cache copy stayed intact (644 / 564 / 500 /
+439 / 398). The attribution is therefore stable across a large perturbation of
+everything upstream of it, not a one-profile artifact. The stall also *grew* in
+absolute terms -- 1,064 -> 1,224 blocked samples, 25.0% -> 31.3% of busy -- while
+the CPU cost above it shrank.
+
+Supporting evidence: F1, F10.
 
 Competing explanations, and there are two credible ones:
 
@@ -506,7 +516,10 @@ Competing explanations, and there are two credible ones:
 
 Confirmed only by an experiment that changes the number of `DrawGlyphs` ops or
 the distinct-glyph count per frame and shows both nodes moving together.
-**No existing instrument can observe either node.**
+**No existing instrument can observe either node.** F10 does **not** satisfy
+this: Phase 2 changed neither the op count nor the distinct-glyph count, which
+is exactly why it is evidence that the stall is independent of the work Phase 2
+removed rather than evidence for the mechanism itself. H3 stays open.
 
 ### H4 -- the plan/draw ratio doc 9 measured is a property of the synthetic churn harness, not of real use
 
@@ -631,18 +644,22 @@ Phase 3.
       R2 and R4 are all landed and measured, so R3 can no longer inherit their
       effect. The gate opening does not license starting R3 -- the next task
       below still comes first, and D1 keeps R3 research-only until doc 11 has it.
-- [ ] Re-capture after Phase 2 and read the `CA::CG::Queue` total and the
+- [x] Re-capture after Phase 2 and read the `CA::CG::Queue` total and the
       `CABackingStoreGetFrontTexture` blocked fraction. Record in **F10**.
-      **This needs the user** -- see the standing rule in Investigation rules and
-      the hand-over text in "Re-capturing a live profile". Pause and ask; do not
-      script the gesture, and do not reuse F1's, F6's **or F7's run 3** as the
-      post-change one -- run 3 is post-R1 but pre-R4, so it is mid-Phase-2 and
-      does not satisfy this task. Its incidental readings (queue 1,273, blocked
-      1,053) are recorded in F7 and are what the eventual F10 capture should be
-      compared against.
-- [ ] Hand F1, **F5**, F8 and H3 to doc 11 as evidence for its Phase 1 and its H1/H3
-      gate. This file does not own the optimize-or-replace decision and must not
-      make it.
+      **Done 2026-07-28: F10**, run 4, captured by the user with the required
+      unscripted gesture on a binary provably containing R4 (the
+      `emptyValuesKeepingCapacity` symbol is in the profile). Queue **1,525** and
+      blocked **1,224**, against F7 run 3's 1,273 / 1,053 and F1's 1,316 / 1,064:
+      the stall did **not** follow the draw subtree down. `drawTextRuns`
+      inclusive fell 1,970 -> 1,537 -> 1,394 over the three captures while the
+      wait rose to 31.3% of main-thread busy. R3 did not inherit Phase 2's
+      effect. A frame-count confound is recorded in F10 and is not resolvable
+      with `sample`.
+- [ ] Hand F1, **F5**, F8, **F10** and H3 to doc 11 as evidence for its Phase 1 and
+      its H1/H3 gate. This file does not own the optimize-or-replace decision and
+      must not make it. F10 is the one that matters most for the gate: it is the
+      evidence that the compositing stall is now the binding constraint and that
+      the three landed draw-path changes did not touch it.
 
 ### Phase 4 -- close the instrument gap
 
@@ -1274,6 +1291,157 @@ Phase 3.
 - Next action: the **F10 re-capture**, which R4 was the last blocker for. Phase 3's
   gate is now open.
 
+### F10 -- post-Phase-2 re-capture: the draw subtree is down 30% from F1, and the compositing stall did not follow it down -- it grew, and is now the largest single main-thread cost
+
+- Status: **recorded, and it discharges the Phase 3 re-capture task.** One
+  profile, taken after all three Phase 2 changes. Attribution and shares, not a
+  timing.
+- Date and investigator: 2026-07-28, capture by the user, analysis by Claude
+  (agent).
+- Artifact:
+  `.build/manual-profiles/2026-07-28-155014-59206-btop-scroll-run4.txt`
+  (run 4), copied out of `/tmp` per the standing rule.
+- Command and gesture: the standing hand-over text -- `sample ... 20 -mayDie
+  -fullPaths` while a person held the down-arrow key scrolling btop's process
+  list, for the full 20 seconds. Not scripted.
+- Provenance, and it is the strongest of the four captures. pid 59206, launch
+  15:49:57, sampled 15:50:14. `.spm-build/release/DanTerm` has mtime 15:49:52 and
+  the installed `~/Applications/DanTerm Dev.app` binary 15:49:57 -- an
+  **optimized** build made after `07dd81f` (15:29:23), so R1, R1b, R2 and R4 are
+  all in it. Unlike every earlier capture the binary is identified by more than
+  mtime: the profile contains a
+  `specialized Dictionary<>.emptyValuesKeepingCapacity()` frame, a symbol that
+  exists only in R4's commit. The sampled binary provably contains the change
+  being measured.
+- **Provenance, geometry and machine load** -- both fields run 3 was missing are
+  filled here, from the user on request. The window was at its usual full size,
+  **179 columns**, the same geometry as F1/F6; the row count was not read off, so
+  F1/F6's 66 is carried as the assumption rather than as a measurement. **Nothing
+  heavy was running**, unlike F6/run 2. That matters because this finding
+  compares *absolute* sample counts across captures: a background load moves the
+  idle/busy split (F6 showed it does) and would make the 1,064 -> 1,224
+  comparison unsound rather than merely noisy. It does not apply here.
+
+- Measurement 1 -- main thread, out of **3,909 busy** samples (F1: 4,256; F7 run
+  3: 3,768). Figures are per-function aggregates across offsets and sibling
+  branches, matching F1's post-correction convention:
+
+  ```
+  CA::Transaction::commit                          3185   81% of busy
+  |- CA::Layer::display_if_needed                  1931
+  |  \- NSViewBackingLayer display                 1559
+  |     \- SwiftTerminalSessionView.draw(_:)       1403
+  |        \- drawRenderFrame                      1399
+  |           \- drawTextRuns                      1394
+  \- CA::Layer::prepare_commit                     1233
+     \- CABackingStoreGetFrontTexture              1228
+        \- _dispatch_sync_f_slow -> kevent_id      1224   BLOCKED, not CPU
+  ```
+
+  Against the two earlier captures:
+
+  | Node | F1 (run 1) | F7 (run 3) | **F10 (run 4)** |
+  | --- | ---: | ---: | ---: |
+  | main-thread busy | 4,256 | 3,768 | **3,909** |
+  | `drawTextRuns` inclusive | 1,970 (46.3%) | 1,537 (40.8%) | **1,394 (35.7%)** |
+  | `CABackingStoreGetFrontTexture` | 1,079 | 1,053 | **1,228** |
+  | blocked (`kevent_id`) | 1,064 (25.0%) | -- | **1,224 (31.3%)** |
+  | `CA::CG::Queue` thread | 1,316 | 1,273 | **1,525** |
+
+- Measurement 2 -- `CA::CG::Queue` thread, inclusive samples out of 1,525
+  (F1: 1,316), in F1's shape:
+
+  ```
+  CA::CG::DrawOp::render                           1412
+  |- DrawGlyphs::compute_dod_                       644   (F1: 547)
+  |  \- get_glyph_bboxes                            564   (497)
+  |     \- FPFontGetGlyphIdealBounds                500   (468)
+  |        \- TFPFont::CopyGlyphPath                439   (424)
+  |           \- TGlyphOutlineDictionaryCache::Copy 398   (382)
+  |- CA::CG::FillRects::draw_shape                  368   (261)
+  |  \- CA::OGL::fill_rect                          345   (241)
+  \- CA::CG::draw_glyph_bitmaps                     189   (179)
+  ```
+
+- Measurement 3 -- **1,334** `drawTextRuns` node samples attributed by source
+  line (F1/F2: 2,085; F7 run 3: 1,670). Line numbers are post-R4:
+
+  | Samples | Share | Line | What |
+  | ---: | ---: | ---: | --- |
+  | **427** | **32.0%** | 619 | `CTFontDrawGlyphs` |
+  | 128 | 9.6% | 395-407 | **R4's per-run reset sweep** (+29 more inside `emptyValuesKeepingCapacity`) |
+  | 126 | 9.4% | 556 | `fill(spriteRects)` |
+  | 117 | 8.8% | 442 | `BoxDrawingSprite.append` |
+  | 92 | 6.9% | 595 | `CTFontGetGlyphsForCharacters` |
+  | 85 | 6.4% | 438 | single-scalar sprite branch |
+  | 54 | 4.0% | 639 | `drawTextCell` fallback |
+  | 41 | 3.1% | 422 | `run.foreground.cgColor(in:)` |
+  | 38 | 2.8% | 608-609 | `positions.append` |
+  | **0** | **0%** | 633-636 | **`attributes` dictionary literal (R1)** |
+
+- Observation 1: **R1 is now provably gone from the live tree, not merely
+  shrunk.** F2 measured the attributes literal at 382 samples (18.3%); run 3 read
+  1; run 4 reads **zero samples across all four of its lines**. This is the
+  cleanest confirmation of H1 available, and it is stronger than F7's, which
+  could not distinguish "1 sample" from noise.
+- Observation 2: **the main-thread draw subtree is down ~30% from F1**
+  (`drawTextRuns` 1,970 -> 1,394) and its share of busy is down from 46.3% to
+  35.7%, monotone across the three captures. That is Phase 2's cumulative effect
+  on the live workload, and it is the number this re-capture existed to get.
+- Observation 3, and the finding's headline: **the compositing stall did not
+  shrink. It grew.** Blocked samples went 1,064 -> 1,224 and the `CA::CG::Queue`
+  thread 1,316 -> 1,525, while the draw subtree fell 30%. The wait is now
+  **31.3% of main-thread busy**, up from 25.0%, and at 1,224 samples it is
+  larger than `drawTextRuns` inclusive (1,394) is over CPU -- of the 1,394,
+  none of the 1,224 is CPU. Phase 2 bought main-thread CPU and spent none of the
+  stall.
+- Observation 4: **the mechanism F1 attributed is unchanged and now bigger in
+  absolute terms.** `compute_dod_` -> `get_glyph_bboxes` ->
+  `FPFontGetGlyphIdealBounds` -> `CopyGlyphPath` -> the 64-entry outline cache is
+  intact, at 644 samples (42.2% of the queue thread) against F1's 547 (41.6%).
+  The *share* is flat to within a point across a capture where everything else
+  moved, which is the first evidence that F1's attribution is stable rather than
+  a one-profile artifact. Bounds computation still costs 3.4x actual
+  rasterization (644 versus 189).
+- Observation 5: F1's Observation 4 sprite-cost side also grew --
+  `FillRects::draw_shape` 261 -> 368, `fill_rect` 241 -> 345. Consistent with
+  more frames reaching the compositor, and it keeps the sprite-versus-glyph cost
+  question open on the terms F1 set.
+- Observation 6, cost of R4 itself: the reset sweep is **128 samples (9.6%) plus
+  29 inside `emptyValuesKeepingCapacity`**, roughly 4% of main-thread busy. R4
+  traded thousands of per-run allocations for thirteen cheap clears per run and
+  the trade is still strongly positive (F9), but the residual is not free and is
+  now a visible line item. Line 396 alone carries 50 of the 128, which is more
+  than the other twelve resets combined -- unexplained here, and plausibly
+  just attribution slop across an inlined block.
+- Inference: **the primary reading is that the stall is not downstream of
+  display-list size in the way Phase 2 shrank it.** R1 removed a dictionary, R2 a
+  tuple copy, R4 a set of allocations; none of them changed how many glyphs are
+  submitted or how their bounds are computed, and the compositor's cost tracked
+  the glyph count, not the main thread's CPU. **R3 is therefore the largest
+  remaining item on this path and did not inherit Phase 2's effect** -- which is
+  exactly the question the Phase 3 gate was protecting.
+- Competing interpretation, and it is not excluded: **this workload is
+  unthrottled key repeat.** A faster main thread produces more frames in the same
+  20 seconds, so more compositing work and more waiting on it is the expected
+  shape even if per-frame compositing cost were unchanged. Nothing in `sample`
+  counts frames, so this capture cannot separate "the stall per frame grew" from
+  "there are more frames". Both readings support the same conclusion about R3 --
+  compositing is now the binding constraint -- but only the first would justify
+  citing 1,224 as a regression, and nothing here licenses that.
+- Uncertainty: **medium on every magnitude, low on the two structural claims.**
+  One profile, a fourth distinct process instance, and human-paced input; the
+  geometry and machine-load gaps that run 3 carried are closed here, which is why
+  this is medium rather than F7's medium-high. What remains is the frame-count
+  confound above, and it is unresolvable with this instrument. The structural
+  claims -- R1's node is gone, and the glyph-bounds chain is intact at a flat
+  share -- do not depend on any of it.
+- Next action: hand F1, F5, F8, H3 **and this finding** to doc 11. R3 belongs to
+  doc 11's optimize-or-replace decision, and this file must not make it. Phase
+  4's instrument question is now sharper, not softer: the confound in the
+  Competing interpretation above is precisely what a frame-counting harness
+  would close.
+
 ## Decision log
 
 ### D1 -- how to rank and sequence the candidates
@@ -1640,39 +1808,53 @@ benchmark, it moves here with the evidence against it rather than being deleted.
 
 ## Outcome
 
-Investigation in progress. **Phase 1 is closed. Phase 2 is two thirds landed:
-R1+R1b (F7, H1 closed) and R2 (F8, H2 closed) are committed and measured; R4 is
-the remainder.**
+**Phases 1, 2 and 3's re-capture are closed. One task remains in this file: the
+hand-off to doc 11.** All three rankable Phase 2 candidates landed and were
+measured -- R1+R1b (F7, H1 closed), R2 (F8, H2 closed), R4 (F9) -- and the
+post-Phase-2 live re-capture is F10.
+
+**The result that matters.** Across the three live captures the main-thread draw
+subtree fell 30% (`drawTextRuns` inclusive 1,970 -> 1,537 -> 1,394) and the
+compositing stall did not follow it: blocked samples went 1,064 -> 1,224, from
+25.0% to 31.3% of main-thread busy, and the `CA::CG::Queue` thread 1,316 ->
+1,525. **Compositing, not draw-path CPU, is now the binding constraint on this
+workload, and R3 did not inherit Phase 2's effect.** F10 records a frame-count
+confound that `sample` cannot resolve; read it before citing any single number.
 
 ### Where a fresh agent should pick this up
 
-1. Read D1. It carries the four candidates, each with a prediction, a
-   falsification criterion, a named instrument, and a risk note. That is the
-   whole actionable surface of this file.
-2. ~~Start with R1+R1b.~~ **Landed 2026-07-28 (`919838f`), result in F7.**
-3. ~~R2 is independent...~~ **Landed 2026-07-28 (`cd57fa7`), result in F8.**
-4. **Start with R4.** It is the only unlanded Phase 2 item, and R1 -- the reason
-   it was gated -- is now measured and committed. Baseline it against `919838f`.
-5. R3 is research, not a change, and is gated behind Phase 2 for a reason stated
-   in D1. Do not promote it.
+1. **Do the hand-off** -- the one open task. Carry F1, F5, F8, **F10** and H3 to
+   doc 11 as evidence for its Phase 1 and its H1/H3 gate. F10 is the load-bearing
+   one. **This file does not own the optimize-or-replace decision and must not
+   make it.**
+2. Then Phase 4: decide whether a repeatable live-compositing instrument is worth
+   building. F10 sharpened this -- the frame-count confound it could not resolve
+   is exactly what such an instrument would close. Record the decision even if it
+   is "no".
+3. **Do not promote R3 from here.** It is research, not a change, and D1 keeps it
+   research-only until doc 11 has it. F10 makes it the largest remaining item;
+   that is an input to doc 11's decision, not authorization to start it.
 
-Findings F1-F8 are recorded. The next free ID is **F9**, and the ledger already
-reserves F9 for R4's result and F10 for the Phase 3 re-capture.
+Findings F1-F10 are recorded. The next free ID is **F11**.
 
 **One step needs the user and cannot be done by an agent:** a live `sample`
 capture. It requires a person holding the down-arrow key in a focused DanTerm
-window for 20 seconds. Phase 3 needs one; any re-measurement of H3 needs one.
-When you reach it, pause and ask -- the exact command and gesture to hand over
-are in "Re-capturing a live profile", and the standing rule against scripting the
-input is in Investigation rules.
+window for 20 seconds. Any re-measurement of H3 needs one. When you reach it,
+pause and ask -- the exact command and gesture to hand over are in "Re-capturing
+a live profile", and the standing rule against scripting the input is in
+Investigation rules.
 
 ### What is already known and should not be re-derived
 
-- **The evidence is three live captures.** F1 and F6 are the same process
+- **The evidence is four live captures.** F1 and F6 are the same process
   instance at commit `4ca27ee`; F7's run 3 is a *different* instance at
-  `919838f`, so it is identified by binary mtime rather than by launch time. All
-  optimized builds, all three artifacts in `.build/manual-profiles/` (disposable;
-  every number is transcribed).
+  `919838f` and F10's run 4 a fourth at `07dd81f`, so both are identified by
+  binary mtime rather than by launch time -- and run 4 additionally by a symbol
+  (`emptyValuesKeepingCapacity`) that exists only in the commit under test, which
+  is the strongest provenance any capture here has. All optimized builds, all
+  four artifacts in `.build/manual-profiles/` (disposable; every number is
+  transcribed). Run 3 is the only capture with no geometry on record; runs 1, 2
+  and 4 are all 179 columns at the window's usual full size.
 - **The analysis method, and its one trap**, are written out in "Reproducing the
   evidence". The trap already cost one wrong number: a function is printed as
   several sibling nodes at different offsets, so a per-node read understates it.
@@ -1682,10 +1864,11 @@ input is in Investigation rules.
   R1, not a conservative case. Do not quote its delta as a user-visible win --
   F2's 18.3% is the real-workload figure. F7 bears this out from the other side:
   the fixture reported -34% where the live share was 18.3%.
-- **Two of D1's four predictions are now tested.** R1 beat its band by ~2x (F7),
-  R2 fell short of its band in the right direction (F8). Both were measured
-  against a baseline resolved *before* implementation. R3 and R4 remain
-  unverified.
+- **Three of D1's four predictions are now tested.** R1 beat its band by ~2x
+  (F7), R2 fell short of its band in the right direction (F8), R4 straddled its
+  band headless and beat it 3x on the paired app benchmark (F9). All three were
+  measured against a baseline resolved *before* implementation. Only R3 remains
+  unverified, and F10 says it did not shrink along the way.
 
 ### What is owed to a neighbouring file
 
