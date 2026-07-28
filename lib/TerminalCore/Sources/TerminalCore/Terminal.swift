@@ -487,9 +487,17 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
-    /// Lets the serialized PTY owner route semantic wheel intent without a lagging snapshot.
+    /// Lets the serialized PTY owner route semantic wheel intent without a lagging snapshot,
+    /// and is the one way this file asks which screen is active. Matches the optional's tag in
+    /// place instead of comparing it against `nil`: `InactivePrimaryScreen` is `Equatable` and
+    /// holds a row array, so `== nil` resolves to the generic two-operand `==`, which copies
+    /// both operands -- retaining and releasing that array -- to answer a question about
+    /// nothing but whether the optional is populated. The feed path asks it several times per
+    /// action, and the resulting pair of comparison temporaries was 22.5% of the live app's
+    /// PTY-host thread.
     public var isAlternateScreenActive: Bool {
-        inactivePrimaryScreen != nil
+        if case .some = inactivePrimaryScreen { return true }
+        return false
     }
 
     /// Projects all child-controlled modes that affect deterministic user-input bytes.
@@ -550,9 +558,9 @@ public struct Terminal: Equatable, Sendable {
 
     private var damageActionSnapshot: DamageActionSnapshot {
         let projection = scrollProjection
-        let cursorStreamRow = inactivePrimaryScreen == nil
-            ? scrollbackRows.count + cursor.row
-            : cursor.row
+        let cursorStreamRow = isAlternateScreenActive
+            ? cursor.row
+            : scrollbackRows.count + cursor.row
         let cursorWindowRow = cursorStreamRow - projection.topRow
         return DamageActionSnapshot(
             cursor: (0..<rowCount).contains(cursorWindowRow)
@@ -567,7 +575,7 @@ public struct Terminal: Equatable, Sendable {
             hoveredLink: hoveredLink,
             topRow: projection.topRow,
             isFollowing: projection.isFollowing,
-            isAlternateScreenActive: inactivePrimaryScreen != nil,
+            isAlternateScreenActive: isAlternateScreenActive,
             cursorPresentation: presentation
         )
     }
@@ -670,7 +678,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func notePrimaryHistoryDamage() {
-        if inactivePrimaryScreen == nil { primaryHistoryObservation.value &+= 1 }
+        if isAlternateScreenActive == false { primaryHistoryObservation.value &+= 1 }
     }
 
     private func damagedViewportRows(for range: TerminalTextRange?) -> Range<Int> {
@@ -1326,7 +1334,7 @@ public struct Terminal: Equatable, Sendable {
         primaryHistoryObservation.value &+= 1
         damage.reset(rowCount: rows, isFull: true)
 
-        if inactivePrimaryScreen != nil {
+        if isAlternateScreenActive {
             clearInspection()
         }
 
@@ -1432,7 +1440,7 @@ public struct Terminal: Equatable, Sendable {
 
     /// Exposes the current visual-row extent and window for scrollbar and inspection consumers.
     public var scrollProjection: TerminalScrollProjection {
-        if inactivePrimaryScreen != nil {
+        if isAlternateScreenActive {
             return TerminalScrollProjection(
                 totalRows: rowCount,
                 topRow: 0,
@@ -1462,7 +1470,7 @@ public struct Terminal: Equatable, Sendable {
 
     /// Moves the local window by signed visual rows; positive values move toward live output.
     public mutating func scroll(byRows rowDelta: Int) {
-        guard inactivePrimaryScreen == nil else { return }
+        guard isAlternateScreenActive == false else { return }
         let current = scrollProjection.topRow
         let addition = current.addingReportingOverflow(rowDelta)
         let target = addition.overflow
@@ -1473,7 +1481,7 @@ public struct Terminal: Equatable, Sendable {
 
     /// Selects a top visual row in current-stream coordinates, clamping to a complete window.
     public mutating func scroll(toTopRow requestedRow: Int) {
-        guard inactivePrimaryScreen == nil else { return }
+        guard isAlternateScreenActive == false else { return }
         let previous = viewportState
         let maximumTop = max(0, scrollbackRows.count + rows.count - rowCount)
         let topRow = min(max(requestedRow, 0), maximumTop)
@@ -1491,7 +1499,7 @@ public struct Terminal: Equatable, Sendable {
 
     /// Returns local presentation to live-bottom follow without changing terminal content.
     public mutating func scrollToBottom() {
-        guard inactivePrimaryScreen == nil else { return }
+        guard isAlternateScreenActive == false else { return }
         guard viewportState != .following else { return }
         viewportState = .following
         recordPresentationFullDamage()
@@ -1541,7 +1549,7 @@ public struct Terminal: Equatable, Sendable {
 
     /// Projects retained history and the viewport as logical text without a final newline.
     public var fullHistoryText: String {
-        guard inactivePrimaryScreen != nil else { return primaryHistoryText }
+        guard isAlternateScreenActive else { return primaryHistoryText }
         var stream = scrollbackRows.asArray()
         if let last = stream.indices.last {
             stream[last].isSoftWrapped = false
@@ -1695,7 +1703,7 @@ public struct Terminal: Equatable, Sendable {
     /// scrollback, but the alt projection restarts at row 0, so a retained scrollback match
     /// would land on unrelated alt-screen content. Mirrors `revealSearchMatchIfNeeded`.
     public var activeSearchMatchRange: TerminalTextRange? {
-        guard inactivePrimaryScreen == nil else { return nil }
+        guard isAlternateScreenActive == false else { return nil }
         return search?.range.flatMap(publicRange)
     }
 
@@ -1710,7 +1718,7 @@ public struct Terminal: Equatable, Sendable {
     /// search was open, or the selected match was overwritten -- this reports the newest
     /// match, which is exactly the one the next navigation re-attaches to.
     public var searchStatus: TerminalSearchStatus? {
-        guard inactivePrimaryScreen == nil, let search else { return nil }
+        guard isAlternateScreenActive == false, let search else { return nil }
         let matches = searchMatches(for: search.query)
         guard matches.isEmpty == false else { return .empty }
         let selected = search.range
@@ -2269,7 +2277,7 @@ public struct Terminal: Equatable, Sendable {
 
     private func viewportStreamRow(at index: Int) -> GridRow? {
         guard index >= 0 else { return nil }
-        if inactivePrimaryScreen != nil {
+        if isAlternateScreenActive {
             return rows.indices.contains(index) ? rows[index] : nil
         }
         if scrollbackRows.indices.contains(index) {
@@ -2280,7 +2288,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func revealSearchMatchIfNeeded() {
-        guard inactivePrimaryScreen == nil, let match = search.flatMap(\.range) else { return }
+        guard isAlternateScreenActive == false, let match = search.flatMap(\.range) else { return }
         let projection = scrollProjection
         let top = evictedRowCount + projection.topRow
         let target: Int
@@ -2300,7 +2308,7 @@ public struct Terminal: Equatable, Sendable {
 
     private func activeProjectionRows() -> [GridRow] {
         var stream = scrollbackRows.asArray()
-        if inactivePrimaryScreen != nil, let last = stream.indices.last {
+        if isAlternateScreenActive, let last = stream.indices.last {
             stream[last].isSoftWrapped = false
         }
         stream.append(contentsOf: rows)
@@ -2794,9 +2802,9 @@ public struct Terminal: Equatable, Sendable {
     public var geometry: TerminalGeometry {
         let projection = scrollProjection
         let windowRows = presentedRows
-        let cursorStreamRow = inactivePrimaryScreen == nil
-            ? scrollbackRows.count + cursor.row
-            : cursor.row
+        let cursorStreamRow = isAlternateScreenActive
+            ? cursor.row
+            : scrollbackRows.count + cursor.row
         let cursorWindowRow = cursorStreamRow - projection.topRow
         return TerminalGeometry(
             columns: columnCount,
@@ -3706,7 +3714,7 @@ public struct Terminal: Equatable, Sendable {
         case 1006:
             isSGRMouseEncodingMode ? 1 : 2
         case 1047, 1049:
-            inactivePrimaryScreen == nil ? 2 : 1
+            isAlternateScreenActive ? 1 : 2
         case 2026:
             isSynchronizedOutputActive ? 1 : 2
         case 2004:
@@ -4264,7 +4272,7 @@ public struct Terminal: Equatable, Sendable {
         recordFullDamage()
         if enabled {
             clearInspection()
-            if inactivePrimaryScreen == nil {
+            if isAlternateScreenActive == false {
                 inactivePrimaryScreen = InactivePrimaryScreen(
                     rows: rows,
                     resizeCursor: cursor,
@@ -4397,13 +4405,13 @@ public struct Terminal: Equatable, Sendable {
 
     private var activeKittyKeyboardStack: [UInt16] {
         get {
-            inactivePrimaryScreen == nil ? primaryKittyKeyboardStack : alternateKittyKeyboardStack
+            isAlternateScreenActive ? alternateKittyKeyboardStack : primaryKittyKeyboardStack
         }
         set {
-            if inactivePrimaryScreen == nil {
-                primaryKittyKeyboardStack = newValue
-            } else {
+            if isAlternateScreenActive {
                 alternateKittyKeyboardStack = newValue
+            } else {
+                primaryKittyKeyboardStack = newValue
             }
         }
     }
@@ -4782,7 +4790,7 @@ public struct Terminal: Equatable, Sendable {
     // no DECSLRM left/right margins, so full width is trivially true. Applies only
     // to the two upward-scroll paths; mid-screen shuffles still discard.
     private var retainsRowsScrolledOffTop: Bool {
-        activeScrollRegion.lowerBound == 0 && inactivePrimaryScreen == nil
+        activeScrollRegion.lowerBound == 0 && isAlternateScreenActive == false
     }
 
     private mutating func setScrollRegion(_ parameters: [UInt16]) {
@@ -5008,7 +5016,7 @@ public struct Terminal: Equatable, Sendable {
     ) {
         if row > 0 {
             severWrapClaim(at: row - 1, replacementStyle: replacementStyle)
-        } else if inactivePrimaryScreen == nil, let last = scrollbackRows.indices.last {
+        } else if isAlternateScreenActive == false, let last = scrollbackRows.indices.last {
             severScrollbackWrapClaim(at: last, replacementStyle: replacementStyle)
         }
     }
@@ -5047,7 +5055,7 @@ public struct Terminal: Equatable, Sendable {
             guard rows[cursor.row - 1].isSoftWrapped == false else { return }
             invalidateInspection(inViewportRows: (cursor.row - 1)..<cursor.row)
             rows[cursor.row - 1].isSoftWrapped = true
-        } else if inactivePrimaryScreen == nil, let last = scrollbackRows.indices.last {
+        } else if isAlternateScreenActive == false, let last = scrollbackRows.indices.last {
             guard scrollbackRows[last].isSoftWrapped == false else { return }
             invalidateInspection(inScrollbackRow: last)
             scrollbackRows[last].isSoftWrapped = true
@@ -5101,7 +5109,7 @@ public struct Terminal: Equatable, Sendable {
             invalidateInspection(inViewportRows: (row - 1)..<row)
             rows[row - 1].cells[columnCount - 1] = GridCell(style: replacementStyle)
         } else if row == 0,
-                  inactivePrimaryScreen == nil,
+                  isAlternateScreenActive == false,
                   let last = scrollbackRows.indices.last,
                   scrollbackRows[last].cells[columnCount - 1].kind == .spacerHead
         {

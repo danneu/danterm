@@ -167,8 +167,53 @@ one workload was blindsided by a second.
 - Commit split: the PO1-PO4 coverage lands first, on the unchanged engine, so a
   reviewer can confirm it passes against pre-change behavior; the non-copying
   test itself lands second, against that net.
+- Emptiness is answered by in-place pattern matching, not a stored flag, so the
+  growth risk named under "What could move the wrong way" never arises:
+  `Terminal` gains no field. Every site routes through the existing public
+  `isAlternateScreenActive` rather than open-coding the match, which also
+  collapses ~30 spellings of the question to one.
+- Four sites were ternaries or if/else pairs whose arms had to be flipped to
+  keep positive phrasing (`isAlternateScreenActive ? ... : ...`). That is the
+  exact inversion the Decision section calls invisible, which is why the
+  coverage commit came first. The two cursor projections are pinned by PO1/PO2;
+  the DECRQM report for 1047/1049 is pinned by `TerminalQueryTests.modeQueries`,
+  which asserts both polarities; the Kitty stack selector is pinned by
+  `TerminalKittyKeyboardTests`, which asserts per-screen stack separation.
+- The file uses `== false` and never `!x` (49 existing sites, zero), so the
+  negated tests follow that.
+- **Mechanism verified, not assumed.** Release-built `Terminal.swift.o` at the
+  baseline revision contains `merged outlined destroy of
+  (InactivePrimaryScreen?, InactivePrimaryScreen?)` -- the pair of comparison
+  temporaries 13/F3 attributed 22.5% of the PTY-host thread to. That symbol is
+  absent after the change; only `outlined init with copy of
+  InactivePrimaryScreen?`, which serves the legitimate `if let` / `if var`
+  payload reads, remains.
+
+## Benchmark result
+
+`benchmark-confirm baseline=20a6eafb8abd8e171719f17d3c2f7b6f2ecda943`:
+
+| workload | verdict |
+| --- | --- |
+| `terminal-feed` (decider) | **faster, -6.61%** (symmetric median of 2 pairs) |
+| `scrollback-stream` (decider) | equivalent, -0.13% (4 pairs) |
+| `content-churn` | inconclusive, -1.66% (4 pairs, 2 flagged outliers) |
+| `style-churn` | equivalent, +0.06% (4 pairs, 1 flagged outlier) |
+| `incremental-mixed` | inconclusive, -0.88% (6 pairs) |
+
+Read against the plan's own predictions: the deciders pass -- `terminal-feed`
+moves the right way and `scrollback-stream` does not regress, so the named
+growth risk did not materialize (it could not, given no field was added). The
+three render-bound workloads land in the predicted-null band and per the plan
+are not read as the change doing nothing.
+
+-6.61% is below 13/R2's predicted -8% to -15%. That is AR1 landing as written:
+the attribution came from a live-app PTY-thread profile and `terminal-feed` is a
+headless harness with a different shape. Recorded rather than tuned around.
+Worth noting `terminal-feed` resolved on only 2 pairs, the fewest of any
+workload, so its interval is the widest here.
 
 ## Commit progress
 
 - [x] 1. test(terminal): pin the primary-vs-alternate cursor branch (PO1-PO4)
-- [ ] 2. perf(terminal): test the inactive primary screen without copying it
+- [x] 2. perf(terminal): test the inactive primary screen without copying it
