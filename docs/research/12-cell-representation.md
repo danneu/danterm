@@ -323,7 +323,9 @@ not a hypothesis, because nothing has measured the per-row allocation yet.
 - [ ] H1: style dedup behind a 16-bit ID.
 - [ ] H2: narrow `hyperlinkId`, and decide `contentIdentity` separately (F3).
 - [ ] H4: row skip flags.
-- [ ] H3: pack the remaining cell into a word, now that it is already POD.
+- [ ] H3: pack the cell into a word. Note that the cell is **not** POD -- the
+  attempt to make it so is the reverted item above -- so H3 as originally written
+  still carries the triviality problem F8 priced, and cannot assume it solved.
 - [x] Settle H5. Erase leg closed by F5/F6 (not representation at all). Move/copy
   leg settled the other way: F4 confirmed the cost is real, F7 confirmed removing
   it speeds up feed, and F8 showed that paying for the removal costs more on
