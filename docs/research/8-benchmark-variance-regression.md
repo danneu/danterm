@@ -685,9 +685,11 @@ series and re-freeze `DECISION_RULES` (Phase 6).
       not to cross-revision comparison. Builds are not byte-reproducible -- every
       cold rebuild yielded a distinct dylib -- so the floor bundles build
       nondeterminism with session drift and this design cannot split them.
-- [ ] **Extend the threshold grid before any freeze.** F22 bottomed out at the
-      grid floors (1.05% / 0.80%), so the instrument's actual resolution is
-      unmeasured and the frozen grids cannot express it.
+- [x] **Extend the threshold grid before any freeze** (F27). Both grids now run
+      from **0.30%**, and re-screening F22's pilot returns interior answers at
+      every pair count -- 1.15% at 2 pairs down to 0.60% at 16. Every threshold
+      the frozen rules could already express is byte-identical, so nothing is
+      refrozen and nothing is redefined.
 - [x] **Decide what the headless benchmark is allowed to decide.** Satisfied by
       **D2**, which states the split explicitly: the headless comparison owns
       damage *drawing*; it cannot see damage *generation* (`setNeedsDisplay` /
@@ -2321,6 +2323,66 @@ Degraded at `HEAD` = **148376**, span **33208**, **4.65%**, **6.26%**, 10/24.
 - **Full argument:** the F7 section of `plans/wip/continue-elegant-boot.md`
   (untracked, by the branch's convention for wip plans).
 
+### F27 -- the extended grid gives F22 an interior answer; its floor readouts were slightly optimistic
+
+- **Status:** closed. F22's screen is re-run and no longer censored. **No
+  threshold is frozen**; these are measurements of what the grid can now express.
+- **Date:** 2026-07-27.
+- **Why the old floors were where they were.** They were not arbitrary and they
+  were not a step that could simply be lowered. `calibrate_threshold_grid`
+  refuses an equivalence band that is not strictly below every threshold in its
+  grid, and each mode's old floor sat exactly one 0.05 step above its band --
+  1.05% over `quick`'s 1.0, 0.80% over `confirm`'s 0.75. So the grid floor *was*
+  the band, and opening the grid downward is inseparable from narrowing the band.
+- **How that was done without redefining a mode.** `screen_equivalence_band`
+  gives each threshold `min(mode band, threshold - 0.05)`. Every threshold above
+  the mode's band -- i.e. every cell the pre-extension screen had -- keeps the
+  frozen band unchanged, and only the new cells below it get a narrower one.
+  Verified by reproduction, not by reading: re-running the frozen-band portion
+  through the new batching path returns reports **equal** to a direct
+  pre-extension call, 70 cells for `quick` and 35 for `confirm`.
+- **The readout that was pinning.** `reduced_candidates` picks the *loosest*
+  eligible cell (it sorts on A/A false-positive rate, which falls as the
+  threshold rises), so it never bottoms out. What F22 reported, and what
+  describes an instrument's capability, is the *tightest* threshold that still
+  clears the gates and the 5% A/A bound. That is now
+  `tightest_threshold_clearing_false_positives`, and the screen report records it
+  per pair count alongside `gridFloorPercent` so a floor answer is visible as a
+  floor.
+- **Re-screen of F22's pilot** (48 quartets / 96 pairs, mean -0.146%, SD 0.708%,
+  20,000 trials per cell):
+
+  | pairs | `quick` | `confirm` | F22 reported |
+  | --- | --- | --- | --- |
+  | 2 | 1.15% | 1.15% | 1.05% / -- (floor) |
+  | 4 | 0.90% | 0.90% | -- |
+  | 6 | 0.85% | 0.85% | -- / 0.80% (floor) |
+  | 8 | 0.75% | 0.75% | -- |
+  | 12 | 0.65% | 0.65% | -- |
+  | 16 | 0.60% | 0.60% | -- |
+
+  No cell lands on the 0.30% floor, so the grid is no longer the binding
+  constraint. The two modes agree because at this precision the binding gate is
+  the A/A false-positive bound, which is common to both; their differing
+  detection gates are all satisfied at 1.000.
+- **F22's floor readouts were optimistic, not pessimistic.** The true tightest is
+  1.15% where F22 reported 1.05%, and 0.85% where it reported 0.80%. A censored
+  answer flattered the instrument by about one to two grid steps. Small, but the
+  opposite direction from what "the screen wanted to go lower" suggests.
+- **These are A/A numbers and must not be read as a revision-pair rule.** The
+  pilot is an A/A control, so the false-positive bound these thresholds clear is
+  an A/A bound -- exactly the quantity F24 showed overstates revision-pair
+  precision, and F25 bounded the gap at a systematic +0.299%. That said, the
+  interior answers (0.60-1.15%) sit on top of F25's independently measured
+  ~0.5-1% revision-pair resolution, which is a mild consistency check rather than
+  a coincidence.
+- **Cost:** the extension adds one calibration call per new threshold, and each
+  call re-resamples, so a full screen now takes minutes instead of seconds. The
+  screen is an offline operator tool and is not in `just test`.
+- **Driver:** "F27 driver" in [Scratch](#scratch). Reads
+  `~/danterm-benchmark-evidence/2026-07-27/headless-twoarm-pilot/` and writes
+  nothing.
+
 ## Decision log
 
 ### D1 -- mechanism class: platform CPU frequency demotion of an under-occupied main thread
@@ -2922,6 +2984,92 @@ arm A `0x60588`, arm B `0x618A0`.
 | --- | --- | --- | --- |
 | F22 baseline (identical source) | -0.024% | 0.719% | 2.23% |
 | layout-perturbed | -0.042% | 0.830% | 3.99% |
+
+### F27 driver -- re-screen F22's pilot against the extended grid (2026-07-27)
+
+Reads the six pilot run JSONs and writes nothing. Run as
+`python3 f27-rescreen.py [trials]` (default 20,000).
+
+```python
+#!/usr/bin/env python3
+"""Re-screen F22's headless two-arm pilot against the extended threshold grids.
+
+Answers one question: with the grid floors moved from 1.05%/0.80% down to 0.30%,
+does the screen still bottom out, or does it now return an interior optimum?
+Reads the six pilot run JSONs; writes nothing.
+"""
+import importlib.util
+import json
+import pathlib
+import sys
+
+ROOT = pathlib.Path("/Users/dan/Code/danterm-terminal-engine")
+PILOT = pathlib.Path.home() / "danterm-benchmark-evidence/2026-07-27/headless-twoarm-pilot"
+
+
+def load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+CALIBRATION = load("cal", ROOT / "scripts/terminal-benchmark-calibration.py")
+FALLBACK = load("fb", ROOT / "scripts/terminal-benchmark-median-fallback.py")
+
+
+def quartets():
+    """Recover two-pair schedule quartets from each ABBA round of each pilot run."""
+    result = []
+    for path in sorted(PILOT.glob("clip4-run*.json")):
+        for round_ in json.loads(path.read_text())["rounds"]:
+            result.append([
+                CALIBRATION.symmetric_difference(a, b)
+                for a, b in zip(round_["a"], round_["b"])
+            ])
+    return result
+
+
+def main():
+    data = quartets()
+    pairs = [value for quartet in data for value in quartet]
+    mean = sum(pairs) / len(pairs)
+    sd = (sum((v - mean) ** 2 for v in pairs) / (len(pairs) - 1)) ** 0.5
+    print(f"{len(data)} quartets / {len(pairs)} pairs; mean {mean:+.3f}%, SD {sd:.3f}%")
+    trials = int(sys.argv[1]) if len(sys.argv) > 1 else 20_000
+
+    for mode in ("quick", "confirm"):
+        floor = min(FALLBACK.MODES[mode]["thresholds"])
+        print(f"\n{mode}  (grid floor {floor}%)")
+        for pair_count in (2, 4, 6, 8, 12, 16):
+            reports = FALLBACK.screen_threshold_grid(
+                data,
+                mode=mode,
+                pair_count=pair_count,
+                trial_count=trials,
+                seed=20264000 + pair_count,
+            )
+            tightest = FALLBACK.tightest_threshold_clearing_false_positives(reports, mode)
+            if tightest is None:
+                print(f"  {pair_count:3d} pairs: no eligible threshold")
+                continue
+            cell = next(
+                r for r in reports if r["directionalThresholdPercent"] == tightest
+            )
+            mark = "  <-- GRID FLOOR" if tightest == floor else ""
+            print(
+                f"  {pair_count:3d} pairs: tightest {tightest:.2f}%"
+                f"  band {cell['equivalenceBandPercent']:.2f}%"
+                f"  aaFP {cell['conditions']['aa']['falsePositiveRate']:.4f}"
+                f"  detect+ {cell['conditions']['positive']['detectionRate']:.3f}"
+                f"  incon {cell['conditions']['positive']['inconclusiveRate']:.3f}"
+                f"{mark}"
+            )
+
+
+if __name__ == "__main__":
+    main()
+```
 
 ### F19 SIGINT repro -- shell-level models of the wrapper teardown (2026-07-27)
 

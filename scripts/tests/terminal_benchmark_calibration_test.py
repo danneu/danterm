@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import pathlib
+import random
 import tempfile
 import unittest
 
@@ -17,14 +18,29 @@ SPEC.loader.exec_module(CALIBRATION)
 FALLBACK_PATH = ROOT / "scripts" / "terminal-benchmark-median-fallback.py"
 
 
+def load_fallback():
+    """Load the median-fallback screen as a module; it is a script, not a package."""
+    spec = importlib.util.spec_from_file_location(
+        "terminal_benchmark_median_fallback",
+        FALLBACK_PATH,
+    )
+    fallback = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fallback)
+    return fallback
+
+
+def headless_precision_quartets():
+    """Synthetic quartets at F22's measured headless paired SD, as complete two-pair schedules."""
+    generator = random.Random(20260727)
+    return [
+        [generator.gauss(0.0, 0.719), generator.gauss(0.0, 0.719)]
+        for _ in range(48)
+    ]
+
+
 class TerminalBenchmarkCalibrationTests(unittest.TestCase):
     def test_phase4_median_fallback_preserves_predeclared_modes_and_sources(self):
-        spec = importlib.util.spec_from_file_location(
-            "terminal_benchmark_median_fallback",
-            FALLBACK_PATH,
-        )
-        fallback = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(fallback)
+        fallback = load_fallback()
 
         self.assertEqual(fallback.MODES["quick"]["effectPercent"], 5)
         self.assertEqual(fallback.MODES["quick"]["equivalenceBandPercent"], 1.0)
@@ -52,6 +68,65 @@ class TerminalBenchmarkCalibrationTests(unittest.TestCase):
             },
         }
         self.assertFalse(fallback.cell_is_eligible(failing_quick, "quick"))
+
+    def test_screening_an_instrument_at_headless_precision_lands_off_the_grid_floor(self):
+        # Intent: on a series as precise as the headless draw comparison, the
+        #   tightest threshold that still clears the 5% A/A false-positive bound
+        #   must come back as an interior grid value, not as the grid's lowest
+        #   entry.
+        # Why it exists: F22 screened the headless pilot against these grids and
+        #   both modes pinned exactly on their floors (1.05% / 0.80%), which means
+        #   the screen was reporting the limit of its own search space and calling
+        #   it the instrument's resolution. A floor answer is censored data. This
+        #   pins the grids open far enough that the answer is the instrument's.
+        # Scenario: spec-first. The synthetic series carries F22's measured 0.719%
+        #   paired SD, so at 6 pairs the bound is cleared around 0.75% -- inside an
+        #   extended grid, and unreachable in the old one.
+        fallback = load_fallback()
+        quartets = headless_precision_quartets()
+
+        for mode in ("quick", "confirm"):
+            with self.subTest(mode=mode):
+                reports = fallback.screen_threshold_grid(
+                    quartets,
+                    mode=mode,
+                    pair_count=6,
+                    trial_count=4_000,
+                    seed=20264321,
+                )
+                tightest = fallback.tightest_threshold_clearing_false_positives(
+                    reports, mode
+                )
+
+                self.assertIsNotNone(tightest)
+                self.assertGreater(tightest, min(fallback.MODES[mode]["thresholds"]))
+
+    def test_extended_grid_keeps_every_cell_legal_and_leaves_the_frozen_band_alone(self):
+        # Intent: extending a mode's grid below its equivalence band must give the
+        #   new cells a band that is still strictly below their threshold, while
+        #   every threshold the frozen rule could already express keeps the frozen
+        #   band exactly.
+        # Why it exists: the old grid floors were not arbitrary -- each sat one
+        #   0.05 step above its mode's frozen equivalence band, because
+        #   `calibrate_threshold_grid` rejects a band that is not below every
+        #   threshold. So extending the grid downward necessarily moves the band,
+        #   and the risk is that it moves for the frozen cells too and silently
+        #   redefines what `quick` and `confirm` decide. This pins the extension to
+        #   the cells that did not exist before.
+        fallback = load_fallback()
+
+        for mode in ("quick", "confirm"):
+            with self.subTest(mode=mode):
+                frozen_band = fallback.MODES[mode]["equivalenceBandPercent"]
+                thresholds = fallback.MODES[mode]["thresholds"]
+
+                self.assertLessEqual(min(thresholds), 0.4)
+                for threshold in thresholds:
+                    band = fallback.screen_equivalence_band(threshold, mode)
+                    self.assertLess(band, threshold)
+                    self.assertGreaterEqual(band, 0.0)
+                    if threshold > frozen_band:
+                        self.assertEqual(band, frozen_band)
 
     def test_winsorized_mean_clamps_twenty_percent_of_each_tail(self):
         values = [-100.0, 0.0, 1.0, 10.0, 100.0]
