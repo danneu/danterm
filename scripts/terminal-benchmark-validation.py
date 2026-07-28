@@ -421,6 +421,20 @@ def _append_reason(reasons, reason):
         reasons.append(reason)
 
 
+def _battery_runs_allowed():
+    """Whether a run on battery still counts, per explicit opt-in.
+
+    Off by default because the decision thresholds are calibrated on AC power, and
+    battery throttling widens the distribution they are compared against. The
+    position-balanced schedule means a steady slowdown hits both arms alike and
+    leaves the symmetric median unbiased, so the opt-in is defensible for reading
+    direction -- but it does not restore the thresholds' calibrated error rates,
+    which is why it must be asked for rather than assumed. Only `terminal-feed`
+    ever enforced this; the four render collectors already accept battery.
+    """
+    return os.environ.get("DANTERM_BENCHMARK_ALLOW_BATTERY") == "1"
+
+
 def collect_terminal_feed(
     blocks,
     *,
@@ -467,7 +481,7 @@ def collect_terminal_feed(
             _append_reason(reasons, f"{prefix}-below-duration-floor")
         if start_state["powerSource"] != completion_state["powerSource"]:
             _append_reason(reasons, f"{prefix}-power-source-changed")
-        elif start_state["powerSource"] != "AC Power":
+        elif start_state["powerSource"] != "AC Power" and not _battery_runs_allowed():
             _append_reason(reasons, f"{prefix}-not-on-ac-power")
         for state in (start_state, completion_state):
             if state["lowPowerMode"]:
