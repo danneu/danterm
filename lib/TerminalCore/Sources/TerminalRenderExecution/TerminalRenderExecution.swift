@@ -362,13 +362,13 @@ private extension CGContext {
             let colorKey = UInt32(run.foreground.red) << 16
                 | UInt32(run.foreground.green) << 8
                 | UInt32(run.foreground.blue)
-            let foreground = colors[colorKey] ?? run.foreground.cgColor(in: colorSpace)
-            colors[colorKey] = foreground
-            let attributes: [NSAttributedString.Key: Any] = [
-                kCTFontAttributeName as NSAttributedString.Key: font,
-                kCTForegroundColorAttributeName as NSAttributedString.Key: foreground,
-                kCTLigatureAttributeName as NSAttributedString.Key: 0,
-            ]
+            let foreground: CGColor
+            if let cached = colors[colorKey] {
+                foreground = cached
+            } else {
+                foreground = run.foreground.cgColor(in: colorSpace)
+                colors[colorKey] = foreground
+            }
             var characters: [UniChar] = []
             var candidateCells: [(cell: RenderTextCell, column: Int)] = []
             var fallbackCells: [(cell: RenderTextCell, column: Int)] = []
@@ -580,14 +580,26 @@ private extension CGContext {
                     self
                 )
             }
-            for fallback in fallbackCells {
-                drawTextCell(
-                    fallback.cell,
-                    row: run.row,
-                    column: fallback.column,
-                    attributes: attributes,
-                    metrics: metrics
-                )
+            // Built inside the guard, not per run: only the fallback path reads
+            // these attributes, and a run produces fallback cells only for
+            // multi-scalar clusters, scalars above `UInt16.max`, or glyphs the
+            // font cannot map -- so the overwhelming majority of runs would
+            // build and tear down this boxed dictionary without ever reading it.
+            if fallbackCells.isEmpty == false {
+                let attributes: [NSAttributedString.Key: Any] = [
+                    kCTFontAttributeName as NSAttributedString.Key: font,
+                    kCTForegroundColorAttributeName as NSAttributedString.Key: foreground,
+                    kCTLigatureAttributeName as NSAttributedString.Key: 0,
+                ]
+                for fallback in fallbackCells {
+                    drawTextCell(
+                        fallback.cell,
+                        row: run.row,
+                        column: fallback.column,
+                        attributes: attributes,
+                        metrics: metrics
+                    )
+                }
             }
         }
     }

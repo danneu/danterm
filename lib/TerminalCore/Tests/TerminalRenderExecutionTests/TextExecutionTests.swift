@@ -192,6 +192,44 @@ struct TextExecutionTests {
         #expect(glyphs.allSatisfy { $0 != 0 })
     }
 
+    @Test("A repeated foreground color renders the same on its second run as on its first")
+    func repeatedForegroundColorMatchesFirstUse() throws {
+        // Intent: a run whose foreground color was already resolved by an
+        //   earlier run in the same draw renders byte-identically to the same
+        //   run drawn as that color's first use.
+        // Why it exists: `drawTextRuns` memoizes `CGColor`s per draw, so the
+        //   second run of a color takes a different code path (cache hit) than
+        //   the first (cache miss). This pins the two paths together, including
+        //   the color the fallback path carries in its text attributes, against
+        //   a refactor that lets them diverge.
+        // Scenario: colored terminal output repeats the same SGR foreground on
+        //   consecutive rows -- the ordinary case for any colorized program.
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
+        // A fallback scalar next to an ASCII one, so both the glyph fast path
+        // and the attributed fallback path carry the memoized color.
+        let text = "ا A"
+        let repeated = try renderBitmap(
+            plan: makePlan(
+                input: "\u{1B}[31m\(text)\u{1B}[2;1H\(text)",
+                columns: 6,
+                rows: 2
+            ),
+            metrics: metrics
+        )
+        let firstUseOnly = try renderBitmap(
+            plan: makePlan(
+                input: "\u{1B}[2;1H\u{1B}[31m\(text)",
+                columns: 6,
+                rows: 2
+            ),
+            metrics: metrics
+        )
+        let secondRow = cellRect(row: 1, column: 0, columnCount: 6, metrics: metrics)
+
+        #expect(repeated.inkCount(in: secondRow) > 0)
+        #expect(repeated.bytes(in: secondRow) == firstUseOnly.bytes(in: secondRow))
+    }
+
     @Test("High and low glyphs remain upright in top-left coordinates", arguments: [1.0, 2.0])
     func glyphOrientation(scale: CGFloat) throws {
         // Intent: distinguish upright glyph placement from a vertically
