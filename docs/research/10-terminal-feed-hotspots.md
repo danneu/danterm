@@ -157,6 +157,12 @@ sit on the construction side, while `recordPresentationDamage` and
 Confirmed if removing the per-`.print` snapshot, or reducing the snapshot to POD,
 collapses both nodes without inflating a sibling.
 
+**Partly refuted, 2026-07-28.** F4 reduced the snapshot to POD and neither node
+moved: `recordDamage` 21.9/22.4% -> 23.1/22.8%, the getter flat, the memmove
+beneath it unchanged. The snapshot's *contents* are not the cost. The hypothesis
+survives only in its H1(a) form -- how often the snapshot is built, not what is
+in it -- and the surviving memmove now points at H3 instead.
+
 ### H2 -- `invalidateInspection` pays copy/destroy traffic to evaluate a guard that usually rejects
 
 `printNarrow` calls `invalidateInspection(inViewportRows:)` per character. That
@@ -229,10 +235,8 @@ the node from an app profile.
 Provisional, ordered by measured size against implementation risk. Nothing here
 is committed until the gate in Phase 2 is answered.
 
-1. **H1(b) -- shrink `DamageActionSnapshot` to POD.** Replace the String-bearing
-   `TerminalResolvedLink?` with the `activationIdentity: Int` and range it
-   already carries. Pure representation change, no behavior surface, no change
-   to when damage is recorded. Smallest and safest first step.
+1. ~~**H1(b) -- shrink `DamageActionSnapshot` to POD.**~~ Done and reverted:
+   F4, D1. No win on either instrument.
 2. **H1(a) -- stop snapshotting for `.print`.** Larger win, but it narrows when
    damage is recorded and therefore needs behavioral tests under the correctness
    rule above.
@@ -263,15 +267,15 @@ unanalyzed; it is a Phase 3 item, not a candidate yet.
 
 ### Phase 2 -- direction gate
 
-- [ ] **Gate: confirm the ordering in "Candidate direction" before implementing.**
-  Acceptance: the operator picks a first change, or replaces the ordering. The
-  open question is whether H1(a) is worth its correctness risk given that H1(b)
-  may recover much of the same cost with none.
+- [x] **Gate: confirm the ordering in "Candidate direction" before implementing.**
+  Answered 2026-07-28: the operator kept the ordering and ran its two cheapest
+  entries -- H1(b) then H2 -- one at a time, each with its own tree pair, `just
+  test`, and paired verdict, explicitly deferring H1(a), H4, and H3. The gate's
+  open question is settled by D1.
 
 ### Phase 3 -- implement and verify, one change at a time
 
-- [ ] H1(b): POD `DamageActionSnapshot`. Re-post trees; paired verdict against a
-  named baseline.
+- [x] H1(b): POD `DamageActionSnapshot`. Result: F4 -- negative, reverted; D1.
 - [ ] H2: interaction-state flag. Doubles as the H2 attribution experiment.
 - [ ] H1(a): skip the snapshot for `.print`, with behavioral damage tests.
 - [ ] H4: replace `lastPlannedTerminal` with a generation counter; verify on an
@@ -421,13 +425,191 @@ unanalyzed; it is a Phase 3 item, not a candidate yet.
   app on a redraw-shaped workload, or add a headless variant that retains a
   snapshot so the same fixture is measured both ways.
 
+### F4 -- a POD `DamageActionSnapshot` removes its copy node and buys nothing
+
+- Status: recorded. Negative result. H1(b) implemented, measured, reverted.
+- Date and investigator: 2026-07-28, Claude (agent).
+- Commit and worktree state: baseline `52af73a` clean; candidate is `52af73a`
+  plus the single-file change described below, with only untracked `notes.md` /
+  `plans/wip/*` besides.
+- The change: `DamageActionSnapshot.hoveredLink` moved from
+  `TerminalResolvedLink?` (which carries a `TerminalHyperlink`, and therefore a
+  `String`) to a POD `HoveredLinkKey?` of `(range, activationIdentity)`, fed by a
+  new `hoveredLinkKey` getter that mirrors `hoveredLink`'s nil conditions without
+  materializing the URI. `recordDamage(since:)` was untouched -- it already only
+  compared the link for equality and read `.range`. The whole struct becomes
+  trivially copyable.
+- Commands: `just benchmark-feed-sample styled-screen-redraw 20` twice before and
+  twice after; `just test`;
+  `DANTERM_BENCHMARK_ALLOW_BATTERY=1 just benchmark-quick baseline=52af73a workload=content-churn`.
+- Artifacts: `.build/terminal-feed-profiles/2026-07-28-{093123,093151}` (before),
+  `.../2026-07-28-{093330,093358}` (after),
+  `.build/terminal-benchmark-comparisons/quick/23310e13bc0c-0000`.
+- Measurements -- share of harness root inclusive, `styled-screen-redraw`:
+
+  | Node | before 1 | before 2 | after 1 | after 2 |
+  | --- | ---: | ---: | ---: | ---: |
+  | `Terminal.feed(_:)` | 96.9% | 97.2% | 97.0% | 96.8% |
+  | `Terminal.printNarrow(_:breakClass:)` | 29.6% | 29.8% | 30.2% | 30.8% |
+  | **`Terminal.recordDamage(since:)`** | **21.9%** | **22.4%** | **23.1%** | **22.8%** |
+  | **`Terminal.damageActionSnapshot.getter`** | **8.9%** | **9.0%** | **9.0%** | **9.1%** |
+  | `Terminal.invalidateInspection(inViewportRows:)` | 19.4% | 19.2% | 20.3% | 21.0% |
+  | `_platform_memmove` | 16.7% | 16.3% | 16.1% | 16.3% |
+  | `Terminal.clearCellAndPair(...)` | 14.9% | 14.7% | 14.0% | 14.4% |
+  | `Terminal.eraseLine(mode:)` | 11.6% | 11.1% | 11.1% | 11.5% |
+  | `outlined init with copy of Terminal.InactivePrimaryScreen?` | 8.7% | 8.1% | 8.3% | 8.7% |
+  | `outlined destroy of Terminal.InteractionLinkState?` | 8.4% | 8.8% | 7.8% | 7.6% |
+  | `TerminalInputStream.feed(_:)` | 7.4% | 7.0% | 7.2% | 6.5% |
+  | `destroy for ClosedRange<>.Index` | 6.0% | 6.3% | 5.9% | 5.6% |
+  | `outlined init with copy of Terminal.DamageActionSnapshot` | 1.4% | -- | **absent** | **absent** |
+
+  Before, run 1, pruned to nodes at or above 130 samples (root 16784):
+
+  ```
+  16784  measureFeedBatch(chunks:executionCount:makeTerminal:now:)
+    5055  Terminal.feed(_:)
+      3282  Terminal.printNarrow(_:breakClass:)
+         763  Terminal.invalidateInspection(inViewportRows:)
+           532  outlined init with copy of Terminal.InactivePrimaryScreen?
+             208  initializeWithCopy for ClosedRange<>.Index
+             172  _platform_memmove
+         757  Terminal.invalidateInspection(inViewportRows:)
+           531  outlined init with copy of Terminal.InactivePrimaryScreen?
+         615  Terminal.invalidateInspection(inViewportRows:)
+           444  outlined destroy of Terminal.InteractionLinkState?
+             274  destroy for ClosedRange<>.Index
+         442  Terminal.invalidateInspection(inViewportRows:)
+           285  outlined destroy of Terminal.InteractionLinkState?
+         219  Terminal.invalidateInspection(inViewportRows:)
+         218  Terminal.invalidateInspection(inViewportRows:)
+      1022  Terminal.printNarrow(_:breakClass:)
+         314  Terminal.clearCellAndPair(...)
+    3883  Terminal.feed(_:)
+      1157  Terminal.recordDamage(since:)
+        1131  _platform_memmove
+       597  Terminal.recordDamage(since:)
+         156  Terminal.damageActionSnapshot.getter
+       371  Terminal.recordDamage(since:)
+         231  outlined init with copy of Terminal.DamageActionSnapshot
+           231  initializeWithCopy for Terminal.DamageActionSnapshot
+       367  Terminal.recordDamage(since:)
+         203  outlined destroy of Terminal.InteractionLinkState?
+       283  Terminal.recordDamage(since:)
+       183  Terminal.recordDamage(since:)
+         183  ___chkstk_darwin
+       142  Terminal.damageActionSnapshot.getter
+    2010  Terminal.feed(_:)
+      1948  Terminal.eraseLine(mode:)
+        1634  Terminal.eraseCells(row:columns:)
+    1255  Terminal.feed(_:)
+       479  TerminalInputStream.feed(_:)
+         286  EscapeAbsorber.consume(_:)
+    1242  Terminal.feed(_:)
+      1201  _platform_memmove
+  ```
+
+  After, run 1, same pruning (root 16697):
+
+  ```
+  16697  measureFeedBatch(chunks:executionCount:makeTerminal:now:)
+    5132  Terminal.feed(_:)
+      3405  Terminal.printNarrow(_:breakClass:)
+         790  Terminal.invalidateInspection(inViewportRows:)
+           634  outlined destroy of Terminal.InteractionLinkState?
+             438  destroy for ClosedRange<>.Index
+         726  Terminal.invalidateInspection(inViewportRows:)
+           500  outlined init with copy of Terminal.InactivePrimaryScreen?
+             192  _platform_memmove
+         709  Terminal.invalidateInspection(inViewportRows:)
+           480  outlined init with copy of Terminal.InactivePrimaryScreen?
+         480  Terminal.invalidateInspection(inViewportRows:)
+           317  outlined destroy of Terminal.InteractionLinkState?
+         217  Terminal.invalidateInspection(inViewportRows:)
+         208  Terminal.invalidateInspection(inViewportRows:)
+       953  Terminal.printNarrow(_:breakClass:)
+         294  Terminal.clearCellAndPair(...)
+    3994  Terminal.feed(_:)
+      1122  Terminal.recordDamage(since:)
+        1101  _platform_memmove
+       892  Terminal.recordDamage(since:)
+       604  Terminal.recordDamage(since:)
+         220  Terminal.damageActionSnapshot.getter
+       215  Terminal.recordDamage(since:)
+       208  Terminal.recordDamage(since:)
+       190  Terminal.recordDamage(since:)
+         190  ___chkstk_darwin
+    1910  Terminal.feed(_:)
+      1851  Terminal.eraseLine(mode:)
+        1535  Terminal.eraseCells(row:columns:)
+    1218  Terminal.feed(_:)
+       456  TerminalInputStream.feed(_:)
+         262  EscapeAbsorber.consume(_:)
+    1184  Terminal.feed(_:)
+      1153  _platform_memmove
+  ```
+
+- Correctness: `just test` exit 0 -- 618 core tests in 84 suites, the one
+  pre-existing `GhosttyInspectionRecoveryReplayTests` known issue, plus 1111
+  protocol, 115 support, 30 shell-contract. No behavior surface moved.
+- Paired verdict: `content-churn` **equivalent** (+0.09% symmetric median of 2
+  pairs; plan time +0.53%, also equivalent). Run on AC power, not battery.
+- Observation: the change did exactly what it was designed to do and nothing
+  more. `outlined init with copy of Terminal.DamageActionSnapshot` -- 231 samples,
+  1.4% of root -- disappears from the tree completely in both after-runs, which
+  is direct confirmation that the struct became trivially copyable. But
+  `recordDamage(since:)` did not shrink: its lowest after-run share (22.8%)
+  exceeds its highest before-run share (22.4%), against a before/after
+  repeat spread of 0.5 and 0.3 points respectively. The
+  `damageActionSnapshot.getter` node is flat to within 0.2 points. The 1.1k-sample
+  `_platform_memmove` directly beneath `recordDamage`, which H1 cited as its
+  strongest evidence, is unchanged at 1131 -> 1101 samples.
+- Inference: **H1(b) is refuted, and it partly refutes H1's stated mechanism.**
+  The cost under `recordDamage` is not the snapshot's *contents*. In this
+  workload `hoveredLinkState` is nil for the entire run, so the optional's
+  reference-counting was never actually exercised -- only the outlined
+  copy/destroy *calls*, which tag-check and return. Removing them removes the
+  calls, and the calls were nearly free. What remains under `recordDamage` is a
+  1.1k-sample memmove that survives making the snapshot POD, which points at the
+  932-byte `Terminal` (H3), not at the ~100-byte snapshot.
+- Second inference, which matters for H2: `outlined destroy of
+  Terminal.InteractionLinkState?` stays at 7.6-7.8% *after* the only
+  `TerminalResolvedLink` in the snapshot was removed. That symbol therefore
+  cannot be accounted for by the hovered-link field. It is direct support for
+  this file's standing caveat that these `outlined ...` names are
+  linker-deduplicated and misattributed, and it is the reason H2's confirming
+  experiment had to be designed not to depend on the name.
+- Competing interpretations: `invalidateInspection` reads 0.9-1.8 points higher
+  after, which could be read as work displaced into a sibling. More likely it is
+  the same total work redistributed by inlining -- `printNarrow` rises by a
+  similar amount, the root is flat, and the paired wall-clock verdict is
+  `equivalent`, which no displacement story survives.
+- Uncertainty: low. Two instruments agree, and the mechanism (a nil optional's
+  outlined calls are cheap) explains the null cleanly.
+- Next action: D1. H1's remaining weight is H1(a) alone.
+
 ## Decision log
 
-No decisions yet. The Phase 2 gate is the first one.
+### D1 -- H1(b) implemented, measured, and reverted; H1's remaining weight is H1(a)
+
+- Date: 2026-07-28.
+- Decision: do **not** carry a POD `DamageActionSnapshot`. F4 measured it as no
+  win on either instrument, and the change is not free -- it narrows the hover
+  diff from "the whole resolved link" to "the run it decorates", which is
+  defensible but is a semantic edit bought for nothing.
+- Consequence for the candidate ordering: H1's cost is **not** in what the
+  snapshot *contains*. The remaining H1 weight is entirely in how often it is
+  built, which is H1(a). The Phase 2 gate's open question -- "is H1(a) worth its
+  correctness risk given that H1(b) may recover much of the same cost with
+  none?" -- is now answered: H1(b) recovers none of it, so H1(a) has to justify
+  itself on its own or H1 closes.
 
 ## Rejected
 
-Nothing yet.
+### H1(b) -- shrink `DamageActionSnapshot` to POD
+
+Implemented, measured on both instruments, reverted. See F4. Behavior-neutral
+(`just test` clean) and no measurable win: the targeted node did not shrink and
+the paired benchmark returned `equivalent`.
 
 ## Open questions and caveats
 
