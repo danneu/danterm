@@ -65,6 +65,13 @@ IDs (`H*`, `F*`, `D*`) are file-local. References to doc 9 are written as
   standing proxy for the btop/htop scroll that opened this file.
   `incremental-screen-updates` is localized-edit-shaped. They rank the same
   nodes very differently, so a share without a workload name is meaningless.
+- **Verify a feed change on a feed-bound workload.** `content-churn` and
+  `style-churn` moved +0.03% and +0.63% across this entire investigation while
+  `terminal-feed` moved -24.31% (F9). A change verified only on a render-bound
+  workload will read as a null no matter how large it is -- which is exactly what
+  happened to H2, recorded as unproven for a day before F9 measured it at -13.6%.
+  `terminal-feed` and `scrollback-stream` are the two collectors that can see this
+  file's work; use them.
 - **A directional claim uses `benchmark-confirm`, not `benchmark-quick`.** F7 ran
   the same `benchmark-quick` comparison on `incremental-mixed` five times against
   one unchanging pair of trees and got every verdict the tool can emit, spanning
@@ -424,6 +431,10 @@ the most valuable remaining RESEARCH item.
   **app** profile, not the headless one. Reconsider jointly with H5.
 - [ ] H3: box the cold fields of `Terminal`. The confound argument for keeping it
   last has largely expired; F4 strengthened its evidence.
+- [x] Measure the investigation end to end rather than change by change, and
+  measure H2 on a workload capable of seeing it. Result: F9 -- -24.31% cumulative
+  on `terminal-feed`, a calibrated null on both render-bound workloads, and a
+  correction to F5; D5.
 - [ ] RESEARCH: `eraseLine` / `eraseCells` / `clearCellAndPair`, 11-17% of root
   on **both** workload shapes. Not yet attributed to a mechanism, and the only
   large node that is shape-independent.
@@ -736,7 +747,9 @@ the most valuable remaining RESEARCH item.
 
 ### F5 -- a precomputed interaction-state flag removes 18 points of feed, and confirms H2's attribution
 
-- Status: recorded. Positive result, committed. Confirms H2.
+- Status: recorded. Positive result, committed. Confirms H2. **Its paired-verdict
+  bullet below is superseded by F9**, which measured this change directly on
+  `terminal-feed` and found it the largest app-level win in the file.
 - Date and investigator: 2026-07-28, Claude (agent).
 - Commit and worktree state: baseline `52af73a` clean; candidate is `52af73a`
   plus the change below (`Terminal.swift` + one new test), with only untracked
@@ -855,11 +868,21 @@ the most valuable remaining RESEARCH item.
 - Paired verdict: `content-churn` **inconclusive** (-1.80% symmetric median of 2
   pairs) then **equivalent** (-0.67%) on a repeat. Both runs on AC power, not
   battery. Both point the right way and neither clears the bar, so per this
-  file's evidence rule **no app-level speedup is claimed**. This is the expected
+  file's evidence rule no app-level speedup is claimed. This is the expected
   shape rather than a contradiction: `benchmark-quick` is a frame-oriented
   main-thread measurement, and feed runs on the pty-host queue -- the same reason
   doc 9 set feed aside. Its role here is as a regression guard, and it clears
   that.
+- **Correction, 2026-07-28 (F9).** The paragraph above is wrong in its
+  conclusion, though right in every measurement. This change was verified only on
+  `content-churn`, which F9 shows is structurally incapable of registering feed
+  work -- it moved +0.03% across the entire investigation. Measured directly on
+  `terminal-feed`, H2 is **faster by -13.30% and -13.83%** across two `confirm`
+  runs, and `scrollback-stream` by -9.36% and -8.73%: the largest single
+  app-level win recorded in this file. The claim "no app-level speedup" was an
+  artifact of the workload chosen, not a property of the change. The workload that
+  could see it (`terminal-feed`) already existed and was simply not known to the
+  investigator until F7.
 - Inference: **H2 is confirmed, including its attribution.** The competing
   explanation in H2 was that the `outlined ...` symbols are linker-deduplicated
   and might belong to some other field of the same layout. They do not: removing
@@ -879,8 +902,9 @@ the most valuable remaining RESEARCH item.
   being removed. The rescale analysis rules this out -- inlining relocates a
   node's samples into its caller, which would have pushed `printNarrow` *above*
   the 1.24 rescale factor, and instead it fell to 0.43.
-- Uncertainty: low headless. Unquantified at the app level, by instrument
-  limitation rather than by disagreement.
+- Uncertainty: low headless. Was recorded as "unquantified at the app level, by
+  instrument limitation"; F9 quantified it, and the limitation was workload
+  choice rather than instrument.
 - Next action: D2. The next scheduled item is H1(a), then H4, then H3.
 
 ### F6 -- post-H2 re-baseline, and the incremental column F1 never showed
@@ -1335,7 +1359,110 @@ the most valuable remaining RESEARCH item.
   and a mechanism that explains both the win and the two nodes that rose.
 - Next action: D4.
 
+### F9 -- the investigation end to end: -24% on feed-bound workloads, exactly 0 on render-bound ones
+
+- Status: recorded. Cumulative measurement plus one direct A/B. **Corrects F5's
+  paired-verdict conclusion** and answers the scope question this file has
+  carried since its Purpose section.
+- Date and investigator: 2026-07-28, Claude (agent).
+- Motivation: every verdict in this file until now compared one commit against
+  its immediate predecessor. Small per-step wins do not reliably sum, and the
+  cumulative effect of the whole investigation had never been measured. Nor had
+  H2 ever been measured on a workload capable of seeing it.
+- Commands, all on AC power:
+  `DANTERM_BENCHMARK_ALLOW_BATTERY=1 just benchmark-confirm baseline=557dd4f`
+  with the working tree at `4ca27ee`; then
+  `... just benchmark-confirm baseline=108f47d`, twice, with
+  `Terminal.swift` restored to `07e4784` (the only product file differing between
+  `07e4784` and HEAD, so this reproduces H2's product tree exactly without a
+  worktree).
+- Artifacts: `.build/terminal-benchmark-comparisons/confirm/a08873e84cbe-0000`
+  (cumulative), `.../19d6df38bc22-{0000,0001}` (H2 direct).
+- Measurement 1 -- cumulative, `557dd4f` (pre-investigation) versus `4ca27ee`:
+
+  | Workload | verdict |
+  | --- | --- |
+  | `terminal-feed` | **faster (-24.31%)** |
+  | `scrollback-stream` | **faster (-21.04%)** |
+  | `content-churn` | equivalent (+0.03%) |
+  | `style-churn` | equivalent (+0.63%) |
+  | `incremental-mixed` | faster (-2.30%) |
+
+- Measurement 2 -- H2 alone, `108f47d` versus `07e4784`, two runs:
+
+  | Workload | run 1 | run 2 |
+  | --- | --- | --- |
+  | `terminal-feed` | **faster** (-13.30%) | **faster** (-13.83%) |
+  | `scrollback-stream` | **faster** (-9.36%) | **faster** (-8.73%) |
+  | `content-churn` | equivalent (-0.63%) | inconclusive (+0.90%) |
+  | `style-churn` | equivalent (+0.60%) | equivalent (-0.42%) |
+  | `incremental-mixed` | inconclusive (+0.78%) | faster (-2.33%) |
+
+- Internal consistency check, which is what makes the whole chain credible: the
+  three shipped changes were each measured against their own immediate baseline,
+  in separate sessions and thermal states. Compounding those independent
+  measurements predicts the independently measured cumulative result:
+
+  | Workload | H2 x F7 x F8 predicted | cumulative observed |
+  | --- | ---: | ---: |
+  | `terminal-feed` | -23.07% | **-24.31%** |
+  | `scrollback-stream` | -18.42% | **-21.04%** |
+
+  Agreement to 1.2 and 2.6 points across four independent `confirm` invocations.
+  Nothing regressed silently between changes, and no change's win was an artifact
+  of its particular baseline.
+- Observation, and the reason this finding exists: **`content-churn` moved
+  +0.03% and `style-churn` +0.63% across the entire investigation.** Three
+  shipped optimizations, roughly a quarter of the feed path removed, and the two
+  render-bound workloads are unmoved. Both verdicts are `equivalent` on AC, so
+  these are calibrated nulls rather than failures to resolve.
+- Inference on scope, which supersedes this file's working assumption: feed work
+  moves feed-bound workloads a great deal and render-bound workloads not at all.
+  The trigger in this file's Purpose section -- feed being roughly 40% of app busy
+  CPU in a `full-screen-content-churn` profile -- is true as an attribution and
+  does not imply that reducing feed moves that workload's frame time. It does not.
+  Every remaining candidate here (H1(a), H1(b), H3, the erase path) is bidding for
+  more of the same feed-bound envelope.
+- Inference on H2: the change this file recorded as unproven at the app level is
+  in fact its largest app-level win, larger than F7 and F8 combined. The error was
+  verifying it on `content-churn`, the one routine workload that cannot register
+  feed work. Recorded as a rule below.
+- Provenance caveat: an unrelated commit (`4de86b6`, "decode the POSIX hostname
+  without `String(cString:)`") landed on the branch at 11:02 during this session
+  and is therefore present in the candidate arm of some of these runs but in
+  neither baseline. It touches only `MachineHostname.swift`, which runs once at
+  host startup and is not reachable from feed, planning, or drawing, so it cannot
+  reach any measured path. Recorded because the arms were otherwise clean and a
+  reader comparing revisions would otherwise find an unexplained delta.
+- Competing interpretations: `terminal-feed` and `scrollback-stream` are the two
+  collectors that drive the pty-host queue hardest, so a critic could argue they
+  are near-synthetic for this file's changes. That is fair, and it is also the
+  point -- the pairing with the `content-churn` null is what makes the scope claim,
+  not the -24% on its own.
+- Uncertainty: low. Four `confirm` runs, all on AC, with the compounding check
+  agreeing across independently baselined measurements.
+- Next action: D5.
+
 ## Decision log
+
+### D5 -- the feed path is worth about -24%, and that is its ceiling for render-bound work
+
+- Date: 2026-07-28.
+- Decision: keep all three shipped changes; they compound to -24% on
+  `terminal-feed` and -21% on `scrollback-stream` (F9), and nothing regressed.
+- Decision on scope: **stop treating this file as the answer to the 2x
+  libghostty gap.** F9 shows `content-churn` and `style-churn` are unmoved by a
+  quarter of the feed path, on calibrated `equivalent` verdicts. The remaining
+  candidates are worth doing on their own merits -- feed-bound workloads are real
+  and `terminal-feed` is what a `cat` of a large file or a btop redraw looks
+  like -- but they cannot close the gap that opened this investigation.
+- Consequence: the renderer difference this file set aside in its caveats (CPU
+  glyph rasterization via CoreText versus libghostty's GPU-composited
+  `IOSurfaceLayer`, `app/TerminalView.swift:266`) is now the *only* untested
+  explanation for the render-bound gap, and it belongs to doc 9's path or to a
+  new file. Sizing it should outrank finishing this file's candidate list.
+- Consequence for D2: its "no app-level regression" framing understated the
+  change. H2 is this file's largest app-level win (-13.6% on `terminal-feed`).
 
 ### D4 -- H6 shipped; feed carries one snapshot per action
 
@@ -1453,9 +1580,12 @@ than here.
   row) but its cell content and frame cadence are synthetic. If a candidate's
   win turns out to be shape-sensitive, capture a real recording into the corpus
   before trusting it.
-- **The renderer gap is out of scope here.** The app comparison that opened this
-  file also showed the Swift backend rasterizing glyphs on the CPU via CoreText
-  while libghostty composites a GPU-rendered `IOSurfaceLayer`
-  (`app/TerminalView.swift:266`). That is a real and probably larger structural
-  difference, but it belongs to the draw path and to a renderer-architecture
-  decision, not to this file.
+- **The renderer gap is out of scope here -- and F9 promoted it from "probably
+  larger" to "the only remaining explanation."** The app comparison that opened
+  this file also showed the Swift backend rasterizing glyphs on the CPU via
+  CoreText while libghostty composites a GPU-rendered `IOSurfaceLayer`
+  (`app/TerminalView.swift:266`). It still belongs to the draw path rather than
+  to this file, but F9 removed the alternative: a quarter of the feed path is
+  gone and the render-bound workloads did not move at all, so feed cost is not
+  what makes them slow. Sizing the renderer difference should outrank finishing
+  this file's candidate list.
