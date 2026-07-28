@@ -239,6 +239,74 @@ struct TerminalAlternateScreenTests {
         #expect(soft.primaryHistoryText.hasSuffix("S"))
     }
 
+    @Test("alternate cursor stays screen-relative over non-empty primary scrollback, across resize")
+    func alternateCursorProjectionOverScrollback() throws {
+        // Intent: while the alternate screen is active, the projected cursor row is the
+        //   screen row, never the primary stream row, even when primary scrollback is
+        //   non-empty -- and it survives a resize taken while alternate is still active.
+        // Why it exists: the cursor projection is the one place that branches on which
+        //   screen is active and computes a *different* row per branch. Every other alt
+        //   test asserts cursors only on terminals with empty scrollback, where both
+        //   branches agree, so inverting the branch fails nothing today. Inverted, the row
+        //   lands outside the viewport and the cursor silently reads nil.
+        // Scenario: a session scrolls output into history, then a full-screen program
+        //   takes over the alternate screen and the window is resized under it.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ".utf8))
+        #expect(terminal.scrollbackRowCount > 0)
+
+        terminal.feed(Array("\u{1B}[?1047h".utf8))
+        #expect(terminal.scrollbackRowCount > 0)
+        terminal.feed(Array("\u{1B}[1;1H".utf8))
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 0, column: 0, isPendingWrap: false))
+        terminal.feed(Array("\u{1B}[2;3H".utf8))
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 1, column: 2, isPendingWrap: false))
+
+        terminal.resize(columns: 5, rows: 3)
+        #expect(terminal.isAlternateScreenActive)
+        #expect(terminal.scrollbackRowCount > 0)
+        terminal.feed(Array("\u{1B}[3;2H".utf8))
+        #expect(terminal.geometry.cursor == TerminalCursor(row: 2, column: 1, isPendingWrap: false))
+
+        terminal.feed(Array("\u{1B}[?1047l".utf8))
+        #expect(terminal.isAlternateScreenActive == false)
+    }
+
+    @Test("alternate-screen state reports true only while a recognized alternate switch is active")
+    func alternateScreenStateTransitions() throws {
+        // Intent: `isAlternateScreenActive` is false on a fresh terminal, true after 1047/1049
+        //   entry, and false again after exit, after RIS, and after DECSTR -- and the inert
+        //   modes never flip it.
+        // Why it exists: TerminalCore asserts this property only through a fixture manifest
+        //   field; the only direct false-transition assertions live outside the module, so
+        //   the accessor itself is unpinned here.
+        // Scenario: a full-screen program is entered and left by every route a child has --
+        //   normal exit, a hard reset, and a soft reset.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        #expect(terminal.isAlternateScreenActive == false)
+        terminal.feed(Array("PRIMARY\u{1B}[?1047h".utf8))
+        #expect(terminal.isAlternateScreenActive)
+        terminal.feed(Array("\u{1B}[?1047l".utf8))
+        #expect(terminal.isAlternateScreenActive == false)
+
+        var hard = try #require(Terminal(columns: 4, rows: 2))
+        hard.feed(Array("PRIMARY\u{1B}[?1049hALT".utf8))
+        #expect(hard.isAlternateScreenActive)
+        hard.feed(Array("\u{1B}c".utf8))
+        #expect(hard.isAlternateScreenActive == false)
+
+        var soft = try #require(Terminal(columns: 4, rows: 2))
+        soft.feed(Array("PRIMARY\u{1B}[?1049hALT".utf8))
+        soft.feed(Array("\u{1B}[!p".utf8))
+        #expect(soft.isAlternateScreenActive == false)
+
+        for sequence in ["\u{1B}[?47h", "\u{1B}[?47l", "\u{1B}[?2047h", "\u{1B}[?1047$h"] {
+            var inert = try #require(Terminal(columns: 3, rows: 2))
+            inert.feed(Array(("AB" + sequence).utf8))
+            #expect(inert.isAlternateScreenActive == false)
+        }
+    }
+
     @Test("alternate-screen sequences are chunk invariant and participate in equality")
     func chunkInvarianceAndEquality() throws {
         let bytes = Array("PRIMARY\u{1B}[?1049hALT\u{1B}[?1049hZ\u{1B}[?1049l".utf8)

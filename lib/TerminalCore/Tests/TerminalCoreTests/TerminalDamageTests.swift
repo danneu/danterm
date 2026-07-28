@@ -164,6 +164,28 @@ struct TerminalDamageTests {
         #expect(terminal.drainDamage() == .none)
     }
 
+    @Test("alternate cursor damage covers old and new rows over non-empty primary scrollback")
+    func alternateCursorDamageOverScrollback() throws {
+        // Intent: with the alternate screen active over non-empty primary scrollback, moving
+        //   the cursor damages both the row it left and the row it entered.
+        // Why it exists: `damageActionSnapshot` projects the cursor through the same
+        //   primary-vs-alternate branch as `geometry`, and this suite otherwise uses the
+        //   alternate screen only to prove full-damage escalation. Inverted, the projected
+        //   row leaves the viewport, the snapshot cursor reads nil, and the vacated row is
+        //   simply never repainted -- a stale cursor no assertion here would catch.
+        // Scenario: a full-screen program moves its cursor down a line after the session has
+        //   already scrolled output into history.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.feed(Array("ABCDEFGHI".utf8))
+        #expect(terminal.scrollbackRowCount > 0)
+
+        terminal.feed(Array("\u{1B}[?1047h\u{1B}[1;1H".utf8))
+        _ = terminal.drainDamage()
+
+        terminal.feed(Array("\u{1B}[2;1H".utf8))
+        #expect(terminal.drainDamage() == TerminalDamage(rows: [0, 1]))
+    }
+
     @Test("damage accumulation is canonical bounded and chunk invariant")
     func accumulationAndChunkInvariance() throws {
         var oneChunk = try #require(Terminal(columns: 6, rows: 4))
