@@ -124,6 +124,15 @@ benchmark-draw-app batches="15" target_ms="400":
 benchmark-loop workload="scrollback-stream" backend="swift":
     ./scripts/terminal-benchmark-profile.sh loop "{{workload}}" "{{backend}}"
 
+# Capture a textual sample profile of Terminal.feed alone, headless and without a
+# display. Isolates parse/grid cost from planning and drawing, which share the app's
+# main thread in benchmark-sample. Attribution only -- never a directional verdict.
+#   just benchmark-feed-sample                                # styled-screen-redraw, 20s
+#   just benchmark-feed-sample incremental-screen-updates 30
+benchmark-feed-sample workload="styled-screen-redraw" seconds="20":
+    python3 ./scripts/terminal-feed-profile.py "{{ trim_start_matches(workload, 'workload=') }}" \
+        --seconds "{{ trim_start_matches(seconds, 'seconds=') }}"
+
 # Capture a textual sample profile from one isolated sustained Swift workload.
 benchmark-sample workload="scrollback-stream" seconds="15":
     ./scripts/terminal-benchmark-profile.sh sample "{{workload}}" swift "{{seconds}}"
