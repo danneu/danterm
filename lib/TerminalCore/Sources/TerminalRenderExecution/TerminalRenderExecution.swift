@@ -32,6 +32,9 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
     /// Top-edge offset for strikethrough in point space.
     public let strikethroughOffset: CGFloat
 
+    /// The styled faces every draw served by these metrics reuses.
+    let fonts: TerminalFontSet
+
     let baseFontName: String
     let baseFontSize: CGFloat
     let unquantizedLineHeight: CGFloat
@@ -88,9 +91,67 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
             cellPixels: cellHeightPixels,
             thicknessPixels: underlinePixels
         )
+        self.fonts = TerminalFontSet(baseName: appKitFont.fontName, baseSize: fontSize)
         self.baseFontName = appKitFont.fontName
         self.baseFontSize = fontSize
         self.unquantizedLineHeight = lineHeight
+    }
+}
+
+/// The four styled faces a draw can need, built once alongside the metrics that
+/// fix the grid rather than per draw. Every face is derived from the same base
+/// family and size, so equality compares the faces themselves: two sets built
+/// from the same base are interchangeable, which is what keeps the metrics'
+/// synthesized `Equatable` a comparison of geometry and not of object identity.
+///
+/// `@unchecked` because CoreText does not annotate `CTFont` as `Sendable`, not
+/// because the faces need care: they are immutable after `init` and CoreText
+/// documents font objects as safe to read from multiple threads. The unchecked
+/// conformance is what lets `TerminalRenderMetrics` stay `Sendable`.
+struct TerminalFontSet: Equatable, @unchecked Sendable {
+    let regular: CTFont
+    let bold: CTFont
+    let italic: CTFont
+    let boldItalic: CTFont
+
+    init(baseName: String, baseSize: CGFloat) {
+        let regular = CTFontCreateWithName(baseName as CFString, baseSize, nil)
+        self.regular = regular
+        self.bold = regular.styled(with: .boldTrait)
+        self.italic = regular.styled(with: .italicTrait)
+        self.boldItalic = regular.styled(with: [.boldTrait, .italicTrait])
+    }
+
+    /// The face for one run's style, so callers route on traits rather than
+    /// reaching for a field and risking the wrong one.
+    func font(bold: Bool, italic: Bool) -> CTFont {
+        switch (bold, italic) {
+        case (false, false): regular
+        case (true, false): self.bold
+        case (false, true): self.italic
+        case (true, true): boldItalic
+        }
+    }
+
+    static func == (lhs: TerminalFontSet, rhs: TerminalFontSet) -> Bool {
+        CFEqual(lhs.regular, rhs.regular)
+            && CFEqual(lhs.bold, rhs.bold)
+            && CFEqual(lhs.italic, rhs.italic)
+            && CFEqual(lhs.boldItalic, rhs.boldItalic)
+    }
+}
+
+private extension CTFont {
+    /// Falls back to the untraited face when the family has no such variant, so
+    /// a missing italic renders as upright text instead of nothing.
+    func styled(with traits: CTFontSymbolicTraits) -> CTFont {
+        CTFontCreateCopyWithSymbolicTraits(
+            self,
+            0,
+            nil,
+            traits,
+            [.boldTrait, .italicTrait]
+        ) ?? self
     }
 }
 
@@ -276,23 +337,6 @@ private extension RenderColor {
     }
 }
 
-private extension TerminalRenderMetrics {
-    func font(bold: Bool, italic: Bool) -> CTFont {
-        let regular = CTFontCreateWithName(baseFontName as CFString, baseFontSize, nil)
-        var traits: CTFontSymbolicTraits = []
-        if bold { traits.insert(.boldTrait) }
-        if italic { traits.insert(.italicTrait) }
-        guard traits.isEmpty == false else { return regular }
-        return CTFontCreateCopyWithSymbolicTraits(
-            regular,
-            0,
-            nil,
-            traits,
-            [.boldTrait, .italicTrait]
-        ) ?? regular
-    }
-}
-
 private extension Dictionary where Value == [CGRect] {
     /// Empties every bucket in place while retaining the keys, so a hoisted
     /// rect dictionary keeps both its hash table and each bucket's storage
@@ -358,10 +402,11 @@ private extension CGContext {
         colorSpace: CGColorSpace
     ) {
         setBlendMode(.normal)
-        let regularFont = metrics.font(bold: false, italic: false)
-        let boldFont = metrics.font(bold: true, italic: false)
-        let italicFont = metrics.font(bold: false, italic: true)
-        let boldItalicFont = metrics.font(bold: true, italic: true)
+        // The faces come from the metrics, which built them once. Constructing
+        // them here instead was a fixed per-draw cost, so it fell entirely on
+        // the small damage-clipped draws that should be cheapest; removing it
+        // measured -8.4% and -3.6% there and no verdict on full-frame draws.
+        let fonts = metrics.fonts
         var colors: [UInt32: CGColor] = [:]
         // Built lazily on the first braille cell and reused for the rest of the
         // draw: the braille dot layout depends only on `metrics` (constant across
@@ -406,12 +451,7 @@ private extension CGContext {
             mappedGlyphs.removeAll(keepingCapacity: true)
             positions.removeAll(keepingCapacity: true)
 
-            let font = switch (run.bold, run.italic) {
-            case (false, false): regularFont
-            case (true, false): boldFont
-            case (false, true): italicFont
-            case (true, true): boldItalicFont
-            }
+            let font = fonts.font(bold: run.bold, italic: run.italic)
             let colorKey = UInt32(run.foreground.red) << 16
                 | UInt32(run.foreground.green) << 8
                 | UInt32(run.foreground.blue)

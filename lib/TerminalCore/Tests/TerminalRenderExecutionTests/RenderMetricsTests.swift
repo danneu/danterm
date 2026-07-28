@@ -1,5 +1,7 @@
-// Behavioral proofs for display-scale metrics and overflow-safe frame sizing.
+// Behavioral proofs for display-scale metrics, its styled font set, and
+// overflow-safe frame sizing.
 import CoreGraphics
+import CoreText
 import Testing
 
 import TerminalCore
@@ -25,6 +27,52 @@ struct RenderMetricsTests {
             (metrics.strikethroughOffset * scale).rounded()
                 == metrics.strikethroughOffset * scale
         )
+    }
+
+    @Test("Metrics carry one styled face per trait combination, all on the base family")
+    func fontSetCoversEveryTraitCombination() throws {
+        // Intent: the font set a draw reads holds four faces whose symbolic
+        //   traits match the style each one serves, all from the base family.
+        // Why it exists: the faces moved off the draw path and onto the metrics
+        //   so a draw constructs no fonts. Once built once and reused forever, a
+        //   face wired to the wrong traits can no longer be corrected by the next
+        //   draw, and the styled-cell bitmap tests only catch it when the wrong
+        //   face happens to render differently.
+        // Scenario: spec-first -- terminal output mixes regular, bold, italic,
+        //   and bold-italic runs within a single frame.
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
+        let fonts = metrics.fonts
+
+        #expect(CTFontGetSymbolicTraits(fonts.regular).isDisjoint(with: [.boldTrait, .italicTrait]))
+        #expect(CTFontGetSymbolicTraits(fonts.bold).contains(.boldTrait))
+        #expect(CTFontGetSymbolicTraits(fonts.bold).contains(.italicTrait) == false)
+        #expect(CTFontGetSymbolicTraits(fonts.italic).contains(.italicTrait))
+        #expect(CTFontGetSymbolicTraits(fonts.italic).contains(.boldTrait) == false)
+        #expect(CTFontGetSymbolicTraits(fonts.boldItalic).isSuperset(of: [.boldTrait, .italicTrait]))
+
+        for font in [fonts.regular, fonts.bold, fonts.italic, fonts.boldItalic] {
+            #expect(CTFontGetSize(font) == metrics.baseFontSize)
+            #expect(CTFontCopyFamilyName(font) == CTFontCopyFamilyName(fonts.regular))
+        }
+    }
+
+    @Test("Equal metrics carry interchangeable font sets")
+    func equalMetricsCarryInterchangeableFontSets() throws {
+        // Intent: two separately built metrics for the same display scale stay
+        //   `==`, and their font sets are interchangeable.
+        // Why it exists: the view rebuilds metrics on every geometry sync and
+        //   repaints only when the new value differs from the old. Storing
+        //   reference-typed faces on the metrics would break that comparison if
+        //   equality ever narrowed to face identity, silently repainting the
+        //   whole grid on every resize tick.
+        // Scenario: spec-first -- a window resize that leaves the backing scale
+        //   unchanged must not read as a metrics change.
+        let first = try #require(TerminalRenderMetrics(displayScale: 2))
+        let second = try #require(TerminalRenderMetrics(displayScale: 2))
+
+        #expect(first == second)
+        #expect(first.fonts == second.fonts)
+        #expect(first != (try #require(TerminalRenderMetrics(displayScale: 1))))
     }
 
     @Test("Invalid and unrepresentable display scales refuse metrics")
