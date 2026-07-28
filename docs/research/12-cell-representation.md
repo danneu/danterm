@@ -1,8 +1,9 @@
 # Cell representation
 
-Research started: 2026-07-28. **Status: Phase 1 evidenced (F1-F5). H5's erase leg
-closed and shipped (F6); its move/copy leg confirmed and unimplemented (F4). The
-cell-representation change itself is still unproposed.**
+Research started: 2026-07-28. **Status: H5 settled and shipped in both legs --
+erase (F5, F6) and cell triviality (F4, F7), together worth -7.05% and -9.43% on
+`terminal-feed`. The memory question -- H1, H2, H4, and what remains of H3 -- is
+evidenced but unproposed.**
 
 ## Purpose
 
@@ -300,17 +301,24 @@ not a hypothesis, because nothing has measured the per-row allocation yet.
 
 ### Phase 2 -- direction gate
 
-- [ ] **Gate: confirm the ordering above before implementing.** In particular
-  decide whether H1 alone is worth shipping if H3 is never done -- it is, on
-  memory and scrollback depth, but the CPU argument in H5 needs H3.
+- [x] **Gate: confirm the ordering above before implementing.** Answered by F3
+  and F4 rather than by deliberation: H1 is a memory and scrollback-depth change
+  with no CPU payoff, and the CPU lives entirely in cell triviality -- which is
+  separable from H3's packing and was taken first. The ordering in "Candidate
+  direction" is therefore superseded for the CPU half and still stands for the
+  memory half.
 
 ### Phase 3 -- implement and verify, one change at a time
 
+- [x] Cell triviality: multi-scalar clusters moved into row-owned storage, making
+  `GridCell` POD without packing it. Not one of H1-H4 as originally written --
+  it is the separable half of H3 that F4 identified. Result: F7.
 - [ ] H1: style dedup behind a 16-bit ID.
-- [ ] H2: narrow `hyperlinkId` and `contentIdentity`.
+- [ ] H2: narrow `hyperlinkId`, and decide `contentIdentity` separately (F3).
 - [ ] H4: row skip flags.
-- [ ] H3: pack the remaining cell into a POD word.
-- [ ] Re-measure `10`'s erase-path node after H3 and settle H5 either way.
+- [ ] H3: pack the remaining cell into a word, now that it is already POD.
+- [x] Settle H5. Erase leg closed by F5/F6 (not representation at all); move/copy
+  leg confirmed by F4 and realized by F7.
 
 ## Findings log
 
@@ -546,9 +554,14 @@ not a hypothesis, because nothing has measured the per-row allocation yet.
   stream includes `unicode-wrapping`, where a correct cluster side-table costs
   something the spike simply skipped. The spike measures the ceiling.
 - Next action: settle the erase question separately (inference 2), and design the
-  cluster side-table's lifetime -- per-row storage dies with row eviction but
-  reflow moves cells between rows; per-terminal storage needs reclamation on
-  overwrite.
+  cluster side-table's lifetime -- per-row storage dies with row eviction but is
+  only meaningful against its own row, so every path that builds a cell under a
+  different row owner has to carry the content across; per-terminal storage
+  avoids that but needs reclamation on overwrite. Corrected after drafting: those
+  paths are not reflow alone, and one of them (`resizedRectangle`) rebuilds rows
+  without moving any cell between row *indices* at all. Enumerating them is the
+  wrong instrument; the design constraint is the row-owner rule. Carried into
+  `plans/wip/despill-cell-clusters.md`.
 
 ### F5 -- the erase cost is per-cell call and nested-COW overhead, and it is not shape-independent at the feed boundary
 
@@ -650,6 +663,44 @@ not a hypothesis, because nothing has measured the per-row allocation yet.
   file's hypotheses** -- it was per-cell call and COW-check shape, not payload
   layout. What remains of H5 is the move/copy leg, which F4 already confirmed
   belongs to cell triviality.
+
+### F7 -- the POD cell shipped and is worth -9.43% on `terminal-feed`
+
+- Status: recorded. Paired comparison at `quick` thresholds. Implemented and
+  committed.
+- Date and investigator: 2026-07-28, Dan (implementation), Claude (this record).
+- Baseline revision: `2a39e5b`, compared against the working tree that became
+  `31c2f8e`. The run's `run.json` confirms the baseline resolved to the
+  pre-change commit rather than to the change's own tree.
+- Change: multi-scalar grapheme clusters moved out of the cell into scalar
+  storage owned by the row, per
+  `plans/impl/2026-07-28-1321-despill-cell-clusters.md`. `GridCell` is now
+  trivially copyable. The cell also dropped `Equatable` in favour of a
+  content-based row `==`.
+- Verdict: **`terminal-feed: faster (-9.43% symmetric median)`**.
+- Against F4's ceiling: F4 measured **-21.5%**, and the gap has two independent
+  causes, both expected. F4's spike skipped cluster storage entirely rather than
+  implementing it, and F4 measured `incremental-screen-updates` alone while this
+  verdict is the combined four-corpus stream, which includes `scrollback-stream`
+  (F4: -9.7%) and `unicode-wrapping` (where clusters are real work). The ceiling
+  behaved as a ceiling.
+- Verification beyond the gate, from the implementation: each of the three
+  cross-row-owner paths was mutated to copy the bare cell reference and confirmed
+  to fail its test -- reflow and alternate-screen resize trap on the stale range,
+  and the last-column wrap gives a scalar-exact mismatch. Disabling compaction
+  took the I4 row from 64 stored scalars to 2,500, so PO4 is load-bearing rather
+  than decorative.
+- Inference: **H5 is now fully settled.** Its move/copy leg was the cell's
+  non-triviality, predicted by F4 and realized here; its erase leg was never
+  representation at all (F5, F6). Separately, this confirms F4's inference 3 in
+  production code: the CPU win needed only POD, not libghostty's 8-byte packing,
+  offsets, or page allocator. What H3 has left is purely the memory question.
+- Uncertainty: `quick`, not `confirm`, so the direction is licensed at `quick`'s
+  threshold and nothing tighter. Memory was not measured; the cell may have grown
+  slightly (plan AR1), and no claim is made about scrollback depth.
+- Open follow-up: a fully erased row keeps its cluster storage until the next
+  intern compacts it. Bounded by the compaction threshold, so I4 holds, but a
+  range covering the whole row could release it outright.
 
 ## Open questions and caveats
 
