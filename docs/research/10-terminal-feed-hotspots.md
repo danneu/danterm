@@ -472,7 +472,11 @@ the most valuable remaining RESEARCH item.
   correction to F5; D5.
 - [ ] RESEARCH: `eraseLine` / `eraseCells` / `clearCellAndPair`, 11-17% of root
   on **both** workload shapes. Not yet attributed to a mechanism, and the only
-  large node that is shape-independent.
+  large node that is shape-independent. **Picked up by
+  [12-cell-representation.md](12-cell-representation.md) H5**, which proposes the
+  mechanism this file never found: blanking a cell writes 65 bytes and releases a
+  refcounted payload, because `GridCell` is 72 bytes of array stride and is not
+  trivially copyable. Verify there, not here.
 
 The unchecked boxes above are **backlog, not remaining work**. Phase 3 closed
 with F9; see Status at the top of this file. H3's line still reads "F4
