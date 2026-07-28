@@ -410,10 +410,24 @@ public struct Terminal: Equatable, Sendable {
     private var primaryKittyKeyboardStack: [UInt16] = []
     private var alternateKittyKeyboardStack: [UInt16] = []
     private var evictedRowCount = 0
-    private var selection: TextAnchorRange?
-    private var search: SearchState?
-    private var hoveredLinkState: InteractionLinkState?
-    private var armedLinkState: InteractionLinkState?
+    // The four inspection fields below are read together, per printed character, by
+    // `invalidateInspection`, whose guard rejects whenever all four are nil -- the state of
+    // every run with no selection, search, hover, or armed link. Each observer keeps
+    // `hasInteractionState` exact so that guard is one Bool load instead of four optional
+    // loads. Maintaining it here rather than at the call sites is what makes it undriftable:
+    // `didSet` fires for in-place mutation (`selection.start.column = ...`) as well as for
+    // whole-value assignment, so no future write can bypass it.
+    private var selection: TextAnchorRange? { didSet { refreshHasInteractionState() } }
+    private var search: SearchState? { didSet { refreshHasInteractionState() } }
+    private var hoveredLinkState: InteractionLinkState? { didSet { refreshHasInteractionState() } }
+    private var armedLinkState: InteractionLinkState? { didSet { refreshHasInteractionState() } }
+
+    /// Caches `selection`/`search`/`hoveredLinkState`/`armedLinkState` being non-nil.
+    ///
+    /// Derived state, never assigned directly: the four observers above are its only writer.
+    /// `false` is correct at initialization because all four fields start nil and property
+    /// observers do not fire during initialization.
+    private var hasInteractionState = false
     private var viewportState = ViewportState.following
     private var damage: TerminalDamageAccumulator
     private var hyperlinkTargets: [Int: TerminalHyperlink] = [:]
@@ -2609,6 +2623,13 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
+    private mutating func refreshHasInteractionState() {
+        hasInteractionState = selection != nil
+            || search != nil
+            || hoveredLinkState != nil
+            || armedLinkState != nil
+    }
+
     private mutating func clearInspection() {
         selection = nil
         search = nil
@@ -2624,8 +2645,7 @@ public struct Terminal: Equatable, Sendable {
         } else {
             recordFullDamage()
         }
-        guard selection != nil || search != nil || hoveredLinkState != nil || armedLinkState != nil
-        else { return }
+        guard hasInteractionState else { return }
         let lower = evictedRowCount + scrollbackRows.count + range.lowerBound
         let upper = evictedRowCount + scrollbackRows.count + range.upperBound - 1
         invalidateInspection(inAbsoluteRows: lower...upper)
@@ -2635,8 +2655,7 @@ public struct Terminal: Equatable, Sendable {
         if viewportState != .following {
             recordFullDamage()
         }
-        guard selection != nil || search != nil || hoveredLinkState != nil || armedLinkState != nil
-        else { return }
+        guard hasInteractionState else { return }
         let absoluteRow = evictedRowCount + row
         invalidateInspection(inAbsoluteRows: absoluteRow...absoluteRow)
     }

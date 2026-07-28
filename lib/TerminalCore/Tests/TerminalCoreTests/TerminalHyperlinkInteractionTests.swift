@@ -40,6 +40,32 @@ struct TerminalHyperlinkInteractionTests {
         #expect(terminal.hoveredLink == nil)
     }
 
+    @Test("an armed link alone is invalidated when its text is overwritten")
+    func armedLinkInvalidatesWithoutOtherInspectionState() throws {
+        // Intent: an armed click reservation, with no selection, search, or hover alongside
+        //   it, is dropped when output overwrites the run it reserved.
+        // Why it exists: `invalidateInspection` short-circuits on one cached
+        //   `hasInteractionState` bit rather than re-reading its four inspection optionals,
+        //   so a bit that fails to account for `armedLinkState` strands an arm over text that
+        //   no longer exists. `armedLinkState` was the one field of the four with no
+        //   arm-only invalidation coverage: `linkArmTracksRunIdentity` exercises an arm over
+        //   an overwrite, but release there is refused by the run-identity check, so it
+        //   passes whether or not the arm itself was ever invalidated.
+        // Scenario: the user holds Cmd and presses on a URL, and the running program repaints
+        //   that line before they release.
+        var terminal = try #require(Terminal(columns: 14, rows: 3))
+        terminal.feed(Array("https://a.co".utf8))
+        let link = try #require(terminal.activatableLink(at: .init(row: 0, column: 3)))
+
+        let armed = terminal.setArmedLink(link)
+        #expect(armed)
+        #expect(terminal.armedLink != nil)
+        #expect(terminal.hoveredLink == nil)
+
+        terminal.feed(Array("\u{1B}[1;4HX".utf8))
+        #expect(terminal.armedLink == nil)
+    }
+
     @Test("soft and hard reset clear hovered presentation")
     func resetClearsHover() throws {
         var terminal = try #require(Terminal(columns: 12, rows: 2))

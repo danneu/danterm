@@ -186,6 +186,13 @@ node is large and its stated work is tiny either way.
 Confirmed if maintaining a precomputed `hasInteractionState` flag, tested before
 any optional field is touched, collapses the node.
 
+**Confirmed, 2026-07-28 (F5, D2).** The flag took the node from 19.4/19.2% to
+1.5/1.7% of root with nothing absorbing the work. The competing explanation is
+also settled against: the `outlined ...` symbols were where this hypothesis
+placed them -- the `InactivePrimaryScreen?` copy goes to zero and the
+`InteractionLinkState?` destroy to 0.31x when the four optional reads leave the
+guard. Reading nil non-POD optionals is not free.
+
 ### H3 -- `Terminal` is large enough that ordinary field access is expensive
 
 `MemoryLayout<Terminal>.size` is **932 bytes** (F2), across roughly fifty stored
@@ -240,8 +247,11 @@ is committed until the gate in Phase 2 is answered.
 2. **H1(a) -- stop snapshotting for `.print`.** Larger win, but it narrows when
    damage is recorded and therefore needs behavioral tests under the correctness
    rule above.
-3. **H2 -- precomputed interaction-state flag.** Self-contained, and it doubles
-   as the experiment that confirms or refutes H2's attribution.
+3. ~~**H2 -- precomputed interaction-state flag.**~~ Done and shipped: F5, D2.
+   About 18 points of the feed path on `styled-screen-redraw`. Note the reordering
+   this implies for the rest -- F1's table is now stale, and `recordDamage`,
+   `eraseLine`/`eraseCells`, and `_platform_memmove` are the three largest
+   remaining nodes on the rescaled profile.
 4. **H4 -- drop `lastPlannedTerminal`.** App-only, removes a per-frame
    whole-grid compare as well as the copies.
 5. **H3 -- box the cold fields of `Terminal`.** Largest, last, and only once the
@@ -276,7 +286,9 @@ unanalyzed; it is a Phase 3 item, not a candidate yet.
 ### Phase 3 -- implement and verify, one change at a time
 
 - [x] H1(b): POD `DamageActionSnapshot`. Result: F4 -- negative, reverted; D1.
-- [ ] H2: interaction-state flag. Doubles as the H2 attribution experiment.
+- [x] H2: interaction-state flag. Result: F5 -- confirmed and shipped; D2. The
+  attribution experiment came out in H2's favor, which also resolves this file's
+  "the `outlined ...` names may be misattributed" caveat.
 - [ ] H1(a): skip the snapshot for `.print`, with behavioral damage tests.
 - [ ] H4: replace `lastPlannedTerminal` with a generation counter; verify on an
   **app** profile, not the headless one.
@@ -587,7 +599,175 @@ unanalyzed; it is a Phase 3 item, not a candidate yet.
   outlined calls are cheap) explains the null cleanly.
 - Next action: D1. H1's remaining weight is H1(a) alone.
 
+### F5 -- a precomputed interaction-state flag removes 18 points of feed, and confirms H2's attribution
+
+- Status: recorded. Positive result, committed. Confirms H2.
+- Date and investigator: 2026-07-28, Claude (agent).
+- Commit and worktree state: baseline `52af73a` clean; candidate is `52af73a`
+  plus the change below (`Terminal.swift` + one new test), with only untracked
+  `notes.md` / `plans/wip/*` besides.
+- The change: the four inspection fields (`selection`, `search`,
+  `hoveredLinkState`, `armedLinkState`) each gained a `didSet` observer that
+  recomputes one `hasInteractionState: Bool`, and both `invalidateInspection`
+  overloads now guard on that Bool instead of re-reading all four optionals.
+  The observers, rather than the mutation sites, are what make the flag
+  undriftable: `didSet` fires for in-place mutation
+  (`hoveredLinkState?.range = ...`) as well as for whole-value assignment, so
+  there is no call site that can forget to maintain it.
+- Commands: `just benchmark-feed-sample styled-screen-redraw 20` twice before
+  and twice after; `just test`;
+  `DANTERM_BENCHMARK_ALLOW_BATTERY=1 just benchmark-quick baseline=52af73a workload=content-churn`, twice.
+- Artifacts: `.build/terminal-feed-profiles/2026-07-28-{093123,093151}` (before,
+  shared with F4), `.../2026-07-28-{095004,095032}` (after),
+  `.build/terminal-benchmark-comparisons/quick/9f143d617884-{0000,0001}`.
+- Measurements -- share of harness root inclusive, `styled-screen-redraw`. The
+  final column is the after/before ratio of the two-run means, which is the
+  column that carries the verification argument:
+
+  | Node | before 1 | before 2 | after 1 | after 2 | ratio |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | `Terminal.feed(_:)` | 96.9% | 97.2% | 96.4% | 96.2% | 0.99 |
+  | **`Terminal.invalidateInspection(inViewportRows:)`** | **19.4%** | **19.2%** | **1.5%** | **1.7%** | **0.08** |
+  | `outlined init with copy of Terminal.InactivePrimaryScreen?` | 8.7% | 8.1% | 0.0% | 0.0% | 0.00 |
+  | `outlined destroy of Terminal.InteractionLinkState?` | 8.4% | 8.8% | 2.7% | 2.7% | 0.31 |
+  | `destroy for ClosedRange<>.Index` | 6.0% | 6.3% | 1.8% | 1.7% | 0.29 |
+  | `Terminal.printNarrow(_:breakClass:)` | 29.6% | 29.8% | 12.5% | 13.0% | 0.43 |
+  | `_platform_memmove` | 16.7% | 16.3% | 17.8% | 17.9% | 1.08 |
+  | `Terminal.clearCellAndPair(...)` | 14.9% | 14.7% | 17.2% | 16.8% | 1.15 |
+  | `Terminal.appendToOpenClusterIfJoined(...)` | 4.0% | 4.0% | 4.8% | 4.5% | 1.16 |
+  | `TerminalInputStream.feed(_:)` | 7.4% | 7.0% | 8.6% | 8.8% | 1.21 |
+  | `Terminal.eraseLine(mode:)` | 11.6% | 11.1% | 14.2% | 13.6% | 1.23 |
+  | `Terminal.eraseCells(row:columns:)` | 10.7% | 10.1% | 13.0% | 12.5% | 1.23 |
+  | `EscapeAbsorber.consume(_:)` | 2.8% | 2.5% | 3.3% | 3.3% | 1.23 |
+  | `Terminal.recordDamage(since:)` | 21.9% | 22.4% | 28.0% | 27.7% | 1.26 |
+  | `Terminal.damageActionSnapshot.getter` | 8.9% | 9.0% | 11.3% | 11.4% | 1.27 |
+
+  After, run 1, pruned to nodes at or above 130 samples (root 16149):
+
+  ```
+  16149  measureFeedBatch(chunks:executionCount:makeTerminal:now:)
+    4777  Terminal.feed(_:)
+      1446  Terminal.recordDamage(since:)
+        1388  _platform_memmove
+       760  Terminal.recordDamage(since:)
+         215  Terminal.damageActionSnapshot.getter
+         137  Terminal.damageActionSnapshot.getter
+       458  Terminal.recordDamage(since:)
+         262  outlined init with copy of Terminal.DamageActionSnapshot
+           262  initializeWithCopy for Terminal.DamageActionSnapshot
+       456  Terminal.recordDamage(since:)
+         242  outlined destroy of Terminal.InteractionLinkState?
+           160  destroy for ClosedRange<>.Index
+       339  Terminal.recordDamage(since:)
+       280  Terminal.recordDamage(since:)
+         280  ___chkstk_darwin
+       142  Terminal.damageActionSnapshot.getter
+    2350  Terminal.feed(_:)
+      2290  Terminal.eraseLine(mode:)
+        1993  Terminal.eraseCells(row:columns:)
+           481  Terminal.clearCellAndPair(...)
+           271  Terminal.clearPreviousSpacer(...)
+    2155  Terminal.feed(_:)
+      1027  Terminal.printNarrow(_:breakClass:)
+         204  Terminal.clearCellAndPair(...)
+       240  Terminal.printNarrow(_:breakClass:)
+       196  Terminal.printNarrow(_:breakClass:)
+    1444  Terminal.feed(_:)
+      1400  _platform_memmove
+    1413  Terminal.feed(_:)
+       524  TerminalInputStream.feed(_:)
+         286  EscapeAbsorber.consume(_:)
+           232  EscapeAbsorber.dispatchCSI(final:)
+       395  TerminalInputStream.feed(_:)
+     757  Terminal.feed(_:)
+       223  Terminal.damageActionSnapshot.getter
+     705  Terminal.feed(_:)
+       431  Terminal.appendToOpenClusterIfJoined(_:classification:)
+     414  Terminal.feed(_:)
+       414  doDecrementSlow -> _swift_release_dealloc -> swift_arrayDestroy
+  ```
+
+  The `invalidateInspection` subtree that dominated the before-tree --
+  six sibling entries totalling 3260 samples, each topped by an `outlined init
+  with copy` or `outlined destroy` -- is simply absent. The function survives at
+  199 raw samples in the after profile.
+
+- Verification that nothing absorbed the work: the harness samples for a fixed
+  20 seconds, so every share is relative and removing a node inflates every
+  other share mechanically. Removing a 19.3% node predicts a uniform rescale of
+  `1/(1-0.193)` = **1.24x** for untouched work. The measured ratios for work
+  with no relationship to the guard cluster tightly on that prediction --
+  `recordDamage` 1.26, the snapshot getter 1.27, `eraseLine` and `eraseCells`
+  1.23, `EscapeAbsorber.consume` 1.23, `TerminalInputStream.feed` 1.21. **No
+  node exceeds 1.27**, so nothing grew in absolute terms; nothing absorbed the
+  removed work. The nodes that came in *below* 1.24 -- `_platform_memmove` 1.08,
+  `clearCellAndPair` 1.15, `appendToOpenClusterIfJoined` 1.16 -- are ones that
+  had part of themselves under the guard and therefore shed work as well.
+  `printNarrow` at 0.43 is the guard's own caller.
+- Correctness: `just test` exit 0 -- 619 core tests in 84 suites (618 plus the
+  new one), the one pre-existing `GhosttyInspectionRecoveryReplayTests` known
+  issue, plus 1111 protocol, 115 support, 30 shell-contract.
+- Test added, per this file's correctness-first rule: *"an armed link alone is
+  invalidated when its text is overwritten"* in
+  `TerminalHyperlinkInteractionTests`. `armedLinkState` was the one of the four
+  fields with no arm-only invalidation coverage -- `linkArmTracksRunIdentity`
+  drives an arm across an overwrite, but its release is refused by the
+  run-identity check, so it passes whether or not the arm was ever invalidated.
+  Verified by mutation: dropping `|| armedLinkState != nil` from the flag's
+  recomputation fails this test and **only** this test, across the whole 619-test
+  suite. Zeroing the flag entirely fails 43 assertions across selection, search,
+  and hover, so those three were already covered.
+- Paired verdict: `content-churn` **inconclusive** (-1.80% symmetric median of 2
+  pairs) then **equivalent** (-0.67%) on a repeat. Both runs on AC power, not
+  battery. Both point the right way and neither clears the bar, so per this
+  file's evidence rule **no app-level speedup is claimed**. This is the expected
+  shape rather than a contradiction: `benchmark-quick` is a frame-oriented
+  main-thread measurement, and feed runs on the pty-host queue -- the same reason
+  doc 9 set feed aside. Its role here is as a regression guard, and it clears
+  that.
+- Inference: **H2 is confirmed, including its attribution.** The competing
+  explanation in H2 was that the `outlined ...` symbols are linker-deduplicated
+  and might belong to some other field of the same layout. They do not: removing
+  the four optional reads from the guard takes `outlined init with copy of
+  Terminal.InactivePrimaryScreen?` to zero and `outlined destroy of
+  Terminal.InteractionLinkState?` to 0.31x. The copies were exactly where H2 said
+  they were. F4 already showed the same `InteractionLinkState?` destroy node was
+  *not* explained by the damage snapshot's hovered link; F5 completes that by
+  showing it was the guard.
+- Broader inference: reading four `Optional`s whose payloads are non-trivial is
+  not free even when all four are nil and the function returns immediately. The
+  loads emit outlined copy/destroy calls, and here that cost about 18% of the
+  entire feed path. That generalizes to any hot guard over non-POD optionals in
+  this engine.
+- Competing interpretations: the reduction could be an artifact of the optimizer
+  inlining `invalidateInspection` into `printNarrow` rather than of real work
+  being removed. The rescale analysis rules this out -- inlining relocates a
+  node's samples into its caller, which would have pushed `printNarrow` *above*
+  the 1.24 rescale factor, and instead it fell to 0.43.
+- Uncertainty: low headless. Unquantified at the app level, by instrument
+  limitation rather than by disagreement.
+- Next action: D2. The next scheduled item is H1(a), then H4, then H3.
+
 ## Decision log
+
+### D2 -- H2 shipped; `hasInteractionState` is maintained by observers, not by call sites
+
+- Date: 2026-07-28.
+- Decision: commit the precomputed flag (F5). It removes about 18 points of the
+  feed path on the redraw-shaped workload with no behavior change and no
+  app-level regression.
+- Design decision inside it: maintain the flag with `didSet` observers on the
+  four fields rather than by updating it at each mutation site. The fields are
+  written from roughly a dozen places (`clearInspection`, `handleEviction`,
+  `setHoveredLink`, `setArmedLink`, reflow, reset, the invalidation itself), and
+  a hand-maintained flag would be one forgotten write away from a *missing*
+  repaint -- the failure mode this file's correctness rule names as invisible to
+  both benchmarks and most tests. The observers cost nothing on the hot path
+  because the hot path never writes these fields.
+- Consequence: the guard is now one Bool load. If a fifth inspection field is
+  ever added, it must be declared with the same observer and added to
+  `refreshHasInteractionState`; the arm-only test added in F5 is the pattern for
+  covering it.
 
 ### D1 -- H1(b) implemented, measured, and reverted; H1's remaining weight is H1(a)
 
@@ -617,10 +797,13 @@ the paired benchmark returned `equivalent`.
   differently from styled (parsing nearly doubles in share, `printNarrow` falls
   by more than three times). Until a repeat exists, do not treat any incremental
   share as stable.
-- **The `outlined ...` symbol names may be linker-deduplicated** and therefore
-  attribute copy/destroy work to the wrong type. The sizes are trustworthy; the
-  type names in H2 are not, which is why H2's confirming experiment is designed
-  to be decisive regardless.
+- ~~**The `outlined ...` symbol names may be linker-deduplicated**~~ -- settled by
+  F5. They were not misattributed: the two large ones tracked exactly the four
+  optional reads in `invalidateInspection`'s guard and collapsed with it.
+- **F1's table describes a profile that no longer exists.** F5 removed about 18
+  points of the feed path, so every share in F1 has been rescaled by roughly
+  1.24x. F1 stays as the record of the starting state; use F5's after-columns
+  for anything forward-looking, and re-baseline before sizing H1(a), H4, or H3.
 - **`styled-screen-redraw` is a proxy for btop, not a recording of it.** It
   matches the shape (cursor-home full-frame redraw, dense truecolor SGR, `EL` per
   row) but its cell content and frame cadence are synthetic. If a candidate's
