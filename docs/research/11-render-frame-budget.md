@@ -5,11 +5,18 @@ change proposed yet. Doc 13 closed on 2026-07-28 and handed over its evidence
 (see "Evidence handed over from doc 13"), which corrects this file's only sizing
 measurement and adds a whole cost this file had never measured.**
 
-**Two things a fresh reader should know before anything else.** Profile share
+**Three things a fresh reader should know before anything else.** Profile share
 overstated recoverable time by ~3x on the one node where that has been tested
-(F2), so the sums in the hypotheses below are soft. And the backend A/B -- the
-instrument this file calls the only one that can settle the 2x claim -- does not
-currently run (F3).
+(F2, corrected and confirmed by F4), so the sums in the hypotheses below are
+soft. The backend A/B -- the instrument this file calls the only one that can
+settle the 2x claim -- does not currently run (F3). And **every draw cost quoted
+above F5 was measured on all-sprite content, which costs 3.5x per cell what text
+does** (F5); the file's headline "23 ms at 179x66" is the worst-case end of a
+range whose other end is ~4 ms.
+
+**F2's table is arithmetically wrong and F4 supersedes it.** The error was a
+double division by the batch count in a summarizing script, not a fault in
+`benchmark-draw`. F2's *conclusion* survives; its numbers must not be quoted.
 
 ## Purpose
 
@@ -61,14 +68,25 @@ feed:
 
 Two rules specific to this file:
 
-- **Never quote a draw cost without its geometry and its scenario.** Full-frame
-  and damage-clipped differ by more than an order of magnitude (F1), and cost is
-  linear in cell count, so a number without both is unreadable.
+- **Never quote a draw cost without its geometry, its scenario, and its
+  workload.** Full-frame and damage-clipped differ by more than an order of
+  magnitude (F1), sprite and text content differ by 3.5x per cell (F5), and cost
+  is linear in cell count, so a number without all three is unreadable.
 - **A profile share is an upper bound on what removing the work recovers, not an
   estimate of it.** Earned here: removing per-draw font construction *entirely*
-  recovered about a third of its measured share (F2). Never total up unharvested
-  shares and compare the sum to the frame budget -- that is this file's central
-  question and the arithmetic does not support it.
+  recovered about a third of its measured share (F2, re-derived correctly in
+  F4). Never total up unharvested shares and compare the sum to the frame budget
+  -- that is this file's central question and the arithmetic does not support it.
+- **Check an absolute number against a physical floor before quoting it.** A
+  per-draw duration divides by a cell count into nanoseconds per cell; a bare
+  `CGContextFillRects` of the same cells is the floor it cannot beat. F4's
+  arithmetic error survived review, two research docs, and a commit message
+  because nobody divided. `benchmark-draw` now emits a `surface` block per
+  measurement so the division takes seconds. Percentages have no such check,
+  which is exactly why the absolute numbers must carry one.
+- **Say which content a draw number describes.** Sprite cells and text cells
+  differ by 3.5x (F5) and the executor routes them down entirely separate paths.
+  "A full-frame draw costs X" is not a well-formed claim without it.
 
 ## Trigger and current evidence
 
@@ -84,7 +102,11 @@ it.
 **Measured, 2026-07-28 (F1).** A btop-shaped full-frame draw costs 15.6 ms at
 160x50 and scales linearly with cell count, implying about 23 ms at DanTerm's
 real 179x66 geometry against a 16.7 ms frame interval. Damage-clipped draws of
-the same content cost 1.36 ms.
+the same content cost 1.36 ms. **Read with F5:** "btop-shaped" is all-sprite
+content, the most expensive kind. The same measurement on text content is 2.7 ms
+full-frame at 160x50, extrapolating to ~4.0 ms at 179x66. F1's scale is sound --
+a later run reproduced 9.9 ms for the same scenario -- but its content is the
+worst case, not the typical one.
 
 **The evidence boundary this file must preserve:** F1 measures a draw path doc 9
 has already shown to be unoptimized -- at the time, four `CTFont` constructions
@@ -93,11 +115,18 @@ the cost of CPU glyph rasterization *in principle*, only as the cost of the
 current implementation. That distinction is the entire difference between H2 and
 H3. (Two of those three have since landed; the glyph cache has not.)
 
-**Third observation, added 2026-07-28 (F2), and it is about the evidence rather
-than the app.** Removing per-draw font construction outright recovered roughly a
-third of what its profile share predicted. Since every remaining estimate on
+**Third observation, added 2026-07-28 (F2, corrected by F4), and it is about the
+evidence rather than the app.** Removing per-draw font construction outright
+recovered **7.9%** of a damage-clipped text draw against a ~24% profile share --
+roughly a third of what the share predicted. Since every remaining estimate on
 either side of the H2/H3 split is a profile share, this file's arithmetic is
 softer than it reads.
+
+**Fourth observation, added 2026-07-28 (F5).** The draw benchmark had exactly one
+fixture for its whole life and that fixture is all sprite geometry, which costs
+3.5x per cell what text costs and never touches CoreText's glyph calls at all
+(`13/F5`). This file's central question is about CPU *glyph* drawing; until now
+no instrument in it had drawn a glyph.
 
 ## Evidence handed over from doc 13
 
@@ -164,15 +193,27 @@ itself.
 
 ## The instruments
 
-Three exist already; none needed to be built.
+Four exist already; none needed to be built.
 
-- `just benchmark-draw` -- headless, no GUI, no PTY. Draws a **btop-shaped** plan
-  into an offscreen sRGB bitmap at `displayScale: 2`, in two scenarios
-  (`full-frame`, `damage-clipped`) across two grids (80x24, 160x50), with
-  calibration passes so caches are warm and the measurement is steady-state.
-  This is the primary instrument for sizing and it is cheap. **Read `13/F5`
-  before quoting it**: its fixture draws no glyphs, so it sizes the sprite path
-  and not the font path.
+- `just benchmark-draw` -- headless, no GUI, no PTY. Draws into an offscreen
+  sRGB bitmap at `displayScale: 2`, across **two workloads** (`btop-shaped`
+  sprites, `text-shaped` glyphs), two scenarios (`full-frame`,
+  `damage-clipped`), and two grids (80x24, 160x50), with calibration passes so
+  caches are warm and the measurement is steady-state. This is the primary
+  instrument for sizing and it is cheap. The `text-shaped` workload was added
+  2026-07-28 in answer to `13/F5`; before that the tool could not draw a glyph.
+  Each measurement now carries a `surface` block -- bitmap pixels, cell pixels,
+  drawn runs and cells -- so **divide before you quote** (F4).
+  **It is a sizing instrument, not a comparison instrument.** Its cross-process
+  drift is 2-4%, larger than most changes worth measuring; for a directional
+  claim use the interleaved tool below.
+- `scripts/terminal-headless-draw-compare.py` -- loads two independently built
+  arms into one process and interleaves their batches, which cancels the drift
+  above and collapses paired spread to ~0.7% (`8/F21-F23`). Takes `--workload`
+  and `--clip-rows`, and computes percentages from raw batch totals, so it
+  cannot make F4's normalization error. **This is the instrument for any claim
+  that one revision is faster than another on the draw path.** Use
+  `--both-directions`; a single direction carries an order bias.
 - `just benchmark-draw-app` -- fixed-row updates through the real optimized AppKit
   draw path.
 - `scripts/terminal-benchmark.sh <workload> <backend>` -- **the backend A/B, and
@@ -204,13 +245,23 @@ only such an instrument could close.
 
 ### H1 -- the CPU draw path exceeds the 60Hz frame budget on a full-frame redraw at real geometry
 
-`makeBtopShapedPlan` at 160x50 costs **15.6 ms per full-frame draw** (F1). Cost
+The btop-shaped workload at 160x50 costs **15.6 ms per full-frame draw** (F1;
+the generator was `makeBtopShapedPlan`, renamed `makeWorkloadPlan(for:workload:)`
+when the second workload landed). Cost
 is linear in cell count, and DanTerm's real geometry is 179x66 = 11,814 cells
 against 160x50's 8,000, so the same draw extrapolates to roughly **23 ms** --
 about **1.4x the 16.7 ms budget** at 60Hz, on the main thread.
 
 Supporting evidence: F1, and the fact that the extrapolation is a straight line
-rather than a guess -- 4.17x the cells produced 4.18x the time.
+rather than a guess -- 4.17x the cells produced 4.18x the time. F5 confirms the
+linearity a second way: per-cell cost is flat to within 1% across both grids.
+
+**F5 narrows this hypothesis sharply and it should be restated.** The 15.6 ms and
+the 23 ms are *all-sprite* content. The same draw on text is ~2.7 ms at 160x50
+and ~4.0 ms extrapolated to 179x66 -- under a quarter of the budget. So H1 as
+written is true only of screens that are wall-to-wall box, block, and braille
+art. A btop or a `vim` status line is closer to that than a build log is, but no
+real screen is entirely either, and nothing here has yet measured a mixture.
 
 Competing explanation: real full-frame redraws may be rarer than the btop-shaped
 fixture implies, in which case the damage-clipped figure (1.36 ms at 160x50,
@@ -381,11 +432,12 @@ repeat exactly the error those corrections caught.
 - [ ] Establish how often a full-frame draw actually happens in
   `content-churn` and `style-churn`. H1's competing explanation turns on this
   and nothing currently measures it.
-- [ ] **Give `benchmark-draw` a scenario that reaches the font path**, or record
-  why the sprite-only fixture is the right one. `13/F5` proved the current plan
-  routes every cell to a sprite family and calls `CTFontDrawGlyphs` zero times,
-  so F1's figure omits glyph rasterization entirely. Until this is settled no
-  re-run of F1 can test H2's glyph-cache half or H3's floor.
+- [x] **Give `benchmark-draw` a scenario that reaches the font path.** Done
+  2026-07-28. A `text-shaped` workload of printable ASCII was added to
+  `benchmark-draw` and to `terminal-headless-draw-compare.py`'s arm, so both
+  instruments can now measure the glyph path. Result: **F5** -- text cells cost
+  ~3.5x *less* than sprite cells, which inverts the assumption F1 was read
+  under. H2's glyph-cache half is now measurable.
 - [ ] **Decide what to do with the compositing stall (`13/F10`, `13/H3`).** It is
   31.3% of live main-thread busy, no instrument here can see it, and it is
   unattributed between "architectural" and "a 64-entry cache miss inside
@@ -405,17 +457,18 @@ repeat exactly the error those corrections caught.
   - **What F2 changed about this gate.** The gate was written assuming the
     harvest's value could be read off the profile shares. It cannot: removing
     the one node that has been tested recovered ~3x less than its share. So
-    satisfying this gate now requires *measuring* the glyph cache after the
-    fixture exists, not estimating it -- and a small measured result would be a
-    real result, not a failure to harvest properly.
+    satisfying this gate now requires *measuring* the glyph cache -- the fixture
+    now exists (F5), so this is unblocked -- not estimating it, and a small
+    measured result would be a real result, not a failure to harvest properly.
 
 ### Phase 3 -- decide
 
 - [ ] Re-run F1 after the harvest. Under budget at real geometry closes this file
   in H2's favor; still over it promotes H3 to a design question and hands it to a
-  design doc rather than a research one. **Two conditions on this task that did
+  design doc rather than a research one. **Three conditions on this task that did
   not exist when it was written:** the re-run needs a glyph-bearing fixture
-  (`13/F5`), and "under budget" must now account for a compositing stall the
+  (`13/F5`) -- **which now exists** (F5), and the re-run must report both
+  workloads because they differ by 3.5x; and "under budget" must now account for a compositing stall the
   instrument does not measure (`13/F10`) -- a draw that fits 16.7 ms of CPU still
   misses the frame if the main thread then blocks a third of its time waiting on
   the compositor.
@@ -499,8 +552,18 @@ repeat exactly the error those corrections caught.
 
 ### F2 -- removing per-draw `CTFont` construction entirely recovered under a third of its profile share
 
-- Status: recorded. Directional comparison, confirmed by non-overlapping repeat
-  runs on two of four scenarios. **Its value is calibration, not the speedup.**
+> **SUPERSEDED IN PART BY F4 -- do not quote this finding's numbers.** Every
+> figure in the table below, and the "0.07-0.14 us" at the end, was divided by
+> the batch count twice. The percentages are approximately the *cube* of the
+> truth. The corrected measurement, the reason the error was invisible, and the
+> ~18 us per-draw fixed cost that replaces it are in F4. **The inference this
+> finding exists for -- that profile share overstated recoverable time by ~3x --
+> is unaffected and was re-derived correctly in F4.** The finding is kept intact
+> rather than rewritten because the shape of the error is the lesson.
+
+- Status: superseded in part (see F4). Directional comparison, confirmed by
+  non-overlapping repeat runs on two of four scenarios. **Its value is
+  calibration, not the speedup.**
 - Date and investigator: 2026-07-28, Claude (agent).
 - Commit and worktree state: `5d32054` (the change itself); measured as working
   tree versus `git stash` of the same tree, so the two arms differ only by this
@@ -640,6 +703,144 @@ repeat exactly the error those corrections caught.
   rather than repair it. The arm's shelf life is short: this branch exists to
   remove libghostty, so a repeatable backend A/B is an asset that expires.
 
+### F4 -- F2's numbers were divided by the batch count twice; the corrected effect is 4x larger on text and the inference survives
+
+- Status: recorded and **corrective**. F2's arithmetic is wrong; F2's conclusion
+  is not. Re-measured on the precise interleaved instrument, both directions.
+- Date and investigator: 2026-07-28, Claude (agent), same day as F2.
+- What went wrong: `drawDurationNanoseconds` is already `total / batchCount`
+  (`TerminalDrawBenchmarkSupport.swift`). The summarizing script used to build
+  F2's table divided by `batchCount` a second time. Reconstruction on a fresh
+  run reproduces every cell of F2's table to three significant figures:
+
+  | Grid / scenario | This run, us/draw | Divided by batch again | F2's recorded table |
+  | --- | ---: | ---: | --- |
+  | 80x24 full-frame | 2368.2 | 13.77 | 13.85 13.93 14.31 |
+  | 80x24 damage-clipped | 506.3 | 0.636 | 0.663 0.666 0.693 |
+  | 160x50 full-frame | 9926.5 | 236.3 | 241.6 247.0 247.6 |
+  | 160x50 damage-clipped | 898.1 | 1.991 | 2.118 2.128 2.212 |
+
+- **The instrument was never broken.** This matters, because the first
+  hypothesis pursued was that `benchmark-draw` itself was reporting draws that
+  had not happened. It was not: F1's 15.6 ms sits on the same scale as this run,
+  and per-cell cost is stable to within 15% across all eight measurements of a
+  fresh run, which is what a sound instrument looks like.
+- **How it was caught, since the same trap is available to the next agent.** Not
+  by re-reading the script. A bare `CGContextFillRects` of 1920 pixel-aligned
+  rects into an sRGB bitmap costs **216 us** on this machine, measured directly.
+  F2's 13.85 us for a full 80x24 frame -- 1920 cells, each of them more work
+  than one rect -- is **16x below the CoreGraphics floor**, so it could not be
+  true whatever the code did. Absolute numbers are checkable against physics;
+  percentages are not, which is why the error survived being written into two
+  research docs and a commit message.
+- **Why the percentages were wrong too, and by how much.** Batch count is
+  calibrated to hit a fixed 400 ms total, so `batchCount ~ target / perDraw`.
+  Dividing by it a second time multiplies the reported ratio by
+  `(baselineBatch / candidateBatch)^2`, which is itself the true ratio squared.
+  **F2's deltas are therefore approximately the cube of the truth**: -8.4%
+  reported corresponds to about -2.9% real, and -3.6% to about -1.2%.
+- Corrected measurement, taken on `scripts/terminal-headless-draw-compare.py`
+  with `--both-directions --rounds 8`, which computes its percentages from raw
+  batch totals and never normalizes per draw, so it cannot make this error.
+  Baseline arm `8ce4f52` (pre-hoist), candidate arm the working tree. 160x50,
+  `--clip-rows 4`:
+
+  | Workload | Real effect | Order bias |
+  | --- | ---: | ---: |
+  | btop-shaped (sprites) | **-1.99%** | +0.21% |
+  | text-shaped (glyphs) | **-7.90%** | +0.13% |
+
+  Order bias near zero in both, so both directions agree.
+- **The two workloads cross-validate a fixed cost.** A per-draw cost that does
+  not scale with content should be a constant number of microseconds, not a
+  constant percentage. It is: `1.99% x 898.1 us = 17.9 us` and
+  `7.90% x 240.5 us = 19.0 us`. **Building the four `CTFont` objects cost about
+  18 us per draw**, measured two independent ways. That is a real number where
+  F2 had only a percentage of an unknown.
+- **F2's inference survives, and is now better founded.** `9/F3` put font
+  construction at ~24% of an incremental draw. The correct comparison is the
+  glyph-bearing workload, since `9/F3`'s profiles came from real terminal
+  content: **7.9% recovered against a ~24% share, a gap of about 3x**. F2
+  claimed 3x from -8.4%, which was the right answer reached through wrong
+  arithmetic -- the btop damage-clipped figure happened to land near the text
+  figure. The investigation rule F2 added to this file stands unchanged.
+- **What is now known about the change itself.** F2 called it "unmeasurable in
+  use" at 0.07-0.14 us per draw. That was the same error: it is **~18 us per
+  draw**, roughly 250x larger, and 7.9% of a damage-clipped text draw. Still
+  small against a 16.7 ms budget, but it is a real saving on exactly the
+  incremental draws that dominate interactive use.
+- Repair landed with this finding: `benchmark-draw` now reports a
+  `surface` block per measurement -- bitmap pixels, cell pixels, drawn run and
+  cell counts -- so any future reader can divide out a per-cell cost and check
+  it against the rect-fill floor before quoting the number.
+- Uncertainty: none on the arithmetic error (reproduced exactly). Low on the
+  corrected percentages (both directions, order bias under 0.25%). Low on the
+  18 us fixed cost (two workloads, independent agreement).
+- Next action: none for this node. Re-read any other percentage in this file
+  that came from a hand-summarized `benchmark-draw` run; F1 is unaffected
+  because it quotes the tool's own output.
+
+### F5 -- the draw benchmark had one workload and it was the atypical one: sprite cells cost 3.5x text cells
+
+- Status: recorded. First measurement of the executor's glyph path in this
+  benchmark, made possible by the fixture added for it.
+- Date and investigator: 2026-07-28, Claude (agent).
+- Change measured: `13/F5` established that `benchmark-draw`'s only fixture
+  routes every cell to a sprite family and calls `CTFontDrawGlyphs` zero times.
+  A second workload was added -- printable ASCII, which no sprite family claims
+  (every family's coarse range begins at U+2500 or above), with color and
+  emphasis changing at token boundaries so runs are the several-cell spans real
+  output produces rather than one cell each.
+- Command: `just benchmark-draw 15`, one run, medians of 15 iterations.
+  Per-cell cost is the last column and is the point.
+
+  | Grid | Workload | Scenario | us/draw | Cells | Runs | ns/cell |
+  | --- | --- | --- | ---: | ---: | ---: | ---: |
+  | 80x24 | btop-shaped | full-frame | 2368.2 | 1920 | 1920 | 1233 |
+  | 80x24 | btop-shaped | damage-clipped | 506.3 | 320 | 320 | 1582 |
+  | 80x24 | text-shaped | full-frame | 677.8 | 1920 | 302 | 353 |
+  | 80x24 | text-shaped | damage-clipped | 122.3 | 320 | 52 | 382 |
+  | 160x50 | btop-shaped | full-frame | 9926.5 | 8000 | 8000 | 1241 |
+  | 160x50 | btop-shaped | damage-clipped | 898.1 | 640 | 640 | 1403 |
+  | 160x50 | text-shaped | full-frame | 2708.1 | 8000 | 1248 | 339 |
+  | 160x50 | text-shaped | damage-clipped | 240.5 | 640 | 98 | 376 |
+
+- Observation 1: **per-cell cost is flat across grids** -- 1233 vs 1241 ns for
+  sprites, 353 vs 339 ns for text, at 4.2x the cell count. This is the linearity
+  F1 asserted, now visible directly rather than by extrapolation between two
+  points, and it is also the sanity check the report's new `surface` block
+  exists to enable.
+- Observation 2, and the reason this finding matters: **the sprite path costs
+  about 3.5x the glyph path per cell.** Every draw number this file has quoted
+  came from the sprite workload. The intuition the file was built on -- that CPU
+  *glyph rasterization* is the thing that might not fit the frame budget -- is
+  not what the only measured fixture was measuring.
+- Observation 3: **the frame-budget picture changes shape.** A full-frame
+  160x50 draw is 9.9 ms of sprites or 2.7 ms of text. Extrapolating per-cell to
+  179x66 (11814 cells): **~14.7 ms all-sprite, ~4.0 ms all-text**, against a
+  16.7 ms interval. The all-sprite figure very nearly consumes the budget; the
+  all-text figure is a quarter of it. Real content is a mixture, so the honest
+  statement is a range, and this file's headline "23 ms at 179x66" was the
+  worst-case end of it measured on the worst-case content.
+- **What this does not settle.** Sprites being expensive is not evidence that
+  the glyph path is cheap enough -- 4.0 ms of a 16.7 ms budget for text alone,
+  before compositing (`13/F10` puts a further 31.3% of live main-thread busy
+  outside every instrument here), is not comfortable. It relocates the cost, it
+  does not remove it. H2 versus H3 is untouched by this finding.
+- **Caveat on the sprite number, which should be checked before it is acted on.**
+  A sample of the sprite draw shows CoreGraphics' antialiased coverage renderer
+  (`aa_render_shape`) taking roughly twice the samples of the fast blit path
+  (`argb32_mark` / `CGBlt_fillBytes`). Pixel-aligned axis-aligned rects should
+  take the fast path. If some sprite geometry is landing off the pixel grid,
+  part of the 3.5x is a fixable alignment bug rather than an inherent cost of
+  drawing sprites. Attribution only -- this has not been tested.
+- Uncertainty: low on the per-cell costs (flat across two grids and two
+  scenarios). Low on the 3.5x ratio. Medium on the 179x66 extrapolation, which
+  is still extrapolation. Untested on the antialiasing caveat.
+- Next action: the glyph cache half of `9/H3` can now be measured, on
+  `text-shaped` and with `terminal-headless-draw-compare.py`. The antialiasing
+  question is a new candidate and belongs to doc 9.
+
 ## Open questions and caveats
 
 - **Profile share overstates recoverable time on this draw path** (F2). One node
@@ -659,11 +860,19 @@ repeat exactly the error those corrections caught.
 - **`benchmark-draw`'s grids do not include real geometry.** Everything about
   179x66 here is extrapolation from a verified straight line, which is defensible
   but is not a measurement.
-- **`benchmark-draw`'s fixture draws no glyphs** (`13/F5`). This is the single
-  most important caveat in this file and it is younger than F1, so anything
-  written before 2026-07-28 that quotes 15.6 ms or 23 ms should be read with it
-  in hand. It does not make F1 wrong; it makes F1 narrower than the sentence
-  "a full-frame CPU draw costs 15.6 ms" suggests.
+- **`benchmark-draw`'s fixture drew no glyphs until 2026-07-28** (`13/F5`,
+  resolved by F5). Anything written before that date quoting 15.6 ms or 23 ms is
+  quoting all-sprite content. It does not make F1 wrong; it makes F1 narrower
+  than the sentence "a full-frame CPU draw costs 15.6 ms" suggests -- and F5
+  shows the direction of the narrowing is *favorable*, since text is 3.5x
+  cheaper per cell than the fixture that was standing in for it.
+- **Sprite drawing may be paying for antialiasing it does not need** (F5's last
+  caveat). Unattributed and untested; it belongs to doc 9, but if it is real
+  then part of the 3.5x gap is a bug rather than a cost.
+- **No number in this file describes mixed content.** Both workloads are
+  deliberately pure -- all sprites or all text -- because that is what isolates
+  the two executor paths. Real screens are mixtures, so the true figure lies
+  between the two and nothing here pins where.
 - **A third of live main-thread busy time is invisible to every instrument
   here** (`13/F10`). The blocked wait on CoreAnimation is not CPU and not draw
   time; it will not appear in `benchmark-draw`, `benchmark-draw-app`, or a
