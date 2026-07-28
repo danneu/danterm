@@ -260,6 +260,12 @@ re-post rule is now the only gate between the change and F4's verdict.
       both live in the region the draw verdict can actually see.
 - [ ] Unreserved array growth in `drawTextRuns` (F3, 14% of draw). Cheapest of
       the three but also the one most likely to be absorbed by allocator noise.
+- [x] `Terminal.feed` -- **moved out of scope.** The trigger evidence above sets
+      it aside as off the plan/draw path, which is right for this file's question
+      and wrong for total process CPU: it is roughly 40% of the app's busy CPU,
+      larger than plan and draw combined. It now has its own file and its own
+      headless instrument -- see
+      [10-terminal-feed-hotspots.md](10-terminal-feed-hotspots.md).
 
 ## Findings log
 
