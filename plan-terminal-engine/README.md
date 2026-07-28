@@ -117,13 +117,6 @@ comes from `just benchmark-quick` / `just benchmark-confirm`.
   single-scalar clusters stay inline while multi-scalar graphemes spill to an
   array. The trade-off is a specialized three-case storage representation and
   more involved upgrade and downgrade paths.
-- **[Row-owned cluster storage for a trivially copyable cell](../plans/impl/2026-07-28-1321-despill-cell-clusters.md)
-  -- about 9% faster core feed.** The spilled array left the grid cell non-POD,
-  so every grid shift and blank went through outlined copy/destroy; a cell now
-  holds a trivial reference into scalar storage owned by its row, which is freed
-  with the row and needs no reclamation of its own. The trade-off is that a cell
-  crossing row owners -- reflow, alternate-screen resize, and the last-column
-  narrow-to-wide wrap -- must re-intern its cluster instead of being copied.
 
 ## Branch and worktree workflow
 

@@ -113,219 +113,20 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    /// Row-relative scalar payload of one cell. Every case is trivially copyable, which is the
-    /// whole point: it keeps `GridCell` POD so a grid shift or a blank fill is a memory move
-    /// instead of a walk through outlined copy/destroy machinery. `cluster` names a range in
-    /// the owning `GridRow`'s scalar storage and is therefore meaningful only against that row.
-    private enum CellScalars: Sendable {
-        case empty
-        case single(Unicode.Scalar)
-        case cluster(start: Int32, count: Int32)
-    }
-
     /// Keeps scalar storage and wide-cell roles together for invariant-preserving mutation.
-    ///
-    /// Deliberately not `Equatable`: a cell's `scalars` is a reference into its owning row, so
-    /// two cells only compare meaningfully through the rows that resolve them -- `GridRow`'s
-    /// own `==` does that.
-    private struct GridCell: Sendable {
+    private struct GridCell: Equatable, Sendable {
         var kind: TerminalCellKind = .padding
-        var scalars = CellScalars.empty
+        var scalars = TerminalScalars.empty
         var style = TerminalStyle()
         var hyperlinkId: Int?
         var contentIdentity: Int?
-
-        /// Scalar count without resolving against the owning row, for cost accounting.
-        var scalarCount: Int {
-            switch scalars {
-            case .empty: 0
-            case .single: 1
-            case let .cluster(_, count): Int(count)
-            }
-        }
-
-        /// Compares every member except the row-relative payload, which only a row can resolve.
-        func matchesIgnoringScalars(_ other: GridCell) -> Bool {
-            kind == other.kind
-                && style == other.style
-                && hyperlinkId == other.hyperlinkId
-                && contentIdentity == other.contentIdentity
-        }
     }
 
-    /// Moves row-level wrap and semantic-prompt identity with cells during scrolling, and owns
-    /// the backing scalars for whatever grapheme clusters its cells currently hold.
-    ///
-    /// The row is the owner because rows are already the unit that moves and dies whole:
-    /// scrolling moves `GridRow` values, scrollback entry appends them, budget eviction drops
-    /// them from the front. Cluster storage attached here therefore needs no reclamation of its
-    /// own -- it is freed exactly when the row is -- and rows holding no cluster never allocate.
-    ///
-    /// The contract that follows from row-relative references: a cell that changes row owner
-    /// must be re-interned through `place(_:scalars:at:)` or `rebuilt(cells:inheriting:...)`.
-    /// Copying the bare cell across rows resolves its payload against the wrong storage.
+    /// Moves row-level wrap and semantic-prompt identity with cells during scrolling.
     private struct GridRow: Equatable, Sendable {
         var cells: [GridCell]
-        var isSoftWrapped: Bool
-        var semanticPrompt: SemanticPromptRow
-
-        /// Backing scalars for this row's `.cluster` cells, plus whatever earlier clusters have
-        /// since been overwritten and not yet compacted away.
-        private var clusterScalars: [Unicode.Scalar] = []
-
-        /// Storage size at which the next intern compacts. Re-armed at twice the live size so
-        /// compaction is amortized constant per scalar while storage stays proportional to the
-        /// clusters the row actually holds, however many times those cells are rewritten.
-        private var compactionThreshold = GridRow.minimumCompactionThreshold
-
-        /// Floor for the threshold so a row that holds one short cluster does not compact on
-        /// every rewrite of it.
-        private static let minimumCompactionThreshold = 32
-
-        init(
-            cells: [GridCell],
-            isSoftWrapped: Bool = false,
-            semanticPrompt: SemanticPromptRow = .none
-        ) {
-            self.cells = cells
-            self.isSoftWrapped = isSoftWrapped
-            self.semanticPrompt = semanticPrompt
-        }
-
-        /// Builds a row out of cells lifted from `source`, re-interning their cluster content so
-        /// the references resolve against the new row. The cells must all come from `source`.
-        static func rebuilt(
-            cells: [GridCell],
-            inheriting source: GridRow,
-            isSoftWrapped: Bool,
-            semanticPrompt: SemanticPromptRow
-        ) -> GridRow {
-            var row = GridRow(
-                cells: cells,
-                isSoftWrapped: isSoftWrapped,
-                semanticPrompt: semanticPrompt
-            )
-            row.clusterScalars = source.clusterScalars
-            row.compactClusterStorage()
-            return row
-        }
-
-        /// Live plus not-yet-compacted scalars this row retains, exposed for the compaction proof.
-        var clusterStorageScalarCount: Int { clusterScalars.count }
-
-        /// Resolves a cell's row-relative payload into a self-contained value.
-        func scalars(of cell: GridCell) -> TerminalScalars {
-            switch cell.scalars {
-            case .empty:
-                return .empty
-            case let .single(scalar):
-                return TerminalScalars(scalar)
-            case let .cluster(start, count):
-                return TerminalScalars(Array(clusterScalars[Int(start)..<Int(start + count)]))
-            }
-        }
-
-        /// Reads the cluster's base scalar without materializing the rest of it.
-        func firstScalar(of cell: GridCell) -> Unicode.Scalar? {
-            switch cell.scalars {
-            case .empty: nil
-            case let .single(scalar): scalar
-            case let .cluster(start, _): clusterScalars[Int(start)]
-            }
-        }
-
-        /// Writes `cell` at `column` carrying `scalars`, which are re-interned into this row.
-        /// The incoming cell's own payload is discarded, which is what makes this the one safe
-        /// way to move a cell between row owners.
-        mutating func place(_ cell: GridCell, scalars: TerminalScalars, at column: Int) {
-            var placed = cell
-            placed.scalars = .empty
-            cells[column] = placed
-            switch scalars.count {
-            case 0:
-                break
-            case 1:
-                cells[column].scalars = .single(scalars[0])
-            default:
-                cells[column].scalars = intern(Array(scalars), releasing: column)
-            }
-        }
-
-        /// Extends the cluster at `column` by one scalar, the path that assembles clusters as
-        /// the parser feeds them.
-        mutating func appendScalar(_ scalar: Unicode.Scalar, at column: Int) {
-            if case let .cluster(start, count) = cells[column].scalars,
-               Int(start + count) == clusterScalars.count
-            {
-                // The open cluster is the last one interned, which is the common case while a
-                // cluster is still being assembled: extend it in place so an N-scalar cluster
-                // costs N slots rather than a fresh copy per scalar.
-                clusterScalars.append(scalar)
-                cells[column].scalars = .cluster(start: start, count: count + 1)
-                return
-            }
-            var scalars = Array(self.scalars(of: cells[column]))
-            scalars.append(scalar)
-            cells[column].scalars = intern(scalars, releasing: column)
-        }
-
-        /// Interns `scalars`, first releasing whatever `column` held so the compaction check
-        /// counts the outgoing cluster as dead rather than keeping it alive one more round.
-        private mutating func intern(
-            _ scalars: [Unicode.Scalar],
-            releasing column: Int
-        ) -> CellScalars {
-            cells[column].scalars = .empty
-            switch scalars.count {
-            case 0:
-                return .empty
-            case 1:
-                return .single(scalars[0])
-            default:
-                break
-            }
-            if clusterScalars.count + scalars.count > compactionThreshold {
-                compactClusterStorage()
-            }
-            let start = clusterScalars.count
-            clusterScalars.append(contentsOf: scalars)
-            precondition(
-                clusterScalars.count <= Int(Int32.max),
-                "row cluster storage exceeded its addressable range"
-            )
-            return .cluster(start: Int32(start), count: Int32(scalars.count))
-        }
-
-        /// Rebuilds storage to hold exactly the clusters `cells` still reference.
-        private mutating func compactClusterStorage() {
-            var compacted: [Unicode.Scalar] = []
-            for column in cells.indices {
-                guard case let .cluster(start, count) = cells[column].scalars else { continue }
-                let compactedStart = compacted.count
-                compacted.append(contentsOf: clusterScalars[Int(start)..<Int(start + count)])
-                cells[column].scalars = .cluster(start: Int32(compactedStart), count: count)
-            }
-            clusterScalars = compacted
-            compactionThreshold = max(Self.minimumCompactionThreshold, 2 * compacted.count)
-        }
-
-        /// Compares resolved content, never storage layout. Two rows that reached the same cells
-        /// by different routes -- one built directly, one reflowed -- hold the same terminal
-        /// state, and `Terminal`'s own synthesized `==` depends on that being true.
-        static func == (lhs: GridRow, rhs: GridRow) -> Bool {
-            guard lhs.isSoftWrapped == rhs.isSoftWrapped,
-                  lhs.semanticPrompt == rhs.semanticPrompt,
-                  lhs.cells.count == rhs.cells.count
-            else { return false }
-            for column in lhs.cells.indices {
-                let left = lhs.cells[column]
-                let right = rhs.cells[column]
-                guard left.matchesIgnoringScalars(right),
-                      lhs.scalars(of: left) == rhs.scalars(of: right)
-                else { return false }
-            }
-            return true
-        }
+        var isSoftWrapped = false
+        var semanticPrompt = SemanticPromptRow.none
     }
 
     /// Marks only the rows needed to find and preserve a shell-redraw prompt block.
@@ -535,13 +336,6 @@ public struct Terminal: Equatable, Sendable {
     /// Carries one atomic cell unit and the old coordinates that must follow it.
     private struct ReflowUnit {
         var cells: [GridCell]
-
-        /// Cluster content of `cells[0]`, materialized at extraction because reflow re-packs
-        /// cells under a new row owner, against which their row-relative payload is meaningless.
-        /// Only the head cell can carry content: a wide unit's second cell is a synthesized
-        /// `.wideTail`.
-        var headScalars: TerminalScalars
-
         var sourceOffsets: [(key: Int, offset: Int)]
     }
 
@@ -1618,7 +1412,7 @@ public struct Terminal: Equatable, Sendable {
             for cell in row.cells {
                 switch cell.kind {
                 case .narrow, .wideHead:
-                    for scalar in row.scalars(of: cell) {
+                    for scalar in cell.scalars {
                         result.unicodeScalars.append(scalar)
                     }
                 case .padding, .spacerHead:
@@ -1716,25 +1510,13 @@ public struct Terminal: Equatable, Sendable {
             cells: row.cells.map {
                 TerminalCell(
                     kind: $0.kind,
-                    scalars: row.scalars(of: $0),
+                    scalars: $0.scalars,
                     style: $0.style,
                     hyperlink: $0.hyperlinkId.flatMap { hyperlinkTargets[$0] }
                 )
             },
             isSoftWrapped: row.isSoftWrapped
         )
-    }
-
-    /// Reports whether a grid cell is trivially copyable, so a regression fails the moment the
-    /// cell regains a non-trivial member and puts outlined copy/destroy back on the grid's shift
-    /// and blank paths.
-    static var isGridCellTriviallyCopyable: Bool { _isPOD(GridCell.self) }
-
-    /// Reports one viewport row's cluster-storage size so compaction can be proven to track the
-    /// clusters a row holds rather than the number of times its cells were rewritten.
-    func clusterStorageScalarCount(row: Int) -> Int {
-        guard rows.indices.contains(row) else { return 0 }
-        return rows[row].clusterStorageScalarCount
     }
 
     /// Recomputes retained-row cost for coherence proofs without affecting enforcement.
@@ -2559,7 +2341,7 @@ public struct Terminal: Equatable, Sendable {
                 let scalars: [Unicode.Scalar]?
                 switch cell.kind {
                 case .narrow, .wideHead:
-                    scalars = Array(row.scalars(of: cell))
+                    scalars = Array(cell.scalars)
                 case .padding:
                     scalars = [" "]
                 case .wideTail, .spacerHead:
@@ -2980,7 +2762,7 @@ public struct Terminal: Equatable, Sendable {
 
     private static func scrollbackByteCost(of row: GridRow) -> Int {
         16 + row.cells.reduce(0) { total, cell in
-            total + 32 + 8 * cell.scalarCount
+            total + 32 + 8 * cell.scalars.count
         }
     }
 
@@ -3047,7 +2829,7 @@ public struct Terminal: Equatable, Sendable {
         let cell = windowRow.cells[column]
         return TerminalCell(
             kind: cell.kind,
-            scalars: windowRow.scalars(of: cell),
+            scalars: cell.scalars,
             style: cell.style,
             hyperlink: cell.hyperlinkId.flatMap { hyperlinkTargets[$0] }
         )
@@ -3133,11 +2915,8 @@ public struct Terminal: Equatable, Sendable {
                 && keepsContinuation
                 && sourceRows[rowIndex + 1].cells.first?.kind == .wideHead
             repairClippedCells(&cells, clearsSpacers: preservesSpacer == false)
-            // The cells came out of `source`, so their cluster references still point into
-            // `source`'s storage; `rebuilt` re-interns them under the new row owner.
-            return GridRow.rebuilt(
+            return GridRow(
                 cells: cells,
-                inheriting: source,
                 isSoftWrapped: clearsRowWrap ? false : source.isSoftWrapped,
                 semanticPrompt: source.semanticPrompt
             )
@@ -3552,7 +3331,6 @@ public struct Terminal: Equatable, Sendable {
                                 contentIdentity: cell.contentIdentity
                             ),
                         ],
-                        headScalars: row.scalars(of: cell),
                         sourceOffsets: sources
                     ))
                     logicalOffset += 2
@@ -3561,7 +3339,6 @@ public struct Terminal: Equatable, Sendable {
                     firstSourceKey = firstSourceKey ?? key
                     currentLine.units.append(ReflowUnit(
                         cells: [cell],
-                        headScalars: row.scalars(of: cell),
                         sourceOffsets: [(key: key, offset: 0)]
                     ))
                     retainedSourceKeys.insert(key)
@@ -3666,11 +3443,7 @@ public struct Terminal: Equatable, Sendable {
             }
 
             for (offset, cell) in unit.cells.enumerated() {
-                packedRows[row].place(
-                    cell,
-                    scalars: offset == 0 ? unit.headScalars : .empty,
-                    at: column + offset
-                )
+                packedRows[row].cells[column + offset] = cell
             }
             for source in unit.sourceOffsets {
                 cellDestinations[source.key] = ReflowDestination(
@@ -4697,14 +4470,10 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func rememberOpenCluster() {
         guard let context = clusterContext else { return }
-        // Subscripted in place rather than bound to a local `row`: this runs after every
-        // printed scalar, and a `GridRow` value binding would retain and release its arrays
-        // each time.
-        let row = context.target.row
-        let column = context.target.column
+        let cell = rows[context.target.row].cells[context.target.column]
         lastPrintedCluster = LastPrintedCluster(
-            scalars: rows[row].scalars(of: rows[row].cells[column]),
-            cellWidth: rows[row].cells[column].kind == .wideHead ? 2 : 1
+            scalars: cell.scalars,
+            cellWidth: cell.kind == .wideHead ? 2 : 1
         )
     }
 
@@ -4734,9 +4503,7 @@ public struct Terminal: Equatable, Sendable {
             return false
         }
 
-        guard let baseScalar = rows[target.row]
-            .firstScalar(of: rows[target.row].cells[target.column])
-        else {
+        guard let baseScalar = rows[target.row].cells[target.column].scalars.first else {
             clusterContext = nil
             return false
         }
@@ -4754,7 +4521,7 @@ public struct Terminal: Equatable, Sendable {
             break
         }
 
-        rows[target.row].appendScalar(scalar, at: target.column)
+        rows[target.row].cells[target.column].scalars.append(scalar)
         context.target = target
         context.previousClass = classification.graphemeBreakClass
         context.breakState = nextBreakState
@@ -4787,9 +4554,7 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func upgradeClusterToWide(at target: CellPosition) -> CellPosition {
-        // Materialized before the rebuild because the destination can be a different row -- the
-        // last-column autowrap branch below moves the cluster to column 0 of the next one.
-        let scalars = rows[target.row].scalars(of: rows[target.row].cells[target.column])
+        let scalars = rows[target.row].cells[target.column].scalars
         let style = rows[target.row].cells[target.column].style
         let hyperlinkId = rows[target.row].cells[target.column].hyperlinkId
         let contentIdentity = rows[target.row].cells[target.column].contentIdentity
@@ -4822,15 +4587,12 @@ public struct Terminal: Equatable, Sendable {
             clearCellAndPair(row: target.row, column: target.column + 1)
         }
 
-        rows[destination.row].place(
-            GridCell(
-                kind: .wideHead,
-                style: style,
-                hyperlinkId: hyperlinkId,
-                contentIdentity: contentIdentity
-            ),
+        rows[destination.row].cells[destination.column] = GridCell(
+            kind: .wideHead,
             scalars: scalars,
-            at: destination.column
+            style: style,
+            hyperlinkId: hyperlinkId,
+            contentIdentity: contentIdentity
         )
         rows[destination.row].cells[destination.column + 1] = GridCell(
             kind: .wideTail,
