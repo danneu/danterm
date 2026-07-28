@@ -162,6 +162,201 @@ changes the reading.
 Run 2 (F6) reads 16,819 main-thread samples, 12,296 idle, **4,523 busy**, with
 1,065 blocked. Both runs are tabulated side by side in F6.
 
+## Reproducing the evidence
+
+Everything below was derived by hand in a chat session. None of it is wired into
+a script in the repo, so a fresh agent starting cold would otherwise re-derive it
+-- and one of the derivations has a trap that already produced a wrong number
+once (F1's correction). This section exists so that does not happen twice.
+
+### Re-capturing a live profile
+
+The capture needs a human: the workload is a person holding a key. There is no
+scripted driver for it (Phase 4 owns whether to build one).
+
+```
+sample "$(pgrep -a -x 'DanTerm Dev')" 20 -mayDie -fullPaths \
+    -file /tmp/danterm-btop-sample-N.txt
+```
+
+While it runs: hold the **down-arrow** key to scroll `btop`'s process list in a
+DanTerm pane, at the window's normal size. Then record, in the finding:
+
+- pid and **launch time** from the sample header -- if launch time matches an
+  earlier capture, it is the same process instance and therefore the same binary,
+  which is much stronger provenance than a commit hash;
+- the binary's build configuration. `~/Applications/DanTerm Dev.app` is a
+  re-signed copy of `.spm-build/{debug,release}/DanTerm`; compare mtimes to tell
+  which, since `just build` and `just build-optimized` both install to the same
+  path. Do not assume debug -- both captures here were **optimized**;
+- the source commit, inferred by comparing the binary's mtime against
+  `git log --format='%h %ci'`;
+- **anything else running on the machine.** Run 2 was taken with an unrelated
+  benchmark active; it moved the idle/busy split and left the shares alone.
+
+Copy the artifact somewhere before `/tmp` is cleared. This file uses
+`.build/manual-profiles/`, which is an ad-hoc directory created for it, not a
+project convention -- `.build/` is gitignored and disposable, so transcribe every
+decision-bearing number into a finding.
+
+### Analyzing a `sample` text file
+
+`sample` prints an indented call tree where **each node's number is already
+inclusive** of its subtree. Two derived quantities are wanted, and they are not
+the same:
+
+```python
+import re, collections
+
+def load(path):
+    """Rows of (indent_depth, inclusive_count, frame_text) from the call-graph section."""
+    lines = open(path).read().split('\n')
+    end = lines.index('Total number in stack (recursive counted multiple, when >=5):')
+    rows = []
+    for line in lines[22:end]:          # 22 skips the header block
+        m = re.match(r'^([ +!:|]*)(\d+) (.*)$', line)
+        if m:
+            rows.append((len(m.group(1)), int(m.group(2)), m.group(3)))
+    return rows
+
+def inclusive(rows, thread_substring=None):
+    """Inclusive samples per function, optionally restricted to one thread.
+
+    A function appearing at several call sites is summed; a function appearing
+    inside its OWN subtree (recursion) is counted once, which is what the
+    ancestor check is for. Without it, recursive frames like
+    CA::Layer::collect_layers_ inflate by an order of magnitude."""
+    total, stack, current = collections.Counter(), [], ''
+    for depth, count, frame in rows:
+        name = frame.split('  (in ')[0]
+        while stack and stack[-1][0] >= depth:
+            stack.pop()
+        if depth <= 4 and 'Thread' in name:
+            current = name
+        if thread_substring is None or thread_substring in current:
+            if name not in {s[1] for s in stack}:
+                total[name] += count
+        stack.append((depth, name))
+    return total
+```
+
+Thread names to pass as `thread_substring`: `'Main Thread'`,
+`'terminal-pty-host'`, `'CA::CG::Queue'`.
+
+**The trap that produced F1's correction.** A single function is usually printed
+as *several sibling nodes* at different instruction offsets
+(`CABackingStoreGetFrontTexture + 128`, `+ 240`, `+ 748`, ...). Reading the one
+node that happens to be visible in an excerpt gives a number that is real but
+partial: `+ 128` carries 723 samples while the function carries 1,079. To ask
+"how much of X is spent in Y", sum Y across the *whole* subtree of every X node:
+
+```python
+def subtree_leaf(path, root_substring, leaf_substring):
+    """(total samples under all `root` nodes, samples of `leaf` anywhere beneath them)."""
+    rows, root_depth, root_total, leaf_total = load(path), None, 0, 0
+    for depth, count, frame in rows:
+        name = frame.split('  (in ')[0]
+        if root_depth is not None and depth <= root_depth:
+            root_depth = None
+        if root_substring in name and root_depth is None:
+            root_depth, root_total = depth, root_total + count
+            continue
+        if root_depth is not None and leaf_substring in name:
+            leaf_total += count
+    return root_total, leaf_total
+
+# The blocked-wait figure, the one that was wrong:
+#   subtree_leaf(path, 'CABackingStoreGetFrontTexture', 'kevent_id') -> (1079, 1064)
+```
+
+Per-source-line attribution inside one Swift function -- how F2's table was
+built -- comes from the `/path/File.swift:NNN` suffix `-fullPaths` puts on
+DanTerm frames:
+
+```python
+agg = collections.Counter()
+for depth, count, frame in load(path):
+    if 'drawTextRuns' in frame and 'DanTerm Dev' in frame:
+        m = re.search(r'TerminalRenderExecution\.swift:(\d+)', frame)
+        agg[m.group(1) if m else 'other'] += count
+```
+
+Note this sums *nodes*, so it double-counts nested frames and its total (2,085
+in run 1) exceeds the function's inclusive figure (1,970). It is valid for
+**shares within the function** and must not be quoted as an absolute.
+
+### Reproducing F5's fixture probe
+
+Drop this in `lib/TerminalCore/Tests/TerminalDrawBenchmarkSupportTests/`, run it,
+delete it. It needs no new dependencies -- that test target already has the three
+imports.
+
+```swift
+import TerminalCore
+import TerminalRenderPlanning
+import Testing
+@testable import TerminalDrawBenchmarkSupport
+
+@Suite("ZZ fixture shape probe")
+struct ZZFixtureShapeProbe {
+    // Coarse ranges only, mirroring the switch in drawTextRuns. This OVER-counts
+    // sprites: a coarse-routed scalar whose family returns nil still falls
+    // through to the font path. For the fixture's 12 glyphs it happens not to
+    // matter -- all three families are total over their ranges (see F5).
+    static let spriteRanges: [ClosedRange<UInt32>] = [
+        0x2500...0x257F, 0x2580...0x259F, 0x25E2...0x25FF, 0x2800...0x28FF,
+        0xE0B0...0xE0D4, 0xF5D0...0xF60D, 0x1FB00...0x1FBEF, 0x1CC1B...0x1CEAF,
+    ]
+
+    @Test("probe: run density and font-path fraction")
+    func probe() throws {
+        for grid in DrawBenchmarkGrid.standard {
+            let plan = try #require(makeBtopShapedPlan(for: grid))
+            var cells = 0, sprite = 0, font = 0, multi = 0
+            for run in plan.textRuns {
+                for cell in run.cells {
+                    cells += 1
+                    let scalars = Array(cell.scalars)
+                    guard scalars.count == 1, let s = scalars.first else { multi += 1; continue }
+                    if Self.spriteRanges.contains(where: { $0.contains(s.value) }) { sprite += 1 }
+                    else if s.value <= UInt32(UInt16.max) { font += 1 }
+                }
+            }
+            print("\(grid.columns)x\(grid.rows): runs \(plan.textRuns.count) cells \(cells) "
+                + "sprite \(sprite) font \(font) multi \(multi)")
+        }
+    }
+}
+```
+
+Run it with the **type** name, not the suite display name:
+
+```
+swift test --package-path lib/TerminalCore --filter ZZFixtureShapeProbe
+```
+
+`--filter "ZZ fixture shape probe"` matches nothing and exits 0 with "No matching
+test cases were run" -- a silent no-op that reads like a pass.
+
+### Instruments, and what is known about each
+
+| Instrument | Invocation | Headless? | Status here |
+| --- | --- | --- | --- |
+| `benchmark-draw` | `just benchmark-draw [iterations=15]` | yes -- `swift run -c release`, offscreen bitmap | **not run.** Doc 11 F1 reports ±2.5% over 15 iterations. Primary instrument for R1/R1b/R4. |
+| `benchmark-headless-draw` | `just benchmark-headless-draw <rounds> [candidate-core-path]` | yes | not run. Interleaves two checkouts in one process; use for an A/B that avoids cross-run drift. |
+| `benchmark-quick` | `just benchmark-quick <baseline-rev> <workload>` | **unknown** | **not run.** Builds and runs the real app, so it plausibly needs a GUI session like `just test-ui` does. Nobody has checked. Budget for that before relying on it. |
+| `benchmark-confirm` | `just benchmark-confirm <baseline-rev>` | unknown, same as above | not run. Runs the full five-workload ladder. |
+| `benchmark-draw-app` | `just benchmark-draw-app` | needs AppKit | not run. Real draw path but not sampled at the compositor. |
+| live `sample` | above | needs a human | **run twice** -- F1, F6. |
+
+Workload names for `benchmark-quick`: `terminal-feed`, `scrollback-stream`,
+`content-churn`, `style-churn`, `incremental-mixed`. Canonical geometry is
+179x66, matching this file's captures.
+
+**No benchmark has been run in this investigation.** Every number in this file is
+either a diagnostic sample share or, for F5, a deterministic count. Nothing here
+is a directional performance result, and D1's predictions are all unverified.
+
 ## Current hypotheses
 
 ### H1 -- the per-run attributes dictionary is the single largest removable cost on the draw path
@@ -596,8 +791,9 @@ Phase 3.
 - Commit and worktree state: `9655657`, tracked tree clean.
 - Command: a scratch probe over `makeBtopShapedPlan(for:)` counting runs, cells,
   and per-cell classification against the eight sprite coarse ranges. The probe
-  was deleted after the numbers were transcribed; it is reproducible from this
-  entry in a few minutes.
+  was deleted after the numbers were transcribed. **Its full source and the
+  invocation are in "Reproducing the evidence" above** -- including the filter
+  gotcha that makes `--filter "<suite display name>"` silently match nothing.
 - Measurements:
 
   | Grid | Cells | `textRuns` | Cells/run | Runs/row | Sprite-routed | Font candidates | Fallback cells | Distinct scalars |
@@ -1081,5 +1277,44 @@ benchmark, it moves here with the evidence against it rather than being deleted.
 
 ## Outcome
 
-Investigation in progress. Phase 1 open; no change proposed for implementation
-until the repeat capture lands.
+Investigation in progress. **Phase 1 is closed; Phase 2 is unblocked and
+unstarted.**
+
+### Where a fresh agent should pick this up
+
+1. Read D1. It carries the four candidates, each with a prediction, a
+   falsification criterion, a named instrument, and a risk note. That is the
+   whole actionable surface of this file.
+2. **Start with R1+R1b.** They are one commit, they edit only
+   `TerminalRenderExecution.swift` (lines 365-371 and the fallback loop at 583),
+   the drawn output is bit-identical, and `benchmark-draw` is headless and cheap.
+   Prediction on record: **-25% to -40%** full-frame at 160x50, falsified under
+   15%.
+3. R2 is independent -- different file (`Terminal.swift:553` and `:565`),
+   different thread, different instrument -- so it can go in parallel. It needs
+   the coverage audit named in its Phase 2 task *before* code.
+4. R4 waits until R1 is measured and committed; same function, and landing them
+   together destroys both attributions.
+5. R3 is research, not a change, and is gated behind Phase 2 for a reason stated
+   in D1. Do not promote it.
+
+### What is already known and should not be re-derived
+
+- **The evidence is two live captures**, F1 and F6, of the same process instance
+  at commit `4ca27ee`, optimized build. Both artifacts are in
+  `.build/manual-profiles/` (disposable; every number is transcribed).
+- **The analysis method, and its one trap**, are written out in "Reproducing the
+  evidence". The trap already cost one wrong number: a function is printed as
+  several sibling nodes at different offsets, so a per-node read understates it.
+  That is how "720 blocked samples" should have been 1,064.
+- **`benchmark-draw`'s fixture is not representative** and F5 says exactly how:
+  one run per cell, and no cell reaches the font path. It is an upper bound on
+  R1, not a conservative case. Do not quote its delta as a user-visible win --
+  F2's 18.3% is the real-workload figure.
+- **No benchmark has been run.** Every prediction in D1 is unverified.
+
+### What is owed to a neighbouring file
+
+F5's second inference belongs to doc 11 and this file must not act on it: doc
+11's F1 measures a draw containing **no glyph rasterization at all**, which bears
+directly on its H2-versus-H3 gate. Phase 3's hand-off task carries it.
