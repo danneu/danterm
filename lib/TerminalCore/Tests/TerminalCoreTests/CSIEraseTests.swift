@@ -290,6 +290,51 @@ struct CSIEraseTests {
         #expect(terminal == expected)
     }
 
+    @Test("an erase starting at column 1 still repairs the previous row's spacer head")
+    func eraseAtColumnOneClearsPrecedingSpacer() throws {
+        // Intent: the preceding row's trailing spacer head is repaired when the
+        //   erased range begins at column 1, not only when it begins at column 0.
+        // Why it exists: the repair is reachable for any erased range whose lower
+        //   bound is at most 1, and that boundary is easy to narrow accidentally
+        //   when the per-cell repair call is hoisted out of the erase loop.
+        // Scenario: a wide glyph wrapped off the right margin, leaving a spacer
+        //   head behind it, and the application blanks the wrapped row from its
+        //   second column.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.moveCursor(row: 0, column: 3)
+        terminal.feed(Array("\u{754C}".utf8))
+        #expect(terminal.geometry.rows[0].cells[3].kind == .spacerHead)
+
+        terminal.moveCursor(row: 1, column: 1)
+        terminal.feed(Array("\u{1B}[X".utf8))
+
+        #expect(terminal.geometry.rows[0].cells[3].kind == .padding)
+        expectValidGrid(terminal)
+    }
+
+    @Test("erasing the first viewport row repairs a spacer head left in scrollback")
+    func eraseAtTopRowClearsScrollbackSpacer() throws {
+        // Intent: the spacer repair reaches the last scrollback row when the
+        //   erased row is the top of the viewport.
+        // Why it exists: this is the only branch of the repair that leaves the
+        //   viewport, so a hoisted or range-based erase can silently drop it while
+        //   every in-viewport case keeps passing.
+        // Scenario: a wide glyph wrapped at the right margin, the row carrying its
+        //   spacer head then scrolled into scrollback, and the application blanks
+        //   the wrapped character now sitting at the top of the viewport.
+        var terminal = try #require(Terminal(columns: 4, rows: 2))
+        terminal.moveCursor(row: 0, column: 3)
+        terminal.feed(Array("\u{754C}".utf8))
+        terminal.moveCursor(row: 1, column: 0)
+        terminal.feed(Array("\n".utf8))
+        #expect(terminal.scrollbackRowCount == 1)
+
+        terminal.moveCursor(row: 0, column: 0)
+        terminal.feed(Array("\u{1B}[X".utf8))
+
+        expectValidGrid(terminal)
+    }
+
     struct EraseLineFixture: Sendable {
         let sequence: String
         let cursorColumn: Int

@@ -2855,13 +2855,29 @@ public struct Terminal: Equatable, Sendable {
         if self.rows[row].cells[upper - 1].kind == .wideHead {
             upper += 1
         }
+        lower = max(0, lower)
         upper = min(upper, columnCount)
 
         invalidateInspection(inViewportRows: row..<(row + 1))
 
         let style = backgroundEraseStyle
-        for column in lower..<upper {
-            clearCellAndPair(row: row, column: column, replacementStyle: style)
+        // The expansion above pulls every intersected wide pair wholly inside the
+        // range, so no cell in it has a partner outside it. That is what lets the
+        // interior be filled directly instead of through a per-cell
+        // `clearCellAndPair`, whose two nested array subscripts cost a COW
+        // uniqueness check on the row array and another on the cell array for
+        // every single cell erased.
+        let blank = GridCell(style: style)
+        rows[row].cells.withUnsafeMutableBufferPointer { cells in
+            for column in lower..<upper {
+                cells[column] = blank
+            }
+        }
+        // Loop-invariant: the repair is a no-op above column 1, so it runs once
+        // for the range rather than once per erased cell. It is idempotent, so
+        // the old per-cell calls at columns 0 and 1 did the work of this one.
+        if lower <= 1 {
+            clearPreviousSpacer(beforeRow: row, column: lower, replacementStyle: style)
         }
         clusterContext = nil
     }
