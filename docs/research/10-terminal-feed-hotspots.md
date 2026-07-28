@@ -237,28 +237,87 @@ snapshot.
 Confirmed if replacing `lastPlannedTerminal` with a generation counter removes
 the node from an app profile.
 
+### H5 -- cell and row shifting reallocates instead of moving in place
+
+`Terminal.moveAndFillCells(in:row:by:)` is **33.8% / 33.2%** of the harness root
+on `incremental-screen-updates` (F6), the single largest node on that shape by
+more than a factor of two, and it is absent from `styled-screen-redraw`
+entirely. Its subtree is not cell writing: it is
+`specialized _copyCollectionToContiguousArray<A>(_:)` (8.0% / 8.4%) and
+`swift_arrayInitWithCopy` (5.5% / 5.7%) building a fresh array, matched by
+`swift_arrayDestroy` (10.3% / 10.9%) tearing the old one down, with
+`outlined copy of` / `outlined consume of TerminalScalars.Storage` on both
+sides. `moveAndFillRows(...)` beneath `advanceToNextRow` (12.1% / 12.5%) shows
+the same shape one level up.
+
+So a shift that should be a `memmove` within one row's storage appears to
+allocate a new buffer, copy each `GridCell` individually, retain each cell's
+heap `TerminalScalars.Storage`, and then release the originals.
+
+Supporting evidence: F6's incremental tree, where the three array-traffic
+symbols plus the refcount release path total roughly the same as
+`moveAndFillCells` itself; `swift_isUniquelyReferenced_nonNull_native` appears
+directly beneath it (2.8% combined with its stub), which is the copy-on-write
+uniqueness check firing on a buffer that is evidently not unique.
+
+Competing explanation: the arrays may be legitimately new -- if the shift is
+expressed as a slice-to-`Array` conversion the allocation is inherent to how it
+is written, not to aliasing, and the fix is a different rewrite (in-place
+`replaceSubrange` or a manual `memmove` over the row) rather than removing a
+retained reference. Distinguished by reading the implementation before
+measuring anything.
+
+Note the interaction with H4: `swift_isUniquelyReferenced` failing here would be
+*aggravated* in the app by the retained snapshots H4 describes, and F3 already
+found `_ArrayBuffer._consumeAndCreateNew` several times larger in the app than
+headless. H5 and H4 may be the same wound seen from two instruments.
+
+Confirmed if rewriting the shift to move cells in place collapses
+`_copyCollectionToContiguousArray` and `swift_arrayInitWithCopy` without
+inflating a sibling.
+
 ## Candidate direction, pending evidence
 
-Provisional, ordered by measured size against implementation risk. Nothing here
-is committed until the gate in Phase 2 is answered.
+Ordered by measured size against implementation risk. Re-scoped 2026-07-28
+against F6, which is the current baseline; the two entries settled so far are
+struck through with their findings.
 
-1. ~~**H1(b) -- shrink `DamageActionSnapshot` to POD.**~~ Done and reverted:
-   F4, D1. No win on either instrument.
-2. **H1(a) -- stop snapshotting for `.print`.** Larger win, but it narrows when
-   damage is recorded and therefore needs behavioral tests under the correctness
-   rule above.
-3. ~~**H2 -- precomputed interaction-state flag.**~~ Done and shipped: F5, D2.
-   About 18 points of the feed path on `styled-screen-redraw`. Note the reordering
-   this implies for the rest -- F1's table is now stale, and `recordDamage`,
-   `eraseLine`/`eraseCells`, and `_platform_memmove` are the three largest
-   remaining nodes on the rescaled profile.
-4. **H4 -- drop `lastPlannedTerminal`.** App-only, removes a per-frame
-   whole-grid compare as well as the copies.
-5. **H3 -- box the cold fields of `Terminal`.** Largest, last, and only once the
-   above have been measured against a clean baseline.
+Done:
 
-`eraseLine` / `eraseCells` / `clearCellAndPair` (11-14% combined) is real but
-unanalyzed; it is a Phase 3 item, not a candidate yet.
+- ~~**H1(b) -- shrink `DamageActionSnapshot` to POD.**~~ Reverted: F4, D1. No win
+  on either instrument.
+- ~~**H2 -- precomputed interaction-state flag.**~~ Shipped: F5, D2. About 18
+  points of the feed path on `styled-screen-redraw`.
+
+Open, re-ordered against F6:
+
+1. **H5 -- move cells in place instead of reallocating.** Now the largest single
+   candidate anywhere in this file: 33.5% of root on `incremental-screen-updates`,
+   and its subtree is allocation and refcount traffic rather than cell writing.
+   Starts as a code read, not a measurement -- the competing explanation in H5 is
+   settled by looking at how the shift is written. Cheap to check, and it may
+   also be the headless face of H4.
+2. **H1(a) -- stop snapshotting for `.print`.** Targets `recordDamage` (27.7%)
+   plus the snapshot getter (11.2%) on styled, but only ~12% combined on
+   incremental, so its value is shape-dependent. F4 sharpened its design: the
+   cost is not what the snapshot contains, so this has to avoid building and
+   diffing it at all. Note the correctness trap -- a print advances the cursor, so
+   the snapshot pair is not dead work for `.print`; it is what damages the old and
+   new cursor rows. Skipping it wholesale drops a cursor repaint. Needs behavioral
+   damage tests first, under the correctness rule above.
+3. **H4 -- drop `lastPlannedTerminal`.** App-only, removes a per-frame whole-grid
+   compare as well as the copies. Worth reconsidering jointly with H5.
+4. **H3 -- box the cold fields of `Terminal`.** The argument strengthened: F4
+   showed the 1.4k-sample `_platform_memmove` under `recordDamage` survives making
+   the snapshot fully POD, so it is not the snapshot and most plausibly is the
+   932-byte `Terminal` being partially copied. The reason H3 was scheduled last --
+   that it would confound H1 and H2 -- has largely expired now that H1(b) and H2
+   are settled.
+
+`eraseLine` / `eraseCells` / `clearCellAndPair` is the one large node that ranks
+high on *both* shapes (styled 13.9% / 12.7% / 17.2%; incremental 12.5% / 11.4% /
+12.0%) and is still unattributed to a mechanism. That shape-independence makes it
+the most valuable remaining RESEARCH item.
 
 ## Task ledger
 
@@ -272,8 +331,8 @@ unanalyzed; it is a Phase 3 item, not a candidate yet.
 - [x] Measure `MemoryLayout<Terminal>.size`. Result: F2.
 - [x] Establish whether the app's copy-on-write pressure is visible headlessly.
   Result: F3 -- it is not, and the delta is the evidence for H4.
-- [ ] Capture a second `incremental-screen-updates` profile so its column meets
-  the two-profile rule.
+- [x] Capture a second `incremental-screen-updates` profile so its column meets
+  the two-profile rule. Result: F6 -- two captures, agreeing within 0.6 points.
 
 ### Phase 2 -- direction gate
 
@@ -289,19 +348,30 @@ unanalyzed; it is a Phase 3 item, not a candidate yet.
 - [x] H2: interaction-state flag. Result: F5 -- confirmed and shipped; D2. The
   attribution experiment came out in H2's favor, which also resolves this file's
   "the `outlined ...` names may be misattributed" caveat.
-- [ ] H1(a): skip the snapshot for `.print`, with behavioral damage tests.
+- [x] Re-baseline the feed path after H2, on both workload shapes. Result: F6,
+  which supersedes F1 and re-scopes the candidate ordering.
+- [ ] H5: read `moveAndFillCells` / `moveAndFillRows` and establish whether the
+  reallocation is aliasing or is inherent to how the shift is written. Code read
+  first; measurement only after.
+- [ ] H1(a): skip the snapshot for `.print`, with behavioral damage tests. Must
+  preserve cursor-row damage -- see the trap noted in the candidate list.
 - [ ] H4: replace `lastPlannedTerminal` with a generation counter; verify on an
-  **app** profile, not the headless one.
-- [ ] H3: box the cold fields of `Terminal`.
-- [ ] RESEARCH: `eraseLine` / `eraseCells` / `clearCellAndPair`, 11-14% of root
-  on both workload shapes. Not yet attributed to a mechanism.
+  **app** profile, not the headless one. Reconsider jointly with H5.
+- [ ] H3: box the cold fields of `Terminal`. The confound argument for keeping it
+  last has largely expired; F4 strengthened its evidence.
+- [ ] RESEARCH: `eraseLine` / `eraseCells` / `clearCellAndPair`, 11-17% of root
+  on **both** workload shapes. Not yet attributed to a mechanism, and the only
+  large node that is shape-independent.
 
 ## Findings log
 
 ### F1 -- feed is dominated by damage snapshotting and inspection invalidation, not by parsing
 
-- Status: recorded; stable across the two styled profiles, single-profile and
-  directional-only for incremental.
+- Status: recorded, and **superseded by F6** as the current picture. Kept as the
+  record of the starting state. Two caveats on reading it now: every styled share
+  predates F5 and has since been rescaled by roughly 1.24x, and its incremental
+  column was built from the styled tree's node list and therefore omits
+  `moveAndFillCells`, the largest node on that shape.
 - Date and investigator: 2026-07-28, Claude (agent).
 - Commit and worktree state: `557dd4f`, plus the new harness and untracked
   `notes.md` / `plans/wip/*` that enter no build.
@@ -748,6 +818,156 @@ unanalyzed; it is a Phase 3 item, not a candidate yet.
   limitation rather than by disagreement.
 - Next action: D2. The next scheduled item is H1(a), then H4, then H3.
 
+### F6 -- post-H2 re-baseline, and the incremental column F1 never showed
+
+- Status: recorded. Supersedes F1 as the current picture of the feed path.
+  Incremental now has two captures and meets the two-profile rule for the first
+  time.
+- Date and investigator: 2026-07-28, Claude (agent).
+- Commit and worktree state: `07e4784` with a clean tracked tree. The
+  `identity.json` files record `isWorkingTreeDirty: true`, which is
+  `git status --porcelain` counting the untracked `notes.md` / `plans/wip/*`
+  that enter no build; no tracked file differs from `07e4784`.
+- Commands: `just benchmark-feed-sample styled-screen-redraw 20` twice,
+  `just benchmark-feed-sample incremental-screen-updates 20` twice.
+- Artifacts: `.build/terminal-feed-profiles/2026-07-28-{100116,100143}` (styled),
+  `.../2026-07-28-{100211,100247}` (incremental).
+- Measurements -- share of harness root inclusive:
+
+  | Node | styled 1 | styled 2 | incr 1 | incr 2 |
+  | --- | ---: | ---: | ---: | ---: |
+  | `Terminal.feed(_:)` | 96.1% | 96.3% | 98.8% | 98.8% |
+  | `Terminal.moveAndFillCells(in:row:by:)` | -- | -- | **33.8%** | **33.2%** |
+  | `Terminal.recordDamage(since:)` | **27.8%** | **27.6%** | 8.6% | 8.7% |
+  | `_platform_memmove` | 17.8% | 17.9% | 5.6% | 5.3% |
+  | `Terminal.clearCellAndPair(...)` | 17.4% | 16.9% | 12.1% | 11.9% |
+  | `Terminal.eraseLine(mode:)` | 14.0% | 13.7% | 12.7% | 12.3% |
+  | `Terminal.printNarrow(_:breakClass:)` | 12.9% | 13.1% | 3.6% | 3.8% |
+  | `Terminal.eraseCells(row:columns:)` | 12.9% | 12.4% | 11.6% | 11.2% |
+  | `Terminal.execute(_:)` | 0.1% | 0.1% | 12.1% | 12.6% |
+  | `Terminal.advanceToNextRow(preservingWrapClaim:)` | -- | -- | 12.1% | 12.6% |
+  | `Terminal.moveAndFillRows(...)` | -- | -- | 12.1% | 12.5% |
+  | `TerminalInputStream.feed(_:)` | 9.0% | 8.7% | 11.8% | 11.8% |
+  | `Terminal.damageActionSnapshot.getter` | 11.0% | 11.4% | 3.3% | 3.6% |
+  | `doDecrementSlow` (refcount release, all callers) | 2.7% | 2.9% | **12.9%** | **13.3%** |
+  | `_ContiguousArrayStorage.__deallocating_deinit` | 2.3% | 2.5% | 10.5% | 11.0% |
+  | `swift_arrayDestroy` | 2.3% | 2.5% | 10.3% | 10.9% |
+  | `specialized _copyCollectionToContiguousArray<A>(_:)` | -- | -- | 8.0% | 8.4% |
+  | `swift_arrayInitWithCopy` | -- | -- | 5.5% | 5.7% |
+  | `outlined init with copy of Terminal.GridCell` | 1.8% | 1.7% | 5.6% | 5.7% |
+  | `outlined consume of TerminalScalars.Storage` | 1.6% | 1.6% | 5.6% | 5.4% |
+  | `EscapeAbsorber.consume(_:)` | 3.4% | 3.4% | 6.0% | 6.0% |
+
+  Incremental, run 1, pruned to nodes at or above 150 samples (root 16633):
+
+  ```
+  16633  measureFeedBatch(chunks:executionCount:makeTerminal:now:)
+    8226  Terminal.feed(_:)
+      2103  Terminal.eraseLine(mode:)
+        1840  Terminal.eraseCells(row:columns:)
+      1216  Terminal.moveAndFillCells(in:row:by:)
+      1157  Terminal.moveAndFillCells(in:row:by:)
+        1088  specialized _copyCollectionToContiguousArray<A>(_:)
+           517  swift_arrayInitWithCopy
+             338  initializeWithCopy for Terminal.GridCell
+             179  initializeWithCopy for Terminal.GridCell
+               179  outlined copy of TerminalScalars.Storage
+           301  initializeWithCopy for Terminal.GridCell
+           257  swift_arrayInitWithCopy
+       849  Terminal.moveAndFillCells(in:row:by:)
+         835  doDecrementSlow -> _swift_release_dealloc
+           715  _ContiguousArrayStorage.__deallocating_deinit
+             408  swift_arrayDestroy -> outlined consume of TerminalScalars.Storage
+       611  Terminal.moveAndFillCells(in:row:by:)
+         469  outlined init with copy of Terminal.GridCell
+       485  Terminal.moveAndFillCells(in:row:by:)
+         284  swift_isUniquelyReferenced_nonNull_native
+    2020  Terminal.feed(_:)
+      2018  Terminal.execute(_:)
+        2011  Terminal.advanceToNextRow(preservingWrapClaim:)
+           889  Terminal.moveAndFillRows(...)
+           650  Terminal.moveAndFillRows(...)
+             639  doDecrementSlow -> _swift_release_dealloc
+               563  _ContiguousArrayStorage.__deallocating_deinit
+                 542  swift_arrayDestroy -> (nested release of GridCell storage)
+    1986  Terminal.feed(_:)
+       996  TerminalInputStream.feed(_:)
+         621  EscapeAbsorber.consume(_:)
+           538  EscapeAbsorber.dispatchCSI(final:)
+    1534  Terminal.feed(_:)
+       479  Terminal.recordDamage(since:)
+         468  _platform_memmove
+    633  Terminal.feed(_:)
+       319  Terminal.printNarrow(_:breakClass:)
+  ```
+
+  Styled, run 1, same pruning (root 16686):
+
+  ```
+  16686  measureFeedBatch(chunks:executionCount:makeTerminal:now:)
+    4941  Terminal.feed(_:)
+      1473  Terminal.recordDamage(since:)
+        1430  _platform_memmove
+       760  Terminal.recordDamage(since:)
+         231  Terminal.damageActionSnapshot.getter
+       514  Terminal.recordDamage(since:)
+         290  outlined init with copy of Terminal.DamageActionSnapshot
+       401  Terminal.recordDamage(since:)
+         214  outlined destroy of Terminal.InteractionLinkState?
+       278  Terminal.recordDamage(since:)
+         278  ___chkstk_darwin
+    2402  Terminal.feed(_:)
+      2334  Terminal.eraseLine(mode:)
+        2041  Terminal.eraseCells(row:columns:)
+           489  Terminal.clearCellAndPair(...)
+    2258  Terminal.feed(_:)
+      1053  Terminal.printNarrow(_:breakClass:)
+    1508  Terminal.feed(_:)
+       567  TerminalInputStream.feed(_:)
+    1500  Terminal.feed(_:)
+      1457  _platform_memmove
+     746  Terminal.feed(_:)
+       468  Terminal.appendToOpenClusterIfJoined(_:classification:)
+  ```
+
+- Repeatability: the two styled runs agree within 0.5 points on every node and
+  reproduce F5's after-columns within 0.4, so four styled captures now agree.
+  The two incremental runs agree within 0.6 points, so the incremental column is
+  finally stable and the standing "one capture, directional only" caveat is
+  discharged.
+- Observation 1 -- **`moveAndFillCells` at 33% was never a change; it was a hole
+  in F1's table.** F1 reported the incremental column by reusing the node list
+  chosen from the styled tree, and `moveAndFillCells` is absent from styled
+  entirely. Every node F1 *did* list for incremental is within 0.6 points today
+  except the two H2 touched (`printNarrow` 8.8% -> 3.6/3.8%,
+  `invalidateInspection` 6.6% -> gone). So this is a reporting gap being closed,
+  not a regression. The F1 artifacts were deleted by `just test`'s `rm -rf
+  .build`, so this cannot be re-derived from them -- it rests on the agreement of
+  every other node.
+- Observation 2 -- **the two workloads now have almost no overlap in their top
+  nodes.** Styled is damage bookkeeping (`recordDamage` 27.7% + the snapshot
+  getter 11.2% = ~39%) over cell clearing. Incremental is row and cell *moving*
+  (`moveAndFillCells` 33.5%, `moveAndFillRows` 12.3%) whose cost is almost
+  entirely array reallocation and refcount traffic -- `_copyCollectionToContiguousArray`,
+  `swift_arrayInitWithCopy`, `swift_arrayDestroy`, and `outlined
+  copy`/`consume of TerminalScalars.Storage`. `recordDamage` is only 8.7% there.
+- Inference: the shifting path builds a **new array** rather than moving cells in
+  place, and each moved `GridCell` retains and releases a heap `TerminalScalars.Storage`.
+  That is a distinct mechanism from anything in H1-H4 and is the dominant cost on
+  the localized-edit shape. It is recorded as H5 below.
+- Second inference, for prioritization: H1(a) targets `recordDamage` plus the
+  snapshot getter, which is ~39% of styled but ~12% of incremental. Its value is
+  strongly shape-dependent, which the correctness risk has to be weighed against.
+- Competing interpretations: `moveAndFillCells`'s share may be inflated by the
+  fixture's edit pattern -- `incremental-screen-updates` is 100000 cycles of
+  localized edits, and ICH/DCH-style shifting is exactly what it exercises. It is
+  a fixture, not a recording, so the same caveat that applies to
+  `styled-screen-redraw` as a btop proxy applies here.
+- Uncertainty: low on both columns now. Moderate on how well either fixture
+  represents real programs.
+- Next action: re-scope the candidate ordering against this table before
+  implementing H1(a).
+
 ## Decision log
 
 ### D2 -- H2 shipped; `hasInteractionState` is maintained by observers, not by call sites
@@ -793,17 +1013,23 @@ the paired benchmark returned `equivalent`.
 
 ## Open questions and caveats
 
-- **`incremental-screen-updates` has one profile.** Its column ranks nodes very
-  differently from styled (parsing nearly doubles in share, `printNarrow` falls
-  by more than three times). Until a repeat exists, do not treat any incremental
-  share as stable.
+- ~~**`incremental-screen-updates` has one profile.**~~ -- discharged by F6, which
+  captured two agreeing within 0.6 points. The warning it carried was
+  understated rather than wrong: the two shapes share almost no top nodes at
+  all. Styled is damage bookkeeping, incremental is row and cell moving. Quoting
+  a share without naming the workload is worse than imprecise here; it is
+  usually just false for the other shape.
+- **F1's incremental column was reported against a node list chosen from the
+  styled tree**, which is how a 33%-of-root node (`moveAndFillCells`) stayed
+  invisible for the file's first day. When adding a workload column, prune that
+  workload's own tree rather than reusing another's node list.
 - ~~**The `outlined ...` symbol names may be linker-deduplicated**~~ -- settled by
   F5. They were not misattributed: the two large ones tracked exactly the four
   optional reads in `invalidateInspection`'s guard and collapsed with it.
 - **F1's table describes a profile that no longer exists.** F5 removed about 18
   points of the feed path, so every share in F1 has been rescaled by roughly
-  1.24x. F1 stays as the record of the starting state; use F5's after-columns
-  for anything forward-looking, and re-baseline before sizing H1(a), H4, or H3.
+  1.24x. F1 stays as the record of the starting state; **F6 is the current
+  baseline** and is what any new candidate must be sized against.
 - **`styled-screen-redraw` is a proxy for btop, not a recording of it.** It
   matches the shape (cursor-home full-frame redraw, dense truecolor SGR, `EL` per
   row) but its cell content and frame cadence are synthetic. If a candidate's
