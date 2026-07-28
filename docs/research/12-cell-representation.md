@@ -1,7 +1,8 @@
 # Cell representation
 
-Research started: 2026-07-28. **Status: scoped, Phase 1 evidenced. No change
-proposed yet.**
+Research started: 2026-07-28. **Status: Phase 1 evidenced (F1-F5). H5's erase leg
+closed and shipped (F6); its move/copy leg confirmed and unimplemented (F4). The
+cell-representation change itself is still unproposed.**
 
 ## Purpose
 
@@ -44,6 +45,14 @@ post alone.
   proposal here must state what it does to `moveAndFillCells`, `eraseCells`, and
   copy-on-write traffic, and must be verified on `terminal-feed` /
   `scrollback-stream` per `10/F9`'s rule about workloads that can see the change.
+- **Import libghostty's techniques as evidence, not as a design to copy.** The
+  goal is the representation that minimizes memory *and* improves performance
+  *while staying simple* in a Swift value-type engine -- not the closest
+  achievable imitation of a Zig arena design. Where DanTerm can find a smarter or
+  simpler answer than the one `.ghostty-src/` uses, take DanTerm's. F4 is the
+  first example: it shows the CPU win comes from cell *triviality* alone, which
+  DanTerm can have without any of the packing, offsets, or page allocation that
+  libghostty pairs it with.
 - **Scrollback depth is a user-visible feature, and it is denominated in cells.**
   A change to cell size changes how much history a fixed budget buys. Say so
   explicitly in any proposal.
@@ -184,6 +193,13 @@ requires 64 bits.
 Removes up to ~18 of 65 bytes. Portable; needs a decision on ID width and
 overflow behavior.
 
+**Revised by F3.** The two halves are not alike. `hyperlinkId` is nil in 100% of
+census cells and should follow libghostty exactly: one bit, data in a page map.
+`contentIdentity` is a monotonic per-printed-cell counter with 132K distinct
+values in one workload, so "nothing about it requires 64 bits" is too casual --
+16 bits overflows, and narrowing needs a wrap or reuse policy. Decide them
+separately.
+
 ### H3 -- the remaining cell should be a packed POD word
 
 After H1 and H2, what is left is `kind` (a 5-case enum), the inline scalar, and
@@ -233,6 +249,21 @@ Confirmed if making the cell trivially copyable collapses those three node
 families together. This is a single prediction covering three separate
 measurements, which makes it unusually falsifiable.
 
+**Sharpened by F3.** The mechanism is *non-POD copy overhead*, not refcount
+traffic: the workload behind `10/F7` has zero `.spill` cells, so nothing is being
+retained or released there at all. The prediction survives -- it just now rests
+entirely on H3, since H1 and H2 both leave `TerminalScalars` in the cell and the
+cell non-trivial.
+
+**Split by F4.** Measured directly: making the cell POD is worth **-21.5%** on
+`incremental-screen-updates` and **-9.7%** on `scrollback-stream`, and it deletes
+the outlined-copy family outright. But only two of the three predicted node
+families collapsed. The erase family did not, so **H5 should now be read as two
+claims**: the move/copy leg is confirmed and owned by triviality; the erase leg
+is still unattributed, exactly as doc 10 left it, and needs its own
+investigation. Note also that triviality does **not** require the 8-byte packing
+of H3 -- only getting `.spill` out of the cell.
+
 ## Candidate direction, pending evidence
 
 **Provisional. Incremental, in this order, because each step is independently
@@ -260,10 +291,10 @@ not a hypothesis, because nothing has measured the per-row allocation yet.
 - [x] Measure DanTerm's cell, row, style, and scalar layout. Result: F1.
 - [x] Verify libghostty's cell and row layout against `.ghostty-src/` rather than
   against the post. Result: F2.
-- [ ] RESEARCH: measure how much of a real session's cells are actually styled,
+- [x] RESEARCH: measure how much of a real session's cells are actually styled,
   and how many distinct styles exist. H1's entire argument is that the answer is
   "few", and DanTerm has never checked it. This is the cheapest possible test of
-  the file's leading hypothesis.
+  the file's leading hypothesis. Result: F3.
 - [ ] RESEARCH: count per-row array allocations in a scrollback-heavy run, to
   size the contiguous-buffer idea.
 
@@ -367,6 +398,258 @@ not a hypothesis, because nothing has measured the per-row allocation yet.
   memory management underneath it -- `Offset`, the page chunking, and the
   bitmap allocator all assume manual memory control.
 - Next action: none; this finding exists to keep the file's claims sourced.
+
+### F3 -- the corpus is unstyled, spill-free where it matters, and `contentIdentity` is near-unique per printed cell
+
+- Status: recorded. Structural census of resident grid state.
+- Date and investigator: 2026-07-28, Claude (agent).
+- Commit and worktree state: `e58a19b`, tracked tree clean.
+- Method: a temporary census test, same disposable shape as F1. `GridCell`,
+  `GridRow`, `SemanticPromptRow`, `ScrollbackBuffer`, `Terminal.rows`,
+  `Terminal.scrollbackRows`, and `TerminalScalars.storage` were briefly widened
+  from `private` to internal so a `@testable` test could walk them; all edits and
+  the test file were reverted immediately and the tracked tree is unchanged. Each
+  of the four `benchmarks/fixtures/terminal-app.json` workloads was framed with
+  the same length-prefixing `terminal-feed-profile.py` uses and fed to a fresh
+  `Terminal(columns: 179, rows: 66)`. The census then walked every cell of
+  `scrollbackRows + rows`. Styles were counted through a `Hashable` key encoding
+  all ten `TerminalStyle` fields, since `TerminalStyle` is `Equatable` only.
+- Measurements (resident state after the full workload):
+
+  | Workload | rows | cells | styled cells | distinct styles | `.spill` | rows w/ `.spill` | hyperlink cells | `contentIdentity` cells / distinct |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+  | `scrollback-stream` | 1,783 | 319,157 | **0** | 1 | **0** | 0 | 0 | 80,219 / **80,219** |
+  | `styled-screen-redraw` | 66 | 11,814 | **88** (0.74%) | **9** | 0 | 0 | 0 | 1,197 / 1,197 |
+  | `unicode-wrapping` | 1,709 | 305,911 | 0 | 1 | **1,876** (0.61%) | **1,005** (58.8%) | 0 | 137,919 / **132,258** |
+  | `incremental-screen-updates` | 66 | 11,814 | 0 | 1 | 0 | 0 | 0 | 289 / 289 |
+
+- Scalar case split: cells are overwhelmingly `.empty` -- 74.9% on
+  `scrollback-stream`, **97.6%** on `incremental-screen-updates`, 56.8% on
+  `unicode-wrapping`. Every remaining cell is `.single` except the 1,876
+  `unicode-wrapping` spills.
+- Inference 1, H1's premise holds but its payoff is memory only. At most **9
+  distinct styles** exist in any workload, so a dedup table stays trivially
+  small and the look-aside indirection is safe. But the 19 bytes come out of
+  every cell whether or not it is styled, so the memory win never depended on
+  this census; what the census establishes is that the table will not grow
+  pathologically.
+- Inference 2, and the one that changes the plan: **H5's mechanism is not
+  reference counting.** `incremental-screen-updates` -- the workload behind the
+  incremental harness whose `moveAndFillCells` node is ~29% of root in `10/F7` --
+  contains **zero** `.spill` cells, as does `scrollback-stream`. With no spill
+  there is no `TerminalScalars.Storage` to retain or release, so the
+  `outlined init with copy` / `outlined consume` cost measured there is the
+  per-cell **call and switch overhead of a non-POD enum**, paid on every cell
+  regardless of case. This corrects F1's observation 2, which attributed it to
+  refcount traffic. It also settles the Phase 2 gate question: H1 removes bytes
+  but **cannot** remove those nodes, because it leaves `TerminalScalars` in the
+  cell and the cell non-trivial. Only H3 can.
+- Inference 3, H2 splits into two unequal halves. `hyperlinkId` is nil in
+  **100%** of cells across all four workloads -- 8 bytes plus discriminator per
+  cell for a feature the corpus never exercises, and the strongest candidate in
+  the file for libghostty's one-bit-plus-page-map treatment. `contentIdentity` is
+  the opposite of what H2 assumed: it is a monotonic counter
+  (`Terminal.swift:436,4610`) issued per printed cell, so distinct values track
+  printed-cell count almost exactly (80,219 of 80,219; 132,258 of 137,919).
+  Narrowing it to 16 bits is **not** a free width change -- 132K distinct values
+  in a single workload overflow it by 2x -- and requires an explicit wrap or
+  reuse policy. H2's two halves should be decided separately.
+- Inference 4, H4's row flags are strong for style and weak for graphemes. A
+  `styled` row bit would let the draw path skip essentially every row on three of
+  four workloads. A `grapheme` row bit is much blunter: on `unicode-wrapping`
+  **58.8% of rows contain at least one spill cell** despite spills being 0.61% of
+  cells, so the flag skips only ~41% of rows on exactly the content it targets.
+- Competing interpretations: the corpus may simply be less styled than real
+  sessions. That weakens inference 1 (which is why it is stated as "the table
+  stays small", not "styling is rare in practice") but does **not** weaken
+  inference 2, which turns on spill being absent from two specific workloads
+  whose profiles doc 10 already took.
+- Uncertainty: this is a census of **resident state**, not of write traffic.
+  `styled-screen-redraw` writes far more styled cells than the 88 that survive to
+  the end, and per-cell style *writes* are what a dedup table's refcount churn
+  would cost. Sizing that needs write-path instrumentation, not a grid walk.
+- Next action: take the H1-alone question to the Phase 2 gate with inference 2 in
+  hand, and measure style-write traffic before committing to a refcounted table.
+
+### F4 -- a POD cell is 21.5% faster on the incremental workload, but the erase leg of H5 does not collapse
+
+- Status: recorded. Deliberately-incorrect spike, reverted. Diagnostic, not a
+  paired verdict.
+- Date and investigator: 2026-07-28, Claude (agent).
+- Commit and worktree state: `e58a19b`, tracked tree clean before and after.
+- Method: `TerminalScalars`' three-case enum was temporarily replaced with a POD
+  struct (`first: Unicode.Scalar`, `count: UInt8`) that truncates multi-scalar
+  clusters to their first scalar, making `GridCell` trivially copyable --
+  `TerminalScalars` is its **only** non-POD member (`TerminalCellKind` is
+  payload-free, `TerminalStyle` is colors/bools/enums, `Int?` is trivial). The
+  build is wrong for grapheme clusters by construction and is exactly correct for
+  `incremental-screen-updates` and `scrollback-stream`, which F3 measured at zero
+  `.spill` cells. Both arms were built release from the same tree and machine
+  session; timing ran interleaved (baseline, candidate, candidate, baseline) x 3
+  per corpus.
+- Profile, `just benchmark-feed-sample incremental-screen-updates 20`
+  (`.build/terminal-feed-profiles/2026-07-28-120745` baseline,
+  `2026-07-28-120910` candidate):
+
+  | Node | baseline (16,574 samples) | candidate (15,954 samples) |
+  | --- | ---: | ---: |
+  | `Terminal.feed` subtree | 47.1% | **37.6%** |
+  | `moveAndFillCells` subtree | 14.4% | **8.1%** |
+  | `eraseLine` subtree | 13.9% | **15.9%** |
+  | `outlined init with copy of GridCell` (own) | 913 | **absent** |
+  | `outlined consume of TerminalScalars.Storage` (own) | 584 | **absent** |
+  | `outlined destroy of GridCell` (own) | 566 | **absent** |
+  | `outlined copy of TerminalScalars.Storage` (own) | 294 | **absent** |
+  | `_platform_memmove` (own) | 617 | 725 |
+
+  The four outlined-copy symbols do not merely shrink; they occur **zero** times
+  anywhere in the candidate profile, and `memmove` rises. That is the predicted
+  substitution, observed directly.
+- Timing, median of 6 interleaved executions per arm:
+
+  | Corpus | baseline | POD spike | change |
+  | --- | ---: | ---: | ---: |
+  | `incremental-screen-updates` | 1,111.3 ms | 872.7 ms | **-21.5%** |
+  | `scrollback-stream` (4 per batch) | 235.5 ms | 212.7 ms | **-9.7%** |
+
+  Spread within each arm was under 1% on both corpora, and no candidate sample
+  overlapped any baseline sample.
+- Inference 1: **H5's central claim is confirmed, and it is large.** Cell
+  triviality alone -- no style dedup, no narrowed keys, no bit-packing -- removes
+  the entire outlined-copy family and a fifth of feed time on the workload where
+  `10/F7` found `moveAndFillCells` dominant. The mechanism is what F3 predicted:
+  non-POD copy overhead, not refcounting.
+- Inference 2, and it revises H5: **the erase leg does not collapse.** `eraseLine`
+  holds 15.9% of root after the spike, and `clearCellAndPair`'s own time *rises*
+  (1,385 -> 1,658 samples), as does `clearPreviousSpacer` (455 -> 642). H5
+  predicted three node families would collapse together; two did. Doc 10 closed
+  the erase node unattributed, and this spike **fails to attribute it to
+  triviality** -- the remaining cost looks like per-cell control flow (spacer
+  repair, pair clearing), not per-cell copying. That is now a separate open
+  question, and it is the more interesting one because it is shape-independent.
+- Inference 3, on direction: the win requires only that the cell be **POD**, not
+  that it be **8 bytes**. A 72-byte trivially-copyable cell captures all of the
+  measured 21.5%. That decouples the CPU work (get `.spill` out of the cell) from
+  the memory work (H1, H2, H3's packing) entirely, and it means DanTerm does not
+  need libghostty's offsets, page chunking, or bitmap allocator to collect the
+  performance half of this file's thesis.
+- Competing interpretations: the spike also removes the array allocation that a
+  real cluster payload costs -- but neither measured corpus contains one, so on
+  these two corpora that difference cannot be doing any work. The
+  `scrollback-stream` gain being half the incremental gain is consistent with the
+  mechanism: it shifts fewer cells per byte fed.
+- Uncertainty: this is a headless microbenchmark and per
+  [agent-docs/terminal-performance.md](../../agent-docs/terminal-performance.md)
+  it is diagnostic, not a directional verdict. A real implementation must be
+  decided with `just benchmark-quick baseline=<rev> workload=terminal-feed`, and
+  that number will be **smaller** than 21.5%, because the combined `terminal-feed`
+  stream includes `unicode-wrapping`, where a correct cluster side-table costs
+  something the spike simply skipped. The spike measures the ceiling.
+- Next action: settle the erase question separately (inference 2), and design the
+  cluster side-table's lifetime -- per-row storage dies with row eviction but
+  reflow moves cells between rows; per-terminal storage needs reclamation on
+  overwrite.
+
+### F5 -- the erase cost is per-cell call and nested-COW overhead, and it is not shape-independent at the feed boundary
+
+- Status: recorded. Diagnostic profiling, no code changed.
+- Date and investigator: 2026-07-28, Claude (agent).
+- Commit and worktree state: `e58a19b`, tracked tree clean.
+- Method: three `just benchmark-feed-sample` profiles -- two on
+  `incremental-screen-updates` (`2026-07-28-120745`, `2026-07-28-121505`) for the
+  stability rule in
+  [agent-docs/terminal-performance.md](../../agent-docs/terminal-performance.md),
+  one on `scrollback-stream` (`2026-07-28-121623`). Attribution of
+  `swift_isUniquelyReferenced_nonNull_native` to its nearest enclosing frame was
+  computed from the call graph.
+- Measurements on `incremental-screen-updates` (own time, two profiles):
+
+  | Node | profile 1 (16,574) | profile 2 (16,720) |
+  | --- | ---: | ---: |
+  | `eraseLine` subtree | 13.9% | 14.8% |
+  | `clearCellAndPair` (own) | 1,385 (8.4%) | 1,480 (8.9%) |
+  | `clearPreviousSpacer` (own) | 455 (2.7%) | 434 (2.6%) |
+  | `isUniquelyReferenced` attributed to `clearCellAndPair` | -- | 567 (3.4%) |
+
+- Mechanism 1, **nested COW checks per cell.** `clearCellAndPair` writes
+  `rows[row].cells[column] = GridCell(style:)` (`Terminal.swift:5066`), which
+  goes through two nested array modify accessors, so every single cell write
+  re-checks uniqueness of the outer `[GridRow]` buffer *and* the inner
+  `[GridCell]` buffer. 3.4% of root is spent there. Line attribution inside the
+  function concentrates on 5066 (the assignment), 5055 (the kind switch), and
+  5070 (the spacer call).
+- Mechanism 2, **a loop-invariant call made per cell.** `eraseCells` calls
+  `clearCellAndPair` per column (`Terminal.swift:2863`), and each of those calls
+  `clearPreviousSpacer`, which can only do work when `column <= 1`
+  (`Terminal.swift:5083`). Erasing a full 179-column line therefore makes 177
+  calls that guard out immediately, each passing a 19-byte `TerminalStyle` by
+  value. That is 2.6-2.7% of root spent almost entirely on no-ops.
+- Mechanism 3, **it is per-cell function-call shape, not payload work.** Neither
+  mechanism touches the cell's contents, which is why F4's POD spike did not move
+  it and why doc 10 could not attribute it to a data-layout cause.
+- Correction to a doc-10 reading: **the erase family is not shape-independent at
+  this boundary.** On `scrollback-stream`, `clearCellAndPair` is only 3.1% of
+  root (509 own samples) and is reached from `printNarrow` -- the per-print
+  clear -- not from `eraseLine` at all. It is the same function on both shapes
+  with a different caller and a much smaller share. `10`'s 11-19% figure spans
+  both callers; this file should not treat "erase" as one node.
+- Incidental finding, recorded because it is large and adjacent:
+  `specialized static Terminal.scrollbackByteCost(of:)` is **8.6% of root** on
+  `scrollback-stream` (1,411 own samples: 883 via `enforceScrollbackBudget`, 398
+  via `appendToScrollback`). F1 observation 3 already flagged this cost model as
+  a ~1.9x underestimate of real bytes; it is also expensive to evaluate. That is
+  a separate question from cell representation and should not be absorbed into
+  one of this file's hypotheses.
+- Uncertainty: sample shares are attribution, not timing, so the sizes above rank
+  the work but cannot license a directional claim. Any fix must be decided with
+  `just benchmark-quick`.
+- Next action: brainstormed candidates are hoisting the row binding out of the
+  per-cell loop, hoisting `clearPreviousSpacer` out of it, and filling the
+  expanded interior as a run rather than cell by cell. None implemented; awaiting
+  direction.
+
+### F6 -- removing the per-cell erase overhead is worth -6.36% on `terminal-feed`
+
+- Status: recorded. Paired comparison at `quick` thresholds. Implemented.
+- Date and investigator: 2026-07-28, Claude (agent).
+- Baseline revision: `e58a19b`, compared against the working tree.
+- Change: `eraseCells` (`Terminal.swift:2847`) no longer calls
+  `clearCellAndPair` per column. The wide-pair expansion already pulls every
+  intersected pair wholly inside the range, so no cell in the range has a partner
+  outside it -- which lets the interior be filled in one
+  `withUnsafeMutableBufferPointer` pass instead of paying two nested-array COW
+  uniqueness checks per cell (F5 mechanism 1), and lets `clearPreviousSpacer` run
+  once for the range instead of once per erased cell (F5 mechanism 2). `lower` is
+  now clamped to 0 after expansion; the old code could compute `-1` and relied on
+  `clearCellAndPair`'s bounds guard to swallow it.
+- Verdict: `just benchmark-quick baseline=e58a19b workload=terminal-feed` ->
+  `faster (-6.36% symmetric median of 2 pairs)`, then
+  `just benchmark-confirm baseline=e58a19b` at the tighter thresholds ->
+  **`terminal-feed: faster (-7.05% symmetric median of 2 pairs)`**. The rest of
+  the ladder: `scrollback-stream` equivalent (+0.40%), `incremental-mixed`
+  equivalent (+0.62%, 5 flagged outlier pairs retained), `content-churn`
+  inconclusive (-1.11%), `style-churn` inconclusive (+0.78%). An earlier
+  invocation was invalid (`not-on-ac-power`) and is disregarded.
+- Supporting per-corpus microbenchmark (diagnostic only, 6 interleaved executions
+  per arm): `incremental-screen-updates` 1,107.6 ms -> 1,020.7 ms (**-7.8%**);
+  `scrollback-stream` 235.0 ms -> 233.7 ms (-0.6%). The split is what F5
+  predicts: `scrollback-stream`'s erase traffic arrives through `printNarrow`,
+  which this change does not touch.
+- Tests: existing coverage already pinned wide-pair expansion and the column-0
+  spacer repair. Two characterization tests were added for the branches the
+  refactor could silently narrow -- an erase starting at column 1, and an erase of
+  the top viewport row repairing a spacer head that has scrolled into scrollback
+  (the only branch of the repair that leaves the viewport). Both passed before and
+  after. Core suite and `just test` green.
+- Uncertainty: the two draw workloads returned `inconclusive`, which is the
+  absence of an answer rather than a clean bill. This change does not touch the
+  draw path, so that is expected, but it does mean the ladder licenses "faster on
+  the feed boundary" and nothing about drawing.
+- Inference: F5's two mechanisms were the erase cost, and neither was about cell
+  representation. **The erase leg of H5 is now closed and answered outside this
+  file's hypotheses** -- it was per-cell call and COW-check shape, not payload
+  layout. What remains of H5 is the move/copy leg, which F4 already confirmed
+  belongs to cell triviality.
 
 ## Open questions and caveats
 
