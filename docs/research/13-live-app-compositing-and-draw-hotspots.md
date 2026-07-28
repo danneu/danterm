@@ -81,6 +81,16 @@ Three rules specific to this file:
 - **A live capture must record the human gesture.** The workload here is a person
   holding a key. The gesture, the target program, and its geometry are part of
   the provenance; a profile without them is not reproducible and not comparable.
+- **Every live capture is a hard stop: pause and ask the user to run it.** An
+  agent cannot produce this evidence alone -- the workload is a human holding a
+  key in a focused GUI window, and no scripted driver exists. When a task needs a
+  capture, stop, give the user the exact `sample` command and the gesture, and
+  wait. Do not synthesize the input with `osascript`, `cliclick`, or a key-repeat
+  script to avoid asking: that silently substitutes a different workload for the
+  one every finding in this file was measured on, and the substitution would not
+  be visible in the resulting profile. Do not proceed on the previous capture as
+  though it were the new one, and never write a number a capture has not
+  produced. The user has been willing; asking costs one message.
 - **Do not land two *separately measurable* candidates in the same function
   without measuring between them.** R1 and R4 both edit `drawTextRuns`. Landing
   them together destroys both attributions and repeats exactly what doc 9's
@@ -171,16 +181,31 @@ once (F1's correction). This section exists so that does not happen twice.
 
 ### Re-capturing a live profile
 
-The capture needs a human: the workload is a person holding a key. There is no
-scripted driver for it (Phase 4 owns whether to build one).
+**Stop here and ask the user.** This is the one step in the investigation an
+agent cannot perform: it needs a person holding a key in a focused GUI window,
+and no scripted driver exists (Phase 4 owns whether to build one). Hand over the
+command and the gesture and wait for the artifact. Both existing captures were
+produced this way and the user has been willing.
+
+Ask for exactly this, incrementing `N`:
 
 ```
 sample "$(pgrep -a -x 'DanTerm Dev')" 20 -mayDie -fullPaths \
     -file /tmp/danterm-btop-sample-N.txt
 ```
 
-While it runs: hold the **down-arrow** key to scroll `btop`'s process list in a
-DanTerm pane, at the window's normal size. Then record, in the finding:
+> While it runs, hold the **down-arrow** key to scroll `btop`'s process list in a
+> DanTerm pane, at the window's normal size, for the full 20 seconds.
+
+Also ask whether anything else heavy was running -- run 2 was taken with an
+unrelated benchmark active, which moved the idle/busy split and left the shares
+alone (F6). That caveat only exists because the user volunteered it.
+
+**Do not** substitute `osascript`, `cliclick`, or a key-repeat script for the
+human. It would silently measure a different workload than every finding here was
+measured on, and nothing in the resulting profile would reveal the substitution.
+
+Then record, in the finding:
 
 - pid and **launch time** from the sample header -- if launch time matches an
   earlier capture, it is the same process instance and therefore the same binary,
@@ -534,7 +559,7 @@ Phase 3.
       the pre-change revision explicitly (`4ca27ee`, or `HEAD` if later work has
       landed -- do not infer it after committing). Run `just benchmark-draw`
       before and after; then `just benchmark-quick <base> content-churn`. Record
-      the predicted-versus-actual comparison in F5, including a disappointing
+      the predicted-versus-actual comparison in **F7**, including a disappointing
       result. **Record R1 and R1b's node shares separately in the re-posted draw
       tree even though the benchmark verdict is joint** -- the tree is what keeps
       the two attributions apart when the number is a single figure.
@@ -544,8 +569,8 @@ Phase 3.
       spelled, and the behavior it must preserve is that
       `damageActionSnapshot.isAlternateScreenActive` and the `cursorStreamRow`
       branch stay identical across enter, exit, and resize. Run
-      `just benchmark-quick <base> terminal-feed`. Record in F6.
-- [ ] **R4, only after R1 is measured and committed.** Record in F7.
+      `just benchmark-quick <base> terminal-feed`. Record in **F8**.
+- [ ] **R4, only after R1 is measured and committed.** Record in **F9**.
 
 ### Phase 3 -- decide what to do about compositing
 
@@ -553,7 +578,11 @@ Phase 3.
       display list that `CA::CG::Queue` replays; the queue's cost may move on its
       own. Attacking it first would attribute their effect to R3.
 - [ ] Re-capture after Phase 2 and read the `CA::CG::Queue` total and the
-      `CABackingStoreGetFrontTexture` blocked fraction. Record in F8.
+      `CABackingStoreGetFrontTexture` blocked fraction. Record in **F10**.
+      **This needs the user** -- see the standing rule in Investigation rules and
+      the hand-over text in "Re-capturing a live profile". Pause and ask; do not
+      script the gesture, and do not reuse F1's or F6's capture as the post-change
+      one.
 - [ ] Hand F1, **F5**, F8 and H3 to doc 11 as evidence for its Phase 1 and its H1/H3
       gate. This file does not own the optimize-or-replace decision and must not
       make it.
@@ -1297,6 +1326,17 @@ unstarted.**
    together destroys both attributions.
 5. R3 is research, not a change, and is gated behind Phase 2 for a reason stated
    in D1. Do not promote it.
+
+Findings F1-F6 are recorded. The next free ID is **F7**, and the ledger already
+reserves F7 for R1's result, F8 for R2's, F9 for R4's, and F10 for the Phase 3
+re-capture.
+
+**One step needs the user and cannot be done by an agent:** a live `sample`
+capture. It requires a person holding the down-arrow key in a focused DanTerm
+window for 20 seconds. Phase 3 needs one; any re-measurement of H3 needs one.
+When you reach it, pause and ask -- the exact command and gesture to hand over
+are in "Re-capturing a live profile", and the standing rule against scripting the
+input is in Investigation rules.
 
 ### What is already known and should not be re-derived
 
