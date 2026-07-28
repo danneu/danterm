@@ -271,10 +271,23 @@ coarse verdict is still the only one that sees them.
 **Its A/A precision is not its precision on a revision pair.** Against itself it
 holds ~0.7% paired SD and a mean within 0.1% of zero. Comparing two *different*
 revisions is worse, and an A/A control cannot reveal by how much, because there
-both arms hold identical code. Measured on a real pair, a single-direction run
-carried an order bias around 0.2-0.5%, and the estimate shifts between
-measurement sessions by more than its within-session spread. Treat ~0.5-1% as
-the honest resolution for a revision claim, not the A/A figures.
+both arms hold identical code. **Treat ~0.5-1% as the honest resolution for a
+revision claim, not the A/A figures.** That range is measured, over 18 cold
+rebuilds of one revision pair, and it decomposes into:
+
+- **Rebuild-to-rebuild SD of the estimate, 0.25-0.37%.** Every rebuild produces a
+  distinct dylib -- Swift release builds are not byte-reproducible here -- so
+  re-running is not free of it. Averaging several runs shrinks this term.
+- **A residual order bias of ~+0.3%**, reported per run as `orderBiasPercent`. It
+  is slot-bound, not revision-bound, so counterbalancing already removes it from
+  `realEffectPercent`; it is not load order, which was tested and exonerated.
+  Averaging does *not* shrink this term, which is why ~0.5% is a floor rather
+  than a starting point.
+
+**Re-running does not need a fresh A/A control to interpret it.** A/A shifts
+across rebuilds by the same amount the revision pair does, so the rebuild floor
+belongs to the instrument rather than to cross-revision comparison. A shift
+between two of your runs is expected at ~0.3%, not evidence that something broke.
 
 **A claim needs both directions, which is why the recipe passes
 `--both-directions` whenever a candidate checkout is given.** A real difference
@@ -302,7 +315,7 @@ basename, since SwiftPM derives a path dependency's identity from it. Run the
 default A/A control after any change to the harness; a control that does not sit
 near 0% is the signal that one of these has broken.
 
-Evidence, limits and the pilots behind all of this: F21-F23 in
+Evidence, limits and the pilots behind all of this: F21-F25 in
 [docs/research/8-benchmark-variance-regression.md](../docs/research/8-benchmark-variance-regression.md).
 
 ### Keep the observer out of the profile

@@ -4,8 +4,11 @@ Research started: 2026-07-27.
 
 > ## Handoff -- read this first
 >
-> **The cause is found and all four fixes are refuted. The recommended next step
-> is recalibration at higher pair counts, which needs no new mechanism.**
+> **The cause is found, all four fixes are refuted, and D2 is now taken against
+> all of them: do not repair the GUI benchmark, route around it.** Damage-drawing
+> comparisons move to `just benchmark-headless-draw`, whose two error floors are
+> measured (F25). The coverage that does not move -- damage *generation* -- stays
+> with a degraded `benchmark-quick`, and that gap is accepted, not closed.
 >
 > ### What is wrong, in one paragraph
 >
@@ -102,6 +105,18 @@ Research started: 2026-07-27.
 > honest resolution for a revision claim at **~0.5-1%**, not the numbers below.
 > Any claim needs `--both-directions`, and `orderBiasPercent` must be read before
 > `realEffectPercent` is believed.
+>
+> **F25 then measured the two floors F24 left asserted, and ~0.5-1% survives.**
+> Over 18 cold rebuilds: rebuild-to-rebuild SD of the estimate is **0.25-0.37%**,
+> and **the A/A control shifts across rebuilds just as much as the revision pair
+> does** (F = 1.35 and 2.07 against an F(5,5) critical value of 5.05) -- so
+> rebuilds are noisy, but comparing *different* code does not make them noisier,
+> which retires the harder problem F24 flagged. The residual **+0.30% order bias
+> is real (t = 5.06) but slot-bound, so counterbalancing removes it from the
+> claimable number**, and **load order is not its cause**: swapping which library
+> is `dlopen`ed first left the bias unchanged (+0.101% +- 0.120) where a
+> load-order cause demanded a sign flip. Best estimate for `d19103f` is now
+> **-0.844% +- 0.108** over 12 counterbalanced runs.
 >
 > **F23 then bounded the last risk:** shifting the hot library's code layout by
 > +4,888 bytes ahead of `drawRenderFrame`, semantics unchanged, left the paired
@@ -418,7 +433,9 @@ within a block at constant damage -- a third shape neither option covered.
 
 ## Candidate directions for D2
 
-**D1 is taken; D2 is not, and all four candidates are now refuted.** F15/F16
+**All four candidates are refuted, and D2 was subsequently taken *against* all of
+them** -- the decision is to route around the mechanism rather than repair it.
+This section is retained as the record of what was tried. F15/F16
 narrowed four to one against data already on disk; F17 then built the survivor
 and measured it, and it made the metric worse. **There is no live candidate.**
 
@@ -563,15 +580,11 @@ series and re-freeze `DECISION_RULES` (Phase 6).
 
 - [x] **All four D2 candidates refuted** (F15, F16, F17). The pacer was built,
       measured twice, and made the metric worse; it has been reverted.
-- [ ] **D2 remains unmade.** No mechanism-level fix is known. The recommended
-      path forward does not require one -- see Phase 6.
-
-- [ ] **Decision D2:** select the fix from the candidates in
-      [Candidate directions for D2](#candidate-directions-for-d2), with
-      correctness risks recorded. **This is the next action.** Report findings
-      and pause for review before implementing, per
-      `agent-docs/terminal-performance.md`. F15/F16 refute candidates B, C and D;
-      only the pacer form of A survives, and its open risks are listed there.
+- [x] **D2 taken: do not repair, route around.** No mechanism-level fix is known
+      and none is adopted; damage-*drawing* detection moves to the headless
+      in-process comparison, and the coverage gap it leaves is stated explicitly.
+      See [D2](#d2----do-not-repair-the-gui-benchmarks-incremental-mixed-variance-route-around-it).
+      This closes the Phase 4 gate that F15/F16/F17 left open.
 
 ### Phase 5 -- implement and verify
 
@@ -653,14 +666,22 @@ series and re-freeze `DECISION_RULES` (Phase 6).
 - [x] **Measure two arms built from genuinely different revisions** (F24). Done,
       and it failed at first: the positive control exposed two order biases that
       A/A could not see. Both fixed (`82614e7`); residual bias +0.208%.
-- [ ] **Drive the residual order bias toward zero, or bound it.** +0.208% after
-      counterbalancing is small but unexplained, and it is the floor on any
-      revision claim. Suspect load order -- the baseline library is always
-      `dlopen`ed first within a direction run.
-- [ ] **Establish rebuild-to-rebuild variance properly.** F24 saw the estimate
-      shift 0.5-0.7% between measurement groups while agreeing to SD 0.089%
-      within a group. Until that is characterized, a revision claim tighter than
-      ~1% is not supportable.
+- [x] **Drive the residual order bias toward zero, or bound it** (F25). Bounded,
+      and **load order is exonerated** -- swapping which library is `dlopen`ed
+      first moved the bias by +0.101% +- 0.120 where a load-order cause required
+      a sign flip of ~0.6%. The bias is **+0.299% +- 0.059**, real but *slot*-bound,
+      so the antisymmetric estimate already removes it from the claimable number.
+      Leading remaining hypothesis, deliberately not chased: the arms compile
+      under different module names, so their code layout differs -- the same
+      order as F23's ~0.21% layout bound.
+- [x] **Establish rebuild-to-rebuild variance properly** (F25). SD **0.25-0.37%**
+      over six cold rebuilds per configuration, not 0.5-0.7%; F24 was comparing
+      means of three runs, which differ by that much on their own. Critically,
+      the **A/A control shifts by the same amount** (F = 1.35 and 2.07 vs an
+      F(5,5) critical value of 5.05), so this floor belongs to the instrument and
+      not to cross-revision comparison. Builds are not byte-reproducible -- every
+      cold rebuild yielded a distinct dylib -- so the floor bundles build
+      nondeterminism with session drift and this design cannot split them.
 - [ ] **Extend the threshold grid before any freeze.** F22 bottomed out at the
       grid floors (1.05% / 0.80%), so the instrument's actual resolution is
       unmeasured and the frozen grids cannot express it.
@@ -2119,12 +2140,98 @@ Degraded at `HEAD` = **148376**, span **33208**, **4.65%**, **6.26%**, 10/24.
   `realEffectPercent`. A bias comparable to the effect means neither direction is
   trustworthy.
 
+### F25 -- both error floors bounded: load order is exonerated, and rebuilds are noisy whether or not the code differs
+
+- **Status:** closed. This is the characterization F24 left owed, and it
+  **confirms F24's asserted ~0.5-1% resolution** rather than overturning it --
+  but replaces the assertion with a measurement and a decomposition.
+- **Date:** 2026-07-27. Same revision pair as F24: `d19103f` vs parent
+  `a785d45`.
+- **Setup.** Six epochs. Each epoch ran three `--both-directions` measurements
+  (12 quartets each, 160x50, clip 4, 8 rounds), and **the build workspace was
+  wiped before every one**, so all 18 measurements are cold rebuilds rather than
+  incremental no-ops. The three configurations were `pair-normal` (the shipped
+  arrangement), `pair-swapped` (identical except the *candidate*-slot library is
+  `dlopen`ed first), and `aa-normal` (the A/A control, both arms from
+  `a785d45`). Config order was rotated within each epoch, so each configuration
+  sits in each position exactly twice and position cannot alias with
+  configuration. The driver is out-of-tree per the investigation rules; it
+  imports the shipped script and reuses its build, calibration, warm-up, schedule
+  and pairing code unchanged.
+
+| configuration | real effect (mean +- SE) | SD across 6 rebuilds | order bias (mean +- SE) |
+| --- | --- | --- | --- |
+| `pair-normal` | **-0.655% +- 0.120** | **0.294%** | +0.350% +- 0.089 |
+| `pair-swapped` | **-1.033% +- 0.149** | **0.365%** | +0.249% +- 0.080 |
+| `aa-normal` (control) | +0.009% +- 0.103 | **0.253%** | +0.127% +- 0.082 |
+
+- **Load order is exonerated as the cause of the residual bias.** A first-loaded
+  advantage would flip the bias sign when the load order swaps, so
+  `bias(normal) - bias(swapped)` would equal about twice the bias, ~+0.6%. It is
+  **+0.101% +- 0.120 (t = 0.84)** -- consistent with zero and an order of
+  magnitude short of the signature. The implied load-order term is
+  **+0.050% +- 0.060**, against a bias of +0.30%. The bias is not load order.
+- **The bias is real, and it is slot-bound rather than revision-bound.** Pooled
+  over the 12 revision-pair runs it is **+0.299% +- 0.059 (t = 5.06)**; over all
+  18 runs, +0.242% +- 0.051. Its sign says the candidate *slot* reads ~0.3%
+  slower whatever revision occupies it. The A/A control's own bias, +0.127% +-
+  0.082 (t = 1.55), is not distinguishable from that. **Because it is slot-bound
+  and the estimate is antisymmetric in slot, counterbalancing removes it from
+  `realEffectPercent`** -- which is the design working, and `orderBiasPercent` is
+  the instrument reporting it rather than hiding it.
+- **Leading remaining hypothesis, not chased:** the two arms compile under
+  different module names (`DrawArmBaseline` / `DrawArmCandidate`), so their
+  symbol names, ObjC class names and hence code and metadata layout differ. F23
+  bounded layout bias at ~0.21% and this residual is +0.24%, the same order.
+  Testing it means swapping the module names against the slots, which the
+  module-name guard makes deliberately awkward. Bounded and left, per the
+  standing preference for a stated floor over an open-ended hunt.
+- **Rebuild-to-rebuild variance of the estimate is SD 0.25-0.37%**, with a range
+  of 0.71-1.09% over six cold rebuilds. This is *tighter* than F24's 0.5-0.7%,
+  and it explains it: F24 compared means of three runs, and group means drawn
+  from SD ~0.3% differ by that much routinely. Today's `pair-normal` mean
+  (-0.655%) and F24's `bidir-abba` mean (-0.951%) are two such groups.
+- **A/A shifts across rebuilds just as much as the revision pair does.** This is
+  the discriminating result. Variance ratios against the control are **F = 1.35**
+  (`pair-normal`) and **F = 2.07** (`pair-swapped`), against an F(5,5) 95%
+  critical value of 5.05 -- no detectable excess. **Rebuilds are noisy; comparing
+  different code does not make them noisier.** That rules out the harder problem
+  F24 flagged, where the shift would have been a property of cross-revision
+  comparison itself.
+- **Builds are not byte-reproducible, so the floor is not merely session drift.**
+  Every cold rebuild produced a distinct dylib -- six distinct digest pairs over
+  the six A/A rebuilds, 18 over the revision-pair runs. The ~0.25% floor
+  therefore bundles build nondeterminism with session drift, and this design
+  cannot separate the two; it bounds their sum.
+- **One thing did not resolve.** The real-effect estimate differs between the two
+  load orders by **+0.378% +- 0.191 (t = 1.98, p ~ 0.08, 10 df)** -- not
+  significant, and with no mechanism, since a slot-bound advantage cancels in an
+  antisymmetric estimate. It is reported rather than dismissed because if it is
+  real it is a further ~0.4% floor. The pooled estimate below spans both load
+  orders so it is not sensitive to which is right.
+- **Honest resolution, now measured.** A single `--both-directions` run carries
+  random SD ~0.3% on `realEffectPercent`, plus a slot bias that counterbalancing
+  removes to within the A/A bound (~0.13%), plus the unresolved ~0.4% load-order
+  discrepancy. **~0.5-1% for a single run stands**, with ~0.5% the floor that
+  averaging more runs cannot cross, because the residual terms are systematic
+  rather than random.
+- **A/A red gate passed:** control mean +0.009% (t = 0.09), so the module-name
+  and `TerminalCore` basename guards were intact throughout.
+- **Best estimate for `d19103f`, pooled over 12 counterbalanced runs:**
+  **-0.844% +- 0.108**, i.e. the candidate is ~0.8% faster. Consistent with
+  F24's -0.951% and -0.802%, and now the first figure from this instrument whose
+  error bar is measured rather than asserted. Still a measurement, not a verdict:
+  no rule is frozen.
+- **Evidence:** `~/danterm-benchmark-evidence/2026-07-27/f25-error-floors/` --
+  18 run JSONs under `runs/`, the driver `f25-driver.py`, the summary
+  `f25-analyze.py`, and `sweep.log`.
+
 ## Decision log
 
 ### D1 -- mechanism class: platform CPU frequency demotion of an under-occupied main thread
 
-- **Taken:** 2026-07-27, on F11 + F12 + F13 + F14. **D2 (select the fix) is
-  still open** and remains the Phase 4 gate.
+- **Taken:** 2026-07-27, on F11 + F12 + F13 + F14. D2 (select the fix) was the
+  Phase 4 gate this left open; it is now taken below, against every candidate.
 - **D1 was reframed before it was taken.** As written it asked for "the commit
   and the mechanism class". F12 showed there is no commit -- the defect grows
   monotonically across four revisions rather than flipping at a boundary -- so
@@ -2166,6 +2273,44 @@ precedes it.
 **Reopen if:** the intervention selected at D2 fails to flatten the ramp. That
 would mean F14's synchronized quantized steps have some other cause, and H5
 revives.
+
+### D2 -- do not repair the GUI benchmark's `incremental-mixed` variance; route around it
+
+- **Taken:** 2026-07-27, on F14 + F17 + F20 + F22 + F25. Recorded because it had
+  otherwise been happening by default, and a decision that is never written down
+  cannot be reopened deliberately.
+
+**The decision.** No collection-side repair is adopted. All four candidates for
+D2 are refuted (see [Candidate directions for D2](#candidate-directions-for-d2)),
+and the mechanism D1 identifies is a platform frequency governor that macOS
+exposes no userspace floor for. Rather than keep hunting, damage-*drawing*
+regression detection moves to the headless in-process comparison
+(`just benchmark-headless-draw`), which sidesteps the mechanism by construction:
+batching past a 400 ms floor holds the thread near 100% occupancy so the governor
+never demotes it.
+
+**Why this is not "give up".** The headless route is measured, not assumed. F22
+established the paired spread, F23 bounded the layout risk, F24 found and fixed
+the two order biases an A/A control could not see, and F25 bounded both remaining
+error floors. Resolution on a real revision pair is ~0.5-1% against a 3% question
+-- which is what `confirm` needed and no longer delivers.
+
+**What this decision does not cover, and this is the load-bearing part.** The
+headless benchmark cannot see damage *generation* -- which rows `setNeedsDisplay`
+and AppKit's dirty-rect coalescing mark -- nor `clipFramePlan`'s own cost, nor
+anything on the published-frame path outside `drawRenderFrame`. For those,
+`benchmark-quick` on `incremental-mixed` remains the only instrument, **and it
+remains degraded**. This decision accepts a coverage gap; it does not close one.
+
+**Consequences deliberately left unmade:** the Phase 6 recalibration of `confirm`
+is declined, not deferred -- F20 puts it at ~100 pairs and ~9 min to land
+marginally over the detection floor on one session's data, which is not worth
+buying now that the 3% question has a better instrument. No threshold is frozen
+for the headless benchmark either; `--threshold` stays caller-supplied.
+
+**Reopen if:** a change needs a verdict on damage generation at better than
+`benchmark-quick`'s degraded resolution, or if the governor behaviour changes
+under a future macOS release.
 
 ## Rejected
 
@@ -2627,6 +2772,41 @@ six. Level CV across processes is 2.23%; pooled paired SD over the 96 pairs is
 Analysis: each ABBA round yields two pairs -- `symmetric_difference(a1, b1)` and
 `symmetric_difference(b2, a2)` -- which is the production quartet shape, so the
 result feeds `calibrate_threshold_grid` directly.
+
+### F25 driver -- load-order swap and cold-rebuild sweep (2026-07-27)
+
+Driver, analysis script and all 18 run JSONs at
+`~/danterm-benchmark-evidence/2026-07-27/f25-error-floors/`. Kept out of
+`scripts/` per the investigation rules: it collects evidence, so it does not
+ship. It imports `scripts/terminal-headless-draw-compare.py` and reuses its
+build, calibration, warm-up, direction schedule and pairing code verbatim,
+adding only the three things the shipped script cannot do.
+
+```sh
+python3 f25-driver.py sweep --before <wt>/lib/TerminalCore \
+                            --after  <wt>/lib/TerminalCore --epochs 6 --out runs
+python3 f25-analyze.py runs
+```
+
+The three additions, and why each was needed:
+
+- `--load-order {baseline-first,candidate-first}` swaps which dylib is `dlopen`ed
+  first **independently of arm role**. The shipped driver always loads the
+  baseline-slot library first, so load order is perfectly confounded with slot
+  and the hypothesis is untestable without this. Exonerated load order.
+- sha256 of each built dylib, which is what showed Swift release builds are not
+  byte-reproducible here -- every cold rebuild yields a distinct library. Without
+  it, "rebuild-to-rebuild" could not be distinguished from "session drift" even
+  in principle.
+- a sweep loop that wipes the build workspace before *every* run, so each of the
+  18 measurements is genuinely cold. Configs rotate within an epoch so position
+  cannot alias with configuration.
+
+Two traps worth carrying if this is rebuilt. A cold `--both-directions` run costs
+~3.5 min, so the 18-run sweep is ~70 min -- run it detached and do nothing else
+CPU-bound on the machine meanwhile. And a child at ~100% CPU is the instrument
+working, not a hang: the 400 ms batch floor exists precisely to keep the thread
+occupied so the governor cannot demote it.
 
 ### F23 raw pilot -- layout-perturbed arm B (2026-07-27)
 
