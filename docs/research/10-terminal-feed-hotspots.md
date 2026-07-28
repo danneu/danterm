@@ -211,6 +211,13 @@ accumulates across the tree.
 Supporting evidence: the measured size; the presence of `___chkstk_darwin`
 (stack-probe calls emitted only for frames past a page).
 
+**Weakened, 2026-07-28 (F8).** The single largest memmove contributor this
+hypothesis leaned on -- the 1.3k-sample node under `recordDamage` that F4 could
+not explain and attributed here -- turned out to be snapshot construction, and
+halving the construction count removed it. Aggregate `_platform_memmove` on
+styled is now 11.0/11.9% of root rather than 18%. H3 keeps the struct size as
+evidence and loses the memmove.
+
 Competing explanation: the memmove is dominated by grid row writes, which are
 legitimate work. Partly testable by workload -- memmove falls to 5.8% on
 `incremental-screen-updates`, which writes far fewer cells but also takes far
@@ -289,6 +296,33 @@ the shift was written rather than caused by aliasing -- so the fix was a
 traversal-order rewrite. That also **detaches H5 from H4**: they are not the same
 wound, and the note above suggesting they might be is withdrawn.
 
+### H6 -- feed builds two snapshots per action where one would do
+
+`feed` captures `before` at the top of each loop iteration and `recordDamage`
+captures `after` internally, so every action pays two `damageActionSnapshot`
+constructions. But action N's `after` is bit-for-bit what action N+1 captures as
+its `before`: nothing runs between them, and everything `recordDamage` does after
+taking `after` writes only `damage` and `pendingConsumerWork`, neither of which
+the snapshot reads. Carrying the value forward is therefore behavior-identical
+and halves the construction count.
+
+Supporting evidence: F6 puts `damageActionSnapshot.getter` at 11.0% / 11.4% of
+root on styled, and F4 left a 1.1-1.4k-sample `_platform_memmove` directly under
+`recordDamage` that survived making the snapshot POD and was never attributed.
+
+Competing explanation: the getter may be dominated by `scrollProjection` and the
+cursor arithmetic rather than by the struct's construction and copy, in which
+case halving the count halves the node and nothing else moves.
+
+Scheduled ahead of H1(a) deliberately. It attacks the same two nodes with no
+correctness surface at all -- no change to when or what damage is recorded -- and
+by separating construction cost from diffing cost it sizes how much of those
+nodes H1(a) could still be worth.
+
+**Confirmed, 2026-07-28 (F8, D4).** The getter halved on both shapes (0.56 / 0.54)
+and the unattributed memmove went with it, which also answers the question F4
+left open.
+
 ## Candidate direction, pending evidence
 
 Ordered by measured size against implementation risk. Re-scoped 2026-07-28
@@ -307,18 +341,32 @@ Open, re-ordered against F6:
 1. ~~**H5 -- move cells in place instead of reallocating.**~~ Shipped: F7, D3.
    The first app-level `faster` verdict in this file (`terminal-feed` ~-7%,
    `scrollback-stream` ~-4.5%, both reproducing).
-2. **H1(a) -- stop snapshotting for `.print`.** Targets `recordDamage` (27.7%)
-   plus the snapshot getter (11.2%) on styled, but only ~12% combined on
-   incremental, so its value is shape-dependent. F4 sharpened its design: the
-   cost is not what the snapshot contains, so this has to avoid building and
-   diffing it at all. Note the correctness trap -- a print advances the cursor, so
-   the snapshot pair is not dead work for `.print`; it is what damages the old and
-   new cursor rows. Skipping it wholesale drops a cursor repaint. Needs behavioral
-   damage tests first, under the correctness rule above.
-3. **H4 -- drop `lastPlannedTerminal`.** App-only, removes a per-frame whole-grid
+2. ~~**H6 -- carry the snapshot across the feed loop.**~~ Shipped: F8, D4. About 8
+   points of the feed path on styled, 3.5 on incremental, with no behavior
+   surface.
+3. **H1(a) -- stop snapshotting for `.print`.** Targets `recordDamage` and the
+   snapshot getter, now 17.9% and 6.3% on styled after F8, ~6.2% and ~2.3% on
+   incremental. F4 sharpened its design -- the cost is not what the snapshot
+   contains -- and F8 shrank the prize by removing the duplicate construction that
+   was part of it. Note the correctness trap: a print advances the cursor, so the
+   snapshot pair is not dead work for `.print`; it is what damages the old and new
+   cursor rows. Skipping it wholesale drops a cursor repaint. Needs behavioral
+   damage tests first, under the correctness rule above. **Read F8's
+   monotone-union note before designing it** -- it establishes that the damage
+   union over a feed call is insensitive to a *stale* `before`, which both bounds
+   what H1(a) can safely elide and explains why the existing suite cannot detect
+   an error in that direction.
+4. **H1(b) revisited -- POD `DamageActionSnapshot`, reconsidered under F8.**
+   Rejected by F4 when `outlined init with copy of Terminal.DamageActionSnapshot`
+   was 1.4% of root. F8 replaces one construction per action with one *copy* per
+   action, taking that node to 4.6% / 4.8% -- a 3x rise in the exact cost H1(b)
+   was designed to remove. The rejection was correct on its evidence and that
+   evidence has since changed. Cheap to retry: F4 describes the reverted patch in
+   full.
+5. **H4 -- drop `lastPlannedTerminal`.** App-only, removes a per-frame whole-grid
    compare as well as the copies. Weakened by F7: the tentative link to H5 is
    withdrawn, so F3 is again its only evidence, and F3 is uncontrolled.
-4. **H3 -- box the cold fields of `Terminal`.** The argument strengthened: F4
+6. **H3 -- box the cold fields of `Terminal`.** The argument strengthened: F4
    showed the 1.4k-sample `_platform_memmove` under `recordDamage` survives making
    the snapshot fully POD, so it is not the snapshot and most plausibly is the
    932-byte `Terminal` being partially copied. The reason H3 was scheduled last --
@@ -364,8 +412,14 @@ the most valuable remaining RESEARCH item.
 - [x] H5: read `moveAndFillCells` / `moveAndFillRows` and establish whether the
   reallocation is aliasing or is inherent to how the shift is written. Result:
   F7 -- inherent to the written form; shifted in place instead; D3.
+- [x] H6: carry each action's snapshot forward as the next action's `before`.
+  Result: F8 -- confirmed and shipped; D4. Also corrects F4's attribution of the
+  memmove under `recordDamage`.
 - [ ] H1(a): skip the snapshot for `.print`, with behavioral damage tests. Must
-  preserve cursor-row damage -- see the trap noted in the candidate list.
+  preserve cursor-row damage -- see the trap noted in the candidate list, and
+  F8's monotone-union note for what the damage union is actually sensitive to.
+- [ ] H1(b) retry: POD `DamageActionSnapshot`, reconsidered now that F8 tripled
+  the copy node D1 rejected it over.
 - [ ] H4: replace `lastPlannedTerminal` with a generation counter; verify on an
   **app** profile, not the headless one. Reconsider jointly with H5.
 - [ ] H3: box the cold fields of `Terminal`. The confound argument for keeping it
@@ -1100,7 +1154,210 @@ the most valuable remaining RESEARCH item.
   app-level verdict reproduced.
 - Next action: D3. H1(a), H4, H3, and the erase-path research item remain.
 
+### F8 -- carrying the snapshot across the feed loop halves its construction, and finds F4's missing memmove
+
+- Status: recorded. Positive result. Confirms H6.
+- Date and investigator: 2026-07-28, Claude (agent).
+- Commit and worktree state: baseline `e379f25` with a clean tracked tree;
+  candidate is `e379f25` plus the single-file change below. As in F6, the
+  `identity.json` files say `isWorkingTreeDirty: true` because
+  `git status --porcelain` counts the untracked `notes.md` / `plans/wip/*`,
+  which enter no build.
+- The change: `feed` captures one snapshot before the action loop and reuses each
+  action's `after` as the next action's `before`. `recordDamage(since:)` keeps its
+  signature for the eleven public-API call sites and now forwards to a new
+  `recordDamage(from:to:)` that takes both snapshots explicitly; `feed` calls that
+  one directly. One construction per action instead of two.
+- Commands: `just benchmark-feed-sample styled-screen-redraw 20` and
+  `just benchmark-feed-sample incremental-screen-updates 20`, twice each before
+  and twice each after; `just test`;
+  `DANTERM_BENCHMARK_ALLOW_BATTERY=1 just benchmark-confirm baseline=e379f25`,
+  twice.
+- Artifacts: `.build/terminal-feed-profiles/2026-07-28-{103406,103429}` (styled
+  before), `.../2026-07-28-{104156,104220}` (styled after),
+  `.../2026-07-28-{103452,103516}` (incremental before),
+  `.../2026-07-28-{104330,104353}` (incremental after).
+- Measurements -- share of harness root inclusive, both shapes, with the
+  after/before ratio of the two-run means:
+
+  | Node | styled before | styled after | ratio | incr before | incr after | ratio |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+  | `Terminal.feed(_:)` | 96.2/96.6 | 95.6/95.5 | 0.99 | 98.7/98.7 | 98.6/98.8 | 1.00 |
+  | **`Terminal.damageActionSnapshot.getter`** | **10.9/11.2** | **6.5/6.0** | **0.56** | **4.2/4.1** | **2.4/2.1** | **0.54** |
+  | **`_platform_memmove`** | **18.1/17.9** | **11.0/11.9** | **0.64** | **6.1/6.0** | **4.0/4.0** | **0.66** |
+  | `recordDamage` (`since:` before, `from:to:` after) | 28.1/26.8 | 18.1/17.7 | 0.65 | 10.0/9.3 | 6.0/6.3 | 0.64 |
+  | `outlined destroy of Terminal.InteractionLinkState?` | 2.7/2.7 | absent | -- | -- | -- | -- |
+  | `outlined destroy of (InactivePrimaryScreen?, InactivePrimaryScreen?)` | absent | 2.8/2.9 | -- | -- | -- | -- |
+  | **`outlined init with copy of Terminal.DamageActionSnapshot`** | 2.4/2.4 | 4.6/4.8 | **1.96** | -- | -- | -- |
+  | `initializeWithCopy for Terminal.DamageActionSnapshot` | 2.3/2.4 | 5.1/5.0 | 2.16 | -- | -- | -- |
+  | `Terminal.eraseLine(mode:)` | 13.9/13.4 | 14.8/14.5 | 1.08 | 13.9/14.2 | 13.7/14.1 | 0.99 |
+  | `Terminal.eraseCells(row:columns:)` | 12.7/12.4 | 13.4/13.1 | 1.06 | 12.6/13.1 | 12.5/12.7 | 0.98 |
+  | `Terminal.clearCellAndPair(...)` | 17.4/17.0 | 19.0/18.8 | 1.10 | 13.1/13.6 | 13.0/13.3 | 0.98 |
+  | `TerminalInputStream.feed(_:)` | 8.6/8.7 | 9.1/9.3 | 1.06 | 13.1/13.3 | 13.0/13.3 | 0.99 |
+  | `EscapeAbsorber.consume(_:)` | 3.1/3.2 | 3.3/3.5 | 1.09 | 6.9/6.8 | 6.7/6.9 | 0.99 |
+  | `Terminal.printNarrow(_:breakClass:)` | 13.3/13.4 | 14.2/14.8 | 1.09 | 4.1/4.1 | 4.1/4.1 | 1.00 |
+  | `GraphemeBreakState.shouldBreak(between:and:)` | 3.1/3.1 | 3.5/3.2 | 1.07 | -- | -- | -- |
+  | `Terminal.moveAndFillCells(in:row:by:)` | -- | -- | -- | 28.7/29.0 | 29.6/29.5 | 1.02 |
+  | `Terminal.moveAndFillRows(...)` | -- | -- | -- | 11.2/10.8 | 11.4/11.1 | 1.02 |
+
+  styled before, run 1, pruned to nodes at or above 130 samples (root 15145) --
+  only the `recordDamage` subtree, which is where the change lands:
+
+  ```
+  15145  measureFeedBatch(chunks:executionCount:makeTerminal:now:)
+    4490  Terminal.feed(_:)
+      1369  Terminal.recordDamage(since:)
+        1331  _platform_memmove
+       723  Terminal.recordDamage(since:)
+         217  Terminal.damageActionSnapshot.getter
+         132  Terminal.damageActionSnapshot.getter
+       412  Terminal.recordDamage(since:)
+         245  outlined init with copy of Terminal.DamageActionSnapshot
+           245  initializeWithCopy for Terminal.DamageActionSnapshot
+       404  Terminal.recordDamage(since:)
+         240  outlined destroy of Terminal.InteractionLinkState?
+           156  destroy for ClosedRange<>.Index
+       324  Terminal.recordDamage(since:)
+       229  Terminal.recordDamage(since:)
+         229  ___chkstk_darwin
+       132  Terminal.recordDamage(since:)
+  ```
+
+  styled after, run 1, same pruning (root 15145 -- the two runs happened to take
+  the same number of root samples):
+
+  ```
+  15145  measureFeedBatch(chunks:executionCount:makeTerminal:now:)
+    2839  Terminal.feed(_:)
+       457  Terminal.recordDamage(from:to:)
+         257  outlined destroy of (Terminal.InactivePrimaryScreen?, Terminal.InactivePrimaryScreen?)
+           172  destroy for ClosedRange<>.Index
+       455  Terminal.recordDamage(from:to:)
+         263  outlined init with copy of Terminal.DamageActionSnapshot
+           263  initializeWithCopy for Terminal.DamageActionSnapshot
+         158  initializeWithCopy for Terminal.DamageActionSnapshot
+       417  Terminal.recordDamage(from:to:)
+         256  outlined init with copy of Terminal.DamageActionSnapshot
+           256  initializeWithCopy for Terminal.DamageActionSnapshot
+       351  Terminal.recordDamage(from:to:)
+       262  Terminal.recordDamage(from:to:)
+         262  ___chkstk_darwin
+       206  Terminal.recordDamage(from:to:)
+       142  Terminal.recordDamage(from:to:)
+  ```
+
+  The 1331-sample `_platform_memmove` -- 8.8% of root, the single largest leaf
+  under `recordDamage` -- is gone from the after tree entirely, and the whole
+  subtree falls from 4490 to 2839 samples.
+
+- Verification that nothing absorbed the work: net removal on styled is about 8
+  points (getter -5.1, memmove -6.5, against about +2.3 for the new snapshot copy
+  and +2.9 for the new paired destroy), predicting a uniform rescale of about
+  **1.087**. Unrelated nodes land at 1.06-1.10 -- `eraseCells` 1.06,
+  `TerminalInputStream.feed` 1.06, `GraphemeBreakState` 1.07, `eraseLine` 1.08,
+  `EscapeAbsorber.consume` 1.09, `printNarrow` 1.09, `clearCellAndPair` 1.10 --
+  so nothing grew in absolute terms. On incremental the net removal is about 3.5
+  points, predicting **1.036**, and every unrelated node sits at 0.97-1.04, again
+  consistent.
+- The nodes that went up, stated plainly: `outlined init with copy of
+  Terminal.DamageActionSnapshot` roughly doubles, from 2.4% to 4.7%, and a new
+  `outlined destroy of (InactivePrimaryScreen?, InactivePrimaryScreen?)` appears
+  at 2.85% where a single-value `InteractionLinkState?` destroy at 2.7%
+  disappeared. Both are the trade being made on purpose: carrying a snapshot
+  replaces a second *construction* with a *copy*, and diffing two live snapshots
+  destroys them as a pair. The construction was more expensive than the copy,
+  which is the entire win. This was checked rather than assumed -- an alternative
+  form that returned the snapshot from `recordDamage(since:)` instead of using a
+  loop-local `let` was profiled separately and is identical to within noise
+  (getter 0.57 vs 0.56, memmove 0.63 vs 0.64), so the copy is inherent to
+  carrying and not an artifact of the calling convention. The clearer form was
+  kept.
+- Correctness: `just test` exit 0 -- 619 core tests in 84 suites, the one
+  pre-existing `GhosttyInspectionRecoveryReplayTests` known issue, plus 1111
+  protocol, 115 support, 30 shell-contract. No test was added; see the next two
+  notes for why, which is the part of this finding worth reading.
+- Correctness argument: the carried value is bit-for-bit what a fresh capture
+  would produce. `damageActionSnapshot` reads `viewportState`, `evictedRowCount`,
+  `scrollbackRows`, `rows`, `rowCount`, `inactivePrimaryScreen`, `cursor`,
+  `isPendingWrap`, `selection`, `search`, `hoveredLinkState`, and `presentation`.
+  Everything `recordDamage` executes after taking `after` writes only `damage` and
+  `pendingConsumerWork`. Nothing runs between one action's diff and the next
+  action's capture -- `inputStream.feed` returns an eager `[TerminalStreamAction]`,
+  so the parser is not interleaved with the loop. The doc comment on
+  `recordDamage(from:to:)` states this as an obligation for future edits.
+- **The monotone-union note, which is the most reusable thing here.** Mutation
+  testing this change is unexpectedly uninformative, and understanding why bounds
+  what H1(a) may do. Pinning `before` to the feed-entry snapshot -- never
+  refreshing the carry at all -- passes **all 619 tests**, including the
+  `TerminalFixtureTests` replay under every feed split. That is not a coverage
+  hole so much as a property of the diff: damage is accumulated as a union, and
+  over one feed call the correct union is `{s0} u {s1..sn}` (each action damages
+  its own before and after cursor rows), while a stale `before` yields
+  `{s0} u {s1..sn}` as well -- every row a skipped comparison would have
+  contributed was already contributed as some earlier action's `after`. The
+  divergent branches (`topRow` changed, `isFollowing` false) escalate to *full*
+  damage, so staleness there over-damages rather than under-damages. A stale
+  `before` is therefore a superset, and this file's failure mode of concern is a
+  *missing* repaint. A test asserting otherwise would be pinning structure, not
+  behavior, so none was written.
+- Paired verdict, `benchmark-confirm` against `e379f25`, two full runs, both on
+  AC power:
+
+  | Workload | run 1 | run 2 |
+  | --- | --- | --- |
+  | `terminal-feed` | **faster** (-4.06%) | **faster** (-4.62%) |
+  | `scrollback-stream` | **faster** (-6.27%) | **faster** (-5.93%) |
+  | `content-churn` | inconclusive (+1.96%) | equivalent (-0.01%) |
+  | `style-churn` | equivalent (-0.37%) | inconclusive (+1.90%) |
+  | `incremental-mixed` | faster (-2.24%) | equivalent (-0.58%) |
+
+  The claim rests on the two that reproduce: `terminal-feed` at about -4.3% and
+  `scrollback-stream` at about -6.1%. Nothing returned `slower` in either run.
+  This is the second app-level directional win in this file, on the same two
+  workloads F7 moved -- which is the expected signature for a feed-path change,
+  since those are the two workloads that drive the pty-host queue hardest.
+- Inference: **H6 confirmed, and it closes the question F4 left open.** F4 found a
+  1.1-1.4k-sample `_platform_memmove` under `recordDamage` that survived making
+  the snapshot POD, and concluded it "points at the 932-byte `Terminal` (H3), not
+  at the ~100-byte snapshot." That conclusion was wrong, and F8 is the correction:
+  halving the number of snapshot constructions removes that memmove. It was the
+  snapshot after all -- just its construction rather than its layout, which is why
+  making it POD did not touch it and halving its count does.
+- Consequence for H3: H3's evidence is correspondingly weaker. The aggregate
+  `_platform_memmove` on styled is now 11.0/11.9% rather than 18%, and its largest
+  single attributed contributor has been explained as snapshot construction rather
+  than as partial copies of a large struct.
+- Competing interpretations: the profiles use a fixed 20-second window, so a
+  change that made feed *slower* per byte while shifting attribution could produce
+  a similar table. Ruled out by the app-level verdict below, which points the same
+  way on an independent instrument.
+- Uncertainty: low headless -- two shapes, two runs each, tight rescale agreement,
+  and a mechanism that explains both the win and the two nodes that rose.
+- Next action: D4.
+
 ## Decision log
+
+### D4 -- H6 shipped; feed carries one snapshot per action
+
+- Date: 2026-07-28.
+- Decision: commit the carried snapshot (F8). Behavior-identical by construction,
+  about 8 points of the feed path on the redraw shape, and a reproducing
+  app-level `faster` verdict on `terminal-feed` and `scrollback-stream`.
+- Design decision inside it: split `recordDamage(from:to:)` out rather than have
+  `recordDamage(since:)` return its `after`. The two forms profile identically,
+  so this was chosen for legibility -- the eleven public-API call sites keep the
+  one-argument form they had, and the two-argument form carries the doc comment
+  stating the invariant that makes carrying sound.
+- Consequence for the correctness rule: the invariant is now a standing
+  obligation. Any statement added to `recordDamage(from:to:)` that mutates
+  snapshot-visible state silently invalidates the carried value, and F8's
+  monotone-union note shows the existing suite would not catch it. The doc
+  comment on the function is the enforcement; there is no test that can be.
+- Consequence for the ordering: F8 corrects F4's inference that the surviving
+  `_platform_memmove` under `recordDamage` belonged to the 932-byte `Terminal`.
+  It did not, and H3 loses the evidence F4 lent it. It also raises the
+  `DamageActionSnapshot` copy node threefold, which reopens H1(b) -- rejected in
+  D1 on measurements that F8 has changed.
 
 ### D3 -- H5 shipped; the shift primitives move in place
 
@@ -1158,6 +1415,13 @@ Implemented, measured on both instruments, reverted. See F4. Behavior-neutral
 (`just test` clean) and no measurable win: the targeted node did not shrink and
 the paired benchmark returned `equivalent`.
 
+**Reopened 2026-07-28 by F8.** The rejection was correct on its evidence, and the
+evidence has since changed: F8 replaced a second snapshot *construction* per
+action with a *copy*, taking `outlined init with copy of
+Terminal.DamageActionSnapshot` from 1.4% of root to 4.7%. That is the node H1(b)
+removes, now three times larger. It sits in the candidate list as entry 4 rather
+than here.
+
 ## Open questions and caveats
 
 - ~~**`incremental-screen-updates` has one profile.**~~ -- discharged by F6, which
@@ -1175,8 +1439,15 @@ the paired benchmark returned `equivalent`.
   optional reads in `invalidateInspection`'s guard and collapsed with it.
 - **F1's table describes a profile that no longer exists.** F5 removed about 18
   points of the feed path, so every share in F1 has been rescaled by roughly
-  1.24x. F1 stays as the record of the starting state; **F6 is the current
-  baseline** and is what any new candidate must be sized against.
+  1.24x. F1 stays as the record of the starting state; **F8's after-columns are
+  the current baseline** and are what any new candidate must be sized against.
+  F6 was that baseline until F7 and F8 landed on top of it.
+- **A finding's attribution can be wrong even when its measurement is right.**
+  F4's numbers were sound and its inference -- that the memmove surviving under
+  `recordDamage` belonged to the 932-byte `Terminal` -- was not; F8 showed it was
+  snapshot construction. The tell in hindsight is that F4 tested a *layout*
+  change and concluded something about a *count*. When a node survives an
+  experiment, the experiment has only excluded what it actually varied.
 - **`styled-screen-redraw` is a proxy for btop, not a recording of it.** It
   matches the shape (cursor-home full-frame redraw, dense truecolor SGR, `EL` per
   row) but its cell content and frame cadence are synthetic. If a candidate's

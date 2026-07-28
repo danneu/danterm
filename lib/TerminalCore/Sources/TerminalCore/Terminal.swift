@@ -572,6 +572,12 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
+    /// Diffs the state now against a snapshot taken before one action. See
+    /// `recordDamage(from:to:)`, which does the work.
+    private mutating func recordDamage(since before: DamageActionSnapshot) {
+        recordDamage(from: before, to: damageActionSnapshot)
+    }
+
     /// Records only the render deltas implied by a cursor/selection/search/hover snapshot diff.
     ///
     /// Every statement here is presentation-only, so none advances the history generation:
@@ -582,8 +588,18 @@ public struct Terminal: Equatable, Sendable {
     /// `contentFunnelsAdvanceGenerationWhileScrolledBack`.
     /// Bumping here as well would make "generation advanced" unreadable as "history changed",
     /// since a bare cursor move or selection drag would trip it.
-    private mutating func recordDamage(since before: DamageActionSnapshot) {
-        let after = damageActionSnapshot
+    ///
+    /// Taking `after` as a parameter rather than reading it is what lets `feed` carry each
+    /// action's "after" forward as the next action's "before". That is sound because nothing
+    /// runs between the two points and every statement below writes only `damage` and
+    /// `pendingConsumerWork`, neither of which `damageActionSnapshot` reads -- so the carried
+    /// value is bit-for-bit what a fresh capture would produce. Anything added here that mutates
+    /// snapshot-visible state breaks that, and no test would catch it (see F8 in
+    /// `docs/research/10-terminal-feed-hotspots.md`); it belongs at the call site instead.
+    private mutating func recordDamage(
+        from before: DamageActionSnapshot,
+        to after: DamageActionSnapshot
+    ) {
         if before.isFollowing == false {
             recordPresentationFullDamage()
             return
@@ -712,8 +728,14 @@ public struct Terminal: Equatable, Sendable {
 
     /// Reduces a byte chunk synchronously while retaining unfinished stream state.
     public mutating func feed(_ bytes: [UInt8]) {
-        for action in inputStream.feed(bytes) {
-            let before = damageActionSnapshot
+        let actions = inputStream.feed(bytes)
+        guard actions.isEmpty == false else { return }
+        // One snapshot per action, not two. Action N's "after" is bit-for-bit what action N+1
+        // would capture as its "before" -- nothing runs between them, and `recordDamage` writes
+        // only damage bookkeeping, which the snapshot does not read -- so carrying it forward is
+        // the same diff sequence at half the construction cost.
+        var before = damageActionSnapshot
+        for action in actions {
             switch action {
             case let .print(scalar):
                 print(scalar)
@@ -732,7 +754,9 @@ public struct Terminal: Equatable, Sendable {
             case let .osc(payload):
                 dispatchOSC(payload)
             }
-            recordDamage(since: before)
+            let after = damageActionSnapshot
+            recordDamage(from: before, to: after)
+            before = after
         }
     }
 
