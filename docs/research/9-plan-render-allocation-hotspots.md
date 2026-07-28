@@ -277,6 +277,29 @@ re-post rule is now the only gate between the change and F4's verdict.
             `terminal-headless-draw-compare.py --workload text-shaped
             --both-directions`, not `benchmark-draw`, whose cross-process drift
             is larger than the effect.
+- [ ] **A sprite geometry cache -- new 2026-07-28, handed over by `11/F6`.**
+      The sprite-side analogue of H3's glyph cache, and on current numbers the
+      larger of the two. `11/F6` decomposed draw cost into per-run and per-cell
+      coefficients and put sprite cells at **626 ns/cell** against text's 197 --
+      3.2x, and the dominant term for sprite-heavy content at any realistic run
+      length. The suspect is per-cell recomputation:
+      `BoxDrawingSprite.append` calls `BoxDrawingSpriteGeometry.geometry(...)`
+      once per cell per draw, and it returns a struct holding two freshly
+      allocated Swift arrays (`rects`, `strokes`). Its inputs -- the pattern and
+      `cellWidthPixels` / `cellHeightPixels` / `lightStrokePixels` -- are
+      constant across a draw and across every draw at a fixed geometry, so the
+      whole result is cacheable on `TerminalRenderMetrics` exactly as the four
+      `CTFont` faces now are. Braille and block elements should be checked for
+      the same shape.
+      **Do not repeat F5's mistake when verifying:** measure with
+      `terminal-headless-draw-compare.py --workload btop-shaped
+      --both-directions`, and hold run length fixed, since `11/F6` showed run
+      count moves a sprite draw nearly 2x on its own. Expect this to underperform
+      any `sample` share, per this file's own discount.
+      **Note the prior:** the one antialiasing hypothesis `11/F5` raised about
+      this same 626 ns/cell was tested in `11/F6` and measured +0.13% -- so the
+      cost is not in rasterization, which is what makes the per-cell allocation
+      the live suspect.
 - [x] Unreserved array growth in `drawTextRuns` (F3, 14% of draw). **Done
       2026-07-28 as doc 13's R4; result in F9 of
       [13-live-app-compositing-and-draw-hotspots.md](13-live-app-compositing-and-draw-hotspots.md).**
@@ -970,6 +993,12 @@ unscheduled in Phase 5; H3 is **half harvested** -- per-draw font construction
 landed 2026-07-28 (`5d32054`, `11/F4`), and the glyph cache remains -- no longer
 blocked, since doc 11 built the glyph-bearing fixture `13/F5` called for
 (`11/F5`).
+
+Phase 5 gained a second entry the same day. `11/F6` separated draw cost into
+per-run and per-cell terms and found sprite cells at 3.2x text cells, with the
+cost surviving a test that ruled out rasterization -- pointing at per-cell sprite
+geometry recomputation, a caching problem of exactly the same shape as H3's two.
+On current numbers it is the larger of the two remaining caches.
 
 The investigation's shape changed once mid-flight and it is worth recording why.
 D1 selected a two-step sequence -- a cheap planner-local experiment, then the

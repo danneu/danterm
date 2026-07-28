@@ -68,10 +68,17 @@ feed:
 
 Two rules specific to this file:
 
-- **Never quote a draw cost without its geometry, its scenario, and its
-  workload.** Full-frame and damage-clipped differ by more than an order of
-  magnitude (F1), sprite and text content differ by 3.5x per cell (F5), and cost
-  is linear in cell count, so a number without all three is unreadable.
+- **Never quote a draw cost without its geometry, its scenario, its workload,
+  and its run length.** Full-frame and damage-clipped differ by more than an
+  order of magnitude (F1), sprite and text cells differ by 3.2x (F6), cost is
+  linear in cell count, and cost is *also* linear in run count with a per-run
+  coefficient larger than the per-cell one (F6) -- so the same content at the
+  same geometry spans nearly 2x depending on how its styles fold. A number
+  without all four is unreadable.
+- **Two workloads that differ in more than one way cannot attribute the
+  difference to either.** F5 read a 6.4x run-count difference as a property of
+  sprite content and published a 3.5x that was really two effects (F6). Before
+  quoting a ratio between fixtures, list every axis on which they differ.
 - **A profile share is an upper bound on what removing the work recovers, not an
   estimate of it.** Earned here: removing per-draw font construction *entirely*
   recovered about a third of its measured share (F2, re-derived correctly in
@@ -262,6 +269,17 @@ and ~4.0 ms extrapolated to 179x66 -- under a quarter of the budget. So H1 as
 written is true only of screens that are wall-to-wall box, block, and braille
 art. A btop or a `vim` status line is closer to that than a build log is, but no
 real screen is entirely either, and nothing here has yet measured a mixture.
+
+**F6 narrows it a second time, along a different axis, and this one is larger.**
+Every figure above was measured at one cell per run, because the fixture changes
+style every cell by design. A run costs more than a cell on both executor paths
+(597 ns/run + 626 ns/cell for sprites; 771 + 197 for text), so run length moves
+a full-frame draw nearly 2x on its own: the same all-sprite 179x66 frame is
+~14.4 ms at one cell per run and **~8.3 ms at eight**. Real content folds into
+runs longer than one cell -- how much longer is unmeasured, and is now the
+largest single unknown behind this hypothesis. H1 may well be an artifact of the
+fixture's style churn rather than a property of the draw path. It cannot be
+decided until someone measures the run-length distribution of real output.
 
 Competing explanation: real full-frame redraws may be rarer than the btop-shaped
 fixture implies, in which case the damage-clipped figure (1.36 ms at 160x50,
@@ -840,6 +858,109 @@ repeat exactly the error those corrections caught.
 - Next action: the glyph cache half of `9/H3` can now be measured, on
   `text-shaped` and with `terminal-headless-draw-compare.py`. The antialiasing
   question is a new candidate and belongs to doc 9.
+- **Superseded in part by F6.** The antialiasing caveat was tested and is dead.
+  The "3.5x per cell" headline is confounded: the two workloads differ in run
+  count as well as in content path, and F6 separates them. The per-cell ratio
+  survives at 3.2x; the claim that a sprite *draw* costs 3.5x a text draw does
+  not.
+
+### F6 -- the 3.5x was two effects: sprite cells really do cost 3.2x, but most of the fixture's draw cost is per-run, not per-cell
+
+- Status: recorded. Supersedes F5's antialiasing caveat (disproved) and F5's
+  attribution of the 3.5x (confounded).
+- Date and investigator: 2026-07-28, Claude (agent).
+- Why it was run: F5 compared `btop-shaped` at 8000 runs against `text-shaped`
+  at 1248 runs and reported the difference as a per-cell property of the
+  content. Those two workloads differ in run count *and* in executor path at the
+  same time, so that number cannot say which difference it measured. This is the
+  file's own rule -- a finding's attribution can be wrong even when its
+  measurement is right -- applied to a finding written the same day.
+
+**Part 1: the antialiasing caveat is dead.**
+
+- Change measured: sprite rect fills are emitted as whole physical pixels
+  divided by the display scale (`BoxDrawingSprite.append`, `BrailleSprite`,
+  `BlockElementSprite` all build `CGFloat(integerPixels) / scale`), so every
+  edge is already on the device pixel grid and antialiasing them can only
+  produce coverage 0 or 1. Disabling it around the rect fills is therefore
+  output-identical. Done, and measured.
+- Command: `terminal-headless-draw-compare.py --columns 160 --rows 50
+  --clip-rows 0 --workload btop-shaped --rounds 8 --both-directions`, baseline
+  arm a worktree at `5e20133`.
+- Result: **realEffectPercent +0.13%, orderBias +0.47%.** No effect. The change
+  was reverted rather than kept.
+- What this means: `aa_render_shape` appearing in the sample is not driven by
+  the antialiasing flag, so the sample share was not pointing at a fixable
+  alignment bug. This is the third time in this file's lineage that a `sample`
+  attribution did not survive an experiment (`10/F8`, F2/F4, now this).
+
+**Part 2: run length and content path, varied independently.**
+
+- Method: a scratch harness holding the grid at 160x50 and the cell count at
+  8000, changing the style every `stride` cells so `planFrame` folds runs to
+  exactly that length, and running it against two glyph sets -- one entirely
+  claimed by sprite families, one printable ASCII. Content and run count now
+  move separately. Two full runs; every row below reproduced within ~1%.
+
+  | Content | Stride | Runs | Cells | us/draw |
+  | --- | ---: | ---: | ---: | ---: |
+  | sprite | 1 | 8000 | 8000 | 9783.6 |
+  | sprite | 2 | 4000 | 8000 | 7568.8 |
+  | sprite | 4 | 2000 | 8000 | 6401.7 |
+  | sprite | 8 | 1000 | 8000 | 5912.4 |
+  | sprite | 16 | 500 | 8000 | 5478.1 |
+  | sprite | 32 | 250 | 8000 | 5157.6 |
+  | text | 1 | 8000 | 8000 | 7749.8 |
+  | text | 2 | 4000 | 8000 | 4823.3 |
+  | text | 4 | 2000 | 8000 | 3185.5 |
+  | text | 8 | 1000 | 8000 | 2425.8 |
+  | text | 16 | 500 | 8000 | 2022.1 |
+  | text | 32 | 250 | 8000 | 1772.3 |
+
+- Fitting `cost = perRun * runs + perCell * cells` to each content path's
+  endpoints (intermediate strides fall within ~4% of the line):
+
+  | Content | ns/run | ns/cell |
+  | --- | ---: | ---: |
+  | sprite | 597 | **626** |
+  | text | 771 | **197** |
+
+- Observation 1: **at equal run count, a sprite draw is only 1.26x a text
+  draw**, not 3.5x. F5's ratio was measured across a 6.4x difference in run
+  count.
+- Observation 2: **the per-cell gap is nonetheless real and large -- 3.2x**
+  (626 vs 197 ns). F5's conclusion that sprite cells are the expensive ones
+  survives; its magnitude for a whole draw did not.
+- Observation 3, the one that matters for H1: **a run costs more than a cell on
+  both paths, and the benchmark fixture has exactly one cell per run.** The
+  `btop-shaped` fixture changes color every cell *by design*, to defeat run
+  folding. Real TUI output does not. So every full-frame number this file has
+  quoted sits at the most pessimistic point on the run-length axis.
+- Observation 4: **text runs cost more per run than sprite runs** (771 vs 597
+  ns) -- the CoreText glyph mapping and draw call per run -- while sprite cells
+  cost more per cell. The two paths are expensive in different dimensions, which
+  is why a single ratio was never going to describe them.
+- **The frame-budget picture at 179x66 (11814 cells), restated.** At stride 1,
+  the fixture's run length: ~14.4 ms all-sprite, consistent with F5's 14.7 ms.
+  At stride 8, a plausible run length for real output: **~8.3 ms all-sprite,
+  ~3.5 ms all-text**, against a 16.7 ms interval. The all-sprite worst case no
+  longer nearly consumes the budget; it uses half.
+- **What this does not settle.** Still nothing about H2 versus H3. Stride 8 is a
+  guess at real run length, not a measurement -- nobody has measured the run
+  length distribution of actual `btop`/`vim`/build output, and that is now the
+  single highest-value unknown in this file, because the draw cost depends on it
+  more strongly than on anything else measured here.
+- Uncertainty: low on the table (two runs, ~1%). Low on the per-run/per-cell
+  split (12 points, two independent content paths, residuals under 4%). **High
+  on any figure quoting a specific real-world stride**, which is unmeasured.
+- Next action: measure the run-length distribution of real terminal content --
+  it reprices every full-frame number in this file. Separately, `626 ns/cell`
+  for filling a few pixel-aligned rects is itself suspicious: `BoxDrawingSprite`
+  calls `BoxDrawingSpriteGeometry.geometry(...)` once per cell per draw, and it
+  returns two freshly allocated Swift arrays whose inputs (`pattern`,
+  `cellWidthPixels`, `cellHeightPixels`, `lightStrokePixels`) are all constant
+  across a draw. That is the sprite-side analogue of `9/H3`'s glyph cache and
+  belongs to doc 9.
 
 ## Open questions and caveats
 
@@ -866,9 +987,16 @@ repeat exactly the error those corrections caught.
   than the sentence "a full-frame CPU draw costs 15.6 ms" suggests -- and F5
   shows the direction of the narrowing is *favorable*, since text is 3.5x
   cheaper per cell than the fixture that was standing in for it.
-- **Sprite drawing may be paying for antialiasing it does not need** (F5's last
-  caveat). Unattributed and untested; it belongs to doc 9, but if it is real
-  then part of the 3.5x gap is a bug rather than a cost.
+- ~~**Sprite drawing may be paying for antialiasing it does not need**~~
+  (F5's last caveat). **Tested and disproved in F6:** disabling antialiasing on
+  the sprite rect fills measured +0.13% with 0.47% order bias. The `sample`
+  share that suggested it was not pointing at a real cost.
+- **Every full-frame number in this file sits at the worst point on the
+  run-length axis** (F6). The `btop-shaped` fixture changes style every cell by
+  design, and a run costs more than a cell on both executor paths. Real content
+  folds into longer runs, and nobody has measured how much longer. Until someone
+  does, treat 15.6 ms / 23 ms / 14.7 ms as upper bounds set by a fixture
+  property, not as content costs.
 - **No number in this file describes mixed content.** Both workloads are
   deliberately pure -- all sprites or all text -- because that is what isolates
   the two executor paths. Real screens are mixtures, so the true figure lies
