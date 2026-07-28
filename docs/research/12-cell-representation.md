@@ -1,9 +1,12 @@
 # Cell representation
 
-Research started: 2026-07-28. **Status: H5 settled and shipped in both legs --
-erase (F5, F6) and cell triviality (F4, F7), together worth -7.05% and -9.43% on
-`terminal-feed`. The memory question -- H1, H2, H4, and what remains of H3 -- is
-evidenced but unproposed.**
+Research started: 2026-07-28. **Status: H5's erase leg settled and shipped (F5,
+F6), worth -7.05% on `terminal-feed`. Its move/copy leg was implemented as a POD
+cell, measured, and then reverted: the feed win held at -8.83% but
+`scrollback-stream` decided slower at +6.74% (F8). Cell triviality is therefore
+demonstrated-and-rejected, not open -- reopening it needs a materially different
+cost model, not another attempt. The memory question -- H1, H2, H4, and what
+remains of H3 -- is evidenced but unproposed.**
 
 ## Purpose
 
@@ -305,20 +308,27 @@ not a hypothesis, because nothing has measured the per-row allocation yet.
   and F4 rather than by deliberation: H1 is a memory and scrollback-depth change
   with no CPU payoff, and the CPU lives entirely in cell triviality -- which is
   separable from H3's packing and was taken first. The ordering in "Candidate
-  direction" is therefore superseded for the CPU half and still stands for the
-  memory half.
+  direction" still stands for the memory half. For the CPU half the answer has
+  since been overtaken by F8: triviality was taken first, measured across all
+  five workloads, and reverted, so there is no CPU half left to order.
 
 ### Phase 3 -- implement and verify, one change at a time
 
-- [x] Cell triviality: multi-scalar clusters moved into row-owned storage, making
-  `GridCell` POD without packing it. Not one of H1-H4 as originally written --
-  it is the separable half of H3 that F4 identified. Result: F7.
+- [ ] ~~Cell triviality: multi-scalar clusters moved into row-owned storage,
+  making `GridCell` POD without packing it.~~ **Attempted and reverted.** Not one
+  of H1-H4 as originally written -- it is the separable half of H3 that F4
+  identified. Results: F7 (the `quick` win) and F8 (the `confirm` regression and
+  the revert). Do not retry as specified; F8 records what would have to change
+  first.
 - [ ] H1: style dedup behind a 16-bit ID.
 - [ ] H2: narrow `hyperlinkId`, and decide `contentIdentity` separately (F3).
 - [ ] H4: row skip flags.
 - [ ] H3: pack the remaining cell into a word, now that it is already POD.
-- [x] Settle H5. Erase leg closed by F5/F6 (not representation at all); move/copy
-  leg confirmed by F4 and realized by F7.
+- [x] Settle H5. Erase leg closed by F5/F6 (not representation at all). Move/copy
+  leg settled the other way: F4 confirmed the cost is real, F7 confirmed removing
+  it speeds up feed, and F8 showed that paying for the removal costs more on
+  `scrollback-stream` than it buys. H5's move/copy remedy is closed as rejected,
+  which is a stronger outcome than leaving it open.
 
 ## Findings log
 
@@ -664,10 +674,15 @@ not a hypothesis, because nothing has measured the per-row allocation yet.
   layout. What remains of H5 is the move/copy leg, which F4 already confirmed
   belongs to cell triviality.
 
-### F7 -- the POD cell shipped and is worth -9.43% on `terminal-feed`
+### F7 -- the POD cell is worth -9.43% on `terminal-feed` at `quick`
 
-- Status: recorded. Paired comparison at `quick` thresholds. Implemented and
-  committed.
+> **Superseded in part by F8.** The measurement below stands and reproduced. Its
+> inferences do not: the change was reverted in `94a1528` after `confirm`
+> decided `scrollback-stream` slower. Read this finding as "what one workload
+> said", and F8 as what the workload set said.
+
+- Status: recorded, and its conclusions withdrawn by F8. Paired comparison at
+  `quick` thresholds. Implemented in `31c2f8e`, reverted in `94a1528`.
 - Date and investigator: 2026-07-28, Dan (implementation), Claude (this record).
 - Baseline revision: `2a39e5b`, compared against the working tree that became
   `31c2f8e`. The run's `run.json` confirms the baseline resolved to the
@@ -683,24 +698,91 @@ not a hypothesis, because nothing has measured the per-row allocation yet.
   implementing it, and F4 measured `incremental-screen-updates` alone while this
   verdict is the combined four-corpus stream, which includes `scrollback-stream`
   (F4: -9.7%) and `unicode-wrapping` (where clusters are real work). The ceiling
-  behaved as a ceiling.
+  behaved as a ceiling. **F8 corrects this**: `scrollback-stream` was not a
+  smaller win inside the blend, it was a decided regression, so the shortfall was
+  never a matter of approaching a ceiling from below.
 - Verification beyond the gate, from the implementation: each of the three
   cross-row-owner paths was mutated to copy the bare cell reference and confirmed
   to fail its test -- reflow and alternate-screen resize trap on the stale range,
   and the last-column wrap gives a scalar-exact mismatch. Disabling compaction
   took the I4 row from 64 stored scalars to 2,500, so PO4 is load-bearing rather
   than decorative.
-- Inference: **H5 is now fully settled.** Its move/copy leg was the cell's
-  non-triviality, predicted by F4 and realized here; its erase leg was never
-  representation at all (F5, F6). Separately, this confirms F4's inference 3 in
-  production code: the CPU win needed only POD, not libghostty's 8-byte packing,
-  offsets, or page allocator. What H3 has left is purely the memory question.
-- Uncertainty: `quick`, not `confirm`, so the direction is licensed at `quick`'s
-  threshold and nothing tighter. Memory was not measured; the cell may have grown
-  slightly (plan AR1), and no claim is made about scrollback depth.
-- Open follow-up: a fully erased row keeps its cluster storage until the next
-  intern compacts it. Bounded by the compaction threshold, so I4 holds, but a
-  range covering the whole row could release it outright.
+- Inference, **withdrawn by F8**: this was read as settling H5's move/copy leg and
+  as confirming F4's inference 3 in production code. The second half survives --
+  the feed win did come from triviality alone, with no packing, offsets, or page
+  allocator. The first half does not: settling a hypothesis requires the whole
+  workload set, and this finding had one workload.
+- Uncertainty, which turned out to be the whole story: `quick`, not `confirm`, so
+  the direction was licensed at `quick`'s threshold and nothing tighter. Memory
+  was not measured; the cell may have grown slightly (plan AR1), and no claim was
+  made about scrollback depth. F8 ran `confirm` and the missing workloads is
+  exactly where the change died.
+
+### F8 -- `confirm` decides `scrollback-stream` slower, and the POD cell is reverted
+
+- Status: recorded and acted on. Paired comparison at `confirm` thresholds.
+- Date and investigator: 2026-07-28, Dan (decision), Claude (runs and this
+  record).
+- Baseline revision: `2a39e5b`, candidate `31c2f8e` -- the same two trees F7
+  compared, so F7 and F8 differ only in which workloads were measured.
+- Verdict, all five workloads:
+
+  | Workload | Symmetric median | Decision |
+  | --- | --- | --- |
+  | `terminal-feed` | -8.83% (2 pairs) | faster |
+  | `scrollback-stream` | +6.74% (4 pairs) | **slower** |
+  | `content-churn` | +1.43% (4 pairs) | inconclusive |
+  | `style-churn` | +0.96% (4 pairs) | inconclusive |
+  | `incremental-mixed` | +1.09% (6 pairs) | inconclusive |
+
+- The feed win reproduced: -8.83% here against F7's -9.43%, two independent runs
+  of the same pair of trees.
+- **`scrollback-stream` came back with the opposite sign to F4's prediction.** F4
+  projected -9.7% there. The measured result is +6.74%, decided, with zero
+  flagged outlier pairs. This is the finding that matters, because it falsifies
+  the specific prediction the change was built on rather than merely failing to
+  reach it.
+- Why the spike and the implementation disagree: F4's spike deliberately
+  truncated clusters, so it deleted cluster storage rather than relocating it. It
+  measured the cell becoming trivial while paying none of the cost of putting the
+  scalars somewhere. Any real implementation pays that cost somewhere, and row
+  ownership put it on `GridRow`, which grew from 16 bytes with one refcounted
+  field to 32 bytes with two. `scrollback-stream` moves rows constantly --
+  scrolling, scrollback append, budget eviction.
+- Attribution, diagnostic only: `just benchmark-sample scrollback-stream
+  seconds=15` puts `moveAndFillRows` second among app frames (1,320 samples),
+  behind only `damageActionSnapshot.getter` plus its `initializeWithCopy`
+  (~2,060 combined), which is pre-existing and untouched by this change. `memcpy`
+  at 944 and `swift_retain`/`swift_release` at ~1,050 sit behind it. Consistent
+  with row-copy cost; not proof, since no baseline profile was taken.
+- Incidental: `outlined consume of TerminalScalars.Storage` is still in the
+  profile at 85 samples. F4 expected the outlined-copy symbols to disappear
+  entirely. They do not, because the render plan still carries the public
+  `TerminalScalars` -- which the change's own I5 required be left alone. Part of
+  F4's projected win was never reachable by any change that keeps the public type.
+- Decision: **reverted in `94a1528`**, not tuned. `GridRow` could have been shrunk
+  to a 24-byte floor by dropping a stored `Int`, but its best case still buys an
+  ambiguous aggregate -- one workload faster, three leaning mildly slower -- at
+  the price of a permanent invariant: a cell's scalars resolve only against its
+  owning row, so every future path that relocates a cell must re-intern or
+  silently corrupt clusters. The ownership story is intrinsic to a POD cell, not
+  to this design of one; the plan's RI1 and RI3 rejected the alternatives for the
+  same reclamation reason.
+- Inference: **a POD cell is demonstrated-and-rejected, not open.** Retrying it as
+  specified would reproduce F8. What would have to change first is the cost model,
+  not the implementation: either row-move traffic stops being hot on
+  `scrollback-stream` -- note that the workload's true top frame is damage
+  bookkeeping, which is unrelated and unoptimized -- or cluster scalars find an
+  owner that does not enlarge the row.
+- Methodological inference, the generalizable one: **a spike that removes a case
+  measures an upper bound on removing the case, not on implementing it.** F4's
+  -21.5% and -9.7% were read as a ceiling to approach. One of them was not a
+  ceiling in the same direction at all. A spike that elides work should carry an
+  explicit note of which costs it did not pay.
+- Open follow-up, now moot in the code but retained as a design note: a fully
+  erased row kept its cluster storage until the next intern compacted it. Bounded
+  by the compaction threshold, so I4 held, but a range covering the whole row
+  could have released it outright.
 
 ## Open questions and caveats
 

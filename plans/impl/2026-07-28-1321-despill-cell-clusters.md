@@ -172,3 +172,36 @@ cluster storage costs something the spike did not pay.
   leaves the backing scalars in place. The residue is bounded per row by the
   compaction threshold, so I4 holds, but a range covering the whole row could
   release the storage outright.
+
+## Outcome: implemented, measured, reverted
+
+Implemented in `31c2f8e` and reverted in `94a1528`. This file is retained as the
+record of the attempt, not as a description of the current code.
+
+The plan's Verification section named `benchmark-quick baseline=<pre-change>
+workload=terminal-feed` as the sole decider, and by that bar the change passed
+at -9.43%. A five-workload `benchmark-confirm` afterwards reproduced the feed
+win at -8.83% but decided `scrollback-stream` **slower at +6.74%**, against the
+-9.7% that 12/F4 predicted for it. The other three workloads were inconclusive
+and all leaned mildly slower. Full evidence is in
+[docs/research/12-cell-representation.md](../../docs/research/12-cell-representation.md)
+under F8.
+
+Two things this plan got wrong, worth carrying into the next one:
+
+- **The Verification section chose one workload.** It named `terminal-feed`
+  because that is where F4's ceiling was measured, and it reasoned explicitly
+  about why the result would fall short of that ceiling. It did not ask what the
+  change would do to the workloads F4 was not measuring. A change that alters a
+  type copied on the row path should have been decided on `confirm` from the
+  start; `quick` was the wrong instrument, not merely a loose one.
+- **AR1 accepted "the cell may grow slightly" without noticing the row.** The
+  accepted risk was framed entirely around `GridCell`, following F4's inference 3
+  that only triviality mattered. But the scalars had to go somewhere, and where
+  they went was `GridRow` -- 16 bytes with one refcounted field before, 32 with
+  two after. The cost moved to the type the plan was not watching.
+
+The design itself is sound and the tests are worth re-reading if this is ever
+retried: PO2's three cross-row-owner cases each caught a deliberate mutation.
+What would have to change first is the cost model, not the implementation -- see
+F8's closing inference.
