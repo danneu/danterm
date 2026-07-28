@@ -5,14 +5,19 @@ change proposed yet. Doc 13 closed on 2026-07-28 and handed over its evidence
 (see "Evidence handed over from doc 13"), which corrects this file's only sizing
 measurement and adds a whole cost this file had never measured.**
 
-**Three things a fresh reader should know before anything else.** Profile share
-overstated recoverable time by ~3x on the one node where that has been tested
-(F2, corrected and confirmed by F4), so the sums in the hypotheses below are
-soft. The backend A/B -- the instrument this file calls the only one that can
-settle the 2x claim -- does not currently run (F3). And **every draw cost quoted
-above F5 was measured on all-sprite content, which costs 3.5x per cell what text
-does** (F5); the file's headline "23 ms at 179x66" is the worst-case end of a
-range whose other end is ~4 ms.
+**Four things a fresh reader should know before anything else.** First, the
+headline: **a full-frame draw at real 179x66 geometry is now measured, not
+extrapolated, at 15.27 ms all-sprite and 4.06 ms all-text against a 16.7 ms
+interval** (F7). The long-quoted "23 ms" was never measured at any geometry and
+is retired; H1 is not supported as written. Second, profile share overstated
+recoverable time by ~3x on the one node where that has been tested (F2,
+corrected and confirmed by F4), so the sums in the hypotheses below are soft.
+Third, the backend A/B -- the instrument this file calls the only one that can
+settle the 2x claim -- does not currently run (F3). Fourth, **every draw cost
+quoted above F5 was measured on all-sprite content at one cell per run**, which
+is the worst case on two axes at once: sprite cells cost 3.2x text cells (F6),
+and per-run cost exceeds per-cell cost on both paths, so the fixture's
+deliberate per-cell style churn inflates every full-frame figure here (F6).
 
 **F2's table is arithmetically wrong and F4 supersedes it.** The error was a
 double division by the batch count in a summarizing script, not a fault in
@@ -252,16 +257,22 @@ only such an instrument could close.
 
 ### H1 -- the CPU draw path exceeds the 60Hz frame budget on a full-frame redraw at real geometry
 
-The btop-shaped workload at 160x50 costs **15.6 ms per full-frame draw** (F1;
-the generator was `makeBtopShapedPlan`, renamed `makeWorkloadPlan(for:workload:)`
-when the second workload landed). Cost
-is linear in cell count, and DanTerm's real geometry is 179x66 = 11,814 cells
-against 160x50's 8,000, so the same draw extrapolates to roughly **23 ms** --
-about **1.4x the 16.7 ms budget** at 60Hz, on the main thread.
+**As of F7 this hypothesis is measured at real geometry and is not supported as
+written.** An all-sprite full-frame draw at 179x66 costs **15.27 ms against the
+16.7 ms interval** -- under budget. All-text is **4.06 ms**. The former headline
+of 23 ms was a scaling of F1's 15.6 ms at 160x50, a figure F5 later measured at
+9.93 ms at that same grid; 23 ms was never measured anywhere and is retired.
 
-Supporting evidence: F1, and the fact that the extrapolation is a straight line
-rather than a guess -- 4.17x the cells produced 4.18x the time. F5 confirms the
-linearity a second way: per-cell cost is flat to within 1% across both grids.
+Two things keep this from being a clean refutation, pulling in opposite
+directions. The 15.27 ms is at one cell per run (F6), the most pessimistic point
+on the run-length axis, so the realistic figure is *lower* still. Against that,
+`13/F10` puts 31.3% of live main-thread busy time in a compositing wait that
+this instrument cannot see, so a draw that fits the budget does not imply a
+frame that does.
+
+Supporting evidence for the linearity the extrapolations rested on: F1's 4.17x
+the cells producing 4.18x the time, and F5 and F7 each confirming it a second
+way -- per-cell cost flat to within 1.1% across a 6.2x cell-count difference.
 
 **F5 narrows this hypothesis sharply and it should be restated.** The 15.6 ms and
 the 23 ms are *all-sprite* content. The same draw on text is ~2.7 ms at 160x50
@@ -445,8 +456,20 @@ repeat exactly the error those corrections caught.
   - Next concrete step: `sudo sample` the hung root-owned `login` pid, or
     decide to retire the arm. A human-paced `btop`/`sample` capture is the
     available substitute for the figure itself.
-- [ ] Confirm the real geometry figure rather than extrapolating: add 179x66 to
-  `DrawBenchmarkGrid.standard`, or record why the two standard grids suffice.
+- [x] **Confirm the real geometry figure rather than extrapolating.** Done
+  2026-07-28: 179x66 replaced the arbitrary 160x50 in
+  `DrawBenchmarkGrid.standard`; 80x24 stayed as the cross-grid linearity check.
+  Result in **F7** -- 15.27 ms all-sprite, 4.06 ms all-text, and the 23 ms
+  headline retired.
+- [ ] **Measure the run-length distribution of real terminal output.** New as of
+  F6 and now the largest single unknown behind H1: a run costs more than a cell
+  on both executor paths, and every full-frame figure in this file was measured
+  at one cell per run because the fixture churns style per cell by design. The
+  same all-sprite 179x66 frame spans ~15.3 ms at stride 1 and ~8.3 ms at stride
+  8. Nothing here pins where real content falls.
+- [ ] Reconcile F1's 15.6 ms with F5's 9.93 ms -- same grid, workload, and
+  scenario, ~1.6x apart, and not explained by the three optimizations that
+  landed between them (F7).
 - [ ] Establish how often a full-frame draw actually happens in
   `content-churn` and `style-churn`. H1's competing explanation turns on this
   and nothing currently measures it.
@@ -962,8 +985,63 @@ repeat exactly the error those corrections caught.
   across a draw. That is the sprite-side analogue of `9/H3`'s glyph cache and
   belongs to doc 9.
 
+### F7 -- real geometry measured at last: 15.3 ms all-sprite, 4.1 ms all-text, and the 23 ms headline is retired
+
+- Status: recorded. Closes the "everything about 179x66 is extrapolation"
+  caveat this file has carried since F1.
+- Date and investigator: 2026-07-28, Claude (agent).
+- Change measured: `benchmark-draw`'s grid list was 80x24 and an arbitrary
+  160x50. 179x66 -- DanTerm's real full-screen geometry, and the one doc 10's
+  feed benchmarks, doc 12's cell census, and all four of doc 13's live captures
+  already use -- replaced 160x50. 80x24 stayed as the linearity control.
+- Command: `just benchmark-draw 15`, medians of 15 iterations.
+
+  | Grid | Workload | Scenario | us/draw | Cells | Runs | ns/cell |
+  | --- | --- | --- | ---: | ---: | ---: | ---: |
+  | 80x24 | btop-shaped | full-frame | 2452.9 | 1920 | 1920 | 1278 |
+  | 80x24 | btop-shaped | damage-clipped | 506.7 | 320 | 320 | 1584 |
+  | 80x24 | text-shaped | full-frame | 727.3 | 1920 | 302 | 379 |
+  | 80x24 | text-shaped | damage-clipped | 134.5 | 320 | 52 | 420 |
+  | 179x66 | btop-shaped | full-frame | **15266.5** | 11814 | 11814 | 1292 |
+  | 179x66 | btop-shaped | damage-clipped | 980.6 | 716 | 716 | 1370 |
+  | 179x66 | text-shaped | full-frame | **4059.6** | 11814 | 1788 | 344 |
+  | 179x66 | text-shaped | damage-clipped | 280.6 | 716 | 108 | 392 |
+
+- Observation 1: **the linearity control worked.** ns/cell is flat across a 6.2x
+  cell-count difference -- 1278 vs 1292 for sprites (1.1%), 379 vs 344 for text.
+  That is the check the second grid exists to provide, and it passes, which is
+  what licenses reading the rest of the table at face value.
+- Observation 2: **the extrapolation was good and the headline was not.** F5
+  projected ~14.7 ms all-sprite at 179x66; the measurement is 15.27 ms, within
+  4%. But this file's standing headline of **23 ms** is retired -- it came from
+  scaling F1's 15.6 ms at 160x50, and F5 had already measured that same
+  configuration at 9.93 ms. The 23 ms was never measured at any geometry.
+- Observation 3, on H1: an all-sprite full-frame draw at real geometry is
+  **15.27 ms against a 16.7 ms interval** -- under budget, not 1.4x over it.
+  All-text is 4.06 ms, under a quarter. Damage-clipped at real geometry is
+  0.98 ms sprite and 0.28 ms text.
+- **What this does not settle.** These full-frame numbers are still at one cell
+  per run (F6), the worst point on the run-length axis, so 15.27 ms is an upper
+  bound and the realistic figure is lower. Working the other way, `13/F10` puts
+  31.3% of live main-thread busy time in a compositing wait that no instrument
+  here can see. H1 is now *unsupported as written* rather than confirmed, but
+  "the draw path fits the budget" is not established either, and H2 versus H3 is
+  still untouched.
+- Uncertainty: low on the table (flat ns/cell across two grids is the internal
+  check). None remaining on the geometry itself, which is now measured.
+- Next action: F1 should be re-run and restated, or marked superseded -- its
+  15.6 ms disagrees with F5's 9.93 ms at the same grid, workload, and scenario,
+  and that gap predates and is separate from the F2/F4 arithmetic error. Nobody
+  has reconciled it.
+
 ## Open questions and caveats
 
+- **F1's 15.6 ms and F5's 9.93 ms describe the same measurement and disagree**
+  (F7). Same grid, workload, and scenario, ~1.6x apart. Three optimizations
+  landed in between (`5d32054`, `07dd81f`, and doc 13's R4) but they do not add
+  up to the gap. Until someone reconciles it, F1's absolute numbers should not
+  be quoted; F5, F6, and F7 were all measured after the corrections and agree
+  with each other.
 - **Profile share overstates recoverable time on this draw path** (F2). One node
   measured at roughly 3x. Every unharvested estimate quoted from a `sample`
   share -- in this file, doc 9, or doc 13 -- should carry that discount as a
@@ -978,9 +1056,10 @@ repeat exactly the error those corrections caught.
   exists precisely because H3 is the expensive, exciting hypothesis and H2 is the
   boring one that would make H3 unnecessary. Doc 10 corrected two of its own
   attributions with experiments that cost minutes; the same discipline applies.
-- **`benchmark-draw`'s grids do not include real geometry.** Everything about
-  179x66 here is extrapolation from a verified straight line, which is defensible
-  but is not a measurement.
+- ~~**`benchmark-draw`'s grids do not include real geometry.**~~ **Resolved by
+  F7**: 179x66 replaced the arbitrary 160x50 in `DrawBenchmarkGrid.standard`, so
+  the headline figure is measured rather than projected. 80x24 stays as the
+  cross-grid linearity check.
 - **`benchmark-draw`'s fixture drew no glyphs until 2026-07-28** (`13/F5`,
   resolved by F5). Anything written before that date quoting 15.6 ms or 23 ms is
   quoting all-sprite content. It does not make F1 wrong; it makes F1 narrower

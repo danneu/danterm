@@ -25,10 +25,23 @@ public struct DrawBenchmarkGrid: Codable, Equatable, Sendable {
         self.rows = rows
     }
 
-    /// Corpus-parity and realistic full-screen geometries measured by every run.
+    /// The two geometries every run measures: a linearity control and the real one.
+    ///
+    /// 179x66 is DanTerm's actual full-screen geometry and the geometry the rest
+    /// of the research corpus already standardizes on -- doc 10's feed benchmarks,
+    /// doc 12's cell census, and all four of doc 13's live captures. This
+    /// benchmark used to sit on an arbitrary 160x50 and extrapolate, which left
+    /// every frame-budget number in `docs/research/11-render-frame-budget.md` a
+    /// projection rather than a measurement.
+    ///
+    /// 80x24 stays because two grids are worth more than one: per-cell cost is
+    /// linear in cell count, so a run whose two grids disagree on ns/cell is a run
+    /// with an arithmetic bug in it. That check is what `11/F4` needed and did not
+    /// have. It costs 1920 cells. Adding a third grid buys nothing the second does
+    /// not already buy.
     public static let standard = [
         DrawBenchmarkGrid(columns: 80, rows: 24),
-        DrawBenchmarkGrid(columns: 160, rows: 50),
+        DrawBenchmarkGrid(columns: 179, rows: 66),
     ]
 }
 
