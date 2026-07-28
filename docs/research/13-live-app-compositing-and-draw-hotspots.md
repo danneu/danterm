@@ -1,8 +1,9 @@
 # Live-app compositing and draw hotspots under interactive scroll
 
 Research started: 2026-07-28. **Status: Phase 1 closed (F5, F6). Phase 2 in
-progress: R2 implemented and benchmarked (F8, H2 closed); R1+R1b still open, R4
-gated behind R1, R3 gated behind Phase 2.**
+progress: R2 implemented and benchmarked (F8, H2 closed); R1+R1b implemented,
+benchmarked and re-captured live (F7, H1 closed); R4 now unblocked, R3 still
+gated behind Phase 2.**
 
 ## Purpose
 
@@ -368,20 +369,22 @@ test cases were run" -- a silent no-op that reads like a pass.
 
 | Instrument | Invocation | Headless? | Status here |
 | --- | --- | --- | --- |
-| `benchmark-draw` | `just benchmark-draw [iterations=15]` | yes -- `swift run -c release`, offscreen bitmap | **not run.** Doc 11 F1 reports ±2.5% over 15 iterations. Primary instrument for R1/R1b/R4. |
+| `benchmark-draw` | `just benchmark-draw [iterations=15]` | yes -- `swift run -c release`, offscreen bitmap | **run: F7.** Doc 11 F1 reports ±2.5% over 15 iterations; F7's four scenarios each moved 25-34%, far outside that. Primary instrument for R1/R1b/R4. |
 | `benchmark-headless-draw` | `just benchmark-headless-draw <rounds> [candidate-core-path]` | yes | not run. Interleaves two checkouts in one process; use for an A/B that avoids cross-run drift. |
-| `benchmark-quick` | `just benchmark-quick <baseline-rev> <workload>` | **unknown** | **not run.** Builds and runs the real app, so it plausibly needs a GUI session like `just test-ui` does. Nobody has checked. Budget for that before relying on it. |
-| `benchmark-confirm` | `just benchmark-confirm <baseline-rev>` | unknown, same as above | not run. Runs the full five-workload ladder. |
+| `benchmark-quick` | `just benchmark-quick <baseline-rev> <workload>` | **yes, in practice** | **run: F7** (`content-churn`), from an agent shell with no GUI interaction. The "plausibly needs a GUI session" caveat recorded here is answered: it does not. ~157 s per workload, most of it the baseline build. |
+| `benchmark-confirm` | `just benchmark-confirm <baseline-rev>` | same as above | **run: F8.** Runs the full five-workload ladder. |
 | `benchmark-draw-app` | `just benchmark-draw-app` | needs AppKit | not run. Real draw path but not sampled at the compositor. |
-| live `sample` | above | needs a human | **run twice** -- F1, F6. |
+| live `sample` | above | needs a human | **run three times** -- F1, F6, F7. |
 
 Workload names for `benchmark-quick`: `terminal-feed`, `scrollback-stream`,
 `content-churn`, `style-churn`, `incremental-mixed`. Canonical geometry is
 179x66, matching this file's captures.
 
-**No benchmark has been run in this investigation.** Every number in this file is
-either a diagnostic sample share or, for F5, a deterministic count. Nothing here
-is a directional performance result, and D1's predictions are all unverified.
+**Superseded 2026-07-28.** This paragraph read "No benchmark has been run in this
+investigation... D1's predictions are all unverified." Two have since been
+verified against baselines resolved before implementation: R2 (F8) and R1+R1b
+(F7). R3 and R4 remain unverified, and every *sample-derived* share in this file
+is still a diagnostic share rather than a performance result.
 
 ## Current hypotheses
 
@@ -413,6 +416,17 @@ after the dictionary is made lazy. Rejected, and the competing explanation
 adopted, if it moves less than 5% -- in which case the correct follow-up is to
 count runs per frame in the fixture versus in real btop output, not to abandon
 the change.
+
+**Status: CONFIRMED and closed 2026-07-28 (F7).** The stated threshold was
+cleared three times over: full-frame **-33.9%** at 80x24 and **-31.2%** at
+160x50 against baseline `fcfff10`. The live re-capture (run 3) shows the
+literal's node at **1 sample (0.1%)** of `drawTextRuns`, down from 382 (18.3%),
+so the cost was removed rather than relocated. The competing btop-shape
+explanation is not refuted and does not need to be -- it governs which number
+transfers to real use, and F7 keeps 18.3% as that number. What the overshoot
+does raise is the mirror-image question: the fixture may be *more* dictionary-
+dense than live btop, which is the same run-density count the rejection branch
+asked for, now motivated by a confirmation instead.
 
 ### H2 -- `damageActionSnapshot` pays a full array-bearing struct copy twice per stream action, to test a pointer against nil
 
@@ -559,7 +573,11 @@ Phase 3.
       F2's 18.3% is the real-workload figure measured end to end, so this is
       wanted for the run-density comparison, not to rescue the prediction.
       Capturing btop's byte stream needs a PTY recording; judge whether that is
-      worth building before doing it.
+      worth building before doing it. **Partial answer, F7:** live run 3 puts
+      `drawTextCell` at 4.0% of `drawTextRuns`, so the fraction is non-zero in
+      real btop output -- unlike the fixture. That is a share, not the count this
+      task wants, and it does not close it. F7's 2x overshoot makes the
+      run-density half of this comparison more interesting, not less.
 - [ ] Establish which glyphs reach `CTFontDrawGlyphs` in the **live** capture.
       H3's second competing explanation turns on it and nothing currently
       measures it. F5 answers this for the fixture (none do); the live case is
@@ -567,15 +585,16 @@ Phase 3.
 
 ### Phase 2 -- land the two low-risk candidates, separately
 
-- [ ] **R1, with R1b in the same commit.** Make `attributes` lazy or cache it
-      outside the run loop, and make the CGColor cache write only on a miss. Note
-      the pre-change revision explicitly (`4ca27ee`, or `HEAD` if later work has
-      landed -- do not infer it after committing). Run `just benchmark-draw`
-      before and after; then `just benchmark-quick <base> content-churn`. Record
-      the predicted-versus-actual comparison in **F7**, including a disappointing
-      result. **Record R1 and R1b's node shares separately in the re-posted draw
-      tree even though the benchmark verdict is joint** -- the tree is what keeps
-      the two attributions apart when the number is a single figure.
+- [x] **R1, with R1b in the same commit.** **Done 2026-07-28: F7.** The
+      dictionary moved inside `if fallbackCells.isEmpty == false` and the cache
+      store into an explicit miss branch, in commit `919838f` against baseline
+      `fcfff10` -- resolved and benchmarked before the first edit, not inferred
+      afterwards. `benchmark-draw` full-frame **-33.9%** / **-31.2%**, roughly
+      double D1's -13% to -18%; `benchmark-quick content-churn` -4.36%. Live
+      run 3 breaks the two nodes out as required: R1's literal 382 (18.3%) -> 1
+      (0.1%), R1b's store 19 (0.9%) -> 7 (0.4%). No `(fontVariant, colorKey)`
+      cache was built -- D1 said hold it back pending the fallback fraction, and
+      F5 measured that fraction at zero in the fixture.
 - [x] **R2.** **Done 2026-07-28: F8.** All thirty nil tests replaced, via
       in-place tag matching rather than a stored flag, so `Terminal` gained no
       field. The coverage audit ran first and found a real hole -- the
@@ -589,7 +608,8 @@ Phase 3.
       the three render-bound workloads null as predicted. The
       `outlined destroy of (InactivePrimaryScreen?, InactivePrimaryScreen?)`
       symbol is gone from the release binary.
-- [ ] **R4, only after R1 is measured and committed.** Record in **F9**.
+- [ ] **R4, now unblocked** -- R1 is measured and committed (F7). Baseline it
+      against `919838f`, not `fcfff10`. Record in **F9**.
 
 ### Phase 3 -- decide what to do about compositing
 
@@ -600,8 +620,11 @@ Phase 3.
       `CABackingStoreGetFrontTexture` blocked fraction. Record in **F10**.
       **This needs the user** -- see the standing rule in Investigation rules and
       the hand-over text in "Re-capturing a live profile". Pause and ask; do not
-      script the gesture, and do not reuse F1's or F6's capture as the post-change
-      one.
+      script the gesture, and do not reuse F1's, F6's **or F7's run 3** as the
+      post-change one -- run 3 is post-R1 but pre-R4, so it is mid-Phase-2 and
+      does not satisfy this task. Its incidental readings (queue 1,273, blocked
+      1,053) are recorded in F7 and are what the eventual F10 capture should be
+      compared against.
 - [ ] Hand F1, **F5**, F8 and H3 to doc 11 as evidence for its Phase 1 and its H1/H3
       gate. This file does not own the optimize-or-replace decision and must not
       make it.
@@ -973,10 +996,105 @@ Phase 3.
   The residual uncertainty is workload shape (btop specifically), not sampling.
 - Next action: Phase 2. R1+R1b and R2 are both unblocked.
 
+### F7 -- R1+R1b landed: the attributes literal is gone from the live tree, and `benchmark-draw` moved roughly twice the predicted amount
+
+- Status: **closed.** R1 and R1b implemented and committed together, as D1
+  prescribed. H1 is confirmed.
+- Source: commit `919838f`, against baseline `fcfff10`, which was resolved and
+  benchmarked *before* any implementation edit -- not inferred from `HEAD`
+  afterwards.
+- Change made: the `[NSAttributedString.Key: Any]` literal moved inside
+  `if fallbackCells.isEmpty == false`, at the fallback loop it feeds. D1 left
+  hoist / lazy / build-in-loop open and named a `(fontVariant, colorKey)` cache
+  as the refinement to hold back; **the guard was chosen and no cache was
+  added**, so the change introduces no new state and no invalidation invariant.
+  R1b became the explicit `if let cached` / `else` pair D1 asked for, which is
+  what rules out the double-construct bug it flagged.
+
+- Measurement 1 -- `just benchmark-draw`, 15 iterations, median
+  `drawDurationNanoseconds`:
+
+  | Scenario | Grid | Baseline | After | Delta |
+  | --- | --- | ---: | ---: | ---: |
+  | full-frame | 80x24 | 3,688,963 | 2,439,973 | **-33.9%** |
+  | damage-clipped | 80x24 | 710,321 | 532,790 | -25.0% |
+  | full-frame | 160x50 | 14,960,141 | 10,300,003 | **-31.2%** |
+  | damage-clipped | 160x50 | 1,313,731 | 946,960 | -27.9% |
+
+  The baseline column is a **same-session re-measurement** of `fcfff10` in a
+  throwaway worktree, not the figures recorded when the plan was written
+  (3,812,103 / 739,177 / 15,700,956 / 1,366,175, which give -36.0% / -27.9% /
+  -34.4% / -30.7%). The re-measurement was taken because a result at double the
+  prediction is exactly the shape a drifted baseline produces; the two baselines
+  agree within run-to-run variance, so drift is excluded.
+
+- Measurement 2 -- `just benchmark-quick fcfff10 content-churn`: **faster,
+  -4.36%** (symmetric median of 2 pairs), plan time inconclusive at +1.08%.
+
+- Measurement 3 -- **live capture run 3**, the re-post the ledger requires.
+  Artifact `.build/manual-profiles/2026-07-28-145622-16337-btop-scroll-run3.txt`,
+  pid 16337, launched 14:55:44 and sampled 14:56:22, same command and same
+  held-down-arrow btop gesture as F1/F6. **Grid geometry was not recorded for
+  this capture** -- F1/F6 are 179x66 and the request was for the window's normal
+  size, but that is an assumption here, not a measurement, and it is the one
+  provenance field this run is missing. Unlike F6 this is a **different process
+  instance**, so the launch-time provenance trick does not apply; the binary is
+  identified by mtime instead -- the installed `DanTerm Dev` (14:55:44) matches
+  `.spm-build/release/DanTerm` (14:55:40), an **optimized** build made after
+  `919838f` (14:52:27). Nothing else heavy was running. Node shares inside
+  `drawTextRuns`, 1,670 node samples against run 1's 2,085:
+
+  | What | Line, run 1 -> run 3 | Run 1 | Run 3 |
+  | --- | --- | ---: | ---: |
+  | **`attributes` dictionary literal (R1)** | 367-370 -> 589-593 | **382 (18.3%)** | **1 (0.1%)** |
+  | **CGColor cache store (R1b)** | 366 -> 370 | **19 (0.9%)** | **7 (0.4%)** |
+  | CGColor cache lookup, and miss-path construction | 365 -> 366, 369 | 66 | 25 + 42 |
+  | `CTFontDrawGlyphs` | 575 | 372 (17.8%) | 353 (21.1%) |
+  | `drawTextCell` fallback | 584 -> 595 | 89 (4.3%) | 67 (4.0%) |
+
+  Whole-function: `drawTextRuns` inclusive on the main thread **1,537 of 3,768
+  busy samples (40.8%)**, against run 1's 1,970 of 4,256 (46.3%).
+
+- Observation 1: **the structural check R1b was given passes.** D1 said the only
+  available test at that size is that the node shrinks in the re-posted tree, and
+  it did, independently of R1's node. The joint benchmark verdict is therefore
+  backed by two separate attributions, which is what the ledger's break-them-out
+  requirement was for.
+- Observation 2: **the prediction was beaten by roughly 2x** -- D1 said -13% to
+  -18% on the full-frame rows and the measurement is -31% to -34%. F5 already
+  established the fixture is R1's best case (one run per cell, zero fallback
+  runs), so the direction of the surprise is the one F5 predicted; the size of it
+  is not explained by anything recorded here. The honest reading is that the
+  dictionary's cost in the fixture exceeds its 18.3% live share, and that the
+  18.3% figure remains the one that transfers to real use.
+- Observation 3: **the fallback path is not empty in real btop output.** Line 595
+  carries 4.0%, so unlike the fixture (F5: zero fallback runs), live btop does
+  reach `drawTextCell` -- and the dictionary is still built there, just only
+  there. This is the first direct evidence on the live side of the open Phase 1
+  task that asks for the fallback fraction against real btop output; it does not
+  close that task, which wants a count, not a share.
+- Observation 4, incidental: `CABackingStoreGetFrontTexture` reads 1,053 (run 1:
+  1,079) and the `CA::CG::Queue` thread 1,273 (1,316). R3's stall is untouched,
+  as the Phase 3 gate intends. **This does not discharge the F10 task**, which
+  wants the re-capture *after* Phase 2 -- R4 has not landed.
+- Inference: **H1 is confirmed and closed.** The largest removable cost on the
+  draw path was removed, the removal is visible in both instruments, and the
+  live tree's largest node inside `drawTextRuns` is now glyph drawing itself.
+- Competing interpretation for the 2x overshoot: the two benchmarks disagree by
+  an order of magnitude (-34% headless versus -4.36% on `content-churn`), which
+  is AR2's predicted dilution but is also consistent with `benchmark-draw`
+  measuring a fixture whose run density is unrepresentative in the *other*
+  direction than F2 feared. Nothing here separates those, and no measurement is
+  proposed -- the change is landed and the direction is not in doubt.
+- Uncertainty: low on the mechanism (the node is gone from the tree). Medium on
+  every magnitude: one live capture, a different process instance from F1/F6, and
+  a headless figure whose fixture F5 already showed to be atypical.
+- Next action: R4, now unblocked. Its measurement should be taken against
+  `919838f`, not against `fcfff10`.
+
 ### F8 -- R2 landed: the tuple destroy is gone from the binary, and `terminal-feed` moved less than predicted
 
-- Status: **closed.** R2 implemented and committed. F7 is reserved for R1's
-  result and is not yet written; the gap is intentional.
+- Status: **closed.** R2 implemented and committed.
 - Source: commits `c13abc3` (coverage) and `cd57fa7` (change), against baseline
   `20a6eaf`, which was resolved and recorded *before* any implementation edit --
   not inferred from `HEAD` afterwards.
@@ -1055,6 +1173,9 @@ Phase 3.
 ---
 
 #### R1 -- make the `attributes` dictionary lazy. **Rank 1.**
+
+**Landed 2026-07-28 (`919838f`); result in F7.** The guard form was chosen and
+no `(fontVariant, colorKey)` cache was added.
 
 **What.** `TerminalRenderExecution.swift:367-371` moves inside
 `if fallbackCells.isEmpty == false`, or is replaced by a small cache outside the
@@ -1147,6 +1268,10 @@ Phase 1 fallback-fraction task measures. Do not build it speculatively.
 ---
 
 #### R1b -- write the CGColor cache only on a miss. **Rides with R1.**
+
+**Landed 2026-07-28 (`919838f`); result in F7.** Written as the
+`if let cached` / `else` pair recommended below; the structural check passed --
+the store node fell 19 -> 7 samples in live run 3.
 
 **What.** `TerminalRenderExecution.swift:365-366` is currently:
 
@@ -1392,30 +1517,24 @@ benchmark, it moves here with the evidence against it rather than being deleted.
 
 ## Outcome
 
-Investigation in progress. **Phase 1 is closed; Phase 2 is unblocked and
-unstarted.**
+Investigation in progress. **Phase 1 is closed. Phase 2 is two thirds landed:
+R1+R1b (F7, H1 closed) and R2 (F8, H2 closed) are committed and measured; R4 is
+the remainder.**
 
 ### Where a fresh agent should pick this up
 
 1. Read D1. It carries the four candidates, each with a prediction, a
    falsification criterion, a named instrument, and a risk note. That is the
    whole actionable surface of this file.
-2. **Start with R1+R1b.** They are one commit, they edit only
-   `TerminalRenderExecution.swift` (lines 365-371 and the fallback loop at 583),
-   the drawn output is bit-identical, and `benchmark-draw` is headless and cheap.
-   Prediction on record: **-25% to -40%** full-frame at 160x50, falsified under
-   15%.
-3. R2 is independent -- different file (`Terminal.swift:553` and `:565`),
-   different thread, different instrument -- so it can go in parallel. It needs
-   the coverage audit named in its Phase 2 task *before* code.
-4. R4 waits until R1 is measured and committed; same function, and landing them
-   together destroys both attributions.
+2. ~~Start with R1+R1b.~~ **Landed 2026-07-28 (`919838f`), result in F7.**
+3. ~~R2 is independent...~~ **Landed 2026-07-28 (`cd57fa7`), result in F8.**
+4. **Start with R4.** It is the only unlanded Phase 2 item, and R1 -- the reason
+   it was gated -- is now measured and committed. Baseline it against `919838f`.
 5. R3 is research, not a change, and is gated behind Phase 2 for a reason stated
    in D1. Do not promote it.
 
-Findings F1-F6 are recorded. The next free ID is **F7**, and the ledger already
-reserves F7 for R1's result, F8 for R2's, F9 for R4's, and F10 for the Phase 3
-re-capture.
+Findings F1-F8 are recorded. The next free ID is **F9**, and the ledger already
+reserves F9 for R4's result and F10 for the Phase 3 re-capture.
 
 **One step needs the user and cannot be done by an agent:** a live `sample`
 capture. It requires a person holding the down-arrow key in a focused DanTerm
@@ -1426,9 +1545,11 @@ input is in Investigation rules.
 
 ### What is already known and should not be re-derived
 
-- **The evidence is two live captures**, F1 and F6, of the same process instance
-  at commit `4ca27ee`, optimized build. Both artifacts are in
-  `.build/manual-profiles/` (disposable; every number is transcribed).
+- **The evidence is three live captures.** F1 and F6 are the same process
+  instance at commit `4ca27ee`; F7's run 3 is a *different* instance at
+  `919838f`, so it is identified by binary mtime rather than by launch time. All
+  optimized builds, all three artifacts in `.build/manual-profiles/` (disposable;
+  every number is transcribed).
 - **The analysis method, and its one trap**, are written out in "Reproducing the
   evidence". The trap already cost one wrong number: a function is printed as
   several sibling nodes at different offsets, so a per-node read understates it.
@@ -1436,8 +1557,12 @@ input is in Investigation rules.
 - **`benchmark-draw`'s fixture is not representative** and F5 says exactly how:
   one run per cell, and no cell reaches the font path. It is an upper bound on
   R1, not a conservative case. Do not quote its delta as a user-visible win --
-  F2's 18.3% is the real-workload figure.
-- **No benchmark has been run.** Every prediction in D1 is unverified.
+  F2's 18.3% is the real-workload figure. F7 bears this out from the other side:
+  the fixture reported -34% where the live share was 18.3%.
+- **Two of D1's four predictions are now tested.** R1 beat its band by ~2x (F7),
+  R2 fell short of its band in the right direction (F8). Both were measured
+  against a baseline resolved *before* implementation. R3 and R4 remain
+  unverified.
 
 ### What is owed to a neighbouring file
 
