@@ -65,6 +65,12 @@ IDs (`H*`, `F*`, `D*`) are file-local. References to doc 9 are written as
   standing proxy for the btop/htop scroll that opened this file.
   `incremental-screen-updates` is localized-edit-shaped. They rank the same
   nodes very differently, so a share without a workload name is meaningless.
+- **A directional claim uses `benchmark-confirm`, not `benchmark-quick`.** F7 ran
+  the same `benchmark-quick` comparison on `incremental-mixed` five times against
+  one unchanging pair of trees and got every verdict the tool can emit, spanning
+  -6.05% to +7.61% -- including `slower` twice, on a change that `confirm`
+  reproducibly scores `faster`. Quick's 2-pair rule is a smoke test. Never record
+  a lone quick verdict as a result, in either direction.
 - **Correctness first on damage.** Every candidate here touches damage
   recording, where the failure mode is a *missing* repaint -- invisible in a
   benchmark and invisible in most tests. `Terminal.swift`'s own comment on the
@@ -276,6 +282,13 @@ Confirmed if rewriting the shift to move cells in place collapses
 `_copyCollectionToContiguousArray` and `swift_arrayInitWithCopy` without
 inflating a sibling.
 
+**Confirmed, 2026-07-28 (F7, D3).** Both symbols went to exactly zero and the
+destroy path more than halved. The competing explanation was the correct one --
+the allocation was an explicit `Array(slice)` in both primitives, inherent to how
+the shift was written rather than caused by aliasing -- so the fix was a
+traversal-order rewrite. That also **detaches H5 from H4**: they are not the same
+wound, and the note above suggesting they might be is withdrawn.
+
 ## Candidate direction, pending evidence
 
 Ordered by measured size against implementation risk. Re-scoped 2026-07-28
@@ -291,12 +304,9 @@ Done:
 
 Open, re-ordered against F6:
 
-1. **H5 -- move cells in place instead of reallocating.** Now the largest single
-   candidate anywhere in this file: 33.5% of root on `incremental-screen-updates`,
-   and its subtree is allocation and refcount traffic rather than cell writing.
-   Starts as a code read, not a measurement -- the competing explanation in H5 is
-   settled by looking at how the shift is written. Cheap to check, and it may
-   also be the headless face of H4.
+1. ~~**H5 -- move cells in place instead of reallocating.**~~ Shipped: F7, D3.
+   The first app-level `faster` verdict in this file (`terminal-feed` ~-7%,
+   `scrollback-stream` ~-4.5%, both reproducing).
 2. **H1(a) -- stop snapshotting for `.print`.** Targets `recordDamage` (27.7%)
    plus the snapshot getter (11.2%) on styled, but only ~12% combined on
    incremental, so its value is shape-dependent. F4 sharpened its design: the
@@ -306,7 +316,8 @@ Open, re-ordered against F6:
    new cursor rows. Skipping it wholesale drops a cursor repaint. Needs behavioral
    damage tests first, under the correctness rule above.
 3. **H4 -- drop `lastPlannedTerminal`.** App-only, removes a per-frame whole-grid
-   compare as well as the copies. Worth reconsidering jointly with H5.
+   compare as well as the copies. Weakened by F7: the tentative link to H5 is
+   withdrawn, so F3 is again its only evidence, and F3 is uncontrolled.
 4. **H3 -- box the cold fields of `Terminal`.** The argument strengthened: F4
    showed the 1.4k-sample `_platform_memmove` under `recordDamage` survives making
    the snapshot fully POD, so it is not the snapshot and most plausibly is the
@@ -350,9 +361,9 @@ the most valuable remaining RESEARCH item.
   "the `outlined ...` names may be misattributed" caveat.
 - [x] Re-baseline the feed path after H2, on both workload shapes. Result: F6,
   which supersedes F1 and re-scopes the candidate ordering.
-- [ ] H5: read `moveAndFillCells` / `moveAndFillRows` and establish whether the
-  reallocation is aliasing or is inherent to how the shift is written. Code read
-  first; measurement only after.
+- [x] H5: read `moveAndFillCells` / `moveAndFillRows` and establish whether the
+  reallocation is aliasing or is inherent to how the shift is written. Result:
+  F7 -- inherent to the written form; shifted in place instead; D3.
 - [ ] H1(a): skip the snapshot for `.print`, with behavioral damage tests. Must
   preserve cursor-row damage -- see the trap noted in the candidate list.
 - [ ] H4: replace `lastPlannedTerminal` with a generation counter; verify on an
@@ -968,7 +979,143 @@ the most valuable remaining RESEARCH item.
 - Next action: re-scope the candidate ordering against this table before
   implementing H1(a).
 
+### F7 -- shifting in place confirms H5, and is the first app-level win in this file
+
+- Status: recorded. Positive result, committed. Confirms H5, with its competing
+  explanation resolved in the competing explanation's favor.
+- Date and investigator: 2026-07-28, Claude (agent).
+- Commit and worktree state: baseline `11a894e` clean tracked tree; candidate is
+  `11a894e` plus the change below.
+- The code read that settled the mechanism, done before any measurement, per the
+  plan in the candidate list: both shift primitives opened with an explicit
+  `Array(...)` of the strip they were about to move --
+  `let sourceCells = Array(rows[row].cells[range])` (`moveAndFillCells`) and
+  `let sourceRows = Array(rows[range])` (`moveAndFillRows`). **So H5's competing
+  explanation was the right one**: the allocation was inherent to how the shift
+  was written, not caused by aliasing or by a retained reference. That also
+  detaches H5 from H4 -- they are not the same wound, and H4 must still be sized
+  on its own.
+- The change: both primitives now shift in place, iterating in the direction that
+  makes an overlapping move safe -- descending when shifting right, ascending when
+  shifting left, which is memmove's direction rule -- through one shared static
+  `moveInPlace(_:by:amount:)` traversal helper. The temp array is gone from both.
+  `moveAndFillRows` still materializes the evicted prefix when
+  `pushesToScrollback` is set, but that is `amount` rows (typically one) rather
+  than the whole region, and it must be materialized because handing
+  `appendToScrollback` a slice of `self.rows` is an overlapping access to `self`.
+  The helper is `static` for the same exclusivity reason: its closure mutates the
+  grid.
+- Commands: `just benchmark-feed-sample incremental-screen-updates 20` twice
+  before and twice after, plus the same on `styled-screen-redraw` as an A/A
+  control; `just test`; `just benchmark-quick` and
+  `DANTERM_BENCHMARK_ALLOW_BATTERY=1 just benchmark-confirm baseline=11a894e`, twice.
+- Artifacts: `.build/terminal-feed-profiles/2026-07-28-{100211,100247}` (incr
+  before, shared with F6), `.../2026-07-28-{101242,101310}` (incr after),
+  `.../2026-07-28-{100116,100143}` and `.../2026-07-28-{101341,101405}` (styled
+  control), `.build/terminal-benchmark-comparisons/confirm/26e803876444-{0000,0001}`.
+- Measurements -- `incremental-screen-updates`, share of harness root inclusive:
+
+  | Node | before 1 | before 2 | after 1 | after 2 | ratio |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | `Terminal.feed(_:)` | 98.8% | 98.8% | 98.8% | 98.8% | 1.00 |
+  | **`specialized _copyCollectionToContiguousArray<A>(_:)`** | **8.0%** | **8.4%** | **0.0%** | **0.0%** | **0.00** |
+  | **`swift_arrayInitWithCopy`** | **5.5%** | **5.7%** | **0.0%** | **0.0%** | **0.00** |
+  | `doDecrementSlow` (refcount release) | 12.9% | 13.3% | 7.8% | 7.5% | 0.58 |
+  | `_ContiguousArrayStorage.__deallocating_deinit` | 10.5% | 11.0% | 6.0% | 5.8% | 0.55 |
+  | `swift_arrayDestroy` | 10.3% | 10.9% | 5.9% | 5.7% | 0.54 |
+  | `outlined consume of TerminalScalars.Storage` | 5.6% | 5.4% | 3.3% | 3.2% | 0.59 |
+  | `Terminal.moveAndFillCells(in:row:by:)` | 33.8% | 33.2% | 28.9% | 29.5% | 0.87 |
+  | `Terminal.moveAndFillRows(...)` | 12.1% | 12.5% | 10.6% | 10.6% | 0.86 |
+  | `Terminal.advanceToNextRow(preservingWrapClaim:)` | 12.1% | 12.6% | 10.6% | 10.6% | 0.86 |
+  | `outlined init with copy of Terminal.GridCell` | 5.6% | 5.7% | 7.0% | 6.8% | **1.22** |
+  | `Terminal.eraseLine(mode:)` | 12.7% | 12.3% | 14.1% | 13.8% | 1.12 |
+  | `Terminal.eraseCells(row:columns:)` | 11.6% | 11.2% | 12.9% | 12.7% | 1.12 |
+  | `Terminal.clearCellAndPair(...)` | 12.1% | 11.9% | 13.4% | 13.0% | 1.10 |
+  | `Terminal.recordDamage(since:)` | 8.6% | 8.7% | 9.8% | 9.3% | 1.10 |
+  | `_platform_memmove` | 5.6% | 5.3% | 6.2% | 5.9% | 1.11 |
+  | `TerminalInputStream.feed(_:)` | 11.8% | 11.8% | 12.8% | 12.8% | 1.08 |
+  | `Terminal.printNarrow(_:breakClass:)` | 3.6% | 3.8% | 4.1% | 4.4% | 1.17 |
+  | `swift_isUniquelyReferenced_nonNull_native` | 4.9% | 4.9% | 5.2% | 5.6% | 1.10 |
+
+  `styled-screen-redraw` as an A/A control -- neither primitive appears on that
+  shape, so nothing should move, and nothing does: `Terminal.feed` 1.00,
+  `recordDamage` 1.00, `_platform_memmove` 1.01, `eraseLine` 0.97,
+  `clearCellAndPair` 1.02, `TerminalInputStream.feed` 1.02, every listed node
+  within 0.91-1.12.
+
+- Verification that nothing absorbed the work: removing roughly 13 points of a
+  fixed-time profile predicts a uniform rescale of about **1.15x**. The
+  unrelated nodes land at 1.08-1.17 (`eraseLine` 1.12, `clearCellAndPair` 1.10,
+  `recordDamage` 1.10, `TerminalInputStream.feed` 1.08), so nothing grew in
+  absolute terms.
+- The one node above the band, stated plainly: `outlined init with copy of
+  Terminal.GridCell` at **1.22** is genuinely up, and it is the expected
+  trade. The old code copied each cell twice -- once into the temp array via the
+  bulk `swift_arrayInitWithCopy`, once out of it -- so eliminating the array moved
+  the surviving single copy from the bulk symbol into the per-element one. The
+  win is the halved copy count plus the removed allocation and teardown, not a
+  free move; this node is where the remaining half shows up.
+- Correctness: `just test` exit 0 -- 619 core tests in 84 suites, the one
+  pre-existing known issue, plus 1111 protocol, 115 support, 30 shell-contract.
+- Correctness verification, which matters more than usual here: a reversed
+  traversal direction does not crash, it silently duplicates one element across
+  the shifted strip. Mutation-tested by swapping the ascending and descending
+  branches, which fails **2207 assertions across 8 suites** --
+  `TerminalFixtureTests`, `TerminalResizeTests`, `TerminalScrollbackBudgetTests`,
+  `TerminalEditingTests` and others. ICH, DCH, IL, and DL are each already pinned
+  against overlapping moves with distinct per-position content, so no new test
+  was required; the direction hazard was already covered from both sides.
+- Paired verdict, `benchmark-confirm` against `11a894e`, two full runs:
+
+  | Workload | run 1 | run 2 |
+  | --- | --- | --- |
+  | `terminal-feed` | **faster** (-6.88%) | **faster** (-7.32%) |
+  | `scrollback-stream` | **faster** (-4.03%) | **faster** (-4.91%) |
+  | `content-churn` | inconclusive (+0.80%) | inconclusive (+1.18%) |
+  | `style-churn` | equivalent (+0.73%) | faster (-2.95%) |
+  | `incremental-mixed` | inconclusive (+1.42%) | faster (-3.26%) |
+
+  The claim rests on the two that reproduce: `terminal-feed` at about -7% and
+  `scrollback-stream` at about -4.5%. Nothing returned `slower` in either confirm
+  run. **This is the first app-level directional win recorded in this file** --
+  F5 shipped on headless evidence with an `equivalent` paired verdict, and H1(b)
+  was reverted for lack of one.
+- Instrument caveat, worth more than the result: `benchmark-quick` on
+  `incremental-mixed` was run five times against the same pair of trees and
+  returned **-2.03% (inconclusive), +3.90% (slower), +7.61% (slower), -6.05%
+  (faster), +0.07% (equivalent)** -- a span of nearly 14 points across every
+  verdict the tool can emit, including `slower` twice. Its 2-pair quick rule
+  cannot resolve this workload at all. Had the second run been taken as the
+  answer, a real win would have been recorded as a regression. Use `confirm` for
+  any directional claim on `incremental-mixed`, and treat a lone `quick` verdict
+  on it as noise regardless of which way it points.
+- Inference: H5 confirmed. The two array-traffic symbols went to exactly zero,
+  the destroy path more than halved, and the A/A control did not move.
+- Competing interpretations: `incremental-screen-updates` is a fixture whose edit
+  pattern is exactly ICH/DCH-shaped, so it flatters this change. That is why the
+  claim above rests on the app-level `confirm` verdicts rather than on the
+  headless share, and `terminal-feed` and `scrollback-stream` are independent of
+  that fixture.
+- Uncertainty: low. Two instruments agree, the A/A control is clean, and the
+  app-level verdict reproduced.
+- Next action: D3. H1(a), H4, H3, and the erase-path research item remain.
+
 ## Decision log
+
+### D3 -- H5 shipped; the shift primitives move in place
+
+- Date: 2026-07-28.
+- Decision: commit the in-place shift. It is the first change in this file to
+  earn a reproducing app-level `faster` verdict, on the workload
+  (`terminal-feed`) most directly aimed at what this file studies.
+- Method note worth keeping: H5 was scheduled as *a code read first, measurement
+  only after*, and that ordering paid. Reading the two functions settled the
+  hypothesis' competing explanation in about a minute and told us the fix was a
+  traversal-order rewrite rather than a hunt for a retained reference. It also
+  detached H5 from H4, which a measurement-first approach would have conflated.
+- Consequence: H4 loses the supporting argument F6 had tentatively lent it. F3
+  remains its only evidence, and that is still a cross-instrument comparison on
+  two different workloads rather than a controlled one.
 
 ### D2 -- H2 shipped; `hasInteractionState` is maintained by observers, not by call sites
 

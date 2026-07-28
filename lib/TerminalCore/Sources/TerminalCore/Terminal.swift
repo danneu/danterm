@@ -4827,6 +4827,38 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
+    /// Visits `range` in the order that makes an overlapping in-place shift safe.
+    ///
+    /// This is memmove's direction rule, and it is the whole reason the two shift primitives
+    /// below need no copy of the strip they are moving. Shifting right (`delta > 0`) reads
+    /// behind the write head, so descending order guarantees a source is read before anything
+    /// overwrites it; shifting left reads ahead of it, so ascending order does. Getting the
+    /// direction wrong does not crash -- it silently duplicates one element across the strip,
+    /// which is why `TerminalEditingTests` pins ICH, DCH, IL, and DL against overlapping
+    /// moves with distinct per-position content.
+    ///
+    /// `body` receives the destination and the source to move from, or `nil` where the source
+    /// falls outside `range` and the caller must fill instead.
+    ///
+    /// Static on purpose: `body` mutates the grid, so a method borrowing `self` here would be
+    /// an exclusivity violation at every call site.
+    private static func moveInPlace(
+        _ range: Range<Int>,
+        by delta: Int,
+        amount: Int,
+        _ body: (_ destination: Int, _ source: Int?) -> Void
+    ) {
+        func source(for destination: Int) -> Int? {
+            let source = delta < 0 ? destination + amount : destination - amount
+            return range.contains(source) ? source : nil
+        }
+        if delta > 0 {
+            for destination in range.reversed() { body(destination, source(for: destination)) }
+        } else {
+            for destination in range { body(destination, source(for: destination)) }
+        }
+    }
+
     private mutating func moveAndFillRows(
         in range: Range<Int>,
         by delta: Int,
@@ -4839,19 +4871,22 @@ public struct Terminal: Equatable, Sendable {
             invalidateInspection(inViewportRows: range)
         }
         let amount = min(abs(delta), range.count)
-        let sourceRows = Array(rows[range])
         let style = backgroundEraseStyle
 
         if delta < 0, pushesToScrollback {
-            appendToScrollback(sourceRows.prefix(amount))
+            // Only the evicted prefix has to outlive the move, so this copies `amount` rows
+            // rather than the whole region. It must be materialized rather than passed as a
+            // slice of `rows`: `appendToScrollback` is mutating, and handing it a slice of
+            // `self.rows` would be an overlapping access to `self`.
+            appendToScrollback(Array(rows[range.lowerBound..<(range.lowerBound + amount)]))
         } else {
             severWrapClaim(before: range.lowerBound, replacementStyle: style)
         }
 
-        for destination in range {
-            let source = delta < 0 ? destination + amount : destination - amount
-            if range.contains(source) {
-                rows[destination] = sourceRows[source - range.lowerBound]
+        Self.moveInPlace(range, by: delta, amount: amount) { destination, source in
+            if let source {
+                let moved = rows[source]
+                rows[destination] = moved
             } else {
                 rows[destination] = makeBlankRow(columns: columnCount, style: style)
             }
@@ -4869,8 +4904,8 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    // Horizontal counterpart to moveAndFillRows: both primitives snapshot,
-    // clip, move intact storage, BCE-fill the vacated strip, and repair seams.
+    // Horizontal counterpart to moveAndFillRows: both primitives clip, shift intact storage
+    // in place via `moveInPlace`, BCE-fill the vacated strip, and repair seams.
     private mutating func moveAndFillCells(
         in range: Range<Int>,
         row: Int,
@@ -4879,13 +4914,12 @@ public struct Terminal: Equatable, Sendable {
         guard range.isEmpty == false, delta != 0 else { return }
         invalidateInspection(inViewportRows: row..<(row + 1))
         let amount = min(abs(delta), range.count)
-        let sourceCells = Array(rows[row].cells[range])
         let style = backgroundEraseStyle
 
-        for destination in range {
-            let source = delta < 0 ? destination + amount : destination - amount
-            if range.contains(source) {
-                rows[row].cells[destination] = sourceCells[source - range.lowerBound]
+        Self.moveInPlace(range, by: delta, amount: amount) { destination, source in
+            if let source {
+                let moved = rows[row].cells[source]
+                rows[row].cells[destination] = moved
             } else {
                 rows[row].cells[destination] = GridCell(style: style)
             }
