@@ -44,15 +44,21 @@ Research started: 2026-07-27.
 > | pin frequency or core affinity | **F14** -- it is frequency, and macOS exposes no userspace floor |
 > | **pacer holding occupancy constant** | **F17** -- built, measured twice, made it worse |
 >
-> ### Next action: graduate D1/D2 to `docs/design/`. Everything else is closed.
+> ### This investigation is closed. Start at the design note, not here.
 >
-> The investigation is finished. F26 discharged the last blocked item (F7), F27
-> reopened the threshold grid so a screen can express what the headless
-> instrument actually resolves, and the Phase 5 and Phase 6 ledgers are
-> reconciled against D2 -- most of what looked open there was mooted when D2 was
-> taken and simply never struck. **One item is genuinely outstanding:** D1 (the
-> mechanism) and D2 (the routing decision plus its accepted coverage gap) live
-> only in this research doc, and belong in `docs/design/`.
+> D1 and D2 are graduated to
+> [docs/design/2026-07-27-damage-render-benchmark-routing.md](../design/2026-07-27-damage-render-benchmark-routing.md),
+> which is the durable record: the mechanism, the routing decision, the coverage
+> split, the constraints any user of the headless comparison inherits, and the
+> conditions for reopening. **Read that first.** This file is the evidence behind
+> it -- come here to check a number before quoting it, or to see why a candidate
+> was refuted.
+>
+> Nothing is outstanding. F26 discharged the last blocked item (F7), F27 reopened
+> the threshold grid so a screen can express what the headless instrument
+> actually resolves, and the Phase 5 and Phase 6 ledgers are reconciled against
+> D2 -- most of what looked open there was mooted when D2 was taken and simply
+> never struck.
 >
 > **F19 is deliberately parked, not forgotten.** Its stated hypothesis is
 > refuted -- three shell-level models exonerate the wrapper's shape and `cleanup`
@@ -676,10 +682,14 @@ its own stated conditions, this is the bar.
       written against an instrument D2 declines to repair, so re-running it could
       never have discharged anything. Duplicate of the Phase 7 entry; both are
       the same item.
-- [ ] **Graduate D1/D2 to `docs/design/` and record here where it went.** The
-      one genuinely outstanding piece of work in this file. D1 (the mechanism)
-      and D2 (the routing decision and its accepted coverage gap) currently live
-      only in a research doc; `docs/design/` is the ADR home.
+- [x] **Graduate D1/D2 to `docs/design/` and record here where it went.** Landed
+      as
+      [2026-07-27: Benchmark Routing for Damage-Scoped Render Changes](../design/2026-07-27-damage-render-benchmark-routing.md),
+      indexed in `docs/design/index.md`. It carries D1's mechanism, D2's routing
+      decision, the coverage split as a table, the constraints any user of the
+      headless comparison inherits, and D2's reopen conditions. **That note is
+      now the durable record**; this file remains the evidence behind it and the
+      place to check a number before quoting it.
 
 ### Phase 7 -- deferred harness work, not blocking
 
