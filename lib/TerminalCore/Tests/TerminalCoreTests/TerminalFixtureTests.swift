@@ -471,7 +471,7 @@ struct TerminalFixtureTests {
         if let cellScalars = expectation.cellScalars {
             for point in cellScalars {
                 let cell = try #require(terminal.cell(row: point.row, column: point.column))
-                #expect(cell.scalars == Array(point.scalars.unicodeScalars))
+                #expect(cell.scalars == TerminalScalars(point.scalars.unicodeScalars))
             }
         }
         if let cellHyperlinks = expectation.cellHyperlinks {

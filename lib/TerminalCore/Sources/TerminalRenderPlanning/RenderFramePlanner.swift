@@ -61,7 +61,7 @@ struct PlannedFrame {
 /// while independent frame layers are derived from the same viewport pass.
 private struct PlannedCell {
     let kind: TerminalCellKind
-    let scalars: [Unicode.Scalar]
+    let scalars: TerminalScalars
     let style: ResolvedCellStyle
 }
 
@@ -319,7 +319,7 @@ struct FramePlanner {
             }
             return PlannedCell(
                 kind: geometry.rows[row].cells[column].kind,
-                scalars: inspected?.scalars ?? [],
+                scalars: inspected?.scalars ?? .empty,
                 style: style
             )
         }

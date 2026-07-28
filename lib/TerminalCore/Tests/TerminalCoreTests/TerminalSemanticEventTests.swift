@@ -106,7 +106,7 @@ struct TerminalSemanticEventTests {
             terminal.feed(Array(bytes[..<split]))
             terminal.feed(Array(bytes[split...]))
             #expect(terminal.drainSemanticEvents() == [.title("Aé")])
-            #expect(terminal.cell(row: 0, column: 0)?.scalars == Array("Z".unicodeScalars))
+            #expect(terminal.cell(row: 0, column: 0)?.scalars == TerminalScalars("Z".unicodeScalars))
         }
     }
 

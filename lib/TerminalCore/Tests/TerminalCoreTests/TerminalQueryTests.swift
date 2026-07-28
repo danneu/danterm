@@ -142,7 +142,7 @@ struct TerminalQueryTests {
         )
         #expect(clustered == clusteredBefore)
         clustered.feed(Array("\u{301}".utf8))
-        #expect(clustered.cell(row: 0, column: 0)?.scalars == Array("e\u{301}".unicodeScalars))
+        #expect(clustered.cell(row: 0, column: 0)?.scalars == TerminalScalars("e\u{301}".unicodeScalars))
     }
 
     @Test("query replies are invariant across every split point")

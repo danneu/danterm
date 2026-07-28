@@ -227,12 +227,12 @@ public struct RenderBackgroundRun: Equatable, Sendable {
 /// font fallback cannot alter grid geometry during execution.
 public struct RenderTextCell: Equatable, Sendable {
     /// Exact Unicode scalar sequence retained by TerminalCore.
-    public let scalars: [Unicode.Scalar]
+    public let scalars: TerminalScalars
 
     /// Terminal grid width, either one for narrow cells or two for wide heads.
     public let columnWidth: Int
 
-    init(scalars: [Unicode.Scalar], columnWidth: Int) {
+    init(scalars: TerminalScalars, columnWidth: Int) {
         self.scalars = scalars
         self.columnWidth = columnWidth
     }

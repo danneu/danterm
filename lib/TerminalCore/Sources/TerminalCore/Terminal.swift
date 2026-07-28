@@ -113,57 +113,10 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    /// Keeps the common empty and one-scalar cell cases inline while spilling grapheme clusters.
-    private enum GridCellScalars: Equatable, Sendable, RandomAccessCollection {
-        case empty
-        case single(Unicode.Scalar)
-        case spill([Unicode.Scalar])
-
-        typealias Index = Int
-        typealias Element = Unicode.Scalar
-
-        var startIndex: Int { 0 }
-
-        var endIndex: Int {
-            switch self {
-            case .empty: 0
-            case .single: 1
-            case let .spill(scalars): scalars.count
-            }
-        }
-
-        subscript(position: Int) -> Unicode.Scalar {
-            switch self {
-            case .empty:
-                preconditionFailure("empty cell scalar storage has no valid index")
-            case let .single(scalar):
-                precondition(position == 0, "single cell scalar storage index out of bounds")
-                return scalar
-            case let .spill(scalars):
-                return scalars[position]
-            }
-        }
-
-        mutating func append(_ scalar: Unicode.Scalar) {
-            switch self {
-            case .empty:
-                self = .single(scalar)
-            case let .single(first):
-                self = .spill([first, scalar])
-            case let .spill(existing):
-                // Release the enum's owner before append so a unique spill grows in place.
-                self = .empty
-                var scalars = existing
-                scalars.append(scalar)
-                self = .spill(scalars)
-            }
-        }
-    }
-
     /// Keeps scalar storage and wide-cell roles together for invariant-preserving mutation.
     private struct GridCell: Equatable, Sendable {
         var kind: TerminalCellKind = .padding
-        var scalars = GridCellScalars.empty
+        var scalars = TerminalScalars.empty
         var style = TerminalStyle()
         var hyperlinkId: Int?
         var contentIdentity: Int?
@@ -360,7 +313,7 @@ public struct Terminal: Equatable, Sendable {
 
     /// Keeps REP independent from later cursor movement and grid replacement.
     private struct LastPrintedCluster: Equatable, Sendable {
-        var scalars: [Unicode.Scalar]
+        var scalars: TerminalScalars
         var cellWidth: Int
     }
 
@@ -1519,7 +1472,7 @@ public struct Terminal: Equatable, Sendable {
             cells: row.cells.map {
                 TerminalCell(
                     kind: $0.kind,
-                    scalars: Array($0.scalars),
+                    scalars: $0.scalars,
                     style: $0.style,
                     hyperlink: $0.hyperlinkId.flatMap { hyperlinkTargets[$0] }
                 )
@@ -2833,7 +2786,7 @@ public struct Terminal: Equatable, Sendable {
         let cell = windowRow.cells[column]
         return TerminalCell(
             kind: cell.kind,
-            scalars: Array(cell.scalars),
+            scalars: cell.scalars,
             style: cell.style,
             hyperlink: cell.hyperlinkId.flatMap { hyperlinkTargets[$0] }
         )
@@ -4460,7 +4413,7 @@ public struct Terminal: Equatable, Sendable {
         guard let context = clusterContext else { return }
         let cell = rows[context.target.row].cells[context.target.column]
         lastPrintedCluster = LastPrintedCluster(
-            scalars: Array(cell.scalars),
+            scalars: cell.scalars,
             cellWidth: cell.kind == .wideHead ? 2 : 1
         )
     }

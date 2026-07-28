@@ -84,8 +84,8 @@ struct RenderFramePlanningTests {
         try #require(plan.textRuns.count == 4)
         #expect(plan.textRuns[0].startColumn == 0)
         #expect(plan.textRuns[0].cells == [
-            RenderTextCell(scalars: Array("e\u{301}".unicodeScalars), columnWidth: 1),
-            RenderTextCell(scalars: Array(" ".unicodeScalars), columnWidth: 1),
+            RenderTextCell(scalars: TerminalScalars("e\u{301}".unicodeScalars), columnWidth: 1),
+            RenderTextCell(scalars: TerminalScalars(" ".unicodeScalars), columnWidth: 1),
         ])
         #expect(plan.textRuns[0].foreground == RenderTheme.dark.defaultForeground)
         #expect(plan.textRuns[1].startColumn == 2)
@@ -233,7 +233,7 @@ struct RenderFramePlanningTests {
         try #require(plan.textRuns.count == 2)
         #expect(plan.textRuns[0].cells.map(\.columnWidth) == [1, 1])
         #expect(plan.textRuns[1].cells == [
-            RenderTextCell(scalars: Array("\u{754C}".unicodeScalars), columnWidth: 2),
+            RenderTextCell(scalars: TerminalScalars("\u{754C}".unicodeScalars), columnWidth: 2),
         ])
         #expect(plan.backgroundRuns.map(\.columnCount) == [3, 2])
         #expect(plan.decorationRuns.map(\.columnCount) == [2, 2])
@@ -485,6 +485,48 @@ struct RenderFramePlanningTests {
                 cursorShape: .block
             )
         )
+    }
+
+    @Test("A grapheme cluster larger than inline scalar storage reaches the plan intact")
+    func spilledClusterPayloadSurvivesPlanning() throws {
+        // Intent: a cell whose payload is too large to hold inline is planned with every
+        //   scalar, in order, in a single one-column text cell.
+        // Why it exists: the cell payload keeps the empty and one-scalar cases off the
+        //   heap and spills anything longer. Only the spill path can silently truncate or
+        //   reorder, and before this the largest payload any planner test exercised was
+        //   two scalars -- inside inline range, so the spill path was unproven end to end.
+        // Scenario: a base letter carrying three combining marks, which the terminal
+        //   stores as one cluster occupying one column.
+        var terminal = try #require(Terminal(columns: 4, rows: 1))
+        feed("e\u{301}\u{327}\u{323}", to: &terminal)
+
+        let plan = invisiblePlan(terminal)
+        assertCanonical(plan)
+        try #require(plan.textRuns.count == 1)
+        #expect(plan.textRuns[0].cells == [
+            RenderTextCell(
+                scalars: TerminalScalars("e\u{301}\u{327}\u{323}".unicodeScalars),
+                columnWidth: 1
+            ),
+        ])
+    }
+
+    @Test("Never-written cells contribute no text cells to the plan")
+    func neverWrittenCellsAreOmittedFromTextRuns() throws {
+        // Intent: cells that were never written produce no `RenderTextCell` at all,
+        //   rather than a cell carrying an empty payload.
+        // Why it exists: the planner reads every column of a damaged row and drops the
+        //   ones with no content. Previously that filter was only observable through run
+        //   start columns, so a change to how an absent payload is represented could have
+        //   started emitting payload-free cells without any test noticing.
+        // Scenario: two written columns separated by an untouched gap.
+        var terminal = try #require(Terminal(columns: 6, rows: 1))
+        feed("a\u{1B}[3Gb", to: &terminal)
+
+        let plan = invisiblePlan(terminal)
+        assertCanonical(plan)
+        #expect(plan.textRuns.flatMap(\.cells).allSatisfy { $0.scalars.isEmpty == false })
+        #expect(plan.textRuns.flatMap(\.cells).count == 2)
     }
 }
 

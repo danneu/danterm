@@ -20,7 +20,7 @@ struct TerminalGraphemeTests {
             terminal.feed(Array(fixture.text.utf8))
 
             #expect(terminal.cell(row: 0, column: 0)?.kind == fixture.kind)
-            #expect(terminal.cell(row: 0, column: 0)?.scalars == Array(fixture.text.unicodeScalars))
+            #expect(terminal.cell(row: 0, column: 0)?.scalars == TerminalScalars(fixture.text.unicodeScalars))
             #expect(terminal.screenText.contains(fixture.text))
         }
     }

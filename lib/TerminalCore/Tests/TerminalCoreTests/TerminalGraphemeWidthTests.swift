@@ -172,7 +172,7 @@ struct TerminalGraphemeWidthTests {
             var terminal = try #require(Terminal(columns: 4, rows: 1))
             terminal.feed(Array(fixture.utf8))
 
-            #expect(terminal.cell(row: 0, column: 0)?.scalars == Array(fixture.unicodeScalars))
+            #expect(terminal.cell(row: 0, column: 0)?.scalars == TerminalScalars(fixture.unicodeScalars))
             #expect(terminal.geometry.rows[0].cells.map(\.kind) == [
                 .wideHead, .wideTail, .padding, .padding,
             ])
@@ -192,7 +192,7 @@ struct TerminalGraphemeWidthTests {
             var terminal = try #require(Terminal(columns: 4, rows: 1))
             terminal.feed(Array(fixture.utf8))
 
-            #expect(terminal.cell(row: 0, column: 0)?.scalars == Array(fixture.unicodeScalars))
+            #expect(terminal.cell(row: 0, column: 0)?.scalars == TerminalScalars(fixture.unicodeScalars))
             #expect(terminal.geometry.rows[0].cells.map(\.kind) == [
                 .narrow, .padding, .padding, .padding,
             ])

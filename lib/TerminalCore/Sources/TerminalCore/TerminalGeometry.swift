@@ -65,7 +65,7 @@ public struct TerminalCell: Equatable, Sendable {
     public let kind: TerminalCellKind
 
     /// Preserves the exact decoded scalar sequence without normalization.
-    public let scalars: [Unicode.Scalar]
+    public let scalars: TerminalScalars
 
     /// Retains semantic presentation for written content or background-color erase padding.
     public let style: TerminalStyle
@@ -76,7 +76,7 @@ public struct TerminalCell: Equatable, Sendable {
     /// Creates a read-only inspection cell while keeping hyperlink absence source-compatible.
     public init(
         kind: TerminalCellKind,
-        scalars: [Unicode.Scalar],
+        scalars: TerminalScalars,
         style: TerminalStyle,
         hyperlink: TerminalHyperlink? = nil
     ) {

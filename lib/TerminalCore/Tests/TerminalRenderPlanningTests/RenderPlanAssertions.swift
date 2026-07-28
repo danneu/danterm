@@ -78,6 +78,13 @@ func assertCanonical(
         #expect(run.row >= 0 && run.row < plan.rows, sourceLocation: sourceLocation)
         #expect(run.startColumn >= 0, sourceLocation: sourceLocation)
         #expect(run.cells.isEmpty == false, sourceLocation: sourceLocation)
+        // A text run exists to carry glyphs, so a payload-free cell in one would draw
+        // nothing while still consuming grid columns. The planner filters empty cells
+        // out; this holds that filter to the whole corpus rather than one test's runs.
+        #expect(
+            run.cells.allSatisfy { $0.scalars.isEmpty == false },
+            sourceLocation: sourceLocation
+        )
         #expect(run.cells.allSatisfy { $0.columnWidth == 1 || $0.columnWidth == 2 }, sourceLocation: sourceLocation)
         #expect(run.startColumn + width <= plan.columns, sourceLocation: sourceLocation)
         if let previousText {

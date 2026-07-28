@@ -320,7 +320,7 @@ struct TerminalResizeTests {
         cluster.feed(Array(("a" + family + "b").utf8))
         cluster.resize(columns: 2, rows: 3)
         #expect(cluster.geometry.rows[0].cells.last?.kind == .spacerHead)
-        #expect(cluster.cell(row: 1, column: 0)?.scalars == Array(family.unicodeScalars))
+        #expect(cluster.cell(row: 1, column: 0)?.scalars == TerminalScalars(family.unicodeScalars))
         expectValidGrid(cluster)
     }
 

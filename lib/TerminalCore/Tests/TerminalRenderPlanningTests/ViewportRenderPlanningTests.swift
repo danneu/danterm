@@ -22,7 +22,7 @@ struct ViewportRenderPlanningTests {
         )
 
         #expect(plan.rows == 3)
-        #expect(plan.textRuns.flatMap(\.cells).map(\.scalars) == [
+        #expect(plan.textRuns.flatMap(\.cells).map { Array($0.scalars) } == [
             Array("a".unicodeScalars),
             Array("b".unicodeScalars),
             Array("c".unicodeScalars),
@@ -46,7 +46,7 @@ struct ViewportRenderPlanningTests {
             )
         )
 
-        #expect(plan.textRuns.flatMap(\.cells).map(\.scalars) == [
+        #expect(plan.textRuns.flatMap(\.cells).map { Array($0.scalars) } == [
             Array("a".unicodeScalars),
             Array("b".unicodeScalars),
             Array("c".unicodeScalars),

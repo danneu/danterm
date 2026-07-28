@@ -25,6 +25,30 @@ struct BoxDrawingSpriteExecutionTests {
         #expect(actual == "nlnl/nhnh/lnln/hnhn/Hl3/Hh3/Vl3/Vh3/Hl4/Hh4/Vl4/Vh4/nlln/nhln/nlhn/nhhn/nnll/nnlh/nnhl/nnhh/llnn/lhnn/hlnn/hhnn/lnnl/lnnh/hnnl/hnnh/llln/lhln/hlln/llhn/hlhn/hhln/lhhn/hhhn/lnll/lnlh/hnll/lnhl/hnhl/hnlh/lnhh/hnhh/nlll/nllh/nhll/nhlh/nlhl/nlhh/nhhl/nhhh/llnl/llnh/lhnl/lhnh/hlnl/hlnh/hhnl/hhnh/llll/lllh/lhll/lhlh/hlll/llhl/hlhl/hllh/hhll/llhh/lhhl/hhlh/lhhh/hlhh/hhhl/hhhh/Hl2/Hh2/Vl2/Vh2/ndnd/dndn/ndln/nldn/nddn/nnld/nndl/nndd/ldnn/dlnn/ddnn/lnnd/dnnl/dnnd/ldln/dldn/dddn/lnld/dndl/dndd/ndld/nldl/nddd/ldnd/dlnl/ddnd/ldld/dldl/dddd/ATL/ATR/ABR/ABL/DR/DF/DX/nnnl/lnnn/nlnn/nnln/nnnh/hnnn/nhnn/nnhn/nhnl/lnhn/nlnh/hnln")
     }
 
+    @Test("A box-drawing scalar carrying a combining mark is not reduced to its first scalar")
+    func combiningMarkTakesFontPath() throws {
+        // Intent: a multi-scalar cell whose first scalar is a box-drawing character must
+        //   not be drawn as the procedural sprite for that first scalar; it must take the
+        //   font path so the rest of the cluster can affect the result.
+        // Why it exists: the executor gates procedural routing on the cell payload having
+        //   exactly one scalar. That gate was pinned by a single test, in the Geometric
+        //   Shapes family only, which left it resting on one family's behavior while the
+        //   cell payload representation underneath it changed.
+        // Scenario: rendering U+2500 followed by a combining acute must differ from the
+        //   bare U+2500, which draws the procedural horizontal line.
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
+        let cell = cellRect(row: 0, column: 0, metrics: metrics)
+        let bare = try renderBitmap(
+            plan: makePlan(input: "\u{2500}", columns: 2, rows: 1),
+            metrics: metrics
+        )
+        let combined = try renderBitmap(
+            plan: makePlan(input: "\u{2500}\u{301}", columns: 2, rows: 1),
+            metrics: metrics
+        )
+        #expect(bare.pixels(in: cell) != combined.pixels(in: cell))
+    }
+
     @Test("All 128 Box Drawing scalars render as cell-local foreground sprites", arguments: [1.0, 2.0])
     func exhaustiveBitmapCoverage(scale: CGFloat) throws {
         let metrics = try #require(TerminalRenderMetrics(displayScale: scale))
