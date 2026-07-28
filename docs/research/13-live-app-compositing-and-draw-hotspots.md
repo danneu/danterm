@@ -1,7 +1,8 @@
 # Live-app compositing and draw hotspots under interactive scroll
 
-Research started: 2026-07-28. **Status: Phase 1 closed (F5, F6). Phase 2
-unblocked. Four ranked candidates proposed, none implemented, none benchmarked.**
+Research started: 2026-07-28. **Status: Phase 1 closed (F5, F6). Phase 2 in
+progress: R2 implemented and benchmarked (F8, H2 closed); R1+R1b still open, R4
+gated behind R1, R3 gated behind Phase 2.**
 
 ## Purpose
 
@@ -444,6 +445,18 @@ itself.
 Confirmed if `just benchmark-quick 4ca27ee terminal-feed` reads faster and the
 tuple-destroy node is absent from a re-post of the PTY tree.
 
+**Status: CONFIRMED and closed 2026-07-28 (F8).** Both conditions met, the
+second by a stronger instrument than the one written here. Absence was shown by
+diffing release-built `Terminal.swift.o` at the baseline and after -- the
+`outlined destroy of (InactivePrimaryScreen?, InactivePrimaryScreen?)` symbol is
+gone from the *binary*, which entails its absence from any tree without needing
+a live capture to sample it. The competing "getter tearing down its own local"
+explanation is dead: removing the comparisons removed the symbol, so the
+comparisons were what produced it. The feed leg read `terminal-feed` -6.61%
+(`benchmark-confirm`, baseline `20a6eaf`) -- faster as required, though below
+D1's predicted -8% to -15%; see F8 for why the magnitude is the weaker half of
+this result.
+
 ### H3 -- the main thread's largest single stall is waiting on CoreAnimation's glyph-bounds computation, and the bounds are computed by copying glyph outlines
 
 `CABackingStoreGetFrontTexture` is 1,079 main-thread samples, of which **1,064
@@ -563,13 +576,19 @@ Phase 3.
       result. **Record R1 and R1b's node shares separately in the re-posted draw
       tree even though the benchmark verdict is joint** -- the tree is what keeps
       the two attributions apart when the number is a single figure.
-- [ ] **R2.** Replace both nil tests. Audit `Terminal` test coverage for
-      alternate-screen entry/exit and cursor-row projection *before* writing
-      code, and record the audit -- the change alters how a screen-state test is
-      spelled, and the behavior it must preserve is that
-      `damageActionSnapshot.isAlternateScreenActive` and the `cursorStreamRow`
-      branch stay identical across enter, exit, and resize. Run
-      `just benchmark-quick <base> terminal-feed`. Record in **F8**.
+- [x] **R2.** **Done 2026-07-28: F8.** All thirty nil tests replaced, via
+      in-place tag matching rather than a stored flag, so `Terminal` gained no
+      field. The coverage audit ran first and found a real hole -- the
+      primary-vs-alternate cursor branch was unpinned, because the alt tests
+      assert cursors only on empty scrollback and the alt tests that build
+      scrollback never assert the cursor -- so the four proof obligations landed
+      in their own commit (`c13abc3`) ahead of the change (`cd57fa7`) and were
+      mutation-verified against an inverted branch. `benchmark-confirm` was run
+      in place of the prescribed `benchmark-quick`; `terminal-feed` **-6.61%**,
+      below the predicted -8% to -15%, with `scrollback-stream` equivalent and
+      the three render-bound workloads null as predicted. The
+      `outlined destroy of (InactivePrimaryScreen?, InactivePrimaryScreen?)`
+      symbol is gone from the release binary.
 - [ ] **R4, only after R1 is measured and committed.** Record in **F9**.
 
 ### Phase 3 -- decide what to do about compositing
@@ -953,6 +972,73 @@ Phase 3.
 - Uncertainty: low. Two captures, same process, same gesture, consistent shares.
   The residual uncertainty is workload shape (btop specifically), not sampling.
 - Next action: Phase 2. R1+R1b and R2 are both unblocked.
+
+### F8 -- R2 landed: the tuple destroy is gone from the binary, and `terminal-feed` moved less than predicted
+
+- Status: **closed.** R2 implemented and committed. F7 is reserved for R1's
+  result and is not yet written; the gap is intentional.
+- Source: commits `c13abc3` (coverage) and `cd57fa7` (change), against baseline
+  `20a6eaf`, which was resolved and recorded *before* any implementation edit --
+  not inferred from `HEAD` afterwards.
+- Change made: all thirty `inactivePrimaryScreen == nil` / `!= nil` sites now
+  route through the existing `isAlternateScreenActive`, which matches the
+  optional's tag in place (`if case .some`). D1 left the choice between in-place
+  matching and a stored flag open; **in-place matching was chosen, so `Terminal`
+  gains no field** and the growth risk D1 named as R2's way of backfiring cannot
+  arise. The four remaining `inactivePrimaryScreen` references all genuinely
+  read the payload.
+
+- Measurement 1 -- **direct confirmation of the mechanism, not a benchmark.**
+  Release-built `Terminal.swift.o` was compared at baseline and after:
+
+  ```
+  baseline: merged outlined destroy of (InactivePrimaryScreen?, InactivePrimaryScreen?)
+            merged outlined init with copy of InactivePrimaryScreen?
+  after:    merged outlined init with copy of InactivePrimaryScreen?
+  ```
+
+  The symbol F3 attributed 187 of 831 PTY-thread samples to is **absent from the
+  binary**. Only the payload copy serving the legitimate `if let` / `if var`
+  reads survives.
+
+- Measurement 2 -- `benchmark-confirm baseline=20a6eaf`:
+
+  | Workload | Verdict | Role per D1 |
+  | --- | --- | --- |
+  | `terminal-feed` | **faster, -6.61%** (2 pairs) | decider |
+  | `scrollback-stream` | equivalent, -0.13% (4 pairs) | decider |
+  | `content-churn` | inconclusive, -1.66% (4 pairs, 2 flagged outliers) | predicted null |
+  | `style-churn` | equivalent, +0.06% (4 pairs, 1 flagged outlier) | predicted null |
+  | `incremental-mixed` | inconclusive, -0.88% (6 pairs) | predicted null |
+
+- Observation 1: **the mechanism transferred; the magnitude did not, fully.**
+  D1 predicted `terminal-feed` **-8% to -15%** and got -6.61% -- outside the
+  band, in the same direction. Recorded as measured.
+- Observation 2: **doc 10/F9's boundary held exactly.** All three render-bound
+  workloads landed in the null band D1 predicted for them. Per D1's own rule this
+  is the expected result and is not read as the change doing nothing.
+- Observation 3: `scrollback-stream` at -0.13% is the second decider passing in
+  the weak sense -- no regression. D1 named it as where a stored flag's struct
+  growth would have shown up; since no field was added, it had nothing to detect.
+- Inference: **H2 is confirmed and closed.** The comparison was real, its cost
+  was real, and removing it is worth a single-digit percentage on the one
+  headless workload that can see feed work.
+- Competing interpretation for the shortfall: the honest one is that F3 is a
+  *live-app PTY-thread* attribution and `terminal-feed` is a headless harness
+  with a different action mix, so 22.5% of that thread need not map onto 8-15%
+  of this workload. A second, weaker possibility is under-sampling --
+  `terminal-feed` resolved on **2 pairs, the fewest of any workload**, so its
+  interval is the widest in the table and -6.61% should be read as directional,
+  not as a point estimate.
+- Deviation from the ledger, deliberate: the ledger prescribed
+  `just benchmark-quick <base> terminal-feed`. **`benchmark-confirm` was run
+  instead**, on doc 10's own single-workload rule and 12/F8's precedent of a
+  change decided on one workload being blindsided by a second. The stricter
+  instrument cost more time and changed no verdict.
+- Uncertainty: low on the mechanism -- the symbol comparison is not statistical.
+  Medium on the magnitude, for the two reasons above.
+- Next action: none for R2. If -6.61% is ever cited as a figure rather than a
+  direction, re-run `terminal-feed` to get it off two pairs first.
 
 ## Decision log
 
