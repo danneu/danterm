@@ -293,6 +293,23 @@ private extension TerminalRenderMetrics {
     }
 }
 
+private extension Dictionary where Value == [CGRect] {
+    /// Empties every bucket in place while retaining the keys, so a hoisted
+    /// rect dictionary keeps both its hash table and each bucket's storage
+    /// across runs. `removeAll(keepingCapacity:)` on the dictionary itself would
+    /// discard the inner arrays, and the `[key, default: []]` subscript would
+    /// then allocate a fresh one per run -- exactly what hoisting removes. The
+    /// retained empty buckets stay invisible to the drawing loops, which all
+    /// guard on `rects.isEmpty == false`.
+    mutating func emptyValuesKeepingCapacity() {
+        var index = startIndex
+        while index != endIndex {
+            values[index].removeAll(keepingCapacity: true)
+            index = self.index(after: index)
+        }
+    }
+}
+
 private extension CGContext {
     func drawCursor(
         _ cursor: RenderCursor,
@@ -351,8 +368,44 @@ private extension CGContext {
         // a draw), so this pays at most one `BraillePixelLayout` construction per
         // draw that contains braille, and none for text-only draws.
         var brailleLayout: BraillePixelLayout?
+        // Per-run scratch, hoisted out of the loop so each buffer is grown at
+        // most once per draw instead of once per run (a full frame carries
+        // thousands). Emptied at the top of every iteration keeping capacity;
+        // see the reset block below for the invariant that governs them.
+        var characters: [UniChar] = []
+        var candidateCells: [(cell: RenderTextCell, column: Int)] = []
+        var fallbackCells: [(cell: RenderTextCell, column: Int)] = []
+        var spriteRects: [CGRect] = []
+        var shadedSpriteRects: [BlockElementShade: [CGRect]] = [:]
+        var geometricShapeTriangles: [GeometricShapeRenderTriangle] = []
+        var powerlinePaths: [PowerlineRenderPath] = []
+        var branchDrawingGeometries: [BranchDrawingRenderGeometry] = []
+        var legacySpriteRects: [UInt8: [CGRect]] = [:]
+        var boxDrawingStrokes: [BoxDrawingRenderStroke] = []
+        var glyphs: [CGGlyph] = []
+        var mappedGlyphs: [CGGlyph] = []
+        var positions: [CGPoint] = []
 
         for run in runs {
+            // No hoisted buffer may carry one run's contents into the next: that
+            // would redraw the earlier run's geometry in this run's foreground
+            // color. Resetting here rather than at the end of the iteration keeps
+            // that true even if a `continue` is ever added to the loop body, and
+            // every buffer added to the loop must join this sweep.
+            characters.removeAll(keepingCapacity: true)
+            candidateCells.removeAll(keepingCapacity: true)
+            fallbackCells.removeAll(keepingCapacity: true)
+            spriteRects.removeAll(keepingCapacity: true)
+            shadedSpriteRects.emptyValuesKeepingCapacity()
+            geometricShapeTriangles.removeAll(keepingCapacity: true)
+            powerlinePaths.removeAll(keepingCapacity: true)
+            branchDrawingGeometries.removeAll(keepingCapacity: true)
+            legacySpriteRects.emptyValuesKeepingCapacity()
+            boxDrawingStrokes.removeAll(keepingCapacity: true)
+            glyphs.removeAll(keepingCapacity: true)
+            mappedGlyphs.removeAll(keepingCapacity: true)
+            positions.removeAll(keepingCapacity: true)
+
             let font = switch (run.bold, run.italic) {
             case (false, false): regularFont
             case (true, false): boldFont
@@ -369,16 +422,6 @@ private extension CGContext {
                 foreground = run.foreground.cgColor(in: colorSpace)
                 colors[colorKey] = foreground
             }
-            var characters: [UniChar] = []
-            var candidateCells: [(cell: RenderTextCell, column: Int)] = []
-            var fallbackCells: [(cell: RenderTextCell, column: Int)] = []
-            var spriteRects: [CGRect] = []
-            var shadedSpriteRects: [BlockElementShade: [CGRect]] = [:]
-            var geometricShapeTriangles: [GeometricShapeRenderTriangle] = []
-            var powerlinePaths: [PowerlineRenderPath] = []
-            var branchDrawingGeometries: [BranchDrawingRenderGeometry] = []
-            var legacySpriteRects: [UInt8: [CGRect]] = [:]
-            var boxDrawingStrokes: [BoxDrawingRenderStroke] = []
             var column = run.startColumn
             for cell in run.cells {
                 // Direct single-scalar family routing. A cell can only be a sprite when it is
@@ -544,7 +587,10 @@ private extension CGContext {
                 setFillColor(foreground.copy(alpha: CGFloat(alpha) / 255) ?? foreground)
                 fill(rects)
             }
-            var glyphs = Array(repeating: CGGlyph(), count: characters.count)
+            // Grown from the emptied hoisted buffer rather than freshly allocated:
+            // CoreText fills exactly `characters.count` elements, so the buffer
+            // needs that many zeroed slots and no more.
+            glyphs.append(contentsOf: repeatElement(CGGlyph(), count: characters.count))
             if characters.isEmpty == false {
                 CTFontGetGlyphsForCharacters(
                     font,
@@ -553,8 +599,6 @@ private extension CGContext {
                     characters.count
                 )
             }
-            var mappedGlyphs: [CGGlyph] = []
-            var positions: [CGPoint] = []
             for (index, candidate) in candidateCells.enumerated() {
                 let glyph = glyphs[index]
                 guard glyph != 0 else {
