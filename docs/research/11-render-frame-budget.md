@@ -5,6 +5,12 @@ change proposed yet. Doc 13 closed on 2026-07-28 and handed over its evidence
 (see "Evidence handed over from doc 13"), which corrects this file's only sizing
 measurement and adds a whole cost this file had never measured.**
 
+**Two things a fresh reader should know before anything else.** Profile share
+overstated recoverable time by ~3x on the one node where that has been tested
+(F2), so the sums in the hypotheses below are soft. And the backend A/B -- the
+instrument this file calls the only one that can settle the 2x claim -- does not
+currently run (F3).
+
 ## Purpose
 
 This file owns one question:
@@ -53,11 +59,16 @@ feed:
   (`10/F4` versus `10/F8`). When a node survives an experiment, the experiment
   has excluded only what it actually varied.
 
-One rule specific to this file:
+Two rules specific to this file:
 
 - **Never quote a draw cost without its geometry and its scenario.** Full-frame
   and damage-clipped differ by more than an order of magnitude (F1), and cost is
   linear in cell count, so a number without both is unreadable.
+- **A profile share is an upper bound on what removing the work recovers, not an
+  estimate of it.** Earned here: removing per-draw font construction *entirely*
+  recovered about a third of its measured share (F2). Never total up unharvested
+  shares and compare the sum to the frame budget -- that is this file's central
+  question and the arithmetic does not support it.
 
 ## Trigger and current evidence
 
@@ -76,10 +87,17 @@ real 179x66 geometry against a 16.7 ms frame interval. Damage-clipped draws of
 the same content cost 1.36 ms.
 
 **The evidence boundary this file must preserve:** F1 measures a draw path doc 9
-has already shown to be unoptimized -- four `CTFont` constructions per call, no
-glyph cache, unreserved array growth. No number here may be read as the cost of
-CPU glyph rasterization *in principle*, only as the cost of the current
-implementation. That distinction is the entire difference between H2 and H3.
+has already shown to be unoptimized -- at the time, four `CTFont` constructions
+per call, no glyph cache, unreserved array growth. No number here may be read as
+the cost of CPU glyph rasterization *in principle*, only as the cost of the
+current implementation. That distinction is the entire difference between H2 and
+H3. (Two of those three have since landed; the glyph cache has not.)
+
+**Third observation, added 2026-07-28 (F2), and it is about the evidence rather
+than the app.** Removing per-draw font construction outright recovered roughly a
+third of what its profile share predicted. Since every remaining estimate on
+either side of the H2/H3 split is a profile share, this file's arithmetic is
+softer than it reads.
 
 ## Evidence handed over from doc 13
 
@@ -157,13 +175,20 @@ Three exist already; none needed to be built.
   and not the font path.
 - `just benchmark-draw-app` -- fixed-row updates through the real optimized AppKit
   draw path.
-- `scripts/terminal-benchmark.sh <workload> <backend>` -- **the backend A/B.**
-  It builds and runs the app under `DANTERM_TERMINAL_BACKEND=swift|ghostty`
-  against the same fixture workload. This is the instrument that produced the 2x
-  observation, and it is the only one that can settle it. Note its asymmetry: the
+- `scripts/terminal-benchmark.sh <workload> <backend>` -- **the backend A/B, and
+  as of F3 it does not run.** It builds and runs the app under
+  `DANTERM_TERMINAL_BACKEND=swift|ghostty` against the same fixture workload.
+  This is the instrument that produced the 2x observation, and it is the only
+  one that could settle it -- but its ghostty arm hangs before the pane's shell
+  starts, and the three `full-screen-*` redraw workloads have no ghostty code
+  path at all. **Read F3 before attempting it**: the workload name in this file
+  is an alias the script does not accept, and the redraw workloads need
+  `DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES=50`. Note also its asymmetry: the
   final-draw instrumentation records
   `{available: false, reason: "unavailable-for-ghostty-backend"}`, so a backend
-  comparison reads total process CPU, not a draw-time delta.
+  comparison reads total process CPU, not a draw-time delta. The swift arm works
+  and is reproducible (0.788 s and 0.768 s total process CPU on
+  `full-screen-content-churn`, ~4.2 s wall).
 
 **The gap doc 13 documents, restated as an instrument fact:** none of the three
 observes CoreAnimation, the `CA::CG::Queue` replay thread, the backing-store
@@ -211,10 +236,13 @@ compositing (`13/F10`), a cost H1's framing does not contain at all.
 Doc 9 has already attributed large, unexploited inefficiencies inside the CPU
 draw path, and none has been harvested:
 
-- `drawTextRuns` constructs **four `CTFont` objects on every call** (`9/H3`).
-  **Still open.**
+- ~~`drawTextRuns` constructs **four `CTFont` objects on every call** (`9/H3`).~~
+  **Landed 2026-07-28** (`5d32054`), result in F2. It moved the right way and
+  **by much less than its share predicted** -- see below.
 - There is **no glyph cache**; `CTFontGetGlyphsForCharacters` is 11% of draw
-  (`9/F3`). **Still open**, and the same `9/H3` entry.
+  (`9/F3`). **Still open**, and the same `9/H3` entry. Blocked on the
+  glyph-bearing fixture (`13/F5`), and F2 predicts it will underperform its
+  share.
 - ~~Unreserved array growth in `drawTextRuns` is 14% of draw.~~ **Landed
   2026-07-28** as doc 13's R4 (`07dd81f`), result in `13/F9`, doc 9's Phase 5
   entry closed. Thirteen per-run collections hoisted above the run loop.
@@ -229,11 +257,20 @@ size H2 predicted, and it is the strongest evidence this hypothesis has.
 
 **What it does not settle.** H2's claim is not "the draw path can be made
 faster" -- that is now demonstrated -- but "made fast *enough*", and the harvest
-is not finished: `9/H3`'s two changes remain, and they are the ones that bear on
+is not finished: `9/H3`'s glyph cache remains, and it is the half that bears on
 glyph work specifically. More importantly, `13/F10` showed the compositing stall
 did **not** shrink alongside the draw subtree; it grew. Whatever H2's remaining
 harvest is worth, it is worth it against a main thread where a third of busy time
 is a wait H2's mechanism does not touch.
+
+**And F2 has now weakened H2's arithmetic.** Every estimate of what remains here
+is a `sample` share, and the one node whose share has been tested against its
+actual removal recovered about a third of what the share implied. H2's remaining
+headroom is therefore smaller than the profiles read, by an unknown factor that
+is at least not zero. This does not refute H2 -- the three landed changes really
+did take `drawTextRuns` from 46.3% to 35.7% -- but it means "add up the
+unharvested shares and compare to the budget" is not a valid way to decide this
+hypothesis, and that was the implicit method.
 
 Supporting evidence: doc 9's original attributions, plus `13/F9` and `13/F10`
 for the part that landed.
@@ -290,14 +327,15 @@ experiment that could refute it. `10/F8` corrected `10/F4`'s attribution;
 **Provisional, and deliberately unambitious: do doc 9's existing work before
 opening anything new here.**
 
-1. **Harvest `9/H3`.** Per-draw `CTFont` construction and a glyph cache are
-   already attributed, already sized, and belong to a file that is already open.
-   Nothing in this file should start before they land. *(The unreserved array
-   growth that used to share this item landed on 2026-07-28 as doc 13's R4;
-   `9/H3` is the whole of what remains.)*
-2. **Re-measure the backend A/B.** One run of
+1. **Harvest `9/H3`.** *(Per-draw `CTFont` construction landed 2026-07-28,
+   `5d32054`, F2. The glyph cache is what remains, and it is now **gated behind
+   item 3** -- the fixture cannot execute it, so it cannot be measured first.)*
+2. **Re-measure the backend A/B.** ~~One run of
    `scripts/terminal-benchmark.sh content-churn swift|ghostty` replaces a
-   remembered "2x" with a current number, and it costs minutes.
+   remembered "2x" with a current number, and it costs minutes.~~ **It does not
+   cost minutes and that command does not run** (F3). Either repair the ghostty
+   arm, retire it, or take the figure from a human-paced `sample` capture and
+   accept doc 13's limits on it.
 3. **Fix the fixture before re-running F1.** `13/F5` established that
    `benchmark-draw`'s plan reaches the font path zero times, so re-running F1
    after a *glyph-cache* harvest would measure a change the fixture cannot
@@ -323,11 +361,21 @@ repeat exactly the error those corrections caught.
 
 - [x] Measure the CPU draw path headlessly, both scenarios, both grids. Result:
   F1.
-- [ ] **Re-measure the 2x claim.** It comes from the observation that opened doc
-  10 and has not been reproduced since; three feed optimizations have landed in
-  the meantime. Run `scripts/terminal-benchmark.sh content-churn swift` against
-  `... content-churn ghostty` and compare total process CPU. Until this exists,
-  "2x" is a remembered figure, not a current measurement.
+- [ ] **Re-measure the 2x claim. BLOCKED on instrument repair -- see F3.** It
+  comes from the observation that opened doc 10 and has not been reproduced
+  since; three feed optimizations have landed in the meantime. Until this
+  exists, "2x" is a remembered figure, not a current measurement.
+  - Attempted 2026-07-28. **The command as written above cannot be run**:
+    `content-churn` is a compare-harness alias, the script spells it
+    `full-screen-content-churn`, and that workload needs
+    `DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES=50`. The swift arm then works
+    (0.788 s / 0.768 s process CPU). The **ghostty arm does not run at all** --
+    the redraw workloads have no ghostty code path, and on corpus workloads the
+    pane's shell hangs in `/usr/bin/login`. F3 records what was eliminated;
+    don't re-derive it.
+  - Next concrete step: `sudo sample` the hung root-owned `login` pid, or
+    decide to retire the arm. A human-paced `btop`/`sample` capture is the
+    available substitute for the figure itself.
 - [ ] Confirm the real geometry figure rather than extrapolating: add 179x66 to
   `DrawBenchmarkGrid.standard`, or record why the two standard grids suffice.
 - [ ] Establish how often a full-frame draw actually happens in
@@ -349,11 +397,17 @@ repeat exactly the error those corrections caught.
   **Partially satisfied as of 2026-07-28.** The unreserved array growth landed
   (doc 13's R4, `13/F9`), as did two changes doc 13 found independently
   (`13/R1`, `13/R2`); together they took live `drawTextRuns` from 46.3% to 35.7%
-  of main-thread busy (`13/F10`). **`9/H3` -- per-draw `CTFont` construction and
-  the missing glyph cache -- is what remains, and it is the half that bears on
-  glyph work.** Deciding H2 versus H3 before it lands would still be deciding on
-  an implementation nobody has tried to make fast, and now also on a fixture that
-  cannot execute the change (`13/F5`).
+  of main-thread busy (`13/F10`). Per-draw `CTFont` construction landed too
+  (`5d32054`, F2). **The missing glyph cache is the whole of what remains, and
+  it is the half that bears on glyph work.** Deciding H2 versus H3 before it
+  lands would still be deciding on an implementation nobody has tried to make
+  fast, and on a fixture that cannot execute the change (`13/F5`).
+  - **What F2 changed about this gate.** The gate was written assuming the
+    harvest's value could be read off the profile shares. It cannot: removing
+    the one node that has been tested recovered ~3x less than its share. So
+    satisfying this gate now requires *measuring* the glyph cache after the
+    fixture exists, not estimating it -- and a small measured result would be a
+    real result, not a failure to harvest properly.
 
 ### Phase 3 -- decide
 
@@ -443,9 +497,158 @@ repeat exactly the error those corrections caught.
 - Next action: the unchecked Phase 1 items -- which `13/F5` has now grown by one,
   the glyph-bearing fixture -- then the Phase 2 gate.
 
+### F2 -- removing per-draw `CTFont` construction entirely recovered under a third of its profile share
+
+- Status: recorded. Directional comparison, confirmed by non-overlapping repeat
+  runs on two of four scenarios. **Its value is calibration, not the speedup.**
+- Date and investigator: 2026-07-28, Claude (agent).
+- Commit and worktree state: `5d32054` (the change itself); measured as working
+  tree versus `git stash` of the same tree, so the two arms differ only by this
+  change. `docs/research/README.md` was modified and untracked `notes.md` /
+  `plans/wip/*` were present in both arms; none enters the build.
+- Change measured: `9/H3`'s first half. `drawTextRuns` built four `CTFont`
+  objects per call via `metrics.font(bold:italic:)`; the faces now live on
+  `TerminalRenderMetrics` as a `TerminalFontSet` built once per geometry sync.
+  A draw now constructs no fonts at all -- this is removal, not reduction, which
+  is what makes the comparison a clean test of the profile share.
+- Command: `just benchmark-draw 25`, **three runs per arm**, arms interleaved
+  A/B/B/A to spread thermal drift. Per-draw microseconds, median of 25
+  iterations within each run.
+
+  | Grid | Scenario | Baseline (3 runs) | Candidate (3 runs) | Median delta |
+  | --- | --- | --- | --- | ---: |
+  | 80x24 | full-frame | 13.85 13.93 14.31 | 13.47 13.60 14.07 | -2.4%, overlaps |
+  | 80x24 | damage-clipped | 0.663 0.666 0.693 | 0.602 0.610 0.621 | **-8.4%** |
+  | 160x50 | full-frame | 241.6 247.0 247.6 | 233.8 244.4 245.3 | -1.1%, overlaps |
+  | 160x50 | damage-clipped | 2.118 2.128 2.212 | 2.005 2.051 2.068 | **-3.6%** |
+
+- Repeatability: on both damage-clipped scenarios every candidate run is below
+  every baseline run, so the direction holds without needing the medians. Both
+  full-frame scenarios overlap and get **no verdict**. The repeat capture was
+  taken specifically because a single pair put the smaller delta inside
+  run-to-run drift, which was 4% on the first pairing -- larger than the effect.
+- Observation 1: **the shape matches `9/F3` exactly.** Font construction was a
+  fixed per-draw cost, so removing it is invisible on a large draw and visible
+  on a small one. `9/F3` predicted this in words ("small when a draw does a lot
+  of glyph work, dominant when it does little") and the split across the four
+  scenarios is that prediction reproducing.
+- Observation 2: **the magnitude does not match.** `9/F3` put
+  `CTFontCreateCopyWithSymbolicTraits` + `CTFontCreateWithName` at **19.5% +
+  4.6% and 20.3% + 5.5%** of draw across two incremental profiles -- a tight
+  repeat. Removing that work outright recovered **3.6-8.4%** on the comparable
+  scenarios. The gap is roughly **3x**.
+- Inference, and it is the reason this finding exists: **profile share
+  overstated recoverable time by about 3x on this node.** `9/F3` recorded
+  precisely this as its competing interpretation -- "CoreText may already cache
+  internally, in which case the observed cost is the wrapper and the retain
+  traffic rather than real font construction" -- and this measurement is the
+  first evidence that decides it. `9/F3` argued against its own competing
+  reading on the grounds that `TFont::TFont` and
+  `TDescriptor::CreateMatchingDescriptor` appear in the subtree; that argument
+  is now known to be insufficient, because construction being real does not
+  make it the part that dominates.
+- **Consequence for this file, which is larger than the change.** Six draw-path
+  optimizations have been selected and justified by profile share. If share
+  systematically overstates recoverable time on this path, then H2's remaining
+  headroom is smaller than the profiles imply, and every unharvested estimate in
+  H2 -- notably `CTFontGetGlyphsForCharacters` at 9-12% across four profiles --
+  should be read with a discount rather than at face value. That cuts toward H3
+  on the optimize-or-replace question, without settling it.
+- **Scope of the calibration, stated so it is not over-applied.** One node, one
+  instrument, one fixture. It does not license a 3x discount on every share in
+  doc 9 or doc 13. It does establish that the discount is not zero, which is
+  what nobody had shown. Note also that the two instruments differ: `9/F3`'s
+  shares come from live `sample` captures, F2's deltas from headless
+  `benchmark-draw`, and `13/F5` means that fixture reaches no glyphs -- so part
+  of the gap could be the fixture rather than the attribution.
+- Absolute magnitude, for honesty about the change itself: **~0.07-0.14 us saved
+  per damage-clipped draw**, against a 16.7 ms frame budget. It is unmeasurable
+  in use. The change earns its place by removing a 20-25% node from future draw
+  profiles, sharpening attribution for everything measured after it -- not by
+  the time it saves.
+- Uncertainty: low on the direction (non-overlapping runs), medium on the 3x
+  factor (two instruments, and `13/F5`'s fixture limitation applies to one of
+  them), low on the conclusion that the discount is real and non-zero.
+- Next action: `9/H3`'s second half, the glyph cache, still needs the
+  glyph-bearing fixture before it can be measured at all. When it is measured,
+  F2 predicts it will underperform its 9-12% share.
+
+### F3 -- the backend A/B instrument does not currently run, and its invocation is not what this file records
+
+- Status: recorded. **Negative result about an instrument, not about the app.**
+  Logged under this file's inherited rule to record inconclusive attempts, so
+  the next agent does not re-derive it.
+- Date and investigator: 2026-07-28, Claude (agent).
+- Commit and worktree state: `8ce4f52` plus the working tree described in F2.
+- What was attempted: Phase 1's 2x re-measure, exactly as this file prescribes
+  it -- `scripts/terminal-benchmark.sh content-churn swift` against `...
+  content-churn ghostty`, comparing total process CPU.
+- **Three durable harness facts, none of them recorded anywhere before:**
+  1. **`content-churn` is not a script workload name.** It is the
+     `benchmark-quick`/`benchmark-confirm` alias; `terminal-benchmark.sh`'s
+     closed workload set spells it `full-screen-content-churn` (likewise
+     `full-screen-style-churn`, `full-screen-incremental-mixed-churn`). Anything
+     outside that set must be a corpus key. The command as written in Phase 1
+     and in "Candidate direction" cannot be run verbatim.
+  2. **The three `full-screen-*` workloads need
+     `DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES=50` in the environment.** The
+     script defaults it to `0`, and at `0` the producer takes its corpus branch
+     and exits `unknown benchmark workload: full-screen-content-churn`. The
+     canonical invocation is in `scripts/terminal-benchmark-validation.py`
+     (~lines 934 and 1071). Setting it for a *corpus* workload breaks that arm
+     instead, so it must be gated on the workload name.
+  3. **The three redraw workloads are structurally swift-only.** The producer's
+     redraw branch (`scripts/terminal-benchmark-producer.py`, ~lines 311-380)
+     unconditionally awaits `start-ack`, `start-draw-ack`, `ready-draw-ack`,
+     per-frame `localized-draw-NNNNNN` and `final-draw` -- all Swift-backend
+     acks, with **no ghostty branch**. Only the corpus path (`run_workload`)
+     branches on backend. So `full-screen-content-churn ghostty` cannot work by
+     construction; it dies at the 20 s ack timeout. This is a harness gap, not a
+     backend behavior.
+- **The ghostty arm is separately broken, on corpus workloads too.** The pane's
+  shell never starts: libghostty's Darwin spawn wraps the shell in
+  `/usr/bin/login -q -flp <user> /bin/bash --noprofile --norc -c 'exec -l <shell>'`
+  (`.ghostty-src/src/termio/Exec.zig:1500`, unconditional on Darwin when the
+  passwd lookup succeeds), and that process sits in `Ss` indefinitely with euid
+  0. Typed text echoes only via the tty line discipline, because nothing reads
+  it.
+- **Eliminated as causes** -- each of these cost time and none needs repeating:
+  the isolated `HOME`/`TMPDIR`/`ZDOTDIR`; the launch method (direct child and
+  `open -n --env` hang identically); the CLI and IPC layers (all three
+  `pane.input` routes -- key events, paste with newline, paste plus separate
+  Enter -- arrive and echo, verified by window screenshot); libghostty and the
+  machine (the same `login` line works under a pty from an ordinary process and
+  from the installed Developer-ID-signed `DanTerm.app`); the
+  `com.apple.security.get-task-allow` entitlement (an ad-hoc rebuild without it
+  hangs the same way); and the crash-restore modal, which **never appears in the
+  harness path** -- the ephemeral isolated `HOME` has no checkpoint, so
+  `AppDelegate.swift:182` takes the `createTab` branch. The hung app was
+  confirmed to have one standard window, zero sheets, and a created pane.
+- Remaining suspects, untested: this branch's ghostty spawn path versus the
+  bundle signature (production is Developer ID + hardened runtime, the benchmark
+  bundle is ad-hoc). **The cheap next step is a `sudo sample` of the hung
+  `login` pid** -- it is root-owned, so it cannot be sampled without
+  privileges, which is where this stopped.
+- Inference: **Phase 1's 2x re-measure is blocked on instrument repair, not on
+  measurement time.** This file describes the backend A/B as "the only one that
+  can settle it"; right now it settles nothing. A human-paced `btop`/`sample`
+  capture is the available substitute and carries doc 13's limits (single
+  capture, cannot count frames).
+- Uncertainty: none on facts 1-3 or on the eliminations -- all were observed
+  directly. High on the root cause of the `login` hang.
+- Next action: either the `sudo sample`, or a decision to retire the ghostty arm
+  rather than repair it. The arm's shelf life is short: this branch exists to
+  remove libghostty, so a repeatable backend A/B is an asset that expires.
+
 ## Open questions and caveats
 
-- **The 2x figure is not currently measured.** It is inherited from the
+- **Profile share overstates recoverable time on this draw path** (F2). One node
+  measured at roughly 3x. Every unharvested estimate quoted from a `sample`
+  share -- in this file, doc 9, or doc 13 -- should carry that discount as a
+  possibility until a second node is measured the same way.
+- **The 2x figure is not currently measured** -- and as of F3 it is not
+  currently *measurable*, because the backend A/B's ghostty arm does not run.
+  It is inherited from the
   observation that opened doc 10, before three feed optimizations landed. It may
   have moved; `terminal-feed` improved 24% in the interim. Nothing in this file
   should lean on "2x" until Phase 1 re-measures it.

@@ -258,6 +258,21 @@ re-post rule is now the only gate between the change and F4's verdict.
       on `incremental-mixed` having no calibrated plan-time verdict.
 - [ ] H3 (per-draw font construction; no glyph cache). Two separable changes;
       both live in the region the draw verdict can actually see.
+      - [x] **Per-draw font construction. Done 2026-07-28** in `5d32054`; result
+            in F2 of
+            [11-render-frame-budget.md](11-render-frame-budget.md). The four
+            faces now live on `TerminalRenderMetrics`, so a draw constructs no
+            fonts at all. **It moved the right way and by far less than F3
+            predicted:** F3 put font construction at ~25% of an incremental
+            draw, and removing it outright recovered 3.6-8.4% on the comparable
+            headless scenarios, with no verdict on full-frame. That decides F3's
+            own competing interpretation in favour of "CoreText was already
+            caching, and the samples were wrapper and retain traffic" -- see the
+            amendment on F3 below.
+      - [ ] **The glyph cache. Blocked on a fixture**, not on evidence:
+            `benchmark-draw`'s plan reaches the font path zero times (`13/F5`),
+            so the change cannot be measured on it. Doc 11's Phase 1 owns the
+            glyph-bearing scenario. Expect it to underperform its 9-12% share.
 - [x] Unreserved array growth in `drawTextRuns` (F3, 14% of draw). **Done
       2026-07-28 as doc 13's R4; result in F9 of
       [13-live-app-compositing-and-draw-hotspots.md](13-live-app-compositing-and-draw-hotspots.md).**
@@ -460,6 +475,30 @@ re-post rule is now the only gate between the change and F4's verdict.
   construction is happening.
 - Uncertainty: low on attribution, unknown on how much a cache recovers.
 - Next action: Phase 5; not scheduled ahead of H1.
+- **Amendment, 2026-07-28. The font half of this finding has now been tested by
+  removing the work, and the competing interpretation above was the right one.**
+  `5d32054` moved all four faces onto `TerminalRenderMetrics`, so a draw
+  constructs no fonts whatsoever. Headless `benchmark-draw`, three runs per arm,
+  recovered **-8.4% (80x24) and -3.6% (160x50) on damage-clipped draws** with
+  every candidate run below every baseline run, and **no verdict** on either
+  full-frame scenario. Full detail in F2 of
+  [11-render-frame-budget.md](11-render-frame-budget.md).
+  - The *observation* above holds exactly: a fixed per-draw cost, invisible on
+    large draws, visible on small ones. That is the prediction reproducing.
+  - The *magnitude* does not. ~25% of an incremental draw by share, ~3.6-8.4%
+    by removal -- roughly 3x. The argument this entry used to dismiss its own
+    competing reading (that `TFont::TFont` and
+    `TDescriptor::CreateMatchingDescriptor` appear in the subtree) is
+    insufficient: construction being real does not make it the dominant part of
+    the samples attributed to it.
+  - Consequence beyond this node: **profile share overstated recoverable time
+    here by about 3x.** Both remaining Phase 5 items are sized by share alone.
+    Neither should be scored on that basis without measuring, and "unknown on
+    how much a cache recovers" now applies to the glyph half with a known
+    direction to the error.
+  - Instrument caveat: the shares are live `sample` captures and the deltas are
+    headless `benchmark-draw`, whose fixture reaches no glyphs (`13/F5`). Some
+    of the 3x could be the fixture rather than the attribution.
 
 ### F6 -- the per-cell array is retained into the frame plan, so B as specified cannot collapse it
 
@@ -899,6 +938,11 @@ experiment for the mechanism D1 believed in.
 - All shares here are `sample` attribution under active profiling. The observer
   overhead is in spec, but profiling is on, so the absolute mix differs from an
   unprofiled run.
+- **A share is an upper bound on what removing the work recovers, and the one
+  measurement of that gap puts it at ~3x** (F3's 2026-07-28 amendment). Removing
+  per-draw font construction entirely recovered about a third of its measured
+  share. Treat every unharvested estimate in this file as an over-estimate of
+  unknown size until it is measured the same way.
 - H1's recoverable fraction is unknown. Removing the allocation does not remove
   `PlannedCell` construction, and some of the 40% will remain.
 - Untracked `plans/wip/*` files were present during capture. They do not enter
@@ -908,8 +952,10 @@ experiment for the mechanism D1 believed in.
 
 ## Outcome
 
-Phases 1-4 are complete. H1 is confirmed and acted on; H2 and H3 remain evidenced
-and unscheduled in Phase 5.
+Phases 1-4 are complete. H1 is confirmed and acted on. H2 remains evidenced and
+unscheduled in Phase 5; H3 is **half harvested** -- per-draw font construction
+landed 2026-07-28 (`5d32054`, `11/F2`), the glyph cache remains and is blocked on
+a glyph-bearing fixture (`13/F5`), not on evidence.
 
 The investigation's shape changed once mid-flight and it is worth recording why.
 D1 selected a two-step sequence -- a cheap planner-local experiment, then the
