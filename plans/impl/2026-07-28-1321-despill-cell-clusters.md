@@ -1,5 +1,13 @@
 # De-spill cell clusters so `GridCell` is trivially copyable
 
+> **REVERTED. Do not implement this plan.** Implemented in `31c2f8e`, reverted in
+> `94a1528` after a five-workload `benchmark-confirm` decided `scrollback-stream`
+> slower at +6.74%. Everything below is the plan as written before that
+> measurement, kept unedited as the record of the attempt; it does not describe
+> the current code. Read [Outcome](#outcome-implemented-measured-reverted) at the
+> bottom first, and `docs/research/12-cell-representation.md` F8 for the
+> evidence. Retrying this as specified would reproduce the same result.
+
 ## Problem and evidence
 
 `Terminal.GridCell` is not POD, and `TerminalScalars` is the sole reason: its
