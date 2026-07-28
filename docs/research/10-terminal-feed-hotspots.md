@@ -1,6 +1,34 @@
 # Terminal.feed hotspots
 
-Research started: 2026-07-28.
+Research started: 2026-07-28. **Answered and closed: 2026-07-28.**
+
+## Status
+
+Both questions this file was opened to answer now have answers, so it is closed
+to new hypotheses. It stays authoritative as the record of the feed path and as
+the source of the rules in "Investigation rules", which outlive it.
+
+**What it asked, and what it found.**
+
+| Question | Answer |
+| --- | --- |
+| Where does `Terminal.feed` spend its time, and can it be reduced? | Damage snapshotting and inspection invalidation, not parsing (F1, F6). Reduced by **-24.31%** on `terminal-feed` and **-21.04%** on `scrollback-stream` (F9). |
+| Is feed why the Swift backend costs roughly 2x libghostty? | **No** (F9, D5). A quarter of the feed path is gone and the render-bound workloads moved +0.03% and +0.63%, on calibrated `equivalent` verdicts. |
+
+**Shipped:** H2 (`07e4784`, the largest single win at -13.6% on `terminal-feed`),
+H5 (`e379f25`), H6 (`4ca27ee`). **Refuted:** H1(b) (F4, D1) -- later reopened as
+backlog by F8. **Weakened by measurement rather than left open:** H1's mechanism
+(F4), H3 (F8), H4 (D3).
+
+**Where the original question goes now.** D5 hands it to the draw path: CPU glyph
+rasterization via CoreText versus libghostty's GPU-composited `IOSurfaceLayer`
+(`app/TerminalView.swift`) is the only untested explanation left for the
+render-bound gap. That belongs to doc 9's path or to a successor file, not here.
+
+**The backlog below is optional.** The four remaining candidates are ordinary
+optimization work with characterized, diminishing returns, all bidding for more
+of the same feed-bound envelope. None can move a render-bound workload. Pick one
+up on its merits; do not work the list for completeness.
 
 ## Purpose
 
@@ -330,11 +358,16 @@ nodes H1(a) could still be worth.
 and the unattributed memmove went with it, which also answers the question F4
 left open.
 
-## Candidate direction, pending evidence
+## Backlog (was: candidate direction)
 
-Ordered by measured size against implementation risk. Re-scoped 2026-07-28
-against F6, which is the current baseline; the two entries settled so far are
-struck through with their findings.
+**Demoted from a work queue to a backlog on close (D5).** Everything still open
+here is optional optimization against the feed-bound envelope, sized by F8's
+after-columns. Nothing in this list can move `content-churn` or `style-churn`,
+so nothing in it bears on the question that opened the file. If you pick one up,
+pick it for its own return, not to finish the list.
+
+Ordered by measured size against implementation risk; settled entries are struck
+through with their findings.
 
 Done:
 
@@ -438,6 +471,12 @@ the most valuable remaining RESEARCH item.
 - [ ] RESEARCH: `eraseLine` / `eraseCells` / `clearCellAndPair`, 11-17% of root
   on **both** workload shapes. Not yet attributed to a mechanism, and the only
   large node that is shape-independent.
+
+The unchecked boxes above are **backlog, not remaining work**. Phase 3 closed
+with F9; see Status at the top of this file. H3's line still reads "F4
+strengthened its evidence", which F8 reversed -- kept as written so the ledger
+stays a record of what was believed when, with the correction in H3's own
+section.
 
 ## Findings log
 
