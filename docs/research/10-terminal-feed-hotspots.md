@@ -20,10 +20,12 @@ H5 (`e379f25`), H6 (`4ca27ee`). **Refuted:** H1(b) (F4, D1) -- later reopened as
 backlog by F8. **Weakened by measurement rather than left open:** H1's mechanism
 (F4), H3 (F8), H4 (D3).
 
-**Where the original question goes now.** D5 hands it to the draw path: CPU glyph
-rasterization via CoreText versus libghostty's GPU-composited `IOSurfaceLayer`
-(`app/TerminalView.swift`) is the only untested explanation left for the
-render-bound gap. That belongs to doc 9's path or to a successor file, not here.
+**Where the original question goes now.** D5 hands it to the draw path, and
+[11-render-frame-budget.md](11-render-frame-budget.md) picks it up: it sizes the
+CPU CoreText draw at roughly 23 ms per full-frame redraw at real geometry against
+a 16.7 ms budget, which is a plausible mechanism for the null in F9. That file
+owns the optimize-or-replace decision; doc 9 stays authoritative for draw
+hotspots.
 
 **The backlog below is optional.** The four remaining candidates are ordinary
 optimization work with characterized, diminishing returns, all bidding for more
