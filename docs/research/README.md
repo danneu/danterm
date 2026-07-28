@@ -39,6 +39,11 @@ vetted, refined, or rejected.
 - **Rejected ideas are never silently removed.** Move them to a "Rejected"
   section (or mark the task `REJECTED`) with one or two lines on why, so the
   same idea is not re-litigated six months later.
+- **The file is the handoff.** An investigation usually outlives the agent
+  working it, and no agent knows in advance whether it is the one that closes
+  the file. The file -- not the conversation that produced it -- is all the
+  next agent inherits, so anything an agent knows and does not write down is
+  lost. Write as you go, not at closure; see "Write for the next agent" below.
 
 ## Required shape
 
@@ -214,6 +219,27 @@ what was rejected, and which uncertainties or follow-up tasks remain. Link the
 plan, design doc, and commits that received the settled work. If the
 investigation is abandoned or superseded, say so at the top and link its
 successor; keep the evidence and rejected paths intact.
+
+### Write for the next agent
+
+Write as though the agent who continues this file starts cold: no chat history,
+no memory of what you tried, only the file and the repo. That reader is often a
+future you with a fresh context window.
+
+- **Update mid-investigation, not only at closure.** Record a result when you
+  have it, not once the phase is done. An investigation that ends abruptly
+  should lose at most the step in progress.
+- **An `ACTIVE` task carries its in-progress state.** Note what is running or
+  half-done, what has already been tried within the task, and the next concrete
+  step. `ACTIVE` with no notes underneath tells the next agent nothing except
+  that someone started.
+- **Record inconclusive attempts, not just rejections.** A command that did not
+  reproduce the behavior, a profiler that would not attach, a benchmark whose
+  variance swamped the effect -- these are not findings-grade results and not
+  rejected ideas, but re-running them is the most common way a fresh agent
+  wastes an hour. One line under the task is enough.
+- **Prefer the file over the summary.** If you would put a fact in a hand-off
+  message, it belongs in the file first.
 
 ## Reading order for agents
 
