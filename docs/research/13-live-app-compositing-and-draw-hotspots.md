@@ -4,8 +4,9 @@ Research started: 2026-07-28. **Status: Phase 1 closed (F5, F6). Phase 2 closed
 and measured: R1+R1b (F7, H1 closed), R2 (F8, H2 closed), R4 (F9). Phase 3's
 re-capture is done (F10): the draw subtree is down 30% from F1 and the
 compositing stall did not follow it down, so R3 is the largest remaining item
-and did not inherit Phase 2's effect. One task left here -- hand the evidence to
-doc 11, which owns the optimize-or-replace decision.**
+and did not inherit Phase 2's effect. Phase 3 is closed -- the evidence is handed
+to doc 11, which owns the optimize-or-replace decision. Only Phase 4's instrument
+question remains open here.**
 
 ## Purpose
 
@@ -655,11 +656,17 @@ Phase 3.
       wait rose to 31.3% of main-thread busy. R3 did not inherit Phase 2's
       effect. A frame-count confound is recorded in F10 and is not resolvable
       with `sample`.
-- [ ] Hand F1, **F5**, F8, **F10** and H3 to doc 11 as evidence for its Phase 1 and
+- [x] Hand F1, **F5**, F8, **F10** and H3 to doc 11 as evidence for its Phase 1 and
       its H1/H3 gate. This file does not own the optimize-or-replace decision and
-      must not make it. F10 is the one that matters most for the gate: it is the
-      evidence that the compositing stall is now the binding constraint and that
-      the three landed draw-path changes did not touch it.
+      must not make it. **Done 2026-07-28.** Recorded in
+      [11-render-frame-budget.md](11-render-frame-budget.md) under "Evidence
+      handed over from doc 13", with the two consequential items amended into
+      doc 11's own F1 (F5's no-glyph fixture, F10's uncounted compositing stall)
+      and the limits travelling with them: the unthrottled-key-repeat frame
+      confound, single captures at medium uncertainty, and H3 explicitly still
+      open. Doc 11's Phase 1 grew a task (a glyph-bearing fixture), its Phase 2
+      gate is now partially satisfied, and **no direction was chosen there** --
+      the decision remains doc 11's to make.
 
 ### Phase 4 -- close the instrument gap
 
@@ -1808,8 +1815,8 @@ benchmark, it moves here with the evidence against it rather than being deleted.
 
 ## Outcome
 
-**Phases 1, 2 and 3's re-capture are closed. One task remains in this file: the
-hand-off to doc 11.** All three rankable Phase 2 candidates landed and were
+**Phases 1, 2 and 3 are closed. One task remains in this file, and it is Phase
+4's instrument question.** All three rankable Phase 2 candidates landed and were
 measured -- R1+R1b (F7, H1 closed), R2 (F8, H2 closed), R4 (F9) -- and the
 post-Phase-2 live re-capture is F10.
 
@@ -1823,17 +1830,19 @@ confound that `sample` cannot resolve; read it before citing any single number.
 
 ### Where a fresh agent should pick this up
 
-1. **Do the hand-off** -- the one open task. Carry F1, F5, F8, **F10** and H3 to
-   doc 11 as evidence for its Phase 1 and its H1/H3 gate. F10 is the load-bearing
-   one. **This file does not own the optimize-or-replace decision and must not
-   make it.**
-2. Then Phase 4: decide whether a repeatable live-compositing instrument is worth
-   building. F10 sharpened this -- the frame-count confound it could not resolve
-   is exactly what such an instrument would close. Record the decision even if it
-   is "no".
+1. ~~Do the hand-off.~~ **Done 2026-07-28.** F1, F5, F8, F10 and H3 are recorded
+   in [11-render-frame-budget.md](11-render-frame-budget.md) under "Evidence
+   handed over from doc 13". **The optimize-or-replace decision is doc 11's; this
+   file did not make it and must not.**
+2. **Phase 4, the one open task:** decide whether a repeatable live-compositing
+   instrument is worth building. F10 sharpened this -- the frame-count confound
+   it could not resolve is exactly what such an instrument would close, and doc
+   11 now depends on a cost only a human-driven `sample` can see. Record the
+   decision even if it is "no".
 3. **Do not promote R3 from here.** It is research, not a change, and D1 keeps it
-   research-only until doc 11 has it. F10 makes it the largest remaining item;
-   that is an input to doc 11's decision, not authorization to start it.
+   research-only. F10 makes it the largest remaining item and doc 11 now has that
+   evidence; that is an input to doc 11's decision, not authorization to start
+   it.
 
 Findings F1-F10 are recorded. The next free ID is **F11**.
 

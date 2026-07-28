@@ -1,7 +1,9 @@
 # Render frame budget
 
 Research started: 2026-07-28. **Status: scoped, Phase 1 partially evidenced. No
-change proposed yet.**
+change proposed yet. Doc 13 closed on 2026-07-28 and handed over its evidence
+(see "Evidence handed over from doc 13"), which corrects this file's only sizing
+measurement and adds a whole cost this file had never measured.**
 
 ## Purpose
 
@@ -25,6 +27,7 @@ Scope split from the two adjacent files:
 | --- | --- |
 | `Terminal.feed` cost | doc 10 (**closed**) |
 | Per-cell / per-draw allocation hotspots in `planFrame` and `drawRenderFrame` | doc 9 |
+| Costs visible only in a live-app profile under real input | doc 13 (**closed**) |
 | **Does the draw path fit the frame budget, and optimize-or-replace** | **this file** |
 
 The distinction from doc 9 is deliberate and narrow. Doc 9 asks *where the draw
@@ -78,6 +81,69 @@ glyph cache, unreserved array growth. No number here may be read as the cost of
 CPU glyph rasterization *in principle*, only as the cost of the current
 implementation. That distinction is the entire difference between H2 and H3.
 
+## Evidence handed over from doc 13
+
+[13-live-app-compositing-and-draw-hotspots.md](13-live-app-compositing-and-draw-hotspots.md)
+closed on 2026-07-28 and handed its evidence here, per its own Phase 3 task. It
+owns costs that appear only when the **real app** is profiled under **real user
+input**; it explicitly does not own the optimize-or-replace decision and did not
+make it. Four live `sample` captures of a person holding down-arrow in btop, plus
+one deterministic fixture probe.
+
+Two of the four items change what this file already believed. The other two are
+additive.
+
+**1. `13/F5` corrects this file's only sizing measurement, and the correction is
+material.** `benchmark-draw`'s fixture routes **every** cell to a sprite family
+and reaches the font path **zero** times: `CTFontGetGlyphsForCharacters`,
+`CTFontDrawGlyphs` and `drawTextCell` are never called, at either grid. All
+twelve of its distinct scalars are box-drawing, braille or block-element, and all
+three families are total over their coarse ranges, so routing cannot fall
+through. **F1's 15.6 ms and the ~23 ms extrapolation therefore contain no glyph
+rasterization at all** -- they are sprite fills plus per-run dictionary
+construction plus planning overhead. This is not a caveat about synthetic
+fixtures; it is a hole in the middle of the number, and it lands directly on the
+H2/H3 split, because H3 is precisely the claim that *CPU glyph rasterization has
+a floor*. See F1's caveats below, now amended.
+
+**2. `13/F10` adds a cost this file has never measured: the compositing stall.**
+F1 draws into an offscreen bitmap, so it observes no CoreAnimation and no window
+server by construction. In the live app the main thread **blocks 1,224 samples --
+31.3% of its busy time -- inside `CABackingStoreGetFrontTexture`**, synchronously
+waiting on a secondary `CA::CG::Queue` thread to replay the previous display
+list. That is not CPU; it is wait, and no instrument in "The instruments" below
+can see it. Across doc 13's three comparable captures the main-thread *draw*
+subtree fell 30% while this stall **grew**, from 25.0% to 31.3% of busy.
+
+**3. `13/H3` attributes that stall, and the attribution is stable.** The queue
+thread's dominant cost is `DrawGlyphs::compute_dod_` -> `get_glyph_bboxes` ->
+`FPFontGetGlyphIdealBounds` -> `TFPFont::CopyGlyphPath` -> a 64-entry outline
+cache: **CoreAnimation copying glyph outline paths purely to compute bounding
+boxes, and missing its cache while doing it.** Bounds computation costs 3.4x
+actual rasterization (644 samples versus 189). The share held at 42.2% of the
+queue thread against 41.6% in the first capture, through a profile in which
+everything upstream of it moved -- which is why doc 13 treats it as stable rather
+than a one-profile artifact. **`13/H3` is nonetheless still open**: confirming it
+needs an experiment that varies the `DrawGlyphs` op count or the distinct-glyph
+count per frame, and doc 13 never ran one.
+
+**4. `13/F8` is procedural evidence, not draw evidence.** It records a change
+decided on the strength of a single workload and the stricter instrument that
+checked it. It is here because this file's Investigation rules already inherit
+that discipline from doc 10; it bears on *how* this file decides, not on what it
+decides.
+
+**What the hand-over does not license.** Doc 13's own inference is that R3 -- the
+glyph-bounds thrash -- is the largest remaining item on the draw path and did not
+inherit the effect of the three landed optimizations. That is an input to the H2
+versus H3 question, **not an answer to it**, and doc 13 kept R3 research-only for
+exactly that reason. Two limits travel with the evidence and must not be dropped:
+the live workload is unthrottled key repeat, so a faster main thread produces more
+frames per second and "more compositing work" is an equally good reading of the
+stall's growth (`sample` cannot count frames); and every live figure is a single
+capture, human-paced, with the magnitudes held at medium uncertainty by doc 13
+itself.
+
 ## The instruments
 
 Three exist already; none needed to be built.
@@ -86,7 +152,9 @@ Three exist already; none needed to be built.
   into an offscreen sRGB bitmap at `displayScale: 2`, in two scenarios
   (`full-frame`, `damage-clipped`) across two grids (80x24, 160x50), with
   calibration passes so caches are warm and the measurement is steady-state.
-  This is the primary instrument for sizing and it is cheap.
+  This is the primary instrument for sizing and it is cheap. **Read `13/F5`
+  before quoting it**: its fixture draws no glyphs, so it sizes the sprite path
+  and not the font path.
 - `just benchmark-draw-app` -- fixed-row updates through the real optimized AppKit
   draw path.
 - `scripts/terminal-benchmark.sh <workload> <backend>` -- **the backend A/B.**
@@ -96,6 +164,16 @@ Three exist already; none needed to be built.
   final-draw instrumentation records
   `{available: false, reason: "unavailable-for-ghostty-backend"}`, so a backend
   comparison reads total process CPU, not a draw-time delta.
+
+**The gap doc 13 documents, restated as an instrument fact:** none of the three
+observes CoreAnimation, the `CA::CG::Queue` replay thread, the backing-store
+stall, or the window server. The first draws into a bitmap; the other two read
+process CPU. A cost worth 31.3% of live main-thread busy (`13/F10`) is invisible
+to every instrument this file has. The only thing that has ever seen it is a
+human-driven `sample` capture, which is not repeatable on demand. Doc 13's Phase
+4 owns the open question of whether a scripted live-compositing instrument is
+worth building; `13/F10` sharpened it by producing a frame-count confound that
+only such an instrument could close.
 
 ## Current hypotheses
 
@@ -118,28 +196,57 @@ being unmoved by feed work while ordinary typing feels fine.
 Confirmed if an app profile on a redraw-shaped workload at real geometry shows
 draw time at or above the frame interval.
 
+**Doc 13's captures are that app profile, at that geometry, and they neither
+confirm nor refute H1 as written.** Four live samples at 179 columns under a real
+held-key scroll (`13/F1`, `13/F10`) put `drawTextRuns` at 46.3% of main-thread
+busy falling to 35.7% after three optimizations landed -- an *attribution*, not a
+timing. `sample` reports shares of busy samples and cannot produce milliseconds
+per draw, so the one number H1 turns on is exactly the one a live capture cannot
+give. What the captures do establish is that the question is not academic: on the
+same workload the main thread *also* blocks 31.3% of its busy time waiting on
+compositing (`13/F10`), a cost H1's framing does not contain at all.
+
 ### H2 -- the gap is implementation, not architecture
 
 Doc 9 has already attributed large, unexploited inefficiencies inside the CPU
 draw path, and none has been harvested:
 
 - `drawTextRuns` constructs **four `CTFont` objects on every call** (`9/H3`).
+  **Still open.**
 - There is **no glyph cache**; `CTFontGetGlyphsForCharacters` is 11% of draw
-  (`9/F3`).
-- Unreserved array growth in `drawTextRuns` is 14% of draw (`9`, open item).
+  (`9/F3`). **Still open**, and the same `9/H3` entry.
+- ~~Unreserved array growth in `drawTextRuns` is 14% of draw.~~ **Landed
+  2026-07-28** as doc 13's R4 (`07dd81f`), result in `13/F9`, doc 9's Phase 5
+  entry closed. Thirteen per-run collections hoisted above the run loop.
 
-Those are roughly a quarter to a third of draw by doc 9's own attribution, in
-work that is constant across draws and therefore cacheable. If harvesting them
-brings a full-frame draw at real geometry under the budget, the architecture is
-adequate and no rewrite is warranted.
+**Part of this hypothesis has now been tested, and it moved the right way.**
+Three of the inefficiencies H2 names have landed -- R4 above, plus `13/R1` (the
+per-run attributes dictionary, 18.3% of live `drawTextRuns`, now reading **zero**
+samples in the live tree) and `13/R2`. On the live workload `drawTextRuns` fell
+from 46.3% to 35.7% of main-thread busy (`13/F10`), roughly a 30% reduction in
+the draw subtree. That is H2's mechanism working as advertised, at roughly the
+size H2 predicted, and it is the strongest evidence this hypothesis has.
 
-Supporting evidence: the numbers above are doc 9's, measured, and untouched.
+**What it does not settle.** H2's claim is not "the draw path can be made
+faster" -- that is now demonstrated -- but "made fast *enough*", and the harvest
+is not finished: `9/H3`'s two changes remain, and they are the ones that bear on
+glyph work specifically. More importantly, `13/F10` showed the compositing stall
+did **not** shrink alongside the draw subtree; it grew. Whatever H2's remaining
+harvest is worth, it is worth it against a main thread where a third of busy time
+is a wait H2's mechanism does not touch.
+
+Supporting evidence: doc 9's original attributions, plus `13/F9` and `13/F10`
+for the part that landed.
 
 Competing explanation: per-cell CoreText glyph rasterization has a floor that no
 amount of caching removes, and the fixed costs above are merely the visible part.
+`13/F5` sharpens this into a real problem rather than a rhetorical one -- the
+only measurement backing either side of the H2/H3 split never rasterizes a glyph,
+so *nobody has yet measured the floor H3 posits*.
 
 Confirmed if doc 9's draw-side backlog lands and F1's full-frame figure falls
-below roughly 16 ms extrapolated to 179x66.
+below roughly 16 ms extrapolated to 179x66 -- **on a fixture that reaches the font
+path**, which per `13/F5` the current one does not.
 
 ### H3 -- the gap is architectural, and compositing has to move to the GPU
 
@@ -147,6 +254,30 @@ libghostty composites a GPU-rendered `IOSurfaceLayer`
 (`app/TerminalView.swift`, the `ghostty_surface_*` path). DanTerm's Swift backend
 rasterizes glyphs on the CPU per frame. If H2's harvest is insufficient, this is
 the remaining explanation and the remaining fix.
+
+**Doc 13's hand-over cuts both ways here, and the two directions should not be
+collapsed.**
+
+*Toward H3.* The stall `13/F10` measures is a genuinely architectural cost, and
+it is one this file had never counted: the main thread waits 31.3% of its busy
+time on a CoreAnimation queue replaying a CPU display list. A GPU-composited
+surface does not build that display list and would not produce that wait. It
+survived three draw-path optimizations untouched -- indeed it grew while they
+shrank the CPU above it -- which is exactly the shape H3 predicts and H2 does
+not.
+
+*Against H3, or at least against reading the above as support.* `13/H3` attributes
+the stall not to rasterization but to CoreAnimation **computing glyph bounding
+boxes by copying outline paths**, missing a 64-entry cache while doing so, at 3.4x
+the cost of the rasterization itself. That is a cache-shaped problem inside the
+compositor, not a floor under CPU rasterization -- which makes it, on its face, an
+H2-shaped finding wearing H3's clothes. Doc 13 kept it research-only (its R3) and
+never ran the experiment that would confirm the attribution. And `13/F5` means
+the sizing number this file would weigh against it has never rasterized a glyph.
+
+The honest position: **the compositing stall is now the largest single item on
+the live main thread, and nobody knows yet whether it is architectural or a cache
+miss.** That is a question to answer, not a verdict to record.
 
 Deliberately **not** scheduled first. It is by far the largest change available
 and it would be justified by an argument this file has not yet made -- and doc
@@ -159,14 +290,22 @@ experiment that could refute it. `10/F8` corrected `10/F4`'s attribution;
 **Provisional, and deliberately unambitious: do doc 9's existing work before
 opening anything new here.**
 
-1. **Harvest `9/H3` and the unreserved array growth.** Per-draw `CTFont`
-   construction and a glyph cache are already attributed, already sized at
-   roughly a quarter of draw between them, and belong to a file that is already
-   open. Nothing in this file should start before they land.
+1. **Harvest `9/H3`.** Per-draw `CTFont` construction and a glyph cache are
+   already attributed, already sized, and belong to a file that is already open.
+   Nothing in this file should start before they land. *(The unreserved array
+   growth that used to share this item landed on 2026-07-28 as doc 13's R4;
+   `9/H3` is the whole of what remains.)*
 2. **Re-measure the backend A/B.** One run of
    `scripts/terminal-benchmark.sh content-churn swift|ghostty` replaces a
    remembered "2x" with a current number, and it costs minutes.
-3. **Re-run F1 and decide.** Under budget at real geometry closes this file in
+3. **Fix the fixture before re-running F1.** `13/F5` established that
+   `benchmark-draw`'s plan reaches the font path zero times, so re-running F1
+   after a *glyph-cache* harvest would measure a change the fixture cannot
+   execute -- the same class of error doc 10 made when it verified feed work on
+   `content-churn` (`10/F9`), which this file's Investigation rules already
+   forbid. Either add a glyph-bearing scenario or record why the sprite-only
+   figure is the one that governs.
+4. **Re-run F1 and decide.** Under budget at real geometry closes this file in
    H2's favour. Still over it, and H3 becomes a design question -- at which point
    it graduates to `docs/design/`, because "replace CoreText rasterization with
    GPU compositing" is an architecture decision, not a research task.
@@ -194,20 +333,38 @@ repeat exactly the error those corrections caught.
 - [ ] Establish how often a full-frame draw actually happens in
   `content-churn` and `style-churn`. H1's competing explanation turns on this
   and nothing currently measures it.
+- [ ] **Give `benchmark-draw` a scenario that reaches the font path**, or record
+  why the sprite-only fixture is the right one. `13/F5` proved the current plan
+  routes every cell to a sprite family and calls `CTFontDrawGlyphs` zero times,
+  so F1's figure omits glyph rasterization entirely. Until this is settled no
+  re-run of F1 can test H2's glyph-cache half or H3's floor.
+- [ ] **Decide what to do with the compositing stall (`13/F10`, `13/H3`).** It is
+  31.3% of live main-thread busy, no instrument here can see it, and it is
+  unattributed between "architectural" and "a 64-entry cache miss inside
+  CoreAnimation". Doc 13 handed it over as its R3, deliberately unstarted.
 
 ### Phase 2 -- direction gate
 
 - [ ] **Gate: harvest doc 9's draw-side backlog before deciding anything here.**
-  `9/H3` (per-draw `CTFont` construction, no glyph cache) plus the unreserved
-  array growth are cheap, already-attributed, and worth roughly a quarter of
-  draw. Deciding H2 versus H3 before they land would be deciding on an
-  implementation nobody has tried to make fast.
+  **Partially satisfied as of 2026-07-28.** The unreserved array growth landed
+  (doc 13's R4, `13/F9`), as did two changes doc 13 found independently
+  (`13/R1`, `13/R2`); together they took live `drawTextRuns` from 46.3% to 35.7%
+  of main-thread busy (`13/F10`). **`9/H3` -- per-draw `CTFont` construction and
+  the missing glyph cache -- is what remains, and it is the half that bears on
+  glyph work.** Deciding H2 versus H3 before it lands would still be deciding on
+  an implementation nobody has tried to make fast, and now also on a fixture that
+  cannot execute the change (`13/F5`).
 
 ### Phase 3 -- decide
 
 - [ ] Re-run F1 after the harvest. Under budget at real geometry closes this file
   in H2's favor; still over it promotes H3 to a design question and hands it to a
-  design doc rather than a research one.
+  design doc rather than a research one. **Two conditions on this task that did
+  not exist when it was written:** the re-run needs a glyph-bearing fixture
+  (`13/F5`), and "under budget" must now account for a compositing stall the
+  instrument does not measure (`13/F10`) -- a draw that fits 16.7 ms of CPU still
+  misses the frame if the main thread then blocks a third of its time waiting on
+  the compositor.
 
 ## Findings log
 
@@ -261,7 +418,30 @@ repeat exactly the error those corrections caught.
   into an offscreen bitmap rather than through AppKit's real surface. The first
   is appropriate (it is the shape that opened both files); the third means the
   absolute figure omits whatever compositing costs the window server adds.
-- Next action: the two unchecked Phase 1 items, then the Phase 2 gate.
+- **Amendment, 2026-07-28, from `13/F5` and `13/F10`. Both of the caveats above
+  understated their case, and neither is a matter of degree.**
+  1. "btop-shaped and synthetic" does not say what the probe found: the fixture
+     routes **every cell to a sprite family** and reaches
+     `CTFontGetGlyphsForCharacters` / `CTFontDrawGlyphs` / `drawTextCell`
+     **zero times**, at both grids. All twelve distinct scalars are box-drawing,
+     braille or block-element, and all three families are total over their coarse
+     ranges. So 15.6 ms and the ~23 ms extrapolation are **sprite fills plus
+     per-run dictionary construction plus planning overhead, with glyph
+     rasterization entirely absent** -- and `CTFontDrawGlyphs` was 17.8% of
+     `drawTextRuns` in the live capture that measured it (`13/F2`). The fixture
+     is defensible for what it was built for (run fragmentation and sprite
+     geometry); the error is reading its output as "the cost of a btop-shaped
+     draw".
+  2. "omits whatever compositing costs the window server adds" is now quantified,
+     and it is not a rounding term: in the live app the main thread blocks
+     **1,224 samples, 31.3% of busy**, waiting on the CoreAnimation replay queue
+     (`13/F10`). The offscreen bitmap does not merely omit a small addend -- it
+     omits the largest single item on the live main thread.
+
+  Neither amendment touches the measurement. F1's numbers are correct for what
+  they measure; what they measure is narrower than the finding claimed.
+- Next action: the unchecked Phase 1 items -- which `13/F5` has now grown by one,
+  the glyph-bearing fixture -- then the Phase 2 gate.
 
 ## Open questions and caveats
 
@@ -276,3 +456,21 @@ repeat exactly the error those corrections caught.
 - **`benchmark-draw`'s grids do not include real geometry.** Everything about
   179x66 here is extrapolation from a verified straight line, which is defensible
   but is not a measurement.
+- **`benchmark-draw`'s fixture draws no glyphs** (`13/F5`). This is the single
+  most important caveat in this file and it is younger than F1, so anything
+  written before 2026-07-28 that quotes 15.6 ms or 23 ms should be read with it
+  in hand. It does not make F1 wrong; it makes F1 narrower than the sentence
+  "a full-frame CPU draw costs 15.6 ms" suggests.
+- **A third of live main-thread busy time is invisible to every instrument
+  here** (`13/F10`). The blocked wait on CoreAnimation is not CPU and not draw
+  time; it will not appear in `benchmark-draw`, `benchmark-draw-app`, or a
+  backend CPU comparison. Any statement of the form "the draw path now fits the
+  budget" that rests only on those instruments is unsupported on the live
+  workload.
+- **`13/H3` is unconfirmed and this file must not launder it.** The glyph-bounds
+  attribution is stable across four captures and doc 13 believes it, but the
+  experiment that would confirm it -- varying the `DrawGlyphs` op count or the
+  distinct-glyph count and showing both nodes move together -- has never been
+  run. Doc 13 kept it research-only. Inheriting it as settled would be exactly
+  the attribution error `10/F8` corrected, which is the error this file's Phase 2
+  gate exists to prevent.
