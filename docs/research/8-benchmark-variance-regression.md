@@ -44,7 +44,23 @@ Research started: 2026-07-27.
 > | pin frequency or core affinity | **F14** -- it is frequency, and macOS exposes no userspace floor |
 > | **pacer holding occupancy constant** | **F17** -- built, measured twice, made it worse |
 >
-> ### Next action: recalibration helps `quick` only -- `confirm` is not cheaply recoverable (F20)
+> ### Next action: graduate D1/D2 to `docs/design/`. Everything else is closed.
+>
+> The investigation is finished. F26 discharged the last blocked item (F7), F27
+> reopened the threshold grid so a screen can express what the headless
+> instrument actually resolves, and the Phase 5 and Phase 6 ledgers are
+> reconciled against D2 -- most of what looked open there was mooted when D2 was
+> taken and simply never struck. **One item is genuinely outstanding:** D1 (the
+> mechanism) and D2 (the routing decision plus its accepted coverage gap) live
+> only in this research doc, and belong in `docs/design/`.
+>
+> **F19 is deliberately parked, not forgotten.** Its stated hypothesis is
+> refuted -- three shell-level models exonerate the wrapper's shape and `cleanup`
+> is bounded at ~2.5 s by construction -- so any future attempt should start at
+> the GUI app, not the shell, and should not re-test the trap placement or the
+> polling loop. Do not change the wrapper's teardown on the current evidence.
+>
+> ### Recalibration was the old next action; D2 declined it (F20)
 >
 > **The earlier "48 pairs recovers 1.75%" recommendation is WITHDRAWN by F20.**
 > It was screened against only the A/A false-positive rate at a 5% injected
@@ -94,8 +110,10 @@ Research started: 2026-07-27.
 > compiled arms, `dlopen`ed into one driver and alternated ABBA, give **paired
 > SD 0.719%** with -0.023% bias -- against the GUI benchmark's 3.98% degraded and
 > 1.49% clean. At the frozen pair counts: `quick` **2 pairs @ 1.05%** (~5 s) and
-> `confirm` **6 pairs @ 0.80%** (~16 s), both detection 1.00, both bottoming out
-> on the predeclared threshold grid rather than on the measurement. A 6% level
+> `confirm` **6 pairs @ 0.80%** (~16 s), both detection 1.00 -- but both of those
+> figures were the *grid floor*, not the measurement. **F27 extended the grids to
+> 0.30% and re-screened: the honest answers are 1.15% at 2 pairs and 0.85% at 6**,
+> i.e. F22's floors flattered the instrument by a step or two. A 6% level
 > excursion in one process produced the *smallest* paired deviation of the six,
 > which is the common-mode claim holding for separately built arms.
 >
@@ -130,8 +148,11 @@ Research started: 2026-07-27.
 >
 > It does **not** cover damage *generation* -- which rows `setNeedsDisplay` and
 > AppKit's coalescing mark dirty -- nor `clipFramePlan`'s own cost, so the GUI
-> benchmark stays for end-to-end validation. Remaining gap: F22 is an A/A pair
-> from identical source; arms from genuinely different revisions are unmeasured.
+> benchmark stays for end-to-end validation. ~~Remaining gap: F22 is an A/A pair
+> from identical source; arms from genuinely different revisions are
+> unmeasured.~~ **Closed by F24 and F25** -- a genuinely different revision was
+> measured, the two order biases it exposed were fixed, and both error floors are
+> now bounded.
 >
 > ### Standing rules for anyone collecting data here
 >
@@ -143,7 +164,9 @@ Research started: 2026-07-27.
 >   `pgrep -f "MacOS/DanTerm Benchmark"`. Match the binary path -- the bare name
 >   also matches the shell doing the checking and reports a phantom orphan.
 > - **A finished run looks hung for ~2 minutes.** The wrapper does not exit on
->   SIGINT, so `close()` waits its full 30 s per arm. Known, unfixed, F19.
+>   SIGINT, so `close()` waits its full 30 s per arm. Known, unfixed, and
+>   deliberately parked with its hypothesis refuted -- F19. It is cosmetic: the
+>   orphan consequence it used to cause is fixed and committed.
 > - The primary readout is the **within-block ramp** (F11) for diagnosing and
 >   **block-level CV** (F16) for judging a fix. F9's block-floor readout is
 >   withdrawn (R10).
@@ -151,7 +174,14 @@ Research started: 2026-07-27.
 > ### State of the tree
 >
 > - `cc3918d fix(benchmark): stop a killed harness wrapper from orphaning its app`
->   -- the F19 fix, committed with tests.
+>   -- the F19 orphan fix, committed with tests.
+> - `10f10a2` / `82614e7` -- `just benchmark-headless-draw` and the two order-bias
+>   fixes F24's positive control exposed.
+> - `7525e7f feat(benchmark): extend the threshold grid below the headless
+>   instrument's floor` -- F27. `scripts/terminal-benchmark-median-fallback.py`
+>   grids now run from 0.30%, with every pre-existing cell reproduced exactly.
+>   No threshold is frozen for the headless instrument; `--threshold` stays
+>   caller-supplied.
 > - The F17 pacer was **reverted**; it is refuted and deliberately not in the tree.
 > - Clean 2026-07-27 series **copied out of the disposable `.build/` tree** to
 >   `~/danterm-benchmark-evidence/2026-07-27/` -- the two rerun series plus all
@@ -586,22 +616,34 @@ series and re-freeze `DECISION_RULES` (Phase 6).
       See [D2](#d2----do-not-repair-the-gui-benchmarks-incremental-mixed-variance-route-around-it).
       This closes the Phase 4 gate that F15/F16/F17 left open.
 
-### Phase 5 -- implement and verify
+### Phase 5 -- implement and verify -- UNMADE BY D2
 
-- [ ] Implement only the selected direction, TDD, with structure-insensitive
-      behavioral tests.
-- [ ] Re-collect the single-arm A/A series and confirm **block-level CV falls to
+**This whole phase is dead.** It was written to verify "the selected direction",
+and the only candidate that reached implementation was the occupancy pacer. F17
+built it and measured it twice against a same-session unpaced control: it
+flattened the ramp as designed and **tripled block-level CV**. D2 then declined
+every collection-side repair. There is no selected direction to implement, so
+none of the acceptance criteria below have anything to verify. The pacer is
+reverted and deliberately absent from the tree.
+
+Kept, struck rather than deleted, because the acceptance criteria are the ones
+any *future* repair attempt would have to meet -- if D2 is ever reopened under
+its own stated conditions, this is the bar.
+
+- ~~Implement only the selected direction, TDD, with structure-insensitive
+      behavioral tests.~~
+- ~~Re-collect the single-arm A/A series and confirm **block-level CV falls to
       ~0.5%** (F16, the primary acceptance criterion), the per-block ramp returns
       to within +/-5% (F11), paired SD returns to ~1.5%, and the `content-churn`
       control stays clean -- the last confirming the pacer adds no drift of its
-      own.
-- [ ] **Verify the pacer does not perturb the draw.** Compare per-draw cost at
+      own.~~
+- ~~**Verify the pacer does not perturb the draw.** Compare per-draw cost at
       matched occupancy with and without the spin; a shift means the pacer is
-      polluting cache or allocator state and is measuring something else.
-- [ ] **Check the residual between-block SD separately.** De-ramping alone only
+      polluting cache or allocator state and is measuring something else.~~
+- ~~**Check the residual between-block SD separately.** De-ramping alone only
       moved it 4.65% -> 4.25% (F11), so a flat ramp is necessary but may not be
       sufficient to restore the thresholds. If it survives, that is new work, not
-      a reason to widen a threshold.
+      a reason to widen a threshold.~~
 
 ### Phase 6 -- recalibrate and close
 
@@ -610,24 +652,34 @@ series and re-freeze `DECISION_RULES` (Phase 6).
       withdrawn: it used an FP-only gate at a 5% effect. Under the real gates
       `quick` needs **12 pairs @ 3.25%** (~1.1 min) and `confirm` needs
       **100 pairs @ 1.65%** at detection 0.93 (~9 min).
-- [ ] **Decide whether `confirm` is worth recalibrating at all.** At ~17x the
-      wall-clock for a marginal pass (0.93 against a 0.90 floor, single session,
-      ~2x session variation per F18), the honest options are: accept a slow
-      `confirm`, accept that `confirm` cannot decide `incremental-mixed` until
-      the instrument is repaired, or build the headless benchmark (Phase 7).
-      **This is a judgement call for a human, and it is the real next decision.**
-- [ ] Confirm the F20 numbers on a fresh **two-arm** series before any freeze --
-      session variation is ~2x (F18), and `confirm`'s 100-pair result is close
-      enough to its gate that a fresh series could move it either way.
-- [ ] Collect a fresh **two-arm** `incremental-mixed` A/A series matching the
-      production shape (96 blocks / 48 pairs / 24 quartets).
-- [ ] Re-screen and re-freeze `DECISION_RULES` via
-      `scripts/terminal-benchmark-median-fallback.py`. A human moves the frozen
-      rule after reading the report.
-- [ ] Settle the F7 measurement still owed on `4061096` in
-      `plans/wip/continue-elegant-boot.md`, which is blocked on this file.
-- [ ] Graduate the settled decision to `docs/design/` and record here where it
-      went.
+- [x] **Decide whether `confirm` is worth recalibrating at all.** **Decided by
+      D2: no.** This item asked for a human judgement call and named itself "the
+      real next decision"; D2 is that decision. Of the three options it listed,
+      D2 takes the third -- build the headless benchmark -- and explicitly
+      declines the `confirm` recalibration rather than deferring it: ~100 pairs
+      and ~9 min to land marginally over the detection floor on one session's
+      data is not worth buying once the 3% question has a better instrument.
+- [x] ~~Confirm the F20 numbers on a fresh **two-arm** series before any
+      freeze.~~ **Moot -- there is no freeze.** This was a precondition on
+      re-freezing `DECISION_RULES`, which D2 declines.
+- [x] ~~Collect a fresh **two-arm** `incremental-mixed` A/A series matching the
+      production shape (96 blocks / 48 pairs / 24 quartets).~~ **Moot** -- same
+      reason; it existed only to feed the re-screen.
+- [x] ~~Re-screen and re-freeze `DECISION_RULES` via
+      `scripts/terminal-benchmark-median-fallback.py`.~~ **Declined by D2.** The
+      GUI benchmark's frozen rules stand unchanged and its `incremental-mixed`
+      resolution stays degraded, which D2 records as an accepted coverage gap.
+      Note the screen's threshold grids *were* extended (F27), but that is a
+      widening of what a screen can express, not a freeze.
+- [x] **Settle the F7 measurement owed in `plans/wip/continue-elegant-boot.md`**
+      (F26). Discharged structurally rather than measured -- the obligation was
+      written against an instrument D2 declines to repair, so re-running it could
+      never have discharged anything. Duplicate of the Phase 7 entry; both are
+      the same item.
+- [ ] **Graduate D1/D2 to `docs/design/` and record here where it went.** The
+      one genuinely outstanding piece of work in this file. D1 (the mechanism)
+      and D2 (the routing decision and its accepted coverage gap) currently live
+      only in a research doc; `docs/design/` is the ADR home.
 
 ### Phase 7 -- deferred harness work, not blocking
 
