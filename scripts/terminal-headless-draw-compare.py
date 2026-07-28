@@ -38,6 +38,10 @@ ARM_SOURCE = ROOT / "scripts" / "terminal-headless-draw-arm.swift"
 DEFAULT_CORE = ROOT / "lib" / "TerminalCore"
 ARTIFACTS = ROOT / ".build" / "terminal-headless-draw"
 
+# Content workloads the arm can fill its grid with. Must match DrawBenchmarkWorkload's raw
+# values in TerminalDrawBenchmarkSupport, which the arm's generators are copied from.
+WORKLOADS = ("btop-shaped", "text-shaped")
+
 # Both arms must compile under different Swift module names; see validate_module_names.
 BASELINE_MODULE = "DrawArmBaseline"
 CANDIDATE_MODULE = "DrawArmCandidate"
@@ -197,13 +201,14 @@ class Arm:
 
     def __init__(self, library_path):
         self._library = ctypes.CDLL(str(library_path), mode=ctypes.RTLD_LOCAL)
-        self._library.arm_prepare.argtypes = [ctypes.c_int32] * 3
+        self._library.arm_prepare.argtypes = [ctypes.c_int32] * 4
         self._library.arm_prepare.restype = ctypes.c_int32
         self._library.arm_batch.argtypes = [ctypes.c_int32]
         self._library.arm_batch.restype = ctypes.c_uint64
 
-    def prepare(self, columns, rows, clip_rows):
-        if self._library.arm_prepare(columns, rows, clip_rows) != 0:
+    def prepare(self, columns, rows, clip_rows, workload):
+        text_shaped = 1 if workload == "text-shaped" else 0
+        if self._library.arm_prepare(columns, rows, clip_rows, text_shaped) != 0:
             raise RuntimeError("arm failed to prepare its draw surface")
 
     def batch(self, count):
@@ -279,6 +284,7 @@ def run_both_directions(arguments):
                 "--columns", str(arguments.columns),
                 "--rows", str(arguments.rows),
                 "--clip-rows", str(arguments.clip_rows),
+                "--workload", arguments.workload,
                 "--rounds", str(arguments.rounds),
             ],
             check=True, capture_output=True, text=True,
@@ -316,6 +322,12 @@ def main():
     parser.add_argument(
         "--clip-rows", type=int, default=4,
         help="rows of damage to clip to; 0 measures the full frame")
+    parser.add_argument(
+        "--workload", choices=WORKLOADS, default="btop-shaped",
+        help="content the grid is filled with. 'btop-shaped' is dense sprite art, which "
+             "the executor draws as rects and which reaches CoreText's glyph calls zero "
+             "times; 'text-shaped' is printable ASCII, the only one of the two that "
+             "measures the glyph path at all")
     parser.add_argument("--rounds", type=int, default=8)
     parser.add_argument(
         "--both-directions", action="store_true",
@@ -346,7 +358,9 @@ def main():
     baseline = Arm(baseline_library)
     candidate = Arm(candidate_library)
     for arm in (baseline, candidate):
-        arm.prepare(arguments.columns, arguments.rows, arguments.clip_rows)
+        arm.prepare(
+            arguments.columns, arguments.rows, arguments.clip_rows, arguments.workload
+        )
 
     batch_count = calibrate_batch_count([baseline, candidate])
     warm_up([baseline, candidate], batch_count)
@@ -364,6 +378,7 @@ def main():
             "rows": arguments.rows,
             "clipRows": arguments.clip_rows,
         },
+        "workload": arguments.workload,
         "batchCount": batch_count,
         "isSelfControl": is_control,
         "baselineCore": str(pathlib.Path(arguments.baseline_core).resolve()),

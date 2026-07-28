@@ -108,6 +108,9 @@ benchmark-draw iterations="15":
 #   just benchmark-headless-draw                      # A/A control against this tree
 #   just benchmark-headless-draw 8                    # 8 rounds
 #   just benchmark-headless-draw 8 /path/TerminalCore # compare against another checkout
+# Content and scenario are script-level flags: pass --workload text-shaped to measure the
+# CoreText glyph path (the default sprite workload never reaches it) and --clip-rows 0 for
+# full-frame draws.
 benchmark-headless-draw rounds="8" candidate_core="":
     python3 ./scripts/terminal-headless-draw-compare.py --rounds {{rounds}} \
       {{ if candidate_core != "" { "--both-directions --candidate-core " + candidate_core } else { "" } }}

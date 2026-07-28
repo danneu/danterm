@@ -33,9 +33,21 @@ private final class PreparedDraw {
 
     /// `clipRows <= 0` selects the full-frame scenario; a positive value clips to that many
     /// leading rows, which is the damage-scoped path the GUI benchmark cannot measure quietly.
-    init?(columns: Int, rows: Int, clipRows: Int, displayScale: CGFloat = 2) {
+    /// `textShaped` selects the all-ASCII workload, which is the only one of the two that
+    /// reaches CoreText's glyph calls at all; the default sprite workload never does.
+    init?(
+        columns: Int,
+        rows: Int,
+        clipRows: Int,
+        textShaped: Bool = false,
+        displayScale: CGFloat = 2
+    ) {
         guard var terminal = Terminal(columns: columns, rows: rows) else { return nil }
-        terminal.feed(Self.btopShapedANSI(columns: columns, rows: rows))
+        terminal.feed(
+            textShaped
+                ? Self.textShapedANSI(columns: columns, rows: rows)
+                : Self.btopShapedANSI(columns: columns, rows: rows)
+        )
         let full = planFrame(
             for: terminal,
             presentation: RenderPresentation(
@@ -100,14 +112,61 @@ private final class PreparedDraw {
         output += "\u{1b}[0m"
         return Array(output.utf8)
     }
+
+    /// Matches TerminalDrawBenchmarkSupport's text generator exactly, for the same reason the
+    /// btop one does. Printable ASCII only: no sprite family claims it, so every cell reaches
+    /// `CTFontGetGlyphsForCharacters` and `CTFontDrawGlyphs` -- the path the btop workload
+    /// leaves entirely uncovered. Style changes land on token boundaries so run lengths match
+    /// real output instead of collapsing to one glyph per draw call.
+    static func textShapedANSI(columns: Int, rows: Int) -> [UInt8] {
+        let words = [
+            "fn", "render_frame(&self,", "plan:", "&Plan)", "->", "Result<(),", "Error>", "{",
+            "let", "mut", "cursor", "=", "self.grid.cursor();", "//", "clamp", "to", "the",
+            "viewport", "before", "drawing", "0x1f04", "42", "assert_eq!(rows,", "24);", "}",
+        ]
+        var output = "\u{1b}[?25l\u{1b}[H"
+        var token = 0
+        for row in 0..<rows {
+            var column = 0
+            while column < columns {
+                let word = words[token % words.count]
+                let color = 16 + (token * 53) % 216
+                let bold = token.isMultiple(of: 2) ? "1" : "22"
+                let italic = token.isMultiple(of: 3) ? "3" : "23"
+                output += "\u{1b}[\(bold);\(italic);38;5;\(color)m"
+                let remaining = columns - column
+                let text = word.count < remaining ? word + " " : String(word.prefix(remaining))
+                output += text
+                column += text.count
+                token += 1
+            }
+            if row + 1 < rows { output += "\r\n" }
+        }
+        output += "\u{1b}[0m"
+        return Array(output.utf8)
+    }
 }
 
 nonisolated(unsafe) private var prepared: PreparedDraw?
 
 /// Builds this arm's surface once. Returns 0 on success, 1 on failure.
+///
+/// `textShaped` is nonzero for the ASCII workload. Both arms are compiled from THIS copy of
+/// the file even when their TerminalCore checkouts differ, so adding a parameter here changes
+/// both arms together and cannot desynchronize the driver from an older baseline.
 @_cdecl("arm_prepare")
-public func arm_prepare(_ columns: Int32, _ rows: Int32, _ clipRows: Int32) -> Int32 {
-    prepared = PreparedDraw(columns: Int(columns), rows: Int(rows), clipRows: Int(clipRows))
+public func arm_prepare(
+    _ columns: Int32,
+    _ rows: Int32,
+    _ clipRows: Int32,
+    _ textShaped: Int32
+) -> Int32 {
+    prepared = PreparedDraw(
+        columns: Int(columns),
+        rows: Int(rows),
+        clipRows: Int(clipRows),
+        textShaped: textShaped != 0
+    )
     return prepared == nil ? 1 : 0
 }
 
