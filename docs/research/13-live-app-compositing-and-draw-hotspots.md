@@ -1,9 +1,9 @@
 # Live-app compositing and draw hotspots under interactive scroll
 
-Research started: 2026-07-28. **Status: Phase 1 closed (F5, F6). Phase 2 in
-progress: R2 implemented and benchmarked (F8, H2 closed); R1+R1b implemented,
-benchmarked and re-captured live (F7, H1 closed); R4 now unblocked, R3 still
-gated behind Phase 2.**
+Research started: 2026-07-28. **Status: Phase 1 closed (F5, F6). Phase 2 closed
+and measured: R1+R1b (F7, H1 closed), R2 (F8, H2 closed), R4 (F9). Phase 3's
+gate is now open -- what it wants first is the F10 re-capture, which needs the
+user.**
 
 ## Purpose
 
@@ -369,9 +369,9 @@ test cases were run" -- a silent no-op that reads like a pass.
 
 | Instrument | Invocation | Headless? | Status here |
 | --- | --- | --- | --- |
-| `benchmark-draw` | `just benchmark-draw [iterations=15]` | yes -- `swift run -c release`, offscreen bitmap | **run: F7.** Doc 11 F1 reports ±2.5% over 15 iterations; F7's four scenarios each moved 25-34%, far outside that. Primary instrument for R1/R1b/R4. |
+| `benchmark-draw` | `just benchmark-draw [iterations=15]` | yes -- `swift run -c release`, offscreen bitmap | **run: F7, F9.** Doc 11 F1 reports ±2.5% over 15 iterations; F7's four scenarios each moved 25-34% and F9's 3-9%, both outside that. Primary instrument for R1/R1b/R4 -- but F9 shows it is only a *mechanism* check for changes touching the glyph or fallback paths, which F5's fixture never executes. |
 | `benchmark-headless-draw` | `just benchmark-headless-draw <rounds> [candidate-core-path]` | yes | not run. Interleaves two checkouts in one process; use for an A/B that avoids cross-run drift. |
-| `benchmark-quick` | `just benchmark-quick <baseline-rev> <workload>` | **yes, in practice** | **run: F7** (`content-churn`), from an agent shell with no GUI interaction. The "plausibly needs a GUI session" caveat recorded here is answered: it does not. ~157 s per workload, most of it the baseline build. |
+| `benchmark-quick` | `just benchmark-quick <baseline-rev> <workload>` | **yes, in practice** | **run: F7, F9** (`content-churn` both times), from an agent shell with no GUI interaction. The "plausibly needs a GUI session" caveat recorded here is answered: it does not. ~157 s per workload cold; a repeat against the same pair of revisions reuses the arm cache and costs ~14 s, which is what makes a replicate pair set cheap (F9). |
 | `benchmark-confirm` | `just benchmark-confirm <baseline-rev>` | same as above | **run: F8.** Runs the full five-workload ladder. |
 | `benchmark-draw-app` | `just benchmark-draw-app` | needs AppKit | not run. Real draw path but not sampled at the compositor. |
 | live `sample` | above | needs a human | **run three times** -- F1, F6, F7. |
@@ -383,8 +383,9 @@ Workload names for `benchmark-quick`: `terminal-feed`, `scrollback-stream`,
 **Superseded 2026-07-28.** This paragraph read "No benchmark has been run in this
 investigation... D1's predictions are all unverified." Two have since been
 verified against baselines resolved before implementation: R2 (F8) and R1+R1b
-(F7). R3 and R4 remain unverified, and every *sample-derived* share in this file
-is still a diagnostic share rather than a performance result.
+(F7). **R4 is now verified too (F9)**, leaving R3 -- which is research only and
+has no instrument. Every *sample-derived* share in this file is still a
+diagnostic share rather than a performance result.
 
 ## Current hypotheses
 
@@ -545,6 +546,11 @@ The ranking, its justification, and its predictions are in D1. In summary:
 | **R3** | Attribute and attack the CA glyph-bounds thrash | 17% of main busy (stall) + 32% of CA queue | **unknown; research only** | none exists -- repeat this capture |
 | **R4** | Scratch buffers / `reserveCapacity` in `drawTextRuns` | ~9% of draw | `benchmark-draw` full-frame **-3% to -6%** | `benchmark-draw`, after R1 |
 
+**All four rankable candidates are now resolved: R1+R1b (F7), R2 (F8) and R4
+(F9) are landed and measured; R3 stays research-only.** The predictions column
+above is preserved as written -- see each finding for what was actually
+measured.
+
 R1 and R2 are independent paths measured by independent instruments and may be
 worked in parallel. R1b rides along with R1 -- it is three lines away, too small
 to measure on its own, and separating it would cost a benchmark run to resolve a
@@ -608,14 +614,23 @@ Phase 3.
       the three render-bound workloads null as predicted. The
       `outlined destroy of (InactivePrimaryScreen?, InactivePrimaryScreen?)`
       symbol is gone from the release binary.
-- [ ] **R4, now unblocked** -- R1 is measured and committed (F7). Baseline it
-      against `919838f`, not `fcfff10`. Record in **F9**.
+- [x] **R4.** **Done 2026-07-28: F9.** All thirteen collections hoisted above the
+      run loop and emptied at the top of each iteration keeping capacity, in
+      commit `07dd81f` against baseline `919838f` -- named in the plan before the
+      first edit. No `reserveCapacity` guess was introduced. `benchmark-draw`
+      full-frame **-4.40%** / **-8.99%**, straddling D1's -3% to -6%;
+      `benchmark-quick content-churn` **-15.68%** and **-18.10%** across two
+      independent pair sets, with plan time equivalent in both. AR1's predicted
+      null did not happen. Behavioral coverage is six cross-run isolation tests,
+      one per category of collection, each mutation-verified against its own
+      deliberately omitted reset.
 
 ### Phase 3 -- decide what to do about compositing
 
-- [ ] **Gate: do not open R3 before Phase 2 is measured.** R1 and R4 shrink the
-      display list that `CA::CG::Queue` replays; the queue's cost may move on its
-      own. Attacking it first would attribute their effect to R3.
+- [x] **Gate: do not open R3 before Phase 2 is measured.** **Open as of F9.** R1,
+      R2 and R4 are all landed and measured, so R3 can no longer inherit their
+      effect. The gate opening does not license starting R3 -- the next task
+      below still comes first, and D1 keeps R3 research-only until doc 11 has it.
 - [ ] Re-capture after Phase 2 and read the `CA::CG::Queue` total and the
       `CABackingStoreGetFrontTexture` blocked fraction. Record in **F10**.
       **This needs the user** -- see the standing rule in Investigation rules and
@@ -1158,6 +1173,107 @@ Phase 3.
 - Next action: none for R2. If -6.61% is ever cited as a figure rather than a
   direction, re-run `terminal-feed` to get it off two pairs first.
 
+### F9 -- R4 landed: the per-run allocations are gone, and the paired app benchmark moved 3x the predicted band while the headless fixture moved less
+
+- Status: **closed.** R4 implemented and committed. Phase 2 is complete and
+  measured.
+- Source: commit `07dd81f`, against baseline `919838f` (R1's commit), which was
+  named in the plan *before* any implementation edit -- not inferred from `HEAD`
+  afterwards, and deliberately not `fcfff10`.
+- Change made: all thirteen collections hoisted above `for run in runs` and
+  emptied at the **top** of each iteration keeping capacity. The reset sits at
+  the top rather than the end so it survives a future `continue` in the loop
+  body. D1 left `reserveCapacity` in the title and the plan's RI1 rejected it:
+  no fixed guess was introduced, so capacity converges on the frame's own
+  maximum. The two dictionaries whose values are arrays empty each bucket in
+  place and retain their keys -- clearing the outer dictionary would have
+  discarded the inner arrays and handed the allocation straight back through the
+  `[key, default: []]` subscript, which is the trap the plan flagged.
+
+- Measurement 1 -- `just benchmark-draw`, 15 iterations, median
+  `drawDurationNanoseconds`. Baseline is a **same-session** measurement of
+  `919838f` in a throwaway worktree, taken minutes before the after run:
+
+  | Scenario | Grid | Baseline | After | Delta |
+  | --- | --- | ---: | ---: | ---: |
+  | full-frame | 80x24 | 2,481,383 | 2,372,147 | **-4.40%** |
+  | damage-clipped | 80x24 | 530,935 | 515,059 | -2.99% |
+  | full-frame | 160x50 | 10,490,107 | 9,546,994 | **-8.99%** |
+  | damage-clipped | 160x50 | 954,650 | 899,866 | -5.74% |
+
+- Measurement 2 -- `just benchmark-quick 919838f content-churn`, the
+  decision-bearing instrument, run **twice**:
+
+  | Run | Draw time | Plan time |
+  | --- | --- | --- |
+  | 1 | **faster, -15.68%** (2 pairs) | +0.98%, equivalent |
+  | 2 (replicate) | **faster, -18.10%** (2 pairs) | +0.18%, equivalent |
+
+  The replicate was run because a single 2-pair result at 3x the predicted band
+  is exactly the shape a sampling artifact produces. It is a second, independent
+  pair set, not a re-read of the first. Both arms build from immutable source
+  snapshots; the candidate snapshot captured eight working-tree paths, all of
+  them docs, notes, or `plans/wip/` files, so the candidate is code-identical to
+  `07dd81f`. Artifacts:
+  `.build/terminal-benchmark-comparisons/quick/bf69881b7b97-0000` and
+  `-0001`; baseline tree `61c036dd`, candidate tree `bf69881b`.
+
+- Observation 1: **the prediction was beaten, and by the instrument it was not
+  written for.** D1's -3% to -6% band was a `benchmark-draw` full-frame
+  prediction: 80x24 landed **inside** it at -4.40% and 160x50 **above** it at
+  -8.99%. The paired app benchmark, which had no predicted band, moved -15.7% to
+  -18.1%. Recorded as measured; the band is not restated after the fact.
+- Observation 2: **AR1 was wrong, decisively.** The plan accepted a null result
+  as the likely outcome -- this is the smallest candidate in D1's ranking, and
+  doc 9 flagged its own version of the item as the one most likely to be absorbed
+  by allocator noise. Two independent pair sets and all four headless scenarios
+  moved in the same direction; three of the four clear `benchmark-draw`'s ±2.5%
+  noise floor (11/F1) comfortably and the fourth, damage-clipped 80x24 at
+  -2.99%, only just does.
+- Observation 3: **the paired figure and the live share agree almost exactly,
+  and that is worth reading carefully.** Run 3 put these lines at 18.1% of
+  `drawTextRuns`' node samples, and `drawTextRuns` is ~93% of `drawRenderFrame`
+  (9/F3), which predicts roughly -17% of draw if every sample removed were pure
+  removable overhead. The measurement is -15.7%/-18.1%. The agreement is
+  striking but should not be promoted to a law: `content-churn` and the btop
+  capture are different workloads, and one coincidence across two instruments is
+  not a calibration.
+- Observation 4, as the plan required: **R4's headless-delta-to-live-share ratio
+  is 0.24 (80x24) to 0.50 (160x50), against R1's ~1.9.** This is reported as
+  descriptive evidence only, and the cause of the gap is left unresolved. The
+  two candidates are not exposure-matched and their ratios cannot establish a
+  calibration factor: F5 established that `benchmark-draw`'s fixture routes 100%
+  of cells to sprites with zero font candidates and zero fallback cells, so it
+  grows only the seven sprite accumulators and never touches `characters`,
+  `candidateCells`, `glyphs`, `mappedGlyphs`, `positions`, or `fallbackCells` at
+  all. That makes the fixture R1's best case and R4's worst -- which is the
+  direction of both ratios -- but the *sizes* of the two gaps are not explained
+  by anything measured here. Deriving a real calibration still needs the open
+  Phase 1 run-density task plus the live route composition.
+- Inference: the per-run allocation of scratch collections was a real cost on
+  the draw path, roughly the size its live attribution said it was. Note which
+  way round the two candidates come out: on `benchmark-draw` R1 is far the
+  larger (-31%/-34% against R4's -4%/-9%), and on the paired app benchmark R4 is
+  (-15.7%/-18.1% against R1's -4.36%). Ranked 1 and 4 by attributed size, they
+  swap places depending on the instrument -- which is Observation 4's point
+  stated as a result rather than as a ratio.
+- Competing interpretation: `content-churn` resolved on **2 pairs each time**,
+  the minimum, so each interval is wide. The replicate narrows the risk that one
+  run was a fluke but does not turn -15.7%/-18.1% into a point estimate. If a
+  single figure is ever cited rather than a direction, get it off two pairs
+  first.
+- Deviation from the ledger, deliberate: `benchmark-confirm` was **not** run.
+  The plan reserved it for resolving an *inconclusive* paired result, and
+  neither run was inconclusive. The change is confined to the draw path and both
+  runs reported plan time equivalent, so the F8 concern that motivated the
+  stricter instrument there -- a second workload being blindsided -- has no
+  corresponding mechanism here.
+- Uncertainty: low on the mechanism (the allocations are gone from the source
+  and four headless scenarios moved). Low-to-medium on the magnitude: two
+  independent pair sets agreeing, but on the minimum sample size each.
+- Next action: the **F10 re-capture**, which R4 was the last blocker for. Phase 3's
+  gate is now open.
+
 ## Decision log
 
 ### D1 -- how to rank and sequence the candidates
@@ -1417,6 +1533,13 @@ design doc, not here.
 ---
 
 #### R4 -- scratch buffers and `reserveCapacity` in `drawTextRuns`. **Rank 4.**
+
+**Landed 2026-07-28 (`07dd81f`); result in F9.** The hoist was taken and
+`reserveCapacity` was not: a fixed per-run guess is wrong for both the 80x24 and
+the 179x66 case, and hoisting removes the allocation outright, so capacity
+converges on the frame's own maximum with no constant to choose. The predicted
+band held on the instrument it was written for and was beaten 3x on the paired
+app benchmark; "possibly nothing measurable" below did not happen.
 
 **What.** Thirteen collections are allocated fresh per run: `characters`,
 `candidateCells`, `fallbackCells` and the eight sprite accumulators declared at

@@ -258,8 +258,16 @@ re-post rule is now the only gate between the change and F4's verdict.
       on `incremental-mixed` having no calibrated plan-time verdict.
 - [ ] H3 (per-draw font construction; no glyph cache). Two separable changes;
       both live in the region the draw verdict can actually see.
-- [ ] Unreserved array growth in `drawTextRuns` (F3, 14% of draw). Cheapest of
-      the three but also the one most likely to be absorbed by allocator noise.
+- [x] Unreserved array growth in `drawTextRuns` (F3, 14% of draw). **Done
+      2026-07-28 as doc 13's R4; result in F9 of
+      [13-live-app-compositing-and-draw-hotspots.md](13-live-app-compositing-and-draw-hotspots.md).**
+      Doc 13 saw the same work through a live-app profile and carried it as R4;
+      this entry and that candidate were always the same change, so it is closed
+      here rather than re-opened there. All thirteen collections were hoisted
+      above the run loop in `07dd81f`. The "most likely to be absorbed by
+      allocator noise" caveat this entry was written with turned out to be wrong:
+      `benchmark-quick content-churn` moved -15.7% and -18.1% across two
+      independent pair sets.
 - [x] `Terminal.feed` -- **moved out of scope.** The trigger evidence above sets
       it aside as off the plan/draw path, which is right for this file's question
       and wrong for total process CPU: it is roughly 40% of the app's busy CPU,

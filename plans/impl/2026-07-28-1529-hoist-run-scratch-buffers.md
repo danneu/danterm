@@ -183,7 +183,22 @@ already-listed task, not a branch of this plan.
 ## Commit progress
 
 - [x] 1. perf(terminal): hoist `drawTextRuns`' per-run scratch buffers
-- [ ] 2. docs(research): record R4's result as 13/F9
+- [x] 2. docs(research): record R4's result as 13/F9
+
+## Follow Up
+
+- Doc 11's Phase 1 item 1 ("Harvest `9/H3` and the unreserved array growth",
+  `docs/research/11-render-frame-budget.md:162`) now points at one landed item
+  and one open one. Whoever lands `9/H3` should retire that bullet; until then it
+  reads as two pieces of pending work when only one is.
+- Doc 13's Phase 3 F10 re-capture is now unblocked and **needs the user** -- it
+  is a live `sample` of a held-down-arrow btop gesture that must not be scripted,
+  and F7's run 3 explicitly may not stand in for it. F7 records the figures it
+  should be compared against (queue 1,273, blocked 1,053).
+- Doc 13's open Phase 1 task -- counting runs per frame in real btop output --
+  gained a second reason to be worth doing: F7 and F9 now have
+  headless-delta-to-live-share ratios of ~1.9 and ~0.24-0.50 respectively, and
+  nothing measured explains the sizes of either gap.
 
 ## Implementation notes
 
@@ -211,3 +226,20 @@ already-listed task, not a branch of this plan.
 - **PO2 was run as an explicit mutation pass**, one omitted reset at a time
   across all thirteen buffers, confirming each is detected by its own category's
   test (with the glyph-buffer exception above).
+- **`benchmark-quick content-churn` was run twice, not once.** The plan named one
+  run as the decision-bearing instrument and reserved `benchmark-confirm` for an
+  *inconclusive* result. The first run was not inconclusive -- it was "faster" at
+  -15.68%, roughly 3x the top of the predicted band, on the minimum 2 pairs. A
+  second independent pair set (-18.10%) was taken because a lone 2-pair result at
+  3x the prediction is the shape a sampling artifact makes, and because the
+  figure is being *recorded* rather than used only as a direction. `confirm` was
+  still not run: the change is confined to the draw path and both runs reported
+  plan time equivalent.
+- **The `benchmark-draw` baseline was re-measured in the same session**, in a
+  throwaway worktree at `919838f`, following F7's precedent rather than reusing
+  any previously recorded figure.
+- **Doc 11's Phase 1 item 1 bundles doc 9's array-growth entry with `9/H3`** and
+  says nothing in that file should start before both land. Only the array-growth
+  half landed here, so doc 11 was left untouched -- its sentence is still true
+  for `9/H3`. Raised as a follow-up rather than edited, since this plan's
+  non-goals scope the doc closure to doc 9's single entry.
