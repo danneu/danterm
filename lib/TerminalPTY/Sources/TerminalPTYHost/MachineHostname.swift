@@ -15,9 +15,13 @@ public enum MachineHostname {
     /// Notably *not* `ProcessInfo.processInfo.hostName`, which returns the mDNS `.local`
     /// form that no shell ever sends. nil when the system cannot supply a name.
     public static var posix: String? {
-        var buffer = [CChar](repeating: 0, count: 256)
-        guard gethostname(&buffer, buffer.count - 1) == 0 else { return nil }
-        let value = String(cString: buffer)
+        var buffer = [UInt8](repeating: 0, count: 256)
+        guard buffer.withUnsafeMutableBufferPointer({ raw in
+            raw.withMemoryRebound(to: CChar.self) { gethostname($0.baseAddress!, $0.count - 1) }
+        }) == 0 else { return nil }
+        // gethostname NUL-terminates within the buffer; drop the terminator and the zero padding
+        // behind it, since String(decoding:as:) would otherwise keep them as U+0000 scalars.
+        let value = String(decoding: buffer.prefix(while: { $0 != 0 }), as: UTF8.self)
         return value.isEmpty ? nil : value
     }
 }
