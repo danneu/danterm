@@ -631,12 +631,15 @@ series and re-freeze `DECISION_RULES` (Phase 6).
 
 ### Phase 7 -- deferred harness work, not blocking
 
-- [ ] **Fix the wrapper's SIGINT handling** (F19). `terminal-benchmark.sh` traps
-      `INT`/`TERM` and its persistent-mode tail polls on `sleep 0.25`, where bash
-      should run the trap within ~250 ms; something defers or swallows it, so
-      `close()` waits the full 30 s per arm and then SIGKILLs. Costs ~2 min of
-      apparent hang per run and is the reason apps were orphaned at all. The
-      orphan *consequence* is fixed and committed; this cause is not.
+- [ ] **Fix the wrapper's SIGINT handling** (F19). **Attempted 2026-07-27 and
+      deliberately left open** -- the stated hypothesis is refuted and no fix is
+      warranted without a reproduction. Three shell-level models exonerate the
+      script's shape (see F19's "Diagnosis attempted" note), and `cleanup` is
+      bounded at ~2.5 s by construction. Reproducing the real 30 s stall needs
+      the GUI app, a WindowServer, and a full benchmark build, which is more than
+      an annoyance-reduction item is worth. **Do not change
+      `terminal-benchmark.sh`'s teardown on the current evidence.** The orphan
+      *consequence* remains fixed and committed.
 - [x] **Scope the headless in-process draw benchmark** (F21). Done, no machine
       idle time. It already exists as `TerminalDrawBenchmark` with a
       `damage-clipped` scenario, already runs at ~100% occupancy, and resolves
@@ -685,10 +688,21 @@ series and re-freeze `DECISION_RULES` (Phase 6).
 - [ ] **Extend the threshold grid before any freeze.** F22 bottomed out at the
       grid floors (1.05% / 0.80%), so the instrument's actual resolution is
       unmeasured and the frozen grids cannot express it.
-- [ ] **Decide what the headless benchmark is allowed to decide.** It cannot see
-      damage *generation* regressions (`setNeedsDisplay` / AppKit dirty-rect
-      coalescing) or `clipFramePlan`'s own cost. Write the split down before it
-      is used to gate a change, so the GUI benchmark's remaining job is explicit.
+- [x] **Decide what the headless benchmark is allowed to decide.** Satisfied by
+      **D2**, which states the split explicitly: the headless comparison owns
+      damage *drawing*; it cannot see damage *generation* (`setNeedsDisplay` /
+      AppKit dirty-rect coalescing), `clipFramePlan`'s own cost, or anything on
+      the published-frame path outside `drawRenderFrame`, and for those
+      `benchmark-quick` on `incremental-mixed` remains the only instrument and
+      remains degraded. The same split is in the user-facing contract in
+      `agent-docs/terminal-performance.md`. D2 records this as an accepted
+      coverage gap, with its own reopen conditions.
+- [x] **Discharge the F7 timing obligation** (F26). Closed structurally: the
+      ungated block-boundary probes are benchmark-only, gated to persistent mode,
+      outside both timers the persistent workloads measure, and unreachable from
+      the two workloads that measure end to end. No measurement spent. The one
+      thing the argument does not cover -- cache perturbation from two `access`
+      calls reaching the next draw -- is stated in F26 and judged not credible.
 
 ## Reproduction recipes
 
@@ -1847,6 +1861,40 @@ Degraded at `HEAD` = **148376**, span **33208**, **4.65%**, **6.26%**, 10/24.
   them. Root cause not diagnosed: `terminal-benchmark.sh` does trap `INT`/`TERM`
   and its persistent-mode tail polls on `sleep 0.25`, where bash should run the
   trap within ~250 ms. Something defers or swallows it.
+- **Diagnosis attempted 2026-07-27, and the hypothesis above is refuted.** The
+  shape of the script does not defer or swallow anything. Four checks, none
+  needing a GUI:
+  1. **The trap is installed before the app launches** -- `trap cleanup EXIT INT
+     TERM` sits ~75 lines above the `&` that backgrounds the app, and nothing
+     between them re-installs or clears a trap. The "installed too late"
+     candidate is dead.
+  2. **A minimal model of the persistent tail** -- same `trap`, same background
+     child, same `while kill -0 ...; do sleep 0.25; done` plus `wait`, signalled
+     with `SIGINT` by a Python driver exactly as `close()` does -- **exits in
+     0.134 s**. Bash runs the trap between loop iterations, as expected.
+  3. **A faithful model, with a child that ignores `SIGTERM` and spawns its own
+     child, exits in 2.58 s** -- and that is `terminate_owned_pid`'s own 40 x
+     0.05 s grace period before it escalates to `SIGKILL`, i.e. the worst case
+     the teardown path can produce. There is no 30 s anywhere in it.
+  4. **`cleanup` cannot be what is slow.** After `terminate_owned_pid` it runs
+     `record_phase` and `rm -rf "$RUNTIME_ROOT"` -- and `RUNTIME_ROOT` is a
+     `mktemp -d` holding only `home/`, `tmp/` and `zdotdir/`. The app bundle
+     lives under `RUN_ROOT`, which cleanup does not touch. The "rm is slow"
+     candidate is dead.
+  - One further lead was checked and closed: if the app became a zombie the
+    parent had not reaped, `kill -0` would keep succeeding and the tail would
+    spin forever. It does not -- non-interactive bash reaps background children
+    asynchronously, and a test loop exits after 2 polls.
+- **What this leaves.** Every mechanism reachable from the script's structure is
+  excluded, so the remaining candidates all involve the real GUI app -- and
+  reproducing it therefore costs a benchmark build, a WindowServer session, and a
+  full persistent run. That is disproportionate for an item whose entire payoff
+  is removing ~2 min of apparent hang, when the orphan consequence it used to
+  cause is already fixed. **Deliberately left open, not fixed.** The negative
+  result is the deliverable: a future attempt should start at the app, not the
+  shell, and should not spend time re-testing the trap's placement or the
+  polling loop.
+- **Drivers:** "F19 SIGINT repro" in [Scratch](#scratch).
 
 ### F20 -- the Phase 6 pair-count table was derived under the wrong gate; `confirm` needs ~100 pairs, not 48
 
@@ -2225,6 +2273,53 @@ Degraded at `HEAD` = **148376**, span **33208**, **4.65%**, **6.26%**, 10/24.
 - **Evidence:** `~/danterm-benchmark-evidence/2026-07-27/f25-error-floors/` --
   18 run JSONs under `runs/`, the driver `f25-driver.py`, the summary
   `f25-analyze.py`, and `sweep.log`.
+
+### F26 -- the F7 timing obligation is discharged structurally, not measured
+
+- **Status:** closed. This is the last thing the variance regression was
+  blocking, and it is closed without spending an instrument.
+- **Date:** 2026-07-27.
+- **What was owed.** `plans/wip/continue-elegant-boot.md` shipped a fix that
+  ungated `reopenCompletedBlockIfRequested` from `completed`, moving two
+  block-boundary file probes from once-per-block to once-per-published-frame of
+  an open block. Its F7 section owed a timing comparison for that cost. Two runs
+  of `benchmark-quick` on exactly that question disagreed by 16 percentage points
+  (+5.95% A/B against -9.97% on an A/A control), which is the observation that
+  opened this whole investigation.
+- **Why no measurement is owed after all.** D2 declines to repair the instrument
+  the obligation was written against, so re-running it was never going to
+  discharge anything. Instead the cost is excluded by construction, in four links
+  each re-verified against the tree at `6da1a29` by symbol:
+  1. `observePublishedFrame`'s only call site is inside `#if
+     DANTERM_TERMINAL_BENCHMARK` in `SwiftTerminalSessionView.publish(_:)`, so
+     shipping builds do not contain the probe.
+  2. Its body opens `guard reusesBlocks, ...`, where `reusesBlocks` is a stored
+     `let` from `DANTERM_BENCHMARK_MODE == "persistent"`. Non-persistent runs pay
+     one `Bool` test.
+  3. Persistent mode is reachable only through `PersistentDrawArms`, whose
+     allowlist admits three workloads, all of which measure the draw timer
+     (opened and closed entirely inside `draw(_:)`) and the plan timer (already
+     stamped by `TerminalPaneSession` before `publish(_:)` reads it). The probe
+     is outside both regions.
+  4. The two workloads that measure wall-clock end to end never reach the gate:
+     `terminal-feed` runs the `TerminalCoreBenchmark` CLI and never constructs a
+     view at all, and `scrollback-stream` spawns a fresh
+     `scripts/terminal-benchmark.sh` per block without setting the mode, so it
+     defaults to `measure`.
+- **The residual, stated rather than omitted.** In persistent mode the two
+  `access` syscalls do run on the PTY-output path. They are outside both timers,
+  but a syscall perturbs cache and TLB state, and that could in principle reach
+  the *next* draw. Judged not credible enough to buy an instrument for: the
+  probe's user-side footprint is two resident constant byte arrays with no
+  allocation and no Objective-C dispatch; ungating changed the probe's
+  *frequency*, not its existence; and the only instrument that could see such an
+  effect is `benchmark-quick` on `incremental-mixed`, whose 6.26% paired SD and
+  26-41% within-block ramp put it orders of magnitude above the effect. If it is
+  ever revisited, the right instrument brackets the published-frame path, not the
+  draw path -- so **not** `benchmark-headless-draw`, which times `drawRenderFrame`
+  on an already-clipped plan and excludes `observePublishedFrame` entirely.
+- **Full argument:** the F7 section of `plans/wip/continue-elegant-boot.md`
+  (untracked, by the branch's convention for wip plans).
 
 ## Decision log
 
@@ -2827,3 +2922,103 @@ arm A `0x60588`, arm B `0x618A0`.
 | --- | --- | --- | --- |
 | F22 baseline (identical source) | -0.024% | 0.719% | 2.23% |
 | layout-perturbed | -0.042% | 0.830% | 3.99% |
+
+### F19 SIGINT repro -- shell-level models of the wrapper teardown (2026-07-27)
+
+All three exit far inside the 30 s grace period, refuting "the trap is
+deferred or swallowed". Driven by `drive.py <script>`, which signals with
+`SIGINT` exactly as `PersistentDrawArms.close()` does.
+
+- `repro.sh` (minimal tail): **0.134 s**
+- `repro2.sh` (SIGTERM-ignoring child with its own child): **2.58 s**, all of it
+  `terminate_owned_pid`'s own grace period
+- `zombie.sh` (does an unreaped child spin the poll loop?): loop exits after 2
+  polls; bash reaps background children asynchronously
+
+```python
+# drive.py
+import signal, subprocess, sys, time
+p = subprocess.Popen([sys.argv[1]], stderr=subprocess.PIPE, text=True)
+time.sleep(1.0)
+t = time.monotonic()
+p.send_signal(signal.SIGINT)
+try:
+    p.wait(timeout=10)
+    print(f"exited after {time.monotonic()-t:.3f}s rc={p.returncode}")
+except subprocess.TimeoutExpired:
+    print("STALLED >10s")
+    p.kill(); p.wait()
+print("stderr:", p.stderr.read().strip().replace("\n", " | "))
+```
+
+```bash
+# repro.sh
+#!/usr/bin/env bash
+# Minimal model of terminal-benchmark.sh's persistent tail.
+set -euo pipefail
+APP_PID=""
+cleanup() {
+    local status=$?
+    trap - EXIT INT TERM
+    echo "TRAP-RAN status=$status" >&2
+    [[ -n "$APP_PID" ]] && kill -TERM "$APP_PID" 2>/dev/null
+    exit "$status"
+}
+trap cleanup EXIT INT TERM
+sleep 600 &
+APP_PID=$!
+echo "READY" >&2
+while kill -0 "$APP_PID" 2>/dev/null; do sleep 0.25; done
+wait "$APP_PID"
+exit $?
+```
+
+```bash
+# repro2.sh (with stubborn.sh as the child)
+#!/usr/bin/env bash
+set -euo pipefail
+terminate_owned_pid() {
+    local pid="${1:-}"
+    [[ "$pid" =~ ^[0-9]+$ ]] || return 0
+    kill -TERM "$pid" 2>/dev/null || true
+    for _attempt in $(seq 1 40); do
+        kill -0 "$pid" 2>/dev/null || { wait "$pid" 2>/dev/null || true; return 0; }
+        sleep 0.05
+    done
+    kill -KILL "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+}
+APP_PID=""
+cleanup() {
+    local status=$?
+    trap - EXIT INT TERM
+    echo "TRAP-ENTER $(date +%s.%N)" >&2
+    terminate_owned_pid "$APP_PID"
+    echo "TRAP-DONE  $(date +%s.%N)" >&2
+    exit "$status"
+}
+trap cleanup EXIT INT TERM
+"$(dirname "$0")/stubborn.sh" >"$(dirname "$0")/stub.log" 2>&1 &
+APP_PID=$!
+echo "READY $(date +%s.%N)" >&2
+while kill -0 "$APP_PID" 2>/dev/null; do sleep 0.25; done
+wait "$APP_PID"
+exit $?
+
+# stubborn.sh
+#!/usr/bin/env bash
+trap '' TERM
+sleep 600 &
+sleep 600
+```
+
+```bash
+# zombie.sh
+#!/usr/bin/env bash
+set -euo pipefail
+sleep 0.3 &
+APP_PID=$!
+n=0
+while kill -0 "$APP_PID" 2>/dev/null; do sleep 0.25; n=$((n+1)); [[ $n -lt 40 ]] || { echo "SPUN 10s -- kill -0 never failed"; exit 9; }; done
+echo "loop exited after $n polls (child reaped by bash)"
+```
