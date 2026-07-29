@@ -548,6 +548,27 @@ repeat exactly the error those corrections caught.
     worth: it is the *glyph* path this experiment probes, and the glyph path is
     4.06 ms of budget at real geometry. A confirmed `13/H3` would explain the
     stall's mechanism without implying the draw path needs restructuring.
+  - **Mirror experiment prepared 2026-07-28, awaiting a human capture.** F11's
+    live hypothesis is that the cost scales with `DrawGlyphs` *op* count rather
+    than glyph diversity. The test fixes diversity and varies run count.
+    `~/runs-many.txt` and `~/runs-few.txt` are **byte-identical in length
+    (8,660,000)** and use the **same 94-glyph alphabet**; both emit a
+    three-digit 256-colour SGR every 8 cells, so parser work is identical too.
+    The only difference is whether that SGR *changes* the colour: varying
+    colours cannot fold, identical ones fold to one run per row. Measured:
+    **5459 vs 462 runs over identical 40694 cells** -- an 11.8x lever on op
+    count. Both arms sit inside F8's real-content range (7.45 and 88.1
+    cells/run), so neither is a synthetic corner.
+    Capture per doc 13's procedure, but with **`less -R`** so the colour codes
+    reach the terminal rather than being escaped.
+    **Prediction:** if op count drives the outline copy, the many-runs arm shows
+    a substantially larger `compute_dod_` / `CopyGlyphPath` share and a larger
+    blocked wait. **If the arms match, op count is not the driver either**, and
+    the cost is per-frame or per-backing-store rather than per-op -- which would
+    leave no lever on the DanTerm side and make the stall structural.
+    Report absolute blocked samples alongside the share: the many-runs arm pays
+    more main-thread draw cost by construction (F6: 771 ns/run on the text
+    path), which inflates the busy denominator and would deflate a ratio.
   - **Run 2026-07-28. Result: F11 -- `13/H3`'s cache-miss mechanism is refuted.**
     47x the distinct glyphs moved nothing, and the outline copy is 42% of the
     queue even at two glyphs, where any 64-entry cache must always hit. The
