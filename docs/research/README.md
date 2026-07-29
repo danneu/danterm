@@ -24,7 +24,7 @@ entry point, not a re-read of the evidence.
 | 12 | Cell representation | Closed. Erase leg shipped; POD cell demonstrated-and-rejected; memory half parked. Its reopening condition was met on 2026-07-29 and taken up by doc 15. |
 | 13 | Live-app compositing | Closed. Three candidates landed; compositing stall is substantially pipeline slack. |
 | 14 | Live scroll workload profile | Closed. One trace, four candidates, two shipped: `TerminalScalars` accessor inlining (**-20% draw**, `14/D2`) and a row-scoped cell read (**-16% plan**, `14/D3`). One candidate rejected as too small to measure (`14/D1`). |
-| 15 | Memory footprint | **LIVE.** Takes up doc 12's recorded reopening condition. Owns resident bytes per cell, per row, and in aggregate. `15/F1`: 84% of the live heap is grid row storage, but the live heap is only 26% of process footprint. Phase 1 builds the terminal-state memory harness doc 12 lacked. |
+| 15 | Memory footprint | **LIVE.** Takes up doc 12's recorded reopening condition. Owns resident bytes per cell, per row, and in aggregate. `15/F1`: 84% of the live heap is grid row storage, but the live heap is only 26% of process footprint. `15/F4` found the first defect: evicted scrollback rows keep their cells, so the buffer holds up to **2x** its live rows (~19 MB). Next up is that fix (`15/H8`), not a representation change. |
 
 (There is no doc 5; numbers are never reused or renumbered.)
 

@@ -230,16 +230,39 @@ H6.
 
 Unquantified. Needs the dirty-vs-live gap attributed first.
 
+### H8 -- evicted scrollback rows are retained, and releasing them costs nothing
+
+**Confirmed by `F4`**, and promoted to the head of the queue. `ScrollbackBuffer`
+evicts by advancing an index without clearing the vacated slot, so it holds up
+to 1x its live row count in rows the budget has already dropped -- ~19 MB at the
+production budget, averaging half that, on a sawtooth.
+
+This is the only item in this file that is **strictly free**: it is a bug fix,
+not a tradeoff. It costs no scrollback depth (`H1` costs depth), no cell layout
+change (`H2`, `H3`, `H6`), and no CPU -- clearing one slot is O(1) against a
+front eviction that is already O(1), and it *removes* work from the periodic
+compaction rather than adding any.
+
+The remaining question is shape, not whether. Clearing `cells` on eviction is
+the minimal change and is what `F4` confirmed. Eagerly compacting instead would
+also fix it but reintroduces the O(n) copy the current threshold exists to
+amortize. The decision belongs in `D1`.
+
 ## Candidate direction, pending evidence
 
 Provisional, and deliberately ordered by evidence-per-unit-risk rather than by
 bytes:
 
-1. **H1**, because it is an accounting correction rather than a design change,
-   its predicted effect is precise, and it validates the harness.
-2. **H2**, because `12/F3` already proved the field is unused in 100% of census
+1. **H8**, because `F4` confirmed it, it is a defect rather than a design
+   choice, and it is the only change here the user pays nothing for.
+2. **H1**, because it is an accounting correction rather than a design change,
+   its predicted effect is precise, and it validates the harness. Note that `F4`
+   changes how to talk about it: the product currently over-retains for *two*
+   independent reasons, and only one of them is the deliberate under-charge `H1`
+   describes.
+3. **H2**, because `12/F3` already proved the field is unused in 100% of census
    cells and doc 12 already named it the best first move.
-3. **H6 or H3**, whichever Phase 1 says is larger -- they attack the same bytes
+4. **H6 or H3**, whichever Phase 1 says is larger -- they attack the same bytes
    from opposite ends (H3 shrinks every cell; H6 re-represents the rows that
    hold most of them), and doing both may be redundant.
 
@@ -259,16 +282,42 @@ H4, H5, H7 are not scheduled.
       (`vmmap` by region, Metal/CoreAnimation vs binary vs allocator). Record in
       F3, and state the resulting **ceiling** on what any cell-representation
       work can move in process terms.
-- [ ] Resolve `F1`'s row-count discrepancy: 3,528 live `[GridCell]` arrays
+- [x] Resolve `F1`'s row-count discrepancy: 3,528 live `[GridCell]` arrays
       against `12/F1`'s ~1,460 budget-admitted scrollback rows plus 66 screen
       rows. Determine whether the excess is render-side copies, damage
       snapshots, multiple `Terminal` instances in the benchmark app, or a
       retention bug. Record in F4. **A retention bug here would outrank every
       hypothesis in this file**, so this task gates the rest of the ledger.
+      **Done -- `F4`.** It is a retention bug: `ScrollbackBuffer.removeFirst`
+      leaves the evicted row's cells in the vacated slot, so the buffer holds up
+      to 2x its live rows. Ungated; `H8` is now the first move.
 - [ ] Attribute the ~40 MB gap between `MALLOC_SMALL` dirty pages and live heap
       bytes: allocator retention, fragmentation, or bucket rounding. Record in
       F5. Sizes H7 and sets expectations for how much any live-bytes win
       actually returns to the OS.
+
+Sequencing note from `F4`: the two remaining Phase 1 attribution tasks (F3, F5)
+measure quantities the `H8` sawtooth perturbs by up to 19 MB depending on when
+the sample lands. **Take Phase 1.5 first**, then re-take them on a stable
+baseline.
+
+### Phase 1.5 -- release the retained rows (H8)
+
+- [ ] Decide the shape: clear the vacated slot's `cells` on eviction (minimal,
+      what `F4` confirmed) versus eager compaction (also correct, but restores
+      the O(n) copy the threshold exists to amortize). Record in D1.
+- [ ] Write the behavioral test first, per the project's TDD rule. It must pin
+      the **observable** invariant -- that resident cell storage stays
+      proportional to live scrollback rows across sustained front eviction -- and
+      not the `storageStart`/`compactIfNeeded` internals, which are an
+      implementation detail this file may later want to change for `H6`/`H7`.
+- [ ] Implement, then verify no CPU regression on `terminal-feed` and
+      `scrollback-stream` per `10/F9`. The expectation is neutral-to-positive:
+      one O(1) store added per eviction, less to copy on compaction.
+- [ ] Re-run `just benchmark-memory scrollback-stream` and record the change in
+      process footprint and in `_ContiguousArrayStorage<GridCell>` node count
+      against `F1`'s artifact. Predicted: node count flat at ~1,783 instead of
+      sawtoothing to ~3,500.
 
 ### Phase 2 -- correct the accounting (H1)
 
@@ -353,6 +402,96 @@ H4, H5, H7 are not scheduled.
     Not chased.
 - Next action: Phase 1, all four tasks. The row-count discrepancy first.
 
+### F4 -- the row count does not reconcile because evicted scrollback rows keep their cells, so the buffer holds up to 2x its live rows
+
+- Status: recorded, and the mechanism is confirmed by a controlled fix. Resolves
+  `F1`'s gating uncertainty and `12/F1`'s implied row arithmetic.
+- Date and investigator: 2026-07-29, Claude (agent).
+- Commit and worktree state: `6170672`, tracked tree clean. Measured with a
+  temporary internal probe (`scrollbackRetentionProbe`) on `ScrollbackBuffer`
+  returning three `Int`s -- the same disposable-widening method as `12/F1` and
+  `12/F3`. The probe and its test were reverted immediately; the tracked tree is
+  unchanged.
+- Method: a fresh `Terminal(columns: 179, rows: 66)` at
+  `productionScrollbackBudgetBytes`, fed 40,000 lines of the actual
+  `scrollback-stream` fixture template
+  (`DANTERM-SCROLLBACK-%05d sustained plain-text output payload\n`,
+  `scrollback-stream-v1-25000-lines`), sampled every 500 lines. The probe counts
+  live rows, dead slots, and -- the number that matters -- **dead slots whose
+  `cells` array is still populated**, which is what a `[GridCell]` allocation
+  actually is.
+- Mechanism: `ScrollbackBuffer.removeFirst` (`Terminal.swift:207`) returns
+  `storage[storageStart]` and advances `storageStart`, but never clears the
+  vacated slot. The evicted `GridRow` -- and the separate heap allocation its
+  `cells` array owns (`12/F1` observation 1) -- stays reachable until
+  `compactIfNeeded` rebuilds the array. Compaction requires
+  `storageStart >= 1_024 && storageStart * 2 >= storage.count`, i.e. dead slots
+  must reach the live count before anything is released. **The retention is
+  therefore bounded at exactly 1x the live row count, and averages 0.5x.**
+- Measurements:
+
+  | quantity | value |
+  | --- | ---: |
+  | live scrollback rows, steady state | **1,717** (flat from ~iteration 1,500 on) |
+  | model byte usage vs budget | 10,480,680 / 10,485,760 |
+  | populated `[GridCell]` allocations, trough -> peak | **1,717 -> 3,431** measured (3,434 analytic) |
+  | plus the 66 screen rows | **1,783 -> 3,497** |
+  | `F1`'s `heap` count | **3,528** |
+  | same probe with the one-line fix | **1,717, flat; peak 1,717** |
+
+- Observation 1: the reconciliation is essentially exact at both ends. The
+  trough, 1,783, is `12/F3`'s recorded resident row count for this workload **to
+  the row**. The peak, 3,497, is within 31 of `F1`'s 3,528 -- 0.9%, and the
+  residue is comfortably render-side and transient. `F1` happened to capture near
+  the top of the sawtooth.
+- Observation 2: a synthetic control of full-width 179-column lines pins live
+  rows at **1,461**, which is `12/F1`'s ~1,460 budget arithmetic to the row. The
+  budget bound is behaving exactly as documented; nothing was wrong with the
+  arithmetic in `12/F1`. What it did not model is that the buffer holds rows the
+  budget has already evicted.
+- Observation 3: the waste is a sawtooth, not a plateau. Dead-cell count climbs
+  linearly to the live count, then drops to zero on compaction. Any single
+  footprint sample lands somewhere on that ramp, which is one plausible
+  contributor to `F1`'s unexplained 273.2 MB peak against a 222.7 MB baseline.
+- Inference 1, and it is the finding: **this is a retention bug, and it is the
+  largest single memory defect found so far.** Roughly a third of resident
+  `[GridCell]` allocations at any moment, and half at peak, are rows the terminal
+  has already evicted, are unreachable by any user-visible operation, and return
+  no scrollback depth. It is invisible to `scrollbackByteCount`, which counts
+  only live rows -- which is why the budget looked healthy.
+- Inference 2, sizing it, without deriving per-type bytes from `heap` per this
+  file's rule: the model charges 40 bytes per single-scalar cell (`12/F1`), so
+  10,480,680 bytes of model usage over 1,717 rows implies ~262,000 cells, ~153
+  per row. At the true stride of 72 that is ~11.0 KB per row and **~18.9 MB of
+  real cell storage live**, with an equal amount held dead at peak. Bucket
+  rounding then inflates ~38.5 MB of real peak storage to `F1`'s 48.2 MB
+  reported figure -- a ~25% overhead that is independent evidence for `H7` and an
+  input to the `F5` task.
+- Inference 3, on ordering: this displaces `H1` as the first move. `H1` corrects
+  an accounting model and *reduces retained history* to do it; `H8` returns the
+  same order of magnitude of bytes and costs the user nothing at all.
+- Controlled confirmation: adding `storage[storageStart].cells = []` immediately
+  before the `storageStart += 1` pins populated allocations at 1,717 flat, with
+  the peak equal to the trough. This is stated as mechanism confirmation, not as
+  the proposed patch -- see `H8` for why the shape still needs deciding.
+- Competing interpretations: considered and eliminated. Not render-side copies,
+  not damage snapshots, and not multiple `Terminal` instances -- the discrepancy
+  reproduces in a **single headless `Terminal` with no GUI, no renderer, and no
+  damage tracking**, and its trough and peak bracket `F1`'s count. Those three
+  can at most account for the residual 31.
+- Uncertainty:
+  - The residual 31 allocations between 3,497 and 3,528 are not attributed. They
+    are 0.9% and do not change any conclusion, but they are also the only part of
+    `F1`'s count that is still unexplained.
+  - The sawtooth means the *phase* at which any footprint sample is taken matters
+    by up to 19 MB. Every measurement in this file taken before the fix lands
+    carries that as noise, including `F1` itself.
+  - `removeLast` and `removeAll(keepingCapacity:)` were read and do not have this
+    problem; `removeLast` shrinks `storage` and `removeAll` drops it. Only the
+    front-eviction path leaks, which is also the only path the budget uses.
+- Next action: `H8`, and it should precede the remaining Phase 1 tasks --
+  `F3` and `F5` both measure quantities this bug perturbs by up to 19 MB.
+
 ## Rejected
 
 Inherited from doc 12, with its evidence. Neither may be reopened here without
@@ -380,12 +519,16 @@ different proposal and is not covered by this rejection.
 
 ## Open questions and caveats
 
-- **The row-count discrepancy is the largest single unknown** and could
-  invalidate the ordering of every hypothesis here. If 3,528 live row arrays
-  reflect retention rather than budget, the fix is a bug fix worth more than any
-  representation change.
-- Whether resident rows are dominated by scrollback or by render-side copies
-  decides H6's value, and is not yet known.
+- ~~The row-count discrepancy is the largest single unknown~~ **Resolved by
+  `F4`**, and it resolved the way this entry feared: 3,528 reflects retention,
+  not budget, and the fix is a bug fix worth more than any representation change.
+  It is now `H8` and heads the queue.
+- Resident rows are dominated by scrollback, not by render-side copies -- `F4`
+  reproduced `F1`'s count in a headless `Terminal` with no renderer at all. That
+  is the precondition `H6` was blocked on, so **`H6` is unblocked**.
+- Every memory measurement taken before `H8` lands carries up to ~19 MB of
+  sawtooth-phase noise, `F1` included. Do not compare a pre-`H8` footprint
+  against a post-`H8` one and attribute the whole delta to a later change.
 - The census underlying `12/F3` is of DanTerm's four fixture workloads, which
   are markedly less styled than plausible real sessions. That weakens confidence
   in H3's table staying small under real use, and doc 12 flagged it too.
@@ -396,4 +539,11 @@ different proposal and is not covered by this rejection.
 
 ## Outcome
 
-Investigation in progress. Findings F1 is recorded; the next free ID is **F2**.
+Investigation in progress. Findings F1 and F4 are recorded; the next free IDs
+are **F2**, **F3**, **F5**, and then **F6**. No decision is recorded yet; the
+next free ID is **D1**.
+
+`F4` closed Phase 1's gating task and changed the plan: the largest defect found
+so far is a scrollback retention bug (`H8`), not a representation problem, and
+it is the only item here that costs the user nothing. Phase 1.5 takes it before
+the remaining attribution work, which it would otherwise contaminate.
