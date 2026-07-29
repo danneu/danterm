@@ -1577,6 +1577,66 @@ Stride **48 -> 32**, a 33% cut and the largest single move in this file:
   is width-dependent in a way the earlier findings were not. Nothing here says
   where between 80 and 179 the footprint change crosses zero.
 
+### F16 -- the settled cell's field-by-field layout, in which padding is now the largest line item
+
+- Status: recorded. Reference measurement of the post-`F15` cell, taken so the
+  layout does not have to be re-derived, and one observation that follows from it.
+- Date and investigator: 2026-07-29, Claude (agent).
+- Commit and worktree state: `d356274`.
+- Instrument: `MemoryLayout.offset(of:)` and `.size` against an exact mirror of
+  `Terminal.GridCell` in a scratch test (the real type is `private`, so it cannot
+  be measured from outside). Offsets are measured, not derived from the field
+  list.
+
+  | bytes | field | size | what it holds |
+  | --- | --- | --- | --- |
+  | 0-8 | `scalars` | 9 | `TerminalScalars` -- the character(s). Align 8 |
+  | 9 | `kind` | 1 | narrow / wideHead / wideTail / spacerHead / padding |
+  | 10-11 | *(padding)* | 2 | `styleId` needs 4-byte alignment |
+  | 12-15 | `styleId` | 4 | `UInt32` index into the swept style table |
+  | 16-18 | `hyperlinkId` | 3 | `UInt16?` -- 2 bytes plus one optional tag |
+  | 19 | *(padding)* | 1 | `contentIdentity` needs 4-byte alignment |
+  | 20-24 | `contentIdentity` | 5 | `UInt32?` -- 4 bytes plus one optional tag |
+  | 25-31 | *(padding)* | 7 | tail padding to the alignment `scalars` forces |
+
+  **size 25, stride 32.** Stride is the number that costs: arrays advance by it.
+
+Priced at the 179x66 full-history geometry `F15` measured (316,472 live cells):
+
+  | field | B/cell | total | share |
+  | --- | --- | --- | --- |
+  | `scalars` | 9 | 2.72 MB | 28% |
+  | **padding** | **10** | **3.02 MB** | **31%** |
+  | `contentIdentity` | 5 | 1.51 MB | 16% |
+  | `styleId` | 4 | 1.21 MB | 13% |
+  | `hyperlinkId` | 3 | 0.91 MB | 9% |
+  | `kind` | 1 | 0.30 MB | 3% |
+  | total | 32 | 10.13 MB | |
+
+- Observation 1: **padding is now the single largest line item in the cell**,
+  larger than any real field. That is what four rounds of narrowing produce -- the
+  fields shrank and the alignment holes did not.
+- Observation 2: 7 of those 10 bytes are **tail** padding, forced by
+  `TerminalScalars` being 8-byte aligned (it carries 9 bytes of payload in a
+  16-byte stride of its own). The interior 3 bytes cannot be recovered by
+  reordering: two 4-byte-aligned fields following a 9-byte one always leave a gap
+  somewhere, and 25 was confirmed as the floor for this set of types.
+- Observation 3: `hyperlinkId` costs **0.91 MB** for a feature `F2` measured as
+  `nil` in **100% of cells on every payload**, and it is also the field forcing
+  the 1-byte gap at offset 19. `F10` narrowed it 16 -> 3 bytes and judged a side
+  map not worth it, which was right when it was 3 of 56; it is now 3 of 32.
+- Candidate directions, recorded as observations rather than promoted to
+  hypotheses, because neither has been sized against a malloc bucket and `F12`'s
+  geometry table is what decides whether either would pay anything:
+  1. A 4-byte-aligned `TerminalScalars` would take the cell to size 25 / stride
+     **28**. This is the larger and the more invasive of the two.
+  2. Moving `hyperlinkId` out of the cell entirely -- the side map `H2` proposed
+     and `F10` declined -- would take size to 21 and remove the offset-19 gap.
+- Uncertainty: neither direction is worth taking on stride arithmetic alone.
+  Every finding in this file since `F10` has shown that the malloc bucket, not the
+  stride, decides whether a cell shrink reaches the user, and 32 -> 28 is a much
+  smaller step than any taken so far.
+
 ## Decision log
 
 ### D4 -- charge history the storage a row reserves, not the storage its cells occupy
@@ -1884,7 +1944,7 @@ different proposal and is not covered by this rejection.
 
 Investigation in progress. **Phase 1 is complete, Phase 2's engineering half is
 shipped, and Phase 3 has taken every hypothesis it opened.** Findings F1 through
-F15 are recorded; the next free ID is **F16**. Decisions D1 through D4 are
+F16 are recorded; the next free ID is **F17**. Decisions D1 through D4 are
 recorded and implemented; the next free ID is **D5**.
 
 The cell is now **32 bytes, down from 72** where this file started -- 56% of it
