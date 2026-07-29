@@ -1,14 +1,14 @@
 // Semantic terminal presentation values, kept independent of renderer palette policy.
 
 /// Retains a terminal color without resolving indexed entries through a renderer palette.
-public enum TerminalColor: Equatable, Sendable {
+public enum TerminalColor: Hashable, Sendable {
     case `default`
     case indexed(UInt8)
     case rgb(red: UInt8, green: UInt8, blue: UInt8)
 }
 
 /// Distinguishes the underline shapes that affect cell presentation.
-public enum TerminalUnderlineStyle: Equatable, Sendable {
+public enum TerminalUnderlineStyle: Hashable, Sendable {
     case none
     case single
     case double
@@ -18,7 +18,11 @@ public enum TerminalUnderlineStyle: Equatable, Sendable {
 }
 
 /// Captures semantic SGR presentation state without resolving renderer policy.
-public struct TerminalStyle: Equatable, Sendable {
+///
+/// `Hashable` rather than merely `Equatable` because the grid stores a style *id* per cell and
+/// interns styles through a dictionary keyed on this type (doc 15's `H3`); hashing is what makes
+/// that intern O(1).
+public struct TerminalStyle: Hashable, Sendable {
     /// Foreground remains semantic until a renderer applies palette policy.
     public internal(set) var foreground: TerminalColor
 

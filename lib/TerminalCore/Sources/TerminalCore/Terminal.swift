@@ -131,11 +131,29 @@ public struct Terminal: Equatable, Sendable {
     /// wrap is not safe.
     private typealias ContentIdentity = UInt32
 
+    /// Indexes `styleTable` from inside a cell, replacing the 19-byte `TerminalStyle` that used to
+    /// sit inline in every one (doc 15's `H3`). `15/F11` measured 9-23 million style *writes* per
+    /// corpus against 1-5 distinct *values*, which is what rules out a refcount and leaves a swept
+    /// table -- see `reclaimDeadStyleEntries`.
+    ///
+    /// 32-bit, not the 16-bit doc 12 proposed, and the eight bytes are bought deliberately. A
+    /// 16-bit id takes `GridCell` to a 24-byte stride instead of 32, but caps the terminal at
+    /// 65,536 simultaneously-live styles -- and a truecolor image renderer assigns a distinct RGB
+    /// per cell, so one screenful is ~12,000 and a few screens of history exhaust it. There is no
+    /// honest fallback at that point: the cell holds nothing but an id, so exceeding the space
+    /// means showing the user approximated colors. 32 bits makes the ceiling unreachable instead.
+    private typealias StyleId = UInt32
+
     /// Keeps scalar storage and wide-cell roles together for invariant-preserving mutation.
+    ///
+    /// Field order is load-bearing, not stylistic. Swift lays stored properties out in declaration
+    /// order, and `scalars` is the only 8-byte-aligned member; declared after `kind` it forced
+    /// seven bytes of padding into every cell. Leading with it recovers them, which is what takes
+    /// the stride to 32 rather than 40 -- a whole malloc bucket at every width `15/F12` checked.
     private struct GridCell: Equatable, Sendable {
-        var kind: TerminalCellKind = .padding
         var scalars = TerminalScalars.empty
-        var style = TerminalStyle()
+        var kind: TerminalCellKind = .padding
+        var styleId: StyleId = Terminal.defaultStyleId
         var hyperlinkId: HyperlinkId?
         var contentIdentity: ContentIdentity?
     }
@@ -465,6 +483,21 @@ public struct Terminal: Equatable, Sendable {
     private var hyperlinkPen: HyperlinkId?
     private var nextHyperlinkId: HyperlinkId = 1
     private var nextContentIdentity: ContentIdentity = 1
+
+    /// Resolves the id every cell carries. Seeded with the default style at `defaultStyleId` so a
+    /// freshly-constructed `GridCell` needs no table access and the default entry is never swept.
+    private var styleTable: [StyleId: TerminalStyle] = [defaultStyleId: TerminalStyle()]
+
+    /// The reverse direction, which is what makes interning O(1) and keeps ids canonical: equal
+    /// styles always intern to the same id, so `GridCell`'s synthesized `==` stays correct while
+    /// comparing four bytes instead of nineteen.
+    private var styleIds: [TerminalStyle: StyleId] = [TerminalStyle(): defaultStyleId]
+    private var nextStyleId: StyleId = defaultStyleId + 1
+
+    /// Table size that triggers a sweep. Raised past the surviving population after each one --
+    /// sweeping is O(every cell), so a threshold that stayed put would re-sweep on nearly every
+    /// intern once the live set legitimately sat above it.
+    private var styleSweepThreshold = Terminal.baseStyleSweepThreshold
     private var machineHostname: String?
     private var currentWorkingDirectory: String?
     private var titleUsesWorkingDirectory = false
@@ -478,6 +511,13 @@ public struct Terminal: Equatable, Sendable {
     public static let productionScrollbackBudgetBytes = 10_485_760
     static let kittyKeyboardStackDepth = 8
     static let maximumHyperlinkTargetBytes = 65_536
+
+    /// Reserved for `TerminalStyle()`. Fixed so an unwritten cell costs no intern and no lookup.
+    private static let defaultStyleId: StyleId = 0
+
+    /// Smallest table size worth a sweep. Well above the 1-5 distinct styles `15/F11` measured in
+    /// ordinary output, so a normal session never sweeps at all.
+    static let baseStyleSweepThreshold = 512
     static let maximumTerminalMetadataBytes = 256 * 1_024
     static let maximumSemanticValueBytes = 64 * 1_024
     static let maximumShellOSCBytes = 88 * 1_024
@@ -499,6 +539,9 @@ public struct Terminal: Equatable, Sendable {
     /// Exposes retained table cardinality for deduplication and sweep proofs.
     var retainedHyperlinkCount: Int { hyperlinkTargets.count }
 
+    /// Exposes style-table cardinality to the sweep proofs in `TerminalStyleTableTests`.
+    var retainedStyleCount: Int { styleTable.count }
+
     /// Makes the active bound visible to shared structural test assertions.
     private(set) var scrollbackBudgetBytes: Int
 
@@ -509,7 +552,22 @@ public struct Terminal: Equatable, Sendable {
     public private(set) var isHistoryHeadTruncated = false
 
     /// Exposes the semantic SGR pen without allowing callers to mutate terminal state.
-    public private(set) var currentStyle = TerminalStyle()
+    ///
+    /// The `didSet` is what keeps `H3` cheap. Every cell write sources its style from this pen or
+    /// from `backgroundEraseStyle`, so interning can happen once per *pen change* -- thousands of
+    /// times per corpus -- rather than once per *cell write*, which `15/F11` counted in the tens of
+    /// millions. Invalidating here instead of interning eagerly also keeps a run of SGR parameters
+    /// (each one a separate assignment) to a single intern at the first cell that uses the result.
+    public private(set) var currentStyle = TerminalStyle() {
+        didSet {
+            guard currentStyle != oldValue else { return }
+            currentStyleIdCache = nil
+            backgroundEraseStyleIdCache = nil
+        }
+    }
+
+    private var currentStyleIdCache: StyleId?
+    private var backgroundEraseStyleIdCache: StyleId?
 
     /// Projects application-controlled presentation state for render scheduling and drawing.
     public var presentation: TerminalPresentation {
@@ -729,6 +787,90 @@ public struct Terminal: Equatable, Sendable {
             foreground: currentStyle.foreground,
             background: currentStyle.background
         )
+    }
+
+    /// Interned id of the SGR pen, for the print path.
+    private mutating func currentStyleId() -> StyleId {
+        if let currentStyleIdCache { return currentStyleIdCache }
+        let id = internStyle(currentStyle)
+        currentStyleIdCache = id
+        return id
+    }
+
+    /// Interned id of the erase pen, for every path that blanks cells.
+    private mutating func backgroundEraseStyleId() -> StyleId {
+        if let backgroundEraseStyleIdCache { return backgroundEraseStyleIdCache }
+        let id = internStyle(backgroundEraseStyle)
+        backgroundEraseStyleIdCache = id
+        return id
+    }
+
+    /// Resolves a cell's stored id. Total by construction: `styleId` is only ever set from an id
+    /// this type issued, and the sweep only drops ids no cell holds, so a miss would mean the
+    /// invariant on `reclaimDeadStyleEntries` had already been violated.
+    private func style(for id: StyleId) -> TerminalStyle {
+        styleTable[id] ?? TerminalStyle()
+    }
+
+    /// Maps a style to the id cells store, minting one only for a value the table has not seen.
+    ///
+    /// Sweeps before minting when the table has grown past its threshold, which is the only thing
+    /// bounding it: entries die when their last cell does, and nothing else notices that happening.
+    private mutating func internStyle(_ style: TerminalStyle) -> StyleId {
+        if let existing = styleIds[style] { return existing }
+        if styleTable.count >= styleSweepThreshold { reclaimDeadStyleEntries() }
+        if let existing = styleIds[style] { return existing }
+
+        guard let id = allocateStyleId() else { return Self.defaultStyleId }
+        styleTable[id] = style
+        styleIds[style] = id
+        return id
+    }
+
+    /// Issues an id no cell can already be pointing at, on the same invariant and by the same
+    /// method as `allocateHyperlinkId`: entries only ever leave `styleTable` through the live-set
+    /// filter in `reclaimDeadStyleEntries`, so an id absent from the table is absent from the grid.
+    ///
+    /// Recycling rather than counting up is what keeps the space unreachable rather than merely
+    /// large. A monotonic counter exhausts after 2^32 *distinct styles ever interned*, which a few
+    /// hours of full-screen truecolor video reaches -- and past that every new color would render
+    /// as the default, permanently. Recycling changes the bound to 2^32 styles live *at once*,
+    /// which the cells holding them would exhaust memory long before reaching. Scanning from a
+    /// rotating cursor keeps that amortized O(1); `defaultStyleId` is skipped for free because its
+    /// entry is always present.
+    private mutating func allocateStyleId() -> StyleId? {
+        guard styleTable.count <= Int(StyleId.max) else { return nil }
+        var candidate = nextStyleId
+        while styleTable[candidate] != nil { candidate &+= 1 }
+        nextStyleId = candidate &+ 1
+        return candidate
+    }
+
+    private func liveStyleIds() -> Set<StyleId> {
+        var live: Set<StyleId> = [Self.defaultStyleId]
+        func collect(_ rows: [GridRow], into live: inout Set<StyleId>) {
+            for row in rows {
+                for cell in row.cells { live.insert(cell.styleId) }
+            }
+        }
+        collect(scrollbackRows.asArray(), into: &live)
+        collect(rows, into: &live)
+        if let inactivePrimaryScreen { collect(inactivePrimaryScreen.rows, into: &live) }
+        return live
+    }
+
+    /// Drops table entries no cell points at, on the same invariant `allocateHyperlinkId` states:
+    /// **every id held by a cell is a key of `styleTable`**. `liveStyleIds` walks history, the
+    /// active grid, and the retained primary screen, which is every place a cell lives; the pens
+    /// are covered by dropping their caches rather than by walking them, since a pen's id is
+    /// re-interned on demand.
+    private mutating func reclaimDeadStyleEntries() {
+        let live = liveStyleIds()
+        styleTable = styleTable.filter { live.contains($0.key) }
+        styleIds = styleIds.filter { live.contains($0.value) }
+        currentStyleIdCache = nil
+        backgroundEraseStyleIdCache = nil
+        styleSweepThreshold = max(Self.baseStyleSweepThreshold, styleTable.count * 2)
     }
 
     /// Rejects dimensions that cannot represent all supported terminal cells.
@@ -1460,9 +1602,9 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func clearPromptCells(in row: Int) {
         invalidateInspection(inViewportRows: row..<(row + 1))
-        let style = backgroundEraseStyle
+        let styleId = backgroundEraseStyleId()
         for column in 0..<columnCount {
-            rows[row].cells[column] = GridCell(style: style)
+            rows[row].cells[column] = GridCell(styleId: styleId)
         }
         clusterContext = nil
     }
@@ -1573,7 +1715,7 @@ public struct Terminal: Equatable, Sendable {
                 TerminalCell(
                     kind: $0.kind,
                     scalars: $0.scalars,
-                    style: $0.style,
+                    style: style(for: $0.styleId),
                     hyperlink: $0.hyperlinkId.flatMap { hyperlinkTargets[$0] }
                 )
             },
@@ -1588,56 +1730,10 @@ public struct Terminal: Equatable, Sendable {
     /// public evidence without widening the grid types, which is what forced doc 12's censuses to
     /// be throwaway probes. O(cells) -- for measurement, not for a hot path.
     public var memoryCensus: TerminalMemoryCensus {
-        // Style has no `Hashable` conformance (it is `Equatable` only), so distinctness is counted
-        // through a key encoding every field. Same approach doc 12's F3 used, kept identical so the
-        // two are comparable.
-        // `TerminalColor` and `TerminalUnderlineStyle` are `Equatable` but not `Hashable`, so both
-        // are flattened to integers here rather than given a conformance the public API does not
-        // otherwise need for one measurement.
-        struct StyleKey: Hashable {
-            var foreground: UInt32
-            var background: UInt32
-            var underlineColor: UInt32
-            var underline: UInt8
-            var flags: UInt8
-        }
-        func colorKey(_ color: TerminalColor) -> UInt32 {
-            switch color {
-            case .default: 0
-            case let .indexed(index): 1 << 24 | UInt32(index)
-            case let .rgb(red, green, blue):
-                2 << 24 | UInt32(red) << 16 | UInt32(green) << 8 | UInt32(blue)
-            }
-        }
-        func underlineKey(_ underline: TerminalUnderlineStyle) -> UInt8 {
-            switch underline {
-            case .none: 0
-            case .single: 1
-            case .double: 2
-            case .curly: 3
-            case .dotted: 4
-            case .dashed: 5
-            }
-        }
-        func key(_ style: TerminalStyle) -> StyleKey {
-            var flags: UInt8 = 0
-            if style.bold { flags |= 1 << 0 }
-            if style.dim { flags |= 1 << 1 }
-            if style.italic { flags |= 1 << 2 }
-            if style.reverse { flags |= 1 << 3 }
-            if style.hidden { flags |= 1 << 4 }
-            if style.strikethrough { flags |= 1 << 5 }
-            return StyleKey(
-                foreground: colorKey(style.foreground),
-                background: colorKey(style.background),
-                underlineColor: colorKey(style.underlineColor),
-                underline: underlineKey(style.underline),
-                flags: flags
-            )
-        }
-
+        // Distinct styles are counted by id rather than by value: ids are canonical (equal styles
+        // always intern to the same one), so this is the same number doc `12/F3` reported, reached
+        // without re-deriving a hash for a type the table already hashes.
         let stride = MemoryLayout<GridCell>.stride
-        let defaultStyle = TerminalStyle()
         var census = TerminalMemoryCensus(
             screenRowCount: 0,
             scrollbackRowCount: scrollbackRows.count,
@@ -1654,7 +1750,7 @@ public struct Terminal: Equatable, Sendable {
             contentIdentityCellCount: 0,
             distinctContentIdentityCount: 0
         )
-        var styles: Set<StyleKey> = []
+        var styles: Set<StyleId> = []
         var identities: Set<ContentIdentity> = []
 
         // The retained primary screen counts as resident: under the alternate screen the process
@@ -1668,8 +1764,8 @@ public struct Terminal: Equatable, Sendable {
             census.cellCount += row.cells.count
             census.cellStorageBytes += row.cells.count * stride
             for cell in row.cells {
-                if cell.style != defaultStyle { census.styledCellCount += 1 }
-                styles.insert(key(cell.style))
+                if cell.styleId != Self.defaultStyleId { census.styledCellCount += 1 }
+                styles.insert(cell.styleId)
                 if cell.scalars.count > 1 {
                     census.multiScalarCellCount += 1
                     census.multiScalarAllocationCount += 1
@@ -1735,6 +1831,13 @@ public struct Terminal: Equatable, Sendable {
     /// consequences are not local -- see `allocateContentIdentity`.
     mutating func primeContentIdentityWrapForTesting() {
         nextContentIdentity = ContentIdentity.max
+    }
+
+    /// Drives the style-id cursor to the end of its range, so a test can reach the recycle without
+    /// interning 2^32 styles. Same rationale as the content-identity seam above: the wrap is
+    /// unreachable in a test, and getting it wrong repaints live cells -- see `allocateStyleId`.
+    mutating func primeStyleIdRecycleForTesting() {
+        nextStyleId = StyleId.max
     }
 
     /// Creates the one-operation no-eviction oracle used to isolate eviction side effects.
@@ -3111,7 +3214,7 @@ public struct Terminal: Equatable, Sendable {
         return TerminalCell(
             kind: cell.kind,
             scalars: cell.scalars,
-            style: cell.style,
+            style: style(for: cell.styleId),
             hyperlink: cell.hyperlinkId.flatMap { hyperlinkTargets[$0] }
         )
     }
@@ -3143,8 +3246,18 @@ public struct Terminal: Equatable, Sendable {
         guard row >= 0, row < rowCount else { return }
         let streamRow = scrollProjection.topRow + row
         guard let windowRow = viewportStreamRow(at: streamRow) else { return }
+        // Memoized because a row is a handful of style runs, not `columnCount` distinct styles:
+        // without it every column would pay a dictionary lookup that the previous column already
+        // did. Correct for any content -- a miss just re-resolves.
+        var lastId: StyleId?
+        var lastStyle = TerminalStyle()
         for column in windowRow.cells.indices {
-            body(column, windowRow.cells[column].scalars, windowRow.cells[column].style)
+            let cell = windowRow.cells[column]
+            if cell.styleId != lastId {
+                lastStyle = self.style(for: cell.styleId)
+                lastId = cell.styleId
+            }
+            body(column, cell.scalars, lastStyle)
         }
     }
 
@@ -3173,14 +3286,14 @@ public struct Terminal: Equatable, Sendable {
 
         invalidateInspection(inViewportRows: row..<(row + 1))
 
-        let style = backgroundEraseStyle
+        let styleId = backgroundEraseStyleId()
         // The expansion above pulls every intersected wide pair wholly inside the
         // range, so no cell in it has a partner outside it. That is what lets the
         // interior be filled directly instead of through a per-cell
         // `clearCellAndPair`, whose two nested array subscripts cost a COW
         // uniqueness check on the row array and another on the cell array for
         // every single cell erased.
-        let blank = GridCell(style: style)
+        let blank = GridCell(styleId: styleId)
         rows[row].cells.withUnsafeMutableBufferPointer { cells in
             for column in lower..<upper {
                 cells[column] = blank
@@ -3190,7 +3303,7 @@ public struct Terminal: Equatable, Sendable {
         // for the range rather than once per erased cell. It is idempotent, so
         // the old per-cell calls at columns 0 and 1 did the work of this one.
         if lower <= 1 {
-            clearPreviousSpacer(beforeRow: row, column: lower, replacementStyle: style)
+            clearPreviousSpacer(beforeRow: row, column: lower, replacementStyleId: styleId)
         }
         clusterContext = nil
     }
@@ -3204,7 +3317,7 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    private func resizedRectangle(
+    private mutating func resizedRectangle(
         _ sourceRows: [GridRow],
         columns: Int,
         rows: Int,
@@ -3236,7 +3349,7 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    private func repairClippedCells(_ cells: inout [GridCell], clearsSpacers: Bool) {
+    private mutating func repairClippedCells(_ cells: inout [GridCell], clearsSpacers: Bool) {
         var invalidColumns: [Int] = []
         for column in cells.indices {
             switch cells[column].kind {
@@ -3262,8 +3375,8 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
-    private func clippedBlank(replacing cell: GridCell) -> GridCell {
-        GridCell(style: TerminalStyle(background: cell.style.background))
+    private mutating func clippedBlank(replacing cell: GridCell) -> GridCell {
+        GridCell(styleId: internStyle(TerminalStyle(background: style(for: cell.styleId).background)))
     }
 
     private mutating func resizeHeight(to newRowCount: Int) {
@@ -3639,7 +3752,7 @@ public struct Terminal: Equatable, Sendable {
                             cell,
                             GridCell(
                                 kind: .wideTail,
-                                style: cell.style,
+                                styleId: cell.styleId,
                                 hyperlinkId: cell.hyperlinkId,
                                 contentIdentity: cell.contentIdentity
                             ),
@@ -3742,7 +3855,7 @@ public struct Terminal: Equatable, Sendable {
             if unit.cells.count == 2, columns - column == 1 {
                 packedRows[row].cells[column] = GridCell(
                     kind: .spacerHead,
-                    style: unit.cells[0].style,
+                    styleId: unit.cells[0].styleId,
                     hyperlinkId: unit.cells[0].hyperlinkId,
                     contentIdentity: unit.cells[0].contentIdentity
                 )
@@ -3802,9 +3915,9 @@ public struct Terminal: Equatable, Sendable {
 
     private func makeBlankRow(
         columns: Int,
-        style: TerminalStyle = TerminalStyle()
+        styleId: StyleId = Terminal.defaultStyleId
     ) -> GridRow {
-        GridRow(cells: (0..<columns).map { _ in GridCell(style: style) })
+        GridRow(cells: (0..<columns).map { _ in GridCell(styleId: styleId) })
     }
 
     private mutating func dispatchCSI(_ sequence: CSISequence) {
@@ -4479,9 +4592,10 @@ public struct Terminal: Equatable, Sendable {
     private mutating func dispatchEscape(_ sequence: EscapeSequence) {
         guard sequence.intermediates == [0x23], sequence.final == 0x38 else { return }
         invalidateInspection(inViewportRows: rows.indices)
+        let styleId = currentStyleId()
         for row in rows.indices {
             rows[row] = GridRow(cells: (0..<columnCount).map { _ in
-                GridCell(kind: .narrow, scalars: .single("E"), style: currentStyle)
+                GridCell(scalars: .single("E"), kind: .narrow, styleId: styleId)
             })
         }
         clearPendingMotionState()
@@ -4587,7 +4701,7 @@ public struct Terminal: Equatable, Sendable {
                 )
             }
             rows = (0..<rowCount).map { _ in
-                makeBlankRow(columns: columnCount, style: backgroundEraseStyle)
+                makeBlankRow(columns: columnCount, styleId: backgroundEraseStyleId())
             }
             semanticContent = .output
             semanticContentClearsAtEndOfLine = false
@@ -4679,8 +4793,8 @@ public struct Terminal: Equatable, Sendable {
         semanticContentClearsAtEndOfLine = false
         promptRedrawMode = .full
 
-        let style = backgroundEraseStyle
-        severWrapClaim(before: 0, replacementStyle: style)
+        let styleId = backgroundEraseStyleId()
+        severWrapClaim(before: 0, replacementStyleId: styleId)
         for row in rows.indices {
             eraseEntireRow(row)
         }
@@ -4868,7 +4982,7 @@ public struct Terminal: Equatable, Sendable {
 
     private mutating func upgradeClusterToWide(at target: CellPosition) -> CellPosition {
         let scalars = rows[target.row].cells[target.column].scalars
-        let style = rows[target.row].cells[target.column].style
+        let styleId = rows[target.row].cells[target.column].styleId
         let hyperlinkId = rows[target.row].cells[target.column].hyperlinkId
         let contentIdentity = rows[target.row].cells[target.column].contentIdentity
         var destination = target
@@ -4878,7 +4992,7 @@ public struct Terminal: Equatable, Sendable {
                 clearCellAndPair(row: target.row, column: target.column)
                 rows[target.row].cells[target.column] = GridCell(
                     kind: .spacerHead,
-                    style: style,
+                    styleId: styleId,
                     hyperlinkId: hyperlinkId,
                     contentIdentity: contentIdentity
                 )
@@ -4901,15 +5015,15 @@ public struct Terminal: Equatable, Sendable {
         }
 
         rows[destination.row].cells[destination.column] = GridCell(
-            kind: .wideHead,
             scalars: scalars,
-            style: style,
+            kind: .wideHead,
+            styleId: styleId,
             hyperlinkId: hyperlinkId,
             contentIdentity: contentIdentity
         )
         rows[destination.row].cells[destination.column + 1] = GridCell(
             kind: .wideTail,
-            style: style,
+            styleId: styleId,
             hyperlinkId: hyperlinkId,
             contentIdentity: contentIdentity
         )
@@ -4966,10 +5080,11 @@ public struct Terminal: Equatable, Sendable {
             )
         }
         clearCellAndPair(row: cursor.row, column: cursor.column)
+        let styleId = currentStyleId()
         rows[cursor.row].cells[cursor.column] = GridCell(
-            kind: .narrow,
             scalars: .single(scalar),
-            style: currentStyle,
+            kind: .narrow,
+            styleId: styleId,
             hyperlinkId: hyperlinkPen,
             contentIdentity: contentIdentity
         )
@@ -4994,7 +5109,7 @@ public struct Terminal: Equatable, Sendable {
                 clearCellAndPair(row: cursor.row, column: cursor.column)
                 rows[cursor.row].cells[cursor.column] = GridCell(
                     kind: .spacerHead,
-                    style: currentStyle,
+                    styleId: currentStyleId(),
                     hyperlinkId: hyperlinkPen,
                     contentIdentity: contentIdentity
                 )
@@ -5027,16 +5142,17 @@ public struct Terminal: Equatable, Sendable {
             column: cursor.column + 1,
             clearsPreviousSpacer: preservesWrappedSpacer == false
         )
+        let styleId = currentStyleId()
         rows[cursor.row].cells[cursor.column] = GridCell(
-            kind: .wideHead,
             scalars: .single(scalar),
-            style: currentStyle,
+            kind: .wideHead,
+            styleId: styleId,
             hyperlinkId: hyperlinkPen,
             contentIdentity: contentIdentity
         )
         rows[cursor.row].cells[cursor.column + 1] = GridCell(
             kind: .wideTail,
-            style: currentStyle,
+            styleId: styleId,
             hyperlinkId: hyperlinkPen,
             contentIdentity: contentIdentity
         )
@@ -5242,7 +5358,7 @@ public struct Terminal: Equatable, Sendable {
             invalidateInspection(inViewportRows: range)
         }
         let amount = min(abs(delta), range.count)
-        let style = backgroundEraseStyle
+        let styleId = backgroundEraseStyleId()
 
         if delta < 0, pushesToScrollback {
             // Only the evicted prefix has to outlive the move, so this copies `amount` rows
@@ -5251,7 +5367,7 @@ public struct Terminal: Equatable, Sendable {
             // `self.rows` would be an overlapping access to `self`.
             appendToScrollback(Array(rows[range.lowerBound..<(range.lowerBound + amount)]))
         } else {
-            severWrapClaim(before: range.lowerBound, replacementStyle: style)
+            severWrapClaim(before: range.lowerBound, replacementStyleId: styleId)
         }
 
         Self.moveInPlace(range, by: delta, amount: amount) { destination, source in
@@ -5259,7 +5375,7 @@ public struct Terminal: Equatable, Sendable {
                 let moved = rows[source]
                 rows[destination] = moved
             } else {
-                rows[destination] = makeBlankRow(columns: columnCount, style: style)
+                rows[destination] = makeBlankRow(columns: columnCount, styleId: styleId)
             }
         }
 
@@ -5268,7 +5384,7 @@ public struct Terminal: Equatable, Sendable {
             let lastSurvivor = delta < 0
                 ? range.lowerBound + survivingCount - 1
                 : range.upperBound - 1
-            severWrapClaim(at: lastSurvivor, replacementStyle: style)
+            severWrapClaim(at: lastSurvivor, replacementStyleId: styleId)
         }
         if delta < 0, pushesToScrollback {
             enforceScrollbackBudget()
@@ -5285,29 +5401,29 @@ public struct Terminal: Equatable, Sendable {
         guard range.isEmpty == false, delta != 0 else { return }
         invalidateInspection(inViewportRows: row..<(row + 1))
         let amount = min(abs(delta), range.count)
-        let style = backgroundEraseStyle
+        let styleId = backgroundEraseStyleId()
 
         Self.moveInPlace(range, by: delta, amount: amount) { destination, source in
             if let source {
                 let moved = rows[row].cells[source]
                 rows[row].cells[destination] = moved
             } else {
-                rows[row].cells[destination] = GridCell(style: style)
+                rows[row].cells[destination] = GridCell(styleId: styleId)
             }
         }
 
-        severWrapClaim(at: row, replacementStyle: style)
+        severWrapClaim(at: row, replacementStyleId: styleId)
         clearPreviousSpacer(
             beforeRow: row,
             column: range.lowerBound,
-            replacementStyle: style
+            replacementStyleId: styleId
         )
-        repairHorizontalMove(in: row, replacementStyle: style)
+        repairHorizontalMove(in: row, replacementStyleId: styleId)
     }
 
     private mutating func repairHorizontalMove(
         in row: Int,
-        replacementStyle: TerminalStyle
+        replacementStyleId: StyleId
     ) {
         let cells = rows[row].cells
         var invalidColumns: [Int] = []
@@ -5329,24 +5445,24 @@ public struct Terminal: Equatable, Sendable {
         }
 
         for column in invalidColumns {
-            rows[row].cells[column] = GridCell(style: replacementStyle)
+            rows[row].cells[column] = GridCell(styleId: replacementStyleId)
         }
     }
 
     private mutating func severWrapClaim(
         before row: Int,
-        replacementStyle: TerminalStyle
+        replacementStyleId: StyleId
     ) {
         if row > 0 {
-            severWrapClaim(at: row - 1, replacementStyle: replacementStyle)
+            severWrapClaim(at: row - 1, replacementStyleId: replacementStyleId)
         } else if isAlternateScreenActive == false, let last = scrollbackRows.indices.last {
-            severScrollbackWrapClaim(at: last, replacementStyle: replacementStyle)
+            severScrollbackWrapClaim(at: last, replacementStyleId: replacementStyleId)
         }
     }
 
     private mutating func severWrapClaim(
         at row: Int,
-        replacementStyle: TerminalStyle
+        replacementStyleId: StyleId
     ) {
         guard rows.indices.contains(row) else { return }
         guard rows[row].isSoftWrapped
@@ -5355,13 +5471,13 @@ public struct Terminal: Equatable, Sendable {
         invalidateInspection(inViewportRows: row..<(row + 1))
         rows[row].isSoftWrapped = false
         if rows[row].cells[columnCount - 1].kind == .spacerHead {
-            rows[row].cells[columnCount - 1] = GridCell(style: replacementStyle)
+            rows[row].cells[columnCount - 1] = GridCell(styleId: replacementStyleId)
         }
     }
 
     private mutating func severScrollbackWrapClaim(
         at row: Int,
-        replacementStyle: TerminalStyle
+        replacementStyleId: StyleId
     ) {
         guard scrollbackRows[row].isSoftWrapped
             || scrollbackRows[row].cells[columnCount - 1].kind == .spacerHead
@@ -5369,7 +5485,7 @@ public struct Terminal: Equatable, Sendable {
         invalidateInspection(inScrollbackRow: row)
         scrollbackRows[row].isSoftWrapped = false
         if scrollbackRows[row].cells[columnCount - 1].kind == .spacerHead {
-            scrollbackRows[row].cells[columnCount - 1] = GridCell(style: replacementStyle)
+            scrollbackRows[row].cells[columnCount - 1] = GridCell(styleId: replacementStyleId)
         }
     }
 
@@ -5395,29 +5511,29 @@ public struct Terminal: Equatable, Sendable {
         row: Int,
         column: Int,
         clearsPreviousSpacer: Bool = true,
-        replacementStyle: TerminalStyle = TerminalStyle()
+        replacementStyleId: StyleId = Terminal.defaultStyleId
     ) {
         guard rows.indices.contains(row), rows[row].cells.indices.contains(column) else { return }
         switch rows[row].cells[column].kind {
         case .wideHead:
-            rows[row].cells[column] = GridCell(style: replacementStyle)
+            rows[row].cells[column] = GridCell(styleId: replacementStyleId)
             if column + 1 < columnCount {
-                rows[row].cells[column + 1] = GridCell(style: replacementStyle)
+                rows[row].cells[column + 1] = GridCell(styleId: replacementStyleId)
             }
         case .wideTail:
-            rows[row].cells[column] = GridCell(style: replacementStyle)
+            rows[row].cells[column] = GridCell(styleId: replacementStyleId)
             if column > 0 {
-                rows[row].cells[column - 1] = GridCell(style: replacementStyle)
+                rows[row].cells[column - 1] = GridCell(styleId: replacementStyleId)
             }
         case .padding, .narrow, .spacerHead:
-            rows[row].cells[column] = GridCell(style: replacementStyle)
+            rows[row].cells[column] = GridCell(styleId: replacementStyleId)
         }
 
         if clearsPreviousSpacer {
             clearPreviousSpacer(
                 beforeRow: row,
                 column: column,
-                replacementStyle: replacementStyle
+                replacementStyleId: replacementStyleId
             )
         }
     }
@@ -5425,19 +5541,19 @@ public struct Terminal: Equatable, Sendable {
     private mutating func clearPreviousSpacer(
         beforeRow row: Int,
         column: Int,
-        replacementStyle: TerminalStyle = TerminalStyle()
+        replacementStyleId: StyleId = Terminal.defaultStyleId
     ) {
         guard column <= 1 else { return }
         if row > 0, rows[row - 1].cells[columnCount - 1].kind == .spacerHead {
             invalidateInspection(inViewportRows: (row - 1)..<row)
-            rows[row - 1].cells[columnCount - 1] = GridCell(style: replacementStyle)
+            rows[row - 1].cells[columnCount - 1] = GridCell(styleId: replacementStyleId)
         } else if row == 0,
                   isAlternateScreenActive == false,
                   let last = scrollbackRows.indices.last,
                   scrollbackRows[last].cells[columnCount - 1].kind == .spacerHead
         {
             invalidateInspection(inScrollbackRow: last)
-            scrollbackRows[last].cells[columnCount - 1] = GridCell(style: replacementStyle)
+            scrollbackRows[last].cells[columnCount - 1] = GridCell(styleId: replacementStyleId)
         }
     }
 }
