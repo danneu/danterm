@@ -71,7 +71,21 @@ different instrument, and one that only became answerable today (`F1`).
   when it should not is measuring the instrument.
 - **Size cell-representation changes in malloc buckets, not in stride.** `F7`
   inference 4: rows round up to a bucket, so a shrink that does not cross a
-  boundary returns nothing resident even though stride fell.
+  boundary returns nothing resident even though stride fell. `F10` found the
+  effect runs both ways -- it *amplified* a 22% stride cut into a 24% footprint
+  cut, by moving the row onto a boundary. Bucket placement is not derivable from
+  stride in either direction. Measure it.
+- **Before proposing where a field should go, measure what it costs where it
+  is.** `F10`: `hyperlinkId` looked like an 8-byte field and was a 16-byte one,
+  because `Int?` alignment could not use the padding `TerminalStyle` leaves. A
+  two-byte type recovered all of it and made the side map `H2` specified
+  unnecessary. Read the offsets before designing the fix.
+- **`incremental-mixed` cannot currently decide a ~3% effect.** Its draw metric
+  has a paired SD of 6.26% against the 1.85% threshold it is judged by, and
+  returns false directional verdicts on byte-identical code -- measured in
+  `plans/wip/f7-arm-confound-diagnosis.md` and reproduced by `F10`'s A/A control,
+  which read `faster (-3.30%)` with no code difference at all. Run an A/A control
+  before believing any `incremental-mixed` verdict under ~5%.
 
 ## Trigger and current evidence
 
@@ -153,7 +167,14 @@ again. Decide the budget's nominal value once, after both.
 Confirmed if resident scrollback bytes fall to the budget and the harness
 measures it.
 
-### H2 -- `hyperlinkId` should be one bit plus a side map
+### H2 -- `hyperlinkId` should be one bit plus a side map -- **CONFIRMED, by a simpler route (`D3`/`F10`)**
+
+**Taken.** The cell is 72 -> 56 bytes, `scrollback-stream` is 18-19% faster, and
+history at 10 MB rises ~810 -> ~1,041 rows. But the side map below was *not*
+built: `F10` measured that narrowing the field to `UInt16?` reaches the same
+stride, because the cost was the `Int?`'s 8-byte alignment rather than its eight
+bytes. See `D3`. The text below is kept as recorded.
+
 
 Continues `12/H2`'s first half, which `12/F3` inference 3 sharpened: nil in
 **100% of cells across all four workloads**. Eight bytes plus a discriminator,
@@ -195,6 +216,14 @@ This is speculative and needs the link-activation path read before it is
 credible. It is stated here because it is the kind of answer doc 12's rules ask
 for: DanTerm's own simpler solution rather than a narrower version of the
 existing one.
+
+**`F10` re-sizes it, and softens the objection.** With the link id narrowed,
+`contentIdentity` is the last `Int?` in the cell and is now the *only* thing
+holding stride at 56: narrowing it to `UInt32?` measures **48**, and removing it
+measures 40. So this is worth ~8 bytes per cell, ~14%, and 132K distinct values
+fit in 32 bits comfortably -- the width objection `12/F3` raised applies to 16
+bits, not to 32. A `UInt32?` is the cheap half of this hypothesis and does not
+need the per-run redesign; the redesign is only needed for the other 8 bytes.
 
 ### H5 -- rows should carry content-class skip flags
 
@@ -411,8 +440,14 @@ baseline.
 
 ### Phase 3 -- shrink the cell (H2, then H3 or H6)
 
-- [ ] Take H2 (`hyperlinkId` to one bit plus side map). Verify stride, resident
+- [x] Take H2 (`hyperlinkId` to one bit plus side map). Verify stride, resident
       bytes, and CPU non-regression.
+      **Done -- `D3`/`F10`, and the side map was not needed.** Narrowing the field
+      to `UInt16?` reaches the same 56-byte stride, because the cost was the
+      `Int?`'s alignment rather than its size. Stride 72 -> 56, per-row bucket
+      overhead 1,487 -> 255 bytes, `scrollback-stream` **18-19% faster** across two
+      runs. At a fixed budget the win is spent on history (+26% rows), not on
+      memory.
 - [ ] Instrument style **write** traffic before H3 -- `12/F3`'s stated
       uncertainty, and the input that decides whether a refcounted dedup table
       pays. Record in a finding; do not implement H3 first.
@@ -957,7 +992,161 @@ Diagnosis path: the excess scaled with `--lines` but was **invariant under
 - Next action: the product decision this finding sets up -- see `D2`'s open
   question. The engineering half is done and is independently correct.
 
+### F10 -- narrowing the link id moves the cell 72 -> 56 bytes, and the malloc bucket pays more than the stride does
+
+- Status: recorded. Verification of `D3`. Closes Phase 3's first task and confirms
+  `H2`.
+- Date and investigator: 2026-07-29, Claude (agent).
+- Commit and worktree state: `99fc4eb` plus `D3`'s change.
+- Instrument: `just terminal-memory-probe`, one fresh process per payload, 179x66,
+  4 KB chunks. Layout figures are `MemoryLayout` on a replica of `GridCell` built
+  from its own (public) component types, since the struct itself is `private`.
+
+**The field's 8 bytes were never the cost; its alignment was.** `GridCell` today
+lays out `kind` at 0, `scalars` at 8, `style` at 17 (19 bytes, ending at 36),
+`hyperlinkId` at 40, `contentIdentity` at 56 -- size 65, stride 72. An `Int?`
+needs 8-byte alignment, so the link id could not sit in the three bytes of
+padding that `style`'s odd 19-byte size leaves behind at offset 36; it started a
+fresh 16-byte slot instead. Measured across five variants:
+
+  | `hyperlinkId` variant | stride |
+  | --- | ---: |
+  | `Int?` (before) | 72 |
+  | removed from the cell entirely -- `H2` as written | 56 |
+  | removed, plus a `Bool` presence flag in the cell | 56 |
+  | **`UInt16?`** | **56** |
+  | `UInt32?` | 64 |
+  | `UInt16?` *and* `contentIdentity: UInt32?` | 48 |
+  | both fields removed | 40 |
+
+- Observation 1, and it decided the design: **removing the field and narrowing it
+  to two bytes land on the same stride.** The side map `H2` proposed buys nothing
+  a type change does not, so `D3` takes the type change. The `Bool` row is the
+  same story from the other side -- a presence flag is free, because it also fits
+  in padding.
+- Observation 2: `UInt32?` is worth only half as much as `UInt16?`. Five bytes at
+  4-byte alignment pushes `contentIdentity` to offset 48; three bytes at 2-byte
+  alignment does not. The win is quantized by what fits in the gap, not by how
+  many bytes are saved.
+- Measured effect, before -> after:
+
+  | payload | rows | cell bytes | overhead/row | footprint |
+  | --- | ---: | ---: | ---: | ---: |
+  | full-screen (fixed row count) | 201 -> 201 | 2.47 -> **1.92 MB** | 1,487 -> **255** | 3.03 -> **2.30 MB** |
+  | scrollback-plain | 876 -> **1,107** | 10.77 -> 10.58 MB | 1,486 -> **265** | 12.61 -> 11.95 MB |
+  | scrollback-unicode | 872 -> 1,100 | 10.72 -> 10.52 MB | -> 351 | -> 11.94 MB |
+  | scrollback-styled | 876 -> 1,107 | 10.77 -> 10.58 MB | -> 265 | -> 11.98 MB |
+  | scrollback-mixed | 875 -> 1,104 | 10.75 -> 10.55 MB | -> 306 | -> 12.56 MB |
+
+- Inference 1, and it is the finding: **`F7` inference 4 was right that bucket
+  placement decides the outcome, and wrong about which way it would cut here.**
+  It warned that a shrink failing to cross a boundary returns nothing. What
+  happened is the opposite: per-row overhead beyond cell bytes fell from 1,487
+  bytes to 255, **-83%**, because a 179-column row moved from 12,888 bytes --
+  badly placed just inside a 14,336-byte bucket -- to 10,024 bytes, which sits
+  almost exactly on a boundary. On the fixed-row-count control the footprint fell
+  **24.0%** against a 22.2% cut in cell bytes. The rule survives, with its sign
+  corrected: **bucket placement can amplify a shrink as easily as erase it, and
+  neither is predictable from stride.** Measure, do not derive.
+- Inference 2, and it is what a reader should not skip: **at a fixed byte budget
+  this is not a memory saving.** `scrollback-plain` holds 10.58 MB where it held
+  10.77 MB -- flat -- and spends the entire win on history instead, 876 -> 1,107
+  rows (**+26.4%**). The saving is realized only where the row count is fixed
+  (the live screen, `full-screen` above) or if the nominal budget is lowered.
+  This is exactly the coupling `D2` left open, now with a number attached.
+- CPU, per `10/F9`. Two independent `just benchmark-confirm baseline=HEAD` runs,
+  then an A/A control:
+
+  | workload | run 1 | run 2 | **A/A control** |
+  | --- | --- | --- | --- |
+  | `terminal-feed` | faster (-2.62%) | inconclusive (-1.88%) | equivalent (-0.58%) |
+  | `scrollback-stream` | **faster (-17.87%)** | **faster (-19.16%)** | equivalent (-0.38%) |
+  | `content-churn` | equivalent (+0.75%) | inconclusive (+2.02%) | inconclusive (+1.16%) |
+  | `style-churn` | inconclusive (+0.79%) | equivalent (-0.31%) | equivalent (+0.22%) |
+  | `incremental-mixed` | slower (+2.84%) | slower (+3.42%) | **faster (-3.30%)** |
+
+- Inference 3: **`scrollback-stream` is 18-19% faster**, reproduced twice against
+  an A/A control that reads -0.38% on the same workload. This is by a wide margin
+  the largest CPU win recorded in any of these files, and the mechanism is
+  ordinary: scrolling moves rows, rows are 22% smaller, so `moveAndFillCells` and
+  the eviction path copy 22% less and touch fewer cache lines. Note the contrast
+  with `12/F8` -- the POD cell was rejected precisely because it made this
+  workload **+6.74% slower**. A memory-motivated change has now moved the same
+  workload three times as far in the opposite direction.
+- Inference 4, on the one negative reading: **`incremental-mixed`'s +2.84% and
+  +3.42% are not attributable to this change**, and the A/A control is why. Run
+  with byte-identical code on both arms, in the same session, it returned
+  `faster (-3.30%)` -- a false verdict of the same magnitude and the opposite
+  sign. That reproduces `plans/wip/f7-arm-confound-diagnosis.md`, which measured
+  this metric's paired SD at **6.26% against the 1.85% threshold** it is judged
+  by, and 10 false directional verdicts in 24 A/A quartets. There is also no
+  mechanism: the workload measures draw time, `GridCell` is not in the draw path,
+  and plan time -- which this change *can* touch -- moved -4.95% and -0.16%.
+  Recorded rather than dismissed, but it is a fact about the instrument.
+- Competing interpretations considered for the memory result: that the row-count
+  rise is eviction lagging rather than real depth. Ruled out by the census, which
+  counts live rows and is exact, and by `scrollbackByteCount` staying inside the
+  budget under the behavioral test that pins it.
+- Uncertainty:
+  - The probe measures a `Terminal` in isolation; `F6`'s unaccounted app-side row
+    arrays are unaffected and still unexplained.
+  - Two bytes is now the id space, so the terminal can refuse a link it would
+    once have admitted. It takes 65,536 targets alive at once, which the 256 KiB
+    metadata cap allows only for URIs averaging four bytes. Bounded and tested,
+    but it is a new refusal path that did not exist before.
+  - `full-screen`'s overhead/row of 255 bytes is close enough to a boundary that
+    a future shrink of a few bytes could land badly. Nothing predicts this from
+    stride; re-measure per change.
+- Next action: instrument style **write** traffic before `H3`, per Phase 3.
+
 ## Decision log
+
+### D3 -- narrow the cell's link id rather than move it to a side map
+
+- Status: decided and implemented. Takes `H2`, by a different route than `H2`
+  proposed.
+- Date and investigator: 2026-07-29, Claude (agent).
+- Evidence used: `F10`'s layout table (removal and narrowing reach the same
+  stride), `12/F3` inference 3 and `15/F2` observation 4 (the field is nil in
+  100% of cells across two independent corpora).
+- What `H2` proposed, following libghostty (`page.zig:145`, `page.zig:1994`): one
+  bit in the cell plus a page-level map. What landed instead: `hyperlinkId` is a
+  `UInt16?` rather than an `Int?`, and nothing else about the cell changes.
+- Why the simpler answer wins here, which is this file's standing rule about
+  libghostty techniques: the side map costs a per-row structure that reflow,
+  resize, scroll, and eviction all have to maintain in step with the cells --
+  every one of them a place a link can silently detach -- and `F10` shows it buys
+  **exactly the same 56-byte stride** as a two-byte field. That is complexity for
+  nothing. libghostty needs the map because a Zig page is a packed byte arena
+  where a bit is genuinely cheaper than a field; a Swift struct has three bytes of
+  alignment padding sitting unused, and a field that fits there is free.
+- The cost, stated plainly: **the id space is now finite.** An unbounded counter
+  cannot collide; a 16-bit one wraps after 65,536 distinct targets and would
+  overwrite a live entry, showing an old cell some newer link's URI. So
+  allocation had to change with the type: `allocateHyperlinkId` scans from a
+  rotating cursor for an id absent from the table, and refuses when the space is
+  full -- the same refusal the byte cap already performs, reaching the same
+  caller path.
+- Why recycling is sound, and it rests on one invariant: **every id held by a
+  cell is a key of `hyperlinkTargets`.** Targets are only ever dropped by
+  `filter { live.contains($0.key) }`, and `liveHyperlinkIds` walks scrollback,
+  the active grid, the inactive primary screen, and the pen -- which was verified
+  to be every place a cell lives (the alternate screen is discarded on exit, not
+  retained). So an id absent from the table is absent from the grid.
+- Tests: a behavioral test drives 70,000 distinct targets past the 65,536-id
+  space while holding one link pinned on a cell that never scrolls, and asserts
+  that cell still resolves to *its own* URI. Confirmed to have teeth: against a
+  deliberately monotonic allocator it fails reading `https://h65535.test/...`
+  where `https://pinned.test` belongs -- the wraparound collision, exactly. An
+  earlier version of the test checked only the newest link and passed against
+  that same broken allocator; it was rewritten rather than trusted.
+- Test-suite consequence: only two places encoded the old stride --
+  `historyRowCost` and the deliberately literal-pinned cost fixtures. `D2`'s
+  centralization did its job.
+- Consequence for the budget, and it is `D2`'s open question getting sharper: at
+  10 MB, history rises from ~810 to ~1,041 scrollback rows (`F10`). The memory
+  number barely moves. Anyone deciding the nominal budget should now assume
+  stride 56, and that `H3` may take it lower still.
 
 ### D2 -- charge history's true size, and leave the budget's nominal value open
 
@@ -1148,9 +1337,21 @@ different proposal and is not covered by this rejection.
 
 ## Outcome
 
-Investigation in progress. **Phase 1 is complete, and Phase 2's engineering half
-is shipped.** Findings F1 through F9 are recorded; the next free ID is **F10**.
-Decisions D1 and D2 are recorded and implemented; the next free ID is **D3**.
+Investigation in progress. **Phase 1 is complete, Phase 2's engineering half is
+shipped, and Phase 3's first item is taken.** Findings F1 through F10 are
+recorded; the next free ID is **F11**. Decisions D1 through D3 are recorded and
+implemented; the next free ID is **D4**.
+
+`D3` took `H2` and the cell is now **56 bytes, down from 72**. It got there by a
+different route than `H2` specified: the link id's cost was its `Int?` alignment,
+not its eight bytes, so narrowing it to `UInt16?` recovered the whole 16 bytes
+and the side map libghostty uses was never built (`F10`). Two results are worth
+carrying forward. **`scrollback-stream` is 18-19% faster** -- the largest CPU win
+in any of these files, reproduced twice against an A/A control, and notable
+because `12/F8` rejected the POD cell for making that same workload 6.7% slower.
+And **at a fixed byte budget the change buys history, not memory**: cell bytes
+stayed at ~10.6 MB while history rose from 876 to 1,107 rows. That is `D2`'s open
+question getting harder to defer, not easier.
 
 `D2` corrected the accounting: a 10 MB budget now holds ~10.8 MB of cells instead
 of ~22 MB, and history at that budget falls from ~1,704 rows to ~810 (`F9`). The
@@ -1198,7 +1399,14 @@ those numbers in one command.
    cells, everywhere.
 6. **Size cell shrinks in malloc buckets, not in stride** (`F7` inference 4). A
    row at 179 columns is 12,888 bytes inside a 14,336-byte bucket, so a shrink
-   that does not cross the boundary below returns nothing resident.
+   that does not cross the boundary below returns nothing resident. `F10` then
+   showed the effect is not one-directional: the same quantization *amplified* a
+   22% stride cut into a 24% footprint cut, by landing the row on a boundary.
+7. **A field's cost is its alignment, not its width** (`F10`). `hyperlinkId`
+   presented as 8 bytes and cost 16, because `Int?` could not sit in the three
+   bytes of padding `TerminalStyle`'s 19-byte size leaves behind. Read the
+   offsets before designing any cell change -- it is what made `H2`'s side map
+   unnecessary, and it is what makes `H4`'s cheap half worth 8 more bytes.
 
 `F7` also closed Phase 1's last question -- no second retention defect exists --
 and left one observation for someone else: `Terminal.feed` materializes one
