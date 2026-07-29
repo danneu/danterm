@@ -63,6 +63,7 @@ test:
     python3 ./scripts/tests/terminal_benchmark_workloads_test.py
     python3 ./scripts/tests/terminal_draw_acceptance_test.py
     python3 ./scripts/tests/terminal_headless_draw_compare_test.py
+    python3 ./scripts/tests/terminal_profile_report_test.py
     ./scripts/tests/test-terminal-pty_test.sh
     ./scripts/tests/shell-integration_test.sh
     ./scripts/tests/agent-notifications-live_test.py
@@ -143,6 +144,14 @@ benchmark-sample workload="scrollback-stream" seconds="15":
 # Capture and export an xctrace profile from one isolated sustained Swift workload.
 benchmark-trace workload="scrollback-stream" template="Time Profiler" seconds="30":
     ./scripts/terminal-benchmark-profile.sh trace "{{workload}}" swift "{{seconds}}" "{{template}}"
+
+# Re-report an existing profile artifact as folded stacks plus JSON. Accepts a
+# profile directory, a .trace bundle, an exported time-profile XML, or a sample.txt;
+# a bare .trace is exported first, so no Instruments session is needed to read it.
+#   just benchmark-report .build/terminal-benchmark-profiles/2026-07-29-100006-58468
+#   just benchmark-report <dir> '--state Running --thread Main --top 40'
+benchmark-report input flags="":
+    python3 ./scripts/terminal-profile-report.py "{{input}}" {{flags}}
 
 # Run the opt-in headless shell/application compatibility workflows.
 # Needs asciinema/fish/fzf: nix develop .#terminal-workflows -c just test-terminal-workflows

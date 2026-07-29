@@ -20,7 +20,7 @@ DURATION="${DURATION#seconds=}"
 TEMPLATE="${TEMPLATE#template=}"
 case "$MODE" in loop|sample|trace) ;; *) echo "Unknown profiling mode: $MODE" >&2; exit 2 ;; esac
 [[ "$DURATION" =~ ^[1-9][0-9]*$ ]] || { echo "Profiling duration must be whole seconds" >&2; exit 2; }
-for command in jq nm; do
+for command in jq nm python3; do
     command -v "$command" >/dev/null || { echo "Missing required command: $command" >&2; exit 1; }
 done
 
@@ -129,6 +129,7 @@ case "$MODE" in
             exit 1
         fi
         echo "Sample profile: $PROFILE_ROOT/sample.txt"
+        python3 "$SCRIPT_DIR/terminal-profile-report.py" "$PROFILE_ROOT/sample.txt"
         ;;
     trace)
         command -v xcrun >/dev/null || { echo "xcrun is unavailable; install Xcode command-line tools" >&2; exit 1; }
@@ -140,7 +141,15 @@ case "$MODE" in
             exit 1
         fi
         xcrun xctrace export --input "$PROFILE_ROOT/profile.trace" --toc --output "$PROFILE_ROOT/trace-toc.xml"
+        # The .trace bundle opens only in Instruments and the table of contents
+        # carries no samples, so export the time-profile rows themselves; that
+        # table is the only artifact here a non-interactive reader can use.
+        xcrun xctrace export --input "$PROFILE_ROOT/profile.trace" \
+            --xpath '/trace-toc/run[@number="1"]/data/table[@schema="time-profile"]' \
+            --output "$PROFILE_ROOT/time-profile.xml"
         echo "Trace profile: $PROFILE_ROOT/profile.trace"
         echo "Trace export: $PROFILE_ROOT/trace-toc.xml"
+        echo "Sample export: $PROFILE_ROOT/time-profile.xml"
+        python3 "$SCRIPT_DIR/terminal-profile-report.py" "$PROFILE_ROOT/time-profile.xml"
         ;;
 esac

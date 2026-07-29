@@ -217,12 +217,27 @@ actually have.
 Profiling is diagnostic only. It builds from the local checkout, runs one
 isolated sustained workload, and cannot decide anything.
 
-Start with `just benchmark-sample scrollback-stream seconds=15`. The textual
-profile is quick to search and usually identifies a dominant stack. Use
-`just benchmark-trace scrollback-stream template="Time Profiler" seconds=30`
-when call-tree filtering, thread timelines, or richer Instruments data is
-needed. Both attach by numeric pid from the isolated harness identity file;
-they do not find a process by name or automate Instruments.app.
+Pick by the shape of the question, not by cost -- both modes cost one build and
+one sustained run.
+
+Reach for `just benchmark-trace scrollback-stream template="Time Profiler"
+seconds=30` for any question phrased as a share: which frame owns the time,
+what fraction the feed path costs, whether a change moved the distribution. Its
+Time Profiler records on-CPU samples only, so its percentages mean what they
+appear to mean.
+
+Reach for `just benchmark-sample scrollback-stream seconds=15` when the
+question is "what is this thread doing" or "does this path appear at all" --
+where a stack is present, and blocked stacks are part of the answer. Its
+percentages need the correction in the next section before they mean anything.
+
+Both attach by numeric pid from the isolated harness identity file; they do not
+find a process by name or automate Instruments.app, and neither needs an
+Instruments session to read -- see the next section.
+
+`just benchmark-feed-sample` is narrower than either: it samples `Terminal.feed`
+alone, headless and without a display, isolating parse and grid cost from the
+planning and drawing that share the app's main thread.
 
 Use `just benchmark-loop scrollback-stream backend=swift` when attaching another
 command-line diagnostic tool. It prints the identity JSON -- pid, workload,
@@ -234,6 +249,32 @@ in System Settings and retry. The benchmark app is ad-hoc signed with
 `get-task-allow`; the harness verifies the entitlement before launch. `xctrace`
 also uses `--no-prompt`, so a permission problem fails with diagnostics instead
 of waiting for UI.
+
+## Read a profile without Instruments
+
+Every profiling mode writes `profile-report.json` and `profile-folded.txt`
+beside its raw artifact and prints a per-thread and top-self-frame summary to
+stdout, so a run is readable end to end with no GUI step. The `.trace` bundle
+opens only in Instruments.app and its `--toc` export carries no samples; the
+`time-profile.xml` written next to it is the actual sample rows, and it is what
+the report parses.
+
+The JSON holds totals, per-thread and per-binary shares, the hottest self and
+inclusive frames, and the hottest stacks. `profile-folded.txt` is the standard
+folded format -- feed it to `flamegraph.pl` or speedscope unchanged.
+
+Re-report an artifact you already have, including one captured before the
+report existed, with `just benchmark-report <dir>`. It accepts a profile
+directory, a `.trace` bundle (which it exports first), an exported XML, or a
+`sample.txt`. Pass flags through as one quoted argument:
+`just benchmark-report <dir> '--state Running --thread Main --top 40'`.
+
+One reading trap, and it is the reason the thread filter exists: `sample`
+captures every thread whether or not it is on-CPU, so an idle app's report is
+mostly `__workq_kernreturn` and `mach_msg2_trap`, and every thread's share
+converges on an equal slice. Those are parked threads, not cost. Filter to the
+thread you care about before reading shares. `xctrace`'s Time Profiler records
+running samples only, so its shares need no such correction.
 
 ## Microbenchmarks
 

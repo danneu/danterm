@@ -155,6 +155,15 @@ def main():
     print(f"workloads: {', '.join(names)}")
     print(f"profile:   {sample_path}")
     print(f"identity:  {profile_root / 'identity.json'}")
+    # The child writes to this stdout directly, so flush first or its summary
+    # lands above the paths printed here.
+    sys.stdout.flush()
+    # `sample`'s call graph is written for a human reader; the report beside it is
+    # the form a caller can aggregate without re-parsing an indented tree.
+    subprocess.run(
+        [sys.executable, str(REPO_ROOT / "scripts" / "terminal-profile-report.py"), str(sample_path)],
+        check=True,
+    )
 
 
 if __name__ == "__main__":
