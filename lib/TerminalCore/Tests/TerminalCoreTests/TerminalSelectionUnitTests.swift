@@ -1,4 +1,4 @@
-// Word and logical-line range queries used by local multi-click selection.
+// Word, cluster, and logical-line range queries used by local multi-click selection.
 import Testing
 
 @testable import TerminalCore
@@ -32,6 +32,41 @@ struct TerminalSelectionUnitTests {
         let wrappedLine = terminal.logicalLineRange(at: .init(row: 1, column: 0))
         terminal.setSelection(wrappedLine)
         #expect(terminal.selectedText == "abcdef")
+    }
+
+    @Test("cluster ranges select a whitespace-delimited token whole")
+    func clusterSelectsPunctuatedToken() throws {
+        // Intent: a cluster query inside a punctuated path returns the path alone,
+        //   excluding a leading output glyph and the space that follows it.
+        // Why it exists: pins the whole point of the granularity -- word selection
+        //   stops at `/`, `-`, and `.`, so the path had no one-gesture target.
+        // Scenario: triple-clicking a path in Claude Code output, which prefixes
+        //   each line with a non-ASCII glyph and a space.
+        var terminal = try #require(Terminal(columns: 40, rows: 2))
+        terminal.feed(Array("\u{23FA} docs/research/13-live-app.md".utf8))
+
+        let cluster = terminal.clusterRange(at: .init(row: 0, column: 10))
+        terminal.setSelection(cluster)
+        #expect(terminal.selectedText == "docs/research/13-live-app.md")
+    }
+
+    @Test("cluster ranges cross soft wraps but stop at hard lines")
+    func clusterWrapRanges() throws {
+        var terminal = try #require(Terminal(columns: 4, rows: 4))
+        terminal.feed(Array("ab.def\r\nXY".utf8))
+
+        #expect(terminal.clusterRange(at: .init(row: 1, column: 1)) == range(0, 0, 1, 2))
+        terminal.setSelection(terminal.clusterRange(at: .init(row: 1, column: 1)))
+        #expect(terminal.selectedText == "ab.def")
+    }
+
+    @Test("cluster ranges select whitespace runs and fall back past retained content")
+    func clusterWhitespaceRegions() throws {
+        var terminal = try #require(Terminal(columns: 24, rows: 2))
+        terminal.feed(Array("ab   cd".utf8))
+
+        #expect(terminal.clusterRange(at: .init(row: 0, column: 3)) == range(0, 2, 0, 5))
+        #expect(terminal.clusterRange(at: .init(row: 0, column: 20)) == range(0, 5, 0, 7))
     }
 
     @Test("selection-unit positions address scrollback and clamp at stream edges")

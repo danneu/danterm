@@ -91,7 +91,7 @@ struct TerminalInteractionPolicyTests {
         #expect(reportMove.selectionMutation == nil)
     }
 
-    @Test("click counts select character word and line units and drag their union")
+    @Test("click counts select character word cluster and line units and drag their union")
     func selectionGranularity() throws {
         var terminal = try #require(Terminal(columns: 8, rows: 3))
         terminal.feed(Array("one two three".utf8))
@@ -115,17 +115,37 @@ struct TerminalInteractionPolicyTests {
         )
         #expect(wordMove.selectionMutation == .set(range(0, 0, 1, 5)))
 
+        // Three clicks mean cluster, not line: the press selects the whole
+        // punctuated token that word granularity would have split, and dragging
+        // extends by whole clusters.
+        var punctuated = try #require(Terminal(columns: 16, rows: 2))
+        punctuated.feed(Array("a.b c.d".utf8))
+        var cluster = TerminalInteractionState()
+        let clusterDown = decideTerminalPointer(
+            .down(.left, column: 1, row: 0, clickCount: 3), terminal: punctuated, state: &cluster
+        )
+        #expect(clusterDown.selectionMutation == .set(range(0, 0, 0, 3)))
+        let clusterMove = decideTerminalPointer(
+            .move(column: 5, row: 0), terminal: punctuated, state: &cluster
+        )
+        #expect(clusterMove.selectionMutation == .set(range(0, 0, 0, 7)))
+
         var line = TerminalInteractionState()
         let lineDown = decideTerminalPointer(
             .down(.left, column: 1, row: 0, clickCount: 5), terminal: terminal, state: &line
         )
         #expect(lineDown.selectionMutation == .set(range(0, 0, 1, 5)))
 
+        var fourClick = TerminalInteractionState()
+        #expect(decideTerminalPointer(
+            .down(.left, column: 1, row: 0, clickCount: 4), terminal: terminal, state: &fourClick
+        ).selectionMutation == .set(range(0, 0, 1, 5)))
+
         var hardLines = try #require(Terminal(columns: 8, rows: 3))
         hardLines.feed(Array("first\r\nsecond".utf8))
         var lineDrag = TerminalInteractionState()
         _ = decideTerminalPointer(
-            .down(.left, column: 1, row: 0, clickCount: 3),
+            .down(.left, column: 1, row: 0, clickCount: 4),
             terminal: hardLines,
             state: &lineDrag
         )
@@ -136,6 +156,34 @@ struct TerminalInteractionPolicyTests {
         #expect(decideTerminalPointer(
             .up(.left, column: 1, row: 0), terminal: terminal, state: &line
         ).consumption == .selection)
+    }
+
+    @Test("click count never reaches an application that has captured the mouse")
+    func capturedMouseIgnoresClickCount() throws {
+        // Intent: under mouse capture, a high-click-count press reports exactly the
+        //   bytes a single click reports, and still makes no selection.
+        // Why it exists: adding a fourth granularity step made click counts above
+        //   three reachable for the first time; the captured-mouse recording suite
+        //   replays terminal state only and discards reported bytes, so it cannot
+        //   catch a report that a new click count altered or suppressed.
+        // Scenario: clicking four times in a TUI that tracks the mouse -- vim, btop --
+        //   must look like four ordinary clicks to that application.
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        terminal.feed(Array("\u{1B}[?1000;1006h".utf8))
+
+        var single = TerminalInteractionState()
+        let singleDown = decideTerminalPointer(
+            .down(.left, column: 1, row: 0, clickCount: 1), terminal: terminal, state: &single
+        )
+        var quadruple = TerminalInteractionState()
+        let quadrupleDown = decideTerminalPointer(
+            .down(.left, column: 1, row: 0, clickCount: 4), terminal: terminal, state: &quadruple
+        )
+
+        #expect(singleDown.inputBytes.isEmpty == false)
+        #expect(quadrupleDown.inputBytes == singleDown.inputBytes)
+        #expect(quadrupleDown.consumption == .report)
+        #expect(quadrupleDown.selectionMutation == nil)
     }
 
     @Test("local selection maps displayed browsing rows into the current stream")

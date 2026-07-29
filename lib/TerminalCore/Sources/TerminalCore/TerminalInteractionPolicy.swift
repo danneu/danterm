@@ -206,6 +206,7 @@ private enum PointerOwnership: Equatable, Sendable {
 private enum SelectionGranularity: Equatable, Sendable {
     case character
     case word
+    case cluster
     case line
 }
 
@@ -523,9 +524,16 @@ private func pointerDownDecision(
         return pointerDecision(.ignored)
     case .selection:
         guard button == .left else { return pointerDecision(.ignored) }
-        let granularity: SelectionGranularity = clickCount <= 1
-            ? .character
-            : (clickCount == 2 ? .word : .line)
+        // Cluster takes the triple click that would conventionally mean line, on the
+        // bet that a path or flag is the more frequent copy target than a whole row
+        // in agent-driven output. Line stays reachable one click further out, and
+        // every count above four still means line.
+        let granularity: SelectionGranularity = switch clickCount {
+        case ...1: .character
+        case 2: .word
+        case 3: .cluster
+        default: .line
+        }
         let anchor = selectionUnit(
             at: streamPosition(column: column, row: row, terminal: terminal),
             granularity: granularity,
@@ -598,6 +606,7 @@ private func selectionUnit(
     switch granularity {
     case .character: terminal.characterRange(at: position)
     case .word: terminal.wordRange(at: position)
+    case .cluster: terminal.clusterRange(at: position)
     case .line: terminal.logicalLineRange(at: position)
     }
 }

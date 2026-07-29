@@ -1802,7 +1802,42 @@ public struct Terminal: Equatable, Sendable {
         )) ?? emptyRange(at: position)
     }
 
-    /// Returns one logical line across all soft-wrapped visual rows for triple-click selection.
+    /// Returns the maximal whitespace-delimited run used by native triple-click selection.
+    ///
+    /// Sits between word and line granularity so a path, URL, hash, or flag is one gesture:
+    /// the split is purely whitespace-vs-not over the same projection `wordRange` walks, with
+    /// no path or URL recognition and no trailing-punctuation trimming. Like `wordRange` it
+    /// stops at a hard line ending, so a cluster spans a soft wrap but never absorbs the next
+    /// command's first token.
+    public func clusterRange(at position: TerminalTextPosition) -> TerminalTextRange {
+        let units = projectionUnits()
+        guard let target = nearestTextUnitIndex(to: position, in: units) else {
+            return emptyRange(at: position)
+        }
+        let targetIsWhitespace = isWhitespaceUnit(units[target])
+        var lower = target
+        var upper = target
+        while lower > units.startIndex {
+            let candidate = units.index(before: lower)
+            guard units[candidate].isHardBoundary == false,
+                  isWhitespaceUnit(units[candidate]) == targetIsWhitespace
+            else { break }
+            lower = candidate
+        }
+        while upper < units.index(before: units.endIndex) {
+            let candidate = units.index(after: upper)
+            guard units[candidate].isHardBoundary == false,
+                  isWhitespaceUnit(units[candidate]) == targetIsWhitespace
+            else { break }
+            upper = candidate
+        }
+        return publicRange(TextAnchorRange(
+            start: units[lower].start,
+            end: units[upper].end
+        )) ?? emptyRange(at: position)
+    }
+
+    /// Returns one logical line across all soft-wrapped visual rows for quadruple-click selection.
     public func logicalLineRange(at position: TerminalTextPosition) -> TerminalTextRange {
         let stream = activeProjectionRows()
         let target = min(max(position.row, 0), stream.count - 1)
@@ -2474,8 +2509,12 @@ public struct Terminal: Equatable, Sendable {
         return TerminalTextRange(start: publicPosition, end: publicPosition)
     }
 
+    private func isWhitespaceUnit(_ unit: ProjectionUnit) -> Bool {
+        unit.scalars.allSatisfy { $0.properties.isWhitespace }
+    }
+
     private func wordClass(of unit: ProjectionUnit) -> Int {
-        if unit.scalars.allSatisfy({ $0.properties.isWhitespace }) { return 0 }
+        if isWhitespaceUnit(unit) { return 0 }
         if unit.scalars.allSatisfy({ scalar in
             let value = scalar.value
             return value >= 0x80
