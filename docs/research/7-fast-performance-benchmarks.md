@@ -1,6 +1,13 @@
 # Fast paired A/B performance benchmarks
 
-Research started: 2026-07-23.
+Research started: 2026-07-23. **Status: CLOSED 2026-07-28. The runner shipped,
+graduated to `plans/impl/2026-07-24-1423-fast-paired-performance-benchmarks.md`,
+and decided every optimization verdict in docs 8-13. Phase 6 (the Ghostty
+reference) was declared severable and was severed -- it was never built. Phase 5's
+independent held-out certification is retired, not failed.** Read "How it held up
+in use" at the end before trusting a threshold frozen here: `8/F24` showed A/A
+calibration overstates real revision-pair precision, and `8/D2` routed
+`incremental-mixed` off this instrument entirely.
 
 ## Purpose
 
@@ -356,21 +363,42 @@ subsystem to choosing and validating a constant.
       questionable decision or a publication-grade certification becomes
       valuable. Any such campaign needs a newly justified sample budget and
       fresh manifest; do not resume or selectively extend the retired one.
+      **Still open as an option and still not taken, but the trigger condition
+      has now partly fired and was answered another way.** Doc 8 exposed exactly
+      the "questionable decision" this box anticipated -- `incremental-mixed`
+      producing false verdicts -- and the resolution was not a certification
+      campaign: `8/D2` routed that workload's draw comparisons to a different
+      instrument entirely. Read doc 8 before spending anything here.
 
-### Phase 6 -- Ghostty reference (severable)
+### Phase 6 -- Ghostty reference (severable). NOT BUILT.
 
 This phase must not block graduation: Phases 1-4 can graduate to an
-implementation plan and ship without a Ghostty baseline.
+implementation plan and ship without a Ghostty baseline. **It did, and this
+phase was never built.** Severability was exercised, not merely declared.
 
-- [ ] Enumerate observable timing seams in the pinned libghostty C API and
+**Closed unbuilt 2026-07-28, with evidence that it is harder than it looks.**
+`11/F3` attempted a DanTerm-vs-ghostty comparison on the existing harness and
+found **the ghostty arm does not run at all**: the redraw workloads have no
+ghostty code path, and on corpus workloads the pane's shell hangs in
+`/usr/bin/login`. So the cross-backend baseline is not a matter of picking a
+metric -- an arm has to be built first.
+
+Note what this leaves unresolved. The 2x-CPU observation that opened docs 10 and
+11 is **unattributed by both of them** -- feed was excluded by `10/F9`, draw by
+doc 11's Outcome -- and this phase is the instrument that would have adjudicated
+it. That is the strongest remaining argument for building it, and it is recorded
+here rather than acted on because no scheduled work depends on the answer.
+
+- [~] Enumerate observable timing seams in the pinned libghostty C API and
       DanTerm's Ghostty surface integration without guessing callback semantics;
-      record viable boundaries in F10.
-- [ ] Run the same screen-sized synchronized-output fixture against both
+      record viable boundaries in F10. **Not done; F10 is retired unpopulated.**
+- [~] Run the same screen-sized synchronized-output fixture against both
       backends and compare producer throughput and backpressure at matched
-      geometry; select the durable target metric in D6.
-- [ ] If Ghostty exposes no validated completed-presentation signal,
+      geometry; select the durable target metric in D6. **Not done; D6 is
+      retired unpopulated.** Blocked in practice by the missing arm above.
+- [~] If Ghostty exposes no validated completed-presentation signal,
       explicitly reject per-draw equivalence and retain throughput as the only
-      cross-backend baseline.
+      cross-backend baseline. **Moot; never reached.**
 
 ### Phase 7 -- graduate and verify
 
@@ -378,7 +406,7 @@ implementation plan and ship without a Ghostty baseline.
       replaced; do not archive or migrate measurements that cannot be compared
       across the method/schema boundary. Give the paired method a separate
       versioned history.
-- [ ] Audit behavioral coverage for fixture reset, exact completed draws,
+- [x] Audit behavioral coverage for fixture reset, exact completed draws,
       window geometry and occlusion guards, machine-state flags, paired
       reporting, profiling identity and history exclusion, and history
       compatibility -- plus the contracts Phases 2-3 establish empirically, so
@@ -386,12 +414,25 @@ implementation plan and ship without a Ghostty baseline.
       contains the intended snapshot), arm isolation, position-balanced schedule
       generation (every completed run is balanced), and the frozen decision rule
       against deterministic sample fixtures. Tests must assert observable
-      contracts, not helper structure.
+      contracts, not helper structure. **Discharged by the implementation, not
+      by a separate audit pass**: the graduated plan
+      (`plans/impl/2026-07-24-1423-fast-paired-performance-benchmarks.md`)
+      carried the coverage with each of its three commits, and the suites live
+      in `scripts/tests/`. `HarnessBuildContractTests` is the one worth naming
+      -- it pins the harness's build flags against the harness source, because
+      the runner duplicates those flags in Python and the two must not silently
+      diverge.
 - [x] Graduate the accepted runner and schema to
       `plans/wip/fast-paired-performance-benchmarks.md`; update
       `agent-docs/terminal-performance.md` as part of that implementation.
-- [ ] Close this research with measured old/new suite runtime, A/A error
+- [x] Close this research with measured old/new suite runtime, A/A error
       rate, known-change detection power, and the Ghostty baseline status.
+      **Closed 2026-07-28.** Runtime, A/A error rate and detection power are in
+      D1/D4 and the Outcome. **Ghostty baseline status: not built** -- Phase 6
+      was severable and was severed; `11/F3` later found the ghostty arm does
+      not run at all. See the Outcome's "How it held up in use", which is the
+      part this box could not have anticipated: the runner's real verdict record
+      is better evidence than any closing measurement would have been.
 
 ## Findings log
 
@@ -2085,3 +2126,51 @@ the accepted runner and schema into an implementation plan and use them on real
 optimization work. Independent certification and adaptive statistics remain
 optional escalation paths if practical use supplies evidence that they are
 needed.
+
+## How it held up in use -- closing note, 2026-07-28
+
+**CLOSED.** The runner graduated to
+`plans/impl/2026-07-24-1423-fast-paired-performance-benchmarks.md`, which is
+fully implemented (all three commits), and `just benchmark-quick` /
+`benchmark-confirm` shipped. It then did the job it was built for: **every
+optimization verdict in docs 8 through 13 was decided on it**, including several
+that reversed a plausible hypothesis -- `12/F8` (`scrollback-stream` +6.74%,
+which reverted a change a spike had projected at -9.7%) and `9/F4` (plan time
+-46.86%). An instrument that reverses your prior is doing its job.
+
+**It also found its own limit, which is the more useful outcome.** The above
+retirement note says certification stays optional "if practical use supplies
+evidence that it is needed". Practical use supplied that evidence within days,
+and the answer turned out not to be certification:
+
+- **`incremental-mixed` degraded to the point of false verdicts** --
+  [8-benchmark-variance-regression.md](8-benchmark-variance-regression.md).
+  Cause: macOS demotes the app's CPU clock when the recent optimizations left
+  the main thread ~96% idle. The instrument was measuring the CPU's power state.
+  This is a **property of GUI-based paired timing on an efficient app**, not a
+  defect in the paired design -- and notably not something a held-out
+  certification campaign would have caught, since it emerged only after the app
+  got fast enough to trigger it.
+- **`8/D2` routed around it** rather than repairing it: damage-*drawing*
+  comparisons moved to the headless in-process `just benchmark-headless-draw`,
+  which holds ~100% occupancy by construction. Damage *generation* stays with a
+  degraded `benchmark-quick`, and that coverage gap is accepted, not closed.
+- **`8/F24` is the methodological correction this file should carry forward.**
+  A real revision pair exposed two order biases that the A/A control was
+  structurally incapable of showing, so **A/A precision overstates
+  revision-pair precision**. Every threshold frozen here was calibrated on A/A
+  series. They were not invalidated, but anyone re-deriving a threshold should
+  screen against a real revision pair as well.
+- The `confirm` recalibration this file's machinery would have supplied is
+  **declined, not deferred** (`8/F20`): ~100 pairs and ~9 minutes to land
+  marginally over the detection floor.
+
+**Ghostty baseline status: not built.** Phase 6 was declared severable and was
+severed. `11/F3` later found the ghostty arm does not run at all -- no ghostty
+code path for the redraw workloads, and a shell that hangs in `/usr/bin/login`
+on corpus workloads. The cross-backend question that motivated it remains
+unattributed (see Phase 6).
+
+**Reopening condition.** A new workload shows verdict instability that
+`8/D2`'s routing does not cover, or a threshold needs re-deriving -- in which
+case screen against a real revision pair per `8/F24`, not an A/A series alone.

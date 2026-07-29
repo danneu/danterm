@@ -20,11 +20,20 @@ H5 (`e379f25`), H6 (`4ca27ee`). **Refuted:** H1(b) (F4, D1) -- later reopened as
 backlog by F8. **Weakened by measurement rather than left open:** H1's mechanism
 (F4), H3 (F8), H4 (D3).
 
-**Where the original question goes now.** D5 hands it to the draw path, and
-[11-render-frame-budget.md](11-render-frame-budget.md) picks it up: it sizes the
-CPU CoreText draw at roughly 23 ms per full-frame redraw at real geometry against
-a 16.7 ms budget, which is a plausible mechanism for the null in F9. That file
-owns the optimize-or-replace decision; doc 9 stays authoritative for draw
+**Where the original question goes now, and how that ended.** D5 handed it to
+the draw path, and [11-render-frame-budget.md](11-render-frame-budget.md) picked
+it up. **Doc 11 has since closed (2026-07-28), and its answer was a null.** At
+the time of writing this section, doc 11 sized the CPU CoreText draw at roughly
+23 ms per full-frame redraw against a 16.7 ms budget, which looked like a
+plausible mechanism for the null in F9. **That 23 ms figure is retired and must
+not be quoted from here**: doc 11's F7 measured the real geometry at 15.27 ms
+all-sprite and 4.06 ms all-text, and its F8 showed the fixture's one-cell-per-run
+content inflated every full-frame figure by ~45%, bringing a realistic
+all-sprite frame to ~8.5 ms. The draw path fits the budget with room, so it is
+**not** the mechanism behind F9's null, and doc 11 proposed no change. The
+question this file opened -- why the Swift backend cost roughly 2x libghostty --
+therefore remains **unattributed by both files**, with feed (F9, D5) and draw
+(11's Outcome) each excluded on evidence. Doc 9 stays authoritative for draw
 hotspots.
 
 **The backlog below is optional.** The four remaining candidates are ordinary
@@ -470,13 +479,20 @@ the most valuable remaining RESEARCH item.
   measure H2 on a workload capable of seeing it. Result: F9 -- -24.31% cumulative
   on `terminal-feed`, a calibrated null on both render-bound workloads, and a
   correction to F5; D5.
-- [ ] RESEARCH: `eraseLine` / `eraseCells` / `clearCellAndPair`, 11-17% of root
+- [x] RESEARCH: `eraseLine` / `eraseCells` / `clearCellAndPair`, 11-17% of root
   on **both** workload shapes. Not yet attributed to a mechanism, and the only
   large node that is shape-independent. **Picked up by
-  [12-cell-representation.md](12-cell-representation.md) H5**, which proposes the
+  [12-cell-representation.md](12-cell-representation.md) H5**, which proposed the
   mechanism this file never found: blanking a cell writes 65 bytes and releases a
   refcounted payload, because `GridCell` is 72 bytes of array stride and is not
-  trivially copyable. Verify there, not here.
+  trivially copyable. Verified there, not here -- **and the proposed mechanism
+  was wrong in an instructive way.** Doc 12's F3 found *zero* spill cells in the
+  relevant workloads, so there is no refcounted payload to release; the cost is
+  the per-cell call and nested-COW overhead of a non-POD enum, paid on every
+  cell regardless of case (`12/F5`). Fixed without touching the cell's layout,
+  worth **-7.05% on `terminal-feed`** (`12/F6`). The wider representation change
+  that mechanism seemed to argue for was then implemented, measured, and
+  **reverted** (`12/F8`). Doc 12 is closed; this box needs nothing further.
 
 The unchecked boxes above are **backlog, not remaining work**. Phase 3 closed
 with F9; see Status at the top of this file. H3's line still reads "F4

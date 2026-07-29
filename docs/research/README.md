@@ -1,5 +1,38 @@
 # docs/research/ -- living research files
 
+## File index and status
+
+Reviewed 2026-07-28. **Every file except doc 1 is closed.** Closed means the
+questions it opened have answers and nothing in it is waiting on anyone -- not
+that every idea in it was implemented. Several closed with parked backlogs; each
+one records its own reopening condition, and those conditions are the right
+entry point, not a re-read of the evidence.
+
+| # | Topic | Status |
+| --- | --- | --- |
+| 1 | External terminal tests | **LIVE.** Survey complete; its Milestone 8/9/10 injection points are not yet consumed. Close when M9's evidence package is assembled. |
+| 2 | Wraptest coverage | Closed. Declined, on redundant coverage *and* unclear license. |
+| 3 | Serialized redraw optimization | Closed. Per-run glyph batching shipped; medians -97%. |
+| 4 | Fallback-glyph batching | Closed. Superseded by procedural sprites across eight families. |
+| 6 | Sprite classification regression | Closed. Both regressions from the sprite series found and fixed. |
+| 7 | Fast paired A/B benchmarks | Closed. Runner shipped and decided every verdict in docs 8-13. Ghostty baseline never built. |
+| 8 | Benchmark variance regression | Closed. Cause is a CPU frequency governor; `D2` routes around it and graduated to a design note. |
+| 9 | Plan/render allocation hotspots | Closed. Three changes shipped; Phase 5 parked with a measured ceiling. |
+| 10 | `Terminal.feed` hotspots | Closed. -24.31% on `terminal-feed`; remaining items are optional backlog. |
+| 11 | Render frame budget | Closed. The draw path fits the 60Hz budget; no change proposed or warranted. |
+| 12 | Cell representation | Closed. Erase leg shipped; POD cell demonstrated-and-rejected; memory half parked. |
+| 13 | Live-app compositing | Closed. Three candidates landed; compositing stall is substantially pipeline slack. |
+
+(There is no doc 5; numbers are never reused or renumbered.)
+
+**Two results worth knowing before you open any of these.** The draw path fits
+the frame budget (`11/F7`, `11/F8`), so a new render optimization needs a
+trigger, not just a profile share. And `8/D2` moved damage-*drawing*
+comparisons off the GUI benchmark onto `just benchmark-headless-draw`; damage
+*generation* stays on a degraded `benchmark-quick`. Read
+[docs/design/2026-07-27-damage-render-benchmark-routing.md](../design/2026-07-27-damage-render-benchmark-routing.md)
+before measuring anything.
+
 A research file is a scratchpad for a single investigation or strategy area.
 It is not an ADR and not a plan: design decisions that are settled graduate to
 `docs/design/`, and work that is ready to implement graduates to a plan file.

@@ -1,6 +1,8 @@
 # Serialized full-screen redraw optimization research
 
-Research date: 2026-07-23.
+Research date: 2026-07-23. **Status: CLOSED 2026-07-23.** Its one hypothesis --
+per-cell fixed overhead dominates, not glyph rasterization -- was confirmed, the
+fix shipped (`7e990fa`), and serialized redraw medians fell ~97%. See "Outcome".
 
 ## Purpose
 
@@ -403,3 +405,38 @@ loop time plus benchmark-only acknowledgment IO.
 - `8ebb92c` (`fix(benchmark): serialize redraw acknowledgments`) transfers
   sequence ownership when a frame is published and retries an exact-grid draw
   when AppKit merges that frame with older partial invalidation.
+
+## Outcome
+
+**Closed 2026-07-23.** A single hypothesis, confirmed and shipped.
+
+- **Confirmed: per-cell fixed overhead dominated, not glyph rasterization.**
+  Per-cell CoreText construction and glyph display-list recording -- not the
+  intrinsic cost of rasterizing glyphs -- were the serialized redraw bottleneck.
+  Per-run batching removed that fixed call-count cost and cut compatible
+  serialized redraw medians by roughly **97%**. Afterwards the sampling profile
+  is dominated by idle event-loop time plus benchmark-only acknowledgment IO,
+  and no successor renderer bottleneck in those captures is large enough to
+  justify a glyph atlas or cross-frame cache.
+- **Shipped:** `7e990fa` (per-run glyph fast path, clipped complex-cell
+  fallback, one-row damage halo, and behavioral tests), `8ebb92c` (benchmark
+  acknowledgment serialization), `98ba9e6` (this record).
+
+**What this file did not close, and it bit someone later.** "Limitations and
+follow-up" flagged a harness usability gap: `benchmark-sample` accepts the
+full-screen workload names but does not select a sustained redraw update count,
+so without `DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES` the producer treats the
+name as a corpus workload and fails to load it. **That gap was never closed**,
+and `11/F3` ran into precisely it a year-quarter later -- also discovering that
+`content-churn` is a compare-harness alias while the script spells it
+`full-screen-content-churn`. If anyone fixes the harness, that is the ticket.
+
+**Where this line of work went.** The fast path this file built is the "batched
+fast path" that [4-fallback-glyph-batching.md](4-fallback-glyph-batching.md)
+opens by citing -- doc 4 took the *slow* path, the per-cell CTLine fallback for
+cmap misses, and replaced it with procedural sprites. Doc 11 later measured the
+combined result at real 179x66 geometry and found it fits the frame budget.
+
+**Reopening condition:** a serialized redraw profile shows a renderer node large
+enough to justify a glyph atlas or cross-frame cache -- the two successors this
+file explicitly found too small to warrant.

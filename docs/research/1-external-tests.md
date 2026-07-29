@@ -2,6 +2,42 @@
 
 Research date: 2026-07-17.
 
+**Status: SURVEY COMPLETE, RECOMMENDATIONS STILL LIVE. This is the one research
+file that is not closed, and deliberately so.** Reviewed 2026-07-28.
+
+The survey itself needs no further work -- the candidate corpora are enumerated,
+the shared fixture seam is chosen, the libvterm coverage is broken down, and the
+licensing rules are set. What keeps it open is that its **roadmap injection
+points for Milestones 8, 9, and 10 have not been consumed yet**: those three
+milestones are unchecked in
+[plan-terminal-engine/14-roadmap.md](../../plan-terminal-engine/14-roadmap.md),
+and this file is what they are supposed to read when they start.
+
+Consumed so far: Milestones 2-7 (all checked on the roadmap). The pinned
+libvterm and Alacritty portfolios landed, and the 2026-07-21 adjudication below
+closed out the WezTerm/xterm.js/Contour question for Milestone 6 -- **as a scope
+judgment for that milestone only**, explicitly deferring those corpora to
+Milestones 7 and 8.
+
+Still pending, and what each needs:
+- **M8** -- Alacritty tmux/Vim/htop recordings as starting points, plus
+  DanTerm-owned workflow captures; Kitty tests mined only for supported
+  protocols.
+- **M9** -- the pinned, reproducible evidence package, including the
+  classification manifest with its four outcomes (adopted / adapted /
+  superseded / out of scope).
+- **M10** -- no new suite; re-run M9's package with the Ghostty backend absent.
+
+Two standing constraints that outlive any milestone: **do not vendor wraptest
+until its reuse terms are clear** (see
+[2-wraptest-coverage.md](2-wraptest-coverage.md), which declined it on that
+ground *and* on redundant coverage), and never regenerate-and-auto-accept
+another emulator's output as DanTerm truth.
+
+**Close this file when Milestone 9's evidence package is assembled** -- that is
+the point at which its recommendations have all been either taken or explicitly
+declined.
+
 ## Purpose
 
 DanTerm should reuse the strongest public terminal-emulator test work where it

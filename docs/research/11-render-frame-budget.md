@@ -498,11 +498,23 @@ repeat exactly the error those corrections caught.
 
 ## Task ledger
 
+**Ledger closed 2026-07-28.** `[x]` is done, `[~]` is **retired without being
+done** -- each one says why it stopped mattering, since a file that closes with
+bare unchecked boxes cannot tell the next reader whether the work was skipped or
+forgotten. No box here is waiting on anyone.
+
 ### Phase 1 -- size the problem
 
 - [x] Measure the CPU draw path headlessly, both scenarios, both grids. Result:
   F1.
-- [ ] **Re-measure the 2x claim. BLOCKED on instrument repair -- see F3.** It
+- [~] **Re-measure the 2x claim. RETIRED at closure, not completed -- see F3.**
+  The figure it chases is a remembered one, and the file closed without needing
+  it: F7 and F8 settled the budget question directly, so no conclusion here
+  rests on the 2x. If someone wants a DanTerm-vs-ghostty comparison, that is a
+  new investigation with a working instrument, not this box. Original statement
+  and evidence retained below.
+
+  It
   comes from the observation that opened doc 10 and has not been reproduced
   since; three feed optimizations have landed in the meantime. Until this
   exists, "2x" is a remembered figure, not a current measurement.
@@ -533,29 +545,55 @@ repeat exactly the error those corrections caught.
   instruments: **71.5% of a full-frame sprite draw is inside
   `CGContextFillRects`**, 12.3% is construction, 16.1% is everything else. The
   split favours H3's framing over H2's on this path.
-- [ ] **Capture a sprite-heavy stream and confirm F8's distribution holds on the
-  sprite path.** F8 measured twelve text-path streams; the repo contains no
-  box-drawing/braille-dense recording, so the ~8.5 ms figure carries an
-  assumption that a btop screen folds into runs like a shell session does. Lower
-  priority than it sounds: the assumption is favorable-direction, and F8's
-  Observation 5 shows only 1.2 ms of the frame is on this axis at all.
-- [ ] Reconcile F1's 15.6 ms with F5's 9.93 ms -- same grid, workload, and
-  scenario, ~1.6x apart, and not explained by the three optimizations that
-  landed between them (F7).
-- [ ] Establish how often a full-frame draw actually happens in
-  `content-churn` and `style-churn`. H1's competing explanation turns on this
-  and nothing currently measures it.
+- [~] **Capture a sprite-heavy stream and confirm F8's distribution holds on the
+  sprite path. NOT DONE, and accepted as an assumption at closure.** F8 measured
+  twelve text-path streams; the repo contains no box-drawing/braille-dense
+  recording, so the ~8.5 ms figure carries an assumption that a btop screen
+  folds into runs like a shell session does. Accepted because the assumption is
+  **favorable-direction** -- if sprite content folded worse, the figure moves
+  toward the already-retired 15.27 ms, which still fits the 16.7 ms budget --
+  and because F8's Observation 5 shows only 1.2 ms of the frame is on this axis
+  at all. Anyone quoting ~8.5 ms should quote this caveat with it.
+- [~] **Reconcile F1's 15.6 ms with F5's 9.93 ms. NOT DONE, and moot.** Same
+  grid, workload, and scenario, ~1.6x apart, unexplained by the three
+  optimizations that landed between them (F7). Moot because **both numbers are
+  retired**: F1 and F5 were measured on a fixture that drew no glyphs and at a
+  grid nobody uses, and the Outcome's standing rule is that no figure before F7
+  may be quoted. The discrepancy is real and unexplained; it just no longer
+  gates anything. Reopen only if a *current* instrument shows the same 1.6x
+  spread, which would make it a live instrument-trust problem rather than a
+  historical one.
+- [~] **Establish how often a full-frame draw actually happens in
+  `content-churn` and `style-churn`. NOT DONE, and no longer load-bearing.** It
+  existed to adjudicate H1's competing explanation, and **H1 is refuted** on
+  other evidence (F7, F8): the draw fits the budget at real geometry regardless
+  of frequency, so the frequency cannot rescue the hypothesis. Still the right
+  first measurement if a future workload is suspected of over-drawing.
 - [x] **Give `benchmark-draw` a scenario that reaches the font path.** Done
   2026-07-28. A `text-shaped` workload of printable ASCII was added to
   `benchmark-draw` and to `terminal-headless-draw-compare.py`'s arm, so both
   instruments can now measure the glyph path. Result: **F5** -- text cells cost
   ~3.5x *less* than sprite cells, which inverts the assumption F1 was read
   under. H2's glyph-cache half is now measurable.
-- [ ] **Decide what to do with the compositing stall (`13/F10`, `13/H3`).** It is
-  31.3% of live main-thread busy, no instrument here can see it, and it is
-  unattributed between "architectural" and "a 64-entry cache miss inside
-  CoreAnimation". Doc 13 handed it over as its R3, deliberately unstarted.
-  - **Confirmation experiment prepared 2026-07-28, awaiting a human capture.**
+- [x] **Decide what to do with the compositing stall (`13/F10`, `13/H3`).**
+  **Decided 2026-07-28: nothing, and the decision is evidence-backed rather
+  than a deferral.** Both captures below were taken and both pre-registered
+  predictions failed in the wrong direction -- glyph diversity refuted in
+  **F11**, op count refuted in **F12** -- and F12 went further: the main thread
+  blocked *less* when given more of its own work (877 samples busier, 122 less
+  blocked), so an unbounded fraction of the 31-35% is **pipeline slack, not
+  recoverable time**. There is no lever on the DanTerm side that either
+  mechanism would have given. Doc 13's Phase 4 subsequently declined to build a
+  repeatable instrument for it (`13/D2`), citing this closure.
+
+  The original framing and both experiment designs are retained verbatim below,
+  because the designs are reusable and the control conditions were expensive to
+  construct. It was 31.3% of live main-thread busy, no instrument here could see
+  it, and it was unattributed between "architectural" and "a 64-entry cache miss
+  inside CoreAnimation". Doc 13 handed it over as its R3, deliberately unstarted.
+  - **Confirmation experiment prepared 2026-07-28. CAPTURED; result in F11 --
+    `13/H3` REFUTED.** Design retained; do not re-run it expecting a different
+    answer.
     `13/H3` is confirmed only by changing the distinct-glyph count per frame and
     showing the main-thread stall and the queue's `compute_dod_` node move
     together. Two workloads were built for exactly that, and the control is
@@ -578,7 +616,9 @@ repeat exactly the error those corrections caught.
     worth: it is the *glyph* path this experiment probes, and the glyph path is
     4.06 ms of budget at real geometry. A confirmed `13/H3` would explain the
     stall's mechanism without implying the draw path needs restructuring.
-  - **Mirror experiment prepared 2026-07-28, awaiting a human capture.** F11's
+  - **Mirror experiment prepared 2026-07-28. CAPTURED; result in F12 -- op
+    count REFUTED as the driver, and the "arms match" branch below is the one
+    that fired.** F11's
     live hypothesis is that the cost scales with `DrawGlyphs` *op* count rather
     than glyph diversity. The test fixes diversity and varies run count.
     `~/runs-many.txt` and `~/runs-few.txt` are **byte-identical in length

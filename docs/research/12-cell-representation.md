@@ -1,12 +1,15 @@
 # Cell representation
 
-Research started: 2026-07-28. **Status: H5's erase leg settled and shipped (F5,
-F6), worth -7.05% on `terminal-feed`. Its move/copy leg was implemented as a POD
-cell, measured, and then reverted: the feed win held at -8.83% but
-`scrollback-stream` decided slower at +6.74% (F8). Cell triviality is therefore
-demonstrated-and-rejected, not open -- reopening it needs a materially different
-cost model, not another attempt. The memory question -- H1, H2, H4, and what
-remains of H3 -- is evidenced but unproposed.**
+Research started: 2026-07-28. **Status: CLOSED 2026-07-28. The CPU question is
+answered and the memory question is evidenced, unproposed, and deliberately
+unscheduled.** H5's erase leg settled and shipped (F5, F6), worth -7.05% on
+`terminal-feed`. Its move/copy leg was implemented as a POD cell, measured, and
+then reverted: the feed win held at -8.83% but `scrollback-stream` decided slower
+at +6.74% (F8). Cell triviality is therefore demonstrated-and-rejected, not open
+-- reopening it needs a materially different cost model, not another attempt. H1,
+H2, H4 and what remains of H3 are memory-only changes with **no CPU payoff**
+(F3, inference 2), and nothing in the product has yet asked for the memory. See
+"Outcome" for the reopening condition.
 
 ## Purpose
 
@@ -300,7 +303,12 @@ not a hypothesis, because nothing has measured the per-row allocation yet.
   "few", and DanTerm has never checked it. This is the cheapest possible test of
   the file's leading hypothesis. Result: F3.
 - [ ] RESEARCH: count per-row array allocations in a scrollback-heavy run, to
-  size the contiguous-buffer idea.
+  size the contiguous-buffer idea. **Not done, and parked with the memory
+  backlog at closure.** It sizes an idea whose only payoff is memory, and F8
+  raised its stakes rather than lowering them: the per-row allocation is on the
+  `scrollback-stream` row-move path that just decided a change slower, so the
+  contiguous buffer is now as plausibly a CPU *win* there as a memory one. That
+  makes it the first measurement to take if this file reopens, not a leftover.
 
 ### Phase 2 -- direction gate
 
@@ -320,12 +328,29 @@ not a hypothesis, because nothing has measured the per-row allocation yet.
   identified. Results: F7 (the `quick` win) and F8 (the `confirm` regression and
   the revert). Do not retry as specified; F8 records what would have to change
   first.
-- [ ] H1: style dedup behind a 16-bit ID.
+**The four items below are unscheduled at closure, not abandoned.** Each is
+evidenced and none is refuted; what none of them has is a consumer. F3 inference
+2 is the reason they are grouped and parked together rather than individually
+ranked: they remove bytes, they cannot remove the CPU nodes doc 10 profiled, and
+no memory or scrollback-depth goal is currently live. The Outcome records what
+would put one back in play.
+
+- [ ] H1: style dedup behind a 16-bit ID. Memory only. F3 confirms the table
+  stays small (<=9 distinct styles) but also that the 19 bytes leave every cell
+  whether styled or not, so the census was never what the win depended on. Its
+  unmeasured cost is style-*write* traffic (F3, uncertainty), not resident state.
 - [ ] H2: narrow `hyperlinkId`, and decide `contentIdentity` separately (F3).
-- [ ] H4: row skip flags.
+  The `hyperlinkId` half is the strongest single item left in the file -- nil in
+  100% of cells across all four workloads. The `contentIdentity` half is **not**
+  a free width change: it is a monotonic per-printed-cell counter that overflows
+  16 bits by 2x on one workload, so it needs a wrap or reuse policy first.
+- [ ] H4: row skip flags. Strong for style (skips essentially every row on three
+  of four workloads), weak for graphemes (skips only ~41% of rows on the one
+  workload it targets).
 - [ ] H3: pack the cell into a word. Note that the cell is **not** POD -- the
   attempt to make it so is the reverted item above -- so H3 as originally written
   still carries the triviality problem F8 priced, and cannot assume it solved.
+  This is the item F8 damaged most; do not treat it as merely "after H1 and H2".
 - [x] Settle H5. Erase leg closed by F5/F6 (not representation at all). Move/copy
   leg settled the other way: F4 confirmed the cost is real, F7 confirmed removing
   it speeds up feed, and F8 showed that paying for the removal costs more on
@@ -792,11 +817,15 @@ not a hypothesis, because nothing has measured the per-row allocation yet.
   compares libghostty against Alacritty on memory. DanTerm is neither, and this
   file's interest is CPU at least as much as memory. Do not import its
   conclusions; import its techniques and re-derive.
-- **Nothing here is yet known to be worth doing.** H1's premise -- that most cells
-  are unstyled and most styles are shared -- is stated by the post about
-  *terminal content in general* and has never been measured on DanTerm. That
-  measurement is the first Phase 1 item precisely because it could refute the
-  leading hypothesis cheaply.
+- ~~**Nothing here is yet known to be worth doing.**~~ **Partly resolved.** H1's
+  premise -- that most cells are unstyled and most styles are shared -- was
+  measured in F3 and holds on this corpus (<=9 distinct styles; 0 to 0.74% of
+  cells styled). What F3 also established is that holding the premise is not the
+  same as being worth doing: the bytes leave every cell regardless, so H1 is a
+  memory change and nothing more. The caveat that survives is narrower and is
+  now the file's central one -- **the memory half of this file is evidenced and
+  unconsumed**, and the census measured resident state, not the style-write
+  traffic a refcounted dedup table would actually cost.
 - **Swift is not Zig, and the gap is largest exactly where the post is most
   impressive.** `packed struct(u64)` with bit-level field control, 16-bit
   base-relative offsets, and a bitmap chunk allocator have no ergonomic Swift
@@ -811,3 +840,61 @@ not a hypothesis, because nothing has measured the per-row allocation yet.
 - **This file must not restart doc 10.** Doc 10 is closed. Where a hypothesis here
   predicts a change to one of its measurements -- H5 predicts three -- the check is
   a fresh measurement against `10/F8`'s after-columns, not a reopening.
+
+## Outcome
+
+**Closed 2026-07-28.** The file opened on a blog post comparing libghostty's
+8-byte cell against Alacritty's, and asked whether DanTerm's 72-byte cell (F1)
+was costing it CPU, memory, or both. It answers CPU decisively and leaves memory
+evidenced but unbought.
+
+### What shipped
+
+- **H5's erase leg (F5, F6), `-7.05%` on `terminal-feed`.** The one change this
+  file put in the tree and kept. It turned out **not to be a representation
+  change at all** -- the cost was per-cell call and nested-COW overhead at the
+  erase boundary, fixable without touching the cell's layout. That is the file's
+  cheapest lesson: the hypothesis that named the cell was right about the
+  symptom and wrong about the subject.
+
+### What was tried and rejected
+
+- **The POD cell (F4 -> F7 -> F8), reverted in `94a1528`.** A spike said -21.5%
+  incremental and projected -9.7% on `scrollback-stream`. The real
+  implementation delivered -8.83% on `terminal-feed` and **+6.74% slower** on
+  `scrollback-stream`, decided, with no outlier pairs. Reverted rather than
+  tuned, because its best case bought an ambiguous aggregate at the price of a
+  permanent invariant (a cell's scalars resolve only against its owning row).
+- **Two methodological results worth more than the change was.** First: *a spike
+  that removes a case measures an upper bound on removing the case, not on
+  implementing it* -- F4 elided the cost of relocating cluster storage, which is
+  exactly the cost that reversed the sign. Any future eliding spike should state
+  which costs it did not pay. Second: F3's inference 2 corrected F1's attribution
+  of the `outlined init with copy` / `outlined consume` nodes from refcount
+  traffic to non-POD enum call overhead, on the strength of two workloads
+  containing **zero** spill cells. An interpretation was replaced, not a number.
+- **libghostty's page allocator**, explicitly not proposed: it depends on Zig's
+  manual memory control and does not transfer to a Swift value-type engine with
+  COW arrays.
+
+### What remains, and why it is parked rather than pursued
+
+H1 (style dedup), H2 (narrow the side-table keys), H4 (row skip flags) and H3
+(pack the cell) are **evidenced, unrefuted, and unscheduled**. F3 sized all four
+and none of them is a CPU change: the bytes leave every cell whether it is
+styled or not, and the profiled nodes survive any change that keeps
+`TerminalScalars` in the cell. Their payoff is memory, and a cell-size change is
+a **scrollback-depth** change -- a product decision about how much history a
+fixed byte budget buys, which nobody has asked for. Parking them is the honest
+state: the engineering is understood and the demand does not exist.
+
+**Reopening condition.** Any of: a scrollback-depth or memory-footprint goal
+becomes live (H2's `hyperlinkId` half is the best first move -- nil in 100% of
+cells across all four workloads); style-write traffic is instrumented and turns
+out to be heavy enough to change H1's sign; or the per-row allocation count in
+Phase 1's unfinished task is taken, since F8 makes row-move traffic on
+`scrollback-stream` a plausible CPU target in its own right. Do **not** reopen
+the POD cell without a materially different cost model -- F8 records precisely
+what would have to change first.
+
+Findings F1-F8 are recorded. The next free ID is **F9**.

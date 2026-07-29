@@ -1,6 +1,12 @@
 # Fallback-glyph batching for symbol-heavy screens
 
-Research date: 2026-07-23.
+Research date: 2026-07-23. **Status: CLOSED 2026-07-28. All four tasks done.**
+The chosen direction -- DanTerm-owned procedural sprites rather than batched
+fallback glyphs -- shipped across eight families and removed the CTLine path
+from the motivating btop workload entirely (confirmed by `13/F1`). H3, stateless
+fallback batching, was never needed and keeps its revival trigger. See
+"Outcome"; read [6-sprite-classification-regression.md](6-sprite-classification-regression.md)
+and doc 11's Outcome for what the sprite path cost.
 
 ## Purpose
 
@@ -265,7 +271,7 @@ a non-covering font, with per-cell CTLine construction hot again.
   `full-screen-symbol-churn-v2-geometric-sprite-mix-80x24` result remains
   closed history: it exercised the entire U+25A0-25FF block and therefore
   cannot serve as the baseline for this corrected fixture.
-- [ ] **Task 3: executor-local braille sprites.** Recognize U+2800-28FF
+- [x] **Task 3: executor-local braille sprites. SHIPPED.** Recognize U+2800-28FF
   inside existing text runs before primary-font lookup and draw their 2x4 dot
   geometry procedurally. Unsupported scalars continue unchanged through the
   mapped-glyph or CTLine paths. Geometry generation is pure and unit-testable;
@@ -275,19 +281,56 @@ a non-covering font, with per-cell CTLine construction hot again.
   whole-block classification elsewhere. Judge with compatible
   `just benchmark-redraw` runs on both symbol workloads plus the three
   ordinary workloads, which must not regress.
-- [ ] **Task 3b: seamless box-drawing and block-element sprites.** Plan this
+
+  **Result: landed, and the architecture generalized further than this task
+  scoped.** The executor-local sprite path now covers **eight families**, not
+  just braille -- box drawing, block elements, braille, powerline, geometric
+  shapes, branch drawing, legacy computing, and legacy computing supplement --
+  each with pure geometry in `lib/TerminalCore/Sources/TerminalSpriteGeometry`
+  and behavioral suites in `TerminalSpriteGeometryTests` +
+  `TerminalRenderExecutionTests`, exactly the split this task asked for. The
+  contract is documented in [docs/terminal-sprites.md](../terminal-sprites.md).
+
+  **Read [6-sprite-classification-regression.md](6-sprite-classification-regression.md)
+  before touching this path.** The series shipped two performance regressions
+  that took a full investigation to find: per-cell classification walking an
+  eight-family chain for sprite-free text (fixed by single-scalar routing,
+  `a785d45`), and a `BraillePixelLayout` refactor allocating two `[Int]` arrays
+  per braille cell (fixed by building it lazily once per draw, `d19103f`). Both
+  are the cost of the generality above.
+- [x] **Task 3b: seamless box-drawing and block-element sprites. SHIPPED** as
+  part of the same series -- see Task 3's result. Plan this
   correctness-oriented increment separately after braille proves the
   executor-local architecture. Mine `.ghostty-src/src/font/sprite/draw/` for
   pixel snapping and line-weight details; adjacent cells must join without
   seams at scale 1 and scale 2. Scope is an explicit supported-scalar set.
   Curated geometric shapes are a later extension, not a prerequisite.
-- [ ] **Task 4: re-profile btop.** Repeat the arrow-key-hold `sample` capture
-  in an optimized build after the sprite path lands. Expect
-  `CTLineCreateWithAttributedString` and the ICU `NeedsShapingForGlyphs`
-  stack to be effectively absent and overall DanTerm CPU to drop
-  substantially. This closes the loop on the motivating regression that the
-  standing btop-shaped workload models. Record hypothesis confirmed or
+- [x] **Task 4: re-profile btop. DONE, and the hypothesis is CONFIRMED.** Repeat
+  the arrow-key-hold `sample` capture in an optimized build after the sprite
+  path lands. Expect `CTLineCreateWithAttributedString` and the ICU
+  `NeedsShapingForGlyphs` stack to be effectively absent and overall DanTerm CPU
+  to drop substantially. This closes the loop on the motivating regression that
+  the standing btop-shaped workload models. Record hypothesis confirmed or
   rejected.
+
+  **Result: the exact capture this task specifies was taken by
+  [13-live-app-compositing-and-draw-hotspots.md](13-live-app-compositing-and-draw-hotspots.md)**
+  -- `sample` for 20 s in an optimized build while a person held the down-arrow
+  scrolling btop's process list (`13/F1`). **The prediction holds:
+  `CTLineCreateWithAttributedString` and `NeedsShapingForGlyphs` do not appear
+  anywhere in that profile.** The per-cell CTLine fallback path this file was
+  opened to remove is gone from the motivating workload.
+
+  **What replaced it is the part this task could not have predicted, and it is
+  why the loop closes here rather than continuing.** With CTLine gone, the btop
+  draw is dominated by `drawTextRuns` -- and doc 13's Phase 2 optimizations then
+  cut that subtree by 30% without the main thread getting faster, because the
+  binding constraint had moved to CoreAnimation compositing (`13/F10`). Doc 11
+  finished the accounting: at real 179x66 geometry a full-frame sprite draw is
+  ~8.5 ms against a 16.7 ms budget, **71.5% of it inside `CGContextFillRects`**
+  (`11/F10`) -- i.e. rasterizing the sprite rects this file's chosen direction
+  introduced. That is a good trade and it is also the new floor. See doc 11's
+  Outcome before proposing further work on this path.
 
 ## Results
 
@@ -305,7 +348,43 @@ a non-covering font, with per-cell CTLine construction hot again.
   no fallback-font resolution. Stateless fallback batching returns only if a
   later profile finds non-sprite cmap misses dominating real output.
 
+## Outcome
+
+**Closed 2026-07-28. All four tasks are done and every hypothesis is
+resolved.** The file asked how to cut main-thread CPU when the screen is
+dominated by characters the primary font's cmap misses. The answer was not to
+batch fallback glyphs but to stop needing them: DanTerm draws those characters
+itself.
+
+- **H1 confirmed** (Task 1). btop's fallback traffic is *entirely* width-one BMP
+  cmap misses -- 284,611 entries over 5.4M examined cells, zero multi-scalar,
+  zero supplementary-plane, zero wide. U+28C0 alone was 252,836 of them. That
+  census is what ruled out three of the four pivots this file had prepared, and
+  it cost one instrumented run.
+- **H2 confirmed** on cost, then **superseded on remedy.** Symbol churn measured
+  94.3x ordinary content churn, so per-cell fallback cost did dominate. The
+  chosen direction -- DanTerm-owned procedural sprites -- shipped across eight
+  families and removed the CTLine path from the motivating workload outright
+  (Task 4).
+- **H3 rejected in practice, with its revival trigger intact.** Stateless
+  fallback batching was never built and is not needed: supported sprites require
+  no fallback-font resolution at all. It returns only if a profile finds
+  *non-sprite* cmap misses dominating real output. Nothing since has.
+
+**The follow-on cost is real and is documented elsewhere, not here.** Procedural
+sprites introduced two performance regressions (doc 6) and moved the draw path's
+dominant cost into `CGContextFillRects` rasterizing the rects they emit -- 71.5%
+of a full-frame sprite draw (`11/F10`). Doc 11 established that this still fits
+the frame budget with room. Anyone revisiting the sprite/fallback tradeoff
+should start at doc 11's Outcome and doc 6, not at this file.
+
+**Reopening condition:** a profile shows non-sprite cmap misses dominating real
+output -- H3's stated trigger, unchanged.
+
 ## Stopping point
+
+**Historical -- this section records the state at 2026-07-23, when the file
+paused before implementation. All of it has since happened; see Outcome.**
 
 Research and benchmark contracts now support the next decision without
 committing to a broad sprite subsystem:
@@ -319,4 +398,5 @@ committing to a broad sprite subsystem:
   trigger.
 
 The next work is a focused plan for task 3, not implementation from this
-research document.
+research document. **That happened: task 3 was planned, implemented, and
+generalized to eight sprite families. See Outcome above.**

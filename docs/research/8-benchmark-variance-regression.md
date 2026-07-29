@@ -2695,7 +2695,13 @@ for machine drift; it applies just as much to any statistic read off one series.
 
 ## Outcome
 
-Investigation in progress.
+**CLOSED 2026-07-27. D1 and D2 are both taken and graduated to
+[docs/design/2026-07-27-damage-render-benchmark-routing.md](../design/2026-07-27-damage-render-benchmark-routing.md),
+which is the durable record. Nothing here is outstanding.** This file is the
+evidence behind that note -- come here to check a number before quoting it, or
+to see why a candidate was refuted. The narrative below is in the order the
+investigation actually happened, including the two reversals, because the
+reversals are the most reusable part of it.
 
 - **Phase 1 complete.** The defect is real, reproduces on an idle machine, and
   is a ~4x widening of the `incremental-mixed` draw distribution -- not an arm
@@ -2784,10 +2790,64 @@ threshold grid rather than by the measurement.
 So the division of labour is no longer speculative: the headless benchmark
 adjudicates the cost of drawing a scoped plan far below the 3% `confirm` needs,
 in seconds, and the GUI benchmark keeps the part headless cannot see -- whether
-the app marks the right rows dirty in the first place. What remains before this
-gates a real change is narrow and named: arms from genuinely different revisions
-rather than an A/A pair, and a threshold grid wide enough to express what the
-instrument can actually resolve.
+the app marks the right rows dirty in the first place. What remained before this
+could gate a real change was narrow and named: arms from genuinely different
+revisions rather than an A/A pair, and a threshold grid wide enough to express
+what the instrument can actually resolve.
+
+### Both were done, and the first one cost the investigation a correction
+
+**F24 took the real revision pair and the news was bad**: it found **two order
+biases** that the A/A control was structurally incapable of showing, and
+established that **A/A precision badly overstates revision-pair precision**. An
+A/A control cannot see a bias that depends on the arms differing. This is the
+file's second reversal and its most transferable one -- the first was "the ramp
+is a symptom, not the driver" (F15, F17), and both have the same shape: a
+control that looked conservative was measuring something other than the question.
+
+**F25 then bounded both remaining error floors** with 18 cold rebuilds across
+six epochs, rotated so position could not alias with configuration. Load order
+is **exonerated**; rebuilds are noisy whether or not the code differs. It
+confirms F24's asserted ~0.5-1% resolution on a real revision pair, replacing an
+assertion with a measurement and a decomposition. **F23** separately bounded the
+code-layout risk: perturbing the hot library's layout produces no measurable
+bias. **F27** reopened the threshold grid downward so a screen can express what
+the headless instrument actually resolves, and found F22's floor readouts
+slightly optimistic -- the old floors were not arbitrary steps that could be
+lowered, since the grid floor *was* the equivalence band. **F26** discharged the
+last blocked item (F7's timing obligation) structurally rather than by
+measurement.
+
+### The decision, and the gap it does not close
+
+**D2: do not repair the GUI benchmark; route around it.** All four
+collection-side candidates are refuted, and D1's mechanism is a platform
+frequency governor macOS exposes no userspace floor for. Damage-*drawing*
+comparisons move to `just benchmark-headless-draw`, which sidesteps the
+mechanism by construction -- batching past a 400 ms floor holds the thread near
+100% occupancy, so the governor never demotes it. This is not "give up": the
+headless route is measured at every step (F22 spread, F23 layout, F24 order
+bias, F25 error floors, F27 grid).
+
+**The load-bearing caveat: this accepts a coverage gap rather than closing
+one.** The headless benchmark cannot see damage *generation* -- which rows
+`setNeedsDisplay` and AppKit's dirty-rect coalescing mark -- nor `clipFramePlan`'s
+own cost, nor anything on the published-frame path outside `drawRenderFrame`.
+For those, `benchmark-quick` on `incremental-mixed` remains the only instrument
+and **remains degraded**. Recalibrating `confirm` is **declined, not deferred**
+(F20: ~100 pairs, ~9 min, to land marginally over the detection floor on one
+session's data). No threshold is frozen for the headless benchmark;
+`--threshold` stays caller-supplied.
+
+**Finding what sets a block's level remains the open scientific question.** It
+is not being pursued, because D2 routes around the need for the answer rather
+than requiring it.
+
+**Reopen if:** a change needs a verdict on damage generation at better than
+`benchmark-quick`'s degraded resolution, or the governor behaviour changes under
+a future macOS release.
+
+Findings F1-F27 and decisions D1-D2 are recorded. The next free ID is **F28**.
 
 ## Scratch
 

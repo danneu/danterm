@@ -1,12 +1,14 @@
 # Live-app compositing and draw hotspots under interactive scroll
 
-Research started: 2026-07-28. **Status: Phase 1 closed (F5, F6). Phase 2 closed
-and measured: R1+R1b (F7, H1 closed), R2 (F8, H2 closed), R4 (F9). Phase 3's
+Research started: 2026-07-28. **Status: CLOSED 2026-07-28. All four phases are
+closed and no task remains.** Phase 1 closed (F5, F6). Phase 2 closed and
+measured: R1+R1b (F7, H1 closed), R2 (F8, H2 closed), R4 (F9). Phase 3's
 re-capture is done (F10): the draw subtree is down 30% from F1 and the
 compositing stall did not follow it down, so R3 is the largest remaining item
-and did not inherit Phase 2's effect. Phase 3 is closed -- the evidence is handed
-to doc 11, which owns the optimize-or-replace decision. Only Phase 4's instrument
-question remains open here.**
+and did not inherit Phase 2's effect; the evidence is handed to doc 11, which
+owns the optimize-or-replace decision and has since closed it. Phase 4's
+instrument question is answered **no** (D2) -- the instrument's only consumer was
+that doc 11 decision, and doc 11 closed without needing it.
 
 ## Purpose
 
@@ -589,7 +591,7 @@ Phase 3.
       zero, and the fixture turns out to be the maximum-run-density case rather
       than a low-density one, which **inverts** the risk R1 was originally
       recorded against. R1's prediction is revised in D1 on the strength of it.
-- [ ] Do the same count against **real** btop output. F5 covers only the fixture.
+- [~] Do the same count against **real** btop output. F5 covers only the fixture.
       F2's 18.3% is the real-workload figure measured end to end, so this is
       wanted for the run-density comparison, not to rescue the prediction.
       Capturing btop's byte stream needs a PTY recording; judge whether that is
@@ -598,10 +600,20 @@ Phase 3.
       real btop output -- unlike the fixture. That is a share, not the count this
       task wants, and it does not close it. F7's 2x overshoot makes the
       run-density half of this comparison more interesting, not less.
-- [ ] Establish which glyphs reach `CTFontDrawGlyphs` in the **live** capture.
+      **Retired unfinished at closure (2026-07-28).** It was wanted for a
+      run-density comparison feeding the optimize-or-replace decision; that
+      decision is made and closed (doc 11), so the count has no consumer. The
+      partial answer above stands as the file's only real-btop figure.
+- [~] Establish which glyphs reach `CTFontDrawGlyphs` in the **live** capture.
       H3's second competing explanation turns on it and nothing currently
       measures it. F5 answers this for the fixture (none do); the live case is
-      still open. Record in F1.
+      still open. Record in F1. **Retired at closure -- the question it serves is
+      settled.** Doc 11 built two fixtures that straddle the 64-entry glyph
+      cache (2 vs 95 distinct glyphs) at identical op, cell, run and geometry
+      counts, captured both, and **refuted H3** (`11/F11`): the arms matched, so
+      the stall is not a glyph-diversity cache miss. `11/F12` then refuted op
+      count too. Knowing the live glyph set would no longer distinguish
+      anything.
 
 ### Phase 2 -- land the two low-risk candidates, separately
 
@@ -670,11 +682,16 @@ Phase 3.
 
 ### Phase 4 -- close the instrument gap
 
-- [ ] Decide whether a repeatable live-compositing instrument is worth building.
+- [x] Decide whether a repeatable live-compositing instrument is worth building.
       The gap this file documents is real -- no harness observes
       `CA::CG::Queue`, the backing-store stall, or the window server -- and the
       cost of closing it is a scripted input driver plus a sample wrapper.
-      Record the decision even if it is "no".
+      Record the decision even if it is "no". **Done 2026-07-28: the answer is
+      no, recorded in D2.** The instrument's only consumer was doc 11's
+      optimize-or-replace decision, which closed the same day without it and in
+      the direction that removes the demand (draw fits the frame budget; the
+      stall is substantially pipeline slack, 11/F12). D2 carries the reopening
+      condition.
 
 ## Findings log
 
@@ -1765,10 +1782,49 @@ must include a run that produces sprites followed by a run that produces none.
 - Quantitative verification: per candidate above, against baseline `4ca27ee` or a
   later explicitly named revision.
 
+### D2 -- whether to build a repeatable live-compositing instrument
+
+- Status: **decided 2026-07-28. No. Not built, and not scheduled.**
+- Evidence used: this file's F1 and F10 (the instrument gap and the frame-count
+  confound it would close); doc 11's F10, F11, F12 and its Outcome.
+- The gap is real and is restated for the record: no harness in the repo
+  observes `CA::CG::Queue`, the backing-store stall, or the window server.
+  `benchmark-draw` renders offscreen and never creates the queue,
+  `benchmark-draw-app` goes through AppKit but is not sampled at the compositor,
+  and `benchmark-sample` runs fixtures rather than real programs under real
+  input. Closing it costs a scripted input driver plus a `sample` wrapper.
+- Candidate solutions: (a) build the driver + wrapper; (b) decide not to, and
+  keep the human-driven `sample` capture documented in "Re-capturing a live
+  profile" as the only live instrument; (c) defer without deciding.
+- Why (b). The instrument had exactly one consumer -- doc 11's
+  optimize-or-replace decision, which needed a repeatable measurement of the
+  31-35% compositing stall F10 found. Doc 11 closed the same day without needing
+  it, and closed in the direction that removes the demand: its F12 showed the
+  main thread blocked **less** when given more of its own work (877 samples
+  busier, 122 less blocked), so an unbounded fraction of that stall is pipeline
+  slack rather than recoverable time, and both mechanisms this file could name
+  for it -- glyph diversity (11/F11) and op count (11/F12) -- were refuted by
+  pre-registered predictions failing in the wrong direction. Doc 11 also
+  established that the draw path fits the 60Hz budget with room (11/F7, 11/F8).
+  An instrument built now would measure a cost no scheduled work is trying to
+  reduce, against a budget nothing is currently exceeding.
+- Tradeoffs: the frame-count confound in F10 stays unresolved, and R3 keeps its
+  "largest remaining item, never measured repeatably" status. Both are accepted.
+  The standing rule against scripting the input (Investigation rules) also means
+  the driver would be the first exception to it, which is a maintenance cost
+  this decision avoids paying for no current benefit.
+- Reopening condition: a live workload is observed to miss frames, or a
+  candidate optimization is proposed whose predicted win lands inside the
+  compositing stall rather than the draw path. Either supplies the consumer this
+  decision found missing. On current evidence (11/F10) the lever would be fewer
+  or larger rects reaching CoreGraphics, not cheaper Swift-side preparation.
+- Behavioral verification: none applicable; no code changed.
+
 ## Rejected
 
-Nothing rejected yet. When a candidate above fails to reproduce or fails its
-benchmark, it moves here with the evidence against it rather than being deleted.
+Nothing rejected. No candidate in D1 failed to reproduce or failed its
+benchmark: R1+R1b, R2 and R4 all landed and were measured (F7, F8, F9). R3 was
+never promoted, by design.
 
 ## Open questions and caveats
 
@@ -1786,7 +1842,10 @@ benchmark, it moves here with the evidence against it rather than being deleted.
   `benchmark-draw` renders offscreen and never creates `CA::CG::Queue`;
   `benchmark-draw-app` goes through AppKit but is not sampled at the compositor;
   `benchmark-sample` runs fixture workloads, not real programs under real input.
-  Phase 4 owns whether that gap is worth closing.
+  **The gap remains open and is accepted, not closed:** D2 decided against
+  building the instrument because its only consumer (doc 11's decision) closed
+  without it. This caveat stands for anyone quoting a compositing number from
+  here.
 - **F4's plan/draw inversion is unexplained between two mechanisms** -- workload
   shape versus harness overhead -- and the distinction matters to doc 9's
   remaining ranking, not just to this file.
@@ -1815,10 +1874,10 @@ benchmark, it moves here with the evidence against it rather than being deleted.
 
 ## Outcome
 
-**Phases 1, 2 and 3 are closed. One task remains in this file, and it is Phase
-4's instrument question.** All three rankable Phase 2 candidates landed and were
-measured -- R1+R1b (F7, H1 closed), R2 (F8, H2 closed), R4 (F9) -- and the
-post-Phase-2 live re-capture is F10.
+**CLOSED 2026-07-28. All four phases are closed and no task remains.** All three
+rankable Phase 2 candidates landed and were measured -- R1+R1b (F7, H1 closed),
+R2 (F8, H2 closed), R4 (F9) -- the post-Phase-2 live re-capture is F10, and Phase
+4's instrument question is answered no (D2).
 
 **The result that matters.** Across the three live captures the main-thread draw
 subtree fell 30% (`drawTextRuns` inclusive 1,970 -> 1,537 -> 1,394) and the
@@ -1828,30 +1887,32 @@ compositing stall did not follow it: blocked samples went 1,064 -> 1,224, from
 workload, and R3 did not inherit Phase 2's effect.** F10 records a frame-count
 confound that `sample` cannot resolve; read it before citing any single number.
 
-### Where a fresh agent should pick this up
+### What a fresh agent should not redo
 
 1. ~~Do the hand-off.~~ **Done 2026-07-28.** F1, F5, F8, F10 and H3 are recorded
    in [11-render-frame-budget.md](11-render-frame-budget.md) under "Evidence
-   handed over from doc 13". **The optimize-or-replace decision is doc 11's; this
-   file did not make it and must not.**
-2. **Phase 4, the one open task:** decide whether a repeatable live-compositing
-   instrument is worth building. F10 sharpened this -- the frame-count confound
-   it could not resolve is exactly what such an instrument would close, and doc
-   11 now depends on a cost only a human-driven `sample` can see. Record the
-   decision even if it is "no".
+   handed over from doc 13". **The optimize-or-replace decision was doc 11's;
+   doc 11 made it and closed: the draw path fits the frame budget, and the
+   compositing stall this file found is substantially pipeline slack rather than
+   recoverable time (11/F7, 11/F8, 11/F12).**
+2. ~~Phase 4's instrument question.~~ **Answered no in D2.** Do not rebuild the
+   case for a scripted input driver on this file's evidence -- D2 records the
+   reopening condition, and it requires a *new* consumer (a missed-frame
+   observation, or a candidate whose predicted win lands inside the compositing
+   stall), not a re-reading of F10.
 3. **Do not promote R3 from here.** It is research, not a change, and D1 keeps it
-   research-only. F10 makes it the largest remaining item and doc 11 now has that
-   evidence; that is an input to doc 11's decision, not authorization to start
-   it.
+   research-only. F10 makes it the largest remaining item, but doc 11 read that
+   evidence and closed against acting on it; per 11/F10 the lever there would be
+   fewer or larger rects reaching CoreGraphics, not cheaper Swift-side
+   preparation.
 
-Findings F1-F10 are recorded. The next free ID is **F11**.
+Findings F1-F10 and decisions D1-D2 are recorded. The next free ID is **F11**.
 
-**One step needs the user and cannot be done by an agent:** a live `sample`
-capture. It requires a person holding the down-arrow key in a focused DanTerm
-window for 20 seconds. Any re-measurement of H3 needs one. When you reach it,
-pause and ask -- the exact command and gesture to hand over are in "Re-capturing
-a live profile", and the standing rule against scripting the input is in
-Investigation rules.
+**Any re-measurement of H3 needs the user and cannot be done by an agent:** a
+live `sample` capture requires a person holding the down-arrow key in a focused
+DanTerm window for 20 seconds. The exact command and gesture are in
+"Re-capturing a live profile", and the standing rule against scripting the input
+is in Investigation rules. Nothing in this file now asks for one.
 
 ### What is already known and should not be re-derived
 

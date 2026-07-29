@@ -1,6 +1,11 @@
 # Plan and render allocation hotspots
 
-Research started: 2026-07-27.
+Research started: 2026-07-27. **Status: CLOSED 2026-07-28. Phases 1-4 are
+complete and H1 shipped. Phase 5 stays as a characterized, unscheduled backlog
+with a measured ceiling on it -- `11/F10` bounds everything the whole list can
+reach at 28% of a draw, with the largest single item worth 3.8%, against a draw
+path that already fits the frame budget (`11/F7`, `11/F8`). Nothing here is
+waiting on anyone.** See "Outcome".
 
 ## Purpose
 
@@ -251,6 +256,16 @@ re-post rule is now the only gate between the change and F4's verdict.
       forward; F5 is retired unpopulated.
 
 ### Phase 5 -- remaining hotspots, unscheduled
+
+**Closed as a backlog 2026-07-28, not worked to completion.** The three items
+below are evidenced, unrefuted, and each individually worth doing if someone is
+already in the file. What changed at closure is that they acquired a **ceiling**:
+`11/F10` put 71.5% of a full-frame sprite draw inside `CGContextFillRects`, so
+the entire Swift-side surface this backlog can address is 28% of a draw, and
+`11/F7` / `11/F8` showed that draw already fits the 16.7 ms budget with room.
+These are tidy single-digit wins on a path with no deadline pressure -- take one
+on its merits, and do not present any of them, or the list as a whole, as a
+route to a large win.
 
 - [ ] H2 (whole-viewport geometry construction per plan). The second incremental
       profile is in; H2 is evidenced and unblocked, still unscheduled. The
@@ -1005,17 +1020,69 @@ experiment for the mechanism D1 believed in.
 
 ## Outcome
 
-Phases 1-4 are complete. H1 is confirmed and acted on. H2 remains evidenced and
-unscheduled in Phase 5; H3 is **half harvested** -- per-draw font construction
-landed 2026-07-28 (`5d32054`, `11/F4`), and the glyph cache remains -- no longer
-blocked, since doc 11 built the glyph-bearing fixture `13/F5` called for
-(`11/F5`).
+**Closed 2026-07-28.** Phases 1-4 are complete, H1 is confirmed and acted on,
+and Phase 5 is a characterized backlog rather than remaining work.
 
-Phase 5 gained a second entry the same day. `11/F6` separated draw cost into
-per-run and per-cell terms and found sprite cells at 3.2x text cells, with the
-cost surviving a test that ruled out rasterization -- pointing at per-cell sprite
-geometry recomputation, a caching problem of exactly the same shape as H3's two.
-On current numbers it is the larger of the two remaining caches.
+### What shipped
+
+- **H1, the per-cell scalar array (D2, change E).** Plan time **-46.86%,
+  classified faster** on the calibrated 2-pair rule, and the targeted
+  `Array.init<A>` subtree is gone from the plan tree entirely. Two workloads the
+  change was not aimed at came back faster -- `terminal-feed` -14.55% and
+  `scrollback-stream` -23.66% -- because the same representation removed an
+  allocation from the grid-write path. The `scrollback-stream` result is
+  unexplained by any profile collected here.
+- **Per-draw font construction** (`5d32054`), H3's first half. Recovered 7.9% of
+  a damage-clipped glyph-bearing draw, ~18 us, cross-validated on two workloads.
+- **Unreserved array growth in `drawTextRuns`** (`07dd81f`), landed as doc 13's
+  R4: `benchmark-quick content-churn` -15.7% and -18.1% across two pair sets.
+
+### The shape change worth remembering
+
+D1 selected a two-step sequence -- a cheap planner-local experiment, then the
+representation change it would license -- on the belief that the per-cell array
+was a planner temporary. **F6 showed it was not**: the array is the plan's own
+scalar representation, retained through `PlannedCell` into the public
+`RenderTextCell` for the life of the frame. That killed the cheap experiment
+outright, because a planner-local accessor would have *moved* the allocation
+rather than removed it. D2 replaced the sequence with a single change. The
+generalizable lesson is that "cheap experiment first" is only cheap if the
+experiment's premise about ownership has been checked.
+
+A second correction runs the same way: F3 put font construction at ~25% of an
+incremental draw, and removing it outright recovered 7.9%. That decided F3's own
+competing interpretation in favour of "CoreText was already caching, and the
+samples were wrapper and retain traffic" -- a reminder that this file's standing
+discount on `sample` shares is real and was earned twice.
+
+### Why Phase 5 closes as a backlog rather than as work
+
+H2 (whole-viewport geometry per plan), H3's remaining glyph cache, and the
+sprite geometry cache handed over by `11/F6` are all evidenced and unrefuted.
+None is scheduled, and the reason is a ceiling measured after they were logged:
+`11/F10` put **71.5% of a full-frame sprite draw inside `CGContextFillRects`**,
+leaving the entire Swift-side surface this backlog can reach at **28% of the
+draw**, with the largest single item in it worth **3.8%**. `11/F7` and `11/F8`
+then showed the draw path fits the 60Hz budget with room. So these are ordinary
+single-digit wins on a path under no pressure. The sprite cache in particular
+shrank twice under measurement before anyone started it -- from "larger of the
+two remaining caches" to ~4% net -- which is the honest record of what a `sample`
+share is worth here.
+
+**Reopening condition.** A live workload is observed to miss frames, or a
+profile puts a *new* node on the plan or draw path that is not on this list. Per
+`11/F10`, a large win on the draw path would have to come from fewer or larger
+rects reaching CoreGraphics -- not from cheaper Swift-side preparation, which is
+what every item in this backlog is.
+
+### Two things deliberately left open
+
+The benchmark verdicts were measured on battery under the F7 override, which
+keeps the `faster` results trustworthy but weakens the `inconclusive` ones -- an
+A/A calibration on battery would settle whether the frozen thresholds still hold
+there. And `textRuns` absorbed about a fifth of the plan-path saving because
+`RenderTextCell` is now a wider struct to copy; that lands on the
+unreserved-array-growth item, which has since shipped.
 
 The investigation's shape changed once mid-flight and it is worth recording why.
 D1 selected a two-step sequence -- a cheap planner-local experiment, then the
