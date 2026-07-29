@@ -224,6 +224,14 @@ credible. It is stated here because it is the kind of answer doc 12's rules ask
 for: DanTerm's own simpler solution rather than a narrower version of the
 existing one.
 
+**`F12` measured it and sent it back.** The narrowing works -- stride 48 -- but at
+179 columns the row stays in the same malloc bucket, so the eight bytes go to the
+allocator and the budget's stride-based arithmetic then admits 15% more rows at
+unchanged cost: **+1.8 MB**. At 80 columns the identical change is worth -26%.
+`H4`'s cheap half is therefore geometry-dependent on its own and must ride behind
+`H3`, which crosses a boundary at every width checked. It also needs the
+identity-wrap fix `F12` records.
+
 **`F10` re-sizes it, and softens the objection.** With the link id narrowed,
 `contentIdentity` is the last `Int?` in the cell and is now the *only* thing
 holding stride at 56: narrowing it to `UInt32?` measures **48**, and removing it
@@ -466,6 +474,17 @@ baseline.
       time: -28.6% stride buys only ~-20% resident.
 - [ ] Gate: compare H3 and H6 against Phase 1 evidence and pick one, or
       establish that they compose. Record in D2.
+      **Partly answered by `F12`.** They compose, and ordering is forced: at wide
+      geometries a 179-column row costs the same anywhere between ~43 and 56
+      bytes, so per-field narrowing below `H3` is spent on the allocator, not on
+      the user. `H3` (stride 40) crosses a bucket boundary at every width checked;
+      `H4` alone does not.
+- [ ] **Decide whether the budget should charge the allocated row rather than
+      `columns * stride`** (`F12`). This is what makes any further cell shrink
+      safe at every geometry: today a cheaper cell can admit more rows than the
+      allocator got cheaper, which is how `H4`'s cheap half turned into +1.8 MB
+      at 179 columns. Same species as `F9`'s correction; sits next to `D2`'s open
+      unit question and should be decided with it.
 
 ### Backlog -- not scheduled, kept so it is not lost
 
@@ -1205,6 +1224,90 @@ writes are enormous and values are trivial:**
     prediction.
 - Next action: the `H3`/`H6` gate, per Phase 3's remaining ledger item.
 
+### F12 -- the same 8-byte cell shrink saves 26% at 80 columns and *costs* memory at 179, because the budget charges stride and the allocator charges buckets
+
+- Status: recorded. Sizes `H4`'s cheap half, and the change was **implemented,
+  measured, and reverted** -- nothing from it is in the tree. Blocks `D4`.
+- Date and investigator: 2026-07-29, Claude (agent).
+- Commit and worktree state: `5ae0140`, clean.
+- Instrument: `just terminal-memory-probe`, one fresh process per payload, at both
+  179x66 and 80x66. Bucket placement across geometries is `malloc_good_size`,
+  which matched the measured per-row overhead within ~100 bytes everywhere it was
+  checked.
+
+Narrowing `contentIdentity` to `UInt32?` reaches stride **48**, as `F10`
+predicted. What it costs and saves does not follow from that number at all:
+
+  | payload | 179x66, stride 56 -> 48 | 80x66, stride 56 -> 48 |
+  | --- | --- | --- |
+  | `full-screen` footprint (fixed rows) | 2.30 -> **2.38 MB** | 1.27 -> **0.94 MB** |
+  | `scrollback-plain` footprint | 11.95 -> **13.75 MB** | 14.88 -> **11.38 MB** |
+  | `scrollback-plain` history rows | 1,107 -> 1,279 | 2,381 -> 2,762 |
+  | per-row overhead beyond cells | 265 -> **1,690 B** | 678 -> **203 B** |
+
+- Observation 1, and it explains the whole table: **at 179 columns the row never
+  leaves its malloc bucket.** Cells plus overhead come to ~10,289 bytes at stride
+  56 and ~10,282 at stride 48 -- the same allocation, to within the array header.
+  The eight bytes per cell were removed from the cell and handed straight back to
+  the allocator.
+- Observation 2: 179 is a **dead zone specific to this shrink**, not a general
+  law. Bucket placement of a `48 + columns * stride` row:
+
+  | columns | stride 56 | stride 48 | stride 40 | stride 32 |
+  | ---: | ---: | ---: | ---: | ---: |
+  | 80 | 5,120 | **4,096** | 3,584 | 3,072 |
+  | 100 | 6,144 | **5,120** | 4,096 | 3,584 |
+  | 120 | 7,168 | **6,144** | 5,120 | 4,096 |
+  | **179** | 10,240 | **10,240** | 8,192 | 6,144 |
+  | 200 | 12,288 | **10,240** | 8,192 | 7,168 |
+  | 240 | 14,336 | **12,288** | 10,240 | 8,192 |
+
+  Every width checked except 179 crosses a boundary. The benchmark geometry is
+  the unlucky one.
+- Inference 1, and it is the finding: **the loss at 179 is not caused by the cell
+  shrink -- it is caused by the budget's cost model.** `scrollbackByteCost`
+  charges `columns * stride`, so a cheaper cell makes a row look cheaper and the
+  budget admits 15% more rows. Those rows each cost what they always did, because
+  the allocation did not shrink. The result is +1.8 MB of real memory bought with
+  accounting that `F9` corrected once already, for exactly this class of reason.
+  `F9` made the budget charge true *stride*; it still does not charge true
+  *allocation*, and the size of that error grows as the cell shrinks -- ~1.6% at
+  stride 56, ~16% at stride 48.
+- Inference 2, on where the lever now is: **between roughly 43 and 56 bytes, a
+  179-column row costs the same.** The cell is no longer the unit that decides
+  resident memory at that width; the row allocation is. This is the first
+  measurement in this file that argues for `H7`/`H6` (amortize or re-represent
+  the row) over any further per-field narrowing at wide geometries.
+- Inference 3, for `H3`: it survives this, and the geometry table is why. Stride
+  40 crosses a boundary at **every** width listed, 179 included (10,240 ->
+  8,192). `H4`'s cheap half rides along once `H3` has moved the row: at stride 32
+  the row falls again at every width. So the ordering is not free-choice --
+  `H4` alone is a coin flip on geometry, `H3` then `H4` is not.
+- Competing interpretation considered: that the 179 regression is probe noise.
+  Ruled out by the mechanism being independently visible in the row count (1,107
+  -> 1,279, an exact consequence of the budget arithmetic) and by the per-row
+  overhead moving 265 -> 1,690, which is a census quantity rather than a
+  footprint sample.
+- One design result worth keeping even though the change was reverted: **a 32-bit
+  identity is exhaustible in minutes, and a wrap silently weakens link
+  activation.** The counter issues one identity per printed cell, so 2^32 is a
+  few minutes of maximal output, and past the wrap a reissued identity lets a
+  run reprinted since pointer-down satisfy the check `linkArmTracksRunIdentity`
+  exists to enforce. The fix is small and was written and tested against a
+  failing test: drop the armed link at the wrap, skip identity zero (which
+  `activationIdentity` already reads as "none"). Whoever takes `H4` should take
+  that with it rather than rediscover it.
+- Uncertainty:
+  - Widths were sampled, not swept. A width not in the table could sit in its own
+    dead zone for any given stride; the rule is to check placement per geometry,
+    not to trust any single measurement as general.
+  - Panes are not all one width, and a split layout mixes them. The probe measures
+    one geometry per process, so "what a real window costs" is still unmeasured.
+- Next action: `D4` -- whether the budget should charge the allocated row rather
+  than the stride sum, which is what makes `H4` safe at every width. That is a
+  cost-model question of the same species `F9`/`D2` handled, and it lands next to
+  the budget's open unit question.
+
 ## Decision log
 
 ### D3 -- narrow the cell's link id rather than move it to a side map
@@ -1444,9 +1547,19 @@ different proposal and is not covered by this rejection.
 ## Outcome
 
 Investigation in progress. **Phase 1 is complete, Phase 2's engineering half is
-shipped, and Phase 3's first item is taken.** Findings F1 through F11 are
-recorded; the next free ID is **F12**. Decisions D1 through D3 are recorded and
+shipped, and Phase 3's first item is taken.** Findings F1 through F12 are
+recorded; the next free ID is **F13**. Decisions D1 through D3 are recorded and
 implemented; the next free ID is **D4**.
+
+`F12` is the one to read before shrinking anything else. Narrowing
+`contentIdentity` to `UInt32?` (`H4`'s cheap half) reaches stride 48 and was
+implemented, measured, and reverted: at 80 columns it is worth **-26%**, and at
+179 it **costs 1.8 MB**, because the row never leaves its malloc bucket while the
+budget -- which charges `columns * stride` -- believes it got cheaper and admits
+15% more rows. Between roughly 43 and 56 bytes a 179-column row costs the same,
+so at wide geometries the cell has stopped being the lever and the row allocation
+has become it. `H3` still clears the bar (stride 40 crosses a boundary at every
+width checked); `H4` alone does not.
 
 `F11` then answered the question `12/F3` left open and re-specified `H3` without
 implementing it: **style writes run 9-23 million per corpus against 1-5 distinct
