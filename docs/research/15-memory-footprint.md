@@ -276,16 +276,22 @@ H4, H5, H7 are not scheduled.
 hypothesis in this file can be verified on `just benchmark-memory`, so the
 headless harness is now the only instrument that can decide any of them.
 
-- [ ] Build a headless terminal-state memory harness on the payload matrix
+- [x] Build a headless terminal-state memory harness on the payload matrix
       (empty, full screen, 10K scrollback plain / unicode / styled / mixed),
       measuring **pure `Terminal` state** with no GUI, on the model of
       `scripts/terminal-feed-profile.py`. Record the per-payload resident bytes
       and bytes-per-cell in F2. This is the instrument every later phase reports
       against; nothing else in this file can be verified without it.
-- [ ] Attribute the ~164 MB of `F1` footprint that is not live malloc heap
+      **Done -- `F2`.** `just terminal-memory-probe`, backed by a public
+      `Terminal.memoryCensus`, so the grid can be measured without the
+      widen-and-revert method that made `12/F1` and `12/F3` unrepeatable.
+- [x] Attribute the ~164 MB of `F1` footprint that is not live malloc heap
       (`vmmap` by region, Metal/CoreAnimation vs binary vs allocator). Record in
       F3, and state the resulting **ceiling** on what any cell-representation
       work can move in process terms.
+      **Done -- `F3/F5`,** and it reframed the question. Measured headlessly the
+      ceiling is stark: cell bytes are only **35-50%** of what the process pays,
+      so halving the cell moves ~11 MB of a ~50 MB cost.
 - [x] Resolve `F1`'s row-count discrepancy: 3,528 live `[GridCell]` arrays
       against `12/F1`'s ~1,460 budget-admitted scrollback rows plus 66 screen
       rows. Determine whether the excess is render-side copies, damage
@@ -295,10 +301,19 @@ headless harness is now the only instrument that can decide any of them.
       **Done -- `F4`.** It is a retention bug: `ScrollbackBuffer.removeFirst`
       leaves the evicted row's cells in the vacated slot, so the buffer holds up
       to 2x its live rows. Ungated; `H8` is now the first move.
-- [ ] Attribute the ~40 MB gap between `MALLOC_SMALL` dirty pages and live heap
+- [x] Attribute the ~40 MB gap between `MALLOC_SMALL` dirty pages and live heap
       bytes: allocator retention, fragmentation, or bucket rounding. Record in
       F5. Sizes H7 and sets expectations for how much any live-bytes win
       actually returns to the OS.
+      **Partially done -- `F3/F5`.** The gap scales with eviction churn, not with
+      resident size. Fragmentation, unreturned pages, and genuine retention are
+      **not yet separated**; that separation is the next measurement and gates
+      acting on `H7`.
+
+- [ ] Separate fragmentation from unreturned pages from genuine retention in the
+      ~2x multiplier `F3/F5` measured, via `malloc_zone` statistics or a `vmmap`
+      at the end of a probe run. Until this lands, do not treat the multiplier as
+      a fixed tax, and do not act on `H7`.
 
 Sequencing note from `F4`: the two remaining Phase 1 attribution tasks (F3, F5)
 measure quantities the `H8` sawtooth perturbs by up to 19 MB depending on when
@@ -536,6 +551,115 @@ baseline.
 - Next action: `H8`, and it should precede the remaining Phase 1 tasks --
   `F3` and `F5` both measure quantities this bug perturbs by up to 19 MB.
 
+### F2 -- the headless probe, and the first exact baseline of what terminal state costs
+
+- Status: recorded. The Phase 1 instrument now exists and has produced its first
+  matrix. Closes Phase 1's first task and unblocks the rest of the file.
+- Date and investigator: 2026-07-29, Claude (agent).
+- Commit and worktree state: `bd0f1c2` plus the probe.
+- Instrument: `just terminal-memory-probe`, a headless executable that feeds each
+  payload to a fresh `Terminal` -- no GUI, no renderer, no sampling -- and reports
+  `Terminal.memoryCensus`. The census is **public API now**, not a widened
+  `private` walked once and reverted, which is what makes `12/F1` and `12/F3`
+  unrepeatable. Cell bytes are exact `MemoryLayout` stride arithmetic. A
+  determinism test asserts two runs produce identical census values.
+- Matrix at 179x66, production budget, 10,000 lines per scrollback payload:
+
+  | payload | rows | cells | cell bytes | B/cell | row allocs |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | empty | 66 | 11,814 | 0.81 MB | 72.0 | 66 |
+  | full-screen | 201 | 35,979 | 2.47 MB | 72.0 | 201 |
+  | scrollback-plain | 1,770 | 316,830 | 21.75 MB | 72.0 | 1,770 |
+  | scrollback-unicode | 1,831 | 327,749 | 22.50 MB | 72.0 | 1,831 |
+  | scrollback-styled | 1,815 | 324,885 | 22.31 MB | 72.0 | 1,815 |
+  | scrollback-mixed | 1,805 | 323,095 | 22.19 MB | 72.0 | 1,805 |
+
+- Content shape, which is what sizes `H2`/`H3`/`H4`:
+
+  | payload | styled cells | distinct styles | multi-scalar | hyperlink | distinct identities |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | empty | 0 | 1 | 0 | 0 | 0 |
+  | full-screen | 0 | 1 | 0 | 0 | 35,800 |
+  | scrollback-plain | 0 | 1 | 0 | 0 | 90,219 |
+  | scrollback-unicode | 0 | 1 | 2,743 | 0 | 39,345 |
+  | scrollback-styled | 56,234 | **193** | 0 | 0 | 56,234 |
+  | scrollback-mixed | 18,631 | 65 | 903 | 0 | 62,254 |
+
+- Observation 1: **a bounded scrollback costs ~22 MB of cell storage against a
+  10 MB budget**, and does so on every payload regardless of content. That is
+  `H1`'s ~1.8x under-charge, now measured rather than derived: the budget admits
+  ~1,770-1,830 rows and each is a full 179 cells at stride 72. `H1`'s predicted
+  magnitude is confirmed.
+- Observation 2: **content barely moves the total.** Plain, unicode, styled, and
+  mixed all land within 0.75 MB of each other, because the budget is denominated
+  in a cost model that content perturbs only slightly, and every row is
+  full-width regardless. Memory is a function of the budget, not of what the user
+  ran.
+- Observation 3, and it is bad news for `H3`: a payload built to *stress* styling
+  produces **193 distinct styles**, against the at-most-9 doc `12/F3` found in
+  the fixture corpus. `12/F3` flagged exactly this as its uncertainty -- that the
+  corpus was less styled than real sessions -- and the flag was justified. 193 is
+  still small enough for a 16-bit id, so `H3` is not refuted, but the "trivially
+  small table" premise rests on the corpus rather than on anything intrinsic.
+- Observation 4: `hyperlinkId` is nil in **100% of cells on every payload**,
+  reproducing `12/F3` inference 3 on an independent corpus. `H2` is the
+  best-evidenced hypothesis in the file.
+- Observation 5: distinct content identities track printed cells almost exactly
+  on every payload, independently reproducing the observation that killed
+  narrowing the field to 16 bits. `H4`'s "move it out of the cell entirely"
+  framing is the only remaining route.
+- Inference: within terminal state there is no content-dependent memory problem
+  to solve. There is a **budget-accounting** problem (`H1`, ~12 MB over budget)
+  and a **per-cell size** problem (`H2`, `H3`, `H6`), and they are independent.
+- Uncertainty: the probe measures a `Terminal` in isolation. What the app adds on
+  top -- render-side copies, the ~1,300 unexplained row arrays in `F6`'s GUI
+  comparison -- is still unaccounted, and the probe cannot see it by design.
+- Next action: `F3`/`F5` attribution, below, then `H1`.
+
+### F3/F5 -- cell storage is only ~35-50% of what the process pays to hold it
+
+- Status: recorded, partial. Answers Phase 1's remaining two attribution tasks
+  well enough to size `H7`, and supersedes the framing of both: the question is
+  not "footprint minus heap" but "process bytes per cell byte".
+- Date and investigator: 2026-07-29, Claude (agent).
+- Method: one probe process **per payload** (`--payload NAME`), so the footprint
+  delta is attributable. In a full-matrix run the allocator reuses pages the
+  previous payload freed and every delta after the first understates its payload
+  -- the run that motivated this reported 59.75 MB for `scrollback-plain` and
+  0.02 MB for `scrollback-mixed`, which is an artifact, not a result.
+- Measurements, fresh process each:
+
+  | payload | cell bytes | process delta | coverage |
+  | --- | ---: | ---: | ---: |
+  | empty | 0.81 MB | 1.03 MB | 0.79 |
+  | full-screen | 2.47 MB | 3.33 MB | 0.74 |
+  | scrollback-plain | 21.75 MB | 62.98 MB | **0.35** |
+  | scrollback-unicode | 22.50 MB | 44.73 MB | 0.50 |
+  | scrollback-styled | 22.31 MB | 49.19 MB | 0.45 |
+  | scrollback-mixed | 22.19 MB | 48.47 MB | 0.46 |
+
+- Observation: coverage falls from ~0.75 on shallow payloads to **0.35-0.50** on
+  deep ones. A terminal holding 22 MB of cells costs the process 45-63 MB.
+- Inference 1: the gap scales with **eviction churn**, not with resident size.
+  The shallow payloads never evict; the deep ones append ~10,000 rows and evict
+  ~8,200, each a ~12.6 KB malloc and free. `scrollback-plain` is both the most
+  churn-heavy and the worst-covered.
+- Inference 2, which reorders the file: **the multiplier is worth more than the
+  cell.** Halving the cell halves the 22 MB but leaves the ~2x allocator
+  multiplier untouched, so it moves ~11 MB of a ~50 MB cost. Fewer, larger, less
+  churn-prone allocations attack the multiplier directly. That is `H7` and `H6`,
+  and this is the first evidence that either outranks `H3`.
+- Competing interpretations, and they are live: this delta includes transient
+  feed allocations the allocator has not returned, so "fragmentation",
+  "unreturned pages", and "genuine retention" are not yet separated. `malloc_zone`
+  statistics or a `vmmap` at the end of a probe run would separate them, and that
+  is the obvious next measurement.
+- Uncertainty: `phys_footprint` is a process-level quantity; attributing all of
+  it to the grid assumes nothing else in the probe allocates materially, which is
+  plausible for a headless binary but unverified.
+- Next action: separate fragmentation from retention before acting on `H7`. Do
+  **not** treat the 2x multiplier as a fixed tax until then.
+
 ### F6 -- the fix is CPU-neutral, and the GUI memory benchmark cannot see it at all
 
 - Status: recorded. Verification of `D1`, and a negative result about the
@@ -756,13 +880,32 @@ it is the only item here that costs the user nothing. Phase 1.5 shipped it
 (`D1`) -- ~22 MB of already-evicted rows at peak, released, with no CPU cost on
 any of the five routine workloads.
 
-`F6` then changed the plan a second time, and this is the more important of the
-two for whoever picks this up. **`just benchmark-memory` cannot measure
-representation work.** Asked to confirm a ~22 MB saving it reported the fixed
-build as *larger*, because one memgraph samples one arbitrary point on a
+`F6` then changed the plan a second time. **`just benchmark-memory` cannot
+measure representation work.** Asked to confirm a ~22 MB saving it reported the
+fixed build as *larger*, because one memgraph samples one arbitrary point on a
 sawtooth and because GUI IOSurface churn is twice the size of the effect. It
-remains a good leak detector, which is what `F1` used it for. It is not a
-measurement instrument. So Phase 1's headless harness (`F2`) is no longer the
-first task among four -- it is a hard blocker on `H1`, `H2`, `H3`, and `H6`
-alike, and `F3` and `F5` should be taken on it rather than on
-`benchmark-memory`. Build it next.
+remains a good leak detector, which is what `F1` used it for.
+
+So Phase 1 is now complete, on a new instrument. `just terminal-memory-probe`
+(`F2`) measures pure terminal state headlessly and exactly, backed by a public
+`Terminal.memoryCensus` -- which also retires the widen-a-private-and-revert
+method that left `12/F1` and `12/F3` unrepeatable. Any agent can now re-derive
+those numbers in one command.
+
+**What it found should be read before picking up any hypothesis here:**
+
+1. A bounded scrollback holds **~22 MB against a 10 MB budget**, on every
+   payload. `H1` is confirmed in magnitude, not merely derived.
+2. Content barely matters. Plain, unicode, styled, and mixed land within 0.75 MB
+   of each other, because rows are full-width regardless. Memory is a function of
+   the budget, not of what the user ran.
+3. **Cell bytes are only 35-50% of what the process pays** (`F3/F5`), and the gap
+   tracks eviction churn rather than resident size. Halving the cell moves ~11 MB
+   of a ~50 MB cost. This is the first evidence that `H7` and `H6` -- fewer,
+   larger, less churn-prone allocations -- outrank `H3`, and it is why the next
+   task is to separate fragmentation from retention rather than to shrink a cell.
+4. `H3`'s "trivially small style table" premise is weaker than doc 12 thought: a
+   payload built to stress styling produces **193** distinct styles against the
+   at-most-9 the fixture corpus produced. Still fits 16 bits; no longer trivial.
+5. `H2` is reconfirmed on an independent corpus -- `hyperlinkId` nil in 100% of
+   cells, everywhere.

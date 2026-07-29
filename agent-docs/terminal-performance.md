@@ -288,6 +288,56 @@ running samples only, so its shares need no such correction.
 
 ## Profile memory
 
+Two instruments, and picking the wrong one is the most expensive mistake in this
+section. They answer different questions and neither substitutes for the other:
+
+| Question | Tool |
+| --- | --- |
+| Is something growing without bound? | `just benchmark-memory` |
+| What does terminal state cost, and did my change shrink it? | `just terminal-memory-probe` |
+
+**`benchmark-memory` cannot answer the second question.** Asked to confirm a
+~22 MB saving it reported the *fixed* build as larger than the leaky one. Two
+reasons, both structural rather than bad luck: a memgraph is one sample of a
+quantity that sawtooths as buffers compact, and the GUI app's IOSurface
+compositing churned 50 MB over the same window -- more than twice the effect. It
+is a leak detector. Use it as one. (`docs/research/15-memory-footprint.md`, F6.)
+
+### `just terminal-memory-probe` -- exact, headless, deterministic
+
+Feeds a payload matrix -- empty, full screen, and a 10K-line scrollback in plain,
+unicode, styled, and mixed content -- to a fresh `Terminal` with no GUI, no
+renderer, and no sampling, then reports `Terminal.memoryCensus`: exact
+`MemoryLayout` stride arithmetic, not malloc buckets and not process pages. Two
+runs print identical census numbers, so a before/after diff is a real comparison.
+
+```
+just terminal-memory-probe                                # full matrix at 179x66
+just terminal-memory-probe "--json"                       # machine-readable
+just terminal-memory-probe "--payload scrollback-plain"   # attributable footprint
+just terminal-memory-probe "--columns 80 --rows 24"
+```
+
+It reports cell bytes, bytes per cell, row allocations, and the content shape
+that sizes representation work -- styled cells, distinct styles, multi-scalar
+spills, hyperlink cells, and content identities.
+
+Two traps. **Only a `--payload` run has an attributable footprint delta**: in a
+full-matrix run all payloads share one process and the allocator reuses pages a
+previous payload freed, so every delta after the first understates its payload.
+Census numbers are exact either way. And **a payload can silently stop
+exercising what it is named for**: the mixed payload originally concatenated
+three blocks, so at the production budget only the last survived eviction and
+`scrollback-mixed` measured byte-identical to `scrollback-styled`. If you add a
+payload, assert its composition at a depth that actually evicts.
+
+`Terminal.memoryCensus` is public, so a one-off question does not need the probe
+-- call it from a test. It exists precisely so that measuring the grid no longer
+means widening `private` members and reverting, which is how the censuses in
+research doc 12 were taken and why none of them can be re-run.
+
+### `just benchmark-memory` -- the leak detector
+
 `just benchmark-memory scrollback-stream 90 15` runs the same isolated workload
 and polls `footprint` on an interval, writing `memory-report.json`: the whole
 footprint curve, growth from baseline to final, a least-squares bytes-per-second

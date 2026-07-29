@@ -100,6 +100,21 @@ benchmark-confirm baseline:
     python3 ./scripts/terminal-benchmark-compare.py confirm \
         --baseline "{{ trim_start_matches(baseline, 'baseline=') }}"
 
+# Measure what terminal state costs, headlessly and exactly, across the payload matrix.
+#
+# Use this -- not `benchmark-memory` -- for any question of the form "did this change reduce
+# resident bytes". It builds a fresh Terminal per payload and reports exact MemoryLayout stride
+# arithmetic, so two runs are comparable; `benchmark-memory` samples GUI process footprint and
+# cannot resolve a representation change at all (docs/research/15, F6).
+#
+#   just terminal-memory-probe                              # full matrix, 179x66
+#   just terminal-memory-probe "--json"                     # machine-readable
+#   just terminal-memory-probe "--payload scrollback-plain" # one payload, attributable footprint
+#   just terminal-memory-probe "--columns 80 --rows 24"
+terminal-memory-probe flags="":
+    swift build -c release --package-path lib/TerminalCore --product TerminalMemoryProbe
+    lib/TerminalCore/.build/release/TerminalMemoryProbe {{flags}}
+
 # Benchmark full-frame and damage-clipped CoreText drawing headlessly.
 benchmark-draw iterations="15":
     swift run --package-path lib/TerminalCore -c release TerminalDrawBenchmark {{iterations}}

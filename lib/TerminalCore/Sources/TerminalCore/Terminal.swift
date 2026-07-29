@@ -454,7 +454,10 @@ public struct Terminal: Equatable, Sendable {
     private var nextSemanticEventOrder: UInt64 = 0
     private var primaryHistoryObservation = ObservationGeneration()
 
-    static let productionScrollbackBudgetBytes = 10_485_760
+    /// Public so measurement tools can report the budget they ran against. Deliberately just the
+    /// constant: the budget-taking initializer stays internal, because the public initializer
+    /// enforcing this fixed value is an invariant with its own test.
+    public static let productionScrollbackBudgetBytes = 10_485_760
     static let kittyKeyboardStackDepth = 8
     static let maximumHyperlinkTargetBytes = 65_536
     static let maximumTerminalMetadataBytes = 256 * 1_024
@@ -1538,6 +1541,112 @@ public struct Terminal: Equatable, Sendable {
             },
             isSoftWrapped: row.isSoftWrapped
         )
+    }
+
+    /// Walks the whole grid and reports exactly what its cell storage costs.
+    ///
+    /// Lives here rather than beside `TerminalMemoryCensus` because it needs `GridCell` and
+    /// `GridRow`, which stay `private`. That split is the point: the census ships as reusable
+    /// public evidence without widening the grid types, which is what forced doc 12's censuses to
+    /// be throwaway probes. O(cells) -- for measurement, not for a hot path.
+    public var memoryCensus: TerminalMemoryCensus {
+        // Style has no `Hashable` conformance (it is `Equatable` only), so distinctness is counted
+        // through a key encoding every field. Same approach doc 12's F3 used, kept identical so the
+        // two are comparable.
+        // `TerminalColor` and `TerminalUnderlineStyle` are `Equatable` but not `Hashable`, so both
+        // are flattened to integers here rather than given a conformance the public API does not
+        // otherwise need for one measurement.
+        struct StyleKey: Hashable {
+            var foreground: UInt32
+            var background: UInt32
+            var underlineColor: UInt32
+            var underline: UInt8
+            var flags: UInt8
+        }
+        func colorKey(_ color: TerminalColor) -> UInt32 {
+            switch color {
+            case .default: 0
+            case let .indexed(index): 1 << 24 | UInt32(index)
+            case let .rgb(red, green, blue):
+                2 << 24 | UInt32(red) << 16 | UInt32(green) << 8 | UInt32(blue)
+            }
+        }
+        func underlineKey(_ underline: TerminalUnderlineStyle) -> UInt8 {
+            switch underline {
+            case .none: 0
+            case .single: 1
+            case .double: 2
+            case .curly: 3
+            case .dotted: 4
+            case .dashed: 5
+            }
+        }
+        func key(_ style: TerminalStyle) -> StyleKey {
+            var flags: UInt8 = 0
+            if style.bold { flags |= 1 << 0 }
+            if style.dim { flags |= 1 << 1 }
+            if style.italic { flags |= 1 << 2 }
+            if style.reverse { flags |= 1 << 3 }
+            if style.hidden { flags |= 1 << 4 }
+            if style.strikethrough { flags |= 1 << 5 }
+            return StyleKey(
+                foreground: colorKey(style.foreground),
+                background: colorKey(style.background),
+                underlineColor: colorKey(style.underlineColor),
+                underline: underlineKey(style.underline),
+                flags: flags
+            )
+        }
+
+        let stride = MemoryLayout<GridCell>.stride
+        let defaultStyle = TerminalStyle()
+        var census = TerminalMemoryCensus(
+            screenRowCount: 0,
+            scrollbackRowCount: scrollbackRows.count,
+            cellCount: 0,
+            cellStrideBytes: stride,
+            cellStorageBytes: 0,
+            rowStorageAllocationCount: 0,
+            retainedRowStorageRowCount: scrollbackRows.retainedCellStorageRowCount,
+            styledCellCount: 0,
+            distinctStyleCount: 0,
+            multiScalarCellCount: 0,
+            multiScalarAllocationCount: 0,
+            hyperlinkCellCount: 0,
+            contentIdentityCellCount: 0,
+            distinctContentIdentityCount: 0
+        )
+        var styles: Set<StyleKey> = []
+        var identities: Set<Int> = []
+
+        // The retained primary screen counts as resident: under the alternate screen the process
+        // holds both grids, and a census that reported only the visible one would understate a
+        // full-screen TUI by an entire screen.
+        let screens = [rows, inactivePrimaryScreen?.rows].compactMap { $0 }
+        census.screenRowCount = screens.reduce(0) { $0 + $1.count }
+
+        for row in scrollbackRows.asArray() + screens.flatMap({ $0 }) {
+            if row.cells.isEmpty == false { census.rowStorageAllocationCount += 1 }
+            census.cellCount += row.cells.count
+            census.cellStorageBytes += row.cells.count * stride
+            for cell in row.cells {
+                if cell.style != defaultStyle { census.styledCellCount += 1 }
+                styles.insert(key(cell.style))
+                if cell.scalars.count > 1 {
+                    census.multiScalarCellCount += 1
+                    census.multiScalarAllocationCount += 1
+                }
+                if cell.hyperlinkId != nil { census.hyperlinkCellCount += 1 }
+                if let identity = cell.contentIdentity {
+                    census.contentIdentityCellCount += 1
+                    identities.insert(identity)
+                }
+            }
+        }
+
+        census.distinctStyleCount = styles.count
+        census.distinctContentIdentityCount = identities.count
+        return census
     }
 
     /// Counts rows whose cell storage history still owns, so leak proofs can assert it equals
