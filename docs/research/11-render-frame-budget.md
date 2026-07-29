@@ -6,18 +6,20 @@ change proposed yet. Doc 13 closed on 2026-07-28 and handed over its evidence
 measurement and adds a whole cost this file had never measured.**
 
 **Four things a fresh reader should know before anything else.** First, the
-headline: **a full-frame draw at real 179x66 geometry is now measured, not
-extrapolated, at 15.27 ms all-sprite and 4.06 ms all-text against a 16.7 ms
-interval** (F7). The long-quoted "23 ms" was never measured at any geometry and
-is retired; H1 is not supported as written. Second, profile share overstated
-recoverable time by ~3x on the one node where that has been tested (F2,
-corrected and confirmed by F4), so the sums in the hypotheses below are soft.
-Third, the backend A/B -- the instrument this file calls the only one that can
-settle the 2x claim -- does not currently run (F3). Fourth, **every draw cost
-quoted above F5 was measured on all-sprite content at one cell per run**, which
-is the worst case on two axes at once: sprite cells cost 3.2x text cells (F6),
-and per-run cost exceeds per-cell cost on both paths, so the fixture's
-deliberate per-cell style churn inflates every full-frame figure here (F6).
+headline: **a full-frame draw at real 179x66 geometry measures 15.27 ms
+all-sprite and 4.06 ms all-text against a 16.7 ms interval (F7), and the
+all-sprite figure corrects to ~8.5 ms once the fixture's unrealistic run length
+is accounted for (F8).** The long-quoted "23 ms" was never measured at any
+geometry and is retired; H1 is not supported as written. Second, profile share
+overstated recoverable time by ~3x on the one node where that has been tested
+(F2, corrected and confirmed by F4), so the sums in the hypotheses below are
+soft. Third, the backend A/B -- the instrument this file calls the only one that
+can settle the 2x claim -- does not currently run (F3). Fourth, **the
+`btop-shaped` fixture is worst-case on two axes at once and every figure it
+produces must be discounted for both**: sprite cells cost 3.2x text cells (F6),
+and it churns style every cell, which F8 shows is ~6x shorter than the shortest
+runs real content produces. The `text-shaped` fixture is worst-case on neither
+and its numbers can be read directly.
 
 **F2's table is arithmetically wrong and F4 supersedes it.** The error was a
 double division by the batch count in a summarizing script, not a fault in
@@ -99,6 +101,26 @@ Two rules specific to this file:
 - **Say which content a draw number describes.** Sprite cells and text cells
   differ by 3.5x (F5) and the executor routes them down entirely separate paths.
   "A full-frame draw costs X" is not a well-formed claim without it.
+- **A cache trades a cost, it does not remove one -- so measure both ends.** F9
+  found the sprite geometry recomputation was 66.7 ns/cell and the lookup that
+  would replace it was 17.5, so a third of the apparent prize was never
+  available. An optimization's value is the difference, and the replacement's
+  cost is the half everyone forgets to measure.
+- **Before generalizing a code smell across a family, read the siblings.** F8
+  read `BoxDrawingSprite.append`, saw per-cell geometry recomputation, and
+  called it a property of the sprite path. `BrailleSprite` had already hoisted
+  its layout out of the loop -- with a comment saying so -- and braille is the
+  highest-rect-count family in the fixture. One file over would have caught it.
+- **A fixture's worst case is a guess about reality until it is checked against
+  reality.** `btop-shaped` churns style every cell, and this file called that
+  "the pessimistic end of the run-length axis" for two findings running. F8
+  measured the axis: real content never gets within 6x of it, so the fixture was
+  not at the end of the distribution but off it, and every figure it produced
+  needed a 45% discount rather than a small one. The same check cut the other
+  way for `text-shaped`, which turned out to already sit at a realistic 6.6
+  cells/run. Both directions matter -- the check is cheap and neither answer was
+  predictable. When committed corpora already exist, measuring the real
+  distribution is usually an afternoon, not a project.
 
 ## Trigger and current evidence
 
@@ -287,10 +309,19 @@ style every cell by design. A run costs more than a cell on both executor paths
 (597 ns/run + 626 ns/cell for sprites; 771 + 197 for text), so run length moves
 a full-frame draw nearly 2x on its own: the same all-sprite 179x66 frame is
 ~14.4 ms at one cell per run and **~8.3 ms at eight**. Real content folds into
-runs longer than one cell -- how much longer is unmeasured, and is now the
-largest single unknown behind this hypothesis. H1 may well be an artifact of the
-fixture's style churn rather than a property of the draw path. It cannot be
-decided until someone measures the run-length distribution of real output.
+runs longer than one cell -- how much longer was the largest single unknown
+behind this hypothesis until F8 measured it.
+
+**F8 closes that axis, and it goes against H1.** Twelve committed streams from
+two unrelated sources -- DanTerm's corpus and alacritty's real session
+recordings -- run **5.8 to 66.6 cells per run**. One cell per run is not the
+pessimistic edge of the real distribution; it is a factor of six outside it. The
+all-sprite 179x66 frame therefore costs **~7.7-8.6 ms**, not 15.27 ms, which is
+roughly half the 16.7 ms interval. Combined with F7, H1 as written now has no
+supporting measurement at any geometry, on either executor path, at any
+realistic run length. What survives of it is not a budget claim but a floor: F8
+also shows 7.40 of those ~8.5 ms is per-cell sprite work that no run folding
+reaches, which is where optimization effort belongs.
 
 Competing explanation: real full-frame redraws may be rarer than the btop-shaped
 fixture implies, in which case the damage-clipped figure (1.36 ms at 160x50,
@@ -461,12 +492,23 @@ repeat exactly the error those corrections caught.
   `DrawBenchmarkGrid.standard`; 80x24 stayed as the cross-grid linearity check.
   Result in **F7** -- 15.27 ms all-sprite, 4.06 ms all-text, and the 23 ms
   headline retired.
-- [ ] **Measure the run-length distribution of real terminal output.** New as of
-  F6 and now the largest single unknown behind H1: a run costs more than a cell
-  on both executor paths, and every full-frame figure in this file was measured
-  at one cell per run because the fixture churns style per cell by design. The
-  same all-sprite 179x66 frame spans ~15.3 ms at stride 1 and ~8.3 ms at stride
-  8. Nothing here pins where real content falls.
+- [x] **Measure the run-length distribution of real terminal output.** Done
+  2026-07-28 against committed bytes only -- DanTerm's corpus plus alacritty's
+  real session recordings. Result: **F8** -- 5.8 to 66.6 cells per run across
+  twelve streams, so the fixture's one cell per run is outside the real
+  distribution, and an all-sprite 179x66 frame is ~8.5 ms rather than 15.27 ms.
+  Leaves one narrower question below.
+- [x] **Attribute the 559 ns/cell that is not sprite geometry.** Opened by F9,
+  answered the same day by **F10** via two ablation arms measured on two
+  instruments: **71.5% of a full-frame sprite draw is inside
+  `CGContextFillRects`**, 12.3% is construction, 16.1% is everything else. The
+  split favours H3's framing over H2's on this path.
+- [ ] **Capture a sprite-heavy stream and confirm F8's distribution holds on the
+  sprite path.** F8 measured twelve text-path streams; the repo contains no
+  box-drawing/braille-dense recording, so the ~8.5 ms figure carries an
+  assumption that a btop screen folds into runs like a shell session does. Lower
+  priority than it sounds: the assumption is favorable-direction, and F8's
+  Observation 5 shows only 1.2 ms of the frame is on this axis at all.
 - [ ] Reconcile F1's 15.6 ms with F5's 9.93 ms -- same grid, workload, and
   scenario, ~1.6x apart, and not explained by the three optimizations that
   landed between them (F7).
@@ -1034,6 +1076,236 @@ repeat exactly the error those corrections caught.
   and that gap predates and is separate from the F2/F4 arithmetic error. Nobody
   has reconciled it.
 
+### F8 -- real content folds into runs of 6 to 49 cells; the fixture's one-cell run is off the observed distribution entirely
+
+- Status: recorded. Closes the run-length caveat F6 opened, for the text path
+  directly and for the sprite path by inference.
+- Date and investigator: 2026-07-28, Claude (agent).
+- Question: F6 established that a run costs more than a cell on both executor
+  paths, and that the `btop-shaped` fixture sits at one cell per run by design.
+  That made every full-frame figure in this file an upper bound of unknown
+  tightness. Where does real content actually fall?
+- Method: a scratch instrument fed committed byte streams through the production
+  `Terminal`, called `planFrame` every 64 KB (2 KB for the small captures), and
+  histogrammed `plan.textRuns` cell counts. No new capture and no new fixture --
+  the bytes are already in the repo. Two independent sources:
+  1. DanTerm's own corpus (`benchmarks/fixtures/terminal-app.json`), at its
+     authored 80x24.
+  2. Alacritty's reference recordings
+     (`references/alacritty/alacritty_terminal/tests/ref/*/alacritty.recording`),
+     each at the grid in its own `size.json`. These are **real captured
+     sessions** -- a vim edit, zsh/fish completion, `ll`, `history` -- not
+     generated templates.
+
+  | Source | Stream | Grid | Frames | Runs | Mean cells/run |
+  | --- | --- | --- | ---: | ---: | ---: |
+  | corpus | `styled-screen-redraw` | 80x24 | 80 | 2846 | 27.3 |
+  | corpus | `incremental-screen-updates` | 80x24 | 87 | 2022 | 12.5 |
+  | corpus | `scrollback-stream` | 80x24 | 24 | 575 | 33.7 |
+  | corpus | `unicode-wrapping` | 80x24 | 24 | 575 | 48.9 |
+  | real | `vim_simple_edit` | 80x24 | 3 | 75 | 66.6 |
+  | real | `ll` | 105x29 | 2 | 92 | 32.7 |
+  | real | `issue_855` | 105x29 | 9 | 342 | 27.9 |
+  | real | `indexed_256_colors` | 105x29 | 5 | 55 | 25.9 |
+  | real | `zsh_tab_completion` | 105x29 | 1 | 11 | 8.3 |
+  | real | `alt_reset` | 106x30 | 11 | 1326 | 7.3 |
+  | real | `fish_cc` | 105x29 | 2 | 82 | 6.6 |
+  | real | `history` | 105x29 | 1 | 33 | 5.8 |
+
+- Observation 1: **nothing anywhere is near one cell per run.** The range across
+  twelve streams from two unrelated sources is 5.8 to 66.6. The minimum -- 5.8,
+  from a colorized `history` listing, the most style-dense real capture
+  available -- is still **6x** the fixture's stride. One cell per run is not a
+  pessimistic corner of the real distribution; it is outside it.
+- Observation 2: **the `text-shaped` fixture was already realistic and nobody
+  knew it.** Its 179x66 full frame is 11,814 cells in 1,788 runs, which is 6.61
+  cells/run -- sitting between `fish_cc` (6.6) and `alt_reset` (7.3), at the
+  short-run end of real content. F7's 4.06 ms all-text figure therefore needs no
+  run-length discount. The whole correction lands on `btop-shaped`.
+- Observation 3, applying F6's model. Before using it, it was checked against
+  F7's independently measured 179x66 numbers: predicted 14.45 ms vs measured
+  15.27 ms all-sprite (-5.4%), predicted 3.71 ms vs measured 4.06 ms all-text
+  (-8.7%). It underpredicts slightly in the same direction on both paths, which
+  is what extrapolating a 160x50 fit to a larger bitmap should do. Good to ~10%,
+  which is enough for a 2x claim and not enough for a 10% one.
+
+  | All-sprite 179x66 at | Runs | Modelled |
+  | --- | ---: | ---: |
+  | 1 cell/run (the fixture) | 11814 | 15.27 ms *(measured, F7)* |
+  | 5.8 cells/run (worst real) | 2040 | 8.61 ms |
+  | 6.6 cells/run (`fish_cc`) | 1782 | 8.46 ms |
+  | 12.5 cells/run (`incremental`) | 945 | 7.96 ms |
+  | 27.3 cells/run (`styled-screen-redraw`) | 433 | 7.65 ms |
+  | per-cell floor (runs -> 0) | 0 | **7.40 ms** |
+
+- Observation 4, on H1: **a full-screen all-sprite redraw at realistic run
+  lengths is ~7.7-8.6 ms, not 15.3 ms.** The fixture overstates by ~45%. Against
+  a 16.7 ms interval that is roughly half the budget, so F7's retirement of H1
+  holds with more margin than F7 could claim.
+- Observation 5, and the useful one for optimization: **the run-length axis is
+  nearly exhausted.** 7.40 of the ~8.5 ms is the per-cell term, which no amount
+  of run folding touches. Driving run length from 5.8 to infinity buys 1.2 ms;
+  the other 7.4 ms is per-cell sprite work. ~~That is the floor the sprite
+  geometry cache (doc 9 Phase 5) attacks, and it is now the single largest
+  identified item in a full-frame sprite draw.~~ **Corrected the same day by F9**,
+  which measured the geometry recomputation directly at 66.7 ns/cell -- 10.7% of
+  the per-cell term, worth ~0.58 ms net. The 7.40 ms is the right target; the
+  cache was the wrong tool for it, and naming it here without measuring it was
+  the error this file's own rules exist to prevent.
+- **What this does not settle.** None of these twelve streams contain sprite
+  content -- doc 12's `12/F3` census found the corpus is essentially ASCII, and
+  the alacritty captures are shell sessions. So the run-length distribution
+  measured here is the *text* path's, and applying it to the sprite path assumes
+  a btop-like screen folds into runs the same way. That assumption is plausible
+  in the favorable direction (a box-drawing border is one long run, a braille
+  plot row is a medium one, and both are longer than one cell) but it is an
+  assumption, not a measurement. The honest statement is: 15.27 ms is a
+  fixture artifact, the true figure is near 8 ms, and pinning it exactly needs a
+  captured sprite-heavy stream that the repo does not currently contain.
+- Uncertainty: low that real content is far from one cell per run -- twelve
+  streams, two sources, no counterexample. Moderate on the exact ~8 ms, which
+  rests on F6's model (good to 10%) plus the sprite-folding assumption above.
+- Next action: none for this question; it is answered well enough to stop. The
+  per-cell floor it exposes is the next thing to attack.
+
+### F9 -- the sprite geometry cache is worth ~0.6 ms, not the headline item; 89% of per-cell sprite cost is somewhere else entirely
+
+- Status: recorded. Downgrades doc 9's Phase 5 sprite-geometry-cache candidate
+  before anyone implements it, and corrects an overclaim this file made in F8
+  the same day.
+- Date and investigator: 2026-07-28, Claude (agent).
+- Question: F8 put 7.40 ms of a realistic ~8.5 ms all-sprite frame in the
+  per-cell term and called the geometry cache the largest identified item in it.
+  That inference came from reading code, not from a measurement -- exactly the
+  move `10/F8`, `11/F2`, `11/F4`, and `11/F6` have each punished. How much of
+  626 ns/cell is actually geometry recomputation?
+- Method: a scratch microbenchmark timed the geometry calls alone, no drawing,
+  at the `btop-shaped` fixture's exact glyph proportions (6 box-drawing, 3
+  braille, 3 block per twelve cells) and its real 17x31 cell in pixels. Batch
+  calibrated to 300 ms, minimum of 5. The benchmark calls across the same
+  module boundary the executor does (`TerminalSpriteGeometry` from outside), so
+  whatever cross-module optimization applies in production applies here too.
+- Result, per 11814-cell 179x66 frame:
+
+  | Component | ns/cell | ms/frame | Share of 626 |
+  | --- | ---: | ---: | ---: |
+  | Box-drawing geometry (5907 cells) | 58.0 | 0.69 | |
+  | Block-element geometry (2953 cells) | 8.3 | 0.10 | |
+  | **Total cacheable recomputation** | **66.7** | **0.79** | **10.7%** |
+  | What a cache replaces it with (dict lookup) | 17.5 | 0.21 | 2.8% |
+  | **Net saving from a perfect cache** | **49.2** | **0.58** | **7.9%** |
+  | **Unattributed remainder** | **559.3** | **6.61** | **89.3%** |
+
+- Observation 1: **the prize is ~0.58 ms on an ~8.5 ms frame -- about 7%.** Real
+  and worth having, but an ordinary optimization, not the thing that decides
+  anything. F8's "single largest identified item in a sprite-heavy draw" was
+  wrong and is struck.
+- Observation 2: **a quarter of the work was already done and F8 did not notice.**
+  Braille -- the fixture's highest-rect-count family at ~7 dots per cell against
+  box drawing's 2 -- already hoists `BraillePixelLayout` to once per draw
+  (`TerminalRenderExecution.swift:415`, with a comment saying exactly why). Only
+  box drawing and block elements still recompute per cell. Reading
+  `BoxDrawingSprite.append` and generalizing to "the sprite path recomputes
+  geometry per cell" skipped the two sibling files that would have shown it.
+- Observation 3: **the cache does not remove the cost, it trades it.** The
+  measured replacement is a dictionary lookup at 17.5 ns/cell, a quarter of what
+  it eliminates, and that figure is optimistic twice over: the benchmark's cache
+  is keyed on `Int` where a real one must key on a pattern enum with payload, and
+  it is measured fully warm in a tight loop.
+- Observation 4, the one that matters: **89% of per-cell sprite cost is
+  unattributed.** At ~3.1 rects per cell for this fixture, 559 ns/cell is roughly
+  180 ns per rect for building the `CGRect` and filling it. This file has no
+  measurement splitting rect construction from `CGContextFillRects` rasterization,
+  and it should not guess -- `11/F6` already disproved one confident guess about
+  this same 626 ns/cell (antialiasing, +0.13%). But whatever it is, it is not
+  geometry recomputation, and it is where a sprite-path optimization would have
+  to land to matter.
+- Uncertainty: low on the ~10.7% share -- the box-drawing figure (58.0 minus
+  17.5 = 40.5 ns/cell) is almost exactly one malloc/free pair, which is the
+  independent check that the allocation being hypothesized is real and is being
+  measured. Moderate on the block-element figure: 8.3 ns/cell is too cheap for a
+  heap allocation and suggests the optimizer stack-promoted that array, which
+  may not happen identically in the executor. Doubling the whole cacheable term
+  for pessimism still leaves it at ~1.5 ms and still not the headline.
+- Next action: do not implement the cache as a headline optimization. Either
+  take it as a cheap ~7% with honest expectations, or -- better -- measure what
+  the other 89% is first, since that is where an 8.5 ms frame would actually
+  move.
+
+### F10 -- the sprite draw is 71% `CGContextFillRects`; construction is 12% and geometry recompute is 5%
+
+- Status: recorded. Attributes the 89% F9 left open, and answers the Phase 1
+  ledger item F9 created the same day.
+- Date and investigator: 2026-07-28, Claude (agent).
+- Method: two ablation arms against a baseline worktree at `1939feb`, each
+  measured twice by independent instruments -- `benchmark-draw 9` for absolute
+  microseconds and `terminal-headless-draw-compare.py --both-directions
+  --rounds 8` for the paired ratio. 179x66, `btop-shaped`, full-frame.
+  - **Arm A** replaced the two sprite `fill(...)` calls with a read of the
+    accumulated array into a global sink. All geometry, `CGRect` construction,
+    and array appends still happen; only rasterization is skipped. The sink
+    exists so the optimizer cannot dead-code-eliminate the construction that
+    the arm is designed to keep -- without it the arm would silently measure
+    both phases and look identical to arm B.
+  - **Arm B** skips the sprite appends entirely while still setting
+    `classifiedAsSprite`, so cells do not fall through to the font path and the
+    arm measures the draw with all sprite work removed.
+
+  | Arm | us/draw | Comparator ratio | Measured ratio |
+  | --- | ---: | ---: | ---: |
+  | baseline | 15266.5 | -- | -- |
+  | A: construction kept, fills skipped | 4344.5 | 0.2846 | 0.2846 |
+  | B: no sprite work at all | 2463.6 | 0.1698 | 0.1614 |
+
+  The two instruments agree to 0.0% on arm A and 5% on arm B. Order bias was
+  0.07% and -0.02%. The `text-shaped` control moved 4.6% and 5.3% -- neither arm
+  touches the glyph path, so that is the noise floor for these runs.
+
+- Decomposition by subtraction:
+
+  | Phase | us | Share of draw | ns/cell |
+  | --- | ---: | ---: | ---: |
+  | **`CGContextFillRects`** | **10922** | **71.5%** | **924** |
+  | Construction (geometry + `CGRect` + append) | 1881 | 12.3% | 159 |
+  | Everything else (clear, backgrounds, routing) | 2464 | 16.1% | 209 |
+
+- Observation 1: **the sprite path is rasterization, not bookkeeping.** Nearly
+  three quarters of a full-frame sprite draw is inside CoreGraphics filling
+  rects. Every Swift-side cost this file has chased -- font construction,
+  scratch-buffer hoisting, geometry recomputation, antialiasing state -- lives
+  in the other 28% combined.
+- Observation 2: **the geometry cache is 5.2% of the draw gross and 3.8% net.**
+  F9 measured the recomputation at 790 us; this puts construction as a whole at
+  1881 us, so geometry is 42% of construction and construction is an eighth of
+  the draw. F8's "largest identified item" was wrong by roughly an order of
+  magnitude, and F9's downgrade was still generous.
+- Observation 3, on the run-length caveat: this is measured at one cell per run,
+  so the 10922 us contains 11814 separate `fill` calls and mixes per-call
+  overhead into the rasterization figure. Splitting it against F6's coefficients
+  -- construction (159) plus routing (209) is 368 ns/cell against F6's 626
+  per-cell term, leaving ~258 ns/cell of per-cell fill, with the 597 ns/run term
+  as call overhead -- puts fill at roughly 55-60% rather than 71% at F8's
+  realistic 6.6 cells/run. It remains the majority term at any run length in the
+  observed distribution.
+- Observation 4, on direction: **this is the first measurement in this file that
+  discriminates H2 from H3.** H2 says the gap is implementation; the entire
+  implementation surface on this path is 28% of the draw and the largest
+  identified item within it is worth 3.8%. H3 says the gap is architectural --
+  that CPU rasterization is the cost -- and 71.5% inside `CGContextFillRects` is
+  what that hypothesis predicts. This does not confirm H3: a GPU path is not the
+  only way to fill fewer rects, and F8 already showed the frame fits the budget
+  at ~8.5 ms, so nothing here establishes that anything must change. But the
+  H2-shaped backlog can no longer be presented as a route to a large win on
+  sprite-heavy content.
+- Uncertainty: low. Two instruments, two arms, agreeing ratios, near-zero order
+  bias, and an unaffected control workload. The main residual risk is arm A's
+  sink being cheaper than the fill it replaced in ways that flatter it, which
+  would understate construction -- but construction is bounded above by arm B's
+  subtraction regardless.
+- Next action: none required; this closes the attribution. If a sprite-path
+  optimization is ever wanted, the lever is fewer or larger rects reaching
+  CoreGraphics, not cheaper Swift-side preparation of them.
+
 ## Open questions and caveats
 
 - **F1's 15.6 ms and F5's 9.93 ms describe the same measurement and disagree**
@@ -1070,12 +1342,15 @@ repeat exactly the error those corrections caught.
   (F5's last caveat). **Tested and disproved in F6:** disabling antialiasing on
   the sprite rect fills measured +0.13% with 0.47% order bias. The `sample`
   share that suggested it was not pointing at a real cost.
-- **Every full-frame number in this file sits at the worst point on the
-  run-length axis** (F6). The `btop-shaped` fixture changes style every cell by
-  design, and a run costs more than a cell on both executor paths. Real content
-  folds into longer runs, and nobody has measured how much longer. Until someone
-  does, treat 15.6 ms / 23 ms / 14.7 ms as upper bounds set by a fixture
-  property, not as content costs.
+- ~~**Every full-frame number in this file sits at the worst point on the
+  run-length axis**~~ (F6). **Measured in F8**: real content runs 5.8 to 66.6
+  cells per run across twelve streams from two sources, so one cell per run is
+  outside the real distribution rather than at its edge. Every `btop-shaped`
+  full-frame figure overstates by ~45% -- read 15.27 ms as ~8.5 ms. The
+  `text-shaped` fixture turned out to already sit at 6.6 cells/run and needs no
+  discount. **What remains open** is that F8's distribution was measured on
+  text-path content only; applying it to sprite content is an assumption, and
+  a sprite-heavy captured stream would settle it.
 - **No number in this file describes mixed content.** Both workloads are
   deliberately pure -- all sprites or all text -- because that is what isolates
   the two executor paths. Real screens are mixtures, so the true figure lies

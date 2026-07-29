@@ -300,6 +300,23 @@ re-post rule is now the only gate between the change and F4's verdict.
       this same 626 ns/cell was tested in `11/F6` and measured +0.13% -- so the
       cost is not in rasterization, which is what makes the per-cell allocation
       the live suspect.
+      **`11/F9` measured it and it is small. Read this before starting.** The
+      geometry recomputation is **66.7 ns/cell -- 10.7% of the 626**, and a cache
+      does not remove it but trades it for a ~17.5 ns/cell lookup, so the net is
+      **~49 ns/cell = ~0.58 ms on a 179x66 frame, about 7%.** Worth having,
+      ordinary in size. Two things this candidate got wrong before measurement:
+      **braille was already done** (the draw loop hoists `BraillePixelLayout` to
+      once per draw, and braille is the highest-rect-count family here), so only
+      box drawing and block elements remain; and **89% of the per-cell term is
+      not geometry at all** -- ~559 ns/cell across ~3.1 rects, unattributed
+      between `CGRect` construction and `CGContextFillRects` rasterization.
+      **`11/F10` measured that 89% and it is not ours.** Two ablation arms on two
+      instruments put **71.5% of a full-frame sprite draw inside
+      `CGContextFillRects`**, with construction as a whole at 12.3% and this
+      candidate's geometry recompute at 5.2% gross / **3.8% net**. The entire
+      Swift-side surface this backlog can reach is 28% of the draw. Take this
+      candidate as a tidy ~4% if it is cheap to write; do not present it, or any
+      sibling on this path, as a route to a large win.
 - [x] Unreserved array growth in `drawTextRuns` (F3, 14% of draw). **Done
       2026-07-28 as doc 13's R4; result in F9 of
       [13-live-app-compositing-and-draw-hotspots.md](13-live-app-compositing-and-draw-hotspots.md).**
