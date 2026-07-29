@@ -188,6 +188,13 @@ public struct Terminal: Equatable, Sendable {
             }
         }
 
+        /// Reports how many rows this buffer still holds cell storage for. Equals `count` only
+        /// while front eviction actually releases what it drops, which is the invariant it exists
+        /// to prove; see doc 15's `F4` for the regression that motivated it.
+        var retainedCellStorageRowCount: Int {
+            storage.reduce(0) { $0 + ($1.cells.isEmpty ? 0 : 1) }
+        }
+
         mutating func append(_ row: GridRow) {
             storage.append(row)
         }
@@ -204,6 +211,12 @@ public struct Terminal: Equatable, Sendable {
         mutating func removeFirst() -> GridRow {
             precondition(isEmpty == false)
             let row = storage[storageStart]
+            // Release the evicted row's cells now rather than at the next compaction. A slot below
+            // `storageStart` owns nothing: it is unreachable through every accessor here, but its
+            // `cells` array is a separate heap allocation that stays live while the slot holds it.
+            // Since compaction will not run until dead slots outnumber live ones, skipping this
+            // let history retain up to twice the rows it admitted (doc 15's `F4`).
+            storage[storageStart] = GridRow(cells: [])
             storageStart += 1
             compactIfNeeded()
             return row
@@ -1527,6 +1540,14 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
+    /// Counts rows whose cell storage history still owns, so leak proofs can assert it equals
+    /// `scrollbackRowCount` without naming how the buffer evicts. Deliberately phrased as the
+    /// invariant rather than as buffer internals: doc 15's `D1` defers a ring-buffer rewrite that
+    /// would answer this trivially, and this accessor must survive it.
+    var retainedCellStorageRowCount: Int {
+        scrollbackRows.retainedCellStorageRowCount
+    }
+
     /// Recomputes retained-row cost for coherence proofs without affecting enforcement.
     var recomputedScrollbackByteCount: Int {
         scrollbackRows.indices.reduce(0) {
@@ -2822,16 +2843,19 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func enforceScrollbackBudget() {
-        var lastEvicted: GridRow?
+        // Carry the one bit we need rather than the row that holds it: retaining the `GridRow`
+        // across the loop and until scope exit pins its cells -- a whole row's allocation -- for
+        // nothing. Same defect class as the one `removeFirst` just stopped committing.
+        var lastEvictedIsSoftWrapped: Bool?
         var evictedCount = 0
         while scrollbackByteCount > scrollbackBudgetBytes {
             let evicted = scrollbackRows.removeFirst()
             scrollbackByteCount -= Self.scrollbackByteCost(of: evicted)
-            lastEvicted = evicted
+            lastEvictedIsSoftWrapped = evicted.isSoftWrapped
             evictedCount += 1
         }
-        if let lastEvicted {
-            isHistoryHeadTruncated = lastEvicted.isSoftWrapped
+        if let lastEvictedIsSoftWrapped {
+            isHistoryHeadTruncated = lastEvictedIsSoftWrapped
         }
         if evictedCount > 0 { primaryHistoryObservation.value &+= 1 }
         handleEviction(of: evictedCount)

@@ -272,6 +272,10 @@ H4, H5, H7 are not scheduled.
 
 ### Phase 1 -- establish a trustworthy memory baseline
 
+`F6` upgraded the first task below from important to **blocking**: no remaining
+hypothesis in this file can be verified on `just benchmark-memory`, so the
+headless harness is now the only instrument that can decide any of them.
+
 - [ ] Build a headless terminal-state memory harness on the payload matrix
       (empty, full screen, 10K scrollback plain / unicode / styled / mixed),
       measuring **pure `Terminal` state** with no GUI, on the model of
@@ -303,21 +307,34 @@ baseline.
 
 ### Phase 1.5 -- release the retained rows (H8)
 
-- [ ] Decide the shape: clear the vacated slot's `cells` on eviction (minimal,
+- [x] Decide the shape: clear the vacated slot's `cells` on eviction (minimal,
       what `F4` confirmed) versus eager compaction (also correct, but restores
       the O(n) copy the threshold exists to amortize). Record in D1.
-- [ ] Write the behavioral test first, per the project's TDD rule. It must pin
+      **Done -- `D1`**: reset the whole vacated slot, and hoist the `lastEvicted`
+      row out of `enforceScrollbackBudget`. The ring buffer is deferred, not
+      rejected -- see `D1`'s candidate 2.
+- [x] Write the behavioral test first, per the project's TDD rule. It must pin
       the **observable** invariant -- that resident cell storage stays
       proportional to live scrollback rows across sustained front eviction -- and
       not the `storageStart`/`compactIfNeeded` internals, which are an
       implementation detail this file may later want to change for `H6`/`H7`.
-- [ ] Implement, then verify no CPU regression on `terminal-feed` and
+      **Done.** `TerminalScrollbackRetentionTests`, against an internal
+      `retainedCellStorageRowCount` phrased as the invariant. Fails at
+      `worstExcess == 1023` before the fix, passes after.
+- [x] Implement, then verify no CPU regression on `terminal-feed` and
       `scrollback-stream` per `10/F9`. The expectation is neutral-to-positive:
       one O(1) store added per eviction, less to copy on compaction.
-- [ ] Re-run `just benchmark-memory scrollback-stream` and record the change in
+      **Done -- `F6`.** All five routine workloads equivalent or inconclusive,
+      none slower.
+- [x] Re-run `just benchmark-memory scrollback-stream` and record the change in
       process footprint and in `_ContiguousArrayStorage<GridCell>` node count
       against `F1`'s artifact. Predicted: node count flat at ~1,783 instead of
       sawtoothing to ~3,500.
+      **Done, and it failed as an experiment -- `F6`.** The instrument cannot
+      resolve the change: one memgraph samples one arbitrary point on the
+      sawtooth, and GUI IOSurface churn (50.6 MB) dwarfs the effect. The fix is
+      verified by the behavioral test instead. **This promotes `F2` from "first
+      Phase 1 task" to a hard blocker on every remaining hypothesis.**
 
 ### Phase 2 -- correct the accounting (H1)
 
@@ -336,6 +353,24 @@ baseline.
       pays. Record in a finding; do not implement H3 first.
 - [ ] Gate: compare H3 and H6 against Phase 1 evidence and pick one, or
       establish that they compose. Record in D2.
+
+### Backlog -- not scheduled, kept so it is not lost
+
+- [ ] **Replace `ScrollbackBuffer`'s index-and-compact scheme with a true ring
+      buffer** (`D1` candidate 2). Deferred, *not* rejected. It is the
+      structurally pure answer -- it makes the dead prefix unrepresentable rather
+      than merely empty, and removes the amortized compaction copy entirely.
+      It was deferred only because `D1` recovers ~700x of the waste (19 MB ->
+      27 KB) in one line, and the compaction copy that a ring buffer additionally
+      eliminates **has never been measured as a cost**. The price is real: the
+      buffer's capacity is dynamic (the budget is denominated in bytes and row
+      cost varies with width), so growth still needs a path, and `asArray`,
+      `suffix(from:)`, `indices`, and `Equatable` all acquire wraparound cases in
+      a struct whose current surface is small and well covered.
+      **Reopen when** any of: `F5` or `H7` shows compaction copying is a
+      measurable share; `H6`'s compact immutable rows change the cost of a row
+      move; or profiling attributes real time to `compactIfNeeded`. `D1`'s
+      invariant-shaped test is deliberately written to survive this swap.
 
 ### Phase 4 -- close
 
@@ -460,13 +495,22 @@ baseline.
   no scrollback depth. It is invisible to `scrollbackByteCount`, which counts
   only live rows -- which is why the budget looked healthy.
 - Inference 2, sizing it, without deriving per-type bytes from `heap` per this
-  file's rule: the model charges 40 bytes per single-scalar cell (`12/F1`), so
-  10,480,680 bytes of model usage over 1,717 rows implies ~262,000 cells, ~153
-  per row. At the true stride of 72 that is ~11.0 KB per row and **~18.9 MB of
-  real cell storage live**, with an equal amount held dead at peak. Bucket
-  rounding then inflates ~38.5 MB of real peak storage to `F1`'s 48.2 MB
-  reported figure -- a ~25% overhead that is independent evidence for `H7` and an
-  input to the `F5` task.
+  file's rule. **Corrected 2026-07-29; the first version of this inference was
+  wrong and is struck below.** Rows are *not* trimmed to their content -- a
+  scrollback row carries a full `columnCount` of cells, which the cost model
+  confirms: `16 + 179 * 32` is 5,744, and the observed average row cost of ~6,104
+  bytes leaves ~45 scalars, consistent with a ~58-character line on a 179-column
+  grid. At the true stride of 72 a row is therefore `179 * 72` = **12,888 bytes**,
+  so 1,717 live rows are **~22.1 MB of real cell storage**, with an equal amount
+  held dead at peak. `heap`'s 14.0K bucket against a 12,888-byte allocation puts
+  bucket overhead at **~8.7%**, not the ~25% first computed.
+  - ~~Superseded: "~262,000 cells, ~153 per row, ~11.0 KB per row, ~18.9 MB
+    live, ~25% bucket overhead."~~ That derivation divided total model cost by
+    rows while ignoring the model's `8 * scalars` term, which inflated the
+    implied per-cell charge and so deflated the implied cell count. The error
+    understated the waste by ~15%.
+- Inference 2b: the corrected figure is what `H8` is worth -- **~22 MB at peak,
+  ~11 MB on average**, at the production budget and 179 columns.
 - Inference 3, on ordering: this displaces `H1` as the first move. `H1` corrects
   an accounting model and *reduces retained history* to do it; `H8` returns the
   same order of magnitude of bytes and costs the user nothing at all.
@@ -491,6 +535,169 @@ baseline.
     front-eviction path leaks, which is also the only path the budget uses.
 - Next action: `H8`, and it should precede the remaining Phase 1 tasks --
   `F3` and `F5` both measure quantities this bug perturbs by up to 19 MB.
+
+### F6 -- the fix is CPU-neutral, and the GUI memory benchmark cannot see it at all
+
+- Status: recorded. Verification of `D1`, and a negative result about the
+  instrument that matters more than the verification does.
+- Date and investigator: 2026-07-29, Claude (agent).
+- Commit and worktree state: baseline `22a08b1`; candidate is that tree plus
+  `D1`'s two edits.
+
+**CPU: no regression.** `just benchmark-quick baseline=HEAD` on `terminal-feed`,
+then `just benchmark-confirm baseline=HEAD` across all five routine workloads:
+
+  | workload | verdict |
+  | --- | --- |
+  | `terminal-feed` | equivalent (-0.61%, 2 pairs) |
+  | `scrollback-stream` | inconclusive (-0.86%, 4 pairs) |
+  | `content-churn` | inconclusive (-1.46%, 4 pairs) |
+  | `style-churn` | equivalent (-0.62%, 4 pairs) |
+  | `incremental-mixed` | inconclusive (-0.81%, 6 pairs) |
+
+- Nothing is slower, and every magnitude is under 1.5%. Worth recording as
+  method: an earlier 2-pair `benchmark-quick` on `scrollback-stream` read
+  **+1.05%**, which the 4-pair confirm run flipped to **-0.86%**. The sign
+  reversal is what a noise reading looks like; a 2-pair "inconclusive" is not a
+  weak regression signal and should not be reported as one.
+
+**Memory: the instrument could not resolve it.** Two `just benchmark-memory
+scrollback-stream 60 15` runs, same binary and geometry (179x66), differing only
+by `D1`:
+
+  | | footprint baseline -> final (peak) | `[GridCell]` nodes | bytes |
+  | --- | --- | ---: | ---: |
+  | with `D1` | 192.9 -> 193.0 MB (243.5) | **3,287** | 44.9 MB |
+  | without `D1` | 222.8 -> 273.3 MB (273.3) | **3,096** | 42.3 MB |
+
+- Observation: the fixed build reports **more** row arrays than the unfixed one.
+  The measurement is not merely insensitive, it is directionally wrong.
+- Inference 1: this is exactly the sawtooth `F4` warned about. A memgraph is one
+  sample at one arbitrary point on a ramp that spans 1,717 to 3,431 allocations,
+  so a single capture of each arm compares two unrelated phases. Nothing about
+  these two numbers is comparable, and the ~200-node difference is phase, not
+  effect.
+- Inference 2: a second, independent confound. The unfixed run grew **50.6 MB of
+  IOSurface** over 42 s while its `MALLOC_SMALL` stayed flat at 0.0 MB. That is
+  GUI compositing, has nothing to do with the terminal, and is more than twice
+  the size of the effect being measured. It also retroactively explains `F1`'s
+  unattributed "273.2 MB peak against a 222.7 MB baseline" -- same magnitude,
+  same workload, and it is IOSurface rather than anything on the heap.
+- Inference 3, and the one that should change plans: **`just benchmark-memory`
+  is a leak detector, not a measurement instrument for representation work.** It
+  was built to answer "is this growing without bound", which `F1` used it for
+  correctly. It cannot answer "did this change reduce resident cell bytes", which
+  is the question the rest of this file asks. `H1` anticipated this in the
+  abstract -- "any harness that cannot see it is not sensitive enough for the
+  rest of the file" -- and this is the concrete demonstration.
+- Inference 4: Phase 1's headless harness (`F2`) is therefore not merely the
+  cleanest way to measure the remaining hypotheses, it is the **only** way. It
+  should be built before `H1`, `H2`, `H3`, or `H6` is attempted, and it must
+  either sample the allocation curve over time or drive the terminal to a
+  deterministic phase, because a single snapshot of a sawtoothing quantity is not
+  a measurement.
+- How `D1` is verified instead: deterministically and headlessly. The behavioral
+  test drives >1,024 evictions and asserts the retained-vs-live excess **at every
+  step**, giving 1,023 on the old code and 0 on the new. That is a stronger proof
+  than any footprint delta would have been, and it is immune to both confounds
+  above.
+- Competing interpretations: it remains possible that the GUI app holds row
+  arrays this file has not accounted for -- both arms report ~3,100-3,300 where
+  the headless terminal peaks at ~3,500 and would now sit at ~1,783. The
+  candidate arm should have dropped to roughly 1,783 + screen if `Terminal` were
+  the only owner. Either the sawtooth phase explains it, or something else in the
+  app retains rows. **This is not resolved**, and it is the live question below.
+- Uncertainty: the whole memory comparison is uninformative rather than
+  negative -- it neither confirms nor refutes the ~22 MB saving. The saving rests
+  on `F4`'s deterministic headless numbers, which are solid, plus arithmetic.
+- Next action: `F2`, and treat it as blocking for every remaining hypothesis.
+  Then re-take `F3` and `F5` on it rather than on `benchmark-memory`.
+
+## Decision log
+
+### D1 -- release evicted scrollback rows by resetting the vacated slot, and defer the ring buffer
+
+- Status: decided, pending implementation. Phase 1.5.
+- Date and investigator: 2026-07-29, Claude (agent).
+- Evidence used: `F4` (mechanism, sizing, and controlled confirmation), plus a
+  read of the three call sites that constrain the change:
+  - `enforceScrollbackBudget` (`Terminal.swift:2818`) computes
+    `scrollbackByteCost(of: evicted)` on the **returned** row, so the fix must
+    not disturb it. It does not: `removeFirst` returns a value copy holding its
+    own reference to the cells array.
+  - `storage` is already uniquely referenced on the hot path --
+    `appendToScrollback` mutates it immediately before eviction -- so an in-place
+    slot write triggers no COW copy of the array.
+  - `damageActionSnapshot` holds no rows, so the per-action snapshot does not
+    share `storage` either. The only whole-`Terminal` copy is
+    `withUnlimitedScrollbackForTesting`.
+- Candidate solutions:
+
+  | | Approach | Peak dead bytes | Cost per eviction | Verdict |
+  | --- | --- | ---: | --- | --- |
+  | 1 | Reset the vacated slot | ~27 KB (row shells only) | O(1) store | **selected** |
+  | 2 | True ring buffer | 0 | O(1), no compaction at all | **deferred, not rejected** |
+  | 3 | Compact on every eviction | 0 | **O(n)** | rejected |
+  | 4 | Tighten the threshold to 8x | ~2.4 MB | O(1) amortized, 4x more copying | rejected |
+  | 5 | `[GridRow?]`, nil the slot | ~27 KB | O(1) store | rejected |
+
+- Why 3 and 4 need no measurement to reject. Candidate 3 turns a per-line
+  eviction into a full-array copy per line at steady state on
+  `scrollback-stream`, which is exactly what `compactIfNeeded`'s threshold exists
+  to amortize. Candidate 4 is **strictly dominated** by candidate 1 on both axes:
+  it leaves ~2.4 MB of waste standing *and* quadruples compaction copying.
+  Candidate 5 buys nothing over 1 while paying an optional discriminator in every
+  live slot and an unwrap in the hot subscript.
+- Selected direction: reset the whole slot rather than only emptying `cells`.
+
+  ```swift
+  let row = storage[storageStart]
+  storage[storageStart] = GridRow(cells: [])   // a slot below storageStart owns nothing
+  storageStart += 1
+  ```
+
+  Same cost as clearing `cells` alone, but it states the invariant -- *a slot
+  below `storageStart` owns nothing* -- instead of leaving a slot that has no
+  cells yet still claims a `isSoftWrapped` / `semanticPrompt` identity. Verified
+  safe against the rest of the struct: `==` compares only `lhs[i]` over live
+  `indices`, and `asArray` / `suffix(from:)` read only from `storageStart`
+  onward, so no dead slot is ever observed. `removeLast` and
+  `removeAll(keepingCapacity:)` already release their rows and are untouched.
+- Folded into the same change: `enforceScrollbackBudget` holds
+  `var lastEvicted: GridRow?` across the whole eviction loop and until scope
+  exit, purely to read `.isSoftWrapped` afterward. That pins one full row's cells
+  (~11 KB) for no reason. Hoist the `Bool` instead. Same defect class, same
+  function, free.
+- Tradeoffs and correctness risks: the invariant ends up expressed in one line
+  and nothing structurally prevents a future eviction path from omitting it.
+  That is the whole reason the behavioral test below is worth its cost. There is
+  no correctness risk to observable behavior -- dead slots are unreachable
+  through every accessor.
+- Consequence worth noting: after this lands, `compactIfNeeded`'s threshold is
+  trading copy work against **16 bytes** per dead slot rather than ~11 KB, so it
+  becomes a pure CPU decision and could reasonably be *raised* to copy less. Not
+  proposed here; recorded so the threshold is not over-tuned on the old premise.
+- This does not touch `scrollbackByteCount`, which was always correct about live
+  rows. `H1` remains independent.
+- Outcome: implemented and verified. Both edits landed as described. The
+  behavioral test fails on the old code at `worstExcess == 1023` -- exactly
+  `compactIfNeeded`'s floor -- and passes after. Full `just test` gate green
+  (645 core tests, one pre-existing unrelated known issue). CPU verified in `F6`;
+  the memory verification did **not** go as planned, also `F6`.
+- Behavioral verification: see the Phase 1.5 ledger. The invariant is not
+  observable through the public API, so the test needs an internal accessor; it
+  must express the **invariant** (`retainedCellStorageRowCount` -- rows for which
+  the buffer still owns cell storage) rather than the **mechanism**
+  (`storageStart`, `storage.count`). A mechanism probe would be coupled to
+  exactly the layout candidate 2, `H6`, and `H7` may later replace; an invariant
+  probe survives all three, since a ring buffer would answer it with `count`.
+- Quantitative verification: ~~`_ContiguousArrayStorage<GridCell>` node count flat
+  near 1,783 instead of sawtoothing to ~3,500, against `F1`'s artifact.~~
+  **This prediction was correct but unmeasurable on the instrument named.** See
+  `F6`: `just benchmark-memory` cannot resolve the change, because a single
+  memgraph samples one arbitrary point on the sawtooth and GUI-side IOSurface
+  churn is an order of magnitude larger than the effect. The fix is verified
+  deterministically instead, headlessly, by the behavioral test.
 
 ## Rejected
 
@@ -539,11 +746,23 @@ different proposal and is not covered by this rejection.
 
 ## Outcome
 
-Investigation in progress. Findings F1 and F4 are recorded; the next free IDs
-are **F2**, **F3**, **F5**, and then **F6**. No decision is recorded yet; the
-next free ID is **D1**.
+Investigation in progress. Findings F1, F4, and F6 are recorded; the next free
+IDs are **F2**, **F3**, **F5**, and then **F7**. Decision D1 is recorded and
+implemented; the next free ID is **D2**.
 
 `F4` closed Phase 1's gating task and changed the plan: the largest defect found
 so far is a scrollback retention bug (`H8`), not a representation problem, and
-it is the only item here that costs the user nothing. Phase 1.5 takes it before
-the remaining attribution work, which it would otherwise contaminate.
+it is the only item here that costs the user nothing. Phase 1.5 shipped it
+(`D1`) -- ~22 MB of already-evicted rows at peak, released, with no CPU cost on
+any of the five routine workloads.
+
+`F6` then changed the plan a second time, and this is the more important of the
+two for whoever picks this up. **`just benchmark-memory` cannot measure
+representation work.** Asked to confirm a ~22 MB saving it reported the fixed
+build as *larger*, because one memgraph samples one arbitrary point on a
+sawtooth and because GUI IOSurface churn is twice the size of the effect. It
+remains a good leak detector, which is what `F1` used it for. It is not a
+measurement instrument. So Phase 1's headless harness (`F2`) is no longer the
+first task among four -- it is a hard blocker on `H1`, `H2`, `H3`, and `H6`
+alike, and `F3` and `F5` should be taken on it rather than on
+`benchmark-memory`. Build it next.

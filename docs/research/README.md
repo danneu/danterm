@@ -24,7 +24,7 @@ entry point, not a re-read of the evidence.
 | 12 | Cell representation | Closed. Erase leg shipped; POD cell demonstrated-and-rejected; memory half parked. Its reopening condition was met on 2026-07-29 and taken up by doc 15. |
 | 13 | Live-app compositing | Closed. Three candidates landed; compositing stall is substantially pipeline slack. |
 | 14 | Live scroll workload profile | Closed. One trace, four candidates, two shipped: `TerminalScalars` accessor inlining (**-20% draw**, `14/D2`) and a row-scoped cell read (**-16% plan**, `14/D3`). One candidate rejected as too small to measure (`14/D1`). |
-| 15 | Memory footprint | **LIVE.** Takes up doc 12's recorded reopening condition. Owns resident bytes per cell, per row, and in aggregate. `15/F1`: 84% of the live heap is grid row storage, but the live heap is only 26% of process footprint. `15/F4` found the first defect: evicted scrollback rows keep their cells, so the buffer holds up to **2x** its live rows (~19 MB). Next up is that fix (`15/H8`), not a representation change. |
+| 15 | Memory footprint | **LIVE.** Takes up doc 12's recorded reopening condition. Owns resident bytes per cell, per row, and in aggregate. `15/F1`: 84% of the live heap is grid row storage, but the live heap is only 26% of process footprint. `15/F4` found and `15/D1` shipped the first defect -- evicted scrollback rows kept their cells, so history held up to **2x** the rows it admitted (~22 MB at peak), at no CPU cost. `15/F6` is the one to read before measuring anything: **`just benchmark-memory` cannot resolve a representation change** and reported the fixed build as larger. The headless harness (`15/F2`) now blocks every remaining hypothesis. |
 
 (There is no doc 5; numbers are never reused or renumbered.)
 
@@ -47,7 +47,16 @@ optimism factor attaches to `sample`, and applying it to an on-CPU share of
 deletable work under-predicted a 16% win as 5%. And a mechanical trap worth
 knowing before you measure a plan-path change: **`benchmark-confirm` does not
 classify plan time at all** -- the calibrated plan rule lives only in
-`benchmark-quick`, on `content-churn` and `style-churn` (`14/F11`).
+`benchmark-quick`, on `content-churn` and `style-churn` (`14/F11`). The memory
+equivalent, from `15/F6`: **`just benchmark-memory` is a leak detector, not a
+measurement instrument.** Asked to confirm a ~22 MB saving it reported the fixed
+build as *larger* -- one memgraph samples one arbitrary point on a sawtoothing
+quantity, and GUI IOSurface churn ran 50 MB over the same window. Use it for
+"is this growing without bound"; do not use it for "did this get smaller".
+Related, and cheap to be burned by: a 2-pair `benchmark-quick` reading of
+**+1.05%** on `scrollback-stream` flipped to **-0.86%** at 4 pairs (`15/F6`) --
+an "inconclusive" verdict is not a weak regression signal, so escalate before
+reporting one.
 
 A research file is a scratchpad for a single investigation or strategy area.
 It is not an ADR and not a plan: design decisions that are settled graduate to
