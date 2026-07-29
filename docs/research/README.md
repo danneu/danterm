@@ -74,6 +74,10 @@ vetted, refined, or rejected.
 - **Files are numbered** (`N-topic.md`, next unused integer) and never
   renumbered. A dead file is marked superseded at the top, not deleted, so its
   rejected ideas stay findable.
+- **A new file may continue an older one.** Reopening a closed investigation, or
+  zooming in on one revelation from another file, gets its own number and names
+  its ancestor at the top. See "Continue an older file instead of reopening it"
+  below.
 - **The task ledger is the file's primary interface.** Keep it near the top,
   after the short framing sections needed to interpret the tasks: purpose,
   investigation rules, triggering evidence, and current hypotheses. It is
@@ -117,6 +121,7 @@ rename a section:
 # Research topic
 
 Research started: YYYY-MM-DD.
+Continues: [N-topic.md](N-topic.md) (`N/F3`).   <!-- only when it has an ancestor -->
 
 ## Purpose
 
@@ -216,6 +221,21 @@ provenance to reproduce or audit it: commit and worktree state, command or
 input, environment when relevant, artifact paths, and known compatibility
 limits. Separate trustworthy evidence from exploratory evidence, and preserve
 why either is usable.
+
+### Continue an older file instead of reopening it
+
+Work that grows out of an existing file -- reopening a closed question, or
+zooming in on one revelation from another investigation -- gets its own new
+numbered file that names its ancestor. That keeps each file scoped to one
+question while the backreference still points at prior work, so it is not
+redone.
+
+Cite the specific `N/F#` or `N/D#` you are building on, and restate only the
+boundary you inherit, not the evidence behind it. Leave a pointer in the
+ancestor so the lineage is findable from either end; pointing at a successor
+does not reopen a closed file. Cross-file IDs are always qualified -- `F3` is
+this file's, `9/F3` is doc 9's -- and a continuation numbers its own findings
+from `F1`.
 
 ### Turn theories into falsifiable hypotheses
 
