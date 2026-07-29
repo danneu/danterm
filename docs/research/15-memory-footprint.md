@@ -472,6 +472,12 @@ baseline.
       reuse the live-set sweep `hyperlinkTargets` already uses. Worth 16 bytes
       (stride 56 -> 40), the largest win left, but the bucket cuts against it this
       time: -28.6% stride buys only ~-20% resident.
+- [x] Retake `H4`'s cheap half (`contentIdentity` to `UInt32?`) now that `D4`
+      makes it safe at every width, with the identity-wrap fix `F12` recorded.
+      **Done -- `F14`.** Stride 56 -> 48. At 80 columns the pane holds 24% more
+      history for 18% less memory; at 179 it is neutral in both directions, which
+      is the whole point -- the same patch cost 1.8 MB there before `D4`. No CPU
+      regression on any of the five workloads.
 - [ ] Gate: compare H3 and H6 against Phase 1 evidence and pick one, or
       establish that they compose. Record in D2.
       **Partly answered by `F12`.** They compose, and ordering is forced: at wide
@@ -1233,6 +1239,10 @@ writes are enormous and values are trivial:**
 
 - Status: recorded. Sizes `H4`'s cheap half, and the change was **implemented,
   measured, and reverted** -- nothing from it is in the tree. Blocks `D4`.
+  **Verdict superseded by `F14`**, which retook the same change after `D4` and
+  measured it as a win or neutral at both widths. The mechanism below is what
+  `D4` was built from and still stands; the numbers describe a cost model no
+  longer in the tree.
 - Date and investigator: 2026-07-29, Claude (agent).
 - Commit and worktree state: `5ae0140`, clean.
 - Instrument: `just terminal-memory-probe`, one fresh process per payload, at both
@@ -1379,6 +1389,78 @@ Live heap against the configured 10.00 MB budget, before -> after:
   - Spill allocations for multi-scalar clusters are still charged at `count`, not
     capacity. They are 0.61% of cells at their worst (`F2`), so this is known and
     left.
+
+### F14 -- the shrink `F12` reverted is a 19-28% win once the budget stops mis-charging it, and neutral where it is not
+
+- Status: recorded. Takes `H4`'s cheap half, which `F12` implemented and
+  reverted. **Shipped** (`1a47166`).
+- Date and investigator: 2026-07-29, Claude (agent).
+- Commit and worktree state: baseline `7b6d84a` (post-`D4`), candidate `1a47166`.
+- Instrument: `just terminal-memory-probe`, one fresh process per payload,
+  **three runs per arm** with the baseline built from a detached worktree;
+  medians reported. `just benchmark-quick` then `just benchmark-confirm
+  baseline=HEAD` for CPU.
+
+Narrowing `contentIdentity` to `UInt32?` reaches stride **48**, the same change
+`F12` measured at +1.8 MB and reverted. Re-measured against a budget that charges
+reserved storage:
+
+  | payload | 179x66, stride 56 -> 48 | 80x66, stride 56 -> 48 |
+  | --- | --- | --- |
+  | `full-screen` footprint (fixed rows) | 2.28 -> 2.30 MB | 1.17 -> **0.95 MB** |
+  | `scrollback-plain` footprint | 11.70 -> 11.72 MB | 13.14 -> **10.83 MB** |
+  | `scrollback-plain` history rows | 1,090 -> 1,091 | 2,126 -> **2,636** |
+
+- Observation 1: at 80 columns the pane holds **24% more history for 18% less
+  memory**. Those are not competing readings of one number -- the row's
+  allocation falls 5,120 -> 4,096 bytes, so each retained row is genuinely
+  cheaper *and* the same 10 MB buys more of them.
+- Observation 2: at 179 columns nothing moves, in either direction, and that is
+  the result `D4` was taken for. `F12` measured **+1.8 MB** here from the same
+  patch; it is now +0.02 MB on a fixed-row screen and +0.02 MB on a full history,
+  both at the edge of the probe's run-to-run spread (~0.4 MB) and stable in sign
+  across three runs. The row count moves by **one** (1,090 -> 1,091) where it
+  previously moved by 172.
+- Inference 1: **`F12`'s regression was never the cell shrink.** The mechanism
+  it identified -- the budget believing a row got cheaper when the allocator had
+  not made it so -- was the whole of it, and removing that mechanism removes the
+  whole regression. A finding that reverts a change is worth keeping precisely
+  because it names what to fix before retaking it.
+- Inference 2, for the remaining hypotheses: the 179-column dead zone is intact
+  and unchanged. The cell shrank 14% and that width paid nothing for it, because
+  a `48 + columns * stride` row lands in the same 10,240-byte bucket at both
+  strides. `F12`'s geometry table still governs, and `H3` (stride 40) is still
+  the change that crosses a boundary at every width checked.
+- CPU, per `10/F9`. A 2-pair quick run read `scrollback-stream` inconclusive
+  (-2.50%), escalated to `just benchmark-confirm baseline=HEAD`:
+
+  | workload | verdict |
+  | --- | --- |
+  | `terminal-feed` | inconclusive (-0.91%) |
+  | `scrollback-stream` | equivalent (-0.22%) |
+  | `content-churn` | equivalent (+0.70%) |
+  | `style-churn` | inconclusive (-1.04%) |
+  | `incremental-mixed` | faster (-6.88%) |
+
+  No workload regressed. `incremental-mixed` reads faster and the mechanism is
+  plausible (a 14% smaller cell is 14% less to copy and to miss on), but a single
+  confirm run is not enough to claim it -- `F13` saw a 4.89% reading on the same
+  workload from a change with no comparable mechanism.
+- Competing interpretation considered: that the 80-column win is the probe
+  attributing allocator fragmentation rather than a real saving. Against it, the
+  census quantities move the same way and are not samples -- per-row overhead
+  falls 678 -> 294 bytes and bucket rounding 1.40 -> 0.74 MB -- and the footprint
+  gap (2.3 MB) is six times the observed spread.
+- Uncertainty:
+  - The wrap is now reachable, and what it costs is untested outside its own
+    test. Dropping the arm at the wrap means a user holding Cmd on a link at the
+    exact moment a pane prints its 4-billionth cell gets a click that does
+    nothing. That is the correct trade against activating the wrong link, but
+    nothing measures how often the wrap occurs in practice.
+  - The identity counter is per-`Terminal`, so a split of many panes reaches the
+    wrap independently in each. Unmeasured.
+  - Only two widths were measured, as in `F12`. The rule there still applies:
+    check bucket placement per geometry rather than generalizing either column.
 
 ## Decision log
 
@@ -1657,9 +1739,20 @@ different proposal and is not covered by this rejection.
 ## Outcome
 
 Investigation in progress. **Phase 1 is complete, Phase 2's engineering half is
-shipped, and Phase 3's first item is taken.** Findings F1 through F12 are
-recorded; the next free ID is **F14**. Decisions D1 through D4 are recorded and
-implemented; the next free ID is **D5**.
+shipped, and Phase 3 has taken everything except `H3`.** Findings F1 through F14
+are recorded; the next free ID is **F15**. Decisions D1 through D4 are recorded
+and implemented; the next free ID is **D5**.
+
+The cell is now **48 bytes, down from 72** where this file started. `F14` took
+the last 8 by narrowing `contentIdentity` to `UInt32?` -- the change `F12`
+implemented and reverted three commits earlier. Nothing about the patch changed;
+`D4` changed what the budget charged for it. At 80 columns the pane now holds
+**24% more history for 18% less memory**, and at 179 columns it is neutral in
+both directions, where the identical patch cost 1.8 MB before. The counter it
+narrowed is genuinely exhaustible, so `allocateContentIdentity` owns the wrap:
+it skips zero and drops any armed link, because a reissued identity would
+otherwise satisfy the check that binds a Cmd-click to the cells it was pressed
+on.
 
 `D4`/`F13` then closed the budget's last systematic gap. `scrollbackByteCost`
 charged what a row's cells *occupy*; it now charges what the row *reserves*, by
@@ -1669,15 +1762,16 @@ configured 10 MB at both 179 and 80 columns, against 8-17% over before, with no
 CPU cost. It also removes the trap `F12` fell into: a narrower cell can no longer
 admit more rows than the allocator actually made cheaper.
 
-`F12` is the one to read before shrinking anything else. Narrowing
+`F12` is the one to read before shrinking anything else -- not for its verdict,
+which `F14` overturned, but for the mechanism it named. Narrowing
 `contentIdentity` to `UInt32?` (`H4`'s cheap half) reaches stride 48 and was
 implemented, measured, and reverted: at 80 columns it is worth **-26%**, and at
 179 it **costs 1.8 MB**, because the row never leaves its malloc bucket while the
 budget -- which charges `columns * stride` -- believes it got cheaper and admits
 15% more rows. Between roughly 43 and 56 bytes a 179-column row costs the same,
 so at wide geometries the cell has stopped being the lever and the row allocation
-has become it. `H3` still clears the bar (stride 40 crosses a boundary at every
-width checked); `H4` alone does not.
+has become it -- and that part still holds after `F14`, which bought nothing at
+179 columns. `H3` (stride 40) crosses a boundary at every width checked.
 
 `F11` then answered the question `12/F3` left open and re-specified `H3` without
 implementing it: **style writes run 9-23 million per corpus against 1-5 distinct
