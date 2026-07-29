@@ -2,7 +2,7 @@
 
 ## File index and status
 
-Reviewed 2026-07-28. **Docs 1 and 14 are live; every other file is closed.**
+Reviewed 2026-07-29. **Doc 1 is live; every other file is closed.**
 Closed means the
 questions it opened have answers and nothing in it is waiting on anyone -- not
 that every idea in it was implemented. Several closed with parked backlogs; each
@@ -23,7 +23,7 @@ entry point, not a re-read of the evidence.
 | 11 | Render frame budget | Closed. The draw path fits the 60Hz budget; no change proposed or warranted. |
 | 12 | Cell representation | Closed. Erase leg shipped; POD cell demonstrated-and-rejected; memory half parked. |
 | 13 | Live-app compositing | Closed. Three candidates landed; compositing stall is substantially pipeline slack. |
-| 14 | Live scroll workload profile | **LIVE.** Fifth live capture, on a full-viewport `less` scroll rather than btop. Phase 1 attribution done. Its first candidate was rejected by an on-CPU trace (`14/D1`); a second shipped -- `TerminalScalars` accessor inlining, **-20% draw on two workloads** (`14/D2`). Open: commit, a design note, and the `inspectedCells` optionals. |
+| 14 | Live scroll workload profile | Closed. One trace, four candidates, two shipped: `TerminalScalars` accessor inlining (**-20% draw**, `14/D2`) and a row-scoped cell read (**-16% plan**, `14/D3`). One candidate rejected as too small to measure (`14/D1`). |
 
 (There is no doc 5; numbers are never reused or renumbered.)
 
@@ -40,7 +40,13 @@ And a fourth, which is about method: **re-size any `sample`-derived hotspot on a
 on-CPU instrument before spending a paired benchmark on it.** `just
 benchmark-trace` costs one build and one 30 s run; in `14/F6` it deflated a node
 by 2.5x and killed the candidate built on it (`14/D1`). `sample` counts blocked
-threads, so it inflates anything near allocation, ARC, or the kernel.
+threads, so it inflates anything near allocation, ARC, or the kernel. The
+corollary, from `14/F11`: **do not then discount the on-CPU share.** `9/F3`'s ~3x
+optimism factor attaches to `sample`, and applying it to an on-CPU share of
+deletable work under-predicted a 16% win as 5%. And a mechanical trap worth
+knowing before you measure a plan-path change: **`benchmark-confirm` does not
+classify plan time at all** -- the calibrated plan rule lives only in
+`benchmark-quick`, on `content-churn` and `style-churn` (`14/F11`).
 
 A research file is a scratchpad for a single investigation or strategy area.
 It is not an ADR and not a plan: design decisions that are settled graduate to

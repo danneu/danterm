@@ -2882,6 +2882,38 @@ public struct Terminal: Equatable, Sendable {
         )
     }
 
+    /// Visits one viewport row's content in a single row resolution, passing each
+    /// column the two fields a renderer actually consumes.
+    ///
+    /// `cell(row:column:)` answers the same question per coordinate, but it re-resolves
+    /// the row on every call and materializes a whole `TerminalCell` -- and the render
+    /// planner, which reads a full row per frame, uses two of that value's four fields
+    /// and never reads `hyperlink` at all. Resolving once per row drops the per-column
+    /// `GridRow` copy, the unread hyperlink lookup, and the `TerminalCell?`
+    /// construct/destroy pair out of the planner's inner loop.
+    ///
+    /// Deliberately closure-based rather than returning a row view: the hot consumer is
+    /// a different SwiftPM target, so per-cell accessors on a returned view would be
+    /// opaque cross-module calls unless `GridCell` itself became `@usableFromInline`
+    /// (see docs/design/2026-07-29-cross-module-value-dispatch.md). This shape costs one
+    /// cross-module call per row and keeps the per-cell work inside this module, where
+    /// it is already inline.
+    ///
+    /// Columns are visited in ascending order starting at zero. A row outside the
+    /// viewport visits nothing, which is the same information `cell(row:column:)`
+    /// conveys by returning nil.
+    public func forEachViewportCell(
+        row: Int,
+        _ body: (_ column: Int, _ scalars: TerminalScalars, _ style: TerminalStyle) -> Void
+    ) {
+        guard row >= 0, row < rowCount else { return }
+        let streamRow = scrollProjection.topRow + row
+        guard let windowRow = viewportStreamRow(at: streamRow) else { return }
+        for column in windowRow.cells.indices {
+            body(column, windowRow.cells[column].scalars, windowRow.cells[column].style)
+        }
+    }
+
     /// Positions future parser actions while preserving the same cursor validity rules.
     mutating func moveCursor(row: Int, column: Int) {
         cursor.row = min(max(row, 0), rowCount - 1)

@@ -288,50 +288,92 @@ struct FramePlanner {
         geometry: TerminalGeometry,
         cursorSpan: CursorSpan?
     ) -> [PlannedCell] {
-        geometry.rows[row].cells.indices.map { column in
-            let inspected = terminal.cell(row: row, column: column)
-            let semanticStyle = inspected?.style ?? TerminalStyle()
-            var style = resolveCellStyle(semanticStyle, theme: presentation.theme)
-            if style.underline == .none, isHovered(row: row, column: column) {
-                style = ResolvedCellStyle(
-                    foreground: style.foreground,
-                    background: style.background,
-                    bold: style.bold,
-                    italic: style.italic,
-                    underline: .single,
-                    underlineColor: style.foreground,
-                    hidden: style.hidden,
-                    strikethrough: style.strikethrough
-                )
-            }
-            if presentation.cursorShape == .block,
-               cursorSpan?.contains(row: row, column: column) == true {
-                style = ResolvedCellStyle(
-                    foreground: presentation.theme.cursorText,
-                    background: presentation.theme.cursor,
-                    bold: style.bold,
-                    italic: style.italic,
-                    underline: style.underline,
-                    underlineColor: presentation.theme.cursorText,
-                    hidden: style.hidden,
-                    strikethrough: style.strikethrough
-                )
-            }
-            return PlannedCell(
-                kind: geometry.rows[row].cells[column].kind,
-                scalars: inspected?.scalars ?? .empty,
-                style: style
-            )
+        // Both row-scoped lookups are hoisted deliberately. `terminal.cell(row:column:)`
+        // re-resolved the viewport row on every column, and `isHovered` re-read
+        // `hoveredLink` and `scrollProjection` on every column; a profile put the
+        // resulting per-cell traffic at ~20% of `planFrame` (see
+        // docs/research/14-live-scroll-workload-profile.md, F10). Resolve each once per
+        // row, then walk the columns.
+        let kinds = geometry.rows[row].cells
+        let hovered = hoveredColumns(row: row, columns: geometry.columns)
+
+        var result: [PlannedCell] = []
+        result.reserveCapacity(kinds.count)
+        terminal.forEachViewportCell(row: row) { column, scalars, semanticStyle in
+            guard column < kinds.count else { return }
+            result.append(plannedCell(
+                row: row,
+                column: column,
+                kind: kinds[column].kind,
+                scalars: scalars,
+                semanticStyle: semanticStyle,
+                hovered: hovered,
+                cursorSpan: cursorSpan
+            ))
         }
+        // Columns the terminal row does not cover keep the empty/default content the
+        // previous `terminal.cell(...) -> nil` path produced for them.
+        while result.count < kinds.count {
+            result.append(plannedCell(
+                row: row,
+                column: result.count,
+                kind: kinds[result.count].kind,
+                scalars: .empty,
+                semanticStyle: TerminalStyle(),
+                hovered: hovered,
+                cursorSpan: cursorSpan
+            ))
+        }
+        return result
     }
 
-    private func isHovered(row: Int, column: Int) -> Bool {
-        guard let range = terminal.hoveredLink?.range else { return false }
+    private func plannedCell(
+        row: Int,
+        column: Int,
+        kind: TerminalCellKind,
+        scalars: TerminalScalars,
+        semanticStyle: TerminalStyle,
+        hovered: Range<Int>?,
+        cursorSpan: CursorSpan?
+    ) -> PlannedCell {
+        var style = resolveCellStyle(semanticStyle, theme: presentation.theme)
+        if style.underline == .none, hovered?.contains(column) == true {
+            style = ResolvedCellStyle(
+                foreground: style.foreground,
+                background: style.background,
+                bold: style.bold,
+                italic: style.italic,
+                underline: .single,
+                underlineColor: style.foreground,
+                hidden: style.hidden,
+                strikethrough: style.strikethrough
+            )
+        }
+        if presentation.cursorShape == .block,
+           cursorSpan?.contains(row: row, column: column) == true {
+            style = ResolvedCellStyle(
+                foreground: presentation.theme.cursorText,
+                background: presentation.theme.cursor,
+                bold: style.bold,
+                italic: style.italic,
+                underline: style.underline,
+                underlineColor: presentation.theme.cursorText,
+                hidden: style.hidden,
+                strikethrough: style.strikethrough
+            )
+        }
+        return PlannedCell(kind: kind, scalars: scalars, style: style)
+    }
+
+    /// The hovered-link span for one row, resolved once instead of per column.
+    private func hoveredColumns(row: Int, columns: Int) -> Range<Int>? {
+        guard let range = terminal.hoveredLink?.range else { return nil }
         let streamRow = terminal.scrollProjection.topRow + row
-        guard range.start.row...range.end.row ~= streamRow else { return false }
+        guard range.start.row...range.end.row ~= streamRow else { return nil }
         let start = streamRow == range.start.row ? range.start.column : 0
-        let end = streamRow == range.end.row ? range.end.column : terminal.geometry.columns
-        return start..<end ~= column
+        let end = streamRow == range.end.row ? range.end.column : columns
+        guard start <= end else { return nil }
+        return start..<end
     }
 
     private func backgroundRuns(row: Int, cells: [PlannedCell]) -> [RenderBackgroundRun] {

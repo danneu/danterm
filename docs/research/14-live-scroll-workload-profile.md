@@ -208,6 +208,44 @@ share, F8 states plainly that 4.95% is a ceiling and not a prediction, and the
 two halves of F6's 11.35% are not proven independent. The next step is the
 paired benchmark, and it must be run for real before any claim is made.
 
+**C2 shipped as (a) in `1323a6d`.** See F9 and D2.
+
+### C3 -- stop materializing a `TerminalCell?` per cell, and stop re-fetching the row per column
+
+**Provisional, VETTING.** Sized by F10 at **20.2% of `planFrame`** as a hard
+ceiling, ~15.7% as the conservative recoverable share, ~5% after `9/F3`'s
+discount -- 2x `benchmark-quick`'s 2.5% plan-time threshold. Unlike C1, the
+deciding benchmark can classify it.
+
+This is deliberately **not** doc 12's POD cell. F10 records the separability
+argument: `12/F3` owns the grid *mutation* path where only layout can help, and
+this owns the render *read* path where the value need not be built at all.
+
+Two shapes, and what each does *not* pay:
+
+- **(a) A row-scoped read on `Terminal`.** Give the planner a way to read one
+  row's content once -- a `withViewportRow(row:)`-style borrow, or a narrow
+  projection carrying only what `inspectedCells` uses (`scalars`, `style`) --
+  and have `inspectedCells` walk the columns inside it. **Removes:** the
+  per-column `GridRow` copy and array retain/release, the repeated
+  `isAlternateScreenActive` and scrollback index checks, the unread `hyperlink`
+  dictionary lookup, and the `TerminalCell?` construct/destroy pair. **Does not
+  pay:** any change to `TerminalCell`, to `GridCell`, or to the existing
+  `cell(row:column:)` signature, which has one production caller and 167 test
+  call sites and should keep working untouched.
+- **(b) A narrow per-cell accessor** returning only `(scalars, style)`.
+  **Removes:** the `TerminalCell?` materialization and the hyperlink lookup.
+  **Does not remove:** the per-column row lookup, which F10 sizes at roughly
+  95 ms of the 272 ms -- so (b) leaves a third of the recoverable cost on the
+  table for a similar amount of work.
+
+(a) is the better first move: it is the shape that removes both halves, and (b)
+is a strict subset of it.
+
+**Nothing here licenses an implementation yet** on the sizing alone. But unlike
+C1, the sizing clears the threshold with margin, so the next step is to build
+(a) and run the paired benchmark for real.
+
 ## Task ledger
 
 ### Phase 1 -- establish what this capture actually says
@@ -275,11 +313,30 @@ paired benchmark, and it must be run for real before any claim is made.
       `agent-docs/terminal-performance.md` -- mode, workload, both tree
       identities, the median symmetric estimates, the classifications -- since
       `.build/` is disposable and the artifact path alone is not a record.
-- [ ] Decide whether `inspectedCells`'s optional-destroy traffic is separable
+- [x] Decide whether `inspectedCells`'s optional-destroy traffic is separable
       from `12/F3`'s "non-POD enum call overhead" attribution. **Do not** reopen
       the POD cell: `12/F8` reverted it and records what would have to change
       first. The question here is narrower -- whether `terminal.cell` can be made
       to return without copying, leaving the representation alone.
+      **Answered 2026-07-29: separable, and larger than expected.** `12/F3` owns
+      the grid *mutation* path, where only layout helps. This is the render
+      *read* path, where `Terminal.cell` builds a four-field `TerminalCell` the
+      caller reads two fields of, and re-copies the whole `GridRow` once per
+      column. Sized on F6's existing trace at **20.2% of `planFrame`** -- the
+      opposite of C1's verdict. -> **F10**, candidate **C3**.
+- [x] **Implement C3 shape (a)** and benchmark it. Done 2026-07-29, baseline
+      `0e5e2e9` resolved before the first edit per `13/F7`. All three
+      pre-registered predictions held: plan time **faster** at `quick`'s
+      calibrated threshold on `content-churn` (-15.38%) and `style-churn`
+      (-18.01%), no draw verdict moved on any of five workloads, and the two
+      grid-path workloads came back *equivalent*. **Tooling fact learned:**
+      `benchmark-confirm` does not classify plan time at all -- the calibrated
+      plan rule exists only in `benchmark-quick`, so a plan-only change needs
+      both modes. -> **F11**, kept by **D3**.
+- [ ] **Commit C3.** The message should carry the decision-bearing values
+      inline per `agent-docs/terminal-performance.md` -- mode, workloads, both
+      tree identities, the median symmetric estimates, the classifications --
+      since `.build/` is disposable and an artifact path alone is not a record.
 
 ### Phase 3 -- close
 
@@ -798,6 +855,197 @@ paired benchmark, and it must be run for real before any claim is made.
   across the three annotations is unknown and deliberately unmeasured.
 - Next action: D2.
 
+### F10 -- `inspectedCells` is separable from `12/F3`: the cost is a materialized value and a per-cell row lookup, not the cell's layout
+
+- Status: recorded. **Answers the last Phase 2 task.** Re-read of F6's existing
+  trace; no new capture.
+- Date and investigator: 2026-07-29, Claude.
+- Commit and worktree state: the trace is F6's, taken at `b645a22`. The source
+  read is at `0e5e2e9`, i.e. **after** C2 landed. See the caveat below.
+- Commands, inputs, or reproduction: subtree sums over
+  `.build/terminal-benchmark-profiles/2026-07-29-101853-80500/profile-folded.txt`,
+  same artifact as F6, same 9,613 ms main-thread on-CPU denominator.
+- Measurements:
+
+  | Node | ms | % main thread | % `planFrame` |
+  | --- | ---: | ---: | ---: |
+  | `FramePlanner.inspectedCells` | 942 | 9.80% | 37.1% |
+  | ` Terminal.cell(row:column:)` | 272 | 2.83% | 10.7% |
+  | ` `outlined destroy of TerminalCell?`` | 240 | 2.50% | 9.5% |
+  | **the two together** | **512** | **5.33%** | **20.2%** |
+
+  Inside `Terminal.cell` (272 ms): self 97, `swift_retain` 41,
+  `initializeWithCopy for Terminal.GridCell` 30, `ScrollbackBuffer.indices.getter`
+  24, `swift_bridgeObjectRetain` 22 + its DYLD stub 19,
+  `_ArrayBuffer.immutableCount` 17, `isAlternateScreenActive.getter` 13,
+  `outlined copy of TerminalScalars.Storage` 9.
+
+  Inside `outlined destroy of TerminalCell?` (240 ms, of which 224 under
+  `inspectedCells`): `getEnumTagSinglePayload for TerminalCell` 51,
+  `destroy for TerminalCell` 37, `__swift_instantiateConcreteTypeFromMangledNameV2`
+  23, `outlined consume of TerminalScalars.Storage` 21, self 25, plus an 83 ms
+  leaf symbolicated as `destroy for ClosedRange<>.Index` -- implausible as a
+  literal attribution and read here as the outlined destroy body attributed to a
+  neighbouring symbol. The trustworthy number is the parent's 240 ms inclusive,
+  not that leaf's identity.
+
+  `Terminal.cell` has exactly **two** callers in the trace: the `inspectedCells`
+  closure (245 ms) and `plan(reusing:damage:)` (27 ms).
+
+- Premise check, done from source before any sizing was believed, per `9/F6`:
+  1. `Terminal.cell` (`Terminal.swift:2867`) calls `viewportStreamRow(at:)`
+     (`Terminal.swift:2313`), which returns **`GridRow?` by value**. `GridRow.cells`
+     is `[GridCell]`, so every column pays a row-struct copy plus an array
+     retain/release, and re-runs `isAlternateScreenActive` and the scrollback
+     index check. On a 179-column row that is per-row work done 179 times. This
+     is the `swift_retain` / `indices.getter` / `immutableCount` /
+     `isAlternateScreenActive` traffic above.
+  2. It then builds a fresh four-field `TerminalCell`, of which `inspectedCells`
+     (`RenderFramePlanner.swift:291-320`) reads exactly **two**: `.style` and
+     `.scalars`. `kind` comes from `geometry`, and `hyperlink` -- the
+     `hyperlinkTargets` dictionary lookup at `Terminal.swift:2881` -- is **never
+     read**. `12/F3` measured `hyperlinkId` nil in 100% of cells on all four
+     workloads, so that field is pure construct-and-destroy cost.
+  3. `Terminal.cell` has **one** production caller repo-wide
+     (`RenderFramePlanner.swift:292`) and 167 test call sites, so the public
+     signature can stay exactly as it is.
+- Observation: the node is dominated by two costs that are visible in the source
+  and neither of which is about how a cell is laid out -- a value materialized
+  per cell that the caller half-uses, and per-row work repeated per column.
+- Inference, and the answer to the ledger question: **separable.** `12/F3`
+  attributed `outlined init with copy` / `outlined consume` on the **grid
+  mutation** path (`moveAndFillCells`) to the per-cell call and switch overhead
+  of a non-POD enum, paid regardless of case, and concluded only a
+  representation change (H3) could remove it. That conclusion stands and is not
+  reopened. This is different work at a different site: the **render read** path
+  constructing a `TerminalCell?` that need not exist and re-fetching a row it
+  already has. The fix is call shape, not layout, and it does not require the
+  cell to be POD -- which is exactly why `12/F8`'s reverted POD experiment does
+  not bear on it. This is the same distinction F8 drew for `TerminalScalars`:
+  one symbol cluster, two costs, two owners.
+- Sizing against the deciding benchmark's denominator, per D2's consequence:
+  a plan-path change is damage *generation*, so `8/D2` routes it to
+  `benchmark-quick`/`confirm` plan time, which brackets `planFrame`. The ceiling
+  is **20.2% of `planFrame`**. Not all of it is recoverable: the scalars copy
+  into `PlannedCell` is inherent (~9 ms copy + ~21 ms consume), and a row-scoped
+  lookup still costs once per row rather than zero. Taking ~400 ms as the
+  conservative recoverable share gives **~15.7% of `planFrame`**; applying
+  `9/F3`'s measured ~3x optimism discount still leaves **~5%**, which is 2x
+  `benchmark-quick`'s calibrated 2.5% plan-time threshold and 2.7x
+  `benchmark-confirm`'s 1.85%. **This is the opposite of C1's verdict in D1** --
+  C1 could not have been classified even if it worked; this one can be.
+- Competing interpretations: the 240 ms destroy could be partly inherent if the
+  compiler already elides construction where it can -- the trace says it does
+  not, but the trace is one build. And `inspectedCells`'s remaining 430 ms
+  (closure body, style resolution, `PlannedCell` construction) is untouched by
+  any of this; a fix here caps out at the 512 ms, not the 942 ms.
+- Uncertainty: low on the attribution and on the premise, both read from source.
+  **Medium on the absolute sizes**, because the trace predates C2 (`1323a6d`),
+  which cut plan time 3-6% and removed some of the `TerminalScalars` traffic
+  inside this very subtree. The denominator and numerator both shrink; the
+  direction and the margin over threshold are not at risk, but the numbers above
+  should be treated as the pre-C2 tree's, not today's.
+- Next action: candidate C3 below, then D3.
+
+### F11 -- C3 classifies **faster** on plan time, ~16%, and F10's conservative estimate predicted it within a point
+
+- Status: recorded. **Benchmark result, not a profile.** Decision-bearing.
+- Date and investigator: 2026-07-29, Claude.
+- Commands, inputs, or reproduction: `just benchmark-confirm 0e5e2e9`, then
+  `just benchmark-quick 0e5e2e9 content-churn` and
+  `just benchmark-quick 0e5e2e9 style-churn`.
+- Why both modes were run, which is a fact about the tooling worth keeping:
+  **`confirm` does not classify plan time.** `decision_rule("confirm")` has an
+  empty `planWorkloads` table, so plan time prints as "descriptive, no verdict --
+  uncalibrated" no matter how large it is. The calibrated plan-time rule lives in
+  **`quick`** only -- `content-churn` and `style-churn`, 2 pairs, 2.5%
+  directional threshold, 1.0% equivalence band
+  (`scripts/terminal-benchmark-compare.py:64,217`). A change whose whole effect
+  is in plan time therefore needs `benchmark-quick` to get a verdict at all, and
+  `benchmark-confirm` for the breadth. This does not disturb `D1`, which cited
+  `quick`'s 2.5% plan threshold and cited it correctly.
+- Identities: baseline revision `0e5e2e9`, commit
+  `0e5e2e9d807c1a6d29e9271c503ddac22d73c110`, tree
+  `91eb4e5bb1df1082e8f0165d41b844218a3caa5b`. Candidate base the same commit,
+  tree `ab36af6a5cb44c6adb1d9fcda8eb7317b0a16d94`, 9 captured working-tree paths
+  of which exactly two are code
+  (`lib/TerminalCore/Sources/TerminalCore/Terminal.swift`,
+  `lib/TerminalCore/Sources/TerminalRenderPlanning/RenderFramePlanner.swift`);
+  the other seven are this file, `notes.md`, and five `plans/wip/` documents.
+  All three runs used the same candidate tree. Artifacts:
+  `.build/terminal-benchmark-comparisons/confirm/ab36af6a5cb4-0000`,
+  `.../quick/ab36af6a5cb4-0000`, `.../quick/ab36af6a5cb4-0001`.
+- Measurements:
+
+  | Workload | Draw verdict (`confirm`) | Plan time (`confirm`, descriptive) | Plan verdict (`quick`) |
+  | --- | --- | ---: | --- |
+  | `terminal-feed` | equivalent (+0.72%, 2 pairs) | -- | -- |
+  | `scrollback-stream` | equivalent (+0.18%, 4 pairs) | -- | -- |
+  | `content-churn` | inconclusive (+1.33%, 4 pairs) | **-16.62%** | **faster (-15.38%, 2 pairs)** |
+  | `style-churn` | equivalent (+0.23%, 4 pairs) | **-16.45%** | **faster (-18.01%, 2 pairs)** |
+  | `incremental-mixed` | inconclusive (+1.56%, 6 pairs) | -2.31% | -- (not in the plan table) |
+
+  No invalidations. `scrollback-stream` flagged 2 outlier pairs, retained in the
+  estimate per the frozen rule. Per-pair plan-time spreads matter here and are
+  worth preserving: `style-churn` -16.39 / -16.50 / -16.34 / -16.67 (a 0.33-point
+  span across four pairs), `content-churn` -17.03 / -14.90 / -16.20 / -18.07,
+  and `incremental-mixed` -0.14 / -4.47 / +7.32 / +14.01 / -13.99 / -18.65.
+
+- Observation 1, the prediction. F10 pre-registered a 20.2% hard ceiling and
+  **~15.7% as the conservative recoverable share** of `planFrame`, and predicted
+  the draw verdict would not move. Measured plan time is -15.4% to -18.0% across
+  three runs, inside the ceiling and within roughly a point of the conservative
+  figure; no workload classified faster or slower on **draw** in either
+  direction, on five workloads.
+- Observation 2, `incremental-mixed` shows nothing, and this is an absence of
+  evidence rather than a small win. Its six plan pairs span 32 points and
+  straddle zero. The expected mechanism is that damage-scoped reuse skips
+  `inspectedCells` for most rows -- `plan(reusing:damage:)` re-inspects only
+  damaged rows -- so the changed code barely runs. That is consistent, but this
+  run does not establish it; the honest statement is that the workload is
+  uninformative about C3.
+- Observation 3, and the one not to smooth over: **all five `confirm` draw
+  medians are mildly positive** (+0.18% to +1.56%), while both `quick` draw
+  medians on the same trees are mildly *negative* (-1.15%, -1.14%). Two of the
+  five positives are `terminal-feed` and `scrollback-stream`, whose draw region
+  this change cannot touch -- it edits the planner and a `Terminal` read path,
+  not `drawRenderFrame`. A uniform small offset that appears on workloads the
+  change provably cannot affect, and reverses sign on a re-run, is the
+  between-arm drift `8/D2` and doc 8 already characterized. What this evidence
+  does **not** do is exclude a real sub-threshold draw regression; it establishes
+  only that nothing crosses a calibrated threshold in either direction.
+- Inference: **C3's mechanism is confirmed.** The win is concentrated exactly
+  where F10 put it -- plan time on the two full-redraw workloads -- and is absent
+  exactly where F10 said it would be absent: the grid path, which never calls
+  `Terminal.cell`, came back *equivalent* (inside the 0.75% band) on both
+  workloads, which is stronger than the "inconclusive" F10 predicted. As in F9,
+  the null result where the attribution says null is the strongest single piece
+  of evidence that the win is the named mechanism and not something incidental.
+- Inference 2, a refinement to an investigation rule. `9/F3`'s measured ~3x
+  optimism discount, applied to F10's sizing, would have predicted ~5%; the
+  actual is ~16%, so **the discount was not needed and would have been
+  misleading here**. The difference is what the number came from: `9/F3`
+  discounted a `sample`-derived share of an allocation node, where blocked time
+  inflates the reading. F10's share came from an on-CPU instrument and named
+  work that a call-shape change deletes outright -- a row copy, a dictionary
+  lookup, a construct/destroy pair. The rule that survives is the one already in
+  this file's Investigation rules ("a `sample` share is not recoverable time"),
+  and the ~3x figure attaches to `sample`, not to profiling in general. An
+  on-CPU share of deletable work is a usable estimate as-is.
+- Competing interpretations: that the effect is one workload's artifact is
+  refuted by two workloads across three runs and eight plan pairs each side of
+  the median. That it is build nondeterminism is refuted by magnitude -- ~16% is
+  6x the calibrated 2.5% threshold, and `style-churn`'s four pairs span a third
+  of a point. What is **not** separated is the three hoists that landed together:
+  the per-column row resolution, the unread hyperlink lookup, and the per-column
+  `hoveredLink`/`scrollProjection` reads. This finding does not claim to split
+  them, and D3 declines to spend benchmarks doing so.
+- Uncertainty: low on direction, magnitude, and mechanism for the plan path.
+  Low-to-medium on the draw path being genuinely unaffected -- the sign
+  reversal between modes supports drift, but sub-threshold effects are by
+  construction invisible to this instrument.
+- Next action: D3.
+
 ## Decision log
 
 ### D2 -- keep C2
@@ -842,6 +1090,69 @@ paired benchmark, and it must be run for real before any claim is made.
 - What this does **not** license: any claim about the value-witness half of
   F6's 11.35%. That half is untouched, remains doc 12's, and remains rejected
   (`12/F8`).
+
+### D3 -- keep C3
+
+- Status: **decided -- keep.** Implemented in the working tree; not yet
+  committed at the time of writing.
+- Evidence used: F10 (attribution, separability, ceiling), F11 (paired
+  benchmarks).
+- Selected direction: shape (a) -- a row-scoped read. Three things landed
+  together, all instances of "per-row work was being done per column":
+  1. `Terminal.forEachViewportCell(row:_:)` resolves the viewport row **once**
+     and passes each column only `scalars` and `style`. That deletes the
+     per-column `GridRow` copy with its array retain/release, the repeated
+     `isAlternateScreenActive` and scrollback-index checks, the
+     `hyperlinkTargets` lookup the planner never read, and the `TerminalCell?`
+     construct/destroy pair.
+  2. `inspectedCells` walks columns inside that single lookup, building
+     `[PlannedCell]` with a reserved buffer, and pads any column the terminal
+     row does not cover with the same empty/default content the old
+     `terminal.cell(...) -> nil` path produced.
+  3. `hoveredColumns(row:columns:)` replaces the per-cell `isHovered`, which was
+     re-reading `terminal.hoveredLink` and `terminal.scrollProjection` on every
+     column across a module boundary.
+- Why closure-based rather than a returned row view, which is the one design
+  choice here worth defending: a view's per-cell accessors would be opaque
+  cross-module calls into `TerminalCore` unless `GridCell` itself became
+  `@usableFromInline` -- exactly the mechanism
+  [docs/design/2026-07-29-cross-module-value-dispatch.md](../design/2026-07-29-cross-module-value-dispatch.md)
+  was written about, and a far wider ABI change than this warrants. The closure
+  costs one cross-module call per **row** and keeps the per-cell work inside the
+  module where it is already inline.
+- Shape (b), a narrow per-cell accessor, was **not** built. F10 sized it as a
+  strict subset that leaves the per-column row lookup in place, and F11's result
+  came from removing both halves; there is no question (b) would now answer.
+- Tradeoffs and correctness risks: no representation change, no new invariant,
+  and `cell(row:column:)` keeps its exact signature. **It now has zero
+  production callers** and 167 test call sites, so it survives as public
+  inspection API -- worth knowing before anyone "cleans it up". One deliberate
+  behavior difference: where a reversed hover range would previously have
+  constructed `start..<end` with `start > end` and trapped, `hoveredColumns`
+  returns nil. That input is unreachable through the link resolver and the old
+  code could only have crashed on it.
+- Behavioral verification: `swift build --package-path lib/TerminalCore` clean;
+  **643 tests in 85 suites pass**; the full `just test` gate passes, including
+  the core-purity lint's 65 assertions and the benchmark harness contracts.
+- Test coverage audit: **no new test.** The changed behavior is plan output,
+  and it is already pinned by structure-insensitive whole-plan comparisons:
+  `RenderCorpusPlanningTests`, the neutral replay fixtures under all feed
+  splits, `TerminalResizeTests`' randomized resize/input sweep (which exercises
+  the short-row padding path), and
+  `RenderFramePlanningTests.hoveredLinkDecoration` for the hover-underline
+  branch specifically. A test asserting *how* the planner fetches cells would
+  couple to the structure this change exists to alter. The performance
+  invariant's cover is F11's recorded identities.
+- Decision and rationale: keep. Plan time classifies **faster** at
+  `benchmark-quick`'s calibrated 2.5% threshold on both workloads that have one,
+  at ~16% -- 6x the threshold and within a point of F10's pre-registered
+  conservative estimate -- and the draw path and the grid path both stayed
+  inside their bands, which is where the attribution said they would stay.
+- What this does **not** license: any claim about doc 12. The cell's
+  representation is unchanged, `12/F8`'s POD experiment stays reverted, and
+  `12/F3`'s attribution of the grid *mutation* path's copy/consume traffic to
+  non-POD enum overhead is untouched by this result. F10's separability argument
+  is about a different call site, not a correction to doc 12.
 
 ### D1 -- do not implement candidate C1
 
@@ -894,6 +1205,12 @@ slower** on `scrollback-stream`, and reverted it in `94a1528` rather than tune
 it. `12/F3` also reattributed exactly this node class away from refcount traffic.
 The narrower question -- can `terminal.cell` return without copying, leaving the
 representation alone -- is a Phase 2 task and is not the same proposal.
+
+**Resolved 2026-07-29, and the narrow question won.** F10 found the cost was
+never the cell's layout: `Terminal.cell` re-resolved the row on every column and
+built a four-field value the planner read two fields of. C3 removed the
+materialization without touching the representation, and F11 measured plan time
+**~16% faster**. The POD cell remains rejected and is not what fixed this.
 
 ### A scripted input driver to get frame counts
 
@@ -1001,6 +1318,40 @@ names.
 C2 is committed (`1323a6d`) and its general lesson has graduated to
 [docs/design/2026-07-29-cross-module-value-dispatch.md](../design/2026-07-29-cross-module-value-dispatch.md).
 
-**One task remains open:** the `inspectedCells` optional-copy question -- whether
-`terminal.cell` can return without copying, leaving the representation alone.
-When that resolves, this file closes.
+**The last open question then resolved the same way, and larger.** F10 took the
+`inspectedCells` optional-copy task -- whether `terminal.cell` can return without
+copying, leaving the representation alone -- back to the *same trace*, and found
+the node's cost was never the cell's layout at all. `Terminal.cell` re-resolved
+the viewport row on every column and built a four-field `TerminalCell` of which
+the planner read two fields, never reading the `hyperlink` it paid a dictionary
+lookup for. Sized at 20.2% of `planFrame`. C3 resolves the row once per row and
+hands the planner only what it uses; F11 measured plan time **faster at the
+calibrated threshold** -- -15.38% `content-churn`, -18.01% `style-churn` -- with
+no draw verdict moving and the grid path *equivalent*, landing within a point of
+F10's pre-registered conservative estimate. Kept by D3.
+
+**The file's shape, in one line:** one trace, four candidates, two shipped. The
+two that shipped were both found the same way -- by asking which of two costs
+wearing one set of symbol names was actually separable -- and both times the
+answer doc 12 had recorded ("only a representation change can remove this") was
+right about its own call site and wrong about the render path's.
+
+Three method results are worth more than the changes:
+
+1. **Re-size a `sample`-derived node on an on-CPU instrument before benchmarking
+   it** (F6, D1). Now an investigation rule.
+2. **An on-CPU share of deletable work needs no optimism discount** (F11).
+   `9/F3`'s ~3x factor attaches to `sample`'s blocked-thread inflation, not to
+   profiling in general; applied here it would have under-predicted a 16% win as
+   5%.
+3. **Convert a profile share to the deciding benchmark's own denominator before
+   predicting** (F9, F10). Both shipped changes looked implausible against the
+   main thread and landed on target against their region.
+
+Two tooling facts recorded for the next agent: `benchmark-confirm` does not
+classify plan time at all -- the calibrated plan rule exists only in
+`benchmark-quick`, on `content-churn` and `style-churn` (F11) -- and
+`Terminal.cell(row:column:)` now has **zero** production callers, surviving as
+public inspection API for 167 test call sites (D3).
+
+Nothing is parked. **This file is closed** once C3 is committed.
