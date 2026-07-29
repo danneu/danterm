@@ -27,6 +27,14 @@ legacy applications retain legacy key behavior.
 xterm `modifyOtherKeys` is deferred; its set and query sequences stay inert
 until a prioritized application workflow demonstrably requires it.
 
+Legacy Return departs from xterm in one place: any Return chord holding Shift
+encodes `LF` (`0x0A`), ESC-prefixed under Alt, in every mode combination
+including LNM. Shift+Return is an explicit "insert a line feed" affordance
+rather than the return key's newline semantics, so composers that cannot
+negotiate the Kitty protocol still get a newline instead of a submit. Shift-free
+Return keeps its xterm bytes, and Kitty-mode Shift+Return still encodes
+`CSI 13;2u`.
+
 macOS composition has precedence over every terminal keyboard mode. Option is
 never reinterpreted as terminal Alt while it is participating in composition;
 Kitty encoding applies only after text is committed and to non-text key events.

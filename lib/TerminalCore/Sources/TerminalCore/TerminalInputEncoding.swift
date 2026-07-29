@@ -316,7 +316,18 @@ private func encodeLegacyKey(
 ) -> [UInt8] {
     switch key {
     case .returnKey:
-        var bytes: [UInt8] = modes.lineFeedNewLine ? [0x0D, 0x0A] : [0x0D]
+        // Shift+Return is an explicit "insert a line feed" affordance, not the return
+        // key's newline semantics, so LNM does not apply to it: emitting CR LF would put
+        // a CR on the wire first and composers would submit. Programs that care about the
+        // distinction can negotiate the kitty protocol and get CSI 13;2u instead.
+        var bytes: [UInt8] =
+            if modifiers.contains(.shift) {
+                [0x0A]
+            } else if modes.lineFeedNewLine {
+                [0x0D, 0x0A]
+            } else {
+                [0x0D]
+            }
         if modifiers.contains(.alt) { bytes.insert(0x1B, at: 0) }
         return bytes
     case .tab:

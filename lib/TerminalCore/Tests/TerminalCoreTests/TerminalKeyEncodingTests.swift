@@ -92,6 +92,38 @@ struct TerminalKeyEncodingTests {
         )
     }
 
+    @Test("legacy Shift+Return encodes LF under every modifier and mode combination")
+    func legacyShiftReturnEncodesLineFeed() {
+        // Intent: in legacy mode every Return chord containing Shift emits LF (0x0A),
+        //   ESC-prefixed when Alt is held, regardless of the active modes.
+        // Why it exists: Claude Code never negotiates the kitty protocol for DanTerm,
+        //   so legacy Shift+Enter is what composers see; CR reads as submit there.
+        //   LNM is the case that would silently regress to CR LF and submit again.
+        // Scenario: pressing Shift+Enter in a Swift-engine pane running `claude`
+        //   inserts a newline instead of sending the message.
+        let lnm = TerminalInputModes(lineFeedNewLine: true)
+        let allModes = TerminalInputModes(
+            applicationCursorKeys: true,
+            applicationKeypad: true,
+            lineFeedNewLine: true
+        )
+
+        for modes in [TerminalInputModes.default, lnm, allModes] {
+            #expect(encodeTerminalKey(.returnKey, modifiers: [.shift], modes: modes) == [0x0A])
+            #expect(
+                encodeTerminalKey(.returnKey, modifiers: [.shift, .control], modes: modes) == [0x0A]
+            )
+            #expect(
+                encodeTerminalKey(.returnKey, modifiers: [.shift, .alt], modes: modes)
+                    == [0x1B, 0x0A]
+            )
+            #expect(
+                encodeTerminalKey(.returnKey, modifiers: [.shift, .control, .alt], modes: modes)
+                    == [0x1B, 0x0A]
+            )
+        }
+    }
+
     @Test("DECKPNM and DECKPAM cover the complete keypad table")
     func completeKeypadTable() {
         let cases: [(TerminalInputKey, String, Character)] = [
