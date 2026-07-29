@@ -479,12 +479,17 @@ baseline.
       bytes, so per-field narrowing below `H3` is spent on the allocator, not on
       the user. `H3` (stride 40) crosses a bucket boundary at every width checked;
       `H4` alone does not.
-- [ ] **Decide whether the budget should charge the allocated row rather than
+- [x] **Decide whether the budget should charge the allocated row rather than
       `columns * stride`** (`F12`). This is what makes any further cell shrink
       safe at every geometry: today a cheaper cell can admit more rows than the
       allocator got cheaper, which is how `H4`'s cheap half turned into +1.8 MB
       at 179 columns. Same species as `F9`'s correction; sits next to `D2`'s open
       unit question and should be decided with it.
+      **Done -- `D4`/`F13`.** Charges `cells.capacity` rather than `cells.count`,
+      which reads the allocator's own rounding instead of modelling it. History
+      now lands within ~1% of the configured budget at both 179 and 80 columns,
+      against 8-17% over before, at no CPU cost. Depth falls 1.5% at 179 columns
+      and 10.7% at 80.
 
 ### Backlog -- not scheduled, kept so it is not lost
 
@@ -1308,7 +1313,112 @@ predicted. What it costs and saves does not follow from that number at all:
   cost-model question of the same species `F9`/`D2` handled, and it lands next to
   the budget's open unit question.
 
+### F13 -- charging reserved storage closes the budget's last systematic gap, and costs no CPU
+
+- Status: recorded. Verification of `D4`. Shipped.
+- Date and investigator: 2026-07-29, Claude (agent).
+- Commit and worktree state: `f53c9ac` plus `D4`'s change.
+- Instrument: `just terminal-memory-probe`, one fresh process per payload, at
+  179x66 and 80x66; `just benchmark-confirm baseline=HEAD` for CPU.
+
+Live heap against the configured 10.00 MB budget, before -> after:
+
+  | geometry | history rows | cell bytes | live heap | overshoot |
+  | --- | ---: | ---: | ---: | ---: |
+  | 179x66 | 1,107 -> 1,090 | 10.58 -> 10.42 MB | 10.86 -> **10.70 MB** | 8.6% -> 7.0% |
+  | 80x66 | 2,381 -> **2,126** | 10.17 -> **9.08 MB** | 11.68 -> **10.48 MB** | 16.8% -> **4.8%** |
+
+- Observation 1: the residual overshoot is the **live screen**, which the budget
+  has never claimed to cover. Subtracting it (66 rows at the same reserved cost)
+  leaves history at 10.02 MB and 10.14 MB -- within ~1% of the configured 10 MB at
+  both widths, against 8-17% before.
+- Observation 2, and it is why this mattered more at 80 columns than at 179: the
+  under-charge is bucket placement, so it varies by width rather than being a
+  constant. `F7` reported ~11.5% from a single geometry and it read as a constant;
+  it is 2% at one width and 17% at another.
+- Inference 1: **`F9`'s correction was two thirds of a fix.** It moved the charge
+  from a modelled 40 bytes to true stride and closed a 120% error. The remaining
+  error had the same cause one level down -- charging what a row *occupies*
+  instead of what it *reserves* -- and it is the error `F12` turned into a 1.8 MB
+  regression. The budget now means what it says at every width measured.
+- Inference 2, and it is the part worth reusing: **the allocator will answer
+  questions about itself.** `F7` declined to model bucket rounding because size
+  classes are a platform detail this code cannot portably encode. That was right,
+  and it made the gap look unfixable. `Array.capacity` is the same number without
+  the model -- Swift sets it from the block malloc actually returned -- so the
+  rounding is charged without anyone predicting it. Verified against
+  `malloc_good_size` at four widths and two strides before being relied on.
+- CPU, per `10/F9`. `just benchmark-confirm baseline=HEAD`:
+
+  | workload | verdict |
+  | --- | --- |
+  | `terminal-feed` | equivalent (-0.52%) |
+  | `scrollback-stream` | faster (-3.28%) |
+  | `content-churn` | inconclusive (+0.89%) |
+  | `style-churn` | equivalent (+0.37%) |
+  | `incremental-mixed` | faster (-4.89%) |
+
+  A preceding 2-pair quick run read `scrollback-stream` at **+1.48%**, and the
+  confirm reads -3.28%. The sign flip is the noise signature `15/F6` describes, so
+  the honest reading is "no regression" rather than "3% faster". The mechanism for
+  a small real gain exists (fewer retained rows means less eviction and copying)
+  but is not separable from the instrument at this size.
+- Competing interpretation considered: that fewer retained rows is itself the
+  regression -- the user loses history. True and intended: those rows were never
+  affordable, and `F12` showed that admitting them is how a cell shrink turns into
+  a memory *increase*. What the budget should be set *to* is `D2`, still open.
+- Uncertainty:
+  - `capacity` is read at charge time and assumed stable while a row sits in
+    history. Scrollback rows are not mutated after append, and
+    `expectValidGrid`'s existing `scrollbackByteCount == recomputedScrollbackByteCount`
+    assertion would catch drift, but nothing states the invariant directly.
+  - Charged cost now depends on how a row's array was built. Every row goes
+    through the same `(0..<columns).map` construction today, and `map` and
+    `Array(repeating:)` were measured to agree; a future third construction path
+    could charge two identical rows differently.
+  - Spill allocations for multi-scalar clusters are still charged at `count`, not
+    capacity. They are 0.61% of cells at their worst (`F2`), so this is known and
+    left.
+
 ## Decision log
+
+### D4 -- charge history the storage a row reserves, not the storage its cells occupy
+
+- Status: **decided and implemented.** Verified in `F13`.
+- Date: 2026-07-29.
+- Context: `F12` measured `H4`'s cheap half as a 1.8 MB *regression* at 179
+  columns despite removing 8 bytes from every cell. The cause was not the cell: a
+  row's cell array is allocated in a malloc bucket, the narrower row landed in the
+  same bucket, and `scrollbackByteCost` -- charging `count * stride` -- concluded
+  the row got cheaper and admitted 15% more of them.
+
+**Decision: charge `cells.capacity`, not `cells.count`.**
+
+Rejected alternatives:
+
+1. **Model the malloc size classes.** A table of allocator buckets is a platform
+   implementation detail, would be guessed rather than known, and would rot on an
+   OS update. This is why `F7` declined to model rounding at all.
+2. **Leave the model and accept the under-charge.** It is what `F7` chose, on the
+   grounds that ~11.5% was small next to the 120% error `F9` fixed. `F12`
+   withdrew that: the error is 17% at 80 columns, it varies by width, and it
+   converts any future cell shrink into an admission of more rows rather than a
+   saving.
+3. **Charge a fixed padding factor.** Arbitrary, wrong at every width but one,
+   and it would need re-tuning after each stride change -- the exact maintenance
+   burden this file keeps finding in derived constants.
+
+`Array.capacity` is the allocator's own answer, so option 1's objection does not
+apply to it: nothing is predicted, only read. The cost is that the charge is no
+longer arithmetic a test can restate from a column count, which is why
+`historyRowCost` now asks the engine (`Terminal.blankScrollbackRowByteCost`)
+rather than multiplying, and why `retainedScrollbackAllocationBytes` re-derives
+the same total by a second route for the test that holds it against the budget.
+
+Consequence to carry into `D2`: history depth falls again, 1.5% at 179 columns
+and **10.7% at 80**. Both nominal-value discussions in this file have now been
+had against a cost model that was under-charging; this is the first one that
+would be had against an accurate one.
 
 ### D3 -- narrow the cell's link id rather than move it to a side map
 
@@ -1548,8 +1658,16 @@ different proposal and is not covered by this rejection.
 
 Investigation in progress. **Phase 1 is complete, Phase 2's engineering half is
 shipped, and Phase 3's first item is taken.** Findings F1 through F12 are
-recorded; the next free ID is **F13**. Decisions D1 through D3 are recorded and
-implemented; the next free ID is **D4**.
+recorded; the next free ID is **F14**. Decisions D1 through D4 are recorded and
+implemented; the next free ID is **D5**.
+
+`D4`/`F13` then closed the budget's last systematic gap. `scrollbackByteCost`
+charged what a row's cells *occupy*; it now charges what the row *reserves*, by
+reading `Array.capacity` -- the allocator's own answer to the bucket-rounding
+question `F7` correctly refused to model. History lands within ~1% of the
+configured 10 MB at both 179 and 80 columns, against 8-17% over before, with no
+CPU cost. It also removes the trap `F12` fell into: a narrower cell can no longer
+admit more rows than the allocator actually made cheaper.
 
 `F12` is the one to read before shrinking anything else. Narrowing
 `contentIdentity` to `UInt32?` (`H4`'s cheap half) reaches stride 48 and was
