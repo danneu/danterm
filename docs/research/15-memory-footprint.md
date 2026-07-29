@@ -392,11 +392,22 @@ baseline.
 
 ### Phase 2 -- correct the accounting (H1)
 
-- [ ] Decide whether `scrollbackByteCost` should charge true stride, and what
+- [x] Decide whether `scrollbackByteCost` should charge true stride, and what
       the nominal budget becomes if it does. Record in D1. Explicitly a product
       decision about history depth, not only a correctness fix.
-- [ ] Implement and verify on the Phase 1 harness plus `terminal-feed` and
+      **Split in `D2`.** The accounting half is decided and shipped: charge true
+      stride. The nominal-value half is deliberately left open, and now includes a
+      third option -- denominate the limit in **lines** rather than bytes, which
+      would decouple every remaining hypothesis from a product decision.
+- [x] Implement and verify on the Phase 1 harness plus `terminal-feed` and
       `scrollback-stream` for CPU non-regression.
+      **Done -- `F9`.** Cell storage 21.75 -> 10.77 MB, footprint 25.02 -> 12.63 MB,
+      history 1,704 -> 810 rows. No decided CPU regression on any of the five
+      workloads.
+
+- [ ] **Decide the budget's nominal value and its unit** (`D2`'s open question).
+      Blocked on nothing technically, but better taken after `H2`/`H3`, which move
+      stride and therefore move depth at any fixed byte budget.
 
 ### Phase 3 -- shrink the cell (H2, then H3 or H6)
 
@@ -904,7 +915,107 @@ Diagnosis path: the excess scaled with `--lines` but was **invariant under
   rather than materializing them would remove both the allocation spike and a
   full pass over the array.
 
+### F9 -- correcting the cost model halves both the memory and the history
+
+- Status: recorded. Verification of `D2`. Closes Phase 2's implementation task.
+- Date and investigator: 2026-07-29, Claude (agent).
+- Commit and worktree state: `e6bb391` plus `D2`'s change.
+- Instrument: `just terminal-memory-probe`, one fresh process per payload.
+
+  | `scrollback-plain`, 179x66, 10 MB budget | before | after |
+  | --- | ---: | ---: |
+  | cell storage | 21.75 MB | **10.77 MB** |
+  | process footprint | 25.02 MB | **12.63 MB** |
+  | total rows (scrollback + screen) | 1,770 | **876** |
+  | scrollback rows | 1,704 | **810** |
+
+  Unicode, styled, and mixed land within 0.05 MB of plain, as `F2` found before.
+- Observation: the model now charges `48 + 72 * columns` for an ordinary row
+  against a true allocation of 12,888 bytes at 179 columns -- **90% of the real
+  cost**, up from 50%. The remaining 10% is the malloc bucket (`F7`), which is
+  deliberately not modelled.
+- CPU, per `10/F9`. `just benchmark-confirm baseline=HEAD`:
+
+  | workload | verdict |
+  | --- | --- |
+  | `terminal-feed` | equivalent (-0.22%, 2 pairs) |
+  | `scrollback-stream` | inconclusive (+1.47%, 4 pairs) |
+  | `content-churn` | equivalent (-0.27%, 4 pairs) |
+  | `style-churn` | equivalent (-0.48%, 4 pairs) |
+  | `incremental-mixed` | inconclusive (+1.72%, 6 pairs) |
+
+- Nothing is decided-slower. `scrollback-stream` read -1.71%, +1.47%, and -2.15%
+  across three runs -- the sign-flip signature `F6` documented, so it is noise.
+  `incremental-mixed` did **not** flip: +1.72% at 6 pairs and +2.45% at 2. It
+  stays inside "inconclusive", and there is a benign mechanism for a small real
+  cost: a budget that admits half as much history starts evicting earlier in the
+  run, so more of the measured window does eviction work that the baseline had not
+  reached yet. That is the change working, not a defect in it. Recorded rather
+  than dismissed, in case a later change makes it decided.
+- Uncertainty: the probe measures a `Terminal` in isolation. The app-side row
+  count from `F6` is still unaccounted and unaffected by this change.
+- Next action: the product decision this finding sets up -- see `D2`'s open
+  question. The engineering half is done and is independently correct.
+
 ## Decision log
+
+### D2 -- charge history's true size, and leave the budget's nominal value open
+
+- Status: decided and implemented for the accounting half. **The product half --
+  what the nominal budget should be, and whether it should even be denominated in
+  bytes -- is deliberately left open.**
+- Date and investigator: 2026-07-29, Claude (agent).
+- Evidence used: `12/F1` observation 3 (the model charges 40 bytes for a cell
+  whose stride is 72), `F2` (a 10 MB budget really held ~22 MB), `F7` (the true
+  per-row cost, and that bucket rounding adds a further ~11.5%).
+- What changed: `scrollbackByteCost` now charges the row's slot, its cell-array
+  header, its cells at **stride**, and one spill allocation per multi-scalar cell
+  -- `48 + 72 * columns` for an ordinary row at 179 columns, against a real
+  allocation of 12,888 bytes. It was `16 + 40 * columns`.
+- What deliberately did **not** change: malloc bucket rounding is not modelled,
+  though `F7` measured it at a further ~11.5%. Bucket size classes are an
+  allocator implementation detail that varies by platform and request size, and
+  this model has to be deterministic and portable -- its tests pin it to literals
+  for that reason. The budget therefore still under-charges, by ~10% instead of
+  by ~120%.
+- Consequence, and it is the point: at a fixed 10 MB budget, history depth falls
+  from ~1,704 rows to ~810 (`F9`). **This is a correctness fix that costs the
+  user history**, which is exactly the coupling this file's investigation rules
+  warn about ("a cell-size change is a scrollback-depth change", in reverse).
+- Tests: the change is pinned by a behavioral test that feeds 20,000 lines at
+  production geometry and asserts that the cell storage history *actually holds*
+  fits the budget -- measured from `memoryCensus`, not from `scrollbackByteCount`,
+  which is the thing under test. Every prior budget test checked the model against
+  itself and so could not have caught this.
+- Test-suite consequence worth recording: a dozen budgets across six suites were
+  magic numbers encoding "two rows at four columns" under the old model, and had
+  to be reverse-engineered to be rescaled. They are now expressed as
+  `historyRowCost(columns:) * n` from one shared helper, so the next model change
+  edits one function. One of them (`TerminalHyperlinkTests.identityCarry`) also
+  had to be sized at the *widest* geometry the test reaches rather than its
+  starting geometry -- a byte budget that holds a row at 5 columns holds none at
+  6, which is itself a small illustration of why byte-denominated budgets are
+  surprising.
+- **Open, and it belongs to the product, not to this file:** whether the nominal
+  budget stays at 10 MB (halving history), rises to ~22 MB (preserving history and
+  making the number honest), or whether the limit should be denominated in
+  **lines** instead of bytes.
+  - Verified against `.ghostty-src/`: Ghostty limits by **bytes**
+    (`src/config/Config.zig:1365` -- "The size of the scrollback buffer in bytes";
+    `:1385` -- `@"scrollback-limit": usize = 10_000_000`), and its `PageList`
+    rounds the limit to whole pages and may "slightly exceed max_size"
+    (`src/terminal/PageList.zig:346-351`). So DanTerm matches Ghostty today, and
+    Ghostty is itself approximate.
+  - tmux (`history-limit`), xterm (`saveLines`), and iTerm2 all limit by lines, so
+    Ghostty is the outlier among terminals generally.
+  - The argument for lines that is specific to this file: with a byte budget,
+    **every** memory optimization silently changes user-visible history depth, so
+    `H2`, `H3`, and `H6` each force a fresh product decision. With a line limit
+    plus a byte ceiling as a safety net, representation work becomes a pure memory
+    win and stops needing one.
+  - Deferred on purpose: `H2` and `H3` may take stride from 72 toward ~44, which
+    buys back most of the depth this decision spends. Decide the nominal value
+    once, after them, rather than twice.
 
 ### D1 -- release evicted scrollback rows by resetting the vacated slot, and defer the ring buffer
 
@@ -1037,9 +1148,17 @@ different proposal and is not covered by this rejection.
 
 ## Outcome
 
-Investigation in progress. **Phase 1 is complete.** Findings F1 through F8 are
-recorded; the next free ID is **F9**. Decision D1 is recorded and implemented;
-the next free ID is **D2**.
+Investigation in progress. **Phase 1 is complete, and Phase 2's engineering half
+is shipped.** Findings F1 through F9 are recorded; the next free ID is **F10**.
+Decisions D1 and D2 are recorded and implemented; the next free ID is **D3**.
+
+`D2` corrected the accounting: a 10 MB budget now holds ~10.8 MB of cells instead
+of ~22 MB, and history at that budget falls from ~1,704 rows to ~810 (`F9`). The
+number the user configures finally means roughly what it says -- within ~10%,
+which is unmodelled malloc bucket rounding. What the number *should be*, and
+whether it should be denominated in bytes at all, is left open in `D2` on purpose:
+`H2` and `H3` both move stride, and moving stride moves depth at any fixed byte
+budget, so the value is worth deciding once at the end rather than twice.
 
 `F4` closed Phase 1's gating task and changed the plan: the largest defect found
 so far is a scrollback retention bug (`H8`), not a representation problem, and
