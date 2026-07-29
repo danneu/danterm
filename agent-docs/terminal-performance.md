@@ -5,11 +5,15 @@ They build optimized apps with isolated home, temporary, and IPC state. Each
 command owns only the processes it launches and never selects or terminates
 another DanTerm instance.
 
-The question these commands answer is always "did this code change make the
-relevant terminal path faster or slower?" -- never "is this faster than it was
-last week". There is no benchmark history: every directional claim compares an
-explicit baseline revision with the current working tree inside one machine
+The question the comparison commands answer is always "did this code change make
+the relevant terminal path faster or slower?" -- never "is this faster than it
+was last week". There is no benchmark history: every directional claim compares
+an explicit baseline revision with the current working tree inside one machine
 session, which is what cancels the machine drift that a stored record cannot.
+
+Speed is not the only cost these commands measure. The profiling modes attribute
+CPU time, and `just benchmark-memory` measures footprint growth over a sustained
+run -- see "Profile memory" below.
 
 ## Decide a change with a paired comparison
 
