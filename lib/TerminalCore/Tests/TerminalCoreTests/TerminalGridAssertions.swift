@@ -157,11 +157,17 @@ private func expectValidRow(
 /// Test budgets are written as multiples of this rather than as magic numbers, so the cost model
 /// lives in one place. Correcting it (doc 15's `H1`, which moved an ordinary cell from a charged
 /// 40 bytes to its true stride) otherwise means reverse-engineering the intended row count out of
-/// a dozen unrelated literals scattered across suites. Narrowing the cell's link id then moved
-/// stride again, 72 -> 56 (doc 15's `D3`), and only this literal had to change.
+/// a dozen unrelated literals scattered across suites.
+///
+/// It asks the engine rather than restating its arithmetic, which doc 15's `D4` made necessary: the
+/// budget now charges the storage a row *reserves*, and a row's cell array is allocated in a malloc
+/// bucket that holds more cells than the row has columns (90 at 80 columns, 218 at 200). No
+/// expression in a column count can reproduce that, and one written from a stride would silently
+/// under-size every budget at real pane widths.
 ///
 /// Blank and single-scalar cells cost the same -- only a multi-scalar cluster adds a spill
 /// allocation, so `spilledClusterScalars` lists the scalar count of each such cluster.
 func historyRowCost(columns: Int, spilledClusterScalars: [Int] = []) -> Int {
-    48 + columns * 56 + spilledClusterScalars.reduce(0) { $0 + 32 + $1 * 4 }
+    Terminal.blankScrollbackRowByteCost(columns: columns)
+        + spilledClusterScalars.reduce(0) { $0 + 32 + $1 * 4 }
 }

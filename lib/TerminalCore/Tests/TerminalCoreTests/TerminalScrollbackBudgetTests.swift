@@ -5,6 +5,33 @@ import Testing
 
 /// Locks the fixed byte budget to every history mutation path without coupling tests to storage.
 struct TerminalScrollbackBudgetTests {
+    @Test("history never reserves more than the budget, at widths where rows round up")
+    func budgetChargesReservedStorageNotJustCells() throws {
+        // Intent: the bytes history actually reserves stay inside the configured budget, not just
+        //   the bytes its cells nominally occupy.
+        // Why it exists: `scrollbackByteCost` charged `count * stride`, but a row's cell array is
+        //   allocated in a malloc bucket and reserves more than that -- 90 cells' worth at 80
+        //   columns, 218 at 200. So the budget systematically admitted rows it could not pay for,
+        //   which doc 15's `F7` measured at ~11.5% and `F12` turned into a 1.8 MB regression by
+        //   shrinking a cell in a way the allocator ignored. Charging reserved storage makes the
+        //   number the user configures mean what it says regardless of what a cell weighs.
+        // Scenario: a pane at ordinary widths streams enough history to force steady eviction.
+        for columns in [80, 200] {
+            var terminal = try #require(Terminal(
+                columns: columns,
+                rows: 4,
+                scrollbackBudgetBytes: 400 * historyRowCost(columns: columns)
+            ))
+            for line in 0..<2_000 {
+                terminal.feed(Array("row \(line) ".utf8))
+                terminal.feed([0x0D, 0x0A])
+            }
+
+            #expect(terminal.scrollbackRowCount > 0)
+            #expect(terminal.retainedScrollbackAllocationBytes <= terminal.scrollbackBudgetBytes)
+        }
+    }
+
     @Test("scrollback cost uses pinned row, cell, and scalar literals")
     func costModelUsesPinnedLiterals() throws {
         // Intent: freeze row, cell, and scalar costs across every structural cell shape.

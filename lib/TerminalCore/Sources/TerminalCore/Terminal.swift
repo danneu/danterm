@@ -1692,6 +1692,28 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
+    /// Charges one blank row of `columns` cells, so tests can size budgets in whole rows without
+    /// restating the cost model. Since `D4` charges reserved rather than occupied storage, that
+    /// model is no longer arithmetic a test can safely rewrite from a column count.
+    static func blankScrollbackRowByteCost(columns: Int) -> Int {
+        scrollbackByteCost(of: GridRow(cells: (0..<columns).map { _ in GridCell() }))
+    }
+
+    /// Sums what history's cell storage *actually reserved*, derived independently of the charge
+    /// model so a test can hold one against the other.
+    ///
+    /// `Array.capacity` is the allocator's own answer -- Swift sets it from the block malloc really
+    /// returned -- so this counts bucket rounding without modelling a single size class. Kept
+    /// separate from `recomputedScrollbackByteCount`, which recomputes the *charge*; this one
+    /// recomputes the *cost*. The budget is honest exactly when the second does not exceed it.
+    var retainedScrollbackAllocationBytes: Int {
+        scrollbackRows.indices.reduce(0) {
+            $0 + MemoryLayout<GridRow>.stride
+                + Self.arrayStorageHeaderBytes
+                + scrollbackRows[$1].cells.capacity * MemoryLayout<GridCell>.stride
+        }
+    }
+
     /// Exposes one canonical row cost so tests can pin the representation-neutral literals.
     func scrollbackRowByteCost(at index: Int) -> Int? {
         guard scrollbackRows.indices.contains(index) else { return nil }
@@ -2979,15 +3001,26 @@ public struct Terminal: Equatable, Sendable {
     /// single-scalar cell against a true stride of 72. It therefore admitted ~2.2x the history it
     /// promised: a 10 MB budget held ~22 MB (doc 15's `H1`, measured in `15/F2`).
     ///
-    /// Deliberately *not* modelled: malloc bucket rounding, which `15/F7` measured at a further
-    /// ~11.5% (a 12,888-byte row lands in a 14,336-byte bucket at 179 columns). Bucket size classes
-    /// are an allocator implementation detail that varies by platform and by request size, and this
-    /// model has to be deterministic and portable -- the tests pin it to literals for exactly that
-    /// reason. So the budget still under-charges, but by ~11% rather than by ~120%.
+    /// Cells are charged at `capacity`, not `count`, and that is the whole of doc 15's `D4`. A row's
+    /// cell array is not allocated at its element count: malloc rounds the request up to a size
+    /// class, and Swift then reports the block it really got as `capacity` -- 90 cells' worth at 80
+    /// columns, 218 at 200. Charging `count` therefore under-charged every row by that rounding,
+    /// which `15/F7` measured at ~11.5%.
+    ///
+    /// Reading `capacity` rather than modelling the size classes is what makes this affordable.
+    /// `15/F7` declined to model bucket rounding because a table of allocator size classes is a
+    /// platform detail this model cannot portably encode -- true, and still true. `capacity` is the
+    /// allocator's own answer to the same question, so the rounding is charged without anyone
+    /// predicting it. `retainedScrollbackAllocationBytes` re-derives the same total independently,
+    /// and a test holds it against the budget.
+    ///
+    /// This also decouples the budget from the cell's width, which is why `15/F12` needed it: a
+    /// narrower cell that leaves the row in the same malloc bucket now admits the same history it
+    /// always did, instead of admitting more rows that each cost what they always cost.
     private static func scrollbackByteCost(of row: GridRow) -> Int {
         var total = MemoryLayout<GridRow>.stride
             + arrayStorageHeaderBytes
-            + row.cells.count * MemoryLayout<GridCell>.stride
+            + row.cells.capacity * MemoryLayout<GridCell>.stride
         for cell in row.cells where cell.scalars.count > 1 {
             total += arrayStorageHeaderBytes + cell.scalars.count * MemoryLayout<Unicode.Scalar>.stride
         }
