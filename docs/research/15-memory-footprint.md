@@ -449,7 +449,12 @@ baseline.
       history 1,704 -> 810 rows. No decided CPU regression on any of the five
       workloads.
 
-- [ ] **Decide the budget's nominal value and its unit** (`D2`'s open question).
+- [x] **Decide the budget's nominal value and its unit** (`D2`'s open question).
+      **Done -- decided by the user, 2026-07-29: bytes, at 10 MB.** Limiting by
+      memory capacity beats limiting by lines; the line-denominated alternative is
+      abandoned. No code change -- it confirms the status quo. Phase 3 had already
+      bought back the depth the accounting fix spent: 1,768 rows at 179 columns
+      inside an honest 10 MB, against the dishonest ~1,704 the old model claimed.
       Blocked on nothing technically, but better taken after `H2`/`H3`, which move
       stride and therefore move depth at any fixed byte budget.
 
@@ -1661,9 +1666,12 @@ would be had against an accurate one.
 
 ### D2 -- charge history's true size, and leave the budget's nominal value open
 
-- Status: decided and implemented for the accounting half. **The product half --
-  what the nominal budget should be, and whether it should even be denominated in
-  bytes -- is deliberately left open.**
+- Status: **fully decided.** The accounting half was decided and implemented on
+  2026-07-29. The product half was **closed the same day by the user: the budget
+  stays denominated in bytes -- memory capacity -- and the line-denominated
+  alternative below is rejected.** The nominal value stays at 10 MB. See
+  "Resolution" at the end of this entry. No code change: bytes at 10 MB is the
+  status quo, and closing this decision confirms it rather than moves it.
 - Date and investigator: 2026-07-29, Claude (agent).
 - Evidence used: `12/F1` observation 3 (the model charges 40 bytes for a cell
   whose stride is 72), `F2` (a 10 MB budget really held ~22 MB), `F7` (the true
@@ -1716,6 +1724,32 @@ would be had against an accurate one.
   - Deferred on purpose: `H2` and `H3` may take stride from 72 toward ~44, which
     buys back most of the depth this decision spends. Decide the nominal value
     once, after them, rather than twice.
+
+- **Resolution (2026-07-29, decided by the user).** The budget stays denominated
+  in **bytes**, at **10 MB**. Limiting by memory capacity is the right contract;
+  the line-denominated alternative is abandoned.
+  - What this rejects, stated plainly so the argument is not re-litigated: the
+    case for lines above was that a byte budget makes **every** representation
+    optimization silently change user-visible history depth, so each of `H2`,
+    `H3`, `H6` forces a fresh product decision. That cost is real and was paid --
+    three times, in `F10`, `F14`, and `F15`. It is accepted as the price of a
+    resource limit that actually bounds the resource. A line limit bounds a
+    proxy: 2,000 lines is 4 MB at 80 columns and 11 MB at 179, and the user who
+    set it cannot see that.
+  - What made the decision cheap in the end: **Phase 3 bought back everything the
+    accounting fix spent, and more.** `D2`'s correction dropped depth at 10 MB
+    from a dishonest ~1,704 rows (really costing ~22 MB) to an honest ~810.
+    `F10`, `F14`, and `F15` then took the cell 72 -> 32 bytes, and `F15` measures
+    **1,768 retained rows at 179 columns** inside the same 10 MB. So the settled
+    state holds *more* history than the broken model claimed, while actually
+    costing what it says. There was never a nominal value that needed raising --
+    the depth problem was a cell-size problem.
+  - Live caveat, carried from `F15` observation 4: at 80 columns the honest 10 MB
+    budget now yields ~11.5 MB of process footprint, because `48 + 80 * 32` sits
+    just past a malloc size class. The budget bounds *charged* bytes, which `D4`
+    made equal to *reserved* bytes; it does not bound allocator fragmentation or
+    process footprint, and no byte budget denominated on rows can. Anyone reading
+    the 10 MB number as a footprint guarantee is reading it wrong.
 
 ### D1 -- release evicted scrollback rows by resetting the vacated slot, and defer the ring buffer
 
@@ -1919,9 +1953,19 @@ question getting harder to defer, not easier.
 of ~22 MB, and history at that budget falls from ~1,704 rows to ~810 (`F9`). The
 number the user configures finally means roughly what it says -- within ~10%,
 which is unmodelled malloc bucket rounding. What the number *should be*, and
-whether it should be denominated in bytes at all, is left open in `D2` on purpose:
-`H2` and `H3` both move stride, and moving stride moves depth at any fixed byte
-budget, so the value is worth deciding once at the end rather than twice.
+whether it should be denominated in bytes at all, was left open in `D2` on
+purpose -- `H2` and `H3` both move stride, and moving stride moves depth at any
+fixed byte budget, so the value was worth deciding once at the end rather than
+twice. **It is now decided: bytes, at 10 MB** (`D2`, closed by the user on
+2026-07-29). Limiting by memory capacity beats limiting by lines, which bounds
+only a proxy -- 2,000 lines is 4 MB at 80 columns and 11 MB at 179, and the user
+who set it cannot see that. The nominal value needed no change, because the depth
+problem was a cell-size problem: `D2`'s correction dropped 10 MB from a dishonest
+~1,704 rows to an honest ~810, and `F10`/`F14`/`F15` then took the cell 72 -> 32
+bytes and put **1,768 rows** back inside the same honest 10 MB. What the byte
+budget does *not* bound is process footprint -- at 80 columns an honest 10 MB now
+costs ~11.5 MB resident, per `F15` observation 4 -- and no row-denominated budget
+can.
 
 `F4` closed Phase 1's gating task and changed the plan: the largest defect found
 so far is a scrollback retention bug (`H8`), not a representation problem, and
