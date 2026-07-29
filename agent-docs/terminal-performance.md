@@ -316,13 +316,15 @@ just terminal-memory-probe                                # full matrix at 179x6
 just terminal-memory-probe "--json"                       # machine-readable
 just terminal-memory-probe "--payload scrollback-plain"   # attributable footprint
 just terminal-memory-probe "--columns 80 --rows 24"
+just terminal-memory-probe "--payload scrollback-plain --vmmap"   # dirty allocator pages
+just terminal-memory-probe "--chunk 0"                    # single-shot feed: parse spike, not resident cost
 ```
 
 It reports cell bytes, bytes per cell, row allocations, and the content shape
 that sizes representation work -- styled cells, distinct styles, multi-scalar
 spills, hyperlink cells, and content identities.
 
-Two traps. **Only a `--payload` run has an attributable footprint delta**: in a
+Three traps. **Only a `--payload` run has an attributable footprint delta**: in a
 full-matrix run all payloads share one process and the allocator reuses pages a
 previous payload freed, so every delta after the first understates its payload.
 Census numbers are exact either way. And **a payload can silently stop
@@ -330,6 +332,27 @@ exercising what it is named for**: the mixed payload originally concatenated
 three blocks, so at the production budget only the last survived eviction and
 `scrollback-mixed` measured byte-identical to `scrollback-styled`. If you add a
 payload, assert its composition at a depth that actually evicts.
+
+And **the probe feeds in 4 KB chunks on purpose** -- do not "simplify" it to one
+`feed` call. `Terminal.feed` materializes one action per input token for the whole
+call, so a single-shot 620 KB feed allocates ~37 MB of transient blocks that land
+in the footprint delta and look exactly like resident cost. That mistake put
+coverage at 0.35 when the true figure is 0.87, and it survived a
+competing-interpretations pass before `--chunk` caught it (doc 15's F7). The
+census is chunk-invariant and a test pins that, so chunking costs nothing.
+
+For the split between live bytes, bucket rounding, and allocator slack, use
+`--vmmap`: it shells out to `vmmap --summary` *while the terminal is still
+resident* and prints the malloc regions, where DIRTY is what the footprint
+charges. Do not try to derive that split from `MallocHeapSnapshot.bytesAllocated`
+-- that is reserved address space, ~20 MB of which exists before a byte is fed,
+and differencing it against footprint yields numbers that come out negative.
+
+One rule for anything you build on top: **do not assert on a heap delta in a
+test.** `mallocHeapSnapshot()` reads the whole process, and the test runner runs
+suites in parallel, so a neighbour's allocations land in your window -- a draft
+test read 76 MB of "overhead" that belonged to other suites. Delta claims belong
+to the probe binary, which owns its process.
 
 `Terminal.memoryCensus` is public, so a one-off question does not need the probe
 -- call it from a test. It exists precisely so that measuring the grid no longer

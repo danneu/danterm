@@ -145,6 +145,52 @@ struct TerminalMemoryProbeSupportTests {
         #expect(report.census.hasRetainedRowStorageLeak == false)
     }
 
+    @Test("the heap snapshot cannot report more bytes in use than the allocator obtained")
+    func heapSnapshotIsSelfConsistent() {
+        // Why it exists: the whole attribution rests on `bytesAllocated - bytesInUse` being the
+        // allocator's own overhead. If that subtraction could go negative the split is meaningless,
+        // so this pins the ordering the malloc zone API promises rather than assuming it.
+        let snapshot = mallocHeapSnapshot()
+        #expect(snapshot.blocksInUse > 0)
+        #expect(snapshot.bytesInUse > 0)
+        #expect(snapshot.bytesAllocated >= snapshot.bytesInUse)
+    }
+
+    // No test asserts on a heap *delta*, and that is deliberate. `mallocHeapSnapshot` reads the
+    // whole process, so under the parallel test runner another suite's allocations land inside any
+    // before/after window -- this file briefly had such a test and it read 76 MB of "overhead" from
+    // its neighbours. Delta-based claims (bucket rounding, coverage) are made by the probe binary,
+    // which owns its process. What stays testable here is the single-snapshot invariant below and
+    // everything derived from the census, which is exact and process-independent.
+
+    @Test("feeding in chunks reaches the same terminal state as feeding all at once")
+    func chunkedFeedMatchesSingleShotFeed() throws {
+        // Intent: chunk size changes when bytes arrive, never what the terminal ends up holding.
+        // Why it exists: the probe fed each payload in one call, which made `feed` materialize an
+        //   action array proportional to the whole payload -- tens of MB of transient LARGE
+        //   allocations that landed in the footprint delta and were attributed to *holding* a
+        //   terminal. Chunking fixes the measurement, but only if it is state-neutral; if it were
+        //   not, every census in this file would become chunk-size-dependent.
+        // Scenario: a real PTY delivers output in small reads, never as one 600 KB block.
+        let deep = MemoryProbeMatrix.payloads(columns: Self.geometry.columns, lineCount: 3_000)
+        let mixed = try #require(deep.first { $0.name == "scrollback-mixed" })
+
+        let singleShot = try #require(measure(
+            payload: mixed, columns: Self.geometry.columns, rows: Self.geometry.rows, chunkBytes: nil
+        )).census
+        let chunked = try #require(measure(
+            payload: mixed, columns: Self.geometry.columns, rows: Self.geometry.rows, chunkBytes: 4_096
+        )).census
+        let tinyChunks = try #require(measure(
+            payload: mixed, columns: Self.geometry.columns, rows: Self.geometry.rows, chunkBytes: 7
+        )).census
+
+        #expect(chunked == singleShot)
+        // Seven bytes splits multi-byte UTF-8 and escape sequences mid-token, which is the case a
+        // stream parser has to carry state across and the one most likely to diverge.
+        #expect(tinyChunks == singleShot)
+    }
+
     @Test("the matrix is deterministic across runs")
     func matrixIsDeterministic() throws {
         // Why it exists: this is the probe's reason to exist over `benchmark-memory`, whose

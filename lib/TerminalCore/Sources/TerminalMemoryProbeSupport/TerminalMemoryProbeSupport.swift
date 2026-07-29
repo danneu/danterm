@@ -33,11 +33,35 @@ public struct MemoryProbePayload: Sendable {
     }
 }
 
-/// What one payload cost, in exact grid bytes and in process pages.
+/// What the malloc zones hold at one instant, across every zone in the process.
 ///
-/// Both are reported because they answer different questions and doc 15's investigation rules
-/// require saying which one a claim rests on: the census is the representation cost, the footprint
-/// delta is what the OS actually charged for holding it.
+/// Exists to split the cost doc 15's `F3/F5` could only measure in aggregate. `phys_footprint`
+/// answers "what did the OS charge", which conflates three causes with three different fixes:
+/// bytes genuinely live on the heap, bytes the allocator obtained but nothing is using, and pages
+/// that are not malloc's at all. These two counters separate the first two; the third falls out by
+/// subtraction.
+public struct MallocHeapSnapshot: Codable, Equatable, Sendable {
+    /// Allocations currently live -- the same population `heap` counts as nodes.
+    public var blocksInUse: UInt64
+
+    /// Bytes those live allocations occupy, *including* malloc's bucket rounding. This is the
+    /// quantity a live-bytes win reduces.
+    public var bytesInUse: UInt64
+
+    /// Address space the zones have reserved. **Not** dirty pages, and deliberately not part of any
+    /// attribution here: ~20 MB of it exists before a byte is fed, most of it clean and therefore
+    /// never charged to `phys_footprint`. Differencing it against footprint produces a plausible
+    /// "non-heap" number that is pure noise -- it came out negative on three of six payloads.
+    /// Reported only so a reader can see the reservation and not mistake it for a cost. Dirty
+    /// allocator pages come from `vmmap`, which the probe's `--vmmap` flag samples.
+    public var bytesAllocated: UInt64
+}
+
+/// What one payload cost, in exact grid bytes, in heap bytes, and in process pages.
+///
+/// All three are reported because they answer different questions and doc 15's investigation rules
+/// require saying which one a claim rests on: the census is the representation cost, the heap
+/// snapshot is what the allocator holds, and the footprint delta is what the OS actually charged.
 public struct MemoryProbePayloadReport: Codable, Equatable, Sendable {
     public var name: String
     public var columns: Int
@@ -47,11 +71,30 @@ public struct MemoryProbePayloadReport: Codable, Equatable, Sendable {
     public var census: TerminalMemoryCensus
     public var footprintBeforeBytes: UInt64
     public var footprintAfterBytes: UInt64
+    public var heapBefore: MallocHeapSnapshot
+    public var heapAfter: MallocHeapSnapshot
 
     /// Process pages charged while this payload was resident. Signed: the allocator can return
     /// pages, and a negative delta is information rather than an error.
     public var footprintDeltaBytes: Int64 {
         Int64(footprintAfterBytes) - Int64(footprintBeforeBytes)
+    }
+
+    /// Live malloc bytes this payload added. The first of the three attribution buckets, and the
+    /// only one a smaller cell reduces.
+    public var liveHeapDeltaBytes: Int64 {
+        Int64(heapAfter.bytesInUse) - Int64(heapBefore.bytesInUse)
+    }
+
+    /// Live heap bytes on top of the exact cell storage the census walked.
+    ///
+    /// Measured to be **malloc bucket rounding on the per-row allocations**, within ~44 bytes per
+    /// row of a clean bucket boundary across a 179-to-300 column sweep. That residue is the array
+    /// header; nothing else is hiding here, which is how Phase 1 concluded there is no second
+    /// `F4`-class retention defect. It is also the only quantity in this file that directly sizes
+    /// `H7`, since it *is* the per-allocation overhead `H7` proposes to amortize.
+    public var perAllocationOverheadBytes: Int64 {
+        liveHeapDeltaBytes - Int64(census.cellStorageBytes)
     }
 
     /// How much of the process delta the grid's own cell bytes explain. Below 1.0 means the
@@ -186,25 +229,68 @@ public func processPhysicalFootprintBytes() -> UInt64 {
     return status == KERN_SUCCESS ? info.phys_footprint : 0
 }
 
+/// Bytes per `feed` call by default -- a plausible PTY read, so the probe measures what a terminal
+/// costs to *hold* rather than what one oversized feed call costs to parse. See `measure`.
+public let defaultFeedChunkBytes = 4_096
+
+/// Reads live and obtained bytes across every malloc zone in the process.
+///
+/// A nil zone asks libmalloc to aggregate all zones, which is what the question needs: Swift's
+/// runtime, Foundation, and the grid do not share one zone, and attributing only the default zone
+/// would silently drop whichever of them moved.
+public func mallocHeapSnapshot() -> MallocHeapSnapshot {
+    var statistics = malloc_statistics_t()
+    malloc_zone_statistics(nil, &statistics)
+    return MallocHeapSnapshot(
+        blocksInUse: UInt64(statistics.blocks_in_use),
+        bytesInUse: UInt64(statistics.size_in_use),
+        bytesAllocated: UInt64(statistics.size_allocated)
+    )
+}
+
 /// Feeds one payload to a fresh terminal and reports what it cost.
 ///
 /// The terminal is held until after the census and the closing footprint read, so neither can race
 /// its deallocation.
+/// - Parameter chunkBytes: feed the payload in slices of this size instead of one call. Defaults to
+///   a PTY-sized read, because `Terminal.feed` materializes one action per input token for the whole
+///   call: a single 600 KB feed builds a ~600,000-element array, tens of MB of transient LARGE
+///   allocations that land in the footprint delta and get misattributed to *holding* a terminal.
+///   Pass nil for the single-shot behavior, which is a feed-cost measurement, not a resident one.
+/// - Parameter whileResident: run after the census, while the terminal is still alive. External
+///   instruments (`vmmap`, `heap`) must observe the process in that window or they measure a
+///   terminal that has already been freed, which is a different question and an easy mistake.
 public func measure(
     payload: MemoryProbePayload,
     columns: Int,
-    rows: Int
+    rows: Int,
+    chunkBytes: Int? = defaultFeedChunkBytes,
+    whileResident: ((TerminalMemoryCensus) -> Void)? = nil
 ) -> MemoryProbePayloadReport? {
+    let heapBefore = mallocHeapSnapshot()
     let before = processPhysicalFootprintBytes()
     // The public initializer, so the probe always measures the production budget. The
     // budget-taking initializer is internal on purpose -- that the public one pins 10 MiB is an
     // invariant with its own test, and a measurement tool is not a reason to weaken it. Depth is
     // varied with `lineCount` instead.
     guard var terminal = Terminal(columns: columns, rows: rows) else { return nil }
-    if payload.bytes.isEmpty == false { terminal.feed(payload.bytes) }
+    if payload.bytes.isEmpty == false {
+        if let chunkBytes, chunkBytes > 0, chunkBytes < payload.bytes.count {
+            var start = payload.bytes.startIndex
+            while start < payload.bytes.endIndex {
+                let end = min(start + chunkBytes, payload.bytes.endIndex)
+                terminal.feed(Array(payload.bytes[start..<end]))
+                start = end
+            }
+        } else {
+            terminal.feed(payload.bytes)
+        }
+    }
 
     let census = terminal.memoryCensus
+    let heapAfter = mallocHeapSnapshot()
     let after = processPhysicalFootprintBytes()
+    whileResident?(census)
     withExtendedLifetime(terminal) {}
 
     return MemoryProbePayloadReport(
@@ -215,7 +301,9 @@ public func measure(
         fedByteCount: payload.bytes.count,
         census: census,
         footprintBeforeBytes: before,
-        footprintAfterBytes: after
+        footprintAfterBytes: after,
+        heapBefore: heapBefore,
+        heapAfter: heapAfter
     )
 }
 
@@ -229,12 +317,22 @@ public func runMatrix(
     columns: Int,
     rows: Int,
     lineCount: Int = MemoryProbeMatrix.scrollbackLineCount,
-    only: String? = nil
+    only: String? = nil,
+    chunkBytes: Int? = defaultFeedChunkBytes,
+    whileResident: ((TerminalMemoryCensus) -> Void)? = nil
 ) -> MemoryProbeReport {
     let reports = MemoryProbeMatrix
         .payloads(columns: columns, lineCount: lineCount)
         .filter { only == nil || $0.name == only }
-        .compactMap { measure(payload: $0, columns: columns, rows: rows) }
+        .compactMap {
+            measure(
+                payload: $0,
+                columns: columns,
+                rows: rows,
+                chunkBytes: chunkBytes,
+                whileResident: whileResident
+            )
+        }
     return MemoryProbeReport(
         schemaVersion: 1,
         columns: columns,
