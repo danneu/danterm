@@ -569,6 +569,11 @@ repeat exactly the error those corrections caught.
     Report absolute blocked samples alongside the share: the many-runs arm pays
     more main-thread draw cost by construction (F6: 771 ns/run on the text
     path), which inflates the busy denominator and would deflate a ratio.
+  - **Run 2026-07-28. Result: F12 -- op count is refuted too.** 11.8x the ops,
+    every glyph-bounds node *down*, with a positive control (`CTFontDrawGlyphs`
+    84 -> 750) proving the lever reached the app. The main thread got 877
+    samples busier and 122 less blocked, which is the pipeline signature: a
+    large part of the stall is slack, not recoverable time.
   - **Run 2026-07-28. Result: F11 -- `13/H3`'s cache-miss mechanism is refuted.**
     47x the distinct glyphs moved nothing, and the outline copy is 42% of the
     queue even at two glyphs, where any 64-entry cache must always hit. The
@@ -1423,6 +1428,72 @@ repeat exactly the error those corrections caught.
 - Uncertainty: low on the refutation. The two arms are one process instance apart
   with a single controlled variable, and the result contradicts a
   pre-registered prediction rather than failing to reach significance.
+
+### F12 -- op count is not the driver either, and the "stall" is substantially pipeline slack: the main thread blocked *less* when it worked *more*
+
+- Status: recorded. Refutes F11's live hypothesis and promotes doc 13's other
+  competing explanation -- that the stall is a pipeline rather than waste --
+  from speculation to the best-supported reading.
+- Date and investigator: 2026-07-28, Claude (agent) with a human-driven capture.
+- Provenance: two 20-second `sample` captures, **pid 36317, launch time
+  2026-07-28 19:48:59.707 in both** -- one process instance, therefore one
+  binary. `DanTerm Dev` 0.0.84, macOS 26.5.2, captured 19:49 and 19:50.
+- Design: the mirror of F11. Glyph diversity fixed (same 94-glyph alphabet),
+  byte count fixed (8,660,000 exactly, both), parser work fixed (a three-digit
+  256-colour SGR every 8 cells in both), cell count fixed (40694). Only whether
+  the SGR *changes* colour differs, which is what decides run folding:
+  **5459 vs 462 runs, an 11.8x lever on `DrawGlyphs` op count.**
+- **Positive control, and the reason this experiment is readable at all:** the
+  lever demonstrably reached the app. `CTFontDrawGlyphs` on the main thread went
+  **84 -> 750 samples (8.9x)** against the 11.8x run ratio, and `drawTextRuns`
+  went 547 -> 1451 (2.7x). Without this, a null result could not be
+  distinguished from a fixture that failed to vary what it claimed to vary --
+  which is the failure mode that would have made F11 unfalsifiable too.
+
+  | Node (absolute samples) | many runs (5459) | few runs (462) | ratio |
+  | --- | ---: | ---: | ---: |
+  | `DrawGlyphs::compute_dod_` | 625 | 750 | 0.83x |
+  | `TFPFont::CopyGlyphPath` | 314 | 447 | 0.70x |
+  | `TGlyphOutlineDictionaryCache::Copy` | 277 | 412 | 0.67x |
+  | main-thread blocked wait | 989 | 1111 | 0.89x |
+  | main-thread busy | 4262 | 3385 | 1.26x |
+
+- Observation 1: **11.8x the ops produced no increase; every glyph-bounds node
+  went down.** Predicted in `f0ab405` as a substantial increase. F11 killed
+  glyph diversity as the driver; this kills op count. Both were killed by
+  pre-registered predictions failing in the wrong direction, not by weak effects.
+- Observation 2, the important one: **the main thread got 877 samples busier and
+  122 samples *less* blocked.** The blocked wait is not a fixed debt the main
+  thread pays; it shrinks when the main thread has more of its own work to do.
+  That is what a pipeline looks like -- the queue runs concurrently, and
+  `CABackingStoreGetFrontTexture` absorbs whatever slack is left over. Doc 13
+  recorded this as a competing explanation it could not test ("some of those
+  samples would be spent waiting regardless; the recoverable fraction is
+  unknown"). It is now the reading the evidence favours.
+- Observation 3, on what this costs the investigation: **a large part of the
+  31-35% stall is not recoverable time.** Every framing that treated it as a
+  cost to be removed -- including this file's own ledger item -- was treating
+  pipeline slack as waste. The honest statement is that an unknown fraction is
+  slack and nothing measured so far bounds the remainder.
+- Observation 4: the one quantity held constant across all four captures in
+  F11 and F12 is **total glyphs on screen per frame** (~40,500 cells), and
+  `compute_dod_` sits in a narrow 625-883 band across all four while diversity
+  moved 47x and op count moved 11.8x. That is consistent with the cost scaling
+  with total glyph count -- i.e. with "the screen is full of text" -- and
+  inconsistent with both tested mechanisms. It is a hypothesis suggested by four
+  points, not a result: no arm has yet varied total glyph count.
+- **Limitation that bounds every absolute number here.** `sample` reports time,
+  not invocation counts, so there is no frame count in these artifacts and
+  per-20-second totals conflate per-frame cost with frame rate. The many-runs
+  arm is more expensive per frame by construction and therefore probably drew
+  fewer frames, which inflates its per-frame cost relative to what the table
+  shows. This does not rescue the prediction -- a driver that scaled with op
+  count should have raised the total even at a lower frame rate -- but it does
+  mean none of these totals should be read as per-frame costs.
+- Uncertainty: low on both refutations, given the pre-registration and the
+  positive control. Moderate on the pipeline reading, which is an inference from
+  one paired observation of the busy/blocked trade and would be worth confirming
+  by deliberately slowing the main thread with unrelated work.
 
 ## Open questions and caveats
 
