@@ -478,6 +478,13 @@ baseline.
       history for 18% less memory; at 179 it is neutral in both directions, which
       is the whole point -- the same patch cost 1.8 MB there before `D4`. No CPU
       regression on any of the five workloads.
+- [x] Take `H3` (style to an id into a swept table), per `F11`'s specification.
+      Verify on the **draw** workloads, not only the feed ones.
+      **Done -- `F15`.** Stride 48 -> 32, by a 32-bit id plus a field reorder that
+      is worth a bucket on its own. First change in this file to pay at 179
+      columns: per-row overhead 1,698 -> 456 bytes, +62% history *and* -7%
+      footprint. No CPU cost anywhere; plan time fell 6-9% on all three draw
+      workloads, because the intern moved off the cell-write path onto the pen.
 - [ ] Gate: compare H3 and H6 against Phase 1 evidence and pick one, or
       establish that they compose. Record in D2.
       **Partly answered by `F12`.** They compose, and ordering is forced: at wide
@@ -1462,6 +1469,109 @@ reserved storage:
   - Only two widths were measured, as in `F12`. The rule there still applies:
     check bucket placement per geometry rather than generalizing either column.
 
+### F15 -- taking `H3` halves the cell, and is the first change that pays at 179 columns
+
+- Status: recorded. Takes `H3`, Phase 3's last hypothesis. **Shipped.**
+- Date and investigator: 2026-07-29, Claude (agent).
+- Commit and worktree state: baseline `32aa35d` (post-`F14`), candidate the
+  working tree measured here.
+- Instrument: `just terminal-memory-probe`, one fresh process per payload,
+  **three runs per arm** with the baseline built from a detached worktree;
+  medians reported. `just benchmark-confirm baseline=HEAD` for CPU.
+
+`TerminalStyle` left the cell and became a 32-bit id into a swept table, per
+`F11`'s specification. Two things had to be settled first, and neither was in
+the hypothesis as written:
+
+- **Field order is worth a whole bucket.** Swift lays stored properties out in
+  declaration order, and `scalars` is the cell's only 8-byte-aligned member;
+  declared after `kind` it forced seven bytes of padding into every cell.
+  Reordering alone changes nothing (48 -> 48, measured), but reorder *plus* the
+  id reaches **32** where the id alone reaches 40.
+- **The id is 32-bit, not the 16-bit doc 12 proposed.** A 16-bit id reaches a
+  24-byte stride -- measured, and better than anything else in this file -- but
+  caps the terminal at 65,536 simultaneously-live styles. A truecolor image
+  renderer assigns a distinct RGB per cell, so one 179-column screen is ~12,000
+  and a few screens of history exhaust it, and at that point the cell holds
+  nothing but an id, so there is no fallback but showing approximated colors.
+  The eight bytes buy a ceiling nothing reaches instead of one `chafa` reaches.
+
+Stride **48 -> 32**, a 33% cut and the largest single move in this file:
+
+  | geometry | payload | history rows | footprint | per-row overhead |
+  | --- | --- | --- | --- | --- |
+  | 179x66 | `full-screen` (fixed rows) | 201 -> 201 | 2.41 -> **1.45 MB** | 1,689 -> 456 B |
+  | 179x66 | `scrollback-plain` | 1,091 -> **1,768** | 11.81 -> **10.95 MB** | 1,698 -> 456 B |
+  | 179x66 | `scrollback-styled` | 1,091 -> **1,768** | 11.86 -> 11.33 MB | 1,713 -> 470 B |
+  | 80x66 | `full-screen` (fixed rows) | 201 -> 201 | 1.08 -> **0.84 MB** | 296 -> 552 B |
+  | 80x66 | `scrollback-plain` | 2,636 -> **3,461** | 10.77 -> 11.48 MB | 295 -> 551 B |
+  | 80x66 | `scrollback-styled` | 2,636 -> **3,461** | 11.14 -> 11.66 MB | 301 -> 558 B |
+
+- Observation 1: on a **fixed-row** screen, where the budget is held out of the
+  measurement, footprint falls at both widths -- **-40% at 179 columns** and -22%
+  at 80. This is the representation win by itself, and it is the cleanest number
+  in the table (identical across all three runs at both widths).
+- Observation 2: **the 179-column dead zone is gone.** Every cell shrink in this
+  file so far bought nothing at the canonical geometry -- `F10` and `F14` both
+  measured it -- because `48 + 179 * stride` stayed inside one malloc bucket
+  across the whole range from 43 to 56 bytes. At 32 it does not: per-row overhead
+  collapses **1,698 -> 456 bytes** and bucket rounding 1.77 -> 0.77 MB. `F14`
+  inference 2 predicted exactly this, and it is the reason `H3` outranked
+  everything else left.
+- Observation 3: history-bound payloads spend the win on **depth, not memory** --
+  +62% retained rows at 179 columns, +31% at 80. At 179 the pane gets both: 62%
+  more history *and* 7% less memory.
+- Observation 4, and the one that cuts the other way: at **80 columns the
+  footprint rises 4.7-6.6%** while depth rises 31%. Per-row overhead moves
+  backwards there (295 -> 551 B) because `48 + 80 * 32` = 2,608 sits just past a
+  size class that `48 + 80 * 48` = 3,888 cleared. Memory per retained row still
+  falls ~19%; the budget simply spends the saving rather than returning it. The
+  effect is ~1.4x the probe's run-to-run spread (~0.5 MB) but held its sign
+  across three runs and both scrollback payloads, so it is small and real rather
+  than noise.
+- Inference 1: this is **not `F12`'s mechanism returning.** `D4` already made the
+  budget charge `Array.capacity`, so the charge and the reservation still agree;
+  what moved is where a row lands among the size classes, which is a property of
+  the geometry rather than an accounting error.
+- Inference 2, and it sharpens `D2`: at 80 columns a user who asked for a 10 MB
+  budget now gets 11.5 MB of process and 31% more scrollback than before. That is
+  defensible, but it is a *choice*, and it is the choice `D2` has been deferring.
+  A budget denominated in lines would have returned the win as memory instead.
+- CPU, per `10/F9`. Straight to `just benchmark-confirm baseline=HEAD`, because
+  the draw path gained an id-to-style lookup and a feed-only read would have
+  missed the regression this hypothesis actually risked:
+
+  | workload | verdict | plan time |
+  | --- | --- | --- |
+  | `terminal-feed` | **faster (-19.04%, 2 pairs)** | -- |
+  | `scrollback-stream` | **faster (-10.58%, 4 pairs)** | -- |
+  | `content-churn` | inconclusive (+0.75%) | -6.07% |
+  | `style-churn` | inconclusive (-0.94%) | -8.92% |
+  | `incremental-mixed` | equivalent (+0.21%) | -8.49% |
+
+- Observation 5: **the feared cost did not appear anywhere, and the opposite
+  did.** Plan time -- the metric that brackets `forEachViewportCell`, the one
+  call the lookup was added to -- fell 6-9% on all three draw workloads. The
+  mechanism is that the intern was moved off the write path entirely: every cell
+  write sources its style from the SGR pen or the erase pen, so a `didSet` on the
+  pen invalidates a cached id and the ~30 write sites store four bytes where they
+  used to copy nineteen. `F11` counted 9-23 million style writes per corpus and
+  worried a table would charge each one; instead each one got cheaper.
+- Uncertainty 1: `terminal-feed`'s -19.04% rests on **2 pairs**, the minimum the
+  confirm mode reaches a verdict on. Unlike `F14`'s `incremental-mixed` reading,
+  which was recorded and not claimed because no mechanism explained it, this one
+  has one -- a 33% smaller cell and a 4-byte store replacing a 19-byte copy --
+  and its magnitude is an order of magnitude outside the +-1% band the other
+  workloads sit in. Still worth a second run before it is quoted anywhere load-bearing.
+- Uncertainty 2: the sweep never ran in any measured payload. The most styled
+  corpus holds 193 distinct styles against a 512-entry trigger, so
+  `reclaimDeadStyleEntries` is covered by tests and by construction, not by
+  measurement. Its cost under a genuinely style-exhausting workload -- the
+  truecolor renderer the 32-bit id exists for -- is unmeasured.
+- Uncertainty 3: only two widths were sampled, and observation 4 shows the result
+  is width-dependent in a way the earlier findings were not. Nothing here says
+  where between 80 and 179 the footprint change crosses zero.
+
 ## Decision log
 
 ### D4 -- charge history the storage a row reserves, not the storage its cells occupy
@@ -1739,16 +1849,30 @@ different proposal and is not covered by this rejection.
 ## Outcome
 
 Investigation in progress. **Phase 1 is complete, Phase 2's engineering half is
-shipped, and Phase 3 has taken everything except `H3`.** Findings F1 through F14
-are recorded; the next free ID is **F15**. Decisions D1 through D4 are recorded
-and implemented; the next free ID is **D5**.
+shipped, and Phase 3 has taken every hypothesis it opened.** Findings F1 through
+F15 are recorded; the next free ID is **F16**. Decisions D1 through D4 are
+recorded and implemented; the next free ID is **D5**.
 
-The cell is now **48 bytes, down from 72** where this file started. `F14` took
-the last 8 by narrowing `contentIdentity` to `UInt32?` -- the change `F12`
-implemented and reverted three commits earlier. Nothing about the patch changed;
-`D4` changed what the budget charged for it. At 80 columns the pane now holds
-**24% more history for 18% less memory**, and at 179 columns it is neutral in
-both directions, where the identical patch cost 1.8 MB before. The counter it
+The cell is now **32 bytes, down from 72** where this file started -- 56% of it
+gone. `F15` took the last 16 by moving `TerminalStyle` out of the cell and behind
+a 32-bit id into a swept table, and it is the first change here that pays at the
+canonical 179-column geometry: every earlier shrink landed inside the same malloc
+bucket there and bought nothing, which `F10` and `F14` both measured and `F14`
+predicted would end at this stride. It does. Per-row overhead falls 1,698 -> 456
+bytes, and the pane holds **62% more history for 7% less memory**. Two details
+were not in the hypothesis as written: field order is worth a whole bucket by
+itself, and the id is 32-bit rather than 16-bit because a 16-bit one caps the
+terminal at 65,536 live styles, which a truecolor image renderer exhausts in a
+few screens. It also cost no CPU -- the draw-path lookup it was expected to pay
+for showed up as plan time *falling* 6-9%, because interning moved off the
+cell-write path onto the SGR pen.
+
+Before `F15` the cell was **48 bytes**, and `F14` got it there by narrowing
+`contentIdentity` to `UInt32?` -- the change `F12` implemented and reverted three
+commits earlier. Nothing about the patch changed; `D4` changed what the budget
+charged for it. At 80 columns it bought **24% more history for 18% less
+memory**, and at 179 columns it was neutral in both directions, where the
+identical patch had cost 1.8 MB before. The counter it
 narrowed is genuinely exhaustible, so `allocateContentIdentity` owns the wrap:
 it skips zero and drops any armed link, because a reissued identity would
 otherwise satisfy the check that binds a Cmd-click to the cells it was pressed
