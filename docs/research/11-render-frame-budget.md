@@ -525,6 +525,29 @@ repeat exactly the error those corrections caught.
   31.3% of live main-thread busy, no instrument here can see it, and it is
   unattributed between "architectural" and "a 64-entry cache miss inside
   CoreAnimation". Doc 13 handed it over as its R3, deliberately unstarted.
+  - **Confirmation experiment prepared 2026-07-28, awaiting a human capture.**
+    `13/H3` is confirmed only by changing the distinct-glyph count per frame and
+    showing the main-thread stall and the queue's `compute_dod_` node move
+    together. Two workloads were built for exactly that, and the control is
+    exact: both are 179 columns x 20000 lines of uncoloured text and both plan
+    to **462 runs / 40472 cells** over seven frames, so op count, cell count,
+    run count, and geometry are identical and **only glyph diversity differs**.
+    `glyphs-low.txt` uses 2 distinct glyphs, `glyphs-high.txt` uses 95 --
+    straddling the 64 in `TGlyphOutlineDictionaryCache<unsigned short, 64, 512>`.
+    Generate with the snippet in this file's history or regenerate trivially:
+    179-char lines, rotating a 2-character and a 94-character alphabet.
+    Capture per doc 13's "Re-capturing a live profile" procedure -- `sample` for
+    20 s while a human holds down-arrow in `less` on each file, at normal window
+    size, one capture per workload. **Prediction if `13/H3` is right:** the
+    high-diversity arm shows a materially larger blocked wait in
+    `CABackingStoreGetFrontTexture` and a larger `DrawGlyphs::compute_dod_`
+    share on `CA::CG::Queue`. **If the two arms match, `13/H3` is refuted** and
+    the stall is a pipeline property rather than a cache miss, which is the
+    other credible explanation doc 13 recorded.
+  - Note that `11/F10` has already narrowed what a positive result would be
+    worth: it is the *glyph* path this experiment probes, and the glyph path is
+    4.06 ms of budget at real geometry. A confirmed `13/H3` would explain the
+    stall's mechanism without implying the draw path needs restructuring.
 
 ### Phase 2 -- direction gate
 
