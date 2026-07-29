@@ -548,6 +548,12 @@ repeat exactly the error those corrections caught.
     worth: it is the *glyph* path this experiment probes, and the glyph path is
     4.06 ms of budget at real geometry. A confirmed `13/H3` would explain the
     stall's mechanism without implying the draw path needs restructuring.
+  - **Run 2026-07-28. Result: F11 -- `13/H3`'s cache-miss mechanism is refuted.**
+    47x the distinct glyphs moved nothing, and the outline copy is 42% of the
+    queue even at two glyphs, where any 64-entry cache must always hit. The
+    glyph-bounds attribution survives and generalizes off btop. New live
+    hypothesis: the cost scales with `DrawGlyphs` *op* count, not glyph
+    diversity.
 
 ### Phase 2 -- direction gate
 
@@ -1328,6 +1334,74 @@ repeat exactly the error those corrections caught.
 - Next action: none required; this closes the attribution. If a sprite-path
   optimization is ever wanted, the lever is fewer or larger rects reaching
   CoreGraphics, not cheaper Swift-side preparation of them.
+
+### F11 -- `13/H3`'s cache-miss mechanism is refuted: 47x the distinct glyphs changed nothing, and the outline copy happens even at two glyphs
+
+- Status: recorded. Runs the confirmation experiment `13/H3` had been waiting
+  for since doc 13 closed, and settles one of doc 13's two competing
+  explanations. Refutes the mechanism; the attribution above it survives.
+- Date and investigator: 2026-07-28, Claude (agent) with a human-driven capture.
+- Provenance: two 20-second `sample` captures, **pid 31750, launch time
+  2026-07-28 19:38:58.041 in both** -- the same process instance, therefore
+  provably the same binary, which is the strongest provenance doc 13's procedure
+  can produce. `DanTerm Dev` 0.0.84, macOS 26.5.2, captured 19:42 and 19:43.
+  Human held down-arrow in `less` for the full 20 s in each.
+- Design: two 179-column x 20000-line uncoloured text files differing in exactly
+  one property. `glyphs-low.txt` uses **2 distinct glyphs**, `glyphs-high.txt`
+  uses **95** -- straddling the 64 in
+  `TGlyphOutlineDictionaryCache<unsigned short, 64, 512>`. Both plan to 462 runs
+  / 40472 cells, so op count, cell count, run count, and geometry are identical.
+  The control holds at any pane width, since both files are full-width unstyled
+  lines and fold to one run per row whatever the column count.
+- **Prediction, recorded in commit `6e08faf` before the captures existed:** if
+  `13/H3` is right, the high-diversity arm shows a materially larger blocked
+  wait and a larger `compute_dod_` share; if the arms match, `13/H3` is refuted.
+
+  | Node (share of `CA::CG::Queue`) | low (2 glyphs) | high (95) | high/low |
+  | --- | ---: | ---: | ---: |
+  | `DrawGlyphs::compute_dod_` | 68.2% | 65.4% | 0.96x |
+  | `get_glyph_bboxes` | 62.9% | 57.0% | 0.91x |
+  | `FPFontGetGlyphIdealBounds` | 55.8% | 50.1% | 0.90x |
+  | `TFPFont::CopyGlyphPath` | 44.8% | 35.9% | 0.80x |
+  | `TGlyphOutlineDictionaryCache::Copy` | 42.3% | 33.1% | 0.78x |
+  | main-thread blocked wait / busy | 35.3% | 34.0% | 0.96x |
+
+- Observation 1: **47x the distinct glyphs produced no increase anywhere.** Every
+  node is equal or *lower* in the high-diversity arm. The prediction is not
+  merely unmet, it is contradicted in direction.
+- Observation 2, and the decisive one: **at two distinct glyphs a 64-entry cache
+  must hit essentially always, yet `TGlyphOutlineDictionaryCache::Copy` is still
+  42.3% of the queue.** The outline copy is therefore not miss-driven. It is paid
+  per `DrawGlyphs` op regardless of how few glyphs the op contains. That is a
+  different mechanism from the one `13/H3` asserted, and it could not have been
+  distinguished from a capture of a single workload.
+- Observation 3: **the glyph-bounds attribution itself survives and generalizes.**
+  `compute_dod_` is 65-68% of the queue here against `13/F1`'s 41.6% on btop, and
+  the whole chain down to the copy is intact in both arms. Doc 13's *other*
+  competing explanation -- that the outline work might be an artifact of btop's
+  box-drawing and braille inventory -- is now also refuted: this is plain ASCII
+  in `less`, no sprites involved, and the chain is stronger than it was on btop.
+- Observation 4: **the stall reproduces on a completely different workload.** The
+  blocked wait is 34-35% of main-thread busy here against `13/F10`'s 31.3% on
+  btop. It is not a btop phenomenon. (Caveat: the busy denominator here comes
+  from this file's own idle heuristic -- main-thread total minus the runloop
+  wait -- which may not match doc 13's exactly. The *comparison between arms* is
+  unaffected, since both were reduced identically.)
+- **What is now the live hypothesis:** the cost scales with the number of
+  `DrawGlyphs` ops per frame, not with the glyphs inside them. Run count is op
+  count, and `11/F8` measured real content at 5.8-66.6 cells per run -- so the
+  lever is emitting fewer, longer text runs, and it is a lever nothing in this
+  investigation has tried. This is a hypothesis, not a result: the experiment
+  that would test it holds glyph diversity fixed and varies run count, which is
+  the mirror image of the one just run.
+- Unexplained, and left unexplained deliberately: the low-diversity arm is
+  ~25% *higher* on the outline-copy nodes. Neither queue throughput (9% apart)
+  nor main-thread busy (5% apart) accounts for a 25% gap. It does not affect the
+  refutation -- the prediction was for a large increase and the observation is a
+  decrease -- but nobody should quote a mechanism for it without measuring one.
+- Uncertainty: low on the refutation. The two arms are one process instance apart
+  with a single controlled variable, and the result contradicts a
+  pre-registered prediction rather than failing to reach significance.
 
 ## Open questions and caveats
 
