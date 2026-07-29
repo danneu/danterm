@@ -1,6 +1,7 @@
 # Memory footprint
 
-Research started: 2026-07-29. **Status: LIVE.**
+Research started: 2026-07-29. **Status: CLOSED 2026-07-29.** All four phases are
+complete; see the Outcome section at the end for the result and the residue.
 
 This file takes up the reopening condition doc 12 recorded when it closed:
 *"a scrollback-depth or memory-footprint goal becomes live"*. It is now live.
@@ -529,10 +530,32 @@ baseline.
 
 ### Phase 4 -- close
 
-- [ ] Final measurement on the Phase 1 harness across the full payload matrix,
-      against the same matrix captured before any change.
-- [ ] Record what the scrollback depth became at the chosen budget, and where
-      the settled work graduated to.
+- [x] Final measurement on the Phase 1 harness across the full payload matrix,
+      against the same matrix captured before any change. **Done -- `F17`.** Six
+      payloads at 179x66 and 80x66, one process per payload. Baseline arm is
+      `8b18d71`, not the intended `bd0f1c2~1`, because the census depends on an
+      API the retention fix introduced; the caveat is stated in `F17` and the
+      deltas understate the whole.
+- [x] Record what the scrollback depth became at the chosen budget, and where
+      the settled work graduated to. **Done.** At the chosen 10 MB byte budget
+      (`D2`), depth is **~1,750-1,768 rows at 179x66** and **~3,390-3,461 at
+      80x66**, against 1,770-1,831 and 3,579-3,848 before -- essentially
+      unchanged at 179, down 3-12% at 80, for roughly half the memory either way.
+      Graduated to:
+      - **Shipped code**, five commits: `bd0f1c2` (release evicted rows),
+        `4419a6e` + `bec07b1` (charge history what a row reserves), `66fff29`
+        (56 B), `1a47166` (48 B), `c25b773` (32 B).
+      - **The instrument**, `just terminal-memory-probe` plus public
+        `Terminal.memoryCensus`, documented in
+        [agent-docs/terminal-performance.md](../../agent-docs/terminal-performance.md)
+        under "Profile memory" -- including `F6`'s finding that
+        `benchmark-memory` cannot answer a representation question and `F7`'s
+        chunked-feed requirement.
+      - **The engineering lessons**, to that same file's new "Before you shrink
+        `GridCell`" section: the malloc bucket rather than the stride decides
+        whether a shrink reaches the user (`F12`), declaration order is worth as
+        much as a field (`F15`), and a per-cell field that *changes* per mode
+        switch belongs behind an id cached on the pen (`F11`/`F15`).
 
 ## Findings log
 
@@ -1946,12 +1969,102 @@ different proposal and is not covered by this rejection.
 - No production memory target exists. This file measures and reduces; it does
   not know what "enough" is, and should not invent one.
 
+### F17 -- the end-to-end matrix: the same history, for 57% less memory
+
+- Status: recorded. Phase 4's closing measurement. Closes the file's measurement
+  ledger.
+- Date and investigator: 2026-07-29, Claude (agent).
+- Commit and worktree state: candidate `f472dcc` (clean tree). Baseline arm built
+  from a throwaway worktree at `8b18d71`, since removed.
+- Method: `TerminalMemoryProbe --payload NAME` one process per payload, per `F7`'s
+  correction -- the shared-process run reports a cumulative footprint delta and is
+  honest only for its first payload. Six payloads at both 179x66 and 80x66,
+  production 10 MB budget, both arms built `-c release` on the same machine.
+- **Baseline caveat, and it is a real limit on this finding.** The intended
+  baseline was `bd0f1c2~1`, the state before *any* change here. That is not
+  measurable: `Terminal.memoryCensus` reads `retainedCellStorageRowCount`, an API
+  that the retention fix in `bd0f1c2` introduced, so the instrument post-dates the
+  first change by construction. Backporting the probe onto `bd0f1c2~1` fails to
+  build for exactly that reason. The arm below is therefore `8b18d71` -- every
+  change in this file **except** `F4`/`D1`'s retention fix, whose own leg `F4`
+  measured separately at up to 2x the admitted rows (~22 MB at peak). So the
+  deltas here **understate** the whole. Cross-check that the arm is the right one:
+  its cell columns reproduce `F2`'s recorded matrix exactly (1,770 rows, 316,830
+  cells, 21.75 MB, 72.0 B/cell).
+- Matrix at 179x66, the canonical geometry, 10 MB budget:
+
+  | payload | rows before | rows after | cell bytes | footprint before | footprint after | footprint |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+  | empty | 66 | 66 | 0.81 -> 0.36 MB | 0.98 MB | 0.48 MB | **-51%** |
+  | full-screen | 201 | 201 | 2.47 -> 1.10 MB | 2.97 MB | 1.45 MB | **-51%** |
+  | scrollback-plain | 1,770 | 1,768 | 21.75 -> 9.66 MB | 26.13 MB | 11.31 MB | **-57%** |
+  | scrollback-unicode | 1,831 | 1,750 | 22.50 -> 9.56 MB | 26.14 MB | 10.97 MB | **-58%** |
+  | scrollback-styled | 1,815 | 1,768 | 22.31 -> 9.66 MB | 25.70 MB | 11.00 MB | **-57%** |
+  | scrollback-mixed | 1,805 | 1,762 | 22.19 -> 9.63 MB | 26.55 MB | 10.88 MB | **-59%** |
+
+- Matrix at 80x66, where `F15` found the trade inverts:
+
+  | payload | rows before | rows after | rows | footprint before | footprint after | footprint |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+  | scrollback-plain | 3,579 | 3,461 | -3% | 23.84 MB | 12.05 MB | **-49%** |
+  | scrollback-unicode | 3,848 | 3,390 | -12% | 23.95 MB | 11.23 MB | **-53%** |
+  | scrollback-styled | 3,779 | 3,461 | -8% | 25.27 MB | 11.38 MB | **-55%** |
+  | scrollback-mixed | 3,732 | 3,437 | -8% | 26.00 MB | 11.77 MB | **-55%** |
+
+- Observation 1, and it is the finding: **at 179 columns the pane holds the same
+  history it always did, for 57-59% less memory.** Depth moves -0.1% to -4.4%
+  across the four scrollback payloads while footprint falls from ~26 MB to ~11 MB.
+  This reads oddly against `F15`, which measured +62% *more* history, and both are
+  right -- `F15` compared against the immediately-prior 48-byte, `D4`-corrected
+  budget, whereas the baseline here is the original one that charged 40 bytes for
+  a 72-byte cell. It admitted ~1,770 rows by miscounting them. The corrected
+  budget admits ~1,768 by counting them honestly. The depth was never the thing
+  that changed; what changed is that it now costs what it claims to.
+- Observation 2: **the budget went from a 2.6x under-count to within ~10%.** A
+  10 MB configured budget cost 25.7-26.6 MB resident before and costs 10.9-11.3 MB
+  now, on every payload. `H1` opened this file on that multiplier; it is closed.
+- Observation 3: content still barely moves the total, reproducing `F2`
+  observation 2 at the new size. The four scrollback payloads span 0.43 MB
+  (10.88-11.31), against 0.85 MB before. Memory remains a function of the budget,
+  not of what the user ran -- which is the property `D2` relies on.
+- Observation 4: **per-row bucket rounding split by width, and this is the residue
+  the file leaves behind.** At 179 columns it fell 1,488 -> 456 B/row and total
+  rounding 2.51 -> 0.77 MB. At 80 columns it *rose*, 422 -> 551 B/row and 1.44 ->
+  1.82 MB, because `48 + 80 * 32` = 2,608 lands just past a size class. Rounding
+  is now 15% of the 80-column footprint against 6% before. This is `F15`
+  observation 4 confirmed on the full payload matrix rather than one payload.
+- Observation 5: coverage -- cell bytes as a fraction of process footprint -- fell
+  from 0.79-0.88 to 0.54-0.74. That is not a regression and should not be read as
+  one: the numerator shrank by more than half while the probe process's fixed
+  costs did not move at all, so the same absolute overhead is now a larger share
+  of a much smaller total. `F7`'s attribution (cells, plus bucket rounding, plus
+  allocator slack, plus zero retention) is unchanged in absolute terms.
+- Inference: every hypothesis this file opened about *cell* size is exhausted, and
+  the lever has moved twice. It was the cell (`H2`, `H3`, `H4`); after `F10` it
+  was the malloc bucket the row lands in; after this matrix, at 80 columns it is
+  the bucket outright. `F16` priced what remains inside the cell -- 10 of 32 bytes
+  are padding -- and observation 4 says a 4-byte step there would have to clear a
+  size class to reach the user at all.
+- Uncertainty: the retention-fix leg is excluded from every number above, per the
+  baseline caveat. The honest end-to-end figure is therefore *better* than -57%,
+  by an amount `F4` sized but this instrument cannot restate.
+
 ## Outcome
 
-Investigation in progress. **Phase 1 is complete, Phase 2's engineering half is
-shipped, and Phase 3 has taken every hypothesis it opened.** Findings F1 through
-F16 are recorded; the next free ID is **F17**. Decisions D1 through D4 are
-recorded and implemented; the next free ID is **D5**.
+**Closed.** All four phases are complete: Phase 1's harness was built and its
+attribution closed, Phase 1.5 and Phase 2 shipped, Phase 3 took every hypothesis
+it opened, and `F17` is Phase 4's closing measurement. Findings F1 through F17 are
+recorded; the next free ID is **F18**. Decisions D1 through D4 are recorded,
+implemented, and closed; the next free ID is **D5**.
+
+**The headline, from `F17`'s end-to-end matrix.** At the canonical 179x66
+geometry a pane holds **the same history it always did -- ~1,768 rows -- for
+57-59% less memory**, ~26 MB down to ~11 MB. The 10 MB budget that cost 26 MB
+resident now costs ~11 MB, closing the ~2.6x multiplier `H1` opened the file on.
+At 80x66 the trade is ~3-12% less depth for ~49-55% less memory. Those figures
+*exclude* `F4`/`D1`'s retention fix, because the probe's census depends on an API
+that fix introduced, so the true end-to-end is better than stated by an amount
+`F4` sized separately.
 
 The cell is now **32 bytes, down from 72** where this file started -- 56% of it
 gone. `F15` took the last 16 by moving `TerminalStyle` out of the cell and behind

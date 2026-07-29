@@ -359,6 +359,34 @@ to the probe binary, which owns its process.
 means widening `private` members and reverting, which is how the censuses in
 research doc 12 were taken and why none of them can be re-run.
 
+### Before you shrink `GridCell`
+
+Four rounds of this took the cell 72 -> 32 bytes (doc 15, `F10`/`F14`/`F15`).
+Three rules came out of it, and each cost a wrong measurement to learn.
+
+**A smaller cell is not a smaller row.** What the process pays is the malloc
+bucket the row's cell array lands in, not `columns * stride`. Between ~43 and 56
+bytes a 179-column row costs the *same*, so `F12`'s narrowing reached stride 48,
+was worth -26% at 80 columns, and **cost 1.8 MB at 179** -- the budget charged
+less while the allocator charged the same, so it admitted 15% more rows for
+nothing. It was implemented, measured, and reverted, then retaken unchanged once
+`D4` fixed what the budget charged. Check both widths, and check the bucket
+before predicting the win.
+
+**Field order is worth as much as a field.** Swift lays stored properties out in
+declaration order and never reorders them, so the widest-aligned member belongs
+first. In `F15` the reorder alone moved nothing (48 -> 48) and the id alone
+reached only 40; together they reached 32. Measure `MemoryLayout.stride` on the
+candidate rather than reasoning about it -- reasoning about it was wrong there.
+
+**Moving a field out of the cell can make the write path faster, not slower.**
+`F11` counted 9-23 million style writes per corpus and predicted an intern table
+would charge every one. It does not, because every cell write sources its style
+from the SGR pen: cache the id on the pen, invalidate in `didSet`, and the write
+sites store four bytes where they used to copy nineteen. Plan time fell 6-9%.
+The general form: if a field is written per cell but *changed* per mode switch,
+the indirection belongs on the thing that changes.
+
 ### `just benchmark-memory` -- the leak detector
 
 `just benchmark-memory scrollback-stream 90 15` runs the same isolated workload
