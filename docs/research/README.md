@@ -2,7 +2,7 @@
 
 ## File index and status
 
-Reviewed 2026-07-29. **Doc 1 is live; every other file is closed.**
+Reviewed 2026-07-29. **Docs 1 and 15 are live; every other file is closed.**
 Closed means the
 questions it opened have answers and nothing in it is waiting on anyone -- not
 that every idea in it was implemented. Several closed with parked backlogs; each
@@ -21,9 +21,10 @@ entry point, not a re-read of the evidence.
 | 9 | Plan/render allocation hotspots | Closed. Three changes shipped; Phase 5 parked with a measured ceiling. |
 | 10 | `Terminal.feed` hotspots | Closed. -24.31% on `terminal-feed`; remaining items are optional backlog. |
 | 11 | Render frame budget | Closed. The draw path fits the 60Hz budget; no change proposed or warranted. |
-| 12 | Cell representation | Closed. Erase leg shipped; POD cell demonstrated-and-rejected; memory half parked. |
+| 12 | Cell representation | Closed. Erase leg shipped; POD cell demonstrated-and-rejected; memory half parked. Its reopening condition was met on 2026-07-29 and taken up by doc 15. |
 | 13 | Live-app compositing | Closed. Three candidates landed; compositing stall is substantially pipeline slack. |
 | 14 | Live scroll workload profile | Closed. One trace, four candidates, two shipped: `TerminalScalars` accessor inlining (**-20% draw**, `14/D2`) and a row-scoped cell read (**-16% plan**, `14/D3`). One candidate rejected as too small to measure (`14/D1`). |
+| 15 | Memory footprint | **LIVE.** Takes up doc 12's recorded reopening condition. Owns resident bytes per cell, per row, and in aggregate. `15/F1`: 84% of the live heap is grid row storage, but the live heap is only 26% of process footprint. Phase 1 builds the terminal-state memory harness doc 12 lacked. |
 
 (There is no doc 5; numbers are never reused or renumbered.)
 

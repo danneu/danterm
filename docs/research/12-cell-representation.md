@@ -888,8 +888,15 @@ a **scrollback-depth** change -- a product decision about how much history a
 fixed byte budget buys, which nobody has asked for. Parking them is the honest
 state: the engineering is understood and the demand does not exist.
 
-**Reopening condition.** Any of: a scrollback-depth or memory-footprint goal
-becomes live (H2's `hyperlinkId` half is the best first move -- nil in 100% of
+**Reopening condition -- met 2026-07-29, taken up by
+[doc 15](15-memory-footprint.md).** A memory-footprint goal became live, and
+`15/F1` measured resident bytes for the first time: grid row storage is 84% of
+the live heap. H1, H2 and H4 continue there as `15/H3`, `15/H2` + `15/H4`, and
+`15/H5`. This file stays closed; doc 15 owns the memory work and inherits F1-F8
+rather than re-deriving them.
+
+The original condition, kept for the record. Any of: a scrollback-depth or
+memory-footprint goal becomes live (H2's `hyperlinkId` half is the best first move -- nil in 100% of
 cells across all four workloads); style-write traffic is instrumented and turns
 out to be heavy enough to change H1's sign; or the per-row allocation count in
 Phase 1's unfinished task is taken, since F8 makes row-move traffic on
