@@ -261,14 +261,16 @@ paired benchmark, and it must be run for real before any claim is made.
       draw workloads** (-19.98% `content-churn`, -20.41% `style-churn`, -12.94%
       `incremental-mixed`), plan time -6.04%/-5.65%/-3.13%, and the grid-path
       workloads unmoved as F8 predicted. -> **F9**, kept by **D2**.
-- [ ] **Hand the general lesson to a design note**: *a value type consumed as a
-      `Collection` across a SwiftPM target boundary pays witness-table dispatch
-      per element access, and SwiftPM will not specialize it.* F8 makes this the
-      third recorded instance in this repo (the marker scanner's lazy generic
-      sequence, its `scan(_:)` concreteness requirement, and now
-      `TerminalScalars`), and the first two were each rediscovered from scratch.
-      A note in `docs/design/` is what stops a fourth.
-- [ ] **Commit C2.** Not committed at the time of writing. The commit message
+- [x] **Hand the general lesson to a design note.** Done 2026-07-29:
+      [docs/design/2026-07-29-cross-module-value-dispatch.md](../design/2026-07-29-cross-module-value-dispatch.md),
+      indexed in `docs/design/index.md` and in `AGENTS.md`'s further-reading
+      list. It carries the decision, the profile signatures that distinguish
+      witness-table dispatch from value-witness traffic, and the denominator trap
+      that made F9's result look implausible. **Count corrected while writing
+      it**: `TerminalScalars` is the **second** recorded instance, not the third
+      -- the marker scanner's lazy generic sequence and its `scan(_:)`
+      concreteness requirement are two facets of one incident, not two.
+- [x] **Commit C2.** Done: `1323a6d`. The commit message
       should carry the decision-bearing values inline per
       `agent-docs/terminal-performance.md` -- mode, workload, both tree
       identities, the median symmetric estimates, the classifications -- since
@@ -714,8 +716,9 @@ paired benchmark, and it must be run for real before any claim is made.
   why this node class looks different here than it did in doc 12, and it is a
   genuinely new observation rather than a re-litigation.
 
-  It is also **the third instance of one mechanism already documented in this
-  repo**: `agent-docs/terminal-performance.md` records that handing the marker
+  It is also **the second recorded instance of one mechanism in this repo**
+  (corrected 2026-07-29 from "third", which double-counted the two facets of a
+  single incident): `agent-docs/terminal-performance.md` records that handing the marker
   scanner a lazy generic sequence "replaced String cost with type-metadata and
   unspecialized-iterator cost of the same size", because SwiftPM does not
   specialize a library's generics for another module. The observer was fixed by
@@ -995,5 +998,9 @@ was rejected as too small to measure, and a node the previous investigation had
 already declared closed turned out to be two costs wearing one set of symbol
 names.
 
-Three tasks remain open: commit C2, graduate its general lesson to a design
-note, and the `inspectedCells` optional-copy question.
+C2 is committed (`1323a6d`) and its general lesson has graduated to
+[docs/design/2026-07-29-cross-module-value-dispatch.md](../design/2026-07-29-cross-module-value-dispatch.md).
+
+**One task remains open:** the `inspectedCells` optional-copy question -- whether
+`terminal.cell` can return without copying, leaving the representation alone.
+When that resolves, this file closes.
