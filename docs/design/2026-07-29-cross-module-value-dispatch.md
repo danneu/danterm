@@ -41,6 +41,15 @@ code, and neither time did anything in the source hint at it:
 The first was rediscovered from scratch. This note exists so the second is the
 last one that has to be.
 
+It has already been used prospectively once. When `14/D3` needed a row-scoped
+read on `Terminal` for the render planner, the obvious shape -- return a row
+view and let the planner index it -- would have put a per-cell accessor across
+this same boundary, and made it fast only by promoting the private `GridCell` to
+`@usableFromInline`. The shape chosen instead (`forEachViewportCell(row:_:)`,
+one cross-module call per row with the per-cell work kept inside the module)
+avoids the mechanism rather than paying to annotate around it. That is the
+cheapest way to apply this note: at design time, not after the profile.
+
 The full investigation is
 [docs/research/14-live-scroll-workload-profile.md](../research/14-live-scroll-workload-profile.md)
 (F8, F9, D2).

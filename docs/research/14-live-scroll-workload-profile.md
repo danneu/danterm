@@ -333,15 +333,23 @@ C1, the sizing clears the threshold with margin, so the next step is to build
       `benchmark-confirm` does not classify plan time at all -- the calibrated
       plan rule exists only in `benchmark-quick`, so a plan-only change needs
       both modes. -> **F11**, kept by **D3**.
-- [ ] **Commit C3.** The message should carry the decision-bearing values
+- [x] **Commit C3.** Done: `97a594b`. The message should carry the decision-bearing values
       inline per `agent-docs/terminal-performance.md` -- mode, workloads, both
       tree identities, the median symmetric estimates, the classifications --
       since `.build/` is disposable and an artifact path alone is not a record.
 
 ### Phase 3 -- close
 
-- [ ] Record the outcome, hand anything durable to doc 9's backlog or a design
-      note, and mark the file closed.
+- [x] Record the outcome, hand anything durable to doc 9's backlog or a design
+      note, and mark the file closed. Done 2026-07-29. **This file is closed.**
+      Two changes shipped (`1323a6d`, `97a594b`), one candidate rejected on
+      measured headroom (D1), nothing parked. The durable lessons went to
+      [docs/design/2026-07-29-cross-module-value-dispatch.md](../design/2026-07-29-cross-module-value-dispatch.md)
+      (the cross-module mechanism, with the profile signatures that distinguish
+      it from value-witness traffic) and to this file's Investigation rules and
+      Outcome (the on-CPU re-sizing rule, the discount's actual scope, and the
+      plan-time calibration fact). Nothing was handed to doc 9's backlog: doc 9's
+      Phase 5 covers allocation nodes, and neither shipped change is one.
 
 ## Findings log
 
@@ -1272,7 +1280,7 @@ Already answered **no** in `13/D2`. Not re-argued here.
 
 ## Outcome
 
-Investigation in progress. Phase 1 is complete (F1-F5) and its build-configuration
+**Closed 2026-07-29.** Phase 1 is complete (F1-F5) and its build-configuration
 gate is resolved (optimized).
 
 Phase 2 has resolved its first half. The pivot from `sample` to the xctrace Time
@@ -1354,4 +1362,4 @@ classify plan time at all -- the calibrated plan rule exists only in
 `Terminal.cell(row:column:)` now has **zero** production callers, surviving as
 public inspection API for 167 test call sites (D3).
 
-Nothing is parked. **This file is closed** once C3 is committed.
+Nothing is parked. C3 is committed (`97a594b`). **This file is closed.**
