@@ -1548,7 +1548,7 @@ Stride **48 -> 32**, a 33% cut and the largest single move in this file:
 
   | workload | verdict | plan time |
   | --- | --- | --- |
-  | `terminal-feed` | **faster (-19.04%, 2 pairs)** | -- |
+  | `terminal-feed` | **faster (-19.04%, 2 pairs)** [replicated: -18.32%] | -- |
   | `scrollback-stream` | **faster (-10.58%, 4 pairs)** | -- |
   | `content-churn` | inconclusive (+0.75%) | -6.07% |
   | `style-churn` | inconclusive (-0.94%) | -8.92% |
@@ -1562,12 +1562,18 @@ Stride **48 -> 32**, a 33% cut and the largest single move in this file:
   pen invalidates a cached id and the ~30 write sites store four bytes where they
   used to copy nineteen. `F11` counted 9-23 million style writes per corpus and
   worried a table would charge each one; instead each one got cheaper.
-- Uncertainty 1: `terminal-feed`'s -19.04% rests on **2 pairs**, the minimum the
-  confirm mode reaches a verdict on. Unlike `F14`'s `incremental-mixed` reading,
-  which was recorded and not claimed because no mechanism explained it, this one
-  has one -- a 33% smaller cell and a 4-byte store replacing a 19-byte copy --
-  and its magnitude is an order of magnitude outside the +-1% band the other
-  workloads sit in. Still worth a second run before it is quoted anywhere load-bearing.
+- Uncertainty 1, **resolved 2026-07-29 -- replicated, and the original worry was
+  misstated**: `terminal-feed`'s -19.04% rests on 2 pairs, which was recorded here
+  as "the minimum the confirm mode reaches a verdict on". That is wrong about the
+  harness. `terminal-benchmark-validation.py` freezes this workload at *exactly* 2
+  pairs against a 2.50% directional threshold, calibrated from its own A/A spread,
+  and `terminal-benchmark-compare.py` refuses any other pair count -- so 2 is the
+  designed N, not a shortfall, and -19.04% is a decided verdict 7.6x outside its
+  threshold. What a second run could still buy was independence from one machine
+  state, so one was taken: `benchmark-quick baseline=32aa35d workload=terminal-feed`
+  against the same baseline, from a different candidate tree with a cold candidate
+  arm, returned **faster (-18.32%, 2 pairs)** against that mode's 4.5% threshold.
+  Two independent runs 0.7 points apart. The reading is quotable.
 - Uncertainty 2: the sweep never ran in any measured payload. The most styled
   corpus holds 193 distinct styles against a 512-entry trigger, so
   `reclaimDeadStyleEntries` is covered by tests and by construction, not by
