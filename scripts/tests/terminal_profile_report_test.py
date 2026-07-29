@@ -318,6 +318,44 @@ class WriteTests(unittest.TestCase):
             self.assertEqual(filtered["totals"]["weight"], 1)
 
 
+class EmptyInputTests(unittest.TestCase):
+    EMPTY_EXPORT = """<?xml version="1.0"?>
+<trace-query-result>
+<node xpath='//trace-toc[1]/run[1]/data[1]/table[1]'><schema name="time-profile"/></node>
+</trace-query-result>
+"""
+
+    def test_an_export_with_no_rows_fails_instead_of_writing_an_empty_report(self):
+        # Intent: a capture that yielded no samples is a failed profiling run, and
+        #   the exit status has to say so.
+        # Why it exists: recording with a non-Time-Profiler template (Allocations,
+        #   Leaks) produces a trace with no time-profile table at all, so the export
+        #   comes back empty. The report happily printed "samples: 0" and wrote a
+        #   zero-filled JSON -- a caller reading only the artifacts would take that
+        #   for a profile of an idle process rather than a capture of nothing.
+        with tempfile.TemporaryDirectory() as raw:
+            directory = pathlib.Path(raw)
+            source = directory / "time-profile.xml"
+            source.write_text(self.EMPTY_EXPORT)
+            with self.assertRaises(SystemExit) as caught:
+                REPORT.main([str(source), "--quiet"])
+            self.assertNotEqual(caught.exception.code, 0)
+            self.assertFalse((directory / "profile-report.json").exists())
+
+    def test_a_filter_matching_nothing_says_so_rather_than_reporting_zero(self):
+        # Why it exists: distinguishing "the capture is empty" from "your filter
+        #   excluded everything" is the difference between rerunning the profile
+        #   and fixing the argument.
+        with tempfile.TemporaryDirectory() as raw:
+            directory = pathlib.Path(raw)
+            source = directory / "sample.txt"
+            source.write_text(SAMPLE_TEXT)
+            with self.assertRaises(SystemExit) as caught:
+                REPORT.main([str(source), "--quiet", "--thread", "no-such-thread"])
+            self.assertIn("no-such-thread", str(caught.exception))
+            self.assertFalse((directory / "profile-report-filtered.json").exists())
+
+
 class FormatDetectionTests(unittest.TestCase):
     def test_xctrace_xml_and_sample_text_are_told_apart_by_content(self):
         # Why it exists: the runner points the report at whichever artifact the

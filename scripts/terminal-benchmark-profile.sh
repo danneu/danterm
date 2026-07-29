@@ -14,12 +14,20 @@ WORKLOAD="${2:-scrollback-stream}"
 BACKEND="${3:-swift}"
 DURATION="${4:-15}"
 TEMPLATE="${5:-Time Profiler}"
+# Fifth positional is the Instruments template for `trace` and the warmup cutoff
+# for `memory`; each mode reads only its own.
+WARMUP="${5:-15}"
 WORKLOAD="${WORKLOAD#workload=}"
 BACKEND="${BACKEND#backend=}"
 DURATION="${DURATION#seconds=}"
 TEMPLATE="${TEMPLATE#template=}"
-case "$MODE" in loop|sample|trace) ;; *) echo "Unknown profiling mode: $MODE" >&2; exit 2 ;; esac
+WARMUP="${WARMUP#warmup=}"
+case "$MODE" in loop|sample|trace|memory) ;; *) echo "Unknown profiling mode: $MODE" >&2; exit 2 ;; esac
 [[ "$DURATION" =~ ^[1-9][0-9]*$ ]] || { echo "Profiling duration must be whole seconds" >&2; exit 2; }
+if [[ "$MODE" == memory ]]; then
+    [[ "$WARMUP" =~ ^[0-9]+$ ]] || { echo "Memory warmup must be whole seconds" >&2; exit 2; }
+    (( DURATION > WARMUP )) || { echo "Profiling duration must exceed the ${WARMUP}s warmup" >&2; exit 2; }
+fi
 for command in jq nm python3; do
     command -v "$command" >/dev/null || { echo "Missing required command: $command" >&2; exit 1; }
 done
@@ -131,6 +139,15 @@ case "$MODE" in
         echo "Sample profile: $PROFILE_ROOT/sample.txt"
         python3 "$SCRIPT_DIR/terminal-profile-report.py" "$PROFILE_ROOT/sample.txt"
         ;;
+    memory)
+        for command in footprint leaks heap; do
+            command -v "$command" >/dev/null || { echo "Missing required command: $command" >&2; exit 1; }
+        done
+        printf 'terminal-memory-profile.py %s --seconds %s --warmup %s\n' \
+            "$target_pid" "$DURATION" "$WARMUP" >"$PROFILE_ROOT/profile-command.txt"
+        python3 "$SCRIPT_DIR/terminal-memory-profile.py" "$target_pid" \
+            --output "$PROFILE_ROOT" --seconds "$DURATION" --warmup "$WARMUP"
+        ;;
     trace)
         command -v xcrun >/dev/null || { echo "xcrun is unavailable; install Xcode command-line tools" >&2; exit 1; }
         printf 'xcrun xctrace record --no-prompt --template %s --attach %s --time-limit %ss --output %s\n' \
@@ -141,6 +158,16 @@ case "$MODE" in
             exit 1
         fi
         xcrun xctrace export --input "$PROFILE_ROOT/profile.trace" --toc --output "$PROFILE_ROOT/trace-toc.xml"
+        # Only the CPU templates record a time-profile table. Recording with a
+        # memory template succeeds and then exports nothing, so name the mismatch
+        # here rather than leaving an empty export to be read as an idle process.
+        if ! grep -q 'schema="time-profile"' "$PROFILE_ROOT/trace-toc.xml"; then
+            echo "Template '$TEMPLATE' recorded no time-profile table; nothing to export." >&2
+            echo "Schemas present in $PROFILE_ROOT/trace-toc.xml:" >&2
+            grep -o 'schema="[a-z0-9-]*"' "$PROFILE_ROOT/trace-toc.xml" | sort -u >&2
+            echo "For memory, use: just benchmark-memory $WORKLOAD" >&2
+            exit 1
+        fi
         # The .trace bundle opens only in Instruments and the table of contents
         # carries no samples, so export the time-profile rows themselves; that
         # table is the only artifact here a non-interactive reader can use.

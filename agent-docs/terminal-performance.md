@@ -239,6 +239,12 @@ Instruments session to read -- see the next section.
 alone, headless and without a display, isolating parse and grid cost from the
 planning and drawing that share the app's main thread.
 
+Both CPU modes take an Instruments template, but only the CPU templates record
+an exportable table. Recording with `Allocations` or `Leaks` succeeds and then
+exports nothing, so `benchmark-trace` checks the trace's schemas and fails with
+the list rather than leaving an empty report behind. For memory, use the mode
+below.
+
 Use `just benchmark-loop scrollback-stream backend=swift` when attaching another
 command-line diagnostic tool. It prints the identity JSON -- pid, workload,
 backend, executable SHA-256, Mach-O UUID, source identity -- and continues until
@@ -275,6 +281,36 @@ mostly `__workq_kernreturn` and `mach_msg2_trap`, and every thread's share
 converges on an equal slice. Those are parked threads, not cost. Filter to the
 thread you care about before reading shares. `xctrace`'s Time Profiler records
 running samples only, so its shares need no such correction.
+
+## Profile memory
+
+`just benchmark-memory scrollback-stream 90 15` runs the same isolated workload
+and polls `footprint` on an interval, writing `memory-report.json`: the whole
+footprint curve, growth from baseline to final, a least-squares bytes-per-second
+rate, and per-category growth. The third argument is the warmup, and growth is
+measured only after it -- scrollback is intentionally bounded and the caches
+intentionally fill, so baselining at launch reports the design working as a leak
+on every run. `seconds` must exceed the warmup.
+
+It also brackets the measured window with two memory graphs and leaves
+`heap --diffFrom` output in `heap-diff.txt`, which names the classes behind any
+growth. Capturing a graph suspends the target briefly; that is why there are two
+rather than one per interval, and one more reason these numbers stay diagnostic.
+
+This is deliberately not leak detection. `leaks` reports only unreachable
+allocations, and the failures this codebase actually produces -- scrollback
+retaining past its bound, a cache that never evicts, damage snapshots
+accumulating -- are all reachable from a live root. `leaks` prints zero for
+every one of them while the footprint climbs.
+
+Read the two artifacts in order, because the heap diff answers a narrower
+question than it appears to. It lists allocations present at the end that were
+not in the baseline graph, which for a workload churning through a bounded ring
+is mostly replacement, not accumulation: a flat 42-second `scrollback-stream`
+run grows 0.1 MB in footprint while its diff reports 25 MB of new
+`_ContiguousArrayStorage<GridCell>` nodes. Those are the ring's rows being
+replaced. Establish from `growthBytes` and `growthBytesPerSecond` that something
+grew, then use the diff to name it. Reading the diff first invents a leak.
 
 ## Microbenchmarks
 

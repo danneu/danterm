@@ -413,7 +413,24 @@ def main(argv=None):
 
     source_path = resolve_input(arguments.input)
     kind, samples = parse(source_path.read_text(errors="replace"))
-    samples = filter_samples(samples, threads=arguments.thread, states=arguments.state)
+    # An empty capture is a failed profiling run, not a profile of an idle
+    # process: recording with a template that has no time-profile table (any of
+    # the memory templates) exports an XML with no rows at all. Writing a
+    # zero-filled report for it would read as success to anyone downstream.
+    if not samples:
+        raise SystemExit(
+            f"No samples parsed from {source_path}. If this came from a .trace, the "
+            "recording template produced no time-profile table -- check the schemas "
+            "in trace-toc.xml."
+        )
+    filtered = filter_samples(samples, threads=arguments.thread, states=arguments.state)
+    if not filtered:
+        raise SystemExit(
+            f"No samples matched thread={arguments.thread or []} "
+            f"state={arguments.state or []} in {source_path} "
+            f"({len(samples)} samples before filtering)."
+        )
+    samples = filtered
     report = summarize(
         samples,
         top=arguments.top,

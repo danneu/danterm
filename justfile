@@ -64,6 +64,7 @@ test:
     python3 ./scripts/tests/terminal_draw_acceptance_test.py
     python3 ./scripts/tests/terminal_headless_draw_compare_test.py
     python3 ./scripts/tests/terminal_profile_report_test.py
+    python3 ./scripts/tests/terminal_memory_profile_test.py
     ./scripts/tests/test-terminal-pty_test.sh
     ./scripts/tests/shell-integration_test.sh
     ./scripts/tests/agent-notifications-live_test.py
@@ -144,6 +145,13 @@ benchmark-sample workload="scrollback-stream" seconds="15":
 # Capture and export an xctrace profile from one isolated sustained Swift workload.
 benchmark-trace workload="scrollback-stream" template="Time Profiler" seconds="30":
     ./scripts/terminal-benchmark-profile.sh trace "{{workload}}" swift "{{seconds}}" "{{template}}"
+
+# Measure sustained memory growth of one isolated Swift workload. Polls footprint
+# and brackets the measured window with memory graphs so heap can name what grew.
+# Growth is measured after the warmup, so seconds must exceed it.
+#   just benchmark-memory scrollback-stream 90 15
+benchmark-memory workload="scrollback-stream" seconds="90" warmup="15":
+    ./scripts/terminal-benchmark-profile.sh memory "{{workload}}" swift "{{seconds}}" "{{warmup}}"
 
 # Re-report an existing profile artifact as folded stacks plus JSON. Accepts a
 # profile directory, a .trace bundle, an exported time-profile XML, or a sample.txt;
