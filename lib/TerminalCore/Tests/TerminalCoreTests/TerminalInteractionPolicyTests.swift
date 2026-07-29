@@ -608,6 +608,37 @@ struct TerminalInteractionPolicyTests {
         ))
     }
 
+    @Test("printing across the content-identity wrap keeps working and drops the armed link")
+    func contentIdentityWrapDropsArmedLink() throws {
+        // Intent: output that exhausts the per-cell content-identity counter keeps printing, and
+        //   any link armed before the wrap is dropped rather than carried across it.
+        // Why it exists: doc 15's `H4` narrowed `contentIdentity` to 32 bits to take `GridCell`
+        //   from 56 bytes to 48, and the counter issues one identity per printed cell -- so 2^32
+        //   is a few minutes of maximal output, not a theoretical bound. A counter that simply
+        //   increments traps on overflow, and one that simply wraps starts reissuing identities
+        //   that an arm taken before the wrap would accept as its own.
+        // Scenario: a long-running pane prints past the counter's range while the user is holding
+        //   Cmd on a URL.
+        var terminal = try #require(Terminal(columns: 16, rows: 2))
+        terminal.feed(Array("https://a.co".utf8))
+        let link = try #require(terminal.activatableLink(at: .init(row: 0, column: 3)))
+        let armed = terminal.setArmedLink(link)
+        #expect(armed)
+
+        terminal.primeContentIdentityWrapForTesting()
+        terminal.feed(Array("\u{1B}[2;1Hx".utf8))
+
+        #expect(terminal.armedLink == nil)
+        #expect(terminal.fullHistoryText.hasSuffix("x"))
+
+        // Printing past the wrap still produces armable runs.
+        terminal.feed(Array("\u{1B}[2;1H\u{1B}[Khttps://b.co".utf8))
+        let reprinted = try #require(terminal.activatableLink(at: .init(row: 1, column: 3)))
+        let rearmed = terminal.setArmedLink(reprinted)
+        #expect(rearmed)
+        #expect(reprinted.matchesActivation(try #require(terminal.armedLink)))
+    }
+
     private func apply(_ mutation: TerminalLinkArmMutation?, to terminal: inout Terminal) {
         switch mutation {
         case .clear:

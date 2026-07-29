@@ -121,13 +121,23 @@ public struct Terminal: Equatable, Sendable {
     /// than counting up; see the invariant stated there.
     private typealias HyperlinkId = UInt16
 
+    /// Distinguishes one printed occurrence of a cell from a later reprint of the same text, so a
+    /// link armed at pointer-down can reject a run recreated before release.
+    ///
+    /// 32-bit for the same reason `HyperlinkId` is 16-bit: an `Int?` cost 8 bytes and forced
+    /// `GridCell` to 8-byte alignment, so narrowing it takes the cell from 56 bytes to 48 (doc
+    /// 15's `H4`). The price is a counter that can exhaust in minutes of maximal output --
+    /// `allocateContentIdentity` owns what happens then, and `15/F12` explains why the naive
+    /// wrap is not safe.
+    private typealias ContentIdentity = UInt32
+
     /// Keeps scalar storage and wide-cell roles together for invariant-preserving mutation.
     private struct GridCell: Equatable, Sendable {
         var kind: TerminalCellKind = .padding
         var scalars = TerminalScalars.empty
         var style = TerminalStyle()
         var hyperlinkId: HyperlinkId?
-        var contentIdentity: Int?
+        var contentIdentity: ContentIdentity?
     }
 
     /// Moves row-level wrap and semantic-prompt identity with cells during scrolling.
@@ -454,7 +464,7 @@ public struct Terminal: Equatable, Sendable {
     private var hyperlinkTargets: [HyperlinkId: TerminalHyperlink] = [:]
     private var hyperlinkPen: HyperlinkId?
     private var nextHyperlinkId: HyperlinkId = 1
-    private var nextContentIdentity = 1
+    private var nextContentIdentity: ContentIdentity = 1
     private var machineHostname: String?
     private var currentWorkingDirectory: String?
     private var titleUsesWorkingDirectory = false
@@ -1645,7 +1655,7 @@ public struct Terminal: Equatable, Sendable {
             distinctContentIdentityCount: 0
         )
         var styles: Set<StyleKey> = []
-        var identities: Set<Int> = []
+        var identities: Set<ContentIdentity> = []
 
         // The retained primary screen counts as resident: under the alternate screen the process
         // holds both grids, and a census that reported only the visible one would understate a
@@ -1718,6 +1728,13 @@ public struct Terminal: Equatable, Sendable {
     func scrollbackRowByteCost(at index: Int) -> Int? {
         guard scrollbackRows.indices.contains(index) else { return nil }
         return Self.scrollbackByteCost(of: scrollbackRows[index])
+    }
+
+    /// Drives the content-identity counter to the last value before it wraps, so a test can reach
+    /// the wrap without printing 2^32 cells. The wrap is otherwise unreachable in a test and its
+    /// consequences are not local -- see `allocateContentIdentity`.
+    mutating func primeContentIdentityWrapForTesting() {
+        nextContentIdentity = ContentIdentity.max
     }
 
     /// Creates the one-operation no-eviction oracle used to isolate eviction side effects.
@@ -2217,7 +2234,7 @@ public struct Terminal: Equatable, Sendable {
             let start = row == range.start.row ? range.start.column : 0
             let end = row == range.end.row ? range.end.column : columnCount
             for column in max(0, start)..<min(columnCount, end) {
-                identity = max(identity, stream[row].cells[column].contentIdentity ?? 0)
+                identity = max(identity, Int(stream[row].cells[column].contentIdentity ?? 0))
             }
         }
         return identity
@@ -4915,12 +4932,31 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
+    /// Issues the identity stamped on one printed cell, and owns what happens when the counter
+    /// runs out.
+    ///
+    /// One identity per printed cell means 32 bits is a few minutes of maximal output, not a bound
+    /// nobody reaches. Two things follow, and neither is free. Incrementing past the end traps.
+    /// Wrapping past it reissues identities an arm taken before the wrap would accept as its own,
+    /// which is the check `linkArmTracksRunIdentity` exists to enforce -- so the arm is dropped at
+    /// the wrap rather than left holding an identity that no longer means what it did. Zero is
+    /// skipped because `activationIdentity` reads it as "this run has no identity".
+    private mutating func allocateContentIdentity() -> ContentIdentity {
+        let identity = nextContentIdentity
+        if nextContentIdentity == ContentIdentity.max {
+            nextContentIdentity = 1
+            armedLinkState = nil
+        } else {
+            nextContentIdentity += 1
+        }
+        return identity
+    }
+
     private mutating func printNarrow(
         _ scalar: Unicode.Scalar,
         breakClass: GraphemeBreakClass
     ) {
-        let contentIdentity = nextContentIdentity
-        nextContentIdentity += 1
+        let contentIdentity = allocateContentIdentity()
         invalidateInspection(inViewportRows: cursor.row..<(cursor.row + 1))
         if isInsertMode {
             moveAndFillCells(
@@ -4950,8 +4986,7 @@ public struct Terminal: Equatable, Sendable {
         _ scalar: Unicode.Scalar,
         breakClass: GraphemeBreakClass
     ) {
-        let contentIdentity = nextContentIdentity
-        nextContentIdentity += 1
+        let contentIdentity = allocateContentIdentity()
         invalidateInspection(inViewportRows: cursor.row..<(cursor.row + 1))
         var preservesWrappedSpacer = false
         if cursor.column == columnCount - 1 {
