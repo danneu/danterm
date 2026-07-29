@@ -177,6 +177,49 @@ struct TerminalHyperlinkTests {
         expectValidGrid(terminal)
     }
 
+    @Test("links keep working after far more distinct targets than the id space holds at once")
+    func linksSurviveIdSpaceExhaustion() {
+        // Intent: a session that emits more distinct OSC 8 targets than the identifier space can
+        //   hold simultaneously still resolves later links, and never resolves one to an earlier
+        //   target's URI.
+        // Why it exists: cell-held link ids are a narrow integer (doc 15's `D3`), so the id space
+        //   is exhaustible in a way an unbounded counter's was not. Two failures become possible
+        //   the moment it narrows -- running out of ids and silently dropping every later link,
+        //   or recycling an id a live cell still points at and showing that cell the wrong URI.
+        //   Both are invisible to every other test here, which uses a handful of links.
+        // Scenario: a long-lived pane running a tool that emits a uniquely-identified link per
+        //   line -- `ls --hyperlink`, a build log, a test runner -- for hours.
+        let linkCount = 70_000
+        var terminal = Terminal(columns: 8, rows: 2)!
+
+        // Column 0 is written once and never touched again, so its link stays live for the whole
+        // run. It is the cell that catches a recycled id landing on a target something still
+        // points at -- the assertion below reads the *old* URI, not the newest one.
+        terminal.feed(osc8(uri: "https://pinned.test"))
+        terminal.feed(Array("a".utf8))
+
+        // Padded to ~512 bytes so the 256 KiB metadata cap admits only a few hundred targets at a
+        // time. Short URIs would let the table grow into the thousands between sweeps, and
+        // admission is linear in table size, which makes this test minutes long for no extra
+        // coverage -- the property under test is the *id* space, not the byte cap.
+        let padding = String(repeating: "p", count: 480)
+        for index in 0..<linkCount {
+            // Rewrite column 1 in place. Nothing scrolls, so the pinned cell above survives, and
+            // each link's only cell dies as the next one overwrites it.
+            terminal.feed(Array("\u{1B}[1;2H".utf8))
+            terminal.feed(osc8(uri: "https://h\(index).test/\(padding)"))
+            terminal.feed(Array("x".utf8))
+        }
+
+        #expect(terminal.cell(row: 0, column: 0)?.hyperlink?.uri == "https://pinned.test")
+        #expect(terminal.cell(row: 0, column: 1)?.hyperlink?.uri
+            == "https://h\(linkCount - 1).test/\(padding)")
+        // The live table must stay bounded rather than growing with the number of targets seen,
+        // which is the property that keeps a narrow id sufficient in the first place.
+        #expect(terminal.retainedHyperlinkCount < linkCount)
+        expectValidGrid(terminal)
+    }
+
     @Test("explicit links resolve by contiguous run and take precedence over detection")
     func explicitResolution() {
         var terminal = Terminal(columns: 12, rows: 2)!

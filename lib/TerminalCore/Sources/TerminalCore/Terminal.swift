@@ -113,12 +113,20 @@ public struct Terminal: Equatable, Sendable {
         }
     }
 
+    /// Indexes `hyperlinkTargets` from inside a cell. Narrow on purpose: an `Int?` here needs
+    /// 8-byte alignment, which padded `GridCell` from 56 bytes to 72 -- so the field cost 16 bytes
+    /// in every cell for a feature `15/F2` measured as unused in 100% of them. Two bytes fit in
+    /// padding `TerminalStyle` already leaves behind, and the whole 16 bytes come back (doc 15's
+    /// `D3`). The price is a finite id space, which is why `allocateHyperlinkId` recycles rather
+    /// than counting up; see the invariant stated there.
+    private typealias HyperlinkId = UInt16
+
     /// Keeps scalar storage and wide-cell roles together for invariant-preserving mutation.
     private struct GridCell: Equatable, Sendable {
         var kind: TerminalCellKind = .padding
         var scalars = TerminalScalars.empty
         var style = TerminalStyle()
-        var hyperlinkId: Int?
+        var hyperlinkId: HyperlinkId?
         var contentIdentity: Int?
     }
 
@@ -443,9 +451,9 @@ public struct Terminal: Equatable, Sendable {
     private var hasInteractionState = false
     private var viewportState = ViewportState.following
     private var damage: TerminalDamageAccumulator
-    private var hyperlinkTargets: [Int: TerminalHyperlink] = [:]
-    private var hyperlinkPen: Int?
-    private var nextHyperlinkId = 1
+    private var hyperlinkTargets: [HyperlinkId: TerminalHyperlink] = [:]
+    private var hyperlinkPen: HyperlinkId?
+    private var nextHyperlinkId: HyperlinkId = 1
     private var nextContentIdentity = 1
     private var machineHostname: String?
     private var currentWorkingDirectory: String?
@@ -1199,11 +1207,31 @@ public struct Terminal: Equatable, Sendable {
                 <= Self.maximumTerminalMetadataBytes
         else { return }
 
-        let id = nextHyperlinkId
+        guard let id = allocateHyperlinkId(avoiding: candidateTargets) else { return }
         candidateTargets[id] = target
         hyperlinkTargets = candidateTargets
         hyperlinkPen = id
-        nextHyperlinkId += 1
+    }
+
+    /// Issues an id no cell can already be pointing at, so a finite id space can be recycled.
+    ///
+    /// Rests on one invariant: **every id held by a cell is a key of `hyperlinkTargets`**. Targets
+    /// are only ever dropped by `filter { live.contains($0.key) }`, and `liveHyperlinkIds` walks
+    /// scrollback, the active grid, the inactive primary screen, and the pen -- which is every
+    /// place a cell lives. So an id absent from the table is absent from the grid, and reusing it
+    /// cannot resurrect a stale link on a cell that outlived its target.
+    ///
+    /// Scanning from a rotating cursor rather than from zero keeps this amortized O(1) against a
+    /// table that admission already walks linearly. Returning nil when the space is full is the
+    /// same refusal the byte cap above performs, and reaches the same caller path.
+    private mutating func allocateHyperlinkId(
+        avoiding targets: [HyperlinkId: TerminalHyperlink]
+    ) -> HyperlinkId? {
+        guard targets.count <= Int(HyperlinkId.max) else { return nil }
+        var candidate = nextHyperlinkId
+        while targets[candidate] != nil { candidate &+= 1 }
+        nextHyperlinkId = candidate &+ 1
+        return candidate
     }
 
     private func osc8ExplicitId(in params: String) -> String? {
@@ -1220,9 +1248,9 @@ public struct Terminal: Equatable, Sendable {
         target.uri.utf8.count + (target.explicitId?.utf8.count ?? 0)
     }
 
-    private func liveHyperlinkIds() -> Set<Int> {
-        var live = Set<Int>()
-        func collect(_ rows: [GridRow], into live: inout Set<Int>) {
+    private func liveHyperlinkIds() -> Set<HyperlinkId> {
+        var live = Set<HyperlinkId>()
+        func collect(_ rows: [GridRow], into live: inout Set<HyperlinkId>) {
             for row in rows {
                 for cell in row.cells {
                     if let id = cell.hyperlinkId { live.insert(id) }

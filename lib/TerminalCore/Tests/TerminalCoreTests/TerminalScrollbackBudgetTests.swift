@@ -12,13 +12,13 @@ struct TerminalScrollbackBudgetTests {
         // Scenario: canonical blank, ASCII, wide, spacer, and emoji rows enter history.
         let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}"
         let fixtures: [(columns: Int, text: String, expected: Int)] = [
-            (4, "", 48 + 4 * 72),
+            (4, "", 48 + 4 * 56),
             // Identical to the blank row above, and correctly so: an ASCII cell stores its one
             // scalar inline, so it costs exactly what an empty cell costs.
-            (4, "ABCD", 48 + 4 * 72),
-            (2, "\u{754C}", 48 + 2 * 72),
+            (4, "ABCD", 48 + 4 * 56),
+            (2, "\u{754C}", 48 + 2 * 56),
             // The only shape that costs more: a five-scalar cluster spills to its own allocation.
-            (2, family, 48 + 2 * 72 + 32 + 5 * 4),
+            (2, family, 48 + 2 * 56 + 32 + 5 * 4),
         ]
 
         for fixture in fixtures {
@@ -35,7 +35,7 @@ struct TerminalScrollbackBudgetTests {
         spacer.moveCursor(row: 0, column: 2)
         spacer.feed(Array("\u{754C}".utf8))
         #expect(spacer.scrollbackRow(at: 0)?.cells.last?.kind == .spacerHead)
-        #expect(spacer.scrollbackRowByteCost(at: 0) == 48 + 3 * 72)
+        #expect(spacer.scrollbackRowByteCost(at: 0) == 48 + 3 * 56)
 
         let production = try #require(Terminal(columns: 4, rows: 2))
         let overridden = try #require(Terminal(
