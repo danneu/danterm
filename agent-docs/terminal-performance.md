@@ -379,6 +379,19 @@ first. In `F15` the reorder alone moved nothing (48 -> 48) and the id alone
 reached only 40; together they reached 32. Measure `MemoryLayout.stride` on the
 candidate rather than reasoning about it -- reasoning about it was wrong there.
 
+**The stride is also the cache-line alignment, and 32 divides 64.** This is the
+one that stopped the series. Doc 16 reached stride 24 with zero interior padding
+-- worth +19% history at 179 columns and +49% at 80, with the malloc bucket
+moving at *both* widths, which no earlier shrink managed -- and it was reverted
+because `incremental-mixed` came back `slower` in two independent confirm runs
+(+1.95%, +3.39%). At stride 32 a 64-byte line holds exactly two cells and every
+cell is line-aligned; at 24 they straddle, so a per-cell read that touched one
+line sometimes touches two. The sign splits by access pattern, not by workload:
+bulk sequential work (`scrollback-stream`, `terminal-feed`) got *faster* from the
+smaller working set while scattered draw reads got slower. Treat 32 as a resting
+point. A candidate stride that does not divide 64 needs the paired benchmark
+before anything else, and 20 is no better than 24 on this axis.
+
 **Moving a field out of the cell can make the write path faster, not slower.**
 `F11` counted 9-23 million style writes per corpus and predicted an intern table
 would charge every one. It does not, because every cell write sources its style
