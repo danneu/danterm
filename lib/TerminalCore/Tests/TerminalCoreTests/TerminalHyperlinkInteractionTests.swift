@@ -120,7 +120,7 @@ struct TerminalHyperlinkInteractionTests {
 
     @Test("scrollback eviction drops a hover rather than attaching it to unrelated text")
     func evictionClearsHover() throws {
-        var terminal = try #require(Terminal(columns: 16, rows: 2, scrollbackBudgetBytes: 200))
+        var terminal = try #require(Terminal(columns: 16, rows: 2, scrollbackBudgetBytes: historyRowCost(columns: 16) - 1))
         terminal.feed(Array("https://a.co\r\nnext".utf8))
         let link = try #require(terminal.activatableLink(at: .init(row: 0, column: 2)))
         let admitted = terminal.setHoveredLink(link)

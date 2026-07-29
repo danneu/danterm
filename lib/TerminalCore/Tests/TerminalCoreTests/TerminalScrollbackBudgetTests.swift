@@ -12,10 +12,13 @@ struct TerminalScrollbackBudgetTests {
         // Scenario: canonical blank, ASCII, wide, spacer, and emoji rows enter history.
         let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}"
         let fixtures: [(columns: Int, text: String, expected: Int)] = [
-            (4, "", 16 + 4 * 32),
-            (4, "ABCD", 16 + 4 * 32 + 4 * 8),
-            (2, "\u{754C}", 16 + 2 * 32 + 8),
-            (2, family, 16 + 2 * 32 + 5 * 8),
+            (4, "", 48 + 4 * 72),
+            // Identical to the blank row above, and correctly so: an ASCII cell stores its one
+            // scalar inline, so it costs exactly what an empty cell costs.
+            (4, "ABCD", 48 + 4 * 72),
+            (2, "\u{754C}", 48 + 2 * 72),
+            // The only shape that costs more: a five-scalar cluster spills to its own allocation.
+            (2, family, 48 + 2 * 72 + 32 + 5 * 4),
         ]
 
         for fixture in fixtures {
@@ -32,7 +35,7 @@ struct TerminalScrollbackBudgetTests {
         spacer.moveCursor(row: 0, column: 2)
         spacer.feed(Array("\u{754C}".utf8))
         #expect(spacer.scrollbackRow(at: 0)?.cells.last?.kind == .spacerHead)
-        #expect(spacer.scrollbackRowByteCost(at: 0) == 16 + 3 * 32)
+        #expect(spacer.scrollbackRowByteCost(at: 0) == 48 + 3 * 72)
 
         let production = try #require(Terminal(columns: 4, rows: 2))
         let overridden = try #require(Terminal(
@@ -48,7 +51,7 @@ struct TerminalScrollbackBudgetTests {
         // Intent: prove the strict-over trigger and minimal oldest-first batch removal.
         // Why it exists: an off-by-one would discard history at the documented boundary.
         // Scenario: two rows fill a tiny budget before one push and one shrink overshoot it.
-        let rowCost = 16 + 2 * 32 + 8
+        let rowCost = historyRowCost(columns: 2)
         var terminal = try #require(Terminal(
             columns: 2,
             rows: 1,
@@ -84,7 +87,7 @@ struct TerminalScrollbackBudgetTests {
         // Intent: derive truncation from the last removed row without editing retained cells.
         // Why it exists: only the deleted predecessor records whether the head is mid-line.
         // Scenario: soft, hard, spacer/wide, and over-budget cluster cuts cross the seam.
-        let oneASCII = 16 + 2 * 32 + 2 * 8
+        let oneASCII = historyRowCost(columns: 2)
         var soft = try #require(Terminal(
             columns: 2,
             rows: 1,
@@ -104,7 +107,7 @@ struct TerminalScrollbackBudgetTests {
         var spacer = try #require(Terminal(
             columns: 3,
             rows: 1,
-            scrollbackBudgetBytes: 16 + 3 * 32 + 8
+            scrollbackBudgetBytes: historyRowCost(columns: 3)
         ))
         spacer.moveCursor(row: 0, column: 2)
         spacer.feed(Array("\u{754C}ABCD".utf8))
@@ -114,7 +117,7 @@ struct TerminalScrollbackBudgetTests {
         var giant = try #require(Terminal(
             columns: 2,
             rows: 1,
-            scrollbackBudgetBytes: 100
+            scrollbackBudgetBytes: historyRowCost(columns: 2)
         ))
         giant.feed(Array((family + "Z").utf8))
         #expect(giant.scrollbackRowCount == 0)
@@ -132,7 +135,7 @@ struct TerminalScrollbackBudgetTests {
         var terminal = try #require(Terminal(
             columns: 2,
             rows: 1,
-            scrollbackBudgetBytes: 96
+            scrollbackBudgetBytes: historyRowCost(columns: 2)
         ))
         terminal.feed(Array("ABCDE".utf8))
         #expect(terminal.isHistoryHeadTruncated)
@@ -154,7 +157,7 @@ struct TerminalScrollbackBudgetTests {
         // Intent: enforce after height displacement and width reflow at the new row cost.
         // Why it exists: both paths can exceed the budget without a parser-driven scroll.
         // Scenario: a pane shrinks, narrows, regrows, and reflows an already-truncated head.
-        let oneCellRowCost = 16 + 2 * 32 + 8
+        let oneCellRowCost = historyRowCost(columns: 2)
         var height = try #require(Terminal(
             columns: 2,
             rows: 4,
@@ -168,14 +171,14 @@ struct TerminalScrollbackBudgetTests {
         var width = try #require(Terminal(
             columns: 4,
             rows: 1,
-            scrollbackBudgetBytes: 352
+            scrollbackBudgetBytes: historyRowCost(columns: 4) * 2
         ))
         width.feed(Array("ABCDEFGHI".utf8))
-        #expect(width.scrollbackByteCount == 352)
+        #expect(width.scrollbackByteCount == historyRowCost(columns: 4) * 2)
         let before = width.primaryHistoryText
 
         width.resize(columns: 2, rows: 1)
-        #expect(width.scrollbackByteCount <= 352)
+        #expect(width.scrollbackByteCount <= historyRowCost(columns: 4) * 2)
         #expect(width.scrollbackRowCount == 3)
         #expect(before.hasSuffix(width.primaryHistoryText))
         #expect(width.isHistoryHeadTruncated)
@@ -189,7 +192,7 @@ struct TerminalScrollbackBudgetTests {
         var truncated = try #require(Terminal(
             columns: 2,
             rows: 1,
-            scrollbackBudgetBytes: 192
+            scrollbackBudgetBytes: historyRowCost(columns: 2) * 2
         ))
         truncated.feed(Array("ABCDEFG".utf8))
         #expect(truncated.isHistoryHeadTruncated)
@@ -210,7 +213,7 @@ struct TerminalScrollbackBudgetTests {
             var terminal = try #require(Terminal(
                 columns: 4,
                 rows: 1,
-                scrollbackBudgetBytes: 352
+                scrollbackBudgetBytes: historyRowCost(columns: 4) * 2
             ))
             terminal.feed(Array("ABCDEFGHI".utf8))
             if entersAlternateScreen {
@@ -234,7 +237,7 @@ struct TerminalScrollbackBudgetTests {
         var active = try #require(Terminal(
             columns: 4,
             rows: 1,
-            scrollbackBudgetBytes: 352
+            scrollbackBudgetBytes: historyRowCost(columns: 4) * 2
         ))
         active.feed(Array("ABCDEFGHI".utf8))
         var alternate = active
@@ -285,9 +288,9 @@ struct TerminalScrollbackBudgetTests {
         ]
 
         let setup: [(columns: Int, rows: Int, bytes: String, budget: Int)] = [
-            (2, 1, "A\r\n", 88),
-            (2, 4, "A\r\nB\r\nC\r\nDE", 176),
-            (4, 1, "ABCDEFGHI", 352),
+            (2, 1, "A\r\n", historyRowCost(columns: 2)),
+            (2, 4, "A\r\nB\r\nC\r\nDE", historyRowCost(columns: 2) * 2),
+            (4, 1, "ABCDEFGHI", historyRowCost(columns: 4) * 2),
         ]
 
         for index in paths.indices {
@@ -319,7 +322,7 @@ struct TerminalScrollbackBudgetTests {
         var cluster = try #require(Terminal(
             columns: 2,
             rows: 1,
-            scrollbackBudgetBytes: 96
+            scrollbackBudgetBytes: historyRowCost(columns: 2)
         ))
         cluster.feed(Array("ABCD".utf8))
         var clusterOracle = cluster.withUnlimitedScrollbackForTesting()
@@ -343,7 +346,7 @@ struct TerminalScrollbackBudgetTests {
             var bounded = try #require(Terminal(
                 columns: 5,
                 rows: 2,
-                scrollbackBudgetBytes: 600
+                scrollbackBudgetBytes: historyRowCost(columns: 5) * 5 / 2
             ))
             var actions: [Action] = []
 
@@ -396,7 +399,7 @@ struct TerminalScrollbackBudgetTests {
                         "seed \(seed), action \(actions.count), script \(actions)"
                     )
                 }
-                #expect(bounded.scrollbackByteCount <= 600)
+                #expect(bounded.scrollbackByteCount <= historyRowCost(columns: 5) * 5 / 2)
                 #expect(bounded.scrollbackByteCount == bounded.recomputedScrollbackByteCount)
                 expectValidGrid(bounded)
             }
@@ -404,7 +407,7 @@ struct TerminalScrollbackBudgetTests {
             var bytewise = try #require(Terminal(
                 columns: 5,
                 rows: 2,
-                scrollbackBudgetBytes: 600
+                scrollbackBudgetBytes: historyRowCost(columns: 5) * 5 / 2
             ))
             for action in actions {
                 apply(action, to: &bytewise, bytewise: true)
@@ -419,7 +422,7 @@ struct TerminalScrollbackBudgetTests {
         // Why it exists: tiny test budgets cannot catch an omitted or incorrect public default.
         // Scenario: sustained two-column output crosses 10 MiB and retains the newest row.
         let budget = 10_485_760
-        let rowCost = 16 + 2 * 32 + 2 * 8
+        let rowCost = historyRowCost(columns: 2)
         let rowCount = budget / rowCost + 2
         var bytes: [UInt8] = []
         bytes.reserveCapacity(rowCount * 4)
@@ -477,5 +480,30 @@ struct TerminalScrollbackBudgetTests {
         case let .resize(columns, rows):
             terminal.resize(columns: columns, rows: rows)
         }
+    }
+
+    @Test("history holds no more real memory than the budget it was given")
+    func historyRespectsItsBudgetInRealBytes() throws {
+        // Intent: after sustained output, the cell storage history actually holds fits inside the
+        //   byte budget the terminal was configured with.
+        // Why it exists: the cost model charged 40 bytes for an ordinary cell whose real cost is a
+        //   72-byte stride, so a 10 MB budget admitted ~22 MB of scrollback -- a user who asks for
+        //   10 MB of history got more than twice that (doc 15's H1, confirmed in magnitude by
+        //   `15/F2`). Every other test here checks the model against itself and so could not see
+        //   it; this one checks the model against what the grid is really holding.
+        // Scenario: any long-running session that has filled its history.
+        let columns = 179
+        var terminal = try #require(Terminal(columns: columns, rows: 66))
+        for line in 0..<20_000 {
+            terminal.feed(Array("DANTERM-BUDGET-\(line) sustained plain-text output payload\r\n".utf8))
+        }
+
+        let census = terminal.memoryCensus
+        // Rows are full width regardless of the text on them, so history's true cell cost is
+        // rows x columns x stride. Deliberately measured from the census rather than from
+        // `scrollbackByteCount`, which is the very thing under test.
+        let historyBytes = census.scrollbackRowCount * columns * census.cellStrideBytes
+        #expect(census.scrollbackRowCount > 0)
+        #expect(historyBytes <= Terminal.productionScrollbackBudgetBytes)
     }
 }

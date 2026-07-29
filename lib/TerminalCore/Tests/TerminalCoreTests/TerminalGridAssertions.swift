@@ -151,3 +151,16 @@ private func expectValidRow(
         }
     }
 }
+
+/// Bytes one full-width history row costs in the terminal's own byte accounting.
+///
+/// Test budgets are written as multiples of this rather than as magic numbers, so the cost model
+/// lives in one place. Correcting it (doc 15's `H1`, which moved an ordinary cell from a charged
+/// 40 bytes to its true 72-byte stride) otherwise means reverse-engineering the intended row count
+/// out of a dozen unrelated literals scattered across suites.
+///
+/// Blank and single-scalar cells cost the same -- only a multi-scalar cluster adds a spill
+/// allocation, so `spilledClusterScalars` lists the scalar count of each such cluster.
+func historyRowCost(columns: Int, spilledClusterScalars: [Int] = []) -> Int {
+    48 + columns * 72 + spilledClusterScalars.reduce(0) { $0 + 32 + $1 * 4 }
+}

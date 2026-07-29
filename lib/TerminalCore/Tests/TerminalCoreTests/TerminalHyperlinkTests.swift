@@ -161,7 +161,9 @@ struct TerminalHyperlinkTests {
 
     @Test("link identity survives wide cells, soft wraps, reflow, scrollback, and eviction")
     func identityCarry() {
-        var terminal = Terminal(columns: 5, rows: 2, scrollbackBudgetBytes: 400)!
+        // Sized at the *widest* geometry this test reaches (it resizes 5 -> 3 -> 6), because the
+        // budget is denominated in bytes: a budget that holds a row at 5 columns holds none at 6.
+        var terminal = Terminal(columns: 5, rows: 2, scrollbackBudgetBytes: historyRowCost(columns: 6) * 2)!
         terminal.feed(osc8(params: "id=wide", uri: "https://wide.test"))
         terminal.feed(Array("abc界z\nnext\nlast".utf8))
         terminal.resize(columns: 3, rows: 2)

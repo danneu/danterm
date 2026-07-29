@@ -51,7 +51,7 @@ struct TerminalHistoryGenerationTests {
         try expectGenerationAdvances(&lineFeed) { $0.feed(Array("\r\n".utf8)) }
 
         // Funnel 4: `enforceScrollbackBudget` eviction, which drops the history head.
-        var eviction = try makeScrolledBackTerminal(scrollbackBudgetBytes: 352)
+        var eviction = try makeScrolledBackTerminal(scrollbackBudgetBytes: historyRowCost(columns: 8))
         #expect(eviction.primaryHistoryText.contains("second"))
         try expectGenerationAdvances(&eviction) { $0.feed(Array("evict me\r\n".utf8)) }
         #expect(eviction.primaryHistoryText.contains("second") == false)

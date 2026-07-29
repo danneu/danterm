@@ -2937,10 +2937,33 @@ public struct Terminal: Equatable, Sendable {
         ))
     }
 
+    /// Bytes a `[GridCell]` array header costs on top of its elements. Not derived from
+    /// `MemoryLayout`, which describes the elements rather than the buffer holding them.
+    static let arrayStorageHeaderBytes = 32
+
+    /// What history really costs, so the byte budget means what it says.
+    ///
+    /// Every term is the true size of something the row owns: its slot in the buffer, the header
+    /// of its cell array, the cells themselves at their **stride** (what a cell costs *in an
+    /// array*, the only way cells are stored), and one spill allocation per multi-scalar cell.
+    ///
+    /// The previous model charged `16 + cells * (32 + 8 * scalars)` -- 40 bytes for an ordinary
+    /// single-scalar cell against a true stride of 72. It therefore admitted ~2.2x the history it
+    /// promised: a 10 MB budget held ~22 MB (doc 15's `H1`, measured in `15/F2`).
+    ///
+    /// Deliberately *not* modelled: malloc bucket rounding, which `15/F7` measured at a further
+    /// ~11.5% (a 12,888-byte row lands in a 14,336-byte bucket at 179 columns). Bucket size classes
+    /// are an allocator implementation detail that varies by platform and by request size, and this
+    /// model has to be deterministic and portable -- the tests pin it to literals for exactly that
+    /// reason. So the budget still under-charges, but by ~11% rather than by ~120%.
     private static func scrollbackByteCost(of row: GridRow) -> Int {
-        16 + row.cells.reduce(0) { total, cell in
-            total + 32 + 8 * cell.scalars.count
+        var total = MemoryLayout<GridRow>.stride
+            + arrayStorageHeaderBytes
+            + row.cells.count * MemoryLayout<GridCell>.stride
+        for cell in row.cells where cell.scalars.count > 1 {
+            total += arrayStorageHeaderBytes + cell.scalars.count * MemoryLayout<Unicode.Scalar>.stride
         }
+        return total
     }
 
     private mutating func appendToScrollback<S: Sequence>(_ newRows: S)

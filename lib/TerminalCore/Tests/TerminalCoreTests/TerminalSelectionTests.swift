@@ -187,7 +187,7 @@ struct TerminalSelectionTests {
 
     @Test("eviction clamps selection and clears a truncated active match")
     func evictionMaintenance() throws {
-        let rowCost = 16 + 2 * 32 + 8
+        let rowCost = historyRowCost(columns: 2)
         var terminal = try #require(Terminal(
             columns: 2,
             rows: 1,
@@ -217,7 +217,7 @@ struct TerminalSelectionTests {
 
     @Test("whole eviction clears while reflow eviction clamps after attachment")
     func wholeAndReflowEviction() throws {
-        let rowCost = 16 + 2 * 32 + 8
+        let rowCost = historyRowCost(columns: 2)
         var whole = try #require(Terminal(
             columns: 2,
             rows: 1,
@@ -234,7 +234,7 @@ struct TerminalSelectionTests {
         var reflow = try #require(Terminal(
             columns: 4,
             rows: 1,
-            scrollbackBudgetBytes: 352
+            scrollbackBudgetBytes: historyRowCost(columns: 4) * 2
         ))
         reflow.feed(Array("ABCDEFGHI".utf8))
         reflow.setSelection(
@@ -284,7 +284,7 @@ struct TerminalSelectionTests {
         // Why it exists: pins whole-stream extent (not the viewport), computed inside the
         //   terminal value, the contract the Cmd-A plumbing relies on to copy scrollback.
         // Scenario: output has scrolled past one screen, evicting early rows into scrollback.
-        let rowCost = 16 + 2 * 32 + 8
+        let rowCost = historyRowCost(columns: 2)
         var terminal = try #require(Terminal(
             columns: 2,
             rows: 1,
