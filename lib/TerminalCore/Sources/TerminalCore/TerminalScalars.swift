@@ -16,19 +16,34 @@
 //
 // Belongs here rather than beside `TerminalCell` because both the terminal grid and the
 // render plan depend on it, and neither owns it.
+//
+// Why the accessors are inlinable. This type lives in `TerminalCore`, but its hottest
+// consumers -- `TerminalRenderPlanning`, `TerminalRenderExecution` -- are separate SwiftPM
+// targets, and SwiftPM does not specialize a library's generics for another module. Left
+// unannotated, every `endIndex` and `subscript` from the render path is an opaque
+// cross-module call and the `RandomAccessCollection` conformance is consumed through
+// witness tables, which a profile measured at ~5% of main-thread on-CPU time. `@inlinable`
+// on the collection surface is what lets a render-side caller see the `Storage` switch,
+// and it is the only reason `Storage` is `@usableFromInline` rather than `private`. The
+// encapsulation the `private` was protecting is unaffected: no other module can name
+// `Storage` either way.
 
 /// Cell scalar content that avoids the heap for the empty and single-scalar cases the
 /// grid is overwhelmingly made of, while still holding arbitrary grapheme clusters.
 public struct TerminalScalars: Sendable {
-    /// Mirrors the three shapes a cell payload actually takes. Private so that the case
-    /// distinction can never leak into behavior callers might come to depend on.
-    private enum Storage: Sendable {
+    /// Mirrors the three shapes a cell payload actually takes. `@usableFromInline` rather
+    /// than `private` only so the accessors below can be `@inlinable`; the case
+    /// distinction still cannot leak into behavior, because no other module can name this
+    /// type. See the "Why the accessors are inlinable" note above.
+    @usableFromInline
+    enum Storage: Sendable {
         case empty
         case single(Unicode.Scalar)
         case spill([Unicode.Scalar])
     }
 
-    private var storage: Storage
+    @usableFromInline
+    var storage: Storage
 
     /// An empty payload, which is what padding and never-written cells carry.
     public static let empty = TerminalScalars()
@@ -82,8 +97,10 @@ extension TerminalScalars: RandomAccessCollection {
     public typealias Index = Int
     public typealias Element = Unicode.Scalar
 
+    @inlinable
     public var startIndex: Int { 0 }
 
+    @inlinable
     public var endIndex: Int {
         switch storage {
         case .empty: 0
@@ -92,6 +109,7 @@ extension TerminalScalars: RandomAccessCollection {
         }
     }
 
+    @inlinable
     public subscript(position: Int) -> Unicode.Scalar {
         switch storage {
         case .empty:
@@ -103,6 +121,31 @@ extension TerminalScalars: RandomAccessCollection {
             return scalars[position]
         }
     }
+}
+
+// Index arithmetic spelled out rather than inherited. The stdlib's defaults for an `Int`
+// index are already correct, but they reach this type through its conformance witnesses,
+// which another module cannot inline or specialize -- `distance(from:to:)` and
+// `underestimatedCount` both showed up as witness-table calls on the render path. These
+// bodies are the defaults, made inlinable.
+extension TerminalScalars {
+    @inlinable
+    public var count: Int { endIndex }
+
+    @inlinable
+    public var underestimatedCount: Int { endIndex }
+
+    @inlinable
+    public func index(after i: Int) -> Int { i + 1 }
+
+    @inlinable
+    public func index(before i: Int) -> Int { i - 1 }
+
+    @inlinable
+    public func index(_ i: Int, offsetBy distance: Int) -> Int { i + distance }
+
+    @inlinable
+    public func distance(from start: Int, to end: Int) -> Int { end - start }
 }
 
 extension TerminalScalars: Equatable {

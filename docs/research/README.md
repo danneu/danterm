@@ -2,7 +2,8 @@
 
 ## File index and status
 
-Reviewed 2026-07-28. **Every file except doc 1 is closed.** Closed means the
+Reviewed 2026-07-28. **Docs 1 and 14 are live; every other file is closed.**
+Closed means the
 questions it opened have answers and nothing in it is waiting on anyone -- not
 that every idea in it was implemented. Several closed with parked backlogs; each
 one records its own reopening condition, and those conditions are the right
@@ -22,6 +23,7 @@ entry point, not a re-read of the evidence.
 | 11 | Render frame budget | Closed. The draw path fits the 60Hz budget; no change proposed or warranted. |
 | 12 | Cell representation | Closed. Erase leg shipped; POD cell demonstrated-and-rejected; memory half parked. |
 | 13 | Live-app compositing | Closed. Three candidates landed; compositing stall is substantially pipeline slack. |
+| 14 | Live scroll workload profile | **LIVE.** Fifth live capture, on a full-viewport `less` scroll rather than btop. Phase 1 attribution done. Its first candidate was rejected by an on-CPU trace (`14/D1`); a second shipped -- `TerminalScalars` accessor inlining, **-20% draw on two workloads** (`14/D2`). Open: commit, a design note, and the `inspectedCells` optionals. |
 
 (There is no doc 5; numbers are never reused or renumbered.)
 
@@ -31,7 +33,14 @@ trigger, not just a profile share. And `8/D2` moved damage-*drawing*
 comparisons off the GUI benchmark onto `just benchmark-headless-draw`; damage
 *generation* stays on a degraded `benchmark-quick`. Read
 [docs/design/2026-07-27-damage-render-benchmark-routing.md](../design/2026-07-27-damage-render-benchmark-routing.md)
-before measuring anything.
+before measuring anything. A third: **the plan/draw ratio is workload-shaped and
+no published ratio generalizes** -- doc 13's four captures are btop, doc 14's is
+a full-viewport scroll, and they disagree by 2x in both directions (`14/F1`).
+And a fourth, which is about method: **re-size any `sample`-derived hotspot on an
+on-CPU instrument before spending a paired benchmark on it.** `just
+benchmark-trace` costs one build and one 30 s run; in `14/F6` it deflated a node
+by 2.5x and killed the candidate built on it (`14/D1`). `sample` counts blocked
+threads, so it inflates anything near allocation, ARC, or the kernel.
 
 A research file is a scratchpad for a single investigation or strategy area.
 It is not an ADR and not a plan: design decisions that are settled graduate to
