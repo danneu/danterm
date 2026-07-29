@@ -199,6 +199,13 @@ the most invasive of the cheap options, and `12/F3`'s uncertainty is live: the
 census counted *resident* styles, not style *writes*, and write traffic is what
 a refcounted table would charge for. Measure write traffic before committing.
 
+**`F11` measured it, and it re-specifies this hypothesis.** Writes are 9-23
+million per corpus against 1-5 distinct values, so the refcount is the whole
+problem and the lookup is nothing: `H3` should sweep a live set the way
+`hyperlinkTargets` already does, and charge zero per cell write. Re-sized against
+the post-`D3` cell it is worth 16 bytes (stride 56 -> 40), still the largest
+single win available, though malloc bucket placement returns some of it.
+
 ### H4 -- `contentIdentity` should not be in the cell at all
 
 Continues `12/H2`'s second half, but proposes a different answer than doc 12
@@ -448,9 +455,15 @@ baseline.
       overhead 1,487 -> 255 bytes, `scrollback-stream` **18-19% faster** across two
       runs. At a fixed budget the win is spent on history (+26% rows), not on
       memory.
-- [ ] Instrument style **write** traffic before H3 -- `12/F3`'s stated
+- [x] Instrument style **write** traffic before H3 -- `12/F3`'s stated
       uncertainty, and the input that decides whether a refcounted dedup table
       pays. Record in a finding; do not implement H3 first.
+      **Done -- `F11`. A refcounted table does not pay; a swept one does.** Stores
+      run 9-23 million per corpus while distinct values run 1-5, so the read path
+      is free and the *store* path is where a refcount would charge. `H3` should
+      reuse the live-set sweep `hyperlinkTargets` already uses. Worth 16 bytes
+      (stride 56 -> 40), the largest win left, but the bucket cuts against it this
+      time: -28.6% stride buys only ~-20% resident.
 - [ ] Gate: compare H3 and H6 against Phase 1 evidence and pick one, or
       establish that they compose. Record in D2.
 
@@ -1099,6 +1112,99 @@ fresh 16-byte slot instead. Measured across five variants:
     stride; re-measure per change.
 - Next action: instrument style **write** traffic before `H3`, per Phase 3.
 
+### F11 -- style writes outnumber style *values* by six orders of magnitude, so `H3` should not refcount
+
+- Status: recorded. Answers `12/F3`'s stated uncertainty and unblocks Phase 3's
+  `H3`/`H6` gate. Does **not** implement `H3`.
+- Date and investigator: 2026-07-29, Claude (agent).
+- Commit and worktree state: `d4ad198`, clean.
+- Instrument: scratch counters compiled into `GridCell` (`style` made a computed
+  property over private storage, so every construction *and* every mutation is
+  counted) and into the `currentStyle` pen, driven headlessly at 179x66 over the
+  four committed benchmark corpora expanded from
+  `benchmarks/fixtures/terminal-app.json`. Reverted after measurement; nothing
+  from it is in the tree. Layout and bucket figures are `MemoryLayout` on replica
+  cells plus `malloc_good_size`, the same method `F10` used.
+
+**The question `12/F3` could not answer was write traffic, and the answer is that
+writes are enormous and values are trivial:**
+
+  | corpus | cell style stores | value switches | pen changes | distinct styles |
+  | --- | ---: | ---: | ---: | ---: |
+  | `scrollback-stream` (25K lines) | **8,966,786** | 1 | 0 | 1 |
+  | `unicode-wrapping` (9K lines) | **5,580,991** | 1 | 0 | 1 |
+  | `incremental-screen-updates` (100K cycles) | **23,211,930** | 1 | 0 | 1 |
+  | `styled-screen-redraw` (3.5K frames) | 634,880 | 252,001 | 24,500 | 5 |
+
+  "Value switches" counts stores whose style differs from the immediately
+  preceding store -- the number of table lookups a dedup design would need with a
+  one-entry cache in front of it. "Pen changes" counts SGR sequences that actually
+  moved `currentStyle`, which is the lookup count if the pen instead carries its
+  resolved id.
+
+- Observation 1: **three of the four corpora are single-style.** Their entire run
+  needs *one* lookup. This is not an artifact of unstyled fixtures being unfair to
+  `H3` -- it is the ordinary case, and it means the table's read path is free
+  almost always.
+- Observation 2, on the one styled corpus: even there, 634,880 stores need at most
+  252,001 lookups into a **five-entry** table, and only 24,500 if the pen holds its
+  id. Against `F2`'s 193 distinct styles on a payload built to stress styling, the
+  table is small enough to stay in L1 in every case measured.
+- Inference 1, and it is the finding: **`H3` must not refcount.** A refcounted
+  table charges on the *store* side, and the store side is 9 to 23 million
+  operations per corpus run -- each a random-access counter update on a different
+  cache line from the cell being written, and each paid again on overwrite,
+  eviction, and every copy-on-write of a row. That is the same shape of per-cell
+  bookkeeping `12/F8` rejected the POD cell for, on the same workloads, and the
+  traffic numbers above are why it would land the same way.
+- Inference 2, the alternative, and it is already in the codebase: **sweep, do not
+  count.** `hyperlinkTargets` solves this exact problem with a live-set walk
+  (`liveHyperlinkIds` plus `filter`) triggered by a byte cap, and pays *nothing*
+  per cell write. With 193 distinct styles as the stress-corpus figure and a
+  16-bit id space, the sweep would essentially never run. This makes `H3`'s store
+  path a two-byte write -- strictly cheaper than today's 19-byte inline copy.
+- Measured effect on the cell, computed the way `F10` requires (buckets, not
+  stride). Row = 48-byte array header plus 179 cells; `F10` measured the real row
+  at 10,024 against 10,072 here, so read these as +-50 bytes:
+
+  | variant | stride | raw row | malloc bucket | waste/row | 201-row screen | history rows at 10 MiB |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+  | before `D3` | 72 | 12,936 | 14,336 | 1,400 | 2.88 MB | 810 |
+  | **today** | **56** | 10,072 | 10,240 | **168** | **2.06 MB** | **1,041** |
+  | `H3` (16-bit style id) | **40** | 7,208 | 8,192 | 984 | **1.65 MB** | **1,454** |
+  | `H3` + `H4`'s cheap half (`UInt32?`) | 32 | 5,776 | 6,144 | 368 | 1.23 MB | 1,815 |
+  | `H3` + `contentIdentity` removed | 24 | 4,344 | 5,120 | 776 | 1.03 MB | 2,413 |
+
+- Inference 3: **`H3` is worth 16 bytes, the largest single win left**, and the
+  bucket rule cuts against it this time. Stride falls 28.6% but the realized screen
+  footprint falls only ~20%, because a 7,208-byte row sits badly inside an
+  8,192-byte bucket -- 984 bytes of waste per row, where today's row wastes 168.
+  `F10`'s corrected rule holds in both directions: today's cell is unusually
+  well-placed, and any further shrink gives some of the win back to the allocator.
+- Inference 4, for the `H3`/`H6` gate: `H3` and `H6` **compose rather than
+  compete**, and `H3` is the cheaper half. `H3` shrinks every cell including the
+  live screen and needs no new representation; `H6` re-represents scrollback rows
+  only, and would be applied to cells `H3` has already shrunk. The gate should be
+  read as an ordering question, not an either/or -- but the decision belongs to
+  the ledger's gate item, not to this finding.
+- Competing interpretation considered: that the near-zero switch counts are an
+  artifact of the corpora rather than of terminal output generally. Partly true and
+  worth stating -- these four fixtures are the CPU corpus, and only one is styled.
+  It does not change the inference, because the inference rests on the *store*
+  side, which is corpus-independent (every printed cell stores a style regardless
+  of what that style is) and which is where a refcount would charge.
+- Uncertainty:
+  - Stores were counted with instrumentation compiled in, so the absolute counts
+    are exact but say nothing about the *cost* of a store. No CPU number here.
+  - The draw path would gain an id-to-style indirection per cell that it does not
+    have today. Small (a 193-entry, ~3.7 KB table) but real, and it is the one
+    place `H3` could regress. It has to be verified on `style-churn` and
+    `styled-screen-redraw`, not just on `terminal-feed`/`scrollback-stream`.
+  - The strides above are replica measurements. `F10`'s lesson applies to `H3`
+    too: re-measure the real struct after the change rather than trusting the
+    prediction.
+- Next action: the `H3`/`H6` gate, per Phase 3's remaining ledger item.
+
 ## Decision log
 
 ### D3 -- narrow the cell's link id rather than move it to a side map
@@ -1338,9 +1444,16 @@ different proposal and is not covered by this rejection.
 ## Outcome
 
 Investigation in progress. **Phase 1 is complete, Phase 2's engineering half is
-shipped, and Phase 3's first item is taken.** Findings F1 through F10 are
-recorded; the next free ID is **F11**. Decisions D1 through D3 are recorded and
+shipped, and Phase 3's first item is taken.** Findings F1 through F11 are
+recorded; the next free ID is **F12**. Decisions D1 through D3 are recorded and
 implemented; the next free ID is **D4**.
+
+`F11` then answered the question `12/F3` left open and re-specified `H3` without
+implementing it: **style writes run 9-23 million per corpus against 1-5 distinct
+values**, so a refcounted dedup table would charge on the only side that is hot,
+and `H3` should instead sweep a live set the way `hyperlinkTargets` already does.
+It is worth 16 more bytes (stride 56 -> 40) -- the largest win left -- but the
+malloc bucket runs the other way this time and returns roughly a third of it.
 
 `D3` took `H2` and the cell is now **56 bytes, down from 72**. It got there by a
 different route than `H2` specified: the link id's cost was its `Int?` alignment,
