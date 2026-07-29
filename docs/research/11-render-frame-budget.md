@@ -1,9 +1,15 @@
 # Render frame budget
 
-Research started: 2026-07-28. **Status: scoped, Phase 1 partially evidenced. No
-change proposed yet. Doc 13 closed on 2026-07-28 and handed over its evidence
-(see "Evidence handed over from doc 13"), which corrects this file's only sizing
-measurement and adds a whole cost this file had never measured.**
+Research started: 2026-07-28. **Status: CLOSED 2026-07-28. No change proposed,
+and none is warranted. H1 is refuted; H2 versus H3 was never reached because the
+gap both hypotheses set out to explain does not exist.** See "Outcome". Doc 13
+closed the same day and handed over its evidence (see "Evidence handed over from
+doc 13"); F11 and F12 finished the one question it left open.
+
+**The one-line version:** a full-frame draw fits the frame budget with room to
+spare, the largest optimization anyone identified in it is worth about 4%, and
+the compositing stall that looked like the real cost is substantially pipeline
+slack rather than recoverable time.
 
 **Four things a fresh reader should know before anything else.** First, the
 headline: **a full-frame draw at real 179x66 geometry measures 15.27 ms
@@ -279,6 +285,13 @@ only such an instrument could close.
 
 ### H1 -- the CPU draw path exceeds the 60Hz frame budget on a full-frame redraw at real geometry
 
+**VERDICT: REFUTED (F7, F8). Closed 2026-07-28.** Measured at real geometry and
+corrected for the fixture's unrealistic run length, a full-screen all-sprite
+redraw is **~8.5 ms against a 16.7 ms interval** and an all-text one is 4.06 ms.
+No measurement at any geometry, on either executor path, at any run length in
+the observed distribution puts the draw path over budget. The 23 ms headline
+this file carried for most of its life was never measured anywhere.
+
 **As of F7 this hypothesis is measured at real geometry and is not supported as
 written.** An all-sprite full-frame draw at 179x66 costs **15.27 ms against the
 16.7 ms interval** -- under budget. All-text is **4.06 ms**. The former headline
@@ -344,6 +357,15 @@ compositing (`13/F10`), a cost H1's framing does not contain at all.
 
 ### H2 -- the gap is implementation, not architecture
 
+**VERDICT: NOT REACHED. Closed 2026-07-28 as moot.** H2 and H3 are competing
+explanations for a gap that F7 and F8 showed does not exist, so neither was
+adjudicated. What the evidence does say about the shape of this path, should a
+gap ever appear: **F10 puts 71.5% of a full-frame sprite draw inside
+`CGContextFillRects`**, with the entire Swift-side surface this hypothesis
+concerns at 28% and its largest identified item worth 3.8%. That is closer to
+H3's framing than H2's -- but it is a statement about where the time is, not
+evidence that anything needs to change.
+
 Doc 9 has already attributed large, unexploited inefficiencies inside the CPU
 draw path, and none has been harvested:
 
@@ -397,6 +419,14 @@ below roughly 16 ms extrapolated to 179x66 -- **on a fixture that reaches the fo
 path**, which per `13/F5` the current one does not.
 
 ### H3 -- the gap is architectural, and compositing has to move to the GPU
+
+**VERDICT: NOT REACHED, and its strongest supporting evidence weakened. Closed
+2026-07-28 as moot.** Same reason as H2: no gap to explain. The live compositing
+stall that made this hypothesis attractive was measured three more times (F11,
+F12) and **a large, unbounded fraction of it is pipeline slack** -- the main
+thread blocked *less* when given more of its own work to do (F12). Treating that
+33% as recoverable time, which is what made an architectural rewrite look
+justified, was a measurement error rather than a finding.
 
 libghostty composites a GPU-rendered `IOSurfaceLayer`
 (`app/TerminalView.swift`, the `ghostty_surface_*` path). DanTerm's Swift backend
@@ -583,8 +613,20 @@ repeat exactly the error those corrections caught.
 
 ### Phase 2 -- direction gate
 
-- [ ] **Gate: harvest doc 9's draw-side backlog before deciding anything here.**
-  **Partially satisfied as of 2026-07-28.** The unreserved array growth landed
+- [x] **Gate: harvest doc 9's draw-side backlog before deciding anything here.**
+  **Closed 2026-07-28 by decision, not by harvest.** The glyph cache -- the whole
+  of what remained -- was never measured, and deliberately so. This gate exists
+  to stop the file concluding "the architecture is at fault" while an obvious
+  implementation win sits untried. That risk is gone: the conclusion is not that
+  architecture is at fault but that **there is no gap to attribute**, and no
+  glyph-cache result could change it. F7/F8 put the text path at 4.06 ms of a
+  16.7 ms budget, and F10 puts the whole Swift-side surface at 28% of a sprite
+  draw with its largest item worth 3.8%. A gate that exists to prevent a
+  premature conclusion does not bind a file that reaches no conclusion requiring
+  it. The candidate stays open in doc 9 as an ordinary optimization, correctly
+  sized by `11/F9` and `11/F10`.
+  - Superseded rationale, kept for the record: **Partially satisfied as of
+    2026-07-28.** The unreserved array growth landed
   (doc 13's R4, `13/F9`), as did two changes doc 13 found independently
   (`13/R1`, `13/R2`); together they took live `drawTextRuns` from 46.3% to 35.7%
   of main-thread busy (`13/F10`). Per-draw `CTFont` construction landed too
@@ -601,9 +643,16 @@ repeat exactly the error those corrections caught.
 
 ### Phase 3 -- decide
 
-- [ ] Re-run F1 after the harvest. Under budget at real geometry closes this file
-  in H2's favor; still over it promotes H3 to a design question and hands it to a
-  design doc rather than a research one. **Three conditions on this task that did
+- [x] **Re-run F1 after the harvest. Done 2026-07-28 -- F7 measured real geometry
+  directly and F8 corrected it for run length. Under budget, so this file closes.**
+  The task as written offered two outcomes, "under budget closes this in H2's
+  favor" or "over budget promotes H3". Neither is quite what happened: the draw
+  came in at roughly half the budget, which closes the file without adjudicating
+  H2 against H3 at all. A file can end by dissolving its question instead of
+  answering it, and this one did.
+  - Original framing, kept for the record: Under budget at real geometry closes
+    this file in H2's favor; still over it promotes H3 to a design question and
+    hands it to a design doc rather than a research one. **Three conditions on this task that did
   not exist when it was written:** the re-run needs a glyph-bearing fixture
   (`13/F5`) -- **which now exists** (F5), and the re-run must report both
   workloads because they differ by 3.5x; and "under budget" must now account for a compositing stall the
@@ -1557,3 +1606,85 @@ repeat exactly the error those corrections caught.
   run. Doc 13 kept it research-only. Inheriting it as settled would be exactly
   the attribution error `10/F8` corrected, which is the error this file's Phase 2
   gate exists to prevent.
+
+## Outcome
+
+**Closed 2026-07-28. No change is proposed and none is warranted.** The file
+asked whether DanTerm's CPU draw path blows the 60Hz frame budget. It does not,
+and the belief that it might rested on three separate measurement errors that
+this file found and corrected in sequence.
+
+### What the file actually established
+
+1. **The draw path fits, with room.** A full-screen 179x66 redraw is ~8.5 ms
+   all-sprite and 4.06 ms all-text against a 16.7 ms interval (F7, F8). The
+   long-quoted 23 ms was never measured at any geometry.
+2. **The benchmark's content was the problem, not the renderer.** The fixture
+   changed style every cell; real content -- twelve streams from two unrelated
+   sources, including real recorded shell sessions -- folds into 5.8 to 66.6
+   cells per run (F8). One cell per run is not a pessimistic corner of that
+   distribution, it is a factor of six outside it, and it inflated every
+   full-frame figure by ~45%.
+3. **The draw path is rasterization, not bookkeeping.** 71.5% of a full-frame
+   sprite draw is inside `CGContextFillRects`; construction is 12.3% and
+   everything else 16.1% (F10). The entire Swift-side surface doc 9's backlog can
+   reach is 28% of the draw, and the largest item anyone identified in it is
+   worth 3.8%.
+4. **The compositing stall is substantially pipeline slack.** The main thread
+   blocked *less* when given more of its own work to do -- 877 samples busier,
+   122 less blocked (F12). An unbounded fraction of the 31-35% figure is
+   therefore not recoverable time. The two mechanisms doc 13 could name for it
+   are both refuted: glyph diversity (F11) and op count (F12), each by a
+   pre-registered prediction failing in the wrong direction.
+
+### What a fresh agent should not redo
+
+- **Do not re-open the optimize-or-replace question on this evidence.** H2 and
+  H3 were never adjudicated because the gap they explain does not exist. If a
+  real gap ever appears, F10 says the lever is fewer or larger rects reaching
+  CoreGraphics, not cheaper Swift-side preparation of them.
+- **Do not quote F1, F2, or any figure from before F5.** F1's 15.6 ms and F5's
+  9.93 ms describe the same measurement and disagree by 1.6x, unreconciled;
+  F2's table is arithmetically wrong (F4 supersedes it); everything before F5
+  was measured on a fixture that drew no glyphs. F7 onward were all measured
+  after the corrections and agree with each other.
+- **Do not treat a `sample` share as recoverable time.** This file tested that
+  twice and it failed both times -- ~3x optimistic on the one node measured
+  directly (F2/F4), and in F12's case measuring slack rather than work.
+
+### What is left, and why none of it is urgent
+
+- **The sprite geometry cache** (doc 9 Phase 5) is an ordinary ~4%, correctly
+  sized in place by `11/F9` and `11/F10`. Take it or leave it.
+- **The glyph cache** (`9/H3`) was never measured. Deliberately: no result could
+  have changed this file's conclusion, and the text path is 4.06 ms of 16.7.
+- **The 559 ns/cell inside `CGContextFillRects`** is unattributed between rect
+  construction and rasterization at the CoreGraphics boundary. It is the largest
+  single quantity in a sprite draw. Nobody needs it until somebody wants that
+  draw faster.
+- **A fifth live capture varying total glyph count** would test F12's remaining
+  hypothesis -- that the cost tracks glyphs on screen rather than ops or
+  diversity. Deliberately not run: "draw fewer glyphs" is not a lever on a
+  terminal, so the answer would be interesting and unactionable.
+- **The backend A/B's ghostty arm** still does not run (F3) and the 2x claim
+  that opened doc 10 was never re-measured. It is blocked on a `sudo sample` of
+  a hung root-owned `login` process, which needs a human, or on a decision to
+  retire the arm.
+
+### Provenance of the live evidence
+
+Four captures were taken for this file, in two pairs, each pair from a single
+process instance so both arms provably share a binary: **pid 31750** (launch
+19:38:58.041) for F11's glyph-diversity arms, **pid 36317** (launch 19:48:59.707)
+for F12's run-count arms. `DanTerm Dev` 0.0.84, macOS 26.5.2, human-driven
+20-second `sample` runs per doc 13's "Re-capturing a live profile" procedure.
+Artifacts were in `/tmp` and are disposable; every decision-bearing number is
+transcribed into F11 and F12.
+
+**One limitation bounds every live number here:** `sample` reports time, not
+invocation counts, so no capture carries a frame count and per-20-second totals
+conflate per-frame cost with frame rate. Doc 13's Phase 4 -- whether a
+repeatable live-compositing instrument is worth building -- is the open question
+that would fix this, and it remains doc 13's to answer.
+
+Findings F1-F12 are recorded. The next free ID is **F13**.
