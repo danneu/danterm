@@ -60,6 +60,18 @@ different instrument, and one that only became answerable today (`F1`).
   a candidate for it.
 - **Do not re-litigate doc 12's rejections.** The POD cell (`12/F8`) and
   libghostty's page allocator are closed with recorded reasons; see "Rejected".
+- **Feed like a PTY, not like a file.** Added by `F7`, which cost a finding.
+  `Terminal.feed` allocates one action per input token for the whole call, so
+  feeding a payload in one shot charges the measurement tens of MB that a real
+  session never pays. The probe chunks by default; if you write a new harness,
+  chunk it, and check that your census is chunk-invariant.
+- **Before believing a memory number, vary something that should not matter.**
+  Sawtooth phase, feed chunk size, and column count each exposed a wrong number in
+  this file (`F6`, `F7`, and `F7`'s diagnosis respectively). A quantity that moves
+  when it should not is measuring the instrument.
+- **Size cell-representation changes in malloc buckets, not in stride.** `F7`
+  inference 4: rows round up to a bucket, so a shrink that does not cross a
+  boundary returns nothing resident even though stride fell.
 
 ## Trigger and current evidence
 
@@ -228,7 +240,16 @@ larger allocations for the immutable scrollback only, where rows are never
 individually mutated -- does not require manual memory control and composes with
 H6.
 
-Unquantified. Needs the dirty-vs-live gap attributed first.
+**Quantified by `F7`, and smaller than `F3/F5` made it look.** Bucket rounding
+is a flat **1,488 bytes per row** at 179 columns -- 11.5% of cell bytes, 2.5 MB
+at the production budget -- plus ~4 MB of `MALLOC_SMALL` slack. Real, worth
+having, and recoverable by fewer-larger-allocations. But it is not the ~2x tax
+`F3/F5` reported, so H7 ranks **below** H2 and H3 rather than above them.
+
+`F7` inference 4 is the part that changes how H2 and H3 are estimated: a row at
+179 columns is 12,888 bytes inside a 14,336-byte bucket, so a cell shrink that
+does not push the row across the boundary below returns nothing resident. Size
+every cell-shrink proposal in **bucket** terms and verify it on the probe.
 
 ### H8 -- evicted scrollback rows are retained, and releasing them costs nothing
 
@@ -267,6 +288,15 @@ bytes:
    hold most of them), and doing both may be redundant.
 
 H4, H5, H7 are not scheduled.
+
+**Phase 1 outcome: this ordering stands.** `F3/F5` briefly argued for hoisting
+`H7`/`H6` above `H3` on the strength of a ~2x allocator multiplier; `F7` showed
+that multiplier was ~1.15x once the probe stopped measuring its own feed call.
+Cell bytes are ~85% of the cost of holding a terminal, so shrinking the cell
+returns close to face value and the list above needs no reordering. The one
+change `F7` forces is arithmetic, not sequence: size cell shrinks in **bucket**
+terms (`F7` inference 4), because a row that stays inside its current malloc
+bucket returns nothing.
 
 ## Task ledger
 
@@ -310,10 +340,19 @@ headless harness is now the only instrument that can decide any of them.
       **not yet separated**; that separation is the next measurement and gates
       acting on `H7`.
 
-- [ ] Separate fragmentation from unreturned pages from genuine retention in the
+- [x] Separate fragmentation from unreturned pages from genuine retention in the
       ~2x multiplier `F3/F5` measured, via `malloc_zone` statistics or a `vmmap`
       at the end of a probe run. Until this lands, do not treat the multiplier as
       a fixed tax, and do not act on `H7`.
+      **Done -- `F7`, and the multiplier was largely the instrument.** Feeding
+      each payload in one call made `feed` materialize a ~620,000-element action
+      array; chunking to PTY-sized reads drops the footprint delta from 64.5 MB to
+      25.1 MB with a bit-identical census. What remains splits cleanly: cells
+      21.75 MB, bucket rounding 2.5 MB (a flat 1,488 B/row), `MALLOC_SMALL` slack
+      ~4 MB, genuine retention **zero**. `H7` is now quantified and demoted.
+
+**Phase 1 is closed.** Every question it opened is answered, and two of its four
+answers were corrections to its own instruments (`F6`, `F7`).
 
 Sequencing note from `F4`: the two remaining Phase 1 attribution tasks (F3, F5)
 measure quantities the `H8` sawtooth perturbs by up to 19 MB depending on when
@@ -618,9 +657,17 @@ baseline.
 
 ### F3/F5 -- cell storage is only ~35-50% of what the process pays to hold it
 
-- Status: recorded, partial. Answers Phase 1's remaining two attribution tasks
-  well enough to size `H7`, and supersedes the framing of both: the question is
-  not "footprint minus heap" but "process bytes per cell byte".
+- Status: **superseded by `F7`. Do not cite the numbers below.** Its method fed
+  each payload to `Terminal.feed` in one call, and the resulting transient action
+  array -- not the terminal -- is most of the gap it measured. Corrected coverage
+  is 0.83-0.87, not 0.35-0.50, and inference 2 below is withdrawn. Kept in full
+  because the reasoning was sound given the instrument, and because the way it
+  failed is the reusable lesson: it explained a real, reproducible 2x gap with a
+  plausible mechanism (eviction churn) that survived a competing-interpretations
+  pass, and was still wrong about the cause.
+- Status when recorded: partial. Answered Phase 1's remaining two attribution
+  tasks well enough to size `H7`, and superseded the framing of both: the question
+  is not "footprint minus heap" but "process bytes per cell byte".
 - Date and investigator: 2026-07-29, Claude (agent).
 - Method: one probe process **per payload** (`--payload NAME`), so the footprint
   delta is attributable. In a full-matrix run the allocator reuses pages the
@@ -644,11 +691,12 @@ baseline.
   The shallow payloads never evict; the deep ones append ~10,000 rows and evict
   ~8,200, each a ~12.6 KB malloc and free. `scrollback-plain` is both the most
   churn-heavy and the worst-covered.
-- Inference 2, which reorders the file: **the multiplier is worth more than the
+- ~~Inference 2, which reorders the file: **the multiplier is worth more than the
   cell.** Halving the cell halves the 22 MB but leaves the ~2x allocator
   multiplier untouched, so it moves ~11 MB of a ~50 MB cost. Fewer, larger, less
   churn-prone allocations attack the multiplier directly. That is `H7` and `H6`,
-  and this is the first evidence that either outranks `H3`.
+  and this is the first evidence that either outranks `H3`.~~ **Withdrawn by
+  `F7`.** The multiplier is ~1.15x, not ~2x; the cell is ~85% of the cost.
 - Competing interpretations, and they are live: this delta includes transient
   feed allocations the allocator has not returned, so "fragmentation",
   "unreturned pages", and "genuine retention" are not yet separated. `malloc_zone`
@@ -736,6 +784,125 @@ by `D1`:
   on `F4`'s deterministic headless numbers, which are solid, plus arithmetic.
 - Next action: `F2`, and treat it as blocking for every remaining hypothesis.
   Then re-take `F3` and `F5` on it rather than on `benchmark-memory`.
+
+### F7 -- the 2x multiplier was mostly the probe's own feed call; holding a terminal costs ~1.15x its cell bytes, and the rest is malloc bucket rounding
+
+- Status: recorded. Closes Phase 1's last task, **supersedes `F3/F5` inference 2**,
+  and substantially weakens `H7`.
+- Date and investigator: 2026-07-29, Claude (agent).
+- Commit and worktree state: `91f98f3` plus the probe's `--vmmap`, `--chunk`, and
+  malloc-zone additions.
+- Instrument additions, all shipped: `mallocHeapSnapshot()` (live bytes across
+  every zone), `--vmmap` (dirty allocator pages, sampled *while the terminal is
+  resident* via a `whileResident` hook -- sampled after `measure` returns it would
+  describe a freed grid), and `--chunk N` (feed in PTY-sized slices; default
+  4,096).
+
+**The instrument was wrong, and it was wrong by more than the effect.** `F3/F5`
+fed each payload to `Terminal.feed` in a single call. `feed` materializes one
+action per input token for the whole call (`Terminal.swift:755`), so a 620 KB
+payload builds a ~620,000-element action array -- tens of MB of transient LARGE
+allocations, freed before the census but still dirty in `phys_footprint`.
+Diagnosis path: the excess scaled with `--lines` but was **invariant under
+`--columns`** (37.2 MB at both 179 and 716 columns, where live rows differ by
+3.4x), which rules out anything per-row, and `vmmap` showed it as
+`MALLOC_LARGE (empty)` -- dirty pages in regions with no live allocation at all.
+
+  | `scrollback-plain`, 179x66 | census | footprint delta | coverage | `MALLOC_LARGE (empty)` |
+  | --- | ---: | ---: | ---: | ---: |
+  | single-shot feed (`F3/F5`'s method) | 21.75 MB | 64.47 MB | 0.35 | 37.2 MB |
+  | 4 KB chunks (a real PTY read) | 21.75 MB | **25.06 MB** | **0.87** | **none** |
+
+- Observation 1: the census is **bit-identical** across chunk sizes, so this is
+  purely a measurement correction, not a behavior change. A test pins chunk
+  invariance at 4,096 and at 7 bytes (which splits UTF-8 and escape sequences
+  mid-token).
+- Corrected matrix, one fresh process per payload, chunked:
+
+  | payload | cell bytes | bucket rounding | per row | footprint | coverage |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | empty | 0.81 MB | 0.10 MB | 1,488 | 1.05 MB | 0.77 |
+  | full-screen | 2.47 MB | 0.29 MB | 1,488 | 3.05 MB | 0.81 |
+  | scrollback-plain | 21.75 MB | 2.51 MB | 1,487 | 25.02 MB | 0.87 |
+  | scrollback-unicode | 22.50 MB | 2.73 MB | 1,488 | 26.52 MB | 0.85 |
+  | scrollback-styled | 22.31 MB | 2.59 MB | 1,488 | 26.08 MB | 0.86 |
+  | scrollback-mixed | 22.19 MB | 2.59 MB | 1,488 | 26.64 MB | 0.83 |
+
+- Observation 2: **the three-way split resolves with no residue.** Live heap
+  beyond the census is a flat 1,488 bytes per row on every payload. A column
+  sweep shows why -- every row allocation lands within ~44 bytes of a clean malloc
+  bucket:
+
+  | columns | row bytes | overhead/row | implied bucket |
+  | ---: | ---: | ---: | ---: |
+  | 179 | 12,888 | 1,488 | 14,336 (14K) |
+  | 182 | 13,104 | 1,273 | 14,336 (14K) |
+  | 200 | 14,400 | 2,028 | 16,384 (16K) |
+  | 256 | 18,432 | 2,091 | 20,480 (20K) |
+  | 300 | 21,600 | 3,025 | 24,576 (24K) |
+
+  The ~44-byte residue is the Swift array header. This also independently
+  confirms `F1`'s `heap` reading of a "14.0K" bucket, which `F4` inference 2 used
+  as 14,000; the true bucket is 14,336, so bucket overhead at 179 columns is
+  **11.5%**, not 8.7%.
+- Inference 1, and it answers the gating question directly: **there is no second
+  retention defect.** Every live byte is either a cell the census walked or
+  bucket rounding on the allocation holding it. Fragmentation among live blocks
+  and unreturned pages together are the ~4 MB gap between `MALLOC_SMALL` dirty
+  (28.6 MB) and live bytes (24.3 MB).
+- Inference 2, which reverses `F3/F5`: **cell bytes are ~85% of what the process
+  pays to hold a terminal, not 35-50%.** Halving the cell moves close to half the
+  cost. `F3/F5`'s "the multiplier is worth more than the cell" was an artifact of
+  the single-shot feed and should not be acted on.
+- Inference 3, sizing `H7` properly: per-allocation overhead is real but is
+  **2.5 MB against 21.75 MB of cells** (11.5%), plus ~4 MB of allocator slack.
+  That is worth having and is exactly what fewer-larger-allocations would
+  recover, but it does not outrank shrinking the cell, and `H7` should be
+  re-ranked below `H2`/`H3` rather than above them.
+- Inference 4, new and actionable for `H2`/`H3`: **cell-size wins are quantized
+  by the bucket.** At 179 columns a row sits at 12,888 bytes inside a 14,336-byte
+  bucket, so ~1.4 KB per row is already paid for and a small cell shrink that does
+  not cross the boundary below returns *nothing* in resident terms. Any
+  `H2`/`H3` estimate must be computed in bucket terms, not stride terms, and
+  verified on the probe rather than derived.
+- Competing interpretations considered: that the LARGE churn was
+  `ScrollbackBuffer.storage` growth or `compactIfNeeded`'s copy. Ruled out by the
+  column sweep -- those scale with row count, and the excess did not move when row
+  count changed by 3.4x. The `--chunk` experiment then removed it entirely, which
+  a storage-array explanation cannot account for.
+- Uncertainty:
+  - The ~4 MB `MALLOC_SMALL` dirty-vs-live gap is not further split between
+    magazine slack and genuine fragmentation. It is 16% of cell bytes and does not
+    change any ranking, so it is not chased.
+  - `phys_footprint` deltas still assume nothing else in the probe allocates
+    materially. The `--vmmap` breakdown is consistent with that on every run
+    inspected.
+  - Coverage on the shallow payloads (0.77-0.81) is below the deep ones for
+    fixed-cost reasons (parser tables, the payload arrays themselves), not
+    anything per-cell.
+- Method note worth carrying: **no test in this file asserts on a heap delta.**
+  `mallocHeapSnapshot` reads the whole process, and under the parallel test runner
+  a neighbouring suite's allocations land inside the before/after window -- a
+  draft test read 76 MB of "overhead" from its neighbours. Delta claims belong to
+  the probe binary, which owns its process; the test suite asserts only
+  single-snapshot invariants and census-derived facts, which are exact.
+- Next action: `H1` (Phase 2). The multiplier is no longer a reason to reorder.
+
+### F8 -- `feed` allocates one action per input token for the whole call
+
+- Status: recorded as an observation, not investigated. Spun out of `F7` so it is
+  not lost.
+- `Terminal.feed` (`Terminal.swift:755`) builds `let actions = inputStream.feed(bytes)`
+  -- a fully materialized array over the entire input -- before applying any of
+  them. Feeding 620 KB in one call allocated ~37 MB of transient LARGE blocks.
+- This is not a steady-state cost and it is invisible at PTY chunk sizes, which is
+  why nothing in this file's budget work is affected. It matters only where a
+  single large chunk arrives: a large paste, a `cat` of a big file delivered in
+  one read, or a session-restore replay.
+- Not a memory-footprint problem, so it is **not** taken up here. It belongs to
+  the feed-CPU question (doc 10) if anyone picks it up: streaming the actions
+  rather than materializing them would remove both the allocation spike and a
+  full pass over the array.
 
 ## Decision log
 
@@ -870,9 +1037,9 @@ different proposal and is not covered by this rejection.
 
 ## Outcome
 
-Investigation in progress. Findings F1, F4, and F6 are recorded; the next free
-IDs are **F2**, **F3**, **F5**, and then **F7**. Decision D1 is recorded and
-implemented; the next free ID is **D2**.
+Investigation in progress. **Phase 1 is complete.** Findings F1 through F8 are
+recorded; the next free ID is **F9**. Decision D1 is recorded and implemented;
+the next free ID is **D2**.
 
 `F4` closed Phase 1's gating task and changed the plan: the largest defect found
 so far is a scrollback retention bug (`H8`), not a representation problem, and
@@ -899,13 +1066,30 @@ those numbers in one command.
 2. Content barely matters. Plain, unicode, styled, and mixed land within 0.75 MB
    of each other, because rows are full-width regardless. Memory is a function of
    the budget, not of what the user ran.
-3. **Cell bytes are only 35-50% of what the process pays** (`F3/F5`), and the gap
-   tracks eviction churn rather than resident size. Halving the cell moves ~11 MB
-   of a ~50 MB cost. This is the first evidence that `H7` and `H6` -- fewer,
-   larger, less churn-prone allocations -- outrank `H3`, and it is why the next
-   task is to separate fragmentation from retention rather than to shrink a cell.
+3. **Cell bytes are ~85% of what the process pays to hold a terminal** (`F7`).
+   `F3/F5` reported 35-50% and argued that the allocator multiplier outranked the
+   cell; that was the probe measuring its own feed call, and it is withdrawn.
+   Holding 21.75 MB of cells costs ~25 MB: cells, plus 2.5 MB of malloc bucket
+   rounding (a flat 1,488 B/row), plus ~4 MB of allocator slack, plus **zero**
+   genuine retention.
 4. `H3`'s "trivially small style table" premise is weaker than doc 12 thought: a
    payload built to stress styling produces **193** distinct styles against the
    at-most-9 the fixture corpus produced. Still fits 16 bits; no longer trivial.
 5. `H2` is reconfirmed on an independent corpus -- `hyperlinkId` nil in 100% of
    cells, everywhere.
+6. **Size cell shrinks in malloc buckets, not in stride** (`F7` inference 4). A
+   row at 179 columns is 12,888 bytes inside a 14,336-byte bucket, so a shrink
+   that does not cross the boundary below returns nothing resident.
+
+`F7` also closed Phase 1's last question -- no second retention defect exists --
+and left one observation for someone else: `Terminal.feed` materializes one
+action per input token for the entire call (`F8`). Irrelevant at PTY chunk sizes,
+which is why it does not appear anywhere in this file's budget work.
+
+The theme of Phase 1 is worth stating plainly, because it cost two findings:
+**every memory instrument this file has used was wrong in a way that produced a
+confident, plausible number.** `benchmark-memory` reported a fixed build as
+larger (`F6`); the headless probe attributed its own parse spike to resident
+state (`F7`); `heap`'s bucket sizes were read as allocation sizes (`F1`). In each
+case the error was found by varying something that should not have mattered --
+sawtooth phase, chunk size, column count -- and seeing the number move.

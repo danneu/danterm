@@ -24,7 +24,7 @@ entry point, not a re-read of the evidence.
 | 12 | Cell representation | Closed. Erase leg shipped; POD cell demonstrated-and-rejected; memory half parked. Its reopening condition was met on 2026-07-29 and taken up by doc 15. |
 | 13 | Live-app compositing | Closed. Three candidates landed; compositing stall is substantially pipeline slack. |
 | 14 | Live scroll workload profile | Closed. One trace, four candidates, two shipped: `TerminalScalars` accessor inlining (**-20% draw**, `14/D2`) and a row-scoped cell read (**-16% plan**, `14/D3`). One candidate rejected as too small to measure (`14/D1`). |
-| 15 | Memory footprint | **LIVE.** Takes up doc 12's recorded reopening condition. Owns resident bytes per cell, per row, and in aggregate. `15/F1`: 84% of the live heap is grid row storage, but the live heap is only 26% of process footprint. `15/F4` found and `15/D1` shipped the first defect -- evicted scrollback rows kept their cells, so history held up to **2x** the rows it admitted (~22 MB at peak), at no CPU cost. `15/F6` is the one to read before measuring anything: **`just benchmark-memory` cannot resolve a representation change** and reported the fixed build as larger. The headless harness (`15/F2`) now blocks every remaining hypothesis. |
+| 15 | Memory footprint | **LIVE.** Takes up doc 12's recorded reopening condition. Owns resident bytes per cell, per row, and in aggregate. **Phase 1 closed.** `15/F4` found and `15/D1` shipped the first defect -- evicted scrollback rows kept their cells, so history held up to **2x** the rows it admitted (~22 MB at peak), at no CPU cost. `15/F7` closed the attribution: holding 21.75 MB of cells costs ~25 MB -- cells, plus 1,488 B/row of malloc bucket rounding, plus ~4 MB allocator slack, plus **zero** retention. Two of Phase 1's four answers were corrections to its own instruments: `15/F6` (`just benchmark-memory` cannot resolve a representation change) and `15/F7` (the headless probe charged its own feed call to resident state). Next: `H1`, the scrollback budget that admits ~22 MB against a nominal 10 MB. |
 
 (There is no doc 5; numbers are never reused or renumbered.)
 
@@ -53,6 +53,11 @@ measurement instrument.** Asked to confirm a ~22 MB saving it reported the fixed
 build as *larger* -- one memgraph samples one arbitrary point on a sawtoothing
 quantity, and GUI IOSurface churn ran 50 MB over the same window. Use it for
 "is this growing without bound"; do not use it for "did this get smaller".
+Its replacement can be wrong too, in the same shape: the headless probe that
+succeeded it charged its own oversized `feed` call to resident state and reported
+cell bytes as 35-50% of process cost when the true figure is ~85% (`15/F7`). The
+general rule those two cost: **vary something that should not matter -- sawtooth
+phase, feed chunk size, column count -- before believing any memory number.**
 Related, and cheap to be burned by: a 2-pair `benchmark-quick` reading of
 **+1.05%** on `scrollback-stream` flipped to **-0.86%** at 4 pairs (`15/F6`) --
 an "inconclusive" verdict is not a weak regression signal, so escalate before
