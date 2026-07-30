@@ -113,6 +113,38 @@ public final class TerminalPaneSessionController {
     /// harness's draw timer cannot see it. Exposing the measurement at its source
     /// is what lets a planner change be attributed at all. Benchmark builds only.
     public private(set) var lastPlanDurationNanoseconds: UInt64 = 0
+
+    /// Main-actor time spent blocked in the fence that drained the frame being
+    /// published, for the benchmark observer to read beside the plan cost.
+    ///
+    /// Exists because draining through `fencedFrameState()` is a `queue.sync`: the
+    /// main actor waits for the host's queue, and a child flooding its pty keeps
+    /// that queue busy with back-to-back read turns. That wait is not planning, not
+    /// drawing, and not on any other thread, so no existing metric can see it --
+    /// while it is exactly the cost the fence-based drain trades for its ordering
+    /// guarantee. Charged per published frame so a block sums what it actually paid.
+    ///
+    /// Counts the per-delivery fence only, summed over every delivery since the last
+    /// published frame. Checkpoint fences (`synchronizeState`,
+    /// `readSelectedTextSynchronizing`) block on the same queue but predate this path
+    /// and run at their callers' cadence, so this understates total main-thread
+    /// blocking by design -- it answers "what did the fence-based drain add", not
+    /// "how long is the main thread blocked on this queue".
+    public private(set) var lastFenceStallNanoseconds: UInt64 = 0
+
+    /// Stall accumulated since the last published frame, flushed into
+    /// `lastFenceStallNanoseconds` by `planIfNeeded` at publish.
+    ///
+    /// Latching the value at drain time instead would misattribute twice, and both
+    /// errors are silent. A frame published by a path that did not drain
+    /// (`synchronizeState`, `readSelectedTextSynchronizing`, `setVisible(true)`)
+    /// would hand the observer the previous delivery's stall a second time, inflating
+    /// the total; and a delivery whose publish is suppressed -- by the
+    /// synchronized-output guard, or by damage the planner finds empty -- would have
+    /// its stall dropped, understating it. The second case is the one that matters for
+    /// a permanent instrument: synchronized output is what modern full-screen TUIs
+    /// use, so latching would understate exactly the floods worth measuring.
+    private var pendingFenceStallNanoseconds: UInt64 = 0
     #endif
 
     /// Creates and starts the sole PTY host owned by this pane controller.
@@ -209,11 +241,19 @@ public final class TerminalPaneSessionController {
                 // and the pane keeps stale content until later damage happens to cover it.
                 // Fencing here instead puts both halves in one main-actor step, which is what
                 // makes the gap unrepresentable rather than merely unlikely.
+                #if DANTERM_TERMINAL_BENCHMARK
+                let fenceStarted = DispatchTime.now().uptimeNanoseconds
+                let frameState = host.fencedFrameState()
+                self.pendingFenceStallNanoseconds +=
+                    DispatchTime.now().uptimeNanoseconds - fenceStarted
+                self.consume(frameState: frameState, result: result, transitions: transitions)
+                #else
                 self.consume(
                     frameState: host.fencedFrameState(),
                     result: result,
                     transitions: transitions
                 )
+                #endif
             }
         }
     }
@@ -608,6 +648,10 @@ public final class TerminalPaneSessionController {
         #if DANTERM_TERMINAL_BENCHMARK
         lastPlanDurationNanoseconds =
             DispatchTime.now().uptimeNanoseconds - planStartedNanoseconds
+        // Below every early return above, so a suppressed publish carries its stall
+        // forward to the next one instead of losing it.
+        lastFenceStallNanoseconds = pendingFenceStallNanoseconds
+        pendingFenceStallNanoseconds = 0
         #endif
         lastPlannedTerminal = terminal
         currentPlan = plan

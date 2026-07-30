@@ -249,6 +249,16 @@ final class TerminalBenchmarkObserver {
     private var pendingPlanFrameCount = 0
     private var acceptedPlanDurations: [UInt64] = []
     private var acceptedPlanFrameCount = 0
+    /// Main-actor time blocked in the per-delivery drain fence, accumulated the same
+    /// way and for the same reason as the plan cost above: several published frames
+    /// can coalesce into one draw, and every fence the block waited on was really
+    /// paid. The max is tracked separately because the decision this answers is
+    /// whether a single block exceeds a frame budget, which a sum cannot show.
+    private var pendingFenceStallNanoseconds: UInt64 = 0
+    private var pendingFenceStallCount = 0
+    private var acceptedFenceStallDurations: [UInt64] = []
+    private var acceptedFenceStallCount = 0
+    private var acceptedFenceStallMaxNanoseconds: UInt64 = 0
     /// Whole-process CPU time, summed over every thread, charged to each accepted
     /// draw as the delta since the previously accepted one.
     ///
@@ -338,13 +348,20 @@ final class TerminalBenchmarkObserver {
     func observePublishedFrame(
         _ plan: RenderFramePlan,
         damage: TerminalDamage,
-        planDurationNanoseconds: UInt64 = 0
+        planDurationNanoseconds: UInt64 = 0,
+        fenceStallNanoseconds: UInt64 = 0
     ) {
         if activityPath != nil { observedPlanFrameCount += 1 }
         reopenCompletedBlockIfRequested()
         if startNanoseconds != nil, completed == false {
             pendingPlanNanoseconds += planDurationNanoseconds
             pendingPlanFrameCount += 1
+            pendingFenceStallNanoseconds += fenceStallNanoseconds
+            pendingFenceStallCount += 1
+            acceptedFenceStallMaxNanoseconds = max(
+                acceptedFenceStallMaxNanoseconds,
+                fenceStallNanoseconds
+            )
         }
         if let pendingRedrawSequence {
             publishedRedrawSequence = pendingRedrawSequence
@@ -399,6 +416,11 @@ final class TerminalBenchmarkObserver {
         pendingPlanFrameCount = 0
         acceptedPlanDurations = []
         acceptedPlanFrameCount = 0
+        pendingFenceStallNanoseconds = 0
+        pendingFenceStallCount = 0
+        acceptedFenceStallDurations = []
+        acceptedFenceStallCount = 0
+        acceptedFenceStallMaxNanoseconds = 0
         blockStartProcessCPUNanoseconds = nil
         lastAcceptedProcessCPUNanoseconds = nil
         acceptedProcessCPUDurations = []
@@ -498,6 +520,22 @@ final class TerminalBenchmarkObserver {
             "expectedFinalState": expectedFinalState,
             "machineStateSamples": stateRecorder?.finishBlock() ?? [],
         ]
+        // Outside the draw-series guard, unlike every other auxiliary series here: a
+        // workload measured as one replay (`scrollback-stream`) localizes no per-draw
+        // durations at all, and that is the workload whose sustained output makes this
+        // fence wait worth measuring in the first place. Pending is added to accepted
+        // for the same reason -- with no accepted draws there is nothing to promote
+        // pending into, so reading accepted alone would report zero for the flood.
+        //
+        // Beside the draw numbers, never folded in: this is main-thread time the draw
+        // timer does not span, spent waiting on the pane's host queue rather than doing
+        // work of its own. Folding it in would redefine the metric the decision
+        // thresholds are calibrated for.
+        object["cumulativeFenceStallNanoseconds"] =
+            acceptedFenceStallDurations.reduce(0, +) + pendingFenceStallNanoseconds
+        object["fenceStallFrameCount"] = acceptedFenceStallCount + pendingFenceStallCount
+        object["maxFenceStallNanoseconds"] = acceptedFenceStallMaxNanoseconds
+        object["fenceStallDurationsNanoseconds"] = acceptedFenceStallDurations
         if localizedDrawDurations.isEmpty == false {
             object["cumulativeDrawNanoseconds"] = localizedDrawDurations.reduce(0, +)
             object["drawCount"] = localizedDrawDurations.count
@@ -614,6 +652,10 @@ final class TerminalBenchmarkObserver {
         acceptedPlanFrameCount += pendingPlanFrameCount
         pendingPlanNanoseconds = 0
         pendingPlanFrameCount = 0
+        acceptedFenceStallDurations.append(pendingFenceStallNanoseconds)
+        acceptedFenceStallCount += pendingFenceStallCount
+        pendingFenceStallNanoseconds = 0
+        pendingFenceStallCount = 0
         let processCPU = processCPUNanoseconds()
         if let previous = lastAcceptedProcessCPUNanoseconds, processCPU >= previous {
             acceptedProcessCPUDurations.append(processCPU - previous)

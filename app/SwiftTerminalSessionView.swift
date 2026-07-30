@@ -678,7 +678,8 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         TerminalBenchmarkObserver.shared?.observePublishedFrame(
             frame.plan,
             damage: frame.damage,
-            planDurationNanoseconds: controller.lastPlanDurationNanoseconds
+            planDurationNanoseconds: controller.lastPlanDurationNanoseconds,
+            fenceStallNanoseconds: controller.lastFenceStallNanoseconds
         )
         #endif
         publishedFrame = (frame.plan, metrics)
