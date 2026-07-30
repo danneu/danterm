@@ -36,6 +36,7 @@ architecture.
 | [Power and performance](13-power-performance.md)                     | Idle, visibility, sleep/wake, and responsiveness contracts                 | Initial decisions captured |
 | [Incremental roadmap](14-roadmap.md)                                 | Canonical high-level progress checklist and replacement gate               | Initial checklist captured |
 | [Open questions](15-open-questions.md)                               | Decisions intentionally left for the next planning rounds                  | Active                     |
+| [Semantic terminal model](16-semantic-model.md)                      | Pane state facets, command journal with output spans, first-class agent commands and introspection (Claude Code/Codex); does not gate replacement | Initial direction captured |
 
 ## Decisions already fixed
 
