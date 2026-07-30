@@ -5,6 +5,10 @@ Continues: [14-live-scroll-workload-profile.md](14-live-scroll-workload-profile.
 (`14/F6`, `14/D1`), [13-live-app-compositing-and-draw-hotspots.md](13-live-app-compositing-and-draw-hotspots.md)
 (`13/H3`, `13/D2`), and [9-plan-render-allocation-hotspots.md](9-plan-render-allocation-hotspots.md)
 (`9/H2`, `9/H3`, Phase 5).
+Continued by: [18-cpu-renderer-optimization-leads.md](18-cpu-renderer-optimization-leads.md),
+which decomposes the one region this sweep ranked but never opened -- the draw
+bracket -- and explains the display-list mechanism behind `F1`'s off-main-thread
+surprise and `F2`'s unbracketed region.
 
 ## Purpose
 

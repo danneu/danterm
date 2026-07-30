@@ -269,6 +269,10 @@ Practice TDD and keep each step at the layer that owns its behavior:
    primitives whose semantics match.
 4. Add exact classification, cell translation, display conversion, and drawing
    to `TerminalRenderExecution`.
+   A family whose range starts below `spriteClassificationMinimumScalar` must
+   also lower that floor and register itself in `SpriteRoutingGuardTests`. The
+   executor rejects sub-floor scalars before routing, so an unregistered family
+   below it renders from the font instead of its sprite, silently.
 5. Add the implemented scalars to `implementedRanges` in
    [`GlyphPreviewLayout.swift`](../lib/TerminalCore/Sources/GlyphPreview/GlyphPreviewLayout.swift)
    and update its corpus test.
