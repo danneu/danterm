@@ -195,7 +195,8 @@ improvement as a failure.
 - [ ] Land the fixture and a runner, with provenance recording the geometry, the
       btop version, the `--update 250` deviation, and the fact that a capture of
       live system state is not regenerable.
-- [ ] Resolve the license question before the fixture is committed.
+- [x] ~~Resolve the license question before the fixture is committed.~~
+      Dismissed by the user, 2026-07-30; see `D3`.
 
 ## Findings log
 
@@ -706,11 +707,12 @@ improvement as a failure.
     deterministic replay -- it is bytes -- but the fixture is not reproducible by
     re-running the capture, and the manifest should say so rather than imply a
     regenerable input.
-  - **Licensing needs a look before commit.** The four committed fixtures are
-    MIT and DanTerm-authored. This one is DanTerm-authored bytes *emitted by* a
-    GPL-3.0 program, which is a different provenance claim than any existing
-    entry makes, and `NeutralTerminalProvenance.validate` currently accepts only
-    `libvterm`, `alacritty`, and `danterm` sources.
+  - ~~**Licensing needs a look before commit.**~~ Raised and **dismissed by the
+    user, 2026-07-30**, as not worth pursuing. Recorded rather than deleted so a
+    later reader knows it was considered and set aside deliberately, not missed.
+    The mechanical part still stands: `NeutralTerminalProvenance.validate`
+    accepts only `libvterm`, `alacritty`, and `danterm` sources, so the fixture
+    declares `danterm` and describes the subject in its provenance text.
 
 ## Rejected
 
