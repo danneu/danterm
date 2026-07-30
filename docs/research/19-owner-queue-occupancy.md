@@ -1,8 +1,9 @@
 # Owner-queue occupancy and the main-thread fence
 
-Research started: 2026-07-30. **Status: OPEN -- Phases 1-4 done (`F1`-`F13`,
-`D1`-`D3`). `C1` is landed and measured (`257bfee`); `C2`-`C4` remain gated on
-user direction.**
+Research started: 2026-07-30. **Status: OPEN -- Phases 1-5 done (`F1`-`F15`,
+`D1`-`D4`). The search thread is closed: `C1` is landed and measured (`257bfee`),
+and `C2`/`C3`/`C5` are all rejected as premature by `D4`. `C4` (resize) is the
+one candidate left and remains gated on user direction.**
 Deliverable is an inventory of every job that can run on `TerminalPTYHost`'s
 serial queue with its bound (or the absence of one), a measured occupancy
 distribution for the unbounded ones, and a per-candidate verdict for anything
@@ -63,6 +64,25 @@ held Enter on a quiet saturated pane goes **99.3 ms -> ~0.00 ms**, a new needle
 is `C5`'s job now). `D2`'s recommended first commit -- landing the probe as a
 checked-in benchmark -- was **not** done, and `D3` says why that was the right call
 and what it costs.
+
+Phase 5 closed the search thread by running the comparison `F9` owed, and it came
+back **negative** (`F14`): a streaming pane still pays a full 48.8 ms rescan per
+press and the user cannot feel it. The model is what that confirms -- `F11`'s
+inequality, re-evaluated, puts the queue at ~0.73 utilization instead of above 1.0,
+so nothing accumulates and the fence never parks behind a backlog. The durable
+result is a **threshold this file had wrong**: `D1` ranked against the 16.7 ms
+frame budget, but what predicts felt behavior is the *arrival interval of the
+gesture driving the job* (66 ms at default key repeat). On that rule `C5`, `C2`,
+and `C3` are all rejected as premature (`D4`) -- each attacks a cost the live app
+has already reported as fine -- with a shared reopening condition on scrollback
+depth. What is left is **resize**, predicted from source and then confirmed
+(`F15`): one reflow per distinct grid with no coalescing, against mouse-move
+arrival, for 4x-8x utilization -- the worst ratio in the file. It also forwards one
+SIGWINCH per grid to the child, which is visible in the screenshot as four complete
+zsh prompt redraws at four different `COLUMNS` values. Whether those *stack* rather
+than overwrite because of the storm or because of a reflow cursor bug is
+deliberately left open, and `F15` names the twenty-second test that decides it --
+`F10` is the standing reason this file does not guess at that seam.
 Continues: the fence fix landed in `f75019a` and the read-turn cap in `a990606`
 (see `agent-docs/terminal-performance.md`); no prior research doc owns this area.
 
@@ -184,8 +204,26 @@ Added here, because the axis is different:
 - [x] Find the invalidation seam and prove it with a test that fails against an
       uninvalidated cache. **Done -- `F13`, and `D1`'s named hook was wrong.**
 - [x] Land `C1` and measure before/after on the same probe. **Done -- `D3`.**
-- [ ] Decide `C5` (incremental tail rescan) against the streaming cost `C1`
-      leaves. Needs the `--stream` comparison `F9` still owes.
+- [x] Decide `C5` (incremental tail rescan) against the streaming cost `C1`
+      leaves. Needs the `--stream` comparison `F9` still owes. **Done -- `F14`.
+      The comparison came back negative and `C5` is rejected; `D4` records the
+      threshold it changed.**
+
+### Phase 5 -- the search thread is closed; resize is what is left
+
+- [x] Run the `--stream` comparison and decide `C5` on it. **Done -- `F14`.**
+- [x] Re-rank `C2`/`C3` against the threshold `F14` established rather than
+      against the frame budget `D1` used. **Done -- `D4`. Both rejected as
+      premature, with a shared reopening condition on scrollback depth.**
+- [x] Test `D1`'s fourth-ranked candidate against the live app before pitching it.
+      **Done -- `F15`. Confirmed, and it is a rate problem rather than a cost
+      problem, which `H2` had left open.**
+- [ ] Run the single-settled-resize test from `F15`, which decides whether `C4` is
+      a performance change or a correctness bug wearing one.
+- [ ] Add an N-distinct-grids drain case to `just terminal-occupancy-probe`. The
+      existing reflow case measures one step and would report a coalescing fix as
+      no change at all (`D4`).
+- [ ] User direction gate before any `C4` implementation. **Not cleared.**
 
 ## Findings
 
@@ -581,6 +619,81 @@ codebase had already solved the classification problem this candidate needed, fo
 a different consumer, and said so in a comment.** `D1` proposed inventing an
 invalidation story. The work was reading enough to find the one already there.
 
+### `F14` -- the `--stream` comparison came back negative, and the model predicted it
+
+The comparison `F9` owed, run in the live app on the optimized dev build against
+`scripts/saturate-scrollback.sh --stream`. User's report, verbatim: **"stepping
+search on streaming now feels good. holding enter feels good on streaming vs
+quiet."**
+
+That is a negative result for `C5` and a positive one for `F11`'s model, which is
+the more valuable half. The streaming pane still pays a full rescan per press --
+48.8 ms by `D3`'s table, five frames, unchanged by `C1` -- and **it cannot be
+felt.** The reason is the inequality `F11` set up, evaluated on the other side of
+the fix:
+
+| | service time | presses/second | vs. 15/s key repeat |
+| --- | --- | --- | --- |
+| before `C1` | 99.3 ms | 10.1 | arrival exceeds service; utilization > 1.0 |
+| after `C1`, streaming | 48.8 ms | 20.5 | utilization ~0.73 |
+
+Nothing about the *job* got acceptable. What changed is that the queue stopped
+accumulating, so no press waits behind an unbounded number of predecessors and the
+`@MainActor` fence never parks behind a backlog. `F9` called the symptom chop
+rather than lag and attributed it to utilization near 1.0; that attribution now has
+a confirming prediction rather than only a consistent story.
+
+**The durable output is a threshold this file had wrong.** `D1` ranked candidates
+against the 16.7 ms frame budget. The budget that actually predicted the user's
+experience is **the repeat interval of the gesture driving the job** -- 66 ms at
+the default 15/s key repeat. A 48.8 ms job under a 66 ms interval is invisible; a
+99.3 ms job under it is intolerable. Occupancy above one frame is not by itself a
+defect, which is why three of this file's five candidates shrink on this finding.
+
+Two limits worth stating rather than burying. This was tested at **one** key-repeat
+setting; at macOS's fastest (66/s, 15 ms interval) 48.8 ms is back above the line,
+so the result is "not felt at default repeat," not "not felt." And it is one user's
+qualitative report on one machine -- adequate for a 2x effect against a threshold
+this far away, and not the kind of evidence that should settle anything close.
+
+### `F15` -- resize is confirmed in the live app, and the same missing coalescing hits the child
+
+Predicted from source before it was tested, which is worth recording because this
+file's previous two live checks (`F9`, `F10`) both went the other way. User's
+report: the window resizes instantly while the pane contents take a long time to
+catch up, plus "weird jank where the prompt gets repeated multiple times on some
+resizes." Screenshot attached to the 2026-07-30 session.
+
+**The lag is `C4` with no coalescing.** `applyResize`
+(`TerminalPTYHost.swift:1107`) is reached once per *distinct* grid --
+`setGridDimensions` (`TerminalPaneSession.swift:341`) de-duplicates identical
+dimensions and nothing else, and `host.resize` enqueues async. So a drag is not one
+64 ms reflow; it is one per column boundary crossed. Narrowing across forty columns
+queues ~2.5 seconds of work, which the window's own resize never waits for. Same
+shape as held Enter before `C1`, at worse odds: mouse-move arrives every 8-16 ms
+against 64 ms of service, so utilization is 4x-8x rather than `F11`'s ~1.5x-6.5x.
+
+**The second symptom shares the cause but not, necessarily, the explanation.** Line
+1115 does a `TIOCSWINSZ` per distinct grid, so the kernel sends the child one
+SIGWINCH per grid too -- the storm is not only ours to absorb, it is forwarded. The
+stacked prompts in the screenshot are the evidence: reading down them, the zsh
+right-prompt truncates `orb` / `orbst` / `orbstac` / `orbstack` while the left goes
+`…repo:` to `repo:`. Those are four complete prompt redraws at four different
+`COLUMNS` values, not rendering corruption.
+
+What is **not** established is why they stack instead of overwrite. That requires
+the cursor to end up somewhere the shell does not expect after a reflow, and the
+two candidates -- our reflow's cursor placement, or zsh losing its own redraw race
+under a storm -- are not distinguished by anything measured. `F13` is the standing
+reason not to guess here.
+
+The discriminating test is cheap and belongs to Phase 5: **resize one notch, let it
+settle fully, repeat.** If each settled single resize is clean, the duplication is
+caused by the storm and coalescing fixes both symptoms at once. If a single settled
+resize also duplicates a prompt, there is a reflow cursor bug underneath, which
+coalescing would only make rarer -- and that outranks the performance finding, the
+same way `F10` did.
+
 ## Decisions
 
 ### `D1` -- rank: fix the repeat scans first, bound the remaining one second
@@ -759,6 +872,84 @@ Ranks against `C2`/`C3` on evidence this file does not have. `F9` still owes the
 `--stream` comparison, and `C5` is only worth its edge cases if searching a
 tailing pane is a real workflow rather than a plausible one.
 
+**Rejected 2026-07-30 by `F14`, on exactly the evidence it named as its gate.**
+The comparison came back negative: the streaming case is not felt. Kept in place
+rather than deleted because the reasoning is the reusable part -- absolute
+coordinates make eviction a prefix drop, and the three edges are properties of
+this engine that any future incremental design still has to handle. Reopening
+condition in `D4`.
+
+### `D4` -- the search thread is closed; the threshold changed, and reflow inherits the file
+
+`F14` and `F15` land together, and between them they re-rank everything this file
+has left. The re-ranking is driven by a **new deciding rule**, so that comes first.
+
+**The rule `D1` should have used.** `D1` ranked by measured tail against the 16.7 ms
+frame budget. `F14` shows the budget that predicts felt behavior is **the arrival
+interval of the gesture driving the job**, and that a job several frames long is
+invisible when nothing queues behind it. So the question for every remaining
+candidate is not "does this exceed a frame" but **"does service time exceed the
+interval at which the user can re-trigger it"**. This is not a calibrated
+benchmark rule and does not pretend to be -- it is a screening rule for deciding
+what is worth measuring, in a file whose effects are 5x-50x (`D2`).
+
+Applied to the board:
+
+| | service | driving gesture | interval | verdict |
+| --- | --- | --- | --- | --- |
+| `C5` streaming search | 48.8 ms | key repeat | 66 ms | **rejected** (`F14`) |
+| `C2` bound the first scan | 52.6 ms | one keypress per needle | n/a, not repeated | **rejected** |
+| `C3` non-materializing walk | ~22% of a scan; Cmd-A 7.9 ms | discrete action | n/a | **rejected** |
+| `C4` resize/reflow | 64 ms | mouse-move during a drag | 8-16 ms | **taken up** (`F15`) |
+
+`C2` and `C3` are rejected on the same argument as `C5`, and it is worth being
+explicit that this is a reversal. Both attack a scan that happens **once per
+needle**, and `F9` established from the live app that typing a needle and single
+Enter steps are responsive. A candidate whose whole benefit lands on an action the
+user has already reported as fine is not worth a cancellation story (`C2`) or a
+traversal rewrite (`C3`). `C3` additionally lost its distinguishing argument along
+the way: `D1` pitched it as "the only candidate that helps the Cmd-A path," and the
+probe reads Cmd-A at **7.92 ms**, inside a 60Hz frame. That is consistent with
+`F5`'s 31 ns/cell rather than new -- what is new is noticing that the path it
+uniquely helps already fits its budget.
+
+Both stay listed rather than deleted, with one shared reopening condition: **a
+history materially deeper than doc 15's ~1,768 rows.** `F6`'s per-cell constant is
+flat, so at 4x the depth the first scan is ~210 ms and crosses the threshold for a
+discrete action on its own. Neither is wrong; both are premature.
+
+**`C4` is now the file's remaining candidate, and it is not the one-liner it
+looks like.** The shape is right there -- reflow is idempotent on the final size
+and every intermediate grid is discarded anyway, so collapsing the queue to the
+newest pending grid is small. What makes it a design question rather than a patch
+is the `TIOCSWINSZ` on `TerminalPTYHost.swift:1115`: the intermediate grids are not
+purely internal, they are **told to the child**. Dropping them changes what the
+shell is told, not only what we render, and `F15`'s stacked prompts are the
+evidence that the child's response to that stream is already not benign.
+
+So `C4` is **not authorized by this decision**, and the gate is a finding rather
+than a preference. `F15`'s single-settled-resize test has to run first, because it
+decides which problem `C4` is solving:
+
+- **Clean single resize** -> the duplication is a storm artifact, coalescing fixes
+  the lag and the jank together, and `C4` is a performance change with a nice
+  side effect.
+- **Duplicated single resize** -> there is a reflow cursor bug underneath.
+  It outranks `C4` outright, gets diagnosed first, and coalescing would have
+  buried it by making it rare. That is `F10`'s pattern for the second time in this
+  file: **the live-app symptom that looks like slowness turns out to have a
+  correctness bug inside it**, and chasing the performance framing first would
+  have hidden it both times.
+
+`D2` applies to `C4` in full, and unlike `C1` it can be honored: the probe exists,
+`just terminal-occupancy-probe` already measures a reflow step, and the baseline
+(64.04 ms mean, 61.78-69.45) is recorded before any change. What the probe does
+**not** measure is the drag *rate*, which is the whole of `H2` and the entire
+reason `C4` matters -- a coalescing fix would leave the per-step number untouched
+and be a total success. Any `C4` measurement therefore needs a stimulus the probe
+does not currently have: N distinct grids submitted back-to-back, timed to drain.
+Adding that case is the honest first commit here, and it is not a behavior change.
+
 ## Open hypotheses
 
 Revised by Phases 1 and 2. `H1` and `H2` are **answered** -- mechanism confirmed
@@ -782,12 +973,21 @@ scan `C1` leaves per needle.
 
 ### `H2` -- resize/reflow is unbounded and fires repeatedly
 
-**Answered.** 170 ns/cell, 53.7 ms at a saturated history, crossing a 60Hz frame
-at ~548 rows. Distinguished from `H1` by stimulus rather than size: a live window
-or split drag fires it whenever the drag crosses a cell-width boundary, so its
-*rate* is the open question and `F5` measured only its length. Ranks below `H1` on
-present evidence -- lower per-action cost, no per-keystroke multiplier, and a fix
-is far less obvious, since reflow genuinely has to touch every row.
+**Answered, and its open half is now answered too.** 170 ns/cell, 53.7 ms at a
+saturated history (64.0 on the checked-in probe), crossing a 60Hz frame at ~548
+rows. Distinguished from `H1` by stimulus rather than size: a live window or split
+drag fires it whenever the drag crosses a cell-width boundary, so its *rate* was
+the open question and `F5` measured only its length.
+
+The rate half is closed by `F15`, from source and confirmed in the live app: **one
+reflow per distinct grid, no coalescing, no debounce**, against mouse-move arrival
+of 8-16 ms. That is 4x-8x utilization -- the worst ratio in the file, worse than
+held Enter ever was -- and it is why the pane visibly trails the window. It also
+forwards a SIGWINCH per grid to the child. `D1` ranked this fourth on the grounds
+that "a fix is far less obvious, since reflow genuinely has to touch every row";
+that reasoning was sound about making reflow *faster* and irrelevant to the actual
+defect, which is doing it forty times when one would do. `D4` promotes it to the
+file's remaining candidate.
 
 ### `H3` -- the write turn is capped at 4x the read turn
 
