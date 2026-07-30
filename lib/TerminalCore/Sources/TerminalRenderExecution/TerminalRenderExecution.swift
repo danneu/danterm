@@ -98,33 +98,74 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
     }
 }
 
+/// The scalars each face precomputes glyphs for: printable ASCII, which is nearly
+/// every cell a terminal draws. Control characters are excluded because they carry
+/// no glyph, and the upper bound stops at ASCII because beyond it the table would
+/// grow far faster than the hit rate.
+let asciiGlyphTableRange: ClosedRange<UInt32> = 0x20...0x7E
+
+/// One styled face together with its printable-ASCII glyphs, resolved eagerly at
+/// construction so the draw loop never asks CoreText to map a character it has
+/// already mapped. `CTFontGetGlyphsForCharacters` is documented as the font's
+/// nominal cmap mapping (`CTFont.h:820-846`) -- a pure function of face and code
+/// unit, with no context, no shaping, and no state -- which is what makes caching
+/// it sound rather than merely convenient. The alternative, a memo filled during
+/// draws, would put mutable state inside a `Sendable` value; this stays immutable.
+struct TerminalFace: @unchecked Sendable {
+    let font: CTFont
+
+    /// `asciiGlyphTableRange`'s glyphs, indexed by `value - lowerBound`. A zero
+    /// entry means the face cannot map that scalar and preserves the draw loop's
+    /// existing meaning of glyph zero: send the cell to the fallback path.
+    private let glyphs: [CGGlyph]
+
+    init(font: CTFont) {
+        self.font = font
+        var characters = asciiGlyphTableRange.map { UniChar($0) }
+        var resolved = [CGGlyph](repeating: 0, count: characters.count)
+        // The return value is false when *any* character is unmapped, so it cannot
+        // stand in for a per-entry check; the zeroed buffer already carries that.
+        _ = CTFontGetGlyphsForCharacters(font, &characters, &resolved, characters.count)
+        glyphs = resolved
+    }
+
+    /// The precomputed glyph, or nil when the scalar is outside the table and the
+    /// caller must fall back to a live cmap lookup.
+    func asciiGlyph(_ scalarValue: UInt32) -> CGGlyph? {
+        guard asciiGlyphTableRange.contains(scalarValue) else { return nil }
+        return glyphs[Int(scalarValue - asciiGlyphTableRange.lowerBound)]
+    }
+}
+
 /// The four styled faces a draw can need, built once alongside the metrics that
 /// fix the grid rather than per draw. Every face is derived from the same base
 /// family and size, so equality compares the faces themselves: two sets built
 /// from the same base are interchangeable, which is what keeps the metrics'
 /// synthesized `Equatable` a comparison of geometry and not of object identity.
+/// The glyph tables are derived from those same faces, so they are deliberately
+/// outside that comparison.
 ///
 /// `@unchecked` because CoreText does not annotate `CTFont` as `Sendable`, not
 /// because the faces need care: they are immutable after `init` and CoreText
 /// documents font objects as safe to read from multiple threads. The unchecked
 /// conformance is what lets `TerminalRenderMetrics` stay `Sendable`.
 struct TerminalFontSet: Equatable, @unchecked Sendable {
-    let regular: CTFont
-    let bold: CTFont
-    let italic: CTFont
-    let boldItalic: CTFont
+    let regular: TerminalFace
+    let bold: TerminalFace
+    let italic: TerminalFace
+    let boldItalic: TerminalFace
 
     init(baseName: String, baseSize: CGFloat) {
         let regular = CTFontCreateWithName(baseName as CFString, baseSize, nil)
-        self.regular = regular
-        self.bold = regular.styled(with: .boldTrait)
-        self.italic = regular.styled(with: .italicTrait)
-        self.boldItalic = regular.styled(with: [.boldTrait, .italicTrait])
+        self.regular = TerminalFace(font: regular)
+        self.bold = TerminalFace(font: regular.styled(with: .boldTrait))
+        self.italic = TerminalFace(font: regular.styled(with: .italicTrait))
+        self.boldItalic = TerminalFace(font: regular.styled(with: [.boldTrait, .italicTrait]))
     }
 
     /// The face for one run's style, so callers route on traits rather than
     /// reaching for a field and risking the wrong one.
-    func font(bold: Bool, italic: Bool) -> CTFont {
+    func face(bold: Bool, italic: Bool) -> TerminalFace {
         switch (bold, italic) {
         case (false, false): regular
         case (true, false): self.bold
@@ -134,10 +175,10 @@ struct TerminalFontSet: Equatable, @unchecked Sendable {
     }
 
     static func == (lhs: TerminalFontSet, rhs: TerminalFontSet) -> Bool {
-        CFEqual(lhs.regular, rhs.regular)
-            && CFEqual(lhs.bold, rhs.bold)
-            && CFEqual(lhs.italic, rhs.italic)
-            && CFEqual(lhs.boldItalic, rhs.boldItalic)
+        CFEqual(lhs.regular.font, rhs.regular.font)
+            && CFEqual(lhs.bold.font, rhs.bold.font)
+            && CFEqual(lhs.italic.font, rhs.italic.font)
+            && CFEqual(lhs.boldItalic.font, rhs.boldItalic.font)
     }
 }
 
@@ -365,6 +406,23 @@ private extension Dictionary where Value == [CGRect] {
 /// test failing. `SpriteRoutingGuardTests` ties the two together.
 let spriteClassificationMinimumScalar: UInt32 = 0x2500
 
+/// The baseline origin one glyph is submitted at. The negative `y` is not a sign
+/// error: glyph submission runs under a y-flipped text matrix, so the position is
+/// expressed in that flipped space while the rest of the executor stays in
+/// top-left coordinates. Its own function because two paths -- the precomputed
+/// ASCII table and the batched cmap residue -- now derive it, and they must not
+/// drift apart by half a pixel.
+private func glyphOrigin(
+    row: Int,
+    column: Int,
+    metrics: TerminalRenderMetrics
+) -> CGPoint {
+    CGPoint(
+        x: CGFloat(column) * metrics.cellSize.width,
+        y: -(CGFloat(row) * metrics.cellSize.height + metrics.baselineOffset)
+    )
+}
+
 private extension CGContext {
     func drawCursor(
         _ cursor: RenderCursor,
@@ -462,7 +520,8 @@ private extension CGContext {
             mappedGlyphs.removeAll(keepingCapacity: true)
             positions.removeAll(keepingCapacity: true)
 
-            let font = fonts.font(bold: run.bold, italic: run.italic)
+            let face = fonts.face(bold: run.bold, italic: run.italic)
+            let font = face.font
             let colorKey = UInt32(run.foreground.red) << 16
                 | UInt32(run.foreground.green) << 8
                 | UInt32(run.foreground.blue)
@@ -594,7 +653,23 @@ private extension CGContext {
                         }
                     }
                     if classifiedAsSprite == false {
-                        if scalar.value <= UInt16.max {
+                        // Printable ASCII is nearly every cell, and its glyph was resolved
+                        // once when the face was built, so it goes straight into the
+                        // submission buffers and never reaches the batched cmap call below.
+                        // Glyph zero keeps its existing meaning -- the face cannot map this
+                        // scalar -- and takes the same fallback path the batch would give it.
+                        if let glyph = face.asciiGlyph(scalar.value) {
+                            if glyph == 0 {
+                                fallbackCells.append((cell, column))
+                            } else {
+                                mappedGlyphs.append(glyph)
+                                positions.append(glyphOrigin(
+                                    row: run.row,
+                                    column: column,
+                                    metrics: metrics
+                                ))
+                            }
+                        } else if scalar.value <= UInt16.max {
                             characters.append(UniChar(scalar.value))
                             candidateCells.append((cell, column))
                         } else {
@@ -662,10 +737,10 @@ private extension CGContext {
                     continue
                 }
                 mappedGlyphs.append(glyph)
-                positions.append(CGPoint(
-                    x: CGFloat(candidate.column) * metrics.cellSize.width,
-                    y: -(CGFloat(run.row) * metrics.cellSize.height
-                        + metrics.baselineOffset)
+                positions.append(glyphOrigin(
+                    row: run.row,
+                    column: candidate.column,
+                    metrics: metrics
                 ))
             }
 

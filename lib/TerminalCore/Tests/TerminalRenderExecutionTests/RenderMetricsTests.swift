@@ -43,16 +43,16 @@ struct RenderMetricsTests {
         let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
         let fonts = metrics.fonts
 
-        #expect(CTFontGetSymbolicTraits(fonts.regular).isDisjoint(with: [.boldTrait, .italicTrait]))
-        #expect(CTFontGetSymbolicTraits(fonts.bold).contains(.boldTrait))
-        #expect(CTFontGetSymbolicTraits(fonts.bold).contains(.italicTrait) == false)
-        #expect(CTFontGetSymbolicTraits(fonts.italic).contains(.italicTrait))
-        #expect(CTFontGetSymbolicTraits(fonts.italic).contains(.boldTrait) == false)
-        #expect(CTFontGetSymbolicTraits(fonts.boldItalic).isSuperset(of: [.boldTrait, .italicTrait]))
+        #expect(CTFontGetSymbolicTraits(fonts.regular.font).isDisjoint(with: [.boldTrait, .italicTrait]))
+        #expect(CTFontGetSymbolicTraits(fonts.bold.font).contains(.boldTrait))
+        #expect(CTFontGetSymbolicTraits(fonts.bold.font).contains(.italicTrait) == false)
+        #expect(CTFontGetSymbolicTraits(fonts.italic.font).contains(.italicTrait))
+        #expect(CTFontGetSymbolicTraits(fonts.italic.font).contains(.boldTrait) == false)
+        #expect(CTFontGetSymbolicTraits(fonts.boldItalic.font).isSuperset(of: [.boldTrait, .italicTrait]))
 
-        for font in [fonts.regular, fonts.bold, fonts.italic, fonts.boldItalic] {
+        for font in [fonts.regular.font, fonts.bold.font, fonts.italic.font, fonts.boldItalic.font] {
             #expect(CTFontGetSize(font) == metrics.baseFontSize)
-            #expect(CTFontCopyFamilyName(font) == CTFontCopyFamilyName(fonts.regular))
+            #expect(CTFontCopyFamilyName(font) == CTFontCopyFamilyName(fonts.regular.font))
         }
     }
 

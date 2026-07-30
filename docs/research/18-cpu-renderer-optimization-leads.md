@@ -1,9 +1,11 @@
 # CPU renderer optimization leads
 
-Research started: 2026-07-29. **Status: OPEN -- survey complete, no code
-candidate started.** Deliverable is the API inventory (`F1`), the decomposition
-of the one decidable renderer bracket (`F4`-`F8`), and the ranked lead list
-(`D1`). Nothing here has been implemented or benchmarked.
+Research started: 2026-07-29. **Status: OPEN -- survey complete; two of the five
+tier-1 leads taken and confirmed (`L3`/`F10`, `L2`/`F11`), the rest still gated.**
+Deliverable is the API inventory (`F1`), the decomposition of the one decidable
+renderer bracket (`F4`-`F8`), the ranked lead list (`D1`), and the paired-benchmark
+verdict for each lead as it lands (`F10` onward). Together the two taken leads cut
+the draw bracket roughly in half on all three draw workloads.
 Continues: [17-cpu-profile-sweep.md](17-cpu-profile-sweep.md) (`17/F2`, `17/F3`,
 `17/F6`, `17/F17`, `17/D8`), [11-render-frame-budget.md](11-render-frame-budget.md)
 (`11/F7`, `11/F8`, `11/F10`).
@@ -97,9 +99,9 @@ Added here:
 
 ### Phase 4 -- code-candidate direction gate
 
-**Opened by user direction on 2026-07-29 for `L3` only.** Listed in `D1`'s
+**Opened by user direction on 2026-07-29 for `L3`, then `L2`.** Listed in `D1`'s
 recommended order; each entry is one commit-sized candidate with its own paired
-benchmark. Everything still unchecked below `L3` remains gated.
+benchmark. Everything still unchecked remains gated.
 
 - [x] **`L3` -- guard the sprite switch** (`>= 0x2500`). ~5% of the bracket.
       First because it is a few lines, its guarding test outlives it, and its
@@ -107,8 +109,13 @@ benchmark. Everything still unchecked below `L3` remains gated.
       all -- information every later lead needs. **Done -- `F10`. Landed as
       `spriteClassificationMinimumScalar` + `SpriteRoutingGuardTests`;
       `content-churn` `faster` -6.76%, `style-churn` `faster` -6.08%.**
-- [ ] **`L2` -- memoize character-to-glyph mapping** per face. 10-14%. Largest
+- [x] **`L2` -- memoize character-to-glyph mapping** per face. 10-14%. Largest
       low-risk item; correctness comes from `F2`'s header text, not a measurement.
+      **Done -- `F11`. Landed as an eager, immutable printable-ASCII table on each
+      styled face (no per-draw memo, so no synchronization decision).
+      `confirm`: `content-churn` -49.43%, `style-churn` -53.16%,
+      `incremental-mixed` -42.95%. Four times the estimate, because a table hit
+      also skips the intermediate buffers -- see `F11`.**
 - [ ] **`L1` -- batch glyph submission** by (face, color) across the damaged
       region. ~11%, and the only tier-1 lead whose *mechanism* the benchmark can
       confirm or refute, via `F9`'s prediction that `content-churn` and
@@ -116,9 +123,12 @@ benchmark. Everything still unchecked below `L3` remains gated.
 - [ ] **`L6` -- batch fills by color**, then **`L5` -- intern `CGColor`s and
       hoist the color space.** Sizes overlap `L1`'s; re-read the bracket between
       them rather than pitching a combined number.
-- [ ] **Prerequisite for `L4`, not `L4` itself:** confirm or refute `F8`'s
-      inlining attribution by ablation. `17/D5` retired a candidate sized exactly
-      this way. Until this is done, 27% is a precondition and not a size.
+- [ ] **`L4` is now mostly spent, and not by the route it was queued for.** `F11`
+      removed the intermediate buffers from the ASCII path rather than making them
+      cheaper, and took a win far larger than the cmap share alone -- so `F8`'s
+      27% was substantially real. What remains of `L4` applies only to the
+      non-ASCII residue. If the exact split between cmap and buffers is ever
+      wanted, `F11` names the one-variant experiment that yields it.
 - [ ] Optional tooling, not a decision rule: the per-draw run-count and
       glyph-call counters `F9` asks for, which would make `L1`/`L6` predictable
       in advance instead of only measurable afterwards.
@@ -541,12 +551,70 @@ produces, and `F9` says so.
   attribution matters for `L1`, where the prediction is directional, and not for
   a guard whose only claim is "do less per cell".
 
+### F11 -- `L2` landed at roughly -50%, four times its estimate, because it also removed the intermediate buffers
+
+- Status: confirmed by the `confirm` schedule on all five workloads. Second
+  `L`-lead implemented.
+- Method: `just benchmark-confirm baseline=HEAD` with baseline `40637fe` (the `L3`
+  commit) and candidate tree `b024c3f`, after two `quick` runs agreed
+  (`content-churn` -52.23%, `style-churn` -50.95%, 2 pairs each).
+- Change: `TerminalFace` now pairs each styled `CTFont` with its printable-ASCII
+  glyphs, resolved once in `init` (`TerminalRenderExecution.swift:110-146`), and
+  the run loop submits a table hit straight into `mappedGlyphs`/`positions`
+  instead of routing it through `characters` -> `CTFontGetGlyphsForCharacters` ->
+  `glyphs` -> `candidateCells` (`:560-580`). The table is immutable, so no
+  synchronization decision was needed and `TerminalFontSet` stays a `Sendable`
+  value -- the mutable per-draw memo `D1` contemplated was never built.
+- Measurements (`confirm`, per-workload pair counts as frozen):
+  - `content-churn`: **`faster` -49.43%** (4 pairs)
+  - `style-churn`: **`faster` -53.16%** (4 pairs, 3 flagged outliers retained)
+  - `incremental-mixed`: **`faster` -42.95%** (6 pairs)
+  - `terminal-feed`: `equivalent` +0.00% -- correct; it never draws.
+  - `scrollback-stream`: `inconclusive` +1.28% -- PTY-bound, as `17` found.
+  - Plan time moved between -0.52% and +2.02% across runs, all descriptive.
+- Observation: the estimate was **10-14%** (`F7`'s cmap share) and the measurement
+  is ~4x that. The estimate was not wrong about the cmap; the change was bigger
+  than the change that was proposed.
+- Inference: a table hit skips three things at once, and only the first was
+  sized. It skips the cmap lookup (`F7`, 16% of the bracket); it skips the
+  `characters`/`candidateCells`/`glyphs` append traffic, which `F4` measured as
+  `_ArrayBuffer.beginCOWMutation` 14.3% plus `Array.replaceSubrange` 11.3%; and
+  it skips the `repeatElement` growth of `glyphs` plus the second pass over
+  `candidateCells`. Those add to roughly the observed figure.
+- **This partly answers `F8`'s open question, and not by the method `F8` asked
+  for.** `F8` attributed ~27% to array growth via an inlining attribution and
+  demanded an ablation before that number could be quoted. No ablation was run.
+  Instead the arrays were *removed* from the ASCII path, and draw time fell by far
+  more than the cmap share alone can explain. That is evidence the 27% was
+  substantially real, but it is inference from a two-mechanism commit, not
+  isolation: this run cannot say how the ~50% divides between the cmap and the
+  buffers.
+- The split is cheap to settle if anyone needs the number: benchmark a throwaway
+  variant that consults the table but still pushes each hit through
+  `characters`/`glyphs` as before. The difference between that and this commit is
+  the buffer share. Nothing currently queued depends on the answer, which is why
+  it was not run.
+- Uncertainty: the three draw workloads' corpora are ASCII-dominated, so the
+  table's hit rate there is near 100%. A CJK-heavy or emoji-heavy session keeps
+  the old path for most cells and would see far less. The win is real but its size
+  is a property of the content, exactly as `F9` warned for `L1` and `L6`.
+- `style-churn` carried 3 flagged outlier pairs, retained in the estimate per the
+  frozen rule. Its verdict agrees with the other two draw workloads within a few
+  points, so the outliers do not change the reading.
+- Competing interpretation considered and rejected: that the change renders less.
+  `AsciiGlyphTableTests` checks every table entry against a fresh
+  `CTFontGetGlyphsForCharacters` on all four faces, and the mixed table/cmap
+  alignment test compares each cell against an isolated control, so glyphs are
+  neither dropped nor displaced. The whole existing bitmap suite (97 tests) is
+  unchanged and green.
+
 ## Decision log
 
 ### D1 -- the ranked lead list
 
-- Status: **recommendation. `L3` has since been taken and confirmed (`F10`); every
-  other lead below is still a recommendation with nothing implemented.**
+- Status: **recommendation. `L3` (`F10`) and `L2` (`F11`) have since been taken and
+  confirmed; every other lead below is still a recommendation with nothing
+  implemented.**
 - Ranking axis: expected reduction in `drawNanosecondsPerDraw` per unit of risk,
   with decidability as a hard gate -- tier 1 is decidable by an existing
   calibrated rule, tier 2 is decidable but small or uncertain, tier 3 is not
@@ -557,7 +625,7 @@ produces, and `F9` says so.
 | # | Lead | Size (% of bracket) | Risk | Smallest first experiment |
 | --- | --- | ---: | --- | --- |
 | `L1` | **Batch glyph submission.** Accumulate glyphs and positions across *all* rows into one buffer per (face, color) for the whole draw; issue one `CTFontDrawGlyphs` per batch instead of one per row per style. Attacks the per-entry color-resource and fill-state construction in `F6`, plus the wrapper and antialias-style lookups. | **~11%** (`F6`), and it also cuts CA-side replay entries | Medium. Draw order changes: all text of one color is submitted before another color's. Text runs do not overlap by construction -- one glyph per cell at a cell-quantized position (`F1` item 1 for the run shape, `TerminalRenderExecution.swift:649-653` for the position derivation) -- so the composite result is identical, but that invariant must be asserted, not assumed. Decorations and cursor must stay ordered after text. | Batch by (face, color) only, keep the existing per-row loop for sprites and fills. Snapshot-test a frame containing every style combination, then run `just benchmark-quick` and read `content-churn` against `style-churn` per `F9`'s prediction. |
-| `L2` | **Memoize character-to-glyph mapping** per face: 128-entry direct array for ASCII plus a dictionary tail, built lazily, owned by `TerminalFontSet` (`TerminalRenderExecution.swift:111-141` -- immutable after `init` and already `@unchecked Sendable`, so adding mutable state to it is a synchronization decision, not a free change; prefer per-draw-thread ownership over a lock). | **10-14%** (`F7`) | Low. `F2` proves purity from the header. Behavior-preserving by construction. | Cache only the ASCII range first; measure; extend to the dictionary tail only if the residue justifies it. Test: a run of every BMP scalar the fixtures cover maps identically with and without the cache. |
+| `L2` | **Taken; `faster` on all three draw workloads at ~4x the estimate -- see `F11`. Memoize character-to-glyph mapping** per face: 128-entry direct array for ASCII plus a dictionary tail, built lazily, owned by `TerminalFontSet` (`TerminalRenderExecution.swift:111-141` -- immutable after `init` and already `@unchecked Sendable`, so adding mutable state to it is a synchronization decision, not a free change; prefer per-draw-thread ownership over a lock). | **10-14%** (`F7`); measured -49% to -53% | Low. `F2` proves purity from the header. Behavior-preserving by construction. | Cache only the ASCII range first; measure; extend to the dictionary tail only if the residue justifies it. Test: a run of every BMP scalar the fixtures cover maps identically with and without the cache. |
 | `L3` | **Guard the sprite switch** with `scalar.value >= 0x2500` before the eight-arm range match. **Taken; `faster` on both draw workloads -- see `F10`.** | **~5%** (`F8`); measured -6.76% / -6.08% | Very low. Pure control flow; the guard's bound is verifiable against the eight constants in one grep. | Add the guard plus a test that asserts every family's `coarseRange.lowerBound >= 0x2500`, so the guard cannot silently outlive the constant that justifies it. This is the file's recommended *first* commit regardless of what else is taken. |
 | `L6` | **Batch fills by color.** Background, selection, and search-match runs each call `fill(rect)` per run; group by color and issue one `fill(rects)` per color per draw, and merge vertically adjacent equal-color spans. Each avoided call is also an avoided display-list entry with its own `colorResourceForColor` + `getEntryFillState` (`F6`). | up to **~14%** (`F4`, `CGContextFillRect`/`FillRects`); content-dependent per `F9` | Low. Fills are opaque and non-overlapping within a layer; the three layers keep their existing relative order. | Backgrounds only, grouped by color. `fill(rects)` is already used by the sprite path, so the idiom is established. |
 | `L5` | **Intern `CGColor`s across draws** in the metrics (or a renderer-owned cache) instead of per draw, and build them in the destination color space rather than constructing `CGColorSpace(name:)` per draw. Removes `RenderColor.cgColor` (4.1%), the per-draw dictionary traffic (1.4%), and `CGColorSpaceCreateWithName` (0.2%). | **~5.5%** (`F4`; call sites at `F1`'s last three rows) | Low, with one real trap: interning must be keyed on the full color *and* the color space, and an unbounded cache on truecolor input is a leak. Bound it. | Hoist the color space to `TerminalRenderMetrics`; add a bounded (e.g. 256-entry) intern table; verify identical rendering on a truecolor fixture. |
@@ -670,8 +738,8 @@ Added by this file:
 
 ## Outcome
 
-**Survey complete; ranked; `L3` implemented and confirmed (`F10`); the rest of
-Phase 4 still gated.** Fifteen leads, five
+**Survey complete; ranked; `L3` (`F10`) and `L2` (`F11`) implemented and confirmed;
+the rest of Phase 4 still gated.** Fifteen leads, five
 of them decidable today by the frozen draw verdict and together covering roughly
 35-45% of the draw bracket (non-additively), three pre-rejections added, and one
 reading corrected before it reached code (`F6`).
@@ -703,3 +771,9 @@ Four results are worth more than the ranking:
    largest. Every remaining tier-1 estimate is quoted in the same units, so an
    `equivalent` verdict on one of them now argues against that lead's mechanism
    instead of against the instrument.
+6. **An estimate can be low without being wrong** (`F11`). `F6`'s lesson was that
+   the obvious reading of a profile node oversizes a lead. `L2` is the mirror: the
+   10-14% was an honest size for *the change proposed* (memoize the cmap), and the
+   change actually built skipped the surrounding buffer traffic too, so it
+   measured ~4x larger. Both failures come from the same habit -- sizing a node
+   instead of sizing the code path a specific edit removes.
