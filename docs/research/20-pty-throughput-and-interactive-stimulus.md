@@ -167,13 +167,29 @@ improvement as a failure.
 
 - [x] Decompose the keypress loop and price the mechanisms a workload would need,
       so `D2` is argued rather than guessed -- recorded in `F8`.
-- [ ] `D2` direction gate: is a keypress-driven workload worth building, and
+- [x] `D2` direction gate: is a keypress-driven workload worth building, and
       which subject (`less`, vim, btop)? Sequenced after Phase 2 deliberately --
       Phase 2 is cheap and certain, Phase 3 is neither.
-      **Recommendation made (`F8` -> `D2`): take the recording, reject the
-      keypress workload. Awaiting the user.**
-- [ ] If taken: decide diagnostic-only versus decidable *before* building. `F1`'s
-      subjects split on exactly this line and the split is not obvious.
+      **Selected the recording; the keypress workload is rejected, user,
+      2026-07-30.**
+- [ ] Capture a real TUI session and characterize what it actually emits, against
+      the same census run over the four committed fixtures.
+- [ ] `D3` admission gate, **pre-registered here before the capture runs**: a
+      recording earns a sixth workload only if its emitted-sequence distribution
+      reaches a path the existing corpus does not. That is not this file's
+      invention -- `TerminalDrawBenchmarkSupport` already states the rule for its
+      own benchmark ("any new workload should be added for the same reason -- a
+      path the existing ones cannot reach -- not to add another flavor of
+      content"), and the corpus manifest makes every workload declare a
+      `dominantQuestion` for the same purpose. **Deciding rule: if the census
+      finds no control sequence class the four fixtures leave unexercised, the
+      recording is another flavor of styled TUI content and is rejected**, with
+      the census kept as the finding. Pre-registered so the capture cannot be
+      read backwards into a justification, the way `21/D1` pre-registers its own
+      gate.
+- [ ] If admitted: decide diagnostic-only versus decidable *before* building --
+      a decidable sixth workload needs an A/A screen and a frozen threshold in
+      both modes, which is the same process `17/F15` ran and refused.
 
 ## Findings log
 
@@ -468,6 +484,56 @@ improvement as a failure.
   looks implicated, it is measurable directly with a `sample` under a held key --
   which is cheaper than everything in Results 1-4 combined.
 - Next action: `D2`.
+
+### F9 -- 100% of a real TUI's output arrives inside a frame-coalescing bracket the corpus never emits
+
+- Status: complete. Clears `D3`'s pre-registered admission gate, and by a wider
+  margin than the gate asked for.
+- Date: 2026-07-30, at `434b90b`.
+- Method: capture btop for 20s under a PTY at the canonical 179x66 with
+  `TERM=xterm-256color`, writing nothing to the child, then census the
+  control-sequence vocabulary of the capture and of all four committed fixtures
+  with one parser. Scratch tooling, not committed: `capture-tui.py`,
+  `escape-census.py`. Capture is 3,102,335 bytes in 3,091 PTY reads.
+- Result -- **13 sequence classes appear in the capture and in none of the four
+  fixtures.** The committed corpus's entire vocabulary is `LF`, `CSI H`,
+  `CSI K`, `CSI J`, `CSI @`, `CSI P`, `CSI r`, and three SGR classes. btop adds:
+  private modes `?2026h`/`?2026l` (99 each), `?1049h`, `?25l`, `?1002h`,
+  `?1015h`, `?1006h`; relative cursor motion `CSI A`/`B`/`C`/`D` (42,093
+  combined); `CSI f`; and `CSI SGR basic`.
+- **The headline is synchronized output.** `100.0%` of the captured bytes --
+  3,101,505 of 3,102,335 -- arrive *inside* a `DECSET 2026` bracket, in 99 spans
+  of median 39,819 bytes. Not one byte of the committed corpus does.
+- Why that is load-bearing rather than trivia:
+  `TerminalPaneSession.planIfNeeded` (`lib/TerminalPTY/.../TerminalPaneSession.swift:635`)
+  returns early on `presentation.isSynchronizedOutputActive`, so while the flag
+  is set **the app parses the bytes and plans and draws nothing.** That is
+  whole-frame suppression sitting directly in front of the two most expensive
+  brackets the harness measures, and no committed workload enters it. The source
+  says as much unprompted, in the comment above `pendingFenceStallNanoseconds`:
+  "synchronized output is what modern full-screen TUIs use, so latching would
+  understate exactly the floods worth measuring."
+- Second-largest difference, and independent of the first -- **the corpus
+  addresses the cursor absolutely and btop moves it relatively.** 27,571
+  `CSI C` forward-skips are how btop steps over unchanged cells; the corpus has
+  zero relative motion and 400k absolute `CSI H`. Different damage shape into
+  the same planner.
+- Third -- **byte composition inverts.** The capture is 20.3% printable ASCII
+  (629,812 of 3,102,335) and 455,100 non-ASCII bytes of box-drawing and braille,
+  against 80-98% printable across the four fixtures. It carries 84,989 truecolor
+  SGRs against `styled-screen-redraw`'s 28,000, on 60% of the bytes. A real TUI
+  is a control- and style-dominated stream, not a text-dominated one; every
+  workload we authored is the opposite.
+- Also unexercised: **the alternate screen.** `?1049h` is the capture's first
+  meaningful sequence, `isAlternateScreenActive` is real state in
+  `Terminal.swift`, and no benchmark workload has ever entered it.
+- Uncertainty: the census recognizes sequence *shapes* and does not interpret
+  them, so a rare class could be miscounted. That moves a number and not the
+  gate, which reads only which classes appear. Separately, `--update 250` is not
+  btop's default 2s cadence -- a deliberate deviation to get 99 frames into a
+  20s capture rather than 10, and one that must be recorded in the fixture's
+  provenance if this is committed. It changes frame *rate*, not frame *content*.
+- Next action: `D3`.
 
 ## Decision log
 
