@@ -87,6 +87,10 @@ public actor TerminalPTYHost {
     )
 
     private let queue: DispatchSerialQueue
+    /// Read on the owner queue, written from whatever thread submits, so it is not
+    /// actor state: every `nonisolated` submission below either enters a resize into
+    /// the open run or closes it.
+    private let resizeCoalescer = ResizeCoalescer()
     private var reducer = PaneLifecycleReducer()
     private var terminal: Terminal
     private let initialDimensions: TerminalDimensions
@@ -199,7 +203,7 @@ public actor TerminalPTYHost {
 
     /// Enqueues launch before synchronous pane submissions without requiring a Task hop.
     nonisolated public func submitStart(_ input: LaunchPolicyInput) {
-        queue.async { [weak self] in
+        queueClosingResizeRun().async { [weak self] in
             self?.assumeIsolated { owner in owner.start(input) }
         }
     }
@@ -207,7 +211,7 @@ public actor TerminalPTYHost {
     /// Enqueues user bytes directly on the owner queue without an ordering-opaque Task.
     nonisolated public func send(_ bytes: [UInt8]) {
         guard bytes.isEmpty == false else { return }
-        queue.async { [weak self] in
+        queueClosingResizeRun().async { [weak self] in
             self?.assumeIsolated { owner in
                 owner.applyViewportNavigation(.scrollToBottom, publishUpdate: false)
                 owner.process(.sendInput(bytes))
@@ -220,35 +224,52 @@ public actor TerminalPTYHost {
         _ key: TerminalInputKey,
         modifiers: TerminalKeyModifiers
     ) {
-        queue.async { [weak self] in
+        queueClosingResizeRun().async { [weak self] in
             self?.assumeIsolated { owner in owner.applyKey(key, modifiers: modifiers) }
         }
     }
 
     /// Enqueues unsanitized text for owner-side safe-paste policy and atomic marker generation.
     nonisolated public func sendPaste(_ text: String) {
-        queue.async { [weak self] in
+        queueClosingResizeRun().async { [weak self] in
             self?.assumeIsolated { owner in owner.applyPaste(text) }
         }
     }
 
     /// Enqueues semantic pane focus for authoritative mode gating without viewport movement.
     nonisolated public func sendFocus(_ focused: Bool) {
-        queue.async { [weak self] in
+        queueClosingResizeRun().async { [weak self] in
             self?.assumeIsolated { owner in owner.applyFocus(focused) }
         }
     }
 
-    /// Enqueues geometry on the same FIFO as input so caller order is preserved jointly.
+    /// Enqueues geometry on the same FIFO as input so caller order is preserved jointly,
+    /// and drops the whole winsize/reflow pair for a grid a later submission already
+    /// superseded -- a drag then applies as many reflows as the owner can afford rather
+    /// than one per column crossed, and the child is told proportionally fewer sizes.
     nonisolated public func resize(_ dimensions: TerminalDimensions) {
+        let submission = resizeCoalescer.submitResize()
         queue.async { [weak self] in
-            self?.assumeIsolated { owner in owner.process(.resize(dimensions)) }
+            self?.assumeIsolated { owner in
+                guard owner.resizeCoalescer.isSuperseded(submission) == false else { return }
+                owner.process(.resize(dimensions))
+            }
         }
+    }
+
+    /// Returns the owner queue for a non-resize submission, first closing the open
+    /// coalescing run so nothing already submitted is superseded across it: the action
+    /// being enqueued here reads the geometry of the resize before it, so that resize
+    /// has to apply. Every `nonisolated` submission other than `resize` goes through
+    /// this rather than touching `queue` directly.
+    nonisolated private func queueClosingResizeRun() -> DispatchSerialQueue {
+        resizeCoalescer.closeRun()
+        return queue
     }
 
     /// Enqueues relative local navigation on the same FIFO as child output and resize.
     nonisolated public func scroll(byRows rowDelta: Int) {
-        queue.async { [weak self] in
+        queueClosingResizeRun().async { [weak self] in
             self?.assumeIsolated { owner in
                 owner.applyViewportNavigation(.scrollByRows(rowDelta), publishUpdate: true)
             }
@@ -257,7 +278,7 @@ public actor TerminalPTYHost {
 
     /// Enqueues absolute scrollbar navigation in current-stream row coordinates.
     nonisolated public func scroll(toTopRow row: Int) {
-        queue.async { [weak self] in
+        queueClosingResizeRun().async { [weak self] in
             self?.assumeIsolated { owner in
                 owner.applyViewportNavigation(.scrollToTopRow(row), publishUpdate: true)
             }
@@ -266,7 +287,7 @@ public actor TerminalPTYHost {
 
     /// Enqueues an explicit return to live-bottom follow.
     nonisolated public func scrollToBottom() {
-        queue.async { [weak self] in
+        queueClosingResizeRun().async { [weak self] in
             self?.assumeIsolated { owner in
                 owner.applyViewportNavigation(.scrollToBottom, publishUpdate: true)
             }
@@ -275,14 +296,14 @@ public actor TerminalPTYHost {
 
     /// Enqueues selection clearing on the same FIFO as pointer mutations and output.
     nonisolated public func clearSelection() {
-        queue.async { [weak self] in
+        queueClosingResizeRun().async { [weak self] in
             self?.assumeIsolated { owner in owner.applyClearSelection() }
         }
     }
 
     /// Enqueues whole-stream selection on the same FIFO as pointer mutations and output.
     nonisolated public func selectAll() {
-        queue.async { [weak self] in
+        queueClosingResizeRun().async { [weak self] in
             self?.assumeIsolated { owner in owner.applySelectAll() }
         }
     }
@@ -320,7 +341,7 @@ public actor TerminalPTYHost {
         _ mutation: SearchMutation,
         onStatus: @escaping @Sendable (TerminalSearchStatus?) -> Void
     ) {
-        queue.async { [weak self] in
+        queueClosingResizeRun().async { [weak self] in
             self?.assumeIsolated { owner in
                 owner.applySearch(mutation, onStatus: onStatus)
             }
@@ -329,7 +350,7 @@ public actor TerminalPTYHost {
 
     /// Enqueues normalized fractional wheel input for atomic route and mode selection.
     nonisolated public func sendWheel(_ event: TerminalWheelEvent) {
-        queue.async { [weak self] in
+        queueClosingResizeRun().async { [weak self] in
             self?.assumeIsolated { owner in owner.applyWheel(event) }
         }
     }
@@ -340,7 +361,7 @@ public actor TerminalPTYHost {
         onPaneMenu: @escaping @Sendable (TerminalViewportCell) -> Void = { _ in },
         onOpenLink: @escaping @Sendable (TerminalHyperlink) -> Void = { _ in }
     ) {
-        queue.async { [weak self] in
+        queueClosingResizeRun().async { [weak self] in
             self?.assumeIsolated { owner in
                 owner.applyPointer(
                     event,
@@ -353,7 +374,7 @@ public actor TerminalPTYHost {
 
     /// Cancels link arming and hover on the same FIFO as pointer transitions.
     nonisolated public func cancelLinkInteraction() {
-        queue.async { [weak self] in
+        queueClosingResizeRun().async { [weak self] in
             self?.assumeIsolated { owner in owner.applyLinkCancellation() }
         }
     }

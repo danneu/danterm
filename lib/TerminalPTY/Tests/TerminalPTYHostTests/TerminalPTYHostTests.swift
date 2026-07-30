@@ -225,6 +225,121 @@ struct TerminalPTYHostTests {
         #expect(await host.submittedTransitions().count == submissionBaseline + 3)
     }
 
+    @Test(
+        "a burst behind a held owner applies only the newest grid to terminal and child",
+        .timeLimit(.minutes(1))
+    )
+    func supersededResizesSkipBothWinsizeAndReflow() async throws {
+        // Intent: when several grids are submitted with no other action between
+        //   them, every one but the newest applies neither its `TIOCSWINSZ` nor
+        //   its reflow, and the newest applies both.
+        // Why it exists: a drag enqueues one full reflow per column crossed, so
+        //   the pane trails the window by seconds and the child is told forty
+        //   sizes. The verdict has to be deterministic rather than "fewer than
+        //   submitted", which a fix that drops one of forty would also satisfy.
+        // Scenario: the owner is held inside a pane-menu callback while a drag's
+        //   worth of grids arrives, then released -- the shape of a real drag on
+        //   a pane whose reflow is slower than mouse-move arrival.
+        let host = try makeHost()
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) resize \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let baseline = await host.transitions().count
+
+        let owner = OwnerHold()
+        owner.hold(host)
+        for grid in [(84, 25), (88, 26), (92, 27), (96, 28)] {
+            host.resize(.init(columns: grid.0, rows: grid.1))
+        }
+        host.resize(.init(columns: 100, rows: 31))
+        owner.release()
+
+        let applied = (await host.transitions()).dropFirst(baseline).filter {
+            if case .resize = $0 { true } else { false }
+        }
+        #expect(applied == [.resize(.init(columns: 100, rows: 31))])
+        #expect(await host.waitForOutput(containing: Array("__WINCH__=31 100".utf8)))
+        let snapshot = await host.snapshot()
+        #expect(snapshot.geometry.columns == 100)
+        #expect(snapshot.geometry.rows.count == 31)
+
+        host.send(Array("done\n".utf8))
+        #expect(await host.waitForResult() == .exited(.exited(0)))
+    }
+
+    @Test(
+        "a pointer between two resizes closes the run and observes the earlier grid",
+        .timeLimit(.minutes(1))
+    )
+    func nonResizeSubmissionClosesTheCoalescingRun() async throws {
+        // Intent: coalescing never reaches across a non-resize submission, so
+        //   the pointer still sees the grid of the last resize submitted before
+        //   it and both surrounding resizes apply.
+        // Why it exists: pointer hit-testing reads the grid, so a resize that
+        //   the coalescer skipped because a later one was already queued would
+        //   silently move where a click lands -- the host's joint FIFO order
+        //   promises geometry that a run-wide skip would break.
+        // Scenario: a drag interrupted by a click, with the click's viewport
+        //   row 0 resolving against the taller grid submitted just before it.
+        let host = try makeHost()
+        await host.start(makeLaunchInput(command: try scrollbackCommand()))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+
+        host.resize(.init(columns: 80, rows: 30))
+        let tallTopLine = topViewportLine(host.fencedSnapshot())
+        host.resize(.init(columns: 80, rows: 10))
+        let shortTopLine = topViewportLine(host.fencedSnapshot())
+        try #require(tallTopLine.isEmpty == false)
+        try #require(tallTopLine != shortTopLine)
+        let baseline = await host.transitions().count
+
+        let owner = OwnerHold()
+        owner.hold(host)
+        host.resize(.init(columns: 80, rows: 30))
+        host.sendPointer(.down(.left, column: 2, row: 0, clickCount: 4))
+        host.resize(.init(columns: 80, rows: 10))
+        owner.release()
+
+        let snapshot = host.fencedSnapshot()
+        let ordered = (await host.transitions()).dropFirst(baseline).filter { transition in
+            switch transition {
+            case .resize: true
+            case .mouse(.down(.left, _, _, _, _)): true
+            default: false
+            }
+        }
+        #expect(ordered == [
+            .resize(.init(columns: 80, rows: 30)),
+            .mouse(.down(.left, column: 2, row: 0, clickCount: 4)),
+            .resize(.init(columns: 80, rows: 10)),
+        ])
+        #expect(
+            snapshot.selectedText?.trimmingCharacters(in: .whitespacesAndNewlines) == tallTopLine
+        )
+        #expect(snapshot.geometry.rows.count == 10)
+        await host.close()
+    }
+
+    @Test("a resize with nothing behind it applies without a settle delay", .timeLimit(.minutes(1)))
+    func loneResizeAppliesWithoutWaiting() async throws {
+        // Intent: coalescing costs a lone resize nothing -- the grid is applied
+        //   by the time the next owner-queue fence returns.
+        // Why it exists: the rejected debounce alternative would have made every
+        //   settled resize wait out a timer, and nothing else in this suite fails
+        //   if a delay is added rather than a submission dropped.
+        let host = try makeHost()
+        await host.start(makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\""))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+
+        host.resize(.init(columns: 100, rows: 31))
+        let snapshot = host.fencedSnapshot()
+
+        #expect(snapshot.geometry.columns == 100)
+        #expect(snapshot.geometry.rows.count == 31)
+        await host.close()
+    }
+
     @Test("updates cover output, resize, and a later result without polling", .timeLimit(.minutes(1)))
     func updateSignalResignalsAfterConsumerPull() async throws {
         // Intent: each newly applied state after a consumer pull makes another
@@ -1201,6 +1316,43 @@ private extension TerminalPointerEvent {
             .init(action: .move, column: column, row: row, modifiers: modifiers)
         }
     }
+}
+
+/// Holds the owner queue inside a pane-menu callback so everything submitted after
+/// `hold(_:)` returns provably queues behind one job.
+///
+/// Coalescing is only a deterministic verdict when the test controls *when the owner is
+/// free*; measuring how much a burst collapses while the queue drains at its own pace
+/// would assert the machine's speed instead. The pane-menu callback is used because it is
+/// the one production entry point that runs caller code on the owner queue.
+private struct OwnerHold {
+    private let reached = DispatchSemaphore(value: 0)
+    private let released = DispatchSemaphore(value: 0)
+
+    /// Returns once the owner queue is blocked, so the caller's next submission waits.
+    func hold(_ host: TerminalPTYHost) {
+        let reached = reached
+        let released = released
+        host.sendPointer(.down(.right, column: 0, row: 0))
+        host.sendPointer(.up(.right, column: 0, row: 0)) { _ in
+            reached.signal()
+            released.wait()
+        }
+        reached.wait()
+    }
+
+    func release() {
+        released.signal()
+    }
+}
+
+/// Names the stream row a viewport's height puts at its top, which is what a pointer at
+/// row 0 resolves against.
+private func topViewportLine(_ terminal: Terminal) -> String {
+    terminal.viewportText
+        .split(separator: "\n", omittingEmptySubsequences: false)
+        .first
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
 }
 
 private func scrollbackCommand(disableEcho: Bool = false) throws -> String {

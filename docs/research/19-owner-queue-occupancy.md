@@ -2,8 +2,12 @@
 
 Research started: 2026-07-30. **Status: OPEN -- Phases 1-5 done (`F1`-`F15`,
 `D1`-`D4`). The search thread is closed: `C1` is landed and measured (`257bfee`),
-and `C2`/`C3`/`C5` are all rejected as premature by `D4`. `C4` (resize) is the
-one candidate left and remains gated on user direction.**
+and `C2`/`C3`/`C5` are all rejected as premature by `D4`. `C4` (resize) cleared
+its gate and is landed as latest-wins coalescing at the host's submission
+boundary; `D4`'s claim that it would be measured by a new probe case is corrected
+at its own heading. What is still open is `F15`'s single-settled-resize test,
+which decides whether the stacked prompts are a storm artifact or a reflow cursor
+bug -- coalescing deliberately leaves that path untouched.**
 Deliverable is an inventory of every job that can run on `TerminalPTYHost`'s
 serial queue with its bound (or the absence of one), a measured occupancy
 distribution for the unbounded ones, and a per-candidate verdict for anything
@@ -220,10 +224,13 @@ Added here, because the axis is different:
       problem, which `H2` had left open.**
 - [ ] Run the single-settled-resize test from `F15`, which decides whether `C4` is
       a performance change or a correctness bug wearing one.
-- [ ] Add an N-distinct-grids drain case to `just terminal-occupancy-probe`. The
-      existing reflow case measures one step and would report a coalescing fix as
-      no change at all (`D4`).
-- [ ] User direction gate before any `C4` implementation. **Not cleared.**
+- [x] ~~Add an N-distinct-grids drain case to `just terminal-occupancy-probe`.~~
+      **Dropped, not done.** The probe measures `Terminal` directly and coalescing
+      lives above it in the host, so no case it can carry observes the fix; the
+      verdict came from a host test instead. See the correction under `D4`.
+- [x] User direction gate before any `C4` implementation. **Cleared, and `C4` is
+      landed: latest-wins coalescing at the owner-queue submission boundary, with
+      any non-resize submission closing the run.**
 
 ## Findings
 
@@ -949,6 +956,20 @@ reason `C4` matters -- a coalescing fix would leave the per-step number untouche
 and be a total success. Any `C4` measurement therefore needs a stimulus the probe
 does not currently have: N distinct grids submitted back-to-back, timed to drain.
 Adding that case is the honest first commit here, and it is not a behavior change.
+
+> **The paragraph above is wrong about where the verdict comes from, and no such
+> probe case was added.** The probe drives `Terminal` directly and deliberately,
+> per its own header; coalescing lives a layer up, at `TerminalPTYHost`'s
+> submission boundary, so no case added to the probe as architected can observe
+> it. The mistake was assuming `D2` implies a probe case whenever it applies. It
+> does not here, because coalescing is a **countable** property rather than a
+> durational one: with the owner held deterministically occupied, a burst of N
+> distinct grids applies exactly one winsize/reflow pair, which needs no
+> threshold, no calibration, and no paired arm. That is what
+> `supersededResizesSkipBothWinsizeAndReflow` in `TerminalPTYHostTests` asserts,
+> from the host's applied effects and the child's observed `SIGWINCH` size, and
+> it is the verdict `C4` shipped on. The probe keeps its narrower existing job of
+> pricing the residual single reflow, whose 64 ms this change does not touch.
 
 ## Open hypotheses
 
