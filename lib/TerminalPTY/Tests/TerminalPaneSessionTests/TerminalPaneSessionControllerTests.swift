@@ -924,7 +924,7 @@ struct TerminalPaneSessionControllerTests {
         #expect(replayed.fullHistoryText == controller.readFullHistoryText())
 
         controller.tearDown()
-        await controller.terminationHandle.terminateForApplicationExit()
+        await waitForQuiescence(controller.terminationHandle)
     }
 
     @Test("tearing down a live child never exposes a recording", .timeLimit(.minutes(1)))
@@ -1191,7 +1191,7 @@ struct TerminalPaneSessionControllerTests {
         closingController.tearDown()
         let completions = PaneExitCompletionRecorder(expecting: handles.count)
         for handle in handles {
-            handle.submitApplicationExitTermination {
+            handle.requestShutdown {
                 completions.signal()
             }
         }
@@ -1496,7 +1496,7 @@ struct TerminalPaneSessionControllerTests {
         #expect(replayed == consumed)
 
         controller.tearDown()
-        await controller.terminationHandle.terminateForApplicationExit()
+        await waitForQuiescence(controller.terminationHandle)
     }
 
     @Test("wheel-rate navigation and sustained output converge without retaining owners", .timeLimit(.minutes(1)))
@@ -1617,6 +1617,12 @@ private func bootstrapExecutable() throws -> String {
 
 private func probeExecutable() throws -> String {
     try builtExecutable(named: "PTYProbe")
+}
+
+private func waitForQuiescence(_ handle: TerminalPaneTerminationHandle) async {
+    await withCheckedContinuation { continuation in
+        handle.whenQuiescent { continuation.resume() }
+    }
 }
 
 /// Records dispatch completions while the main actor is intentionally blocked.

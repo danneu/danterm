@@ -1,4 +1,4 @@
-// Process-lifetime access to one PTY host's orderly application-exit ladder.
+// Process-lifetime access to one PTY host's shutdown and quiescence callbacks.
 import TerminalPTYHost
 
 /// Lets the process backend retain and terminate a host without retaining its pane controller.
@@ -10,16 +10,15 @@ public struct TerminalPaneTerminationHandle: Sendable {
         self.host = host
     }
 
-    /// Applies the bounded application-exit ladder and returns after native ownership is released.
-    public func terminateForApplicationExit() async {
-        await host.terminateForApplicationExit()
+    /// Observes host quiescence without retaining the pane controller or initiating shutdown.
+    public func whenQuiescent(_ observer: @escaping @Sendable () -> Void) {
+        host.whenQuiescent(observer)
     }
 
-    /// Submits process exit without creating a Swift task and signals only after
-    /// the retained host has irreversibly released its native ownership.
-    public func submitApplicationExitTermination(
-        completion: @escaping @Sendable () -> Void
+    /// Requests the host's idempotent shutdown transaction from any process-lifetime owner.
+    public func requestShutdown(
+        completion: (@Sendable () -> Void)? = nil
     ) {
-        host.submitApplicationExitTermination(completion: completion)
+        host.requestShutdown(completion: completion)
     }
 }

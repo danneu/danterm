@@ -124,7 +124,7 @@ final class SwiftTerminalBackend: TerminalBackend {
         let completions = DispatchGroup()
         for handle in handles {
             completions.enter()
-            handle.submitApplicationExitTermination {
+            handle.requestShutdown {
                 completions.leave()
             }
         }

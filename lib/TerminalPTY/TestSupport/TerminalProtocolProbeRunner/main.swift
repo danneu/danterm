@@ -74,7 +74,7 @@ private enum TerminalProtocolProbeRunner {
         controller.synchronizeState()
         let capture = controller.diagnosticCapture(test: "esctest2-supported-subset")
         controller.tearDown()
-        await termination.terminateForApplicationExit()
+        await waitForQuiescence(termination)
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -100,6 +100,14 @@ private enum TerminalProtocolProbeRunner {
 
     private static func shellQuote(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    private static func waitForQuiescence(
+        _ handle: TerminalPaneTerminationHandle
+    ) async {
+        await withCheckedContinuation { continuation in
+            handle.whenQuiescent { continuation.resume() }
+        }
     }
 }
 

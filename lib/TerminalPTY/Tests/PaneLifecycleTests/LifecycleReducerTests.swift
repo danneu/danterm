@@ -113,13 +113,6 @@ import Testing
         #expect(reducer.handle(.spawnFailed(.workingDirectoryUnavailable)) == [.finishTeardown])
     }
 
-    @Test("app termination uses the pane-close teardown contract")
-    func appTermination() {
-        var reducer = runningReducer()
-
-        #expect(reducer.handle(.appTermination) == beginCloseCommands)
-    }
-
     @Test("finished lifecycle ignores every later event")
     func finishedStateIsTerminal() {
         var reducer = PaneLifecycleReducer()
@@ -129,7 +122,7 @@ import Testing
             .start(lifecycleInput()), .spawnSucceeded,
             .spawnFailed(.systemError(1)), .sendInput([1]),
             .resize(TerminalDimensions(columns: 1, rows: 1)), .output([2]),
-            .outputEOF, .childExited(.exited(0)), .requestClose, .appTermination,
+            .outputEOF, .childExited(.exited(0)), .requestClose,
             .graceElapsed(.hangup), .sessionDrained,
         ]
         for event in events {

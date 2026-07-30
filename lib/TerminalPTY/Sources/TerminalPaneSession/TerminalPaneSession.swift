@@ -565,7 +565,7 @@ public final class TerminalPaneSessionController {
         onSearchStatus = nil
         let onTeardownCompleted = takeTeardownCompletion()
 
-        host.submitApplicationExitTermination {
+        host.whenQuiescent {
             onTeardownCompleted?()
         }
     }

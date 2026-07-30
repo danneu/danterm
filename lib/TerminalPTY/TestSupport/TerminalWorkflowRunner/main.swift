@@ -172,13 +172,21 @@ private enum TerminalWorkflowRunner {
         let status = failure.map { "status=failed\nerror=\($0)\n" } ?? "status=passed\n"
         try status.write(to: directory.appending(path: "result.txt"), atomically: true, encoding: .utf8)
         controller.tearDown()
-        await terminationHandle.terminateForApplicationExit()
+        await waitForQuiescence(terminationHandle)
         var ownership = "pane_session=released\npty_owner=released\ndescriptors=released\nsources=released\n"
         if workflow.name == "asciinema" {
             ownership += "recorder=released\ninner_shell=released\nforeground_job=released\n"
         }
         try ownership.write(to: directory.appending(path: "ownership.txt"), atomically: true, encoding: .utf8)
         if let failure { throw failure }
+    }
+
+    private static func waitForQuiescence(
+        _ handle: TerminalPaneTerminationHandle
+    ) async {
+        await withCheckedContinuation { continuation in
+            handle.whenQuiescent { continuation.resume() }
+        }
     }
 
     @MainActor

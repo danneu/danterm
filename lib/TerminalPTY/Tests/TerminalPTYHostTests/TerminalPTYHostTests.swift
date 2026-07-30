@@ -740,7 +740,7 @@ struct TerminalPTYHostTests {
         let start = clock.now
         await withTaskGroup(of: Void.self) { group in
             for host in [stalled, chatty, ordinary] {
-                group.addTask { await host.terminateForApplicationExit() }
+                group.addTask { await host.close() }
             }
         }
         let elapsed = start.duration(to: clock.now)
@@ -776,7 +776,7 @@ struct TerminalPTYHostTests {
 
         let recorder = ExitCompletionRecorder(expecting: hosts.count)
         for host in hosts {
-            host.submitApplicationExitTermination { recorder.signal() }
+            host.requestShutdown { recorder.signal() }
         }
         #expect(recorder.waitForAll(within: .seconds(20)))
 
@@ -816,7 +816,7 @@ struct TerminalPTYHostTests {
         ]
 
         let recorder = ExitCompletionRecorder(expecting: 1)
-        host.submitApplicationExitTermination { recorder.signal() }
+        host.requestShutdown { recorder.signal() }
         #expect(recorder.waitForAll(within: .seconds(20)))
 
         for pid in ownedPIDs {
@@ -849,10 +849,59 @@ struct TerminalPTYHostTests {
         let recorder = ExitCompletionRecorder(expecting: 1)
         let clock = ContinuousClock()
         let start = clock.now
-        host.submitApplicationExitTermination { recorder.signal() }
+        host.requestShutdown { recorder.signal() }
         #expect(recorder.waitForAll(within: .seconds(20)))
         #expect(start.duration(to: clock.now) < .seconds(1))
         #expect((await host.resourceSnapshot()).forcedQuiescenceCount == 0)
+    }
+
+    @Test("quiescence observation neither starts shutdown nor misses later completion", .timeLimit(.minutes(1)))
+    func quiescenceObservationDoesNotRequestShutdown() async throws {
+        // Intent: whenQuiescent observes host lifetime without changing it, then
+        //   fires exactly once after a separate shutdown request.
+        // Why it exists: registry ownership must be able to follow natural or
+        //   requested teardown without observation itself closing a live pane.
+        // Scenario: the backend registers cleanup while a shell is live, and the
+        //   pane controller requests close later.
+        let host = try makeHost()
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let pid = try taggedInt(
+            "__PID__",
+            in: String(decoding: await host.outputBytes(), as: UTF8.self)
+        )
+        let recorder = ExitCompletionRecorder(expecting: 1)
+
+        host.whenQuiescent { recorder.signal() }
+        _ = host.fencedSnapshot()
+
+        #expect(recorder.queueLabels.isEmpty)
+        #expect(processExists(pid))
+
+        host.requestShutdown()
+        #expect(recorder.waitForAll(within: .seconds(20)))
+        #expect(recorder.queueLabels.count == 1)
+        #expect(recorder.queueLabels == [hostOwnerQueueLabel])
+        #expect(await waitForProcessExit(pid))
+    }
+
+    @Test("an observer registered after quiescence runs once on the owner queue", .timeLimit(.minutes(1)))
+    func lateQuiescenceObserverRunsImmediately() async throws {
+        let host = try makeHost(captureTransitions: false)
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        await host.close()
+
+        let recorder = ExitCompletionRecorder(expecting: 1)
+        host.whenQuiescent { recorder.signal() }
+
+        #expect(recorder.waitForAll(within: .seconds(20)))
+        #expect(recorder.queueLabels.count == 1)
+        #expect(recorder.queueLabels == [hostOwnerQueueLabel])
     }
 
     @Test("exit during a launch discards the child instead of adopting it", .timeLimit(.minutes(1)))
@@ -881,7 +930,7 @@ struct TerminalPTYHostTests {
 
         let liveAtCompletion = LockedBox<[pid_t]>([])
         let recorder = ExitCompletionRecorder(expecting: 1)
-        host.submitApplicationExitTermination {
+        host.requestShutdown {
             liveAtCompletion.set(directChildProcessIDs())
             recorder.signal()
         }
@@ -933,7 +982,7 @@ struct TerminalPTYHostTests {
 
         let liveAtCompletion = LockedBox<[pid_t]>([])
         let recorder = ExitCompletionRecorder(expecting: 1)
-        host.submitApplicationExitTermination {
+        host.requestShutdown {
             liveAtCompletion.set(directChildProcessIDs())
             recorder.signal()
         }

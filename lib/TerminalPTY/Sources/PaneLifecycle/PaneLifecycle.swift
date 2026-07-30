@@ -55,7 +55,6 @@ public enum PaneLifecycleEvent: Equatable, Sendable {
     case outputEOF
     case childExited(ChildExitStatus)
     case requestClose
-    case appTermination
     case graceElapsed(TeardownStage)
     case sessionDrained
 }
@@ -128,7 +127,7 @@ public struct PaneLifecycleReducer: Sendable {
                 storage = .finished
                 return [.report(.launchFailed(launchFailure(for: error))), .finishTeardown]
             }
-        case .requestClose, .appTermination:
+        case .requestClose:
             storage = .finished
             return [.finishTeardown]
         default:
@@ -176,7 +175,7 @@ public struct PaneLifecycleReducer: Sendable {
                 pendingDimensions: dimensions
             ))
             return []
-        case .requestClose, .appTermination:
+        case .requestClose:
             storage = .closingWhileSpawning
             return []
         default:
@@ -218,7 +217,7 @@ public struct PaneLifecycleReducer: Sendable {
             }
             storage = .drainingOutput(status)
             return [.drainOutput]
-        case .requestClose, .appTermination:
+        case .requestClose:
             return beginTeardown(result: nil, leaderStatus: nil, reapLeader: false)
         default:
             return []
@@ -234,7 +233,7 @@ public struct PaneLifecycleReducer: Sendable {
             return [.deliverOutput(bytes)]
         case .outputEOF:
             return beginTeardown(result: .exited(status), leaderStatus: status, reapLeader: true)
-        case .requestClose, .appTermination:
+        case .requestClose:
             return beginTeardown(result: .exited(status), leaderStatus: status, reapLeader: true)
         default:
             return []

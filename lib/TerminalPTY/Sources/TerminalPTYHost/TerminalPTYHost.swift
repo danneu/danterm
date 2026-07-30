@@ -167,8 +167,8 @@ public actor TerminalPTYHost {
     private var reportedResult: PaneLifecycleResult?
     private var teardownFinished = false
     private let applicationExitBound: DispatchTimeInterval
-    private var exitTerminationRequested = false
-    private var exitCompletions: [@Sendable () -> Void] = []
+    private var shutdownRequested = false
+    private var quiescenceObservers: [@Sendable () -> Void] = []
     private var exitBoundSource: (any DispatchSourceTimer)?
     private var forcedQuiescenceCount = 0
     private var waiterSlots: [Int: WaiterSlot] = [:]
@@ -426,54 +426,51 @@ public actor TerminalPTYHost {
 
     /// Closes one pane and returns only after its owned process session is gone.
     public func close() async {
-        process(.requestClose)
-        await waitForTeardown()
-    }
-
-    /// Applies the same bounded teardown when the application exits orderly.
-    public func terminateForApplicationExit() async {
-        process(.appTermination)
-        await waitForTeardown()
-    }
-
-    /// Requests orderly termination from any thread and signals `completion` from
-    /// this host's own queue. The application-exit path uses this rather than the
-    /// `async` form above because at exit the main thread is blocked and the
-    /// process is being dismantled: creating, retaining, or resuming a Swift
-    /// Concurrency job in that window is exactly the hazard the exit path has to
-    /// avoid, so the whole round trip stays on dispatch.
-    ///
-    /// The completion is not an acknowledgement -- it means this host has reached
-    /// irreversible quiescence and nothing it owns can run afterward, which is
-    /// what lets the caller wait on it with no deadline of its own.
-    nonisolated public func submitApplicationExitTermination(
-        completion: @escaping @Sendable () -> Void
-    ) {
-        queueClosingResizeRun().async { [weak self] in
-            guard let self else {
-                // Nothing is left to quiesce, and the caller must not wait forever.
-                completion()
-                return
-            }
-            self.assumeIsolated { owner in
-                owner.beginApplicationExitTermination(completion: completion)
-            }
+        await withCheckedContinuation { continuation in
+            requestShutdown { continuation.resume() }
         }
     }
 
-    private func beginApplicationExitTermination(completion: @escaping @Sendable () -> Void) {
-        // I4: already quiescent, so there is no signal left to wait for.
+    /// Observes natural or requested completion without changing host lifecycle.
+    ///
+    /// The observer always runs on this host's queue, including when registered
+    /// after quiescence, so process-lifetime ownership never depends on main.
+    nonisolated public func whenQuiescent(
+        _ observer: @escaping @Sendable () -> Void
+    ) {
+        queueClosingResizeRun().async { [self] in
+            assumeIsolated { owner in owner.observeQuiescence(observer) }
+        }
+    }
+
+    /// Idempotently starts the one host shutdown transaction from any thread.
+    ///
+    /// An optional completion is registered before shutdown begins and means
+    /// irreversible quiescence, not acknowledgement of the request.
+    nonisolated public func requestShutdown(
+        completion: (@Sendable () -> Void)? = nil
+    ) {
+        queueClosingResizeRun().async { [self] in
+            assumeIsolated { owner in owner.beginShutdown(completion: completion) }
+        }
+    }
+
+    private func observeQuiescence(_ observer: @escaping @Sendable () -> Void) {
         guard teardownFinished == false else {
-            completion()
+            observer()
             return
         }
-        // Registered before the ladder starts, because `process` can reach
-        // quiescence synchronously and drain the completions on the way out.
-        exitCompletions.append(completion)
-        guard exitTerminationRequested == false else { return }
-        exitTerminationRequested = true
+        quiescenceObservers.append(observer)
+    }
+
+    private func beginShutdown(completion: (@Sendable () -> Void)?) {
+        if let completion {
+            observeQuiescence(completion)
+        }
+        guard teardownFinished == false, shutdownRequested == false else { return }
+        shutdownRequested = true
         armExitBound()
-        process(.appTermination)
+        process(.requestClose)
     }
 
     private func armExitBound() {
@@ -632,7 +629,7 @@ public actor TerminalPTYHost {
         queue.sync {
             assumeIsolated { owner in
                 owner.updateHandler = nil
-                owner.process(.requestClose)
+                owner.beginShutdown(completion: nil)
                 return owner.terminal
             }
         }
@@ -775,18 +772,6 @@ public actor TerminalPTYHost {
             emittedUpdateSignalCount: emittedUpdateSignalCount,
             updateSignalsAfterTermination: updateSignalsAfterTermination
         )
-    }
-
-    private func waitForTeardown() async {
-        if teardownFinished { return }
-        let id = allocateWaiterID()
-        await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                registerWaiter(id: id, slot: .teardown(continuation))
-            }
-        } onCancel: {
-            Task { await self.cancelWaiter(id) }
-        }
     }
 
     private func process(_ event: PaneLifecycleEvent) {
@@ -1626,17 +1611,12 @@ public actor TerminalPTYHost {
         updateHandler = nil
         updateContinuation.finish()
         updateSignalFinished = true
-        for id in waiterSlots.keys {
-            guard case .teardown(let continuation) = waiterSlots[id] else { continue }
-            waiterSlots[id] = nil
-            continuation.resume()
-        }
         // Last, and on this queue: quiescence is only irreversible once the update
         // stream is finished and every waiter is settled, and the exit path treats
         // a completion as meaning exactly that.
-        let completions = exitCompletions
-        exitCompletions.removeAll()
-        for completion in completions { completion() }
+        let observers = quiescenceObservers
+        quiescenceObservers.removeAll()
+        for observer in observers { observer() }
     }
 
     private func resumeOutputWaiters() {
@@ -1658,7 +1638,6 @@ private enum WaiterSlot {
     case cancelled
     case result(CheckedContinuation<PaneLifecycleResult?, Never>)
     case output(OutputWaiter)
-    case teardown(CheckedContinuation<Void, Never>)
 
     /// Resumes with the "wait abandoned" value for the slot's wait kind.
     func resumeCancelled() {
@@ -1669,8 +1648,6 @@ private enum WaiterSlot {
             continuation.resume(returning: nil)
         case .output(let waiter):
             waiter.continuation.resume(returning: false)
-        case .teardown(let continuation):
-            continuation.resume()
         }
     }
 }
