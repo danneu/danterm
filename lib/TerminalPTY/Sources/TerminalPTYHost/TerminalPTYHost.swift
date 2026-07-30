@@ -381,6 +381,11 @@ public actor TerminalPTYHost {
     // actor, and a synchronous fence taken in that gap reads a terminal newer than the damage
     // still in flight -- it then reuses rows that did move, and the pane holds stale content
     // until later damage happens to cover it. Every drain therefore goes through the fence.
+    //
+    // If a second interleaving bug ever appears in this hand-over contract, stop patching
+    // it: make damage reads non-destructive (the owner accumulates damage, the consumer
+    // acknowledges a watermark), so a lost or duplicated delivery degrades to a redundant
+    // repaint instead of stale rows.
 
     /// Fences earlier owner-queue work for synchronous session recovery reads.
     nonisolated public func fencedSnapshot() -> Terminal {
@@ -949,6 +954,12 @@ public actor TerminalPTYHost {
     /// runs) for 0.86ms of further latency; 16 KiB holds `inconclusive` (+3.69% against the
     /// uncapped tree). Lowering it further also stops working on the constant alone -- the
     /// chunk buffer below is 16 KiB, so a turn is already a single `read`.
+    ///
+    /// Turn size and delivery rate are separate levers, and the cost above is the second
+    /// one: fences arriving more often, each paying a fixed ~0.15ms floor, not the shorter
+    /// turn itself. If 120Hz margin is ever needed, throttle the consumer's drain cadence
+    /// (fence at most once per display frame) instead of revisiting 8 KiB -- that buys the
+    /// smaller cap's worst block at the old delivery count.
     private func readReady() {
         guard masterFD >= 0 else { return }
         var bytesReadThisTurn = 0

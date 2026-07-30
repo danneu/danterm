@@ -733,7 +733,11 @@ Four instances cost real time on this code, all the same shape:
   entirely -- understating precisely the full-screen TUI floods worth measuring.
 - A flake rate sampled from single-test runs (~1 failure in 60) instead of
   full-suite runs (~3 in 14). Twenty clean runs in the wrong denominator prove
-  nothing, at any sample size.
+  nothing, at any sample size. The ~21% rate was itself a property of a degraded
+  machine -- a quiet one expresses the flake at neither read-turn cap (0-of-9
+  interleaved arms each) -- so "did the cap resolve it" stays open until suite
+  arms at both caps run under generated load (for example a concurrent
+  `scrollback-stream` flood), with the readings pre-registered.
 
 Practical rules:
 
@@ -745,9 +749,10 @@ Practical rules:
   neighbouring metric's emit site.
 - Prefer the continuous quantity to the thresholded one. A pass/fail at a 60s
   time limit is one bit; the test's wall time underneath it shows a distribution
-  shifting before any verdict flips. The read-turn cap moved the termination
-  test from 7.70s to 0.82s and the PTY suite from 116s to 12.7s -- visible in
-  timings long before it would have been visible in a pass rate.
+  shifting before any verdict flips. Across nine interleaved suite pairs, the
+  read-turn cap moved the termination test from 1.073s to 0.810s with
+  non-overlapping ranges -- while the pass/fail bit read 0-of-9 failures on both
+  arms and so carried no signal at all.
 - Verify a weakened or cheapened measurement still detects what it was built to
   detect, by reintroducing the defect and confirming it goes red.
 - Derive nothing that one more run could measure.
