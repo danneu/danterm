@@ -176,9 +176,14 @@ measures. Not hypothesised in advance; it emerged from the sweep.
       `scrollback-stream` **faster -10.78%**, both churn workloads `equivalent`,
       `incremental-mixed` `inconclusive`. `DamageActionSnapshot` is now POD, 190 ->
       166 bytes.
-- [ ] Candidate C (`recentOutput`, `F9`) -- open, next in `D3`'s order.
-- [ ] A/A screen to freeze a rule for `processCPUNanosecondsPerDraw` -- open;
-      prerequisite for reading candidate A partially. Untouched by B's acceptance.
+- [x] **Candidate C measured and rejected. `F14`, `D5`.** The ablation `F9` asked
+      for removed `recentOutput` entirely and *nothing vanished* (`applyOutput`'s
+      body 14.95% -> 15.24%); `scrollback-stream` flipped sign between 2 and 4
+      pairs. It also refuted the method that sized C: `F9`'s frame subtraction is
+      unsound because `Terminal.feed` is partially inlined. Diagnostic reverted.
+- [ ] A/A screen to freeze a rule for `processCPUNanosecondsPerDraw` -- open, and
+      now the cheapest useful step (`D5`). Prerequisite for reading candidate A
+      partially.
 - [ ] Candidate A (`F6`) -- open, largest, elasticity still unconfirmed.
 
 ## Findings log
@@ -805,6 +810,83 @@ measures. Not hypothesised in advance; it emerged from the sweep.
   A/A screen in `D3` would make legitimate.
 - Next action: `D4`.
 
+### F14 -- candidate C refuted, and `F9`'s sizing method was unsound
+
+- Status: recorded. **`D1` candidate C measured and rejected.** The diagnostic
+  `F9` asked for was run; it refuted both the candidate and the reasoning that
+  sized it. Diagnostic reverted; the tree is unchanged by this finding.
+- Date and investigator: 2026-07-29, Claude (agent).
+- Method: the experiment `F9` specified. Comment out the two statements at
+  `TerminalPTYHost.swift:1067-1070`, re-trace `scrollback-stream`, record which
+  frames vanish. Baseline `2026-07-29-204444-50228` at commit `0e5d7f4`, candidate
+  `2026-07-29-204807-53130`, both `just benchmark-trace scrollback-stream "Time
+  Profiler" 30`, run sequentially. **Build verified before reading the result** --
+  the candidate's `harness.log` shows `Compiling TerminalPTYHost` and
+  `Linking DanTerm` -- because "no change" and "no rebuild" produce identical
+  output.
+- Result: **nothing vanished.**
+
+  | | baseline | candidate | delta |
+  | --- | ---: | ---: | ---: |
+  | `applyOutput` own body | 14.95% | 15.24% | +0.29 pts |
+  | `Array._checkSubscript` | 2.88% | 3.06% | +0.18 |
+  | `UnsafeMutablePointer.initialize(to:)` | 2.67% | 2.75% | +0.08 |
+  | `_reserveCapacityAssumingUniqueBuffer` | 2.47% | 2.64% | +0.16 |
+  | trace total, ms | 37,177 | 37,203 | +0.07% |
+
+  A prediction of 8-9% was registered before the run. It was wrong, and a change of
+  that size cannot hide in a folded profile.
+- Paired verdicts on the **maximal** form of C (full deletion, so these bound all
+  three shapes `D1` listed), baseline `0e5d7f4`:
+
+  | workload | `quick` | `confirm` |
+  | --- | --- | --- |
+  | `scrollback-stream` | inconclusive **-2.65%** (2) | inconclusive **+0.85%** (4, 2 outliers flagged) |
+  | `terminal-feed` | -- | equivalent -0.03% (2) |
+  | `content-churn` | -- | inconclusive -1.40% (4) |
+  | `style-churn` | -- | **faster -3.02%** (4) |
+  | `incremental-mixed` | -- | inconclusive -0.98% (6) |
+
+- **The sign flipped on the workload C should most affect** -- `scrollback-stream`
+  went -2.65% at 2 pairs to +0.85% at 4. That is what a null effect looks like when
+  read at insufficient power, and it is the reason `quick`'s inconclusive was
+  escalated rather than closed.
+- **`style-churn`'s `faster` is not evidence for C, and the Phase 4 metrics are how
+  we can tell.** Its plan time moved -3.08% and its process CPU -3.07%, against the
+  draw metric's -3.02% -- three regions shifting by the same amount. `recentOutput`
+  has no causal path to *plan* time, so a uniform shift across unrelated regions is
+  an arm-level artifact, not a targeted win. This is the first time the uncalibrated
+  CPU metric has changed a reading: without it, a lone `faster -3.02%` on one
+  workload would have looked like partial support for C. It carries no verdict and
+  it did not need one -- it was used as a **consistency check**, which is a use `D2`
+  did not anticipate.
+- **`F9`'s sizing was measuring the wrong thing, and so was my first replacement
+  for it.** Both derived a bound by subtracting the `Terminal.feed(_:)` frame from
+  `applyOutput`. That subtraction is unsound on these traces: `Terminal.feed(_:)`
+  is **partially inlined**, present as a frame in some stacks (52.87%) and elided in
+  others. The proof is in the folded stacks --
+  `Terminal.moveAndFillRows < TerminalPTYHost.applyOutput` with no feed frame
+  between them, i.e. scrollback movement, which is feed's own work, presenting as
+  `applyOutput`'s child. So:
+  - `F9`'s "`applyOutput` minus `Terminal.feed` = 23.82% upper bound" is not a bound
+    on non-feed work.
+  - The 14.95% figure computed here by excluding engine-named descendants is
+    contaminated the same way, one level deeper: inlined feed carries no
+    `Terminal.*` frame to exclude. **It should not be cited as a bound either.**
+  - `applyOutput`'s body contains no per-byte loop besides the deleted one, so the
+    per-byte array frames under it are the parser loop.
+- Generalizable lesson, and it outlives this candidate: **under partial inlining,
+  subtracting a frame does not subtract that function's work**, and no amount of
+  care with folded stacks repairs it -- the discriminating frame is gone. Sizing a
+  region by frame subtraction needs a check that the region's *callees* are absent
+  too. Ablation (delete it and re-measure) does not have this failure mode, which is
+  the one thing `F9` got right in asking for the experiment rather than trusting its
+  own number.
+- What survives: `recentOutput` is still production work maintained for a test-only
+  facility. That is a **cleanliness** argument, and `D1` ranked C on performance.
+  Nothing here recommends spending the `waitForOutput` decision on it.
+- Next action: `D5`.
+
 ## Decision log
 
 ### D1 -- which CPU opportunity to take first
@@ -1073,6 +1155,50 @@ input shapes.
   thing to build.
 - Next action: none forced. `C` is next in order if the direction continues.
 
+### D5 -- candidate C is rejected, and one of this file's two sizing methods is retired
+
+- Status: **closed.** Candidate C measured by ablation and by two paired runs, and
+  **rejected**. Diagnostic reverted; no code change survives it.
+- Evidence used: `F14`.
+- Decision: **do not take C, in any of its three shapes.** The measurement was made
+  on the maximal form -- full deletion -- so it bounds the ring buffer and the
+  production gate too: neither can beat deleting the thing outright. Nothing vanished
+  from the profile, `scrollback-stream` flipped sign between 2 and 4 pairs, and the
+  one `faster` verdict is contradicted by its own plan-time co-movement. The
+  `waitForOutput` question `D1` raised does not need answering, because the reason to
+  ask it is gone.
+- What this does to the ranking: C is closed, not deferred. Remaining, in order:
+
+  | # | Candidate | Status |
+  | --- | --- | --- |
+  | B | `DamageActionSnapshot` POD | Done, kept (`F13`) |
+  | D | Stale planner docs | Done (`F5`) |
+  | C | `recentOutput` | **Rejected -- `F14`** |
+  | A/A screen for `processCPUNanosecondsPerDraw` | Open; now the cheapest useful step |
+  | A | CA per-glyph bounds (`F6`) | Open, largest, elasticity still unconfirmed |
+  | E, F | Unchanged from `D1`; both small |
+  | G | Do not take (`D1`) |
+
+- **The A/A screen moves up by default, not by argument.** `D3` placed it behind C.
+  C is gone, so it is now the cheapest step that changes what the next candidate can
+  be decided by -- and `F14` sharpened why it matters: the CPU metric was useful as a
+  consistency check while carrying no verdict, and a frozen rule would let it do that
+  job deliberately rather than by luck.
+- **A methodological consequence, and it is the durable part of this decision.**
+  `F14` retires frame subtraction as a sizing method for any region whose callees can
+  inline. Two numbers in this file were produced that way -- `F9`'s 23.82% and
+  `F14`'s own 14.95% -- and neither is a bound. This does not touch `F7`'s 8.27% or
+  `F6`'s 16.8%, which are inclusive shares of stacks containing a named frame rather
+  than differences between two regions; a share attributes what it contains, while a
+  subtraction assumes what it excludes. Future sizing of a *non*-region ("X minus Y")
+  needs an ablation or a callee check before it is quoted.
+- Cost of the rejection: two 30s traces and two paired runs, about 8 minutes of
+  machine time, to close a candidate that had been carried as "lowest risk, worth
+  doing alongside B" since `D1`. Cheap, and the alternative was shipping a change to
+  a test-only facility for no measured gain.
+- Next action: none forced. The A/A screen is the recommended next step; `A` remains
+  the largest and least decidable.
+
 ## Pre-rejected
 
 Candidates a fresh survey would plausibly re-propose, with the evidence that
@@ -1163,6 +1289,14 @@ separate a *verdict* by freezing one axis, which is what they exist for.
 - **`terminal-feed` has no on-CPU instrument** (`F2`), so doc 10's ranking still
   cannot be re-sized on its own boundary. Building a `trace` mode for the headless
   feed harness is an unlogged tooling opportunity.
+- **`F9`'s 23.82% and `F14`'s 14.95% are both retired as bounds** (`D5`). Anything
+  in this file of the form "region X minus region Y" needs re-deriving by ablation
+  before it is quoted; inclusive shares of a named frame are unaffected.
+- The one `faster` verdict in `F14` (`style-churn` -3.02%) is read as an arm-level
+  artifact on the strength of its plan-time co-movement, not on a repeat run. A
+  second paired run would settle it, and was not spent: no mechanism connects
+  `recentOutput` to plan time, so the candidate's fate does not turn on it. It is
+  also an unquantified data point about `confirm`'s false-positive rate at 4 pairs.
 - Untracked `notes.md` and `plans/wip/*` were present during capture. They cannot
   affect a profile, but they **would** be captured into a paired comparison's
   candidate tree -- read the printed path list before believing any benchmark run
@@ -1170,13 +1304,13 @@ separate a *verdict* by freezing one axis, which is what they exist for.
 
 ## Outcome
 
-**Phases 1-4 complete; Phase 5 open with its first candidate taken.** Four on-CPU
-traces, thirteen findings, five ranked code candidates, two tooling fixes shipped,
-seven pre-rejections, and **one code candidate implemented, measured across all five
-routine workloads, and kept** (B: `terminal-feed` -14.59%, `scrollback-stream`
--10.78%).
+**Phases 1-4 complete; Phase 5 open, two candidates resolved.** Six on-CPU traces,
+fourteen findings, five ranked code candidates, two tooling fixes shipped, seven
+pre-rejections, **one code candidate kept** (B: `terminal-feed` -14.59%,
+`scrollback-stream` -10.78%) and **one rejected on measurement** (C: nothing
+vanished when it was deleted outright).
 
-Six results are worth more than the ranking:
+Seven results are worth more than the ranking:
 
 1. **The two regions this project has spent four documents optimizing are no
    longer where the time is.** `planFrame` and `drawRenderFrame` are 10.5% and
@@ -1219,7 +1353,18 @@ Six results are worth more than the ranking:
    lesson: a pitch's *mechanism* deserves the same scepticism this file applies to a
    pitch's *size*, and a test written before the code is what supplies it -- the
    benchmark would have reported `faster` either way, with the hover bug included.
+7. **One of this file's two sizing methods does not work, and it produced two of its
+   numbers** (`F14`). `F9` sized candidate C by subtracting the `Terminal.feed(_:)`
+   frame from `applyOutput`; the first attempt to correct that repeated the mistake
+   one level deeper. `Terminal.feed` is *partially inlined*, so subtracting its frame
+   does not subtract its work -- `moveAndFillRows` appears as `applyOutput`'s direct
+   child. Deleting `recentOutput` outright then changed nothing, which is what
+   actually closed the candidate. Inclusive shares of a named frame (`F6`, `F7`) are
+   unaffected: a share attributes what it contains, a subtraction assumes what it
+   excludes. Size a "X minus Y" region by ablation, or check that Y's callees are
+   absent too.
 
-Findings F1-F13 are recorded; the next free ID is **F14**. Decisions D1-D4 are
-recorded; D2 and D4 are closed and acted on, D1 and D3 are directed as far as
-candidate B and hold C, A, and the A/A screen open; the next free ID is **D5**.
+Findings F1-F14 are recorded; the next free ID is **F15**. Decisions D1-D5 are
+recorded; D2, D4 and D5 are closed and acted on; candidates B and D are done, C is
+rejected, and the A/A screen and A remain open in that order; the next free ID is
+**D6**.
