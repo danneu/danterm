@@ -37,6 +37,13 @@ silently.
 - Which product consumers adopt journal queries first (exit-status-aware
   alerts, sidebar command chrome, agent debugging), and what do they need
   beyond the initial record shape?
+- Should panes ever model workspace/git context (worktree root, branch,
+  dirty state)? Cut from the first semantic-model release for lacking a
+  consumer. Two points are settled if it returns: the shell reports its own
+  repo context at prompt boundaries over the versioned envelope (the OSC 7
+  cwd pattern, with honest prompt-time staleness), and app-side filesystem
+  watching stays rejected -- it breaks remote panes, races cwd changes, and
+  reintroduces ambient IO.
 - Should OSC 52 reads ever gain an explicit permission path?
 - When should file paths and source locations become link targets?
 - What evidence would justify a Metal renderer or a custom `danterm` terminfo
