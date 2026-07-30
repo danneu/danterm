@@ -829,6 +829,201 @@ struct TerminalPTYHostTests {
         #expect(snapshot.isReleased)
     }
 
+    @Test("shutdown completion waits for every source cancellation acknowledgement", .timeLimit(.minutes(1)))
+    func shutdownCompletionJoinsDispatchSources() async throws {
+        // Intent: shutdown keeps the PTY and child owned until every canceled
+        //   Dispatch source has run its cancellation handler.
+        // Why it exists: cancel() is only a request; publishing quiescence before
+        //   its handler runs lets callbacks and descriptor access outlive teardown.
+        // Scenario: application exit pauses source cancellation acknowledgements
+        //   while a live pane is closing, then releases the join barrier.
+        let host = try makeHost()
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let pid = try taggedInt(
+            "__PID__",
+            in: String(decoding: await host.outputBytes(), as: UTF8.self)
+        )
+        let cancellationReached = ExitCompletionRecorder(expecting: 1)
+        await host.holdSourceCancellationAcknowledgements {
+            cancellationReached.signal()
+        }
+        let completion = ExitCompletionRecorder(expecting: 1)
+
+        host.requestShutdown { completion.signal() }
+        #expect(cancellationReached.waitForAll(within: .seconds(20)))
+
+        let whileHeld = await host.resourceSnapshot()
+        #expect(whileHeld.hasOpenMaster)
+        #expect(whileHeld.activeSourceCount > 0)
+        #expect(completion.queueLabels.isEmpty)
+        #expect(processExists(pid))
+
+        await host.releaseSourceCancellationAcknowledgements()
+        #expect(completion.waitForAll(within: .seconds(20)))
+        #expect(await waitForProcessExit(pid))
+        #expect((await host.resourceSnapshot()).isReleased)
+    }
+
+    @Test("forced cleanup starts only after descriptor cancellation joins", .timeLimit(.minutes(1)))
+    func forcedShutdownWaitsForDescriptorJoin() async throws {
+        // Intent: the forced path leaves the child and master owned until the
+        //   descriptor-source barrier opens, then completes the whole cleanup.
+        // Why it exists: resuming forced reap from closeMaster() itself can block
+        //   before cancellation callbacks run or replay superseded ladder commands.
+        // Scenario: application exit forces a live pane while its source
+        //   cancellation acknowledgements are deterministically paused.
+        let host = try makeHost(
+            applicationExitBound: .seconds(30)
+        )
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let pid = try taggedInt(
+            "__PID__",
+            in: String(decoding: await host.outputBytes(), as: UTF8.self)
+        )
+        let cancellationReached = ExitCompletionRecorder(expecting: 1)
+        await host.holdSourceCancellationAcknowledgements {
+            cancellationReached.signal()
+        }
+        let completion = ExitCompletionRecorder(expecting: 1)
+        host.requestShutdown { completion.signal() }
+        #expect(cancellationReached.waitForAll(within: .seconds(20)))
+
+        await host.forceExitBoundForTesting()
+        let beforeJoin = await host.resourceSnapshot()
+        #expect(beforeJoin.hasOpenMaster)
+        #expect(processExists(pid))
+        #expect(completion.queueLabels.isEmpty)
+
+        await host.releaseSourceCancellationAcknowledgements()
+        #expect(completion.waitForAll(within: .seconds(20)))
+        #expect(await waitForProcessExit(pid))
+        let finished = await host.resourceSnapshot()
+        #expect(finished.forcedQuiescenceCount == 1)
+        #expect(finished.isReleased)
+    }
+
+    @Test("input submitted after shutdown sealing cannot rearm descriptor IO", .timeLimit(.minutes(1)))
+    func shutdownSealDiscardsQueuedInput() async throws {
+        // Intent: a shutdown request permanently prevents later input work from
+        //   installing another write source or touching the closing descriptor.
+        // Why it exists: queued submissions can otherwise recreate descriptor
+        //   ownership after the cancellation census was assumed complete.
+        // Scenario: a pane with write backpressure receives another write while
+        //   application exit is paused at the source join barrier.
+        let host = try makeHost()
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) stalled \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        host.send([UInt8](repeating: 65, count: 4 * 1024 * 1024))
+        let beforeShutdown = await host.resourceSnapshot()
+        #expect(beforeShutdown.pendingInputByteCount > 0)
+        #expect(beforeShutdown.descriptorSourceCount == 2)
+
+        let cancellationReached = ExitCompletionRecorder(expecting: 1)
+        await host.holdSourceCancellationAcknowledgements {
+            cancellationReached.signal()
+        }
+        let completion = ExitCompletionRecorder(expecting: 1)
+        host.requestShutdown { completion.signal() }
+        host.send(Array("after-shutdown".utf8))
+        #expect(cancellationReached.waitForAll(within: .seconds(20)))
+
+        let whileHeld = await host.resourceSnapshot()
+        #expect(whileHeld.pendingInputByteCount == 0)
+        #expect(whileHeld.descriptorSourceCount == beforeShutdown.descriptorSourceCount)
+        #expect(completion.queueLabels.isEmpty)
+
+        await host.releaseSourceCancellationAcknowledgements()
+        #expect(completion.waitForAll(within: .seconds(20)))
+        #expect((await host.resourceSnapshot()).isReleased)
+    }
+
+    @Test("close during spawn activates inactive sources before cancellation", .timeLimit(.minutes(1)))
+    func closeDuringSpawnJoinsInactiveSources() async throws {
+        // Intent: sources installed before launch adoption can still reach their
+        //   cancellation handlers when shutdown wins before activation.
+        // Why it exists: canceling a suspended Dispatch source does not make its
+        //   cancellation handler runnable until the source is activated.
+        // Scenario: a newly opened pane receives Cmd-Q between source installation
+        //   and the reducer command that would normally activate PTY IO.
+        let host = try makeHost(captureTransitions: false)
+        let sourcesInstalled = ExitCompletionRecorder(expecting: 1)
+        await host.holdInstalledSourcesBeforeActivation {
+            sourcesInstalled.signal()
+        }
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        ))
+        #expect(sourcesInstalled.waitForAll(within: .seconds(20)))
+
+        let cancellationReached = ExitCompletionRecorder(expecting: 1)
+        await host.holdSourceCancellationAcknowledgements {
+            cancellationReached.signal()
+        }
+        let completion = ExitCompletionRecorder(expecting: 1)
+        host.requestShutdown { completion.signal() }
+        await host.releaseInstalledSourcesForActivation()
+        #expect(cancellationReached.waitForAll(within: .seconds(20)))
+
+        let whileHeld = await host.resourceSnapshot()
+        #expect(whileHeld.hasOpenMaster)
+        #expect(whileHeld.descriptorSourceCount == 1)
+        #expect(completion.queueLabels.isEmpty)
+
+        await host.releaseSourceCancellationAcknowledgements()
+        #expect(completion.waitForAll(within: .seconds(20)))
+        #expect((await host.resourceSnapshot()).isReleased)
+    }
+
+    @Test("joined descriptor sources cannot touch a reused fd number", .timeLimit(.minutes(1)))
+    func teardownDoesNotTouchReusedDescriptor() async throws {
+        // Intent: after quiescence, reusing the former PTY fd for a pipe leaves
+        //   that replacement descriptor open and its bytes untouched.
+        // Why it exists: a late source callback or cancellation close keyed only
+        //   by fd number can act on an unrelated descriptor after rapid teardown.
+        // Scenario: a pane closes and the kernel immediately assigns its master
+        //   number to a replacement pipe before any later owner work can run.
+        var pipeFDs = [Int32](repeating: -1, count: 2)
+        try #require(pipe(&pipeFDs) == 0)
+        defer {
+            if pipeFDs[0] >= 0 { Darwin.close(pipeFDs[0]) }
+            if pipeFDs[1] >= 0 { Darwin.close(pipeFDs[1]) }
+        }
+
+        let host = try makeHost(captureTransitions: false)
+        await host.installDescriptorReuseProbe(replacementFD: pipeFDs[0])
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        await host.close()
+
+        let reusedFD = try #require(await host.reusedDescriptorForTesting())
+        let byte: UInt8 = 0x5A
+        #expect(withUnsafeBytes(of: byte) {
+            Darwin.write(pipeFDs[1], $0.baseAddress, $0.count)
+        } == 1)
+        _ = await host.resourceSnapshot()
+        var received: UInt8 = 0
+        #expect(withUnsafeMutableBytes(of: &received) {
+            Darwin.read(reusedFD, $0.baseAddress, $0.count)
+        } == 1)
+        #expect(received == byte)
+        #expect(fcntl(reusedFD, F_GETFD) != -1)
+
+        Darwin.close(reusedFD)
+        if reusedFD == pipeFDs[0] {
+            pipeFDs[0] = -1
+        }
+    }
+
     @Test("terminating an already-quiesced host completes without waiting", .timeLimit(.minutes(1)))
     func applicationExitTerminationOnTornDownHostReturnsImmediately() async throws {
         // Intent: a host that finished teardown before exit reached it completes

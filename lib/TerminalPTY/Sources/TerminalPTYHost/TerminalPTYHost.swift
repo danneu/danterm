@@ -58,6 +58,7 @@ enum TerminalPTYSubmittedTransition: Equatable, Sendable {
 struct TerminalPTYResourceSnapshot: Equatable, Sendable {
     let hasOpenMaster: Bool
     let activeSourceCount: Int
+    let descriptorSourceCount: Int
     /// A launch whose outcome this host would still adopt. Deliberately not "a
     /// launch still running": the blocking spawn cannot be interrupted, so what
     /// teardown can guarantee is that a late outcome is discarded, not that the
@@ -138,6 +139,22 @@ public actor TerminalPTYHost {
     private var sessionPollSource: (any DispatchSourceTimer)?
     private var sessionPollStage: TeardownStage?
     private var sessionPollStageSignaled = false
+    private var retainedSources: [Int: any DispatchSourceProtocol] = [:]
+    private var descriptorSourceIDs: Set<Int> = []
+    private var nextSourceID = 0
+    private var heldSourceCancellationIDs: [Int] = []
+    private var holdsSourceCancellationAcknowledgements = false
+    private var sourceCancellationHeldObserver: (@Sendable () -> Void)?
+    private var holdsInstalledSourcesBeforeActivation = false
+    private var installedSourcesObserver: (@Sendable () -> Void)?
+    private var hasDeferredSpawnSuccess = false
+    private var descriptorReuseReplacementFD: Int32?
+    private var reusedDescriptor: Int32?
+    private var descriptorOwnershipSealed = false
+    private var masterCloseRequested = false
+    private var deferredCommandsAfterMasterClose: [PaneLifecycleCommand] = []
+    private var forcedCleanupAfterMasterClose = false
+    private var teardownFinalizationRequested = false
     /// Bumped by every new launch and by teardown. A returning spawn compares the
     /// generation it was issued under, so supersession and abandonment are one
     /// mechanism and a stale outcome is discarded rather than adopted.
@@ -469,6 +486,7 @@ public actor TerminalPTYHost {
         }
         guard teardownFinished == false, shutdownRequested == false else { return }
         shutdownRequested = true
+        descriptorOwnershipSealed = true
         armExitBound()
         process(.requestClose)
     }
@@ -480,6 +498,7 @@ public actor TerminalPTYHost {
         timer.setEventHandler { [weak self] in
             self?.assumeIsolated { owner in owner.exitBoundElapsed() }
         }
+        retainUntilCancellation(timer, descriptorBacked: false)
         exitBoundSource = timer
         timer.activate()
     }
@@ -489,6 +508,44 @@ public actor TerminalPTYHost {
         exitBoundSource = nil
     }
 
+    /// Retains one source through its cancellation callback and enrolls
+    /// descriptor-backed sources in the PTY close barrier.
+    private func retainUntilCancellation<Source: DispatchSourceProtocol>(
+        _ source: Source,
+        descriptorBacked: Bool
+    ) {
+        let id = nextSourceID
+        nextSourceID += 1
+        source.setCancelHandler { [weak self] in
+            self?.assumeIsolated { owner in
+                owner.sourceCancellationHandlerRan(id)
+            }
+        }
+        retainedSources[id] = source
+        if descriptorBacked {
+            descriptorSourceIDs.insert(id)
+        }
+    }
+
+    private func sourceCancellationHandlerRan(_ id: Int) {
+        guard retainedSources[id] != nil else { return }
+        guard holdsSourceCancellationAcknowledgements else {
+            acknowledgeSourceCancellation(id)
+            return
+        }
+        heldSourceCancellationIDs.append(id)
+        let observer = sourceCancellationHeldObserver
+        sourceCancellationHeldObserver = nil
+        observer?()
+    }
+
+    private func acknowledgeSourceCancellation(_ id: Int) {
+        guard retainedSources.removeValue(forKey: id) != nil else { return }
+        descriptorSourceIDs.remove(id)
+        completeMasterCloseIfPossible()
+        completeTeardownIfPossible()
+    }
+
     /// The teardown ladder did not converge inside this host's bound, so ownership
     /// of the child session is resolved here rather than abandoned: every surviving
     /// member is killed before teardown finishes. Returning while those processes
@@ -496,10 +553,21 @@ public actor TerminalPTYHost {
     private func exitBoundElapsed() {
         guard teardownFinished == false else { return }
         forcedQuiescenceCount += 1
-        // Close before any blocking reap. A macOS session leader drains its
-        // controlling terminal while exiting, so retaining an unread master while
-        // waiting for that exit can deadlock the leader and this owner queue.
+        forcedCleanupAfterMasterClose = true
+        cancelExitBound()
+        cancelGrace()
+        cancelSessionPoll()
+        cancelProcessSource()
+        cancelChildExitPoll()
         closeMaster()
+    }
+
+    /// Continues forced cleanup only after descriptor source cancellation has
+    /// closed the master, so a blocking reap cannot deadlock a draining leader.
+    private func performForcedCleanupAfterMasterClose() {
+        guard forcedCleanupAfterMasterClose else { return }
+        forcedCleanupAfterMasterClose = false
+        deferredCommandsAfterMasterClose.removeAll()
         killOwnedSession()
         reapLeaderAfterKill()
         // Last: a launch that has not come back yet owns a child this host cannot
@@ -754,15 +822,8 @@ public actor TerminalPTYHost {
     func resourceSnapshot() -> TerminalPTYResourceSnapshot {
         TerminalPTYResourceSnapshot(
             hasOpenMaster: masterFD >= 0,
-            activeSourceCount: [
-                readSource != nil,
-                writeSource != nil,
-                processSource != nil,
-                childExitPollSource != nil,
-                graceSource != nil,
-                sessionPollSource != nil,
-                exitBoundSource != nil,
-            ].filter { $0 }.count,
+            activeSourceCount: retainedSources.count,
+            descriptorSourceCount: descriptorSourceIDs.count,
             hasPendingSpawnAdoption: pendingSpawnAdoption,
             hasLeader: leaderPID != nil,
             hasSession: sessionID != nil,
@@ -786,9 +847,7 @@ public actor TerminalPTYHost {
         while pendingEvents.isEmpty == false {
             let next = pendingEvents.removeFirst()
             let commands = reducer.handle(next)
-            for command in commands {
-                execute(command)
-            }
+            execute(commands)
         }
     }
 
@@ -965,6 +1024,22 @@ public actor TerminalPTYHost {
         if publishUpdate { publishPendingUpdate() }
     }
 
+    private func execute(_ commands: [PaneLifecycleCommand]) {
+        for (index, command) in commands.enumerated() {
+            if command == .closeMaster {
+                closeMaster()
+                if masterFD >= 0 {
+                    deferredCommandsAfterMasterClose.append(
+                        contentsOf: commands.dropFirst(index + 1)
+                    )
+                    return
+                }
+                continue
+            }
+            execute(command)
+        }
+    }
+
     private func execute(_ command: PaneLifecycleCommand) {
         switch command {
         case .spawn(let spec):
@@ -1062,6 +1137,60 @@ public actor TerminalPTYHost {
         lastIssuedLaunch?.hasPendingDelivery == true
     }
 
+    /// Test-support: pauses the owner-side acknowledgement after cancellation
+    /// handlers run so tests can inspect the join barrier without elapsed sleeps.
+    package func holdSourceCancellationAcknowledgements(
+        onFirstHeld: @escaping @Sendable () -> Void
+    ) {
+        holdsSourceCancellationAcknowledgements = true
+        sourceCancellationHeldObserver = onFirstHeld
+    }
+
+    /// Test-support: releases every cancellation acknowledgement held by the
+    /// deterministic join-barrier seam.
+    package func releaseSourceCancellationAcknowledgements() {
+        holdsSourceCancellationAcknowledgements = false
+        let held = heldSourceCancellationIDs
+        heldSourceCancellationIDs.removeAll()
+        for id in held {
+            acknowledgeSourceCancellation(id)
+        }
+    }
+
+    /// Test-support: drives the host-bound phase without relying on an elapsed
+    /// timer while source acknowledgements are controlled separately.
+    package func forceExitBoundForTesting() {
+        exitBoundElapsed()
+    }
+
+    /// Test-support: holds the launch after source installation but before the
+    /// reducer can activate IO.
+    package func holdInstalledSourcesBeforeActivation(
+        onInstalled: @escaping @Sendable () -> Void
+    ) {
+        holdsInstalledSourcesBeforeActivation = true
+        installedSourcesObserver = onInstalled
+    }
+
+    /// Test-support: resumes a launch held with installed, inactive sources.
+    package func releaseInstalledSourcesForActivation() {
+        holdsInstalledSourcesBeforeActivation = false
+        guard hasDeferredSpawnSuccess else { return }
+        hasDeferredSpawnSuccess = false
+        process(.spawnSucceeded)
+    }
+
+    /// Test-support: atomically replaces the closing PTY fd with this descriptor
+    /// so the test can prove no joined source acts on the reused number.
+    package func installDescriptorReuseProbe(replacementFD: Int32) {
+        descriptorReuseReplacementFD = replacementFD
+    }
+
+    /// Test-support: returns the fd number reused while closing the PTY master.
+    package func reusedDescriptorForTesting() -> Int32? {
+        reusedDescriptor
+    }
+
     /// Releases a child this host will never adopt. Off the owner queue because
     /// the kill-and-reap blocks, and the owner must stay free to keep tearing down.
     private nonisolated static func discardOffOwner(_ spawned: SpawnedPTY) {
@@ -1091,7 +1220,16 @@ public actor TerminalPTYHost {
             leaderPID = spawned.leader
             sessionID = spawned.session
             leaderReaped = false
-            installSources(for: spawned)
+            if descriptorOwnershipSealed == false {
+                installSources(for: spawned)
+            }
+            if holdsInstalledSourcesBeforeActivation {
+                hasDeferredSpawnSuccess = true
+                let observer = installedSourcesObserver
+                installedSourcesObserver = nil
+                observer?()
+                return
+            }
             process(.spawnSucceeded)
         case .failure(let failure):
             process(.spawnFailed(failure))
@@ -1103,6 +1241,7 @@ public actor TerminalPTYHost {
         read.setEventHandler { [weak self] in
             self?.assumeIsolated { owner in owner.readSourceFired() }
         }
+        retainUntilCancellation(read, descriptorBacked: true)
         readSource = read
         readSourceActivated = false
 
@@ -1114,11 +1253,16 @@ public actor TerminalPTYHost {
         process.setEventHandler { [weak self] in
             self?.assumeIsolated { owner in owner.processSourceFired() }
         }
+        retainUntilCancellation(process, descriptorBacked: false)
         processSource = process
         processSourceActivated = false
     }
 
     private func activateIO() {
+        guard descriptorOwnershipSealed == false else {
+            closeMaster()
+            return
+        }
         activateReadSourceIfNeeded()
         activateProcessSourceIfNeeded()
     }
@@ -1136,13 +1280,21 @@ public actor TerminalPTYHost {
     }
 
     private func enqueueInput(_ bytes: [UInt8]) {
-        guard bytes.isEmpty == false, masterFD >= 0 else { return }
+        guard descriptorOwnershipSealed == false,
+              bytes.isEmpty == false,
+              masterFD >= 0
+        else { return }
         pendingInput.append(contentsOf: bytes)
         flushInput()
     }
 
     private func flushInput() {
-        guard masterFD >= 0 else { return }
+        guard descriptorOwnershipSealed == false, masterFD >= 0 else {
+            pendingInput.removeAll(keepingCapacity: false)
+            pendingInputOffset = 0
+            cancelWriteSource()
+            return
+        }
         let turnLimit = 64 * 1024
         var writtenThisTurn = 0
         while pendingInputOffset < pendingInput.count, writtenThisTurn < turnLimit {
@@ -1175,11 +1327,15 @@ public actor TerminalPTYHost {
     }
 
     private func installWriteSourceIfNeeded() {
-        guard writeSource == nil, masterFD >= 0 else { return }
+        guard descriptorOwnershipSealed == false,
+              writeSource == nil,
+              masterFD >= 0
+        else { return }
         let source = DispatchSource.makeWriteSource(fileDescriptor: masterFD, queue: queue)
         source.setEventHandler { [weak self] in
             self?.assumeIsolated { owner in owner.writeSourceFired() }
         }
+        retainUntilCancellation(source, descriptorBacked: true)
         writeSource = source
         source.activate()
     }
@@ -1190,12 +1346,12 @@ public actor TerminalPTYHost {
     }
 
     private func readSourceFired() {
-        guard recordSystemCallback() else { return }
+        guard recordSystemCallback(), descriptorOwnershipSealed == false else { return }
         readReady()
     }
 
     private func writeSourceFired() {
-        guard recordSystemCallback() else { return }
+        guard recordSystemCallback(), descriptorOwnershipSealed == false else { return }
         flushInput()
     }
 
@@ -1301,6 +1457,7 @@ public actor TerminalPTYHost {
         timer.setEventHandler { [weak self] in
             self?.assumeIsolated { owner in owner.childExitPollFired() }
         }
+        retainUntilCancellation(timer, descriptorBacked: false)
         childExitPollSource = timer
         timer.activate()
     }
@@ -1371,7 +1528,7 @@ public actor TerminalPTYHost {
     }
 
     private func applyResize(_ dimensions: TerminalDimensions) {
-        guard masterFD >= 0 else { return }
+        guard descriptorOwnershipSealed == false, masterFD >= 0 else { return }
         var size = winsize(
             ws_row: UInt16(clamping: dimensions.rows),
             ws_col: UInt16(clamping: dimensions.columns),
@@ -1397,6 +1554,8 @@ public actor TerminalPTYHost {
     }
 
     private func closeMaster() {
+        descriptorOwnershipSealed = true
+        masterCloseRequested = true
         // A close that raced spawn has sources installed but no activateIO
         // command. Resume before cancellation so libdispatch never releases a
         // suspended source, and keep process observation live for leader reap.
@@ -1405,9 +1564,43 @@ public actor TerminalPTYHost {
         cancelWriteSource()
         pendingInput.removeAll(keepingCapacity: false)
         pendingInputOffset = 0
+        completeMasterCloseIfPossible()
+    }
+
+    private func completeMasterCloseIfPossible() {
+        guard masterCloseRequested, descriptorSourceIDs.isEmpty else { return }
+        masterCloseRequested = false
         if masterFD >= 0 {
-            Darwin.close(masterFD)
+            if let replacementFD = descriptorReuseReplacementFD,
+               dup2(replacementFD, masterFD) == masterFD
+            {
+                reusedDescriptor = masterFD
+            } else {
+                Darwin.close(masterFD)
+            }
             masterFD = -1
+        }
+        if forcedCleanupAfterMasterClose {
+            performForcedCleanupAfterMasterClose()
+            return
+        }
+        resumeCommandsAfterMasterClose()
+    }
+
+    private func resumeCommandsAfterMasterClose() {
+        guard deferredCommandsAfterMasterClose.isEmpty == false else { return }
+        let commands = deferredCommandsAfterMasterClose
+        deferredCommandsAfterMasterClose.removeAll()
+        precondition(isReducing == false)
+        isReducing = true
+        defer {
+            publishPendingUpdate()
+            isReducing = false
+        }
+        execute(commands)
+        while pendingEvents.isEmpty == false {
+            let next = pendingEvents.removeFirst()
+            execute(reducer.handle(next))
         }
     }
 
@@ -1494,6 +1687,7 @@ public actor TerminalPTYHost {
         timer.setEventHandler { [weak self] in
             self?.assumeIsolated { owner in owner.graceTimerFired(stage) }
         }
+        retainUntilCancellation(timer, descriptorBacked: false)
         graceSource = timer
         timer.activate()
     }
@@ -1519,6 +1713,7 @@ public actor TerminalPTYHost {
         timer.setEventHandler { [weak self] in
             self?.assumeIsolated { owner in owner.sessionPollFired() }
         }
+        retainUntilCancellation(timer, descriptorBacked: false)
         sessionPollSource = timer
         timer.activate()
     }
@@ -1558,7 +1753,7 @@ public actor TerminalPTYHost {
     }
 
     private func finishTeardown() {
-        guard teardownFinished == false else { return }
+        guard teardownFinished == false, teardownFinalizationRequested == false else { return }
         // Abandons a launch still blocked in its syscall: it cannot be interrupted,
         // so the generation bump is what guarantees its child is discarded instead
         // of adopted into a host that is about to be quiescent.
@@ -1584,8 +1779,20 @@ public actor TerminalPTYHost {
                 break
             }
         }
+        teardownFinalizationRequested = true
+        completeTeardownIfPossible()
+    }
+
+    private func completeTeardownIfPossible() {
+        guard teardownFinalizationRequested,
+              teardownFinished == false,
+              masterFD < 0,
+              retainedSources.isEmpty,
+              inFlightLaunch == nil
+        else { return }
         teardownFinished = true
         shouldFinishUpdates = true
+        publishPendingUpdate()
     }
 
     private func markUpdatePending() {
