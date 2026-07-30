@@ -144,9 +144,6 @@ public final class TerminalPaneSessionController {
     /// ones that mutate nothing -- the find overlay's counter is driven entirely from here.
     public var onSearchStatus: ((TerminalSearchStatus?) -> Void)?
 
-    /// Releases process-lifetime ownership from the host completion queue.
-    public var onTeardownCompleted: (@Sendable () -> Void)?
-
     /// The latest complete plan delivered for the visible pane, retained for scale-only redraws.
     public private(set) var currentPlan: RenderFramePlan?
 
@@ -578,11 +575,6 @@ public final class TerminalPaneSessionController {
         onPaneMenu = nil
         onOpenLink = nil
         onSearchStatus = nil
-        let onTeardownCompleted = takeTeardownCompletion()
-
-        host.whenQuiescent {
-            onTeardownCompleted?()
-        }
     }
 
     private func consume(
@@ -609,7 +601,6 @@ public final class TerminalPaneSessionController {
             if let transitions {
                 completedRecordingEvents = neutralEvents(transitions)
             }
-            takeTeardownCompletion()?()
             onSessionEnded?(result)
         }
     }
@@ -659,12 +650,6 @@ public final class TerminalPaneSessionController {
     /// Test support for whole-value recording equality after a synchronization fence.
     package func terminalSnapshot() -> Terminal {
         cachedTerminal
-    }
-
-    private func takeTeardownCompletion() -> (@Sendable () -> Void)? {
-        let completion = onTeardownCompleted
-        onTeardownCompleted = nil
-        return completion
     }
 
     private func planIfNeeded(_ terminal: Terminal) {

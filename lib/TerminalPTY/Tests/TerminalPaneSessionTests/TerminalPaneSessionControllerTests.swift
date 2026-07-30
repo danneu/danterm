@@ -1226,17 +1226,15 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
-    @Test("application termination reaches live and already-closing pane hosts", .timeLimit(.minutes(1)))
-    func applicationTerminationHandlesLiveAndMidCloseHosts() async throws {
-        // Intent: backend-owned termination handles cover every native host until
-        //   teardown completes through dispatch completions, including one whose
-        //   ordinary close is in flight.
-        // Why it exists: dropping a host from the backend registry at tearDown()
-        //   would let app termination leave that pane's process ladder unfinished,
-        //   while rebuilding the old task group around the handles recreates the
-        //   exit-crash victim.
-        // Scenario: the app quits while one shell is live and another pane has
-        //   just begun closing; both must release their complete process sessions.
+    @Test("application termination drains the retained registry while main is blocked", .timeLimit(.minutes(1)))
+    func applicationTerminationDrainsRegistryWithoutMainProgress() async throws {
+        // Intent: the backend registry retains every host through native cleanup,
+        //   removes it from host-queue quiescence, and returns only after all
+        //   shutdown observers have run.
+        // Why it exists: main-delivery cleanup could strand a mid-close host when
+        //   applicationWillTerminate synchronously blocked the main actor.
+        // Scenario: the user quits with one live shell and one pane already
+        //   closing; the synchronous exit hook blocks main until both are quiescent.
         let liveHost = try makeHost()
         let closingHost = try makeHost()
         let liveController = TerminalPaneSessionController(
@@ -1247,74 +1245,59 @@ struct TerminalPaneSessionControllerTests {
             host: closingHost,
             launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
         )
-        let handles = [liveController.terminationHandle, closingController.terminationHandle]
+        let registry = TerminalPaneTerminationRegistry()
+        registry.retain(liveController.terminationHandle)
+        registry.retain(closingController.terminationHandle)
+        let observers = PaneExitCompletionRecorder()
+        liveController.terminationHandle.whenQuiescent { observers.signal() }
+        closingController.terminationHandle.whenQuiescent { observers.signal() }
         #expect(await liveHost.waitForOutput(containing: Array("__READY__".utf8)))
         #expect(await closingHost.waitForOutput(containing: Array("__READY__".utf8)))
 
         closingController.tearDown()
-        let completions = PaneExitCompletionRecorder(expecting: handles.count)
-        for handle in handles {
-            handle.requestShutdown {
-                completions.signal()
-            }
-        }
-        #expect(completions.waitForAll(within: .seconds(20)))
+        registry.requestShutdownAndWait()
 
+        #expect(observers.signalCount == 2)
+        #expect(registry.retainedCount == 0)
         #expect((await liveHost.resourceSnapshot()).isReleased)
         #expect((await closingHost.resourceSnapshot()).isReleased)
         liveController.tearDown()
     }
 
-    @Test("pane teardown completion does not require main-actor progress", .timeLimit(.minutes(1)))
-    func teardownCompletionDoesNotRequireMainActor() async throws {
-        // Intent: ordinary pane teardown signals native completion directly from
-        //   the host path even while the main actor is synchronously blocked.
-        // Why it exists: PO5/I1. The old detached close task awaited a
-        //   @MainActor completion, so Cmd-Q during an in-flight pane close left a
-        //   Swift job parked behind applicationWillTerminate's synchronous wait.
-        // Scenario: a pane starts closing immediately before the user confirms
-        //   quit, and the app's main thread then waits for host quiescence.
-        let host = try makeHost()
-        let controller = TerminalPaneSessionController(
-            host: host,
+    @Test("ordinary teardown and app exit release identical registry ownership", .timeLimit(.minutes(1)))
+    func ordinaryTeardownAndAppExitReleaseRegistryOwnership() async throws {
+        // Intent: ordinary pane teardown and process exit both remove exactly one
+        //   retained handle only after the same native resource outcome.
+        // Why it exists: controller-driven registry removal gave ordinary close a
+        //   different lifetime edge from application termination.
+        // Scenario: one pane closes through reconciliation while another remains
+        //   live until Cmd-Q; neither handle survives its host's quiescence.
+        let ordinaryHost = try makeHost()
+        let exitHost = try makeHost()
+        let ordinaryController = TerminalPaneSessionController(
+            host: ordinaryHost,
             launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
         )
-        let completions = PaneExitCompletionRecorder(expecting: 1)
-        controller.onTeardownCompleted = {
-            completions.signal()
-        }
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
-
-        controller.tearDown()
-
-        #expect(completions.waitForAll(within: .seconds(20)))
-        #expect((await host.resourceSnapshot()).isReleased)
-    }
-
-    @Test("teardown completion fires backend registry cleanup exactly once", .timeLimit(.minutes(1)))
-    func teardownCompletionFiresOnce() async throws {
-        // Intent: a pane teardown publishes one completion after native resources
-        //   are released, even when tearDown() is called repeatedly.
-        // Why it exists: early registry removal loses mid-close hosts, while repeat
-        //   removal callbacks make backend ownership state race-prone.
-        // Scenario: repeated reconciler cleanup calls close one live shell pane.
-        let host = try makeHost()
-        let controller = TerminalPaneSessionController(
-            host: host,
+        let exitController = TerminalPaneSessionController(
+            host: exitHost,
             launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
         )
-        let completions = PaneExitCompletionRecorder(expecting: 1)
-        controller.onTeardownCompleted = {
-            completions.signal()
-        }
-        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let registry = TerminalPaneTerminationRegistry()
+        registry.retain(ordinaryController.terminationHandle)
+        registry.retain(exitController.terminationHandle)
+        #expect(await ordinaryHost.waitForOutput(containing: Array("__READY__".utf8)))
+        #expect(await exitHost.waitForOutput(containing: Array("__READY__".utf8)))
 
-        controller.tearDown()
-        controller.tearDown()
+        ordinaryController.tearDown()
+        ordinaryController.tearDown()
+        await waitForQuiescence(ordinaryController.terminationHandle)
+        #expect(registry.retainedCount == 1)
+        #expect((await ordinaryHost.resourceSnapshot()).isReleased)
 
-        #expect(completions.waitForAll(within: .seconds(20)))
-        #expect(completions.signalCount == 1)
-        #expect((await host.resourceSnapshot()).isReleased)
+        registry.requestShutdownAndWait()
+        #expect(registry.retainedCount == 0)
+        #expect((await exitHost.resourceSnapshot()).isReleased)
+        exitController.tearDown()
     }
 
     @Test("viewport state emits on change only and pane reads use logical window text", .timeLimit(.minutes(1)))
@@ -1692,24 +1675,11 @@ private func waitForQuiescence(_ handle: TerminalPaneTerminationHandle) async {
 private final class PaneExitCompletionRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var count = 0
-    private let expectedCount: Int
-    private let group = DispatchGroup()
-
-    init(expecting count: Int) {
-        expectedCount = count
-        for _ in 0..<count { group.enter() }
-    }
 
     func signal() {
         lock.lock()
         count += 1
-        let shouldLeave = count <= expectedCount
         lock.unlock()
-        if shouldLeave { group.leave() }
-    }
-
-    func waitForAll(within timeout: DispatchTimeInterval) -> Bool {
-        group.wait(timeout: .now() + timeout) == .success
     }
 
     var signalCount: Int {

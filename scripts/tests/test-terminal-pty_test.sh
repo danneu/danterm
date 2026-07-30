@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Behavioral self-test for TerminalPTY test cache invalidation and the repository
-# clean contract. It uses a fake Swift driver so cache decisions stay observable.
+# Behavioral self-test for TerminalPTY test cache invalidation, the two-lane
+# split that reruns the process-wide fd census solo, and the repository clean
+# contract. It uses a fake Swift driver so cache decisions stay observable.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -48,48 +49,57 @@ clean_count() {
     grep -c '^<package><--package-path>.*<clean>$' "$swift_log" || true
 }
 
-test_count() {
-    grep -c '^<test><--package-path>' "$swift_log" || true
+# The wrapper runs two test lanes: a parallel lane that skips the process-wide
+# fd census test, then a solo lane running only that census test.
+parallel_count() {
+    grep -c '^<test><--package-path>.*<--skip><rapidCloseStressLeavesNoResources>' "$swift_log" || true
+}
+
+census_count() {
+    grep -c '^<test><--package-path>.*<--filter><rapidCloseStressLeavesNoResources>$' "$swift_log" || true
 }
 
 assert_counts() {
     local expected_cleans="$1"
-    local expected_tests="$2"
-    local label="$3"
+    local expected_parallels="$2"
+    local expected_censuses="$3"
+    local label="$4"
     [[ "$(clean_count)" == "$expected_cleans" ]] || fail "$label: expected $expected_cleans cleans"
-    [[ "$(test_count)" == "$expected_tests" ]] || fail "$label: expected $expected_tests tests"
+    [[ "$(parallel_count)" == "$expected_parallels" ]] || fail "$label: expected $expected_parallels parallel lanes"
+    [[ "$(census_count)" == "$expected_censuses" ]] || fail "$label: expected $expected_censuses census lanes"
 }
 
 : > "$swift_log"
 run_wrapper --filter FocusedTests/testExample
-assert_counts 1 1 "first run"
-grep -q '<--filter><FocusedTests/testExample>$' "$swift_log" || fail "focused-test arguments were not forwarded"
+assert_counts 1 1 1 "first run"
+grep -q '<--skip><rapidCloseStressLeavesNoResources><--filter><FocusedTests/testExample>$' "$swift_log" \
+    || fail "focused-test arguments were not forwarded to the parallel lane"
 stamp="$fixture/.build/test-terminal-pty/terminal-core.sha256"
 [[ -s "$stamp" ]] || fail "successful first run did not publish a fingerprint"
 
 run_wrapper
-assert_counts 1 2 "warm run"
+assert_counts 1 2 2 "warm run"
 
 printf '// manifest changed\n' >> "$fixture/lib/TerminalCore/Package.swift"
 run_wrapper
-assert_counts 2 3 "manifest change"
+assert_counts 2 3 3 "manifest change"
 
 printf '// source changed\n' >> "$fixture/lib/TerminalCore/Sources/TerminalCore/A.swift"
 run_wrapper
-assert_counts 3 4 "source-content change"
+assert_counts 3 4 4 "source-content change"
 
 printf '// source b\n' > "$fixture/lib/TerminalCore/Sources/TerminalCore/B.swift"
 run_wrapper
-assert_counts 4 5 "source addition"
+assert_counts 4 5 5 "source addition"
 
 mv "$fixture/lib/TerminalCore/Sources/TerminalCore/B.swift" \
     "$fixture/lib/TerminalCore/Sources/TerminalCore/Renamed.swift"
 run_wrapper
-assert_counts 5 6 "source-path change"
+assert_counts 5 6 6 "source-path change"
 
 rm "$fixture/lib/TerminalCore/Sources/TerminalCore/Renamed.swift"
 run_wrapper
-assert_counts 6 7 "source removal"
+assert_counts 6 7 7 "source removal"
 
 old_stamp="$(cat "$stamp")"
 printf '// failing input\n' >> "$fixture/lib/TerminalCore/Sources/TerminalCore/A.swift"
@@ -99,12 +109,12 @@ run_wrapper
 status=$?
 set -e
 [[ "$status" == 17 ]] || fail "failed test status was not preserved"
-assert_counts 7 8 "failed run"
+assert_counts 7 8 7 "failed run: parallel-lane failure must stop before the census lane"
 [[ "$(cat "$stamp")" == "$old_stamp" ]] || fail "failed run published a fingerprint"
 
 rm "$swift_fail"
 run_wrapper
-assert_counts 8 9 "run after failure"
+assert_counts 8 9 8 "run after failure"
 
 clean_fixture="$TMP/clean-repo"
 mkdir -p "$clean_fixture/scripts"

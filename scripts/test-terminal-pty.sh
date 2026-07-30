@@ -31,7 +31,12 @@ if [[ "$fingerprint" != "$recorded_fingerprint" ]]; then
     "$SWIFT" package --package-path "$PTY_PACKAGE" clean
 fi
 
-"$SWIFT" test --package-path "$PTY_PACKAGE" "$@"
+"$SWIFT" test --package-path "$PTY_PACKAGE" \
+    --skip rapidCloseStressLeavesNoResources "$@"
+# Process-wide fd census: needs a process to itself, since parallel suites
+# legitimately hold /dev/ptmx descriptors across its baseline.
+"$SWIFT" test --package-path "$PTY_PACKAGE" \
+    --filter rapidCloseStressLeavesNoResources
 
 mkdir -p "$STAMP_DIR"
 temporary_stamp="$(mktemp "$STAMP_DIR/.terminal-core.sha256.XXXXXX")"

@@ -692,9 +692,10 @@ struct TerminalPTYHostTests {
             #expect(releasedHost == nil)
         }
 
-        // The census is process-wide, and other suites in this process open
-        // PTYs concurrently in parallel runs: a real leak from this loop
-        // persists, neighbor descriptors are transient, so settle briefly.
+        // The census is process-wide, so it is only valid with the process to
+        // itself: scripts/test-terminal-pty.sh skips this test by name in the
+        // parallel lane and reruns it solo (update the script if renaming it).
+        // The settle loop stays as cheap insurance against fd-table lag.
         var descriptorsAfter = try openFileDescriptorCount()
         for _ in 0..<40 where descriptorsAfter > descriptorsBefore {
             try await Task.sleep(for: .milliseconds(50))

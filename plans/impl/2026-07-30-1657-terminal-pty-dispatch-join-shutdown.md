@@ -179,4 +179,31 @@ application-level timeout.
 - [x] 1. refactor(pty): unify shutdown observation around host callbacks
 - [x] 2. fix(pty): join dispatch resources before publishing quiescence
 - [x] 3. fix(terminal): fence UI delivery without Swift concurrency
-- [ ] 4. fix(app): retain terminal hosts through exit quiescence
+- [x] 4. fix(app): retain terminal hosts through exit quiescence
+
+## Implementation notes
+
+- The retention registry lives in `TerminalPaneSession` as
+  `TerminalPaneTerminationRegistry` rather than in `app/`, so its
+  retain-until-quiescence and shutdown-drain behavior is testable in the
+  package; `SwiftTerminalBackend` keeps only the one-line delegation.
+- The process-wide fd census test (`rapidCloseStressLeavesNoResources`)
+  flaked under parallel package runs: `@Suite(.serialized)` cannot stop
+  neighboring suites from holding `/dev/ptmx` descriptors across its
+  baseline. `scripts/test-terminal-pty.sh` now runs the package with
+  `--skip` on that test, then reruns it solo in its own test process;
+  `scripts/tests/test-terminal-pty_test.sh` pins the two-lane contract,
+  including that a parallel-lane failure stops before the census lane.
+  Chosen over serializing the whole package (taxes every test on an
+  experimental flag) and over ownership-scoped instrumentation (the
+  census must not trust the registry it exists to check). A
+  semaphore-for-DispatchGroup swap in the registry was tried and
+  reverted; it did not affect the flake, confirming the cause was
+  cross-suite descriptor noise, not the registry.
+
+## Follow Up
+
+- The solo census lane in `scripts/test-terminal-pty.sh` also runs for
+  argument-filtered invocations (e.g. `--filter CheckpointTests`),
+  adding ~36s. The justfile only calls the wrapper bare today; add a
+  skip knob if targeted runs through the wrapper become common.
