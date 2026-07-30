@@ -312,4 +312,84 @@ struct TerminalSearchTests {
         terminal.clearSearch()
         #expect(terminal.drainDamage() == TerminalDamage(rows: [2]))
     }
+
+    @Test("the reported total grows as matching output arrives under an open search")
+    func reportedTotalGrowsWithArrivingOutput() throws {
+        // Intent: a search left open while the pane keeps producing output reports the
+        //   matches that exist now, not the ones that existed when the needle was typed.
+        // Why it exists: guards the freshness contract against any future memoization of
+        //   the match list. `searchStatus` recomputes today, so this passes as written --
+        //   its job is to fail the moment a cache serves an answer the buffer outgrew.
+        // Scenario: a user searches a tailing log and watches the overlay's counter climb
+        //   as new matching lines land, without retyping anything.
+        var terminal = try #require(Terminal(columns: 8, rows: 4))
+        terminal.feed(Array("hit".utf8))
+
+        let found = terminal.beginSearch("hit")
+        #expect(found)
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
+
+        terminal.feed(Array("\r\nhit".utf8))
+        #expect(terminal.searchStatus == .matched(selected: 1, total: 2))
+
+        terminal.feed(Array("\r\nhit".utf8))
+        #expect(terminal.searchStatus == .matched(selected: 2, total: 3))
+    }
+
+    @Test("re-searching a needle after it was cleared sees output that arrived meanwhile")
+    func reSearchingAfterClearSeesInterveningOutput() throws {
+        // Intent: closing a search and reopening the same needle reports the buffer as it
+        //   stands, including everything printed while no search was open.
+        // Why it exists: the invalidation path that drops stale occurrences
+        //   (`invalidateInspection`) short-circuits when no selection, search, or link is
+        //   live, so mutations arriving in that window are the ones a memoized match list
+        //   is least likely to hear about. This is the hole, stated as behavior.
+        // Scenario: a user searches, closes the overlay, lets the pane run, and searches
+        //   the same term again -- the second search must not answer from the first.
+        var terminal = try #require(Terminal(columns: 8, rows: 4))
+        terminal.feed(Array("hit".utf8))
+
+        var found = terminal.beginSearch("hit")
+        #expect(found)
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
+
+        terminal.clearSearch()
+        #expect(terminal.searchStatus == nil)
+        terminal.feed(Array("\r\nhit\r\nhit".utf8))
+
+        found = terminal.beginSearch("hit")
+        #expect(found)
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 3))
+    }
+
+    @Test("the reported total shrinks when matching rows are evicted")
+    func reportedTotalShrinksOnEviction() throws {
+        // Intent: matches that fall off the end of scrollback stop being counted.
+        // Why it exists: eviction removes rows from the front of the stream without
+        //   touching any surviving row, so it is the one content change that alters the
+        //   match set while mutating nothing a row-range invalidation would name.
+        // Scenario: a user searches a busy pane and watches the total fall as the oldest
+        //   matches age out of history.
+        var terminal = try #require(Terminal(
+            columns: 8,
+            rows: 2,
+            scrollbackBudgetBytes: historyRowCost(columns: 8) * 3
+        ))
+        terminal.feed(Array("hit\r\nhit\r\na".utf8))
+
+        let found = terminal.beginSearch("hit")
+        #expect(found)
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 2))
+
+        // Fills history exactly to its budget: both matches are still retained.
+        terminal.feed(Array("\r\nb\r\nc".utf8))
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 2))
+
+        // Each further row now evicts one from the front, taking a match with it.
+        terminal.feed(Array("\r\nd".utf8))
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
+
+        terminal.feed(Array("\r\ne".utf8))
+        #expect(terminal.searchStatus == .empty)
+    }
 }

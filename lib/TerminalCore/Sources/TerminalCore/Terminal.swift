@@ -337,6 +337,38 @@ public struct Terminal: Equatable, Sendable {
         var range: TextAnchorRange?
     }
 
+    /// Memoizes the open needle's whole-history match list, keyed by the needle itself.
+    ///
+    /// Exists because every navigation step rescanned all of history twice -- once in
+    /// `searchNext`/`searchPrevious` and again in `searchStatus` -- which at a saturated
+    /// 10 MiB scrollback priced one keypress above the owner queue's whole budget for it.
+    /// Selecting a different occurrence does not change which occurrences exist, so the
+    /// list survives navigation and only content invalidates it.
+    ///
+    /// Never part of value equality: `TerminalPTYHost.applySearch` publishes a frame when
+    /// `terminal != previousTerminal`, and filling a cache is not a change any consumer
+    /// can observe. Sharing `ObservationGeneration`'s always-equal shape for that reason.
+    private struct SearchMatchCache: Equatable, Sendable {
+        private var query: String?
+        private var stored: [TextAnchorRange] = []
+
+        func matches(for query: String) -> [TextAnchorRange]? {
+            self.query == query ? stored : nil
+        }
+
+        mutating func store(_ matches: [TextAnchorRange], for query: String) {
+            self.query = query
+            stored = matches
+        }
+
+        mutating func invalidate() {
+            query = nil
+            stored = []
+        }
+
+        static func == (_ lhs: Self, _ rhs: Self) -> Bool { true }
+    }
+
     /// Retains hover presentation against reflowable text anchors without storing platform state.
     private struct InteractionLinkState: Equatable, Sendable {
         var hyperlink: TerminalHyperlink
@@ -478,6 +510,7 @@ public struct Terminal: Equatable, Sendable {
     // whole-value assignment, so no future write can bypass it.
     private var selection: TextAnchorRange? { didSet { refreshHasInteractionState() } }
     private var search: SearchState? { didSet { refreshHasInteractionState() } }
+    private var searchMatchCache = SearchMatchCache()
     private var hoveredLinkState: InteractionLinkState? {
         didSet {
             refreshHasInteractionState()
@@ -810,6 +843,15 @@ public struct Terminal: Equatable, Sendable {
     }
 
     private mutating func notePrimaryHistoryDamage() {
+        // Deliberately above the alternate-screen guard, and deliberately here rather than
+        // at the invalidation sites: the comment above `recordPresentationFullDamage` makes
+        // this the funnel every cell-storage write reaches and the non-bumping variants the
+        // narrow exception, so hanging the match cache here inherits its fail-safe
+        // direction -- a miscategorized call site costs a redundant rescan, never a stale
+        // answer. The guard below is about primary-history recovery, which the alternate
+        // screen genuinely does not affect; a search scanned under the alternate screen
+        // reads that screen's rows, so its cache must drop on both.
+        searchMatchCache.invalidate()
         if isAlternateScreenActive == false { primaryHistoryObservation.value &+= 1 }
     }
 
@@ -2059,7 +2101,10 @@ public struct Terminal: Equatable, Sendable {
     /// match, which is exactly the one the next navigation re-attaches to.
     public var searchStatus: TerminalSearchStatus? {
         guard isAlternateScreenActive == false, let search else { return nil }
-        let matches = searchMatches(for: search.query)
+        // Read-only counterpart to `memoizedSearchMatches`: a get-only property on a value
+        // type cannot fill the cache, so it answers from one and scans only on a miss.
+        let matches = searchMatchCache.matches(for: search.query)
+            ?? searchMatches(for: search.query)
         guard matches.isEmpty == false else { return .empty }
         let selected = search.range
             .flatMap(matches.firstIndex(of:))
@@ -2574,7 +2619,7 @@ public struct Terminal: Equatable, Sendable {
             recordDamage(since: before)
             return false
         }
-        let match = searchMatches(for: query).last
+        let match = memoizedSearchMatches(for: query).last
         search = SearchState(query: query, range: match)
         revealSearchMatchIfNeeded()
         recordDamage(since: before)
@@ -2585,7 +2630,7 @@ public struct Terminal: Equatable, Sendable {
     @discardableResult
     public mutating func searchNext() -> Bool {
         guard let search else { return false }
-        let matches = searchMatches(for: search.query)
+        let matches = memoizedSearchMatches(for: search.query)
         guard let current = search.range.flatMap(matches.firstIndex(of:)) else {
             return reattachToNewestMatch(among: matches)
         }
@@ -2600,7 +2645,7 @@ public struct Terminal: Equatable, Sendable {
     @discardableResult
     public mutating func searchPrevious() -> Bool {
         guard let search else { return false }
-        let matches = searchMatches(for: search.query)
+        let matches = memoizedSearchMatches(for: search.query)
         guard let current = search.range.flatMap(matches.firstIndex(of:)) else {
             return reattachToNewestMatch(among: matches)
         }
@@ -2890,6 +2935,18 @@ public struct Terminal: Equatable, Sendable {
             row: evictedRowCount + position.row,
             column: min(columnCount, position.column + width)
         )
+    }
+
+    /// Returns the needle's matches, scanning only when the cache cannot answer.
+    ///
+    /// The mutating counterpart of the read in `searchStatus`: navigation runs first and
+    /// fills the cache, so the status read that follows it in the same owner-queue job is
+    /// a hit rather than a second full scan.
+    private mutating func memoizedSearchMatches(for query: String) -> [TextAnchorRange] {
+        if let cached = searchMatchCache.matches(for: query) { return cached }
+        let computed = searchMatches(for: query)
+        searchMatchCache.store(computed, for: query)
+        return computed
     }
 
     private func searchMatches(for query: String) -> [TextAnchorRange] {
