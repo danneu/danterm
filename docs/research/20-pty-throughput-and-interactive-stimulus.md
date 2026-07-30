@@ -172,9 +172,9 @@ improvement as a failure.
       Phase 2 is cheap and certain, Phase 3 is neither.
       **Selected the recording; the keypress workload is rejected, user,
       2026-07-30.**
-- [ ] Capture a real TUI session and characterize what it actually emits, against
-      the same census run over the four committed fixtures.
-- [ ] `D3` admission gate, **pre-registered here before the capture runs**: a
+- [x] Capture a real TUI session and characterize what it actually emits, against
+      the same census run over the four committed fixtures -- recorded in `F9`.
+- [x] `D3` admission gate, **pre-registered here before the capture runs**: a
       recording earns a sixth workload only if its emitted-sequence distribution
       reaches a path the existing corpus does not. That is not this file's
       invention -- `TerminalDrawBenchmarkSupport` already states the rule for its
@@ -186,10 +186,16 @@ improvement as a failure.
       recording is another flavor of styled TUI content and is rejected**, with
       the census kept as the finding. Pre-registered so the capture cannot be
       read backwards into a justification, the way `21/D1` pre-registers its own
-      gate.
-- [ ] If admitted: decide diagnostic-only versus decidable *before* building --
-      a decidable sixth workload needs an A/A screen and a frozen threshold in
-      both modes, which is the same process `17/F15` ran and refused.
+      gate. **Passed: 13 novel classes, `F9`.**
+- [ ] `D3` shape gate: diagnostic-only versus decidable, decided *before*
+      building -- a decidable sixth workload needs an A/A screen and a frozen
+      threshold in both modes, which is the same process `17/F15` ran and
+      refused. **Recommendation made: admit, characterize the composition, then
+      calibrate. Awaiting the user.**
+- [ ] Land the fixture and a runner, with provenance recording the geometry, the
+      btop version, the `--update 250` deviation, and the fact that a capture of
+      live system state is not regenerable.
+- [ ] Resolve the license question before the fixture is committed.
 
 ## Findings log
 
@@ -644,6 +650,67 @@ improvement as a failure.
   on input, which makes attribution clean and matches kitty's precedent (`F1`).
   Under (1) the concern evaporates -- a recording is bytes, and btop's timer is
   captured rather than raced.
+
+### D3 -- admit the recording, and in what shape
+
+- Status: **admitted on the pre-registered gate; shape recommendation made,
+  awaiting user direction gate.**
+- Evidence used: `F9`, and `F2`'s lesson about measuring a metric's composition
+  before trusting it.
+- Admission: **passes.** The gate asked for one sequence class the corpus leaves
+  unexercised; `F9` found thirteen, and the largest is a whole-frame draw
+  suppression path in front of the harness's two most expensive brackets. This is
+  not another flavor of styled content.
+- What the workload would actually measure, and it is not what the trigger
+  imagined. 3,091 PTY deliveries arrive in 99 synchronized spans with
+  effectively no bytes between them, so a conforming terminal plans and draws
+  **99 times for 3.1 MB** where `scrollback-stream` plans repeatedly through
+  1.5 MB. The deciding quantity is therefore **plan/draw amortization under a
+  real TUI's frame discipline** -- roughly 31 deliveries coalesced per drawn
+  frame. No existing workload has a coalescing ratio above 1.
+- Candidate shapes:
+  1. **Admit, characterize, then calibrate** (recommended). Land the fixture and
+     a runner, report its drain/draw composition the way `D1` already does for
+     `scrollback-stream`, and **only then** run the A/A screen and freeze a
+     threshold in both modes. Decidable if and only if the composition says the
+     draw bracket is worth deciding on.
+  2. **Admit as decidable immediately.** Fixture, runner, A/A screen, frozen
+     thresholds, in one pass.
+  3. **Admit as diagnostic-only, permanently.** A sixth workload that reports and
+     never decides.
+- Tradeoffs and correctness risks:
+  - (2) risks repeating this file's own opening mistake. `F2` is the finding that
+    `scrollback-stream`'s deciding metric was 95.7% drain and nobody had checked;
+    calibrating a threshold before knowing the composition is exactly how that
+    happened. If a btop replay turns out to be 96% parse with 99 cheap draws,
+    a frozen draw threshold on it would be a second instance of the same error --
+    and a threshold, once frozen, is what later documents rest on.
+  - (3) is the safe option and probably too safe. `17/F15` refused a rule to
+    `processCPUNanosecondsPerDraw` because an auxiliary metric rides the deciding
+    metric's blocks and **cannot buy more pairs**. A workload does not have that
+    constraint: it owns its blocks and can be run at whatever pair count the
+    screen demands. The reason calibration failed there does not apply here, so
+    declining to try is declining for no stated reason.
+  - (1) is (2) with the composition check `F2` says to do first, and it can still
+    land as (2) -- the only cost is that the screen runs after a characterization
+    rather than beside it.
+- Recommendation: **(1)**. Ordering only; it forecloses nothing.
+- Risks to carry into implementation regardless of shape:
+  - **`17/F17` is the cautionary case.** A capture is a stimulus like any other,
+    and btop full-screen at 179x66 is close in shape to the stimulus whose
+    headline `17/F17` retired. The fixture provenance must record the geometry,
+    the subject version, and the `--update 250` deviation, and no number read off
+    this workload generalizes past that capture.
+  - **A recording is a frozen artifact of one machine's system state.** btop
+    renders this box's cores, processes, and network. That is fine for a
+    deterministic replay -- it is bytes -- but the fixture is not reproducible by
+    re-running the capture, and the manifest should say so rather than imply a
+    regenerable input.
+  - **Licensing needs a look before commit.** The four committed fixtures are
+    MIT and DanTerm-authored. This one is DanTerm-authored bytes *emitted by* a
+    GPL-3.0 program, which is a different provenance claim than any existing
+    entry makes, and `NeutralTerminalProvenance.validate` currently accepts only
+    `libvterm`, `alacritty`, and `danterm` sources.
 
 ## Rejected
 
