@@ -167,11 +167,19 @@ measures. Not hypothesised in advance; it emerged from the sweep.
 
 ### Phase 5 -- code-candidate direction gate
 
-- [ ] **ACTIVE. Awaiting user direction.** No code candidate implemented, no
-      paired benchmark spent. `D3` recommends B, then C, then A -- and names a
-      fourth option that did not exist before Phase 4: run the A/A screening pass
-      that would freeze a rule for `processCPUNanosecondsPerDraw` and make
-      candidate A fully decidable. The user picks, revises, or declines.
+- [x] Gate opened by user instruction; **B selected**. `D3` recommended B, then C,
+      then A, plus a fourth option (the A/A screen).
+- [x] **Candidate B implemented, measured, kept. `F13`, `D4`.** Guarding test
+      written first -- and it rejected the implementation `F7`/`D1` had pitched
+      before any benchmark ran, so what shipped is a revision counter rather than an
+      identity token. Verdicts: `terminal-feed` **faster -14.59%**,
+      `scrollback-stream` **faster -10.78%**, both churn workloads `equivalent`,
+      `incremental-mixed` `inconclusive`. `DamageActionSnapshot` is now POD, 190 ->
+      166 bytes.
+- [ ] Candidate C (`recentOutput`, `F9`) -- open, next in `D3`'s order.
+- [ ] A/A screen to freeze a rule for `processCPUNanosecondsPerDraw` -- open;
+      prerequisite for reading candidate A partially. Untouched by B's acceptance.
+- [ ] Candidate A (`F6`) -- open, largest, elasticity still unconfirmed.
 
 ## Findings log
 
@@ -447,6 +455,8 @@ measures. Not hypothesised in advance; it emerged from the sweep.
 ### F7 -- `DamageActionSnapshot` is non-POD for exactly one reason, and it costs 8.3% of the throughput workload
 
 - Status: recorded. **Reopens `10/H1(b)` at 3.4x the size that rejected it.**
+  **Taken and kept -- `F13`** -- though the implementation this finding pitched
+  turned out to be wrong; see `F13` for what shipped instead and why.
 - Measurements, `scrollback-stream`:
   - `recordDamage` region: **15.79% of total on-CPU** (5,796 ms), the largest
     app-owned region inside `Terminal.feed`.
@@ -715,6 +725,86 @@ measures. Not hypothesised in advance; it emerged from the sweep.
   nothing.
 - Next action: `D3`.
 
+### F13 -- candidate B taken and accepted: two `faster` verdicts, and the pitched implementation was wrong
+
+- Status: recorded. **`D1` candidate B implemented, measured, accepted.** The first
+  code candidate this file has spent a benchmark on.
+- Date and investigator: 2026-07-29, Claude (agent).
+- Direction gate: satisfied by user instruction ("continue", following the message
+  that ended "Ready for candidate B when you are"). Recorded because the
+  investigation rules forbid implementing a code candidate without one, and a gate
+  must not look self-opened.
+- What shipped, and it is **not what `F7` and `D1` specified.** Both pitched
+  replacing the field with `(identity: Int, range: TerminalTextRange)`. That
+  implementation is wrong, and the guarding test proved it before any benchmark ran:
+  built exactly as pitched, it recorded `rows: []` where `rows: [0]` is required.
+  - Mechanism of the defect: `activationIdentity` is `max(contentIdentity)` over the
+    range's cells (`Terminal.swift:2330-2344`), so it is a function of the *cells*,
+    never of the URI. Two links can share a range and an identity while differing in
+    target -- the OSC 8 shape, where the URI is metadata rather than visible text.
+    `F7` listed this as a "correctness risk ... **Unverified**"; it is now verified,
+    and it is a defect in the pitch rather than a risk in the change.
+  - What shipped instead: `hoveredLinkRange: TerminalTextRange?` plus
+    `hoveredLinkRevision: UInt64`, a counter advanced by `hoveredLinkState`'s
+    existing `didSet`. It compares no values, so no token needs to be a function of
+    the URI. It advances even on a write that stores an equal value, so the diff
+    over-reports rather than under-reports -- a redundant repaint of the hovered
+    rows, never a missed one.
+  - The range comparison is retained and is **not** redundant with the revision:
+    scrollback eviction reindexes rows without touching `hoveredLinkState`, so the
+    same anchors can name different viewport rows with no mutation to notice. Both
+    conditions are live for different reasons.
+- Structural result, measured rather than assumed (`_isPOD` via a temporary hook,
+  since removed):
+
+  | | POD? | size | stride |
+  | --- | --- | ---: | ---: |
+  | before | **false** | 190 | 192 |
+  | after | **true** | 166 | -- |
+
+  Two snapshots exist per parser action, so this is also 48 fewer bytes of stack
+  traffic per action -- relevant to `F7`'s `___chkstk_darwin` observation, though
+  nothing here isolates that term.
+- Verdicts, `just benchmark-confirm baseline=HEAD` at baseline `e4298bf`, candidate
+  tree `bc13d2f67132`:
+
+  | workload | verdict | symmetric median | pairs |
+  | --- | --- | ---: | ---: |
+  | `terminal-feed` | **faster** | **-14.59%** | 2 |
+  | `scrollback-stream` | **faster** | **-10.78%** | 4 |
+  | `content-churn` | equivalent | +0.22% | 4 |
+  | `style-churn` | equivalent | -0.31% | 4 |
+  | `incremental-mixed` | inconclusive | -1.09% | 6 |
+
+  A prior single-workload `quick` on the same tree returned `faster` -8.30%
+  (-8.45% / -8.14%, no outliers), so `scrollback-stream` reproduced its own
+  direction across two independent runs at different pair counts. Artifacts:
+  `.build/terminal-benchmark-comparisons/confirm/bc13d2f67132-0000`.
+- Both `faster` workloads are the two `F7`/`D1` named in advance as the ones that
+  could see it. Neither churn workload regressed, which matters because
+  `recordDamage` runs on every workload.
+- **On the magnitude, against this file's own rule.** `F7` predicted "~6.6%", a
+  share of `scrollback-stream`'s on-CPU total. The verdicts above are reductions in
+  each workload's *deciding* metric -- time-to-final-draw for the two `faster` ones.
+  Those are different denominators, so this is a confirmed direction landing in the
+  same neighbourhood, **not** a prediction beaten by 4 points. The investigation
+  rule "convert a share to the deciding benchmark's own denominator before
+  predicting a win" is exactly about not conflating these, and `F7` did not do that
+  conversion.
+- The Phase 4 instrument did not decide this. `scrollback-stream` and
+  `terminal-feed` decide on completion time, so they carry no per-draw auxiliary
+  line at all; the frozen draw rule decided B, as `D3` said it would.
+- Observation worth exactly its weight, no more: on the three serialized-draw
+  workloads the new process-CPU metric moved negative in every case (-1.63%
+  `content-churn`, -1.05% `style-churn`, -3.88% `incremental-mixed`) while two of
+  the three draw verdicts were `equivalent`. Consistent in sign across 14 pairs. It
+  is **not evidence** -- the metric has no frozen rule and `F12` put its unpaired
+  block spread at 5.60%, above two of these three magnitudes. Pairing cancels drift
+  that unpaired blocks do not, so the paired sensitivity is probably better than
+  5.60%, but "probably better" is not a threshold. This is precisely the reading the
+  A/A screen in `D3` would make legitimate.
+- Next action: `D4`.
+
 ## Decision log
 
 ### D1 -- which CPU opportunity to take first
@@ -948,8 +1038,40 @@ input shapes.
   from "partly" to "yes" and is the same shape of work as
   `scripts/terminal-benchmark-plan-calibration.py`. Worth doing before A, not
   before B.
-- Direction review: pending.
-- Selected direction: pending.
+- Direction review: **directed** -- B taken. See `D4`.
+- Selected direction: **B**, per user instruction.
+
+### D4 -- candidate B is kept, and what its acceptance does to the rest of the list
+
+- Status: **closed.** Candidate B implemented, measured across all five routine
+  workloads, and **kept**.
+- Evidence used: `F13`.
+- Decision: keep the change. Two `faster` verdicts on the two workloads named in
+  advance, no regression on the other three, and a structural guarantee (POD) that
+  the earlier `10/H1(b)` attempt never obtained. `10/F4`'s lesson -- "when a node
+  survives an experiment, the experiment has only excluded what it actually varied"
+  -- is what `F7` invoked to reopen this after doc 10 reverted it: doc 10 varied
+  *layout*, this varied *triviality*, and triviality is what moved the number.
+- What the ranking looks like now. B is done; A and C are unchanged in size and in
+  risk, and the A/A screen is unchanged in value:
+
+  | # | Candidate | Status |
+  | --- | --- | --- |
+  | B | `DamageActionSnapshot` POD | **Done** -- `F13`, kept |
+  | D | Correct the stale planner docs | **Done** -- shipped with `F5`'s correction |
+  | C | `recentOutput` (`F9`) | Open, next in `D3`'s order, lowest risk |
+  | A/A screen for `processCPUNanosecondsPerDraw` | Open, prerequisite for reading A partially |
+  | A | CA per-glyph bounds (`F6`) | Open, largest, elasticity still unconfirmed |
+  | E, F, G | Unchanged from `D1` |
+
+- **What B's acceptance does not license.** It says nothing about A or C: the three
+  candidates share no mechanism. It also does not retire `D3`'s A/A screen -- B was
+  decided by the frozen draw rule, so the new metric is exactly as uncalibrated
+  after this result as before it. The one thing B does establish is procedural:
+  writing the guarding test first is what caught a defect in the pitched
+  implementation, and both `F7` and `D1` had that implementation written down as the
+  thing to build.
+- Next action: none forced. `C` is next in order if the direction continues.
 
 ## Pre-rejected
 
@@ -1048,11 +1170,13 @@ separate a *verdict* by freezing one axis, which is what they exist for.
 
 ## Outcome
 
-**Phases 1-4 complete; Phase 5 is an open direction gate.** Four on-CPU traces,
-twelve findings, five ranked code candidates, two tooling fixes shipped, seven
-pre-rejections. **No code candidate implemented and no paired benchmark spent.**
+**Phases 1-4 complete; Phase 5 open with its first candidate taken.** Four on-CPU
+traces, thirteen findings, five ranked code candidates, two tooling fixes shipped,
+seven pre-rejections, and **one code candidate implemented, measured across all five
+routine workloads, and kept** (B: `terminal-feed` -14.59%, `scrollback-stream`
+-10.78%).
 
-Five results are worth more than the ranking:
+Six results are worth more than the ranking:
 
 1. **The two regions this project has spent four documents optimizing are no
    longer where the time is.** `planFrame` and `drawRenderFrame` are 10.5% and
@@ -1086,7 +1210,16 @@ Five results are worth more than the ranking:
    which is the version that can change a decision. The corollary is the standing
    warning: an `equivalent` verdict on these workloads is a statement about one
    ninth of the cost, and was never claiming to be more.
+6. **The guarding test caught a defect in the pitch, not in the change** (`F13`).
+   `F7` and `D1` both specified candidate B's implementation as an identity token,
+   and `F7` filed the collision risk as "unverified". Written first, the test
+   demonstrated that implementation drops the damage outright, because
+   `activationIdentity` is derived from cell content and never from the URI. What
+   shipped is a revision counter that compares no values at all. The generalizable
+   lesson: a pitch's *mechanism* deserves the same scepticism this file applies to a
+   pitch's *size*, and a test written before the code is what supplies it -- the
+   benchmark would have reported `faster` either way, with the hover bug included.
 
-Findings F1-F12 are recorded; the next free ID is **F13**. Decisions D1-D3 are
-recorded, D2 is closed and acted on, D1 and D3 await direction; the next free ID
-is **D4**.
+Findings F1-F13 are recorded; the next free ID is **F14**. Decisions D1-D4 are
+recorded; D2 and D4 are closed and acted on, D1 and D3 are directed as far as
+candidate B and hold C, A, and the A/A screen open; the next free ID is **D5**.
