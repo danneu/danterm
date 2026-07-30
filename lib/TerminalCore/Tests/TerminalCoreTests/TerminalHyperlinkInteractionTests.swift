@@ -22,6 +22,43 @@ struct TerminalHyperlinkInteractionTests {
         #expect(terminal.drainDamage() == TerminalDamage(rows: [0]))
     }
 
+    @Test("re-hovering a different target over the same range still damages the run")
+    func hoverTargetChangeAtIdenticalRangeDamages() throws {
+        // Intent: replacing the hovered link's target damages the run even when the
+        //   new link occupies the exact same range as the old one, so a renderer
+        //   that draws the target (or its underline styling) repaints.
+        // Why it exists: the hover comparison inside `recordDamage(from:to:)` is the
+        //   only thing that notices this change, and the cheapest ways to make the
+        //   damage snapshot trivially copyable all replace the compared link with a
+        //   token -- `activationIdentity`, a range, or both. None of those is a
+        //   function of the URI: `activationIdentity` is `max(contentIdentity)` over
+        //   the range's cells, and the public `TerminalResolvedLink` initializer
+        //   assigns 0. This pins the behavior any such substitution would silently
+        //   drop.
+        // Scenario: two links share one run of text and differ only in target -- the
+        //   OSC 8 shape, where the URI is metadata rather than visible text. The
+        //   pointer stays still while the target under it is replaced.
+        var terminal = try #require(Terminal(columns: 12, rows: 3))
+        terminal.feed(Array("https://a.co".utf8))
+        let range = TerminalTextRange(
+            start: .init(row: 0, column: 0),
+            end: .init(row: 0, column: 12)
+        )
+
+        let admittedFirst = terminal.setHoveredLink(
+            TerminalResolvedLink(hyperlink: .init(uri: "https://a.co"), range: range)
+        )
+        #expect(admittedFirst)
+        _ = terminal.drainDamage()
+
+        let admittedSecond = terminal.setHoveredLink(
+            TerminalResolvedLink(hyperlink: .init(uri: "https://b.co"), range: range)
+        )
+        #expect(admittedSecond)
+        #expect(terminal.hoveredLink?.hyperlink.uri == "https://b.co")
+        #expect(terminal.drainDamage() == TerminalDamage(rows: [0]))
+    }
+
     @Test("hover anchors follow width reflow and clear when their text is overwritten")
     func hoverReflowAndOverwrite() throws {
         var terminal = try #require(Terminal(columns: 14, rows: 3))

@@ -187,11 +187,21 @@ public struct Terminal: Equatable, Sendable {
     }
 
     /// Captures non-grid presentation state around one parser action in constant time.
+    ///
+    /// Every field is trivially copyable, and that is load-bearing rather than incidental:
+    /// two of these exist per parser action, so a single refcounted member turns each
+    /// construction, copy and destruction into a value-witness call. Holding the hovered
+    /// `TerminalResolvedLink` did exactly that -- its `TerminalHyperlink` carries `uri`
+    /// and `explicitId` Strings -- and cost 8.3% of the throughput workload's on-CPU time
+    /// (`17/F7`). The hovered link is therefore represented by a revision counter plus its
+    /// projected range, which is all `recordDamage(from:to:)` ever needed. Keep it POD:
+    /// adding a String, array, or class reference here reintroduces that cost.
     private struct DamageActionSnapshot {
         var cursor: TerminalCursor?
         var selection: TerminalTextRange?
         var searchMatch: TerminalTextRange?
-        var hoveredLink: TerminalResolvedLink?
+        var hoveredLinkRange: TerminalTextRange?
+        var hoveredLinkRevision: UInt64
         var topRow: Int
         var isFollowing: Bool
         var isAlternateScreenActive: Bool
@@ -468,8 +478,30 @@ public struct Terminal: Equatable, Sendable {
     // whole-value assignment, so no future write can bypass it.
     private var selection: TextAnchorRange? { didSet { refreshHasInteractionState() } }
     private var search: SearchState? { didSet { refreshHasInteractionState() } }
-    private var hoveredLinkState: InteractionLinkState? { didSet { refreshHasInteractionState() } }
+    private var hoveredLinkState: InteractionLinkState? {
+        didSet {
+            refreshHasInteractionState()
+            hoveredLinkRevisionCounter.value &+= 1
+        }
+    }
     private var armedLinkState: InteractionLinkState? { didSet { refreshHasInteractionState() } }
+
+    /// Counts writes to `hoveredLinkState` so `DamageActionSnapshot` can notice a hover
+    /// change without copying the link's refcounted target -- the whole point of `17/F7`.
+    ///
+    /// Reuses `ObservationGeneration` for its equality-neutral `==`: this is repaint
+    /// bookkeeping, and two terminals with identical visible state must not compare
+    /// unequal because one was hovered and unhovered along the way.
+    ///
+    /// The counter advances on every write, including one that stores an equal value, so
+    /// the snapshot diff over-reports rather than under-reports. That direction is the safe
+    /// one -- a redundant repaint of the hovered rows, never a missed one -- and it is why
+    /// this replaces a value comparison instead of reimplementing one on a cheaper token:
+    /// no token available here is a function of the link's URI (`activationIdentity` is
+    /// `max(contentIdentity)` over the range's cells, and the public `TerminalResolvedLink`
+    /// initializer assigns 0), so comparing tokens would miss a target change at an
+    /// unchanged range. `TerminalHyperlinkInteractionTests` pins that case.
+    private var hoveredLinkRevisionCounter = ObservationGeneration()
 
     /// Caches `selection`/`search`/`hoveredLinkState`/`armedLinkState` being non-nil.
     ///
@@ -664,7 +696,8 @@ public struct Terminal: Equatable, Sendable {
                 : nil,
             selection: selectionRange,
             searchMatch: activeSearchMatchRange,
-            hoveredLink: hoveredLink,
+            hoveredLinkRange: hoveredLinkState.flatMap { publicRange($0.range) },
+            hoveredLinkRevision: hoveredLinkRevisionCounter.value,
             topRow: projection.topRow,
             isFollowing: projection.isFollowing,
             isAlternateScreenActive: isAlternateScreenActive,
@@ -728,9 +761,16 @@ public struct Terminal: Equatable, Sendable {
             recordPresentationDamage(rows: damagedViewportRows(for: before.searchMatch))
             recordPresentationDamage(rows: damagedViewportRows(for: after.searchMatch))
         }
-        if before.hoveredLink != after.hoveredLink {
-            recordPresentationDamage(rows: damagedViewportRows(for: before.hoveredLink?.range))
-            recordPresentationDamage(rows: damagedViewportRows(for: after.hoveredLink?.range))
+        // Two independent reasons the hovered run can need repainting, and neither implies
+        // the other: the stored link changed (`hoveredLinkRevision`), or it did not change
+        // while the projection moved under it, so the same anchors now name different
+        // viewport rows (`hoveredLinkRange`). Eviction reindexes rows without touching
+        // `hoveredLinkState`, which is exactly the second case.
+        if before.hoveredLinkRevision != after.hoveredLinkRevision
+            || before.hoveredLinkRange != after.hoveredLinkRange
+        {
+            recordPresentationDamage(rows: damagedViewportRows(for: before.hoveredLinkRange))
+            recordPresentationDamage(rows: damagedViewportRows(for: after.hoveredLinkRange))
         }
     }
 
