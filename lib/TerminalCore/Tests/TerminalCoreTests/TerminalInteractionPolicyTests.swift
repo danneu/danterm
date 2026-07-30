@@ -91,61 +91,50 @@ struct TerminalInteractionPolicyTests {
         #expect(reportMove.selectionMutation == nil)
     }
 
-    @Test("click counts select character word cluster and line units and drag their union")
+    @Test("click counts cycle through character cluster and line units")
     func selectionGranularity() throws {
         var terminal = try #require(Terminal(columns: 8, rows: 3))
-        terminal.feed(Array("one two three".utf8))
+        terminal.feed(Array("a.b c.d".utf8))
+
+        let expectedMutations: [TerminalSelectionMutation] = [
+            .clear,
+            .set(range(0, 0, 0, 3)),
+            .set(range(0, 0, 0, 7)),
+            .clear,
+            .set(range(0, 0, 0, 3)),
+            .set(range(0, 0, 0, 7)),
+        ]
+        for clickCount in 1...6 {
+            var state = TerminalInteractionState()
+            let down = decideTerminalPointer(
+                .down(.left, column: 1, row: 0, clickCount: clickCount),
+                terminal: terminal,
+                state: &state
+            )
+            #expect(down.selectionMutation == expectedMutations[clickCount - 1])
+        }
 
         var character = TerminalInteractionState()
         _ = decideTerminalPointer(
-            .down(.left, column: 1, row: 0, clickCount: 1), terminal: terminal, state: &character
+            .down(.left, column: 1, row: 0, clickCount: 4), terminal: terminal, state: &character
         )
-        let characterMove = decideTerminalPointer(
-            .move(column: 3, row: 0), terminal: terminal, state: &character
-        )
-        #expect(characterMove.selectionMutation == .set(range(0, 1, 0, 4)))
-
-        var word = TerminalInteractionState()
-        let wordDown = decideTerminalPointer(
-            .down(.left, column: 1, row: 0, clickCount: 2), terminal: terminal, state: &word
-        )
-        #expect(wordDown.selectionMutation == .set(range(0, 0, 0, 3)))
-        let wordMove = decideTerminalPointer(
-            .move(column: 2, row: 1), terminal: terminal, state: &word
-        )
-        #expect(wordMove.selectionMutation == .set(range(0, 0, 1, 5)))
-
-        // Three clicks mean cluster, not line: the press selects the whole
-        // punctuated token that word granularity would have split, and dragging
-        // extends by whole clusters.
-        var punctuated = try #require(Terminal(columns: 16, rows: 2))
-        punctuated.feed(Array("a.b c.d".utf8))
-        var cluster = TerminalInteractionState()
-        let clusterDown = decideTerminalPointer(
-            .down(.left, column: 1, row: 0, clickCount: 3), terminal: punctuated, state: &cluster
-        )
-        #expect(clusterDown.selectionMutation == .set(range(0, 0, 0, 3)))
-        let clusterMove = decideTerminalPointer(
-            .move(column: 5, row: 0), terminal: punctuated, state: &cluster
-        )
-        #expect(clusterMove.selectionMutation == .set(range(0, 0, 0, 7)))
-
-        var line = TerminalInteractionState()
-        let lineDown = decideTerminalPointer(
-            .down(.left, column: 1, row: 0, clickCount: 5), terminal: terminal, state: &line
-        )
-        #expect(lineDown.selectionMutation == .set(range(0, 0, 1, 5)))
-
-        var fourClick = TerminalInteractionState()
         #expect(decideTerminalPointer(
-            .down(.left, column: 1, row: 0, clickCount: 4), terminal: terminal, state: &fourClick
-        ).selectionMutation == .set(range(0, 0, 1, 5)))
+            .move(column: 3, row: 0), terminal: terminal, state: &character
+        ).selectionMutation == .set(range(0, 1, 0, 4)))
+
+        var cluster = TerminalInteractionState()
+        _ = decideTerminalPointer(
+            .down(.left, column: 1, row: 0, clickCount: 5), terminal: terminal, state: &cluster
+        )
+        #expect(decideTerminalPointer(
+            .move(column: 5, row: 0), terminal: terminal, state: &cluster
+        ).selectionMutation == .set(range(0, 0, 0, 7)))
 
         var hardLines = try #require(Terminal(columns: 8, rows: 3))
         hardLines.feed(Array("first\r\nsecond".utf8))
         var lineDrag = TerminalInteractionState()
         _ = decideTerminalPointer(
-            .down(.left, column: 1, row: 0, clickCount: 4),
+            .down(.left, column: 1, row: 0, clickCount: 6),
             terminal: hardLines,
             state: &lineDrag
         )
@@ -154,7 +143,7 @@ struct TerminalInteractionPolicyTests {
         ).selectionMutation == .set(range(0, 0, 1, 6)))
 
         #expect(decideTerminalPointer(
-            .up(.left, column: 1, row: 0), terminal: terminal, state: &line
+            .up(.left, column: 1, row: 0), terminal: terminal, state: &cluster
         ).consumption == .selection)
     }
 

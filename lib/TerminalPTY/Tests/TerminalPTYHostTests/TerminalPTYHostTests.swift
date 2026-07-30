@@ -297,7 +297,7 @@ struct TerminalPTYHostTests {
         let owner = OwnerHold()
         owner.hold(host)
         host.resize(.init(columns: 80, rows: 30))
-        host.sendPointer(.down(.left, column: 2, row: 0, clickCount: 4))
+        host.sendPointer(.down(.left, column: 2, row: 0, clickCount: 3))
         host.resize(.init(columns: 80, rows: 10))
         owner.release()
 
@@ -311,7 +311,7 @@ struct TerminalPTYHostTests {
         }
         #expect(ordered == [
             .resize(.init(columns: 80, rows: 30)),
-            .mouse(.down(.left, column: 2, row: 0, clickCount: 4)),
+            .mouse(.down(.left, column: 2, row: 0, clickCount: 3)),
             .resize(.init(columns: 80, rows: 10)),
         ])
         #expect(

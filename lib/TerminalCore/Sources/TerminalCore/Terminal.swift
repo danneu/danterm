@@ -2158,61 +2158,28 @@ public struct Terminal: Equatable, Sendable {
         recordDamage(since: before)
     }
 
-    /// Returns the maximal same-class word unit used by native double-click selection.
-    public func wordRange(at position: TerminalTextPosition) -> TerminalTextRange {
-        let units = projectionUnits()
-        guard let target = nearestTextUnitIndex(to: position, in: units) else {
-            return emptyRange(at: position)
-        }
-        let targetClass = wordClass(of: units[target])
-        var lower = target
-        var upper = target
-        while lower > units.startIndex {
-            let candidate = units.index(before: lower)
-            guard units[candidate].isHardBoundary == false,
-                  wordClass(of: units[candidate]) == targetClass
-            else { break }
-            lower = candidate
-        }
-        while upper < units.index(before: units.endIndex) {
-            let candidate = units.index(after: upper)
-            guard units[candidate].isHardBoundary == false,
-                  wordClass(of: units[candidate]) == targetClass
-            else { break }
-            upper = candidate
-        }
-        return publicRange(TextAnchorRange(
-            start: units[lower].start,
-            end: units[upper].end
-        )) ?? emptyRange(at: position)
-    }
-
-    /// Returns the maximal whitespace-delimited run used by native triple-click selection.
-    ///
-    /// Sits between word and line granularity so a path, URL, hash, or flag is one gesture:
-    /// the split is purely whitespace-vs-not over the same projection `wordRange` walks, with
-    /// no path or URL recognition and no trailing-punctuation trimming. Like `wordRange` it
-    /// stops at a hard line ending, so a cluster spans a soft wrap but never absorbs the next
-    /// command's first token.
+    /// Returns the maximal Ghostty-compatible boundary or non-boundary run used by
+    /// native double-click selection. Classification uses the leading scalar so a
+    /// combining mark cannot move its base cell across the boundary.
     public func clusterRange(at position: TerminalTextPosition) -> TerminalTextRange {
         let units = projectionUnits()
         guard let target = nearestTextUnitIndex(to: position, in: units) else {
             return emptyRange(at: position)
         }
-        let targetIsWhitespace = isWhitespaceUnit(units[target])
+        let targetIsBoundary = isSelectionBoundaryUnit(units[target])
         var lower = target
         var upper = target
         while lower > units.startIndex {
             let candidate = units.index(before: lower)
             guard units[candidate].isHardBoundary == false,
-                  isWhitespaceUnit(units[candidate]) == targetIsWhitespace
+                  isSelectionBoundaryUnit(units[candidate]) == targetIsBoundary
             else { break }
             lower = candidate
         }
         while upper < units.index(before: units.endIndex) {
             let candidate = units.index(after: upper)
             guard units[candidate].isHardBoundary == false,
-                  isWhitespaceUnit(units[candidate]) == targetIsWhitespace
+                  isSelectionBoundaryUnit(units[candidate]) == targetIsBoundary
             else { break }
             upper = candidate
         }
@@ -2222,7 +2189,7 @@ public struct Terminal: Equatable, Sendable {
         )) ?? emptyRange(at: position)
     }
 
-    /// Returns one logical line across all soft-wrapped visual rows for quadruple-click selection.
+    /// Returns one logical line across all soft-wrapped visual rows for multi-click selection.
     public func logicalLineRange(at position: TerminalTextPosition) -> TerminalTextRange {
         let stream = activeProjectionRows()
         let target = min(max(position.row, 0), stream.count - 1)
@@ -2894,23 +2861,15 @@ public struct Terminal: Equatable, Sendable {
         return TerminalTextRange(start: publicPosition, end: publicPosition)
     }
 
-    private func isWhitespaceUnit(_ unit: ProjectionUnit) -> Bool {
-        unit.scalars.allSatisfy { $0.properties.isWhitespace }
-    }
-
-    private func wordClass(of unit: ProjectionUnit) -> Int {
-        if isWhitespaceUnit(unit) { return 0 }
-        if unit.scalars.allSatisfy({ scalar in
-            let value = scalar.value
-            return value >= 0x80
-                || value == 0x5F
-                || (0x30...0x39).contains(value)
-                || (0x41...0x5A).contains(value)
-                || (0x61...0x7A).contains(value)
-        }) {
-            return 1
+    private func isSelectionBoundaryUnit(_ unit: ProjectionUnit) -> Bool {
+        guard let leadingScalar = unit.scalars.first else { return false }
+        switch leadingScalar.value {
+        case 0x09, 0x20, 0x22, 0x24, 0x27, 0x28, 0x29, 0x2C, 0x3A, 0x3B,
+             0x3C, 0x3E, 0x5B, 0x5D, 0x60, 0x7B, 0x7C, 0x7D, 0x2502:
+            return true
+        default:
+            return false
         }
-        return 2
     }
 
     private func textPositionPrecedes(

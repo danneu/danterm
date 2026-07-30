@@ -1,27 +1,51 @@
-// Word, cluster, and logical-line range queries used by local multi-click selection.
+// Cluster and logical-line range queries used by local multi-click selection.
 import Testing
 
 @testable import TerminalCore
 
 /// Pins selection units to the terminal's logical projection rather than visual rows.
 struct TerminalSelectionUnitTests {
-    @Test("word ranges use whitespace word and symbol classes")
-    func wordClasses() throws {
-        var terminal = try #require(Terminal(columns: 24, rows: 2))
-        terminal.feed(Array("abc_12  \u{00E9}\u{754C}!!".utf8))
+    @Test("cluster ranges use Ghostty's default boundary set")
+    func clusterBoundarySet() throws {
+        // Intent: every renderable default boundary scalar separates the
+        //   non-boundary characters on either side.
+        // Why it exists: the fixed set is the selection contract, so omitting
+        //   one scalar silently changes what double-click selects.
+        // Scenario: a user double-clicks beside each kind of shell punctuation
+        //   in otherwise path-like text.
+        let boundaries = Array(" '\"\u{2502}`|:;,()[]{}<>$")
+        for boundary in boundaries {
+            var terminal = try #require(Terminal(columns: 16, rows: 2))
+            terminal.feed(Array("x/\(boundary).-_\u{00E9}".utf8))
 
-        #expect(terminal.wordRange(at: .init(row: 0, column: 2)) == range(0, 0, 0, 6))
-        #expect(terminal.wordRange(at: .init(row: 0, column: 6)) == range(0, 6, 0, 8))
-        #expect(terminal.wordRange(at: .init(row: 0, column: 8)) == range(0, 8, 0, 11))
-        #expect(terminal.wordRange(at: .init(row: 0, column: 11)) == range(0, 11, 0, 13))
+            #expect(
+                terminal.clusterRange(at: .init(row: 0, column: 1)) == range(0, 0, 0, 2),
+                "boundary \(boundary) must stop the left run"
+            )
+            #expect(
+                terminal.clusterRange(at: .init(row: 0, column: 3)) == range(0, 3, 0, 7),
+                "boundary \(boundary) must stop the right run"
+            )
+        }
     }
 
-    @Test("word and line ranges cross soft wraps but stop at hard lines")
+    @Test("cluster ranges select paths and bare identifiers")
+    func clusterSelectsPathsAndIdentifiers() throws {
+        var terminal = try #require(Terminal(columns: 32, rows: 2))
+        terminal.feed(Array("(/foo/bar.txt) bare_name".utf8))
+
+        terminal.setSelection(terminal.clusterRange(at: .init(row: 0, column: 7)))
+        #expect(terminal.selectedText == "/foo/bar.txt")
+        terminal.setSelection(terminal.clusterRange(at: .init(row: 0, column: 20)))
+        #expect(terminal.selectedText == "bare_name")
+    }
+
+    @Test("cluster and line ranges cross soft wraps but stop at hard lines")
     func logicalWrapRanges() throws {
         var terminal = try #require(Terminal(columns: 4, rows: 4))
         terminal.feed(Array("abcdef\r\nXY".utf8))
 
-        #expect(terminal.wordRange(at: .init(row: 1, column: 1)) == range(0, 0, 1, 2))
+        #expect(terminal.clusterRange(at: .init(row: 1, column: 1)) == range(0, 0, 1, 2))
         #expect(terminal.logicalLineRange(at: .init(row: 1, column: 0)) == range(0, 0, 1, 2))
         #expect(terminal.logicalLineRange(at: .init(row: 2, column: 1)) == range(2, 0, 2, 2))
 
@@ -34,50 +58,43 @@ struct TerminalSelectionUnitTests {
         #expect(terminal.selectedText == "abcdef")
     }
 
-    @Test("cluster ranges select a whitespace-delimited token whole")
-    func clusterSelectsPunctuatedToken() throws {
-        // Intent: a cluster query inside a punctuated path returns the path alone,
-        //   excluding a leading output glyph and the space that follows it.
-        // Why it exists: pins the whole point of the granularity -- word selection
-        //   stops at `/`, `-`, and `.`, so the path had no one-gesture target.
-        // Scenario: triple-clicking a path in Claude Code output, which prefixes
-        //   each line with a non-ASCII glyph and a space.
-        var terminal = try #require(Terminal(columns: 40, rows: 2))
-        terminal.feed(Array("\u{23FA} docs/research/13-live-app.md".utf8))
+    @Test("heterogeneous adjacent boundary characters form one cluster")
+    func heterogeneousBoundaryRun() throws {
+        var terminal = try #require(Terminal(columns: 24, rows: 2))
+        terminal.feed(Array("a;,(b x (y".utf8))
 
-        let cluster = terminal.clusterRange(at: .init(row: 0, column: 10))
-        terminal.setSelection(cluster)
-        #expect(terminal.selectedText == "docs/research/13-live-app.md")
+        terminal.setSelection(terminal.clusterRange(at: .init(row: 0, column: 2)))
+        #expect(terminal.selectedText == ";,(")
+        terminal.setSelection(terminal.clusterRange(at: .init(row: 0, column: 7)))
+        #expect(terminal.selectedText == " (")
     }
 
-    @Test("cluster ranges cross soft wraps but stop at hard lines")
-    func clusterWrapRanges() throws {
-        var terminal = try #require(Terminal(columns: 4, rows: 4))
-        terminal.feed(Array("ab.def\r\nXY".utf8))
+    @Test("cluster classification uses each cell's leading scalar")
+    func leadingScalarClassification() throws {
+        var terminal = try #require(Terminal(columns: 24, rows: 2))
+        terminal.feed(Array("x'\u{0301}y e\u{0301}.z".utf8))
 
-        #expect(terminal.clusterRange(at: .init(row: 1, column: 1)) == range(0, 0, 1, 2))
-        terminal.setSelection(terminal.clusterRange(at: .init(row: 1, column: 1)))
-        #expect(terminal.selectedText == "ab.def")
+        terminal.setSelection(terminal.clusterRange(at: .init(row: 0, column: 1)))
+        #expect(terminal.selectedText == "'\u{0301}")
+        terminal.setSelection(terminal.clusterRange(at: .init(row: 0, column: 4)))
+        #expect(terminal.selectedText == "e\u{0301}.z")
     }
 
-    @Test("cluster ranges select whitespace runs and fall back past retained content")
-    func clusterWhitespaceRegions() throws {
+    @Test("cluster ranges fall back past retained content and clamp at stream edges")
+    func fallbackAndClamping() throws {
         var terminal = try #require(Terminal(columns: 24, rows: 2))
         terminal.feed(Array("ab   cd".utf8))
 
         #expect(terminal.clusterRange(at: .init(row: 0, column: 3)) == range(0, 2, 0, 5))
         #expect(terminal.clusterRange(at: .init(row: 0, column: 20)) == range(0, 5, 0, 7))
-    }
 
-    @Test("selection-unit positions address scrollback and clamp at stream edges")
-    func scrollbackAndClamping() throws {
-        var terminal = try #require(Terminal(columns: 4, rows: 2))
-        terminal.feed(Array("old\r\nnew\r\nend".utf8))
-
-        #expect(terminal.wordRange(at: .init(row: 0, column: 1)) == range(0, 0, 0, 3))
-        #expect(terminal.wordRange(at: .init(row: -20, column: -20)) == range(0, 0, 0, 3))
-        #expect(terminal.wordRange(at: .init(row: 200, column: 200)) == range(2, 0, 2, 3))
-        #expect(terminal.logicalLineRange(at: .init(row: 200, column: 200)) == range(2, 0, 2, 3))
+        var retained = try #require(Terminal(columns: 4, rows: 2))
+        retained.feed(Array("old\r\nnew\r\nend".utf8))
+        #expect(retained.clusterRange(at: .init(row: 0, column: 1)) == range(0, 0, 0, 3))
+        #expect(retained.clusterRange(at: .init(row: -20, column: -20)) == range(0, 0, 0, 3))
+        #expect(retained.clusterRange(at: .init(row: 200, column: 200)) == range(2, 0, 2, 3))
+        #expect(retained.logicalLineRange(at: .init(row: 200, column: 200))
+            == range(2, 0, 2, 3))
     }
 
     private func range(
