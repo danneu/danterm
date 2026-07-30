@@ -228,10 +228,30 @@ as a screen and let confirm decide. The median-symmetric estimator is what absor
 that tail, and is why any rule clears.
 
 A first screen proposed 12 pairs at +/-1.05% and was discarded: its spread came
-from one block in 48 running 193 ms against a 164 ms median. Drop that block and
-the rest sit at CV 1.17%, *quieter* than `scrollback-stream`. The tail is rare,
-real, and lands in drain rather than draw; its cause is unidentified and belongs
-to [docs/research/19-owner-queue-occupancy.md](../docs/research/19-owner-queue-occupancy.md).
+from one block in 48 running 193 ms against a 164 ms median. **That block is the
+only one of its kind ever recorded** -- across the 192 blocks of the two screens
+the rule rests on, none exceeds +10% over median and the worst is +6.9%
+(`20/F12`). An earlier version of this section called that tail "rare, real, and
+unexplained" and handed it to doc 19. It was neither real nor doc 19's: the
+discarded outlier had been counted a second time as independent evidence. **A
+block discarded from a statistic is discarded from the whole file.**
+
+**Two known weaknesses in the frozen rule, neither yet fixed** (`20/F15`):
+`confirm 8p@2.15%` clears its detection gate only on pooled evidence -- on two of
+the three 1x screens individually it reads 0.8571 and 0.8867 against a 0.90 gate.
+And this workload never received the confirmation stage the other five had: doc 7
+records their selected cells re-run at **100,000 trials with disjoint fresh
+seeds** before freezing, while `synchronized-frames` was frozen directly off
+50,000-trial screen reports. Running that missing stage is the open action.
+
+**Do not try to buy a tighter rule by lengthening the replay.** It was tried
+(`20/F16`). `replayCount` exists and works, and block length is *not* a lever on
+this workload's noise: at 1x/2x/3x/5x the trimmed A/A pair SD reads
+1.30-1.72% / 1.65% / 1.62% / 0.56-0.77%. The first three are flat, which is
+multiplicative noise, not the additive noise a two-point comparison had
+suggested. The 5x point is a two-screen anomaly with no mechanism -- and note
+that lengthening also changes what the workload measures, since the main-thread
+fence regime shifts at 2x (9 stalls of ~16 ms become 1-2 of 126-266 ms).
 
 Re-screen it with `scripts/terminal-benchmark-candidate-screen.py --workload
 <name> --revision <rev>`, which searches pair count alongside threshold -- a
@@ -819,7 +839,36 @@ Practical rules:
   that count where the number drives a decision.
 - Check that a new field is actually present in the artifact before reading its
   value. Both benchmark blind spots above were guards inherited by copying a
-  neighbouring metric's emit site.
+  neighbouring metric's emit site. **A missing field is not a zero.** The
+  fixture-replay collector records fence-stall fields and no `drawCount`; reading
+  its absence as "this workload never draws" was wrong, and the two collectors
+  simply instrument different things.
+- **Read a gate from the code that owns it, not from a reconstruction of it.**
+  The calibration gates are deliberately not all read from the same condition:
+  `select_candidate` (`scripts/terminal-benchmark-calibration.py`) takes the
+  false-positive rate from the **A/A** condition and detection, inconclusive and
+  wrong-direction from the **injected-effect** conditions. Reading `inconclusive`
+  off `aa` produces a much larger number and manufactures failures that are not
+  there -- it briefly indicted every frozen rule in the table (`20/F15`). Call
+  `select_candidate` on the candidate; do not re-implement its arithmetic.
+- **Two points are not a trend, and a trend with a small-n endpoint is not even
+  two points.** An additive-noise model inferred from block lengths of 40 frames
+  (n=5) and 95 frames survived one confirming measurement at 5x and then died
+  when the intermediate 2x and 3x points were finally taken -- they were flat,
+  and the model had the direction backwards (`20/F12`, `20/F16`). When a model
+  predicts a curve, measure the middle of the curve before acting on it. This is
+  the same rule as "derive nothing that one more run could measure", applied to
+  the shape of a relationship rather than to a single value.
+- **A screen is not a freeze.** The corpus's protocol (doc 7) is two-stage:
+  screen a grid at 50,000 trials to select a cell, then re-run *that exact cell*
+  at 100,000 trials with disjoint fresh seeds and no parameter changed after
+  screening. Freezing straight off a screen skips the confirmation the whole
+  design rests on, and a cell that looks selected-and-verified may only be
+  selected (`20/F15`).
+- **Verify a candidate cell on each series independently, not only pooled.** A
+  cell can clear every gate on combined evidence and fail on two of the three
+  series that fed it -- which is the current state of `synchronized-frames`'
+  confirm rule. Pooling hides fragility that a per-series check surfaces.
 - Prefer the continuous quantity to the thresholded one. A pass/fail at a 60s
   time limit is one bit; the test's wall time underneath it shows a distribution
   shifting before any verdict flips. Across nine interleaved suite pairs, the
