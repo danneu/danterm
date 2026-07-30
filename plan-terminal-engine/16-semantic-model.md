@@ -243,10 +243,10 @@ fact:
 
 Later design candidates, each needing its own decision round: trimming the
 recovery projection at record boundaries so restored text never starts
-mid-output; treating command end as a checkpoint flush point; and the
-journal-in-recovery question already recorded in
-[Open questions](15-open-questions.md), which would let a restored pane
-brief a resumed agent session on what it was running and how it ended.
+mid-output; treating command end as a checkpoint flush point; and whether
+journals ever join enriched recovery checkpoints, and under what bounds --
+which would let a restored pane brief a resumed agent session on what it
+was running and how it ended.
 
 None of these touch the byte-feed hot path: the journal mutates per command,
 not per byte, so this direction does not trade against the indexed
@@ -341,9 +341,7 @@ introducing a new subsystem.
 - Agent integrations beyond the bundled Claude Code and Codex hooks in the
   first release.
 - Workspace or VCS awareness: no repo context (worktree root, branch, dirty
-  state) is modeled; the record's cwd is the only location fact. If a
-  consumer ever earns it, the settled direction is recorded in
-  [Open questions](15-open-questions.md).
+  state) is modeled; the record's cwd is the only location fact.
 - Styled or annotated output capture.
 - Gating any replacement milestone on this document.
 
@@ -363,6 +361,14 @@ introducing a new subsystem.
 - Keeping the journal in the top-level Elm model: journal mutation frequency
   tracks terminal output, not user actions; it stays pane-owned like grid,
   damage, and scrollback.
+- A workspace/git facet (worktree root, branch, dirty state): cut for
+  lacking a first-release consumer after carrying a research item, an
+  envelope verb, and freshness semantics. Two points are settled if a
+  consumer ever revives it: the shell reports its own repo context at
+  prompt boundaries over the versioned envelope (the OSC 7 cwd pattern,
+  with honest prompt-time staleness), and app-side filesystem watching
+  stays rejected -- it breaks remote panes, races cwd changes, and
+  reintroduces the ambient-IO enrichment the declared-sources rule forbids.
 - Driving the journal from OSC 133 marks (dual-source records with an
   anonymous marks-only tier): cross-source arbitration, per-record
   provenance, and a foreign-dialect survey bought journal coverage only on
