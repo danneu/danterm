@@ -31,11 +31,17 @@ Pane semantic state is a set of small independent facets, not one machine:
 - **presentation**: primary or alternate screen
 - **connection**: local, or a reported remote identity
 - **agent**: none, or an attached agent session (kind and session id)
+- **workspace**: none, or the shell-reported repo context -- worktree root,
+  branch, and optionally dirty state
 
 Facets transition only on declared semantic inputs -- OSC 133 marks, shell
 envelope events, parser state changes, and pane-scoped IPC events such as
 the bundled Claude Code and Codex `danterm agent attach` hooks -- and are
-never inferred from rendered cells. Most facet
+never inferred from rendered cells. The workspace facet has prompt-time
+freshness: the shell reports it at prompt boundaries, so it is accurate at
+each prompt and honestly stale while a command runs -- the same freshness
+the prompt itself displays. A remote shell with the integration reports the
+remote repo's context, which is the context that matters for that pane. Most facet
 data already exists across engine and model; the decision is that every facet
 derives from the same ordered semantic stream that feeds the journal below, so
 current state and history cannot disagree about what happened. The facet set
@@ -60,9 +66,10 @@ have fixed roles:
   [Protocols and shell integration](10-protocols-shell-integration.md), and
   any foreign integration that emits them drives the same machine.
 - DanTermShell envelope events decorate the skeleton with the identity the
-  marks cannot carry: the reported command text and remote identity. When
-  both sources describe one command, marks are authoritative for boundaries
-  and exit status.
+  marks cannot carry: the reported command text, remote identity, and
+  workspace context reported at prompt boundaries. When both sources
+  describe one command, marks are authoritative for boundaries and exit
+  status.
 - Parser facts supply presentation transitions during the command.
 
 One executed command yields one record no matter which sources report it,
@@ -75,8 +82,14 @@ records the requesting context as launch provenance.
 
 A record carries the reported command text, stream order, injected wall-clock
 timestamps (stamped at the owner boundary under the existing
-save/send/assert injection rule), the cwd and connection facet at start, exit
-status when reported, source provenance, and an output span.
+save/send/assert injection rule), the cwd, connection, and workspace facets
+at start, exit status when reported, source provenance, and an output span.
+
+Workspace reporting must not tax the prompt: worktree root and branch are
+cheap to compute; the dirty flag is not, so it ships opt-in or deferred, and
+the integration may reuse what the user's prompt framework already computes
+rather than double-computing. Git is the only VCS modeled in the first
+release, as typed fields; the versioned envelope leaves room to grow.
 
 A record stores no output text. Its output span is a reflow-attached logical
 range into primary history under the same anchor contract selection and
@@ -86,10 +99,59 @@ record whose output has been evicted survives in the journal and reports its
 span truncated.
 
 The journal has explicit count and byte bounds inside the per-pane resource
-policy; the oldest records evict first. All three sources remain untrusted
-terminal output -- bounded, pane-scoped, granted no authority -- with
-provenance recorded so consumers can distinguish shell-integration intent
-from generic marks any program may emit.
+policy -- provisionally on the order of 1,000 records and 1 MiB per pane,
+pinned when the slice lands -- and the oldest records evict first. Journal
+and scrollback evict independently, on the axes their value decays along:
+scrollback by bytes, the journal by records. Eviction never crosses the
+boundary in either direction; the only thing that crosses is span fidelity,
+retained to truncated. A command whose output saturates the scrollback
+budget therefore truncates older spans without erasing the history around
+it -- flooding output degrades span fidelity, never the record of what
+happened. All three sources remain untrusted terminal output -- bounded,
+pane-scoped, granted no authority -- with provenance recorded so consumers
+can distinguish shell-integration intent from generic marks any program may
+emit.
+
+### Provisional shape (illustrative)
+
+Names, nesting, and storage here are implementation discretion; the
+contract is the invariants below, not this sketch. It exists so readers
+share one concrete picture of the facets and a record:
+
+```swift
+/// Facets snapshot for one pane. Every field derives from declared
+/// sources; rendered cells are never an input.
+struct PaneSemanticState {
+    var command: CommandFacet            // .idle | .running(CommandRecordId)
+    var presentation: PresentationFacet  // .primary | .alternate
+    var connection: ConnectionFacet      // .local | .remote(user:host:)
+    var agent: AgentFacet                // .none | .attached(kind:sessionId:)
+    var workspace: WorkspaceContext?     // nil until the shell reports one
+}
+
+/// Shell-reported repo context with prompt-time freshness.
+struct WorkspaceContext {
+    var root: String       // worktree root
+    var branch: String?    // nil when detached
+    var dirty: Bool?       // nil when not reported (opt-in)
+}
+
+/// One executed command in the bounded per-pane journal. Never stores
+/// output text; `output` resolves through the logical projection.
+struct CommandRecord {
+    let id: CommandRecordId
+    var text: String?                 // envelope-reported; nil for marks-only
+    var exitStatus: Int32?            // OSC 133 `D`
+    var provenance: RecordProvenance  // which source supplied text and exit
+    var startedAt: Date               // injected at the owner boundary
+    var endedAt: Date?
+    var cwd: String?                  // at start
+    var connection: ConnectionFacet   // at start
+    var workspace: WorkspaceContext?  // at start
+    var agent: AgentProvenance?       // attached session and/or launch requester
+    var output: OutputSpan            // reflow-attached; clamps under eviction
+}
+```
 
 ### One structured surface for every consumer
 
@@ -124,7 +186,8 @@ A user runs `claude` in a pane at `~/Code/danterm`:
 1. The shell integration emits the OSC 133 marks that open the command's
    regions and reports the command text through the envelope. The command
    facet becomes running, and the journal opens a record with the pane's
-   cwd, connection facet, and an injected start timestamp.
+   cwd, workspace (worktree root and branch), connection facet, and an
+   injected start timestamp.
 2. Claude Code's session-start hook runs
    `danterm agent attach --kind claude --id <session-id>` (the bundled
    integration, same for Codex). The agent facet attaches, and the open
@@ -145,17 +208,17 @@ the grammar is implementation discretion:
 
 ```sh
 danterm pane commands --pane 32 --last 3
-# -> typed records: command text, exit status, timestamps, agent and
-#    launch provenance, span state (retained or truncated)
+# -> typed records: command text, exit status, timestamps, workspace,
+#    agent and launch provenance, span state (retained or truncated)
 
 danterm pane read --pane 32 --command c41
 # -> only that command's output, materialized through its span
 ```
 
 The journal answers "what happened"; spans answer "what it printed"; the
-agent facet answers "who asked". A debugging agent reads three records
-instead of two thousand scraped lines, then fetches output only for the one
-command that failed.
+agent facet answers "who asked"; the workspace facet answers "where". A
+debugging agent reads three records instead of two thousand scraped lines,
+then fetches output only for the one command that failed.
 
 ### Downstream consumers
 
@@ -178,6 +241,10 @@ fact:
   contracts.
 - Clearing stale progress state at command end when a progress-reporting
   command dies without resetting it.
+- Workspace-aware chrome and targeting: branch and worktree shown per pane,
+  panes grouped or queried by worktree, and agent launches aimed at a
+  workspace instead of a remembered pane id -- the natural fit for the
+  worktree-per-agent arrangement the plan README already documents.
 
 Later design candidates, each needing its own decision round: trimming the
 recovery projection at record boundaries so restored text never starts
@@ -215,9 +282,16 @@ introducing a new subsystem.
   visual rows without changing a retained span's text.
 - Eviction of rows or records never leaves a dangling span; truncation is
   observable, not silent.
+- Eviction never crosses the journal/scrollback boundary in either
+  direction: a span never delays or prevents scrollback eviction, and
+  scrollback eviction never removes a record; only span fidelity crosses,
+  retained to truncated.
 - Records retain no output text; scrollback remains the only text authority.
 - Facets and records derive only from declared sources; rendered cells are
   never an input.
+- Workspace state is only what the shell most recently reported; DanTerm
+  performs no filesystem inspection to derive or refresh it, and staleness
+  during a running command is defined behavior, not a defect.
 - One executed command produces exactly one record regardless of which
   sources report it, how their events interleave, or how often marks repeat.
 - A consumer can always tell which source supplied a record's command text
@@ -231,6 +305,9 @@ introducing a new subsystem.
   authored, bytewise, and split replay.
 - Width and height walks preserve span reads for retained content; eviction
   fixtures clamp spans and surface truncation without invalidating records.
+- A single command whose output saturates the scrollback budget leaves every
+  prior record intact with truncated spans; flooding the journal with fake
+  marks evicts oldest records without touching scrollback.
 - Disagreement and duplication traces have pinned outcomes: `D` with no
   matching envelope command-end, envelope command-start with no marks,
   repeated or out-of-order marks, a foreign integration emitting alongside
@@ -240,6 +317,9 @@ introducing a new subsystem.
 - The bundled zsh, Bash, and fish integrations drive full-fidelity records
   through a real pane; a marks-only replay produces anonymous records with
   spans and exit status.
+- Workspace traces pin prompt-time freshness: a branch switch mid-command
+  does not change the running record's stamped workspace, and the next
+  prompt's report updates the facet; a pane that leaves the repo clears it.
 - Adversarial streams of command marks and envelope events stay within
   journal bounds and recover to later valid input.
 - Journal queries return identical structured results before and after resize
@@ -263,6 +343,8 @@ introducing a new subsystem.
 - A cross-pane global timeline, analytics, or usage store.
 - Agent integrations beyond the bundled Claude Code and Codex hooks in the
   first release.
+- VCS awareness beyond git in the first release; no generic VCS abstraction
+  or open-ended context bag.
 - Styled or annotated output capture.
 - Gating any replacement milestone on this document.
 
@@ -282,11 +364,17 @@ introducing a new subsystem.
 - Keeping the journal in the top-level Elm model: journal mutation frequency
   tracks terminal output, not user actions; it stays pane-owned like grid,
   damage, and scrollback.
+- App-side filesystem watching for git state: it breaks for remote panes,
+  races cwd changes, and reintroduces the ambient-IO enrichment the
+  declared-sources rule forbids; the shell reports its own environment
+  instead, the same pattern OSC 7 cwd already uses.
 
 ## Implementation discretion
 
 - Journal and span representation, exact count and byte bounds, and eviction
   batching, provided the bounds are explicit and tested.
+- Retaining less of a command's text in the journal than the 64 KiB event
+  limit, provided truncation is flagged.
 - Arbitration mechanics, and how the bundled integrations coexist with a
   foreign 133 emitter, provided one command yields one record and provenance
   stays observable.
@@ -313,12 +401,18 @@ None of this gates Milestones 8-10.
   semantic-content tracking, and reflow-attached anchor machinery against
   the journal's needs; decide where journal state sits beside selection and
   search and what the record's span representation reuses.
-- [ ] **1: Bundled integrations emit marks.** zsh, Bash, and fish scripts
-  emit the pinned marks alongside the existing envelope; prompt redraw on
-  primary-screen resize activates with only DanTerm's integration installed;
-  existing prompt hooks and ssh/mosh forwarding keep working; coexistence
-  with a foreign emitter produces no visible misbehavior; the integration
-  contract in
+- [ ] **R4: Workspace reporting cost.** Measure prompt-time cost of
+  worktree-root, branch, and dirty computation across representative repos;
+  survey what prompt frameworks (starship, powerlevel10k) already compute so
+  the integration piggybacks rather than double-computing; pin what v1
+  reports and what stays opt-in.
+- [ ] **1: Bundled integrations emit marks and workspace.** zsh, Bash, and
+  fish scripts emit the pinned marks alongside the existing envelope and
+  report workspace context at prompt boundaries (root and branch; dirty per
+  R4); prompt redraw on primary-screen resize activates with only DanTerm's
+  integration installed; existing prompt hooks and ssh/mosh forwarding keep
+  working; coexistence with a foreign emitter produces no visible
+  misbehavior; the integration contract in
   [Protocols and shell integration](10-protocols-shell-integration.md)
   records the emission.
 - [ ] **2: Exit status retention.** The engine retains the status `D`
@@ -330,10 +424,10 @@ None of this gates Milestones 8-10.
   by neutral replay, including the repeated and out-of-order mark traces
   from R1.
 - [ ] **4: Envelope decoration and one-record arbitration.** Envelope events
-  attach command text and remote identity to mark-opened records; the
-  disagreement and duplication traces pin at-most-one-record outcomes;
-  provenance stays observable; injected timestamps stamp records at the
-  owner boundary.
+  attach command text, remote identity, and workspace context to mark-opened
+  records; the disagreement and duplication traces pin at-most-one-record
+  outcomes, including the workspace freshness traces; provenance stays
+  observable; injected timestamps stamp records at the owner boundary.
 - [ ] **5: Output spans.** Records carry reflow-attached spans into primary
   history; span reads equal the logical projection; eviction clamps and
   surfaces truncation without invalidating records.
