@@ -9,7 +9,8 @@ prompt/input/output row classification, OSC 7 cwd, alternate-screen
 transitions, and the Claude Code / Codex hooks that attach an agent session
 to a pane -- but that knowledge collapses on arrival into latest-value model
 fields (`lastCommand`, cwd, remote identity, agent session, progress) and
-transient engine state. The exit status OSC 133 `D` reports is discarded.
+transient engine state. No exit status survives at all: the envelope does
+not carry one, and the status OSC 133 `D` reports is discarded on arrival.
 Any consumer that needs history -- an agent debugging a pane, a notification
 naming the command that failed, future timeline or command-navigation UI --
 would have to scrape scrollback text and guess at structure the engine knew
@@ -21,7 +22,12 @@ reliable completion or exit signal.
 ## Decision
 
 The engine retains pane history as first-class semantic state: model what
-happened, not only what was drawn. Three commitments realize that.
+happened, not only what was drawn. Three commitments realize that, under one
+governing principle: strictness. The model records only what an integration
+explicitly and completely reported -- a record is complete or absent, with
+no partial tiers, no inference, and no tolerance parsing of foreign
+dialects. Strictness is the simplification lever that keeps every transition
+table and assumption in this document small.
 
 ### Orthogonal pane facets, one semantic stream
 
@@ -34,10 +40,10 @@ Pane semantic state is a set of small independent facets, not one machine:
 - **workspace**: none, or the shell-reported repo context -- worktree root,
   branch, and optionally dirty state
 
-Facets transition only on declared semantic inputs -- OSC 133 marks, shell
-envelope events, parser state changes, and pane-scoped IPC events such as
-the bundled Claude Code and Codex `danterm agent attach` hooks -- and are
-never inferred from rendered cells. The workspace facet has prompt-time
+Facets transition only on declared semantic inputs -- DanTermShell envelope
+events, parser state changes, and pane-scoped IPC events such as the bundled
+Claude Code and Codex `danterm agent attach` hooks -- and are never inferred
+from rendered cells. The workspace facet has prompt-time
 freshness: the shell reports it at prompt boundaries, so it is accurate at
 each prompt and honestly stale while a command runs -- the same freshness
 the prompt itself displays. A remote shell with the integration reports the
@@ -46,44 +52,48 @@ data already exists across engine and model; the decision is that every facet
 derives from the same ordered semantic stream that feeds the journal below, so
 current state and history cannot disagree about what happened. The facet set
 may grow (progress and title remain latest-value model fields until a
-demonstrated need moves them). Degradation is honest and tiered: a pane with
-DanTerm's integration gets full records; a pane whose shell emits only
-foreign OSC 133 marks gets anonymous but accurate records -- lifecycle,
-spans, and exit status without command text; a pane with neither stays idle
-with an empty journal. Nothing is guessed at any tier.
+demonstrated need moves them). Degradation is strict, not tiered: a pane
+with DanTerm's integration gets complete records; any other pane stays idle
+with an empty journal, and a consumer can tell that emptiness apart from an
+integrated pane where no commands ran. Nothing is guessed in either state.
 
 ### The command journal
 
 Each pane retains a bounded, ordered journal of command records, owned by the
-terminal core as deterministic state alongside selection and search. Sources
-have fixed roles:
+terminal core as deterministic state alongside selection and search. The
+envelope is the journal's only source; everything lowers into one stream:
 
-- OSC 133 marks are the primary lifecycle source: they drive the command
-  facet's transitions and supply a record's skeleton -- prompt, input, and
-  output boundaries plus the exit status reported at `D`. DanTerm's bundled
-  shell integrations emit these marks themselves, extending the integration
-  contract in
-  [Protocols and shell integration](10-protocols-shell-integration.md), and
-  any foreign integration that emits them drives the same machine.
-- DanTermShell envelope events decorate the skeleton with the identity the
-  marks cannot carry: the reported command text, remote identity, and
-  workspace context reported at prompt boundaries. When both sources
-  describe one command, marks are authoritative for boundaries and exit
-  status.
+- DanTermShell envelope events are the sole record authority: command-start
+  carries the required command text and is the only record opener;
+  command-end carries the exit status and closes the record; remote identity
+  and workspace context (reported at prompt boundaries) decorate it. DanTerm
+  owns both ends of the envelope, so the journal parses no foreign dialect.
+- OSC 133 marks stay emitted by the bundled integrations -- extending the
+  integration contract in
+  [Protocols and shell integration](10-protocols-shell-integration.md) --
+  and stay parsed by the engine, where they drive prompt/input/output row
+  classification, navigation, and prompt redraw for DanTerm's scripts and
+  foreign integrations alike. The journal never listens to them.
 - Parser facts supply presentation transitions during the command.
 
-One executed command yields one record no matter which sources report it,
-how their events interleave, or how often marks repeat.
+Envelope, IPC, and parser inputs lower into a single ordered stream that the
+journal and facets consume, and the reducer over that stream is small and
+total: command-start opens a record, sealing any dangling predecessor;
+command-end closes it; pane teardown seals; identity events decorate the
+open record and are otherwise dropped. Each reported command yields exactly
+one record.
 
 Pane-scoped IPC events join the same ordered stream as explicit inputs
 through the pane owner: an attached agent session becomes part of records
 opened while it is active, and a command launched through the `danterm` CLI
 records the requesting context as launch provenance.
 
-A record carries the reported command text, stream order, injected wall-clock
-timestamps (stamped at the owner boundary under the existing
-save/send/assert injection rule), the cwd, connection, and workspace facets
-at start, exit status when reported, source provenance, and an output span.
+A record carries the reported command text (required -- a record without
+identity cannot exist), stream order, injected wall-clock timestamps
+(stamped at the owner boundary under the existing save/send/assert injection
+rule), the cwd, connection, and workspace facets at start, exit status when
+reported (absent only when the record was sealed rather than closed), and an
+output span.
 
 Workspace reporting must not tax the prompt: worktree root and branch are
 cheap to compute; the dirty flag is not, so it ships opt-in or deferred, and
@@ -107,18 +117,29 @@ boundary in either direction; the only thing that crosses is span fidelity,
 retained to truncated. A command whose output saturates the scrollback
 budget therefore truncates older spans without erasing the history around
 it -- flooding output degrades span fidelity, never the record of what
-happened. All three sources remain untrusted terminal output -- bounded,
-pane-scoped, granted no authority -- with provenance recorded so consumers
-can distinguish shell-integration intent from generic marks any program may
-emit.
+happened. Envelope events remain untrusted terminal output -- structurally validated,
+bounded, pane-scoped, granted no authority -- and strictness narrows what a
+forged sequence can do to inserting one bounded fake record, never
+corrupting a neighboring one.
 
 ### Provisional shape (illustrative)
 
 Names, nesting, and storage here are implementation discretion; the
 contract is the invariants below, not this sketch. It exists so readers
-share one concrete picture of the facets and a record:
+share one concrete picture of the stream, the facets, and a record:
 
 ```swift
+/// The single vocabulary the journal consumes. Envelope, parser, and
+/// pane-scoped IPC inputs lower into one ordered stream; the journal
+/// reducer never sees an OSC.
+enum CommandJournalEvent {
+    case commandStarted(text: String)      // envelope command-start; the only opener
+    case commandEnded(exitStatus: Int32?)  // envelope command-end, carrying $?
+    case remoteIdentity(user: String, host: String)
+    case workspace(WorkspaceContext)
+    case agentAttached(kind: String, sessionId: String)  // IPC, via the pane owner
+}
+
 /// Facets snapshot for one pane. Every field derives from declared
 /// sources; rendered cells are never an input.
 struct PaneSemanticState {
@@ -140,9 +161,8 @@ struct WorkspaceContext {
 /// output text; `output` resolves through the logical projection.
 struct CommandRecord {
     let id: CommandRecordId
-    var text: String?                 // envelope-reported; nil for marks-only
-    var exitStatus: Int32?            // OSC 133 `D`
-    var provenance: RecordProvenance  // which source supplied text and exit
+    var text: String                  // required; no partial records exist
+    var exitStatus: Int32?            // nil only when sealed, not closed
     var startedAt: Date               // injected at the owner boundary
     var endedAt: Date?
     var cwd: String?                  // at start
@@ -183,11 +203,12 @@ become durable records instead of transient field updates.
 
 A user runs `claude` in a pane at `~/Code/danterm`:
 
-1. The shell integration emits the OSC 133 marks that open the command's
-   regions and reports the command text through the envelope. The command
-   facet becomes running, and the journal opens a record with the pane's
-   cwd, workspace (worktree root and branch), connection facet, and an
-   injected start timestamp.
+1. The shell integration reports the command through the envelope's
+   command-start. The command facet becomes running, and the journal opens a
+   record with the required command text, the pane's cwd, workspace
+   (worktree root and branch), connection facet, and an injected start
+   timestamp. The integration's OSC 133 marks classify the prompt and
+   output rows for navigation; the journal takes nothing from them.
 2. Claude Code's session-start hook runs
    `danterm agent attach --kind claude --id <session-id>` (the bundled
    integration, same for Codex). The agent facet attaches, and the open
@@ -198,8 +219,8 @@ A user runs `claude` in a pane at `~/Code/danterm`:
 4. The Claude Code TUI redraws continuously. Nothing enters any journal:
    drawing is not an event, and the presentation facet changes only if the
    application actually switches screens.
-5. The user quits. OSC 133 `D` and the envelope command-end close the record
-   with exit status and end timestamp, and the agent facet detaches (today's
+5. The user quits. The envelope command-end closes the record with exit
+   status and end timestamp, and the agent facet detaches (today's
    command-end behavior, unchanged).
 
 Later, any consumer -- the user, or a fresh agent asked to "debug what
@@ -260,11 +281,12 @@ feed-throughput work.
 ### Roadmap position
 
 This direction gates nothing in Milestones 8-10 and adds no replacement proof
-obligation. Its early protocol needs are compatible by design: the bundled
-shell integrations start emitting the OSC 133 marks the engine already
-parses -- which independently activates the existing prompt-redraw-on-resize
-behavior for every DanTerm user -- and the engine starts retaining the exit
-status `D` already delivers. The envelope does not need to grow.
+obligation. Its early protocol needs are small and DanTerm-owned: the
+versioned envelope grows exit status on command-end and workspace reporting
+at prompt boundaries, and the bundled shell integrations start emitting the
+OSC 133 marks the engine already parses -- which independently activates the
+existing prompt-redraw-on-resize behavior for every DanTerm user, and which
+serves navigation, never the journal.
 Everything else composes machinery with existing proof -- row
 semantic classification, reflow-attached anchors, the logical projection,
 bounded semantic-event delivery, versioned shell integrations -- rather than
@@ -292,10 +314,14 @@ introducing a new subsystem.
 - Workspace state is only what the shell most recently reported; DanTerm
   performs no filesystem inspection to derive or refresh it, and staleness
   during a running command is defined behavior, not a defect.
-- One executed command produces exactly one record regardless of which
-  sources report it, how their events interleave, or how often marks repeat.
-- A consumer can always tell which source supplied a record's command text
-  and exit status.
+- Each envelope-reported command produces exactly one record; unmatched or
+  re-entrant envelope events (an end while idle, a start while running) have
+  pinned outcomes, never a partial or duplicate record. Marks alone never
+  produce a record.
+- Every record carries its command text; the journal admits no partial
+  records. An empty journal is honest: a consumer can distinguish a pane
+  whose integration has never reported from an integrated pane where no
+  commands ran.
 - The journal lives with the pane owner; the top-level model continues to
   receive only product-level latest values.
 
@@ -306,22 +332,23 @@ introducing a new subsystem.
 - Width and height walks preserve span reads for retained content; eviction
   fixtures clamp spans and surface truncation without invalidating records.
 - A single command whose output saturates the scrollback budget leaves every
-  prior record intact with truncated spans; flooding the journal with fake
-  marks evicts oldest records without touching scrollback.
-- Disagreement and duplication traces have pinned outcomes: `D` with no
-  matching envelope command-end, envelope command-start with no marks,
-  repeated or out-of-order marks, a foreign integration emitting alongside
-  DanTerm's, pane teardown mid-command, nested remote sessions,
-  alternate-screen entry mid-command, and agent attach with no running
-  command -- each yielding at most one record per executed command.
-- The bundled zsh, Bash, and fish integrations drive full-fidelity records
-  through a real pane; a marks-only replay produces anonymous records with
-  spans and exit status.
+  prior record intact with truncated spans; flooding the journal with forged
+  envelope events evicts oldest records without touching scrollback.
+- Unmatched and re-entrant traces have pinned outcomes: command-start while
+  a record is open (the predecessor seals), command-end while idle, pane
+  teardown mid-command, nested remote sessions, alternate-screen entry
+  mid-command, foreign OSC 133 marks arriving with and without the envelope,
+  and agent attach with no running command -- each yielding at most one
+  record per reported command and no record from marks alone.
+- The bundled zsh, Bash, and fish integrations drive complete records
+  through a real pane; a marks-only replay (a foreign integration) leaves
+  the journal empty while row classification and prompt navigation still
+  work, and a consumer can tell that pane's integration has never reported.
 - Workspace traces pin prompt-time freshness: a branch switch mid-command
   does not change the running record's stamped workspace, and the next
   prompt's report updates the facet; a pane that leaves the repo clears it.
-- Adversarial streams of command marks and envelope events stay within
-  journal bounds and recover to later valid input.
+- Adversarial streams of envelope events stay within journal bounds and
+  recover to later valid input.
 - Journal queries return identical structured results before and after resize
   for retained content, and a command's span read equals the text a user
   would select over the same output region.
@@ -340,6 +367,8 @@ introducing a new subsystem.
   stores the reported command line only.
 - Heuristic inference of state from screen contents, diffs, cursor motion, or
   prompt shapes -- including as a fallback.
+- Journal records for panes without DanTerm's integration: foreign OSC 133
+  marks earn row classification and navigation, never records.
 - A cross-pane global timeline, analytics, or usage store.
 - Agent integrations beyond the bundled Claude Code and Codex hooks in the
   first release.
@@ -368,6 +397,13 @@ introducing a new subsystem.
   races cwd changes, and reintroduces the ambient-IO enrichment the
   declared-sources rule forbids; the shell reports its own environment
   instead, the same pattern OSC 7 cwd already uses.
+- Driving the journal from OSC 133 marks (dual-source records with an
+  anonymous marks-only tier): cross-source arbitration, per-record
+  provenance, and a foreign-dialect survey bought journal coverage only on
+  machines the user never set up. Strictness deletes the tiers, the
+  arbitration table, and the dialect tolerance; the lowering seam (one
+  internal stream the journal consumes) keeps the door cheap to reopen if
+  un-integrated coverage ever earns its cost.
 
 ## Implementation discretion
 
@@ -375,9 +411,8 @@ introducing a new subsystem.
   batching, provided the bounds are explicit and tested.
 - Retaining less of a command's text in the journal than the 64 KiB event
   limit, provided truncation is flagged.
-- Arbitration mechanics, and how the bundled integrations coexist with a
-  foreign 133 emitter, provided one command yields one record and provenance
-  stays observable.
+- The internal stream representation that lowers envelope, IPC, and parser
+  inputs into the events the journal consumes.
 - Query grammar and JSON shape of the CLI/IPC surface.
 - Slicing: exit-status capture, facets, journal, and query surface may land
   as independent green slices in any order.
@@ -388,15 +423,14 @@ Ordered so every step lands green and independently valuable; research
 precedes the contracts it informs. Reordering is implementation discretion.
 None of this gates Milestones 8-10.
 
-- [ ] **R1: Pin the OSC 133 dialect.** Survey the mark grammars emitted by
-  the integrations users actually run (iTerm2, VS Code, WezTerm, Kitty,
-  starship) and record, as a research note, the exact marks DanTerm's
-  scripts will emit and the foreign variants arbitration must tolerate --
-  including the double-emission and out-of-order cases observed in practice.
-- [ ] **R2: Characterize pass-through.** Verify how OSC 133 and the
-  DanTermShell envelope traverse ssh, tmux, and nested PTYs so the tiered
-  degradation story matches reality; capture the traces as replay fixtures
-  for later slices.
+- [ ] **R1: Author the emitted OSC 133 dialect.** Record, as a research
+  note, the exact marks DanTerm's scripts will emit for row classification
+  and prompt redraw, checked against the engine's existing parser. No
+  foreign survey: the journal parses no marks.
+- [ ] **R2: Characterize pass-through.** Verify how the DanTermShell
+  envelope (and secondarily the marks) traverses ssh, tmux, and nested PTYs
+  so the remote-integration story matches reality; capture the traces as
+  replay fixtures for later slices.
 - [ ] **R3: Audit reusable engine state.** Map today's row classification,
   semantic-content tracking, and reflow-attached anchor machinery against
   the journal's needs; decide where journal state sits beside selection and
@@ -415,19 +449,19 @@ None of this gates Milestones 8-10.
   misbehavior; the integration contract in
   [Protocols and shell integration](10-protocols-shell-integration.md)
   records the emission.
-- [ ] **2: Exit status retention.** The engine retains the status `D`
-  delivers instead of discarding it, exposed through pane-scoped semantics
-  under the existing bounds.
-- [ ] **3: Command facet and record skeleton.** Marks alone drive
-  idle/running transitions and open/close bounded journal records with
-  region boundaries and exit status; behavior is chunk-invariant and proven
-  by neutral replay, including the repeated and out-of-order mark traces
-  from R1.
-- [ ] **4: Envelope decoration and one-record arbitration.** Envelope events
-  attach command text, remote identity, and workspace context to mark-opened
-  records; the disagreement and duplication traces pin at-most-one-record
-  outcomes, including the workspace freshness traces; provenance stays
-  observable; injected timestamps stamp records at the owner boundary.
+- [ ] **2: Exit status over the envelope.** The bundled scripts report `$?`
+  on command-end through the versioned envelope, and the engine retains it
+  through pane-scoped semantics under the existing bounds.
+- [ ] **3: Command facet and record lifecycle.** Envelope events alone drive
+  idle/running transitions and open/close bounded journal records --
+  command-start opens with required text, sealing any dangling predecessor;
+  command-end closes with exit status; teardown seals; behavior is
+  chunk-invariant and proven by neutral replay, including the unmatched and
+  re-entrant traces.
+- [ ] **4: Identity decoration.** Remote identity and workspace context
+  stamp the open record, including the workspace freshness traces; injected
+  timestamps stamp records at the owner boundary; marks-only replays leave
+  the journal empty while row classification still works.
 - [ ] **5: Output spans.** Records carry reflow-attached spans into primary
   history; span reads equal the logical projection; eviction clamps and
   surfaces truncation without invalidating records.
