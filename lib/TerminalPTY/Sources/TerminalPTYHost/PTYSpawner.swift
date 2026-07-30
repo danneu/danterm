@@ -14,14 +14,24 @@ struct SpawnedPTY: Sendable {
 enum PTYSpawnOutcome: Sendable {
     case success(SpawnedPTY)
     case failure(SpawnFailure)
+    /// The host abandoned the launch after a child existed, so the spawner closed
+    /// the master, killed and reaped the child, and withheld any reducer outcome.
+    case abandoned
 }
 
-/// Performs the blocking system launch away from the pane actor's serial executor.
+/// Performs the blocking system launch. Both entry points are synchronous and
+/// blocking by design: the caller owns getting off the pane's serial executor,
+/// which `TerminalPTYHost` does with a dispatch hop rather than a Swift task, so
+/// a launch still in its syscall at application exit parks no async frame.
 enum PTYSpawner {
-    @concurrent static func spawn(
+    /// `didLaunch` is called the instant a child exists, before the bootstrap
+    /// handshake below. Returning `false` keeps ownership in the spawner, which
+    /// closes the master, kills and reaps the child, and returns `.abandoned`.
+    static func spawn(
         _ spec: PTYLaunchSpec,
-        bootstrapExecutable: String
-    ) async -> PTYSpawnOutcome {
+        bootstrapExecutable: String,
+        didLaunch: (SpawnedPTY) -> Bool = { _ in true }
+    ) -> PTYSpawnOutcome {
         var master: Int32 = -1
         var slave: Int32 = -1
         var name = [CChar](repeating: 0, count: Int(MAXPATHLEN))
@@ -35,12 +45,14 @@ enum PTYSpawner {
             return .failure(.systemError(errno))
         }
         defer {
+            closeMaster(&master)
+        }
+        defer {
             if slave >= 0 { Darwin.close(slave) }
         }
 
         var statusPipe: [Int32] = [-1, -1]
         guard pipe(&statusPipe) == 0 else {
-            Darwin.close(master)
             return .failure(.systemError(errno))
         }
         defer {
@@ -51,7 +63,6 @@ enum PTYSpawner {
               fcntl(statusPipe[1], F_SETFD, FD_CLOEXEC) == 0
         else {
             let code = errno
-            Darwin.close(master)
             return .failure(.systemError(code))
         }
 
@@ -59,13 +70,11 @@ enum PTYSpawner {
         var attributes: posix_spawnattr_t?
         let actionsResult = posix_spawn_file_actions_init(&actions)
         guard actionsResult == 0 else {
-            Darwin.close(master)
             return .failure(.systemError(actionsResult))
         }
         defer { posix_spawn_file_actions_destroy(&actions) }
         let attributesResult = posix_spawnattr_init(&attributes)
         guard attributesResult == 0 else {
-            Darwin.close(master)
             return .failure(.systemError(attributesResult))
         }
         defer { posix_spawnattr_destroy(&attributes) }
@@ -76,12 +85,10 @@ enum PTYSpawner {
         )
         let actionResult = posix_spawn_file_actions_addinherit_np(&actions, statusPipe[1])
         guard actionResult == 0 else {
-            Darwin.close(master)
             return .failure(classifySpawnFailure(actionResult))
         }
         let attributeResult = configureAttributes(&attributes)
         guard attributeResult == 0 else {
-            Darwin.close(master)
             return .failure(.systemError(attributeResult))
         }
 
@@ -113,16 +120,24 @@ enum PTYSpawner {
             }
         }
         guard spawnResult == 0 else {
-            Darwin.close(master)
             return .failure(classifySpawnFailure(spawnResult))
         }
         Darwin.close(statusPipe[1])
         statusPipe[1] = -1
+        guard didLaunch(SpawnedPTY(master: master, leader: leader, session: leader)) else {
+            // Abandoned mid-launch. Released here because this is the only context
+            // that still has the descriptors, and because the host that gave up on
+            // this launch must not be made to wait on a reap to finish quiescing.
+            closeMaster(&master)
+            kill(leader, SIGKILL)
+            _ = waitpid(leader, nil, 0)
+            return .abandoned
+        }
         let bootstrapFailure = readBootstrapFailure(statusPipe[0])
         Darwin.close(statusPipe[0])
         statusPipe[0] = -1
         if let bootstrapFailure {
-            Darwin.close(master)
+            closeMaster(&master)
             _ = waitpid(leader, nil, 0)
             if bootstrapFailure.stage == BootstrapStage.workingDirectory.rawValue {
                 return .failure(.workingDirectoryUnavailable)
@@ -135,18 +150,29 @@ enum PTYSpawner {
               fcntl(master, F_SETFL, currentFlags | O_NONBLOCK) == 0
         else {
             let code = errno
-            Darwin.close(master)
+            closeMaster(&master)
             kill(leader, SIGKILL)
             _ = waitpid(leader, nil, 0)
             return .failure(.systemError(code))
         }
-        return .success(SpawnedPTY(master: master, leader: leader, session: leader))
+        let ownedMaster = master
+        master = -1
+        return .success(SpawnedPTY(master: ownedMaster, leader: leader, session: leader))
     }
 
-    @concurrent static func discard(_ spawned: SpawnedPTY) async {
+    static func discard(_ spawned: SpawnedPTY) {
         Darwin.close(spawned.master)
         kill(spawned.leader, SIGKILL)
         _ = waitpid(spawned.leader, nil, 0)
+    }
+
+    /// Closes the PTY master before reaping a spawned session leader. On macOS,
+    /// the leader's exit drains its controlling terminal, so waiting while the
+    /// parent still holds an unread master can deadlock both processes.
+    private static func closeMaster(_ descriptor: inout Int32) {
+        guard descriptor >= 0 else { return }
+        Darwin.close(descriptor)
+        descriptor = -1
     }
 
     private static func configureAttributes(_ attributes: inout posix_spawnattr_t?) -> Int32 {
@@ -170,6 +196,11 @@ enum PTYSpawner {
         .systemError(code)
     }
 
+    /// Blocks until the bootstrap writes a complete failure payload or closes its
+    /// status descriptor. Successful `execve` closes it through `FD_CLOEXEC`;
+    /// bootstrap failure writes the payload and exits. If the bootstrap stalls
+    /// before either, `InFlightLaunch.abandon` kills the leader, whose exit closes
+    /// the descriptor and unblocks this read. Keep that abandonment coupling intact.
     private static func readBootstrapFailure(_ descriptor: Int32) -> BootstrapFailure? {
         var failure = BootstrapFailure(stage: 0, error: 0)
         var received = 0

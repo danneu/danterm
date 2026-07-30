@@ -202,7 +202,7 @@ Critical files:
 ## Commit progress
 
 - [x] 1. Phase D -- record the exit-crash diagnosis in `docs/research/22`
-- [ ] 2. Phase F -- host-owned dispatch termination and completion signalling
+- [x] 2. Phase F -- host-owned dispatch termination and completion signalling
 - [ ] 3. Phase F -- backend and pane teardown adopt host-signalled termination
 
 ## Implementation notes
@@ -225,6 +225,25 @@ Critical files:
 - **`nm`-address breakpoints are unusable against this bundle** (`22/F11`). They
   report themselves resolved and then never trap. Any further debugging of this
   crash needs a positive control before its negative results mean anything.
+- **The user re-decided the bound fork in favor of truthful completion.**
+  `posix_spawn` cannot be interrupted or bounded, and neither successful process
+  enumeration nor a killed child's final kernel exit has a contractual deadline.
+  `I3` and PO6's bound therefore cover the host-owned teardown ladder up to forced
+  ownership resolution; the final kernel operations may extend it, and completion
+  waits for them without a deadline. A bounded reserve was implemented and
+  rejected after its test showed completion could precede child cleanup. A
+  failed census likewise keeps retrying rather than signalling a completion that
+  its own resource snapshot would call unreleased.
+- **PTY master closure is a prerequisite for blocking reap on macOS.** The live
+  PO6 test hung with the spawned session leader in kernel exit and its parent in
+  `waitpid`: XNU drains a session leader's controlling terminal during exit, so
+  keeping an unread master open across `waitpid` deadlocks both sides. Forced
+  teardown and spawn failure paths therefore close the master before reaping,
+  while early failures retain the common deferred cleanup.
+- **A fresh optimized build reproduced the original victim before commit 3.**
+  Crash UUID `EDB156E5-870F-30C1-BE0B-FA8B44B8D081` still ran the task group at
+  `SwiftTerminalBackend.swift:109`, confirming that commit 2 only establishes the
+  host primitive; commit 3 must remove that backend task before PO7 can pass.
 
 ## Follow Up
 

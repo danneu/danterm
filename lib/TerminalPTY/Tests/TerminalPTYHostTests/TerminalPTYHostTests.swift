@@ -751,6 +751,207 @@ struct TerminalPTYHostTests {
         }
     }
 
+    @Test("dispatch-submitted termination releases every pane and signals from its own queue", .timeLimit(.minutes(1)))
+    func applicationExitTerminationSignalsFromOwnerQueues() async throws {
+        // Intent: submitting termination to a set of live hosts releases every
+        //   child and signals one completion per host from that host's own queue.
+        // Why it exists: PO2. The exit path has to reach quiescence without
+        //   creating a Swift Concurrency job, so the completion has to arrive on
+        //   the queue that owns the work rather than through an async hop.
+        // Scenario: the user quits with three live panes open.
+        let hosts = try (0..<3).map { _ in try makeHost() }
+        for host in hosts {
+            await host.start(makeLaunchInput(
+                command: "exec \(try probeExecutable()) hold \"$0\""
+            ))
+        }
+        var childPIDs: [Int] = []
+        for host in hosts {
+            #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+            childPIDs.append(try taggedInt(
+                "__PID__",
+                in: String(decoding: await host.outputBytes(), as: UTF8.self)
+            ))
+        }
+
+        let recorder = ExitCompletionRecorder(expecting: hosts.count)
+        for host in hosts {
+            host.submitApplicationExitTermination { recorder.signal() }
+        }
+        #expect(recorder.waitForAll(within: .seconds(20)))
+
+        #expect(recorder.queueLabels.count == hosts.count)
+        #expect(recorder.queueLabels.allSatisfy { $0 == hostOwnerQueueLabel })
+        for pid in childPIDs {
+            #expect(await waitForProcessExit(pid), "pane child \(pid) survived termination")
+        }
+        for host in hosts {
+            let snapshot = await host.resourceSnapshot()
+            #expect(snapshot.isReleased)
+            #expect(snapshot.forcedQuiescenceCount == 0)
+        }
+    }
+
+    @Test("a stalled teardown ladder still quiesces inside the host's own bound", .timeLimit(.minutes(1)))
+    func applicationExitTerminationForcesQuiescenceWithinBound() async throws {
+        // Intent: a host whose ladder cannot converge in time reaches quiescence
+        //   anyway, completes, kills the session it owns, and runs nothing after.
+        // Why it exists: PO3/I3. A bound that returns while the host's children
+        //   are still alive would satisfy the deadline by abandoning ownership,
+        //   which is the failure the removed application-level timeout had.
+        // Scenario: the pane holds a signal-resistant job tree at quit, and the
+        //   ladder's escalation cannot finish before the host's bound expires.
+        let host = try makeHost(applicationExitBound: .milliseconds(1))
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) teardown \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        let output = String(decoding: await host.outputBytes(), as: UTF8.self)
+        let ownedPIDs = try [
+            taggedInt("__LEADER__", in: output),
+            taggedInt("__FOREGROUND__", in: output),
+            taggedInt("__BACKGROUND__", in: output),
+            taggedInt("__STOPPED__", in: output),
+            taggedInt("__RESISTANT__", in: output),
+        ]
+
+        let recorder = ExitCompletionRecorder(expecting: 1)
+        host.submitApplicationExitTermination { recorder.signal() }
+        #expect(recorder.waitForAll(within: .seconds(20)))
+
+        for pid in ownedPIDs {
+            #expect(await waitForProcessExit(pid), "owned process \(pid) survived the bound")
+        }
+        // Settles so any source that outlived teardown would have a turn to fire.
+        try await Task.sleep(for: .milliseconds(200))
+        let snapshot = await host.resourceSnapshot()
+        #expect(snapshot.forcedQuiescenceCount == 1)
+        #expect(snapshot.isReleased)
+    }
+
+    @Test("terminating an already-quiesced host completes without waiting", .timeLimit(.minutes(1)))
+    func applicationExitTerminationOnTornDownHostReturnsImmediately() async throws {
+        // Intent: a host that finished teardown before exit reached it completes
+        //   at once rather than waiting for a signal that will never come.
+        // Why it exists: PO4/I4. The teardown ladder is what produces a
+        //   completion, and a host past it will never run one again.
+        // Scenario: a pane was closed moments before the user quit.
+        // The bound is long on purpose: if this waited on the ladder at all, it
+        //   would wait thirty seconds, so the elapsed assertion cannot pass by luck.
+        let host = try makeHost(captureTransitions: false, applicationExitBound: .seconds(30))
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        ))
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        await host.close()
+        #expect((await host.resourceSnapshot()).isReleased)
+
+        let recorder = ExitCompletionRecorder(expecting: 1)
+        let clock = ContinuousClock()
+        let start = clock.now
+        host.submitApplicationExitTermination { recorder.signal() }
+        #expect(recorder.waitForAll(within: .seconds(20)))
+        #expect(start.duration(to: clock.now) < .seconds(1))
+        #expect((await host.resourceSnapshot()).forcedQuiescenceCount == 0)
+    }
+
+    @Test("exit during a launch discards the child instead of adopting it", .timeLimit(.minutes(1)))
+    func applicationExitTerminationDuringSpawnDiscardsChild() async throws {
+        // Intent: when a launch has not reported its child yet at exit, the host
+        //   stops that launch and the child is already gone by the time the host
+        //   signals completion.
+        // Why it exists: PO6/I1/I2. The ladder waits for an in-flight spawn --
+        //   until it lands there is no session to signal -- so a slow launch is
+        //   exactly what drives a host past its bound. The completion is the
+        //   moment the exit path is entitled to let the process die, so anything
+        //   still alive then is a child that outlives the app: asserting after the
+        //   fact instead would pass on an asynchronous cleanup that a real exit
+        //   would never reach.
+        // Scenario: the user quits in the moment a freshly opened pane is
+        //   launching, and the launch is slow enough to outlast the bound.
+        let host = try makeHost(captureTransitions: false, applicationExitBound: .milliseconds(50))
+        // Withholds the report that tells the owner queue a child exists, which is
+        // the window this test is about. Deliberately many times the host's bound:
+        // the host is required to wait it out, because a deadline here could only
+        // make quiescence punctual, never true.
+        await host.injectSpawnReportDelay(1.0)
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        ))
+
+        let liveAtCompletion = LockedBox<[pid_t]>([])
+        let recorder = ExitCompletionRecorder(expecting: 1)
+        host.submitApplicationExitTermination {
+            liveAtCompletion.set(directChildProcessIDs())
+            recorder.signal()
+        }
+        #expect(recorder.waitForAll(within: .seconds(20)))
+
+        // A launch that has still not reported by the time the host says it is
+        // quiescent is the failure itself, not an inconclusive run: the child is
+        // then born after the exit path was entitled to end the process.
+        let launched = try #require(
+            await host.lastLaunchedLeaderPID(),
+            "the host reported quiescence while its launch was still unresolved"
+        )
+        // Named rather than counted: sibling suites launch their own children, so a
+        // process-wide census cannot tell this pane's child from a neighbor's.
+        #expect(
+            liveAtCompletion.value.contains(launched) == false,
+            "child \(launched) was still alive when the host reported quiescence"
+        )
+        let atCompletion = await host.resourceSnapshot()
+        #expect(atCompletion.isReleased)
+        #expect(atCompletion.forcedQuiescenceCount == 1)
+
+        // Nothing arrives afterward either: the launch is not adopted late.
+        try await Task.sleep(for: .seconds(1))
+        let snapshot = await host.resourceSnapshot()
+        #expect(snapshot.isReleased, "the abandoned launch was adopted after teardown")
+        #expect(snapshot.callbacksAfterTeardown == 0)
+        #expect(directChildProcessIDs().contains(launched) == false)
+    }
+
+    @Test("exit claims a resolved spawn before owner delivery", .timeLimit(.minutes(1)))
+    func applicationExitTerminationClaimsResolvedSpawn() async throws {
+        // Intent: exit cannot complete while a resolved spawn and its live child
+        //   are waiting to be delivered to the owner queue.
+        // Why it exists: PO6/I2. Resolving the worker before enqueueing its owner
+        //   callback creates a second handoff race after the pre-report race.
+        // Scenario: a pane finishes launching exactly as the user confirms quit,
+        //   but the owner has not adopted the returned PTY yet.
+        let host = try makeHost(captureTransitions: false, applicationExitBound: .milliseconds(50))
+        await host.injectSpawnDeliveryDelay(1.0)
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        ))
+
+        for _ in 0..<200 where await host.lastLaunchHasPendingDelivery() == false {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(await host.lastLaunchHasPendingDelivery())
+
+        let liveAtCompletion = LockedBox<[pid_t]>([])
+        let recorder = ExitCompletionRecorder(expecting: 1)
+        host.submitApplicationExitTermination {
+            liveAtCompletion.set(directChildProcessIDs())
+            recorder.signal()
+        }
+        #expect(recorder.waitForAll(within: .seconds(20)))
+
+        let launched = try #require(await host.lastLaunchedLeaderPID())
+        #expect(
+            liveAtCompletion.value.contains(launched) == false,
+            "resolved child \(launched) was still alive when the host reported quiescence"
+        )
+        #expect((await host.resourceSnapshot()).isReleased)
+
+        // Let the delayed worker submit its token-gated callback so a failure does
+        // not leave this test's child running into the next test.
+        try await Task.sleep(for: .seconds(2))
+        #expect(directChildProcessIDs().contains(launched) == false)
+    }
+
     @Test("user-authored command input reaches the interactive login shell exactly once", .timeLimit(.minutes(1)))
     func initialInputSeamPreservesBytes() async throws {
         // Intent: prove the app-facing command variants become one byte-exact
@@ -1372,12 +1573,95 @@ private func printMarker(_ body: String, newline: Bool = true) -> String {
     "m=\(body); printf '__%s__\(newline ? "\\n" : "")' \"$m\""
 }
 
-private func makeHost(captureTransitions: Bool = true) throws -> TerminalPTYHost {
+private func makeHost(
+    captureTransitions: Bool = true,
+    applicationExitBound: DispatchTimeInterval = TerminalPTYHost.defaultApplicationExitBound
+) throws -> TerminalPTYHost {
     try TerminalPTYHost(
         initialDimensions: .init(columns: 80, rows: 24),
         bootstrapExecutable: bootstrapExecutable(),
-        captureTransitions: captureTransitions
+        captureTransitions: captureTransitions,
+        applicationExitBound: applicationExitBound
     )
+}
+
+/// Collects host exit completions the way the exit path does -- a dispatch signal
+/// with no Swift Concurrency between the host and the waiter -- and records the
+/// queue each one ran on, because "the host's own queue signalled it" is half of
+/// what a completion is supposed to mean.
+private final class ExitCompletionRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var labels: [String] = []
+    private let group = DispatchGroup()
+
+    init(expecting count: Int) {
+        for _ in 0..<count { group.enter() }
+    }
+
+    func signal() {
+        let label = String(cString: __dispatch_queue_get_label(nil))
+        lock.lock()
+        labels.append(label)
+        lock.unlock()
+        group.leave()
+    }
+
+    func waitForAll(within timeout: DispatchTimeInterval) -> Bool {
+        group.wait(timeout: .now() + timeout) == .success
+    }
+
+    var queueLabels: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return labels
+    }
+}
+
+private let hostOwnerQueueLabel = "com.danneu.danterm.terminal-pty-host"
+
+/// Carries one observation out of a host completion, which runs on the host's own
+/// queue while the test is suspended elsewhere.
+private final class LockedBox<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Value
+
+    init(_ value: Value) { stored = value }
+
+    func set(_ value: Value) {
+        lock.lock()
+        stored = value
+        lock.unlock()
+    }
+
+    var value: Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return stored
+    }
+}
+
+private func directChildProcessIDs() -> [pid_t] {
+    var capacity = max(Int(proc_listallpids(nil, 0)), 256) + 64
+    var pids = [pid_t](repeating: 0, count: capacity)
+    let count = pids.withUnsafeMutableBytes { buffer in
+        proc_listallpids(buffer.baseAddress, Int32(buffer.count))
+    }
+    guard count > 0 else { return [] }
+    capacity = min(Int(count), pids.count)
+    let selfPID = getpid()
+    return Array(pids.prefix(capacity)).filter { pid in
+        guard pid > 0 else { return false }
+        var info = proc_bsdinfo()
+        let size = proc_pidinfo(
+            pid,
+            PROC_PIDTBSDINFO,
+            0,
+            &info,
+            Int32(MemoryLayout<proc_bsdinfo>.size)
+        )
+        guard size == Int32(MemoryLayout<proc_bsdinfo>.size) else { return false }
+        return pid_t(info.pbi_ppid) == selfPID
+    }
 }
 
 private func makeLaunchInput(command: String) -> LaunchPolicyInput {

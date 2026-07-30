@@ -58,18 +58,25 @@ enum TerminalPTYSubmittedTransition: Equatable, Sendable {
 struct TerminalPTYResourceSnapshot: Equatable, Sendable {
     let hasOpenMaster: Bool
     let activeSourceCount: Int
-    let hasSpawnTask: Bool
+    /// A launch whose outcome this host would still adopt. Deliberately not "a
+    /// launch still running": the blocking spawn cannot be interrupted, so what
+    /// teardown can guarantee is that a late outcome is discarded, not that the
+    /// syscall has returned.
+    let hasPendingSpawnAdoption: Bool
     let hasLeader: Bool
     let hasSession: Bool
     let pendingInputByteCount: Int
     let callbacksAfterTeardown: Int
+    /// How many times the teardown ladder failed to converge inside the host's own
+    /// bound and quiescence had to be forced. Zero on every ordinary teardown.
+    let forcedQuiescenceCount: Int
     let emittedUpdateSignalCount: Int
     let updateSignalsAfterTermination: Int
 
     var isReleased: Bool {
         hasOpenMaster == false
             && activeSourceCount == 0
-            && hasSpawnTask == false
+            && hasPendingSpawnAdoption == false
             && hasLeader == false
             && hasSession == false
             && pendingInputByteCount == 0
@@ -85,6 +92,22 @@ public actor TerminalPTYHost {
     private static let bytesAvailableRequest = UInt(
         0x4000_0000 | (MemoryLayout<Int32>.size << 16) | (102 << 8) | 127
     )
+
+    /// Runs the blocking launch off the owner queue. Concurrent so one pane's
+    /// spawn cannot delay another's, and shared because each host would
+    /// otherwise carry a whole queue for the one call it makes on it.
+    private static let spawnQueue = DispatchQueue(
+        label: "com.danneu.danterm.terminal-pty-spawn",
+        attributes: .concurrent
+    )
+
+    /// How long a host will let its own teardown ladder run before forcing
+    /// quiescence. The bound lives here, not in the exit path, because only the
+    /// owner of the PTY, the child session, and the dispatch sources can both
+    /// stop waiting and guarantee that nothing it owns runs afterward.
+    static let defaultApplicationExitBound: DispatchTimeInterval = .seconds(2)
+
+    private static let forcedCensusRetryInterval: UInt32 = 1000
 
     private let queue: DispatchSerialQueue
     /// Read on the owner queue, written from whatever thread submits, so it is not
@@ -115,7 +138,19 @@ public actor TerminalPTYHost {
     private var sessionPollSource: (any DispatchSourceTimer)?
     private var sessionPollStage: TeardownStage?
     private var sessionPollStageSignaled = false
-    private var spawnTask: Task<Void, Never>?
+    /// Bumped by every new launch and by teardown. A returning spawn compares the
+    /// generation it was issued under, so supersession and abandonment are one
+    /// mechanism and a stale outcome is discarded rather than adopted.
+    private var spawnGeneration = 0
+    private var pendingSpawnAdoption = false
+    private var spawnReportDelay: Double?
+    private var spawnDeliveryDelay: Double?
+    /// The launch this host would still adopt, kept only so forced quiescence can
+    /// stop it. Cleared as soon as its outcome lands.
+    private var inFlightLaunch: InFlightLaunch?
+    /// The most recent launch, retained past its resolution purely so a test can
+    /// name the child it produced after the host has stopped tracking it.
+    private var lastIssuedLaunch: InFlightLaunch?
 
     private var pendingInput: [UInt8] = []
     private var pendingInputOffset = 0
@@ -131,6 +166,11 @@ public actor TerminalPTYHost {
     private var capturedReplyWrites: [[UInt8]] = []
     private var reportedResult: PaneLifecycleResult?
     private var teardownFinished = false
+    private let applicationExitBound: DispatchTimeInterval
+    private var exitTerminationRequested = false
+    private var exitCompletions: [@Sendable () -> Void] = []
+    private var exitBoundSource: (any DispatchSourceTimer)?
+    private var forcedQuiescenceCount = 0
     private var waiterSlots: [Int: WaiterSlot] = [:]
     private var nextWaiterID = 0
     private var transientChildWaitInjections = 0
@@ -163,12 +203,15 @@ public actor TerminalPTYHost {
         )
     }
 
+    /// `applicationExitBound` is injected only so a test can drive the forced
+    /// quiescence path deterministically instead of waiting out the real bound.
     package init(
         initialDimensions: TerminalDimensions,
         bootstrapExecutable: String,
         machineHostname: String? = MachineHostname.posix,
         programVersion: String = "dev",
-        captureTransitions: Bool
+        captureTransitions: Bool,
+        applicationExitBound: DispatchTimeInterval = TerminalPTYHost.defaultApplicationExitBound
     ) throws {
         guard let terminal = Terminal(
             columns: initialDimensions.columns,
@@ -188,6 +231,7 @@ public actor TerminalPTYHost {
         self.initialDimensions = initialDimensions
         self.bootstrapExecutable = bootstrapExecutable
         self.captureTransitions = captureTransitions
+        self.applicationExitBound = applicationExitBound
     }
 
     /// Starts the pure launch plan and returns after scheduling its system spawn.
@@ -391,6 +435,123 @@ public actor TerminalPTYHost {
         await waitForTeardown()
     }
 
+    /// Requests orderly termination from any thread and signals `completion` from
+    /// this host's own queue. The application-exit path uses this rather than the
+    /// `async` form above because at exit the main thread is blocked and the
+    /// process is being dismantled: creating, retaining, or resuming a Swift
+    /// Concurrency job in that window is exactly the hazard the exit path has to
+    /// avoid, so the whole round trip stays on dispatch.
+    ///
+    /// The completion is not an acknowledgement -- it means this host has reached
+    /// irreversible quiescence and nothing it owns can run afterward, which is
+    /// what lets the caller wait on it with no deadline of its own.
+    nonisolated public func submitApplicationExitTermination(
+        completion: @escaping @Sendable () -> Void
+    ) {
+        queueClosingResizeRun().async { [weak self] in
+            guard let self else {
+                // Nothing is left to quiesce, and the caller must not wait forever.
+                completion()
+                return
+            }
+            self.assumeIsolated { owner in
+                owner.beginApplicationExitTermination(completion: completion)
+            }
+        }
+    }
+
+    private func beginApplicationExitTermination(completion: @escaping @Sendable () -> Void) {
+        // I4: already quiescent, so there is no signal left to wait for.
+        guard teardownFinished == false else {
+            completion()
+            return
+        }
+        // Registered before the ladder starts, because `process` can reach
+        // quiescence synchronously and drain the completions on the way out.
+        exitCompletions.append(completion)
+        guard exitTerminationRequested == false else { return }
+        exitTerminationRequested = true
+        armExitBound()
+        process(.appTermination)
+    }
+
+    private func armExitBound() {
+        cancelExitBound()
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + applicationExitBound)
+        timer.setEventHandler { [weak self] in
+            self?.assumeIsolated { owner in owner.exitBoundElapsed() }
+        }
+        exitBoundSource = timer
+        timer.activate()
+    }
+
+    private func cancelExitBound() {
+        exitBoundSource?.cancel()
+        exitBoundSource = nil
+    }
+
+    /// The teardown ladder did not converge inside this host's bound, so ownership
+    /// of the child session is resolved here rather than abandoned: every surviving
+    /// member is killed before teardown finishes. Returning while those processes
+    /// could still be running would satisfy the bound by breaking `I2`.
+    private func exitBoundElapsed() {
+        guard teardownFinished == false else { return }
+        forcedQuiescenceCount += 1
+        // Close before any blocking reap. A macOS session leader drains its
+        // controlling terminal while exiting, so retaining an unread master while
+        // waiting for that exit can deadlock the leader and this owner queue.
+        closeMaster()
+        killOwnedSession()
+        reapLeaderAfterKill()
+        // Last: a launch that has not come back yet owns a child this host cannot
+        // see, and finishing without stopping it would report quiescence over a
+        // process that is still starting up.
+        inFlightLaunch?.abandon()
+        inFlightLaunch = nil
+        finishTeardown()
+        publishPendingUpdate()
+    }
+
+    /// Kills every member of the owned session, across all of its process groups.
+    ///
+    /// The census is retried rather than treated as optional: it is the only way to
+    /// see background and stopped jobs, which routinely sit in process groups of
+    /// their own. Signalling just the leader's group would leave those running while
+    /// this host reported the session resolved.
+    private func killOwnedSession() {
+        guard let sessionID else { return }
+        while true {
+            if let members = sessionMembers(sessionID: sessionID) {
+                for pid in members where getsid(pid) == sessionID {
+                    _ = kill(pid, SIGKILL)
+                }
+                return
+            }
+            // Keep making progress against the portion addressable without a
+            // census, but do not report quiescence until every process group in
+            // the session has actually been enumerable and signalled.
+            _ = kill(-sessionID, SIGKILL)
+            if let leaderPID { _ = kill(leaderPID, SIGKILL) }
+            usleep(Self.forcedCensusRetryInterval)
+        }
+    }
+
+    /// Blocks, unlike the ladder's `reapLeader`, and deliberately: the PTY master
+    /// is already closed and the leader has just been SIGKILLed, so this returns
+    /// as soon as the kernel posts its status.
+    /// Giving up on a bounded poll would clear `leaderPID` and signal completion
+    /// over a zombie this process still owns -- abandonment wearing quiescence's
+    /// clothes -- and a completion is only worth anything if it is never that.
+    private func reapLeaderAfterKill() {
+        guard leaderReaped == false, let leaderPID else { return }
+        _ = kill(leaderPID, SIGKILL)
+        var status: Int32 = 0
+        if waitpid(leaderPID, &status, 0) == leaderPID {
+            leaderReaped = true
+        }
+    }
+
     /// Returns a Sendable value copy that cannot mutate owner state.
     public func snapshot() -> Terminal {
         terminal
@@ -571,12 +732,14 @@ public actor TerminalPTYHost {
                 childExitPollSource != nil,
                 graceSource != nil,
                 sessionPollSource != nil,
+                exitBoundSource != nil,
             ].filter { $0 }.count,
-            hasSpawnTask: spawnTask != nil,
+            hasPendingSpawnAdoption: pendingSpawnAdoption,
             hasLeader: leaderPID != nil,
             hasSession: sessionID != nil,
             pendingInputByteCount: max(pendingInput.count - pendingInputOffset, 0),
             callbacksAfterTeardown: callbacksAfterTeardown,
+            forcedQuiescenceCount: forcedQuiescenceCount,
             emittedUpdateSignalCount: emittedUpdateSignalCount,
             updateSignalsAfterTermination: updateSignalsAfterTermination
         )
@@ -821,26 +984,91 @@ public actor TerminalPTYHost {
     }
 
     private func spawn(_ spec: PTYLaunchSpec) {
-        spawnTask?.cancel()
+        spawnGeneration += 1
+        pendingSpawnAdoption = true
+        let generation = spawnGeneration
         let bootstrapExecutable = self.bootstrapExecutable
-        spawnTask = Task { [weak self] in
-            let outcome = await PTYSpawner.spawn(
-                spec,
-                bootstrapExecutable: bootstrapExecutable
-            )
-            guard Task.isCancelled == false, let self else {
-                if case .success(let spawned) = outcome {
-                    await PTYSpawner.discard(spawned)
-                }
-                return
+        let reportDelay = spawnReportDelay
+        let deliveryDelay = spawnDeliveryDelay
+        let launch = InFlightLaunch()
+        inFlightLaunch = launch
+        lastIssuedLaunch = launch
+        let queue = self.queue
+        Self.spawnQueue.async { [weak self] in
+            let outcome = PTYSpawner.spawn(spec, bootstrapExecutable: bootstrapExecutable) {
+                spawned in
+                if let reportDelay { usleep(UInt32(reportDelay * 1_000_000)) }
+                return launch.reportLaunched(spawned)
             }
-            await self.receiveSpawn(outcome)
+            // Abandoned launches stop here only after `resolve` has released any
+            // child. A deliverable outcome remains in `launch` until the owner
+            // callback takes it, so exit can claim it during that handoff too.
+            guard launch.resolve(outcome) else { return }
+            if let deliveryDelay { usleep(UInt32(deliveryDelay * 1_000_000)) }
+            queue.async { [weak self] in
+                guard let deliverable = launch.takeOutcome() else { return }
+                guard let self else {
+                    if case .success(let spawned) = deliverable {
+                        Self.discardOffOwner(spawned)
+                    }
+                    return
+                }
+                self.assumeIsolated { owner in
+                    owner.receiveSpawn(deliverable, generation: generation)
+                }
+            }
         }
     }
 
-    private func receiveSpawn(_ outcome: PTYSpawnOutcome) {
-        spawnTask = nil
+    /// Test-support fault injection replicating a launch still inside its
+    /// uninterruptible `posix_spawn` when application exit is requested: the next
+    /// spawn withholds the report that tells the owner queue a child exists.
+    /// The window it stands in for is real but too narrow to hit on demand.
+    package func injectSpawnReportDelay(_ delay: Double) {
+        spawnReportDelay = delay
+    }
+
+    /// Test-support fault injection for the second launch handoff window: the
+    /// worker has an outcome, but its owner-queue delivery has not been submitted.
+    package func injectSpawnDeliveryDelay(_ delay: Double) {
+        spawnDeliveryDelay = delay
+    }
+
+    /// Test-support: the child produced by the most recent launch, whether or not
+    /// this host went on to adopt it.
+    package func lastLaunchedLeaderPID() -> pid_t? {
+        lastIssuedLaunch?.launchedLeader
+    }
+
+    /// Test-support: whether the most recent worker has resolved but not delivered.
+    package func lastLaunchHasPendingDelivery() -> Bool {
+        lastIssuedLaunch?.hasPendingDelivery == true
+    }
+
+    /// Releases a child this host will never adopt. Off the owner queue because
+    /// the kill-and-reap blocks, and the owner must stay free to keep tearing down.
+    private nonisolated static func discardOffOwner(_ spawned: SpawnedPTY) {
+        spawnQueue.async { PTYSpawner.discard(spawned) }
+    }
+
+    private func receiveSpawn(_ outcome: PTYSpawnOutcome, generation: Int) {
+        // A superseded or abandoned launch (`PO6`: the blocking spawn returned a
+        // live child after exit was requested). Adopting it would install sources
+        // and a leader on a host that has already been declared quiescent.
+        guard generation == spawnGeneration else {
+            if case .success(let spawned) = outcome {
+                Self.discardOffOwner(spawned)
+            }
+            return
+        }
+        pendingSpawnAdoption = false
+        inFlightLaunch = nil
         switch outcome {
+        case .abandoned:
+            // Unreachable in practice -- `resolve` withholds an abandoned outcome
+            // rather than delivering it -- but the reducer must never be told a
+            // launch succeeded when its child has already been released.
+            process(.spawnFailed(.systemError(ECANCELED)))
         case .success(let spawned):
             masterFD = spawned.master
             leaderPID = spawned.leader
@@ -1314,8 +1542,12 @@ public actor TerminalPTYHost {
 
     private func finishTeardown() {
         guard teardownFinished == false else { return }
-        spawnTask?.cancel()
-        spawnTask = nil
+        // Abandons a launch still blocked in its syscall: it cannot be interrupted,
+        // so the generation bump is what guarantees its child is discarded instead
+        // of adopted into a host that is about to be quiescent.
+        spawnGeneration += 1
+        pendingSpawnAdoption = false
+        cancelExitBound()
         closeMaster()
         cancelGrace()
         cancelSessionPoll()
@@ -1365,6 +1597,12 @@ public actor TerminalPTYHost {
             waiterSlots[id] = nil
             continuation.resume()
         }
+        // Last, and on this queue: quiescence is only irreversible once the update
+        // stream is finished and every waiter is settled, and the exit path treats
+        // a completion as meaning exactly that.
+        let completions = exitCompletions
+        exitCompletions.removeAll()
+        for completion in completions { completion() }
     }
 
     private func resumeOutputWaiters() {
