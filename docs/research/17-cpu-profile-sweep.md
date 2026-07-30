@@ -193,11 +193,14 @@ measures. Not hypothesised in advance; it emerged from the sweep.
       (5.907x glyph-occurrence lever): the `get_glyph_bboxes` subtree moves 5.62x,
       **95.1% of linear**. The bar `11/F12` used to refute two earlier mechanisms is
       passed. Also replicates `F6` at HEAD (16.37% vs 16.78%).
-- [ ] Candidate A (`F6`) -- **open and confirmed, but deliberately not started
-      (`D7`).** Elastic and real; the win is energy rather than frames, because the
-      draw rate is pinned at the panel's refresh at both geometries (`F16`), and no
-      instrument here can return a verdict on it (`F12`, `F15`). Cheapest next step
-      is one live capture to size the node, not the change.
+- [x] **Live sizing capture taken; `F6`'s magnitude retired. `F17`.** A
+      damage-scoped stimulus at the same geometry puts the node at **27.3 us/draw
+      against 801.0** -- 29.3x smaller -- and `F3`'s 1.85% on `scrollback-stream`
+      agreed all along. The draw path is damage-scoped, like planning (`F5`).
+- [x] **Candidate A closed. `D8`.** Magnitude is a benchmark artifact, the win
+      would be energy rather than frames (`F16`), and no instrument here can decide
+      it (`F12`, `F15`). Reopening condition recorded: a capture of a real
+      full-screen animated TUI showing the node above 1.85%.
 
 ## Findings log
 
@@ -409,8 +412,12 @@ measures. Not hypothesised in advance; it emerged from the sweep.
 
 ### F6 -- CoreAnimation recomputes every glyph's bounds on every frame, and it is the largest cost in the app
 
-- Status: recorded. **The sweep's headline finding. Confirms `13/H3` and
-  satisfies `13/D2`'s reopening condition.**
+- Status: recorded, **mechanism confirmed (`F16`), magnitude retired (`F17`).** The
+  per-occurrence mechanism below is right and elastic at 95.1% of linear. The
+  **16.8% is not**: it is 29.3x smaller under a damage-scoped draw, and `F3`'s own
+  1.85% on `scrollback-stream` always agreed. Read the heading as "in the
+  forced-full-redraw churn workload", not "in the app". Candidate A is closed
+  (`D8`). Confirms `13/H3` and satisfies `13/D2`'s reopening condition either way.
 - Date and investigator: 2026-07-29, Claude (agent).
 - Measurements: `content-churn` 16.78% of total on-CPU (3,021 ms of 18,008);
   `style-churn` 16.55%; `incremental-mixed` 4.98%; `scrollback-stream` 1.85%.
@@ -1064,6 +1071,67 @@ measures. Not hypothesised in advance; it emerged from the sweep.
 - Artifacts: `.build/terminal-benchmark-profiles/2026-07-29-213635-10866/` (179x66)
   and `.../2026-07-29-213852-13142/` (80x25).
 
+### F17 -- the draw path is damage-scoped, and `F6`'s 16.8% is mostly loop mode's own stimulus
+
+- Status: **closed, and it retires `F6`'s magnitude.** The live-sizing capture `D7`
+  named as the cheapest next step. The mechanism `F16` confirmed is real; the
+  *number* attached to it is not a property of the app.
+- Date and investigator: 2026-07-29, Claude (agent).
+- Method: a third 30s Time Profiler capture at the same 179x66 geometry, on the
+  `localized-draw-acceptance` workload -- **one damaged row per update against a
+  dense styled screen**, versus `F16`'s forced full-viewport republication. A ~66x
+  occurrence lever if the draw path scopes to damage, more than ten times `F16`'s.
+  Required a new profiling workload case; see the tooling note below.
+
+  | Stimulus at 179x66 | `get_glyph_bboxes` us/draw | Share of on-CPU | Draw rate |
+  | --- | ---: | ---: | ---: |
+  | Forced full redraw (`F16`) | **801.0** | 16.37% | 119.10/s |
+  | One damaged row | **27.3** | 0.42% | 97.85/s |
+  | Ratio | **29.3x** | | |
+
+- **The draw path is damage-scoped.** At `F16`'s measured 67.8-71.3 ns per glyph
+  occurrence, 27.3 us/draw implies **~390 occurrences per frame** against a
+  179-cell damaged row -- about 2.2 rows' worth. So the view does not rebuild the
+  whole viewport's display list for a one-row change; it draws the damaged row plus
+  roughly a row of halo. This answers a question `F5` left open for the draw side:
+  planning is damage-scoped, and so is drawing.
+- **Triangulation, and it is what makes this decisive.** `F17` is not the only
+  non-forced measurement. `F3` already put `get_glyph_bboxes` at **1.85% on
+  `scrollback-stream`**, which runs with `redraw_updates=0` and replays a real
+  corpus. Two independent realistic stimuli therefore say 0.42% and 1.85%; the only
+  stimulus that says 16.8% is the one that republishes every glyph on the screen
+  120 times a second. **`F6`'s headline number is a property of the benchmark, not
+  of DanTerm.**
+- Inference: **candidate A's live value is one to two orders of magnitude below its
+  pitch.** It scales with glyphs actually redrawn per second, so it approaches
+  `F6`'s figure only for a full-screen animated TUI at high frame rate, and sits
+  near 0.5-2% for typing, scrolling, and streaming output. `D8` acts on this.
+- **Share versus absolute, and why only one of these numbers is safe.** The 0.42%
+  share is deflated by instrument: this trace is dominated by the per-draw
+  acknowledgment write (`_convertJSONString` 4.78%, `CFStringCompareWithOptions...`
+  3.49%, `__open` 2.51%, `__rename` 2.03%), because the localized producer
+  serializes on a JSON ack file per update and the real work per draw is tiny. The
+  **absolute 801.0 -> 27.3 us/draw is the robust comparison**, and it is
+  apples-to-apples: both stimuli pay the same per-draw ack cost, so it cancels in
+  the per-draw figure and does not cancel in the share.
+- **Predictions registered before the trace was read; three of four correct.**
+  1. *"falls to a few percent at most, plausibly under 1%"* -- **correct**, 0.42%.
+     My arithmetic estimate of ~12 us/draw was 2.3x low, because I assumed exactly
+     one row of damage and the real figure is ~2.2 rows.
+  2. *"not to zero, and the floor is the interesting number"* -- **correct**, and
+     the floor is the halo: ~390 occurrences where the damaged row holds 179.
+  3. *"the alternative outcome: the subtree stays near 801 us/draw, meaning the
+     draw path is not damage-scoped"* -- **did not happen.** It is scoped.
+  4. *"I do not predict the draw rate holds at ~119/s"* -- **correct** not to; it
+     fell to 97.85/s, set by the ack round trip rather than the panel.
+- Tooling: `scripts/terminal-benchmark-profile.sh` gained a
+  `localized-draw-acceptance` case, since the three churn workloads all hardcode
+  forced republication and there was no way to profile a damage-scoped stimulus.
+  It also **fixed a provenance bug `F16` exposed**: `fixtureIdentity` hardcoded
+  `179x66`, so `F16`'s 80x25 artifact claimed a fixture it had not run. The
+  identity now derives the geometry, and the contract test refuses the literal.
+- Artifacts: `.build/terminal-benchmark-profiles/2026-07-29-214810-22895/`.
+
 ## Decision log
 
 ### D1 -- which CPU opportunity to take first
@@ -1461,6 +1529,44 @@ input shapes.
   capture to size the node (cheap), then a purpose-built CPU bracket with its own
   A/A screen (expensive), then the change.
 
+### D8 -- candidate A is closed, and the sweep's headline finding is demoted
+
+- Status: **closed.** Evidence: `F17`, on `F16`, `F6`, `F3`, `F12`, `F15`.
+- Decision: **do not take candidate A.** Not deferred -- closed, with a reopening
+  condition below. Three independent reasons, and the third alone is sufficient:
+  1. **Its magnitude is a benchmark artifact** (`F17`). 801.0 us/draw under forced
+     full-viewport republication, 27.3 us/draw when the draw is damage-scoped --
+     29.3x. `F3`'s 1.85% on `scrollback-stream` agrees. The 16.8% that made A the
+     top of the ranking exists only under a stimulus that redraws every glyph on
+     screen 120 times a second.
+  2. **Its win is energy, not frames** (`F16`). The draw rate is pinned at the
+     panel's refresh regardless.
+  3. **Nothing here can measure it** (`F12`, `F15`, `D7`). Wrong thread for the
+     draw rule, no headroom in the frame rate, no calibratable rule for CPU.
+- So the honest ordering of this file's findings changed twice. `F6` ranked A first
+  on a share; `F16` confirmed its mechanism and looked like vindication; `F17`
+  removed the number. A confirmed mechanism attached to an unrealistic input is not
+  an opportunity.
+- **Reopening condition**, and it is specific: a capture of a *real* full-screen
+  animated TUI -- not the synthetic churn stimulus -- showing `get_glyph_bboxes`
+  materially above `F3`'s 1.85% on `scrollback-stream`. That is the only regime
+  where A's arithmetic works, and no measurement here has sampled it. A live
+  complaint about fan noise or battery during full-screen TUI use is the same
+  trigger arriving from the user's side.
+- **What this does to `D1`'s ranking, finally.** Every ranked candidate is now
+  resolved: B kept, C rejected, D done, **A closed**, E and F still small and
+  untaken, G still not to be taken. The file has no open code candidate.
+- **The generalizable lesson, and it is the one worth carrying out of doc 17.**
+  An elasticity test confirms a *mechanism*; it says nothing about whether the
+  mechanism's input is realistic. `F16` proved the cost scales with glyphs drawn,
+  and it was right -- what it could not see is that the benchmark was drawing an
+  absurd number of glyphs. **Ask what the input is worth before asking whether the
+  cost scales with it.** In profiling terms: a share measured under a synthetic
+  stimulus inherits that stimulus's unrealism, and the cheapest defence is a second
+  capture under a different stimulus shape, which cost one trace here and would
+  have reordered `D1` at the top of the file.
+- Next action: none. Doc 17 has no open candidate and no unmet prerequisite.
+
 ## Pre-rejected
 
 Candidates a fresh survey would plausibly re-propose, with the evidence that
@@ -1545,14 +1651,18 @@ separate a *verdict* by freezing one axis, which is what they exist for.
   region. Treat that column as an order of magnitude.
 - **Loop profiling mode forces a republished full-viewport redraw**
   (`DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES=1000000`), so per-frame glyph counts
-  sit at maximum. This inflates `F6` by an unmeasured amount relative to live use,
-  and may be why `F4` finds the two churn workloads identical.
-- **`F6`'s elasticity is confirmed** (`F16`): 5.62x against a 5.907x lever, 95.1%
-  of linear, with a 5% per-occurrence premium at the small geometry marking the
-  per-op floor. Superseded caveat, kept for the chain: *"nothing here varied glyph
-  count and showed the node move."* What remains unconfirmed is the **magnitude** in
-  live use, not the mechanism -- see the loop-mode caveat above, which `F16` did not
-  address because both its arms force full redraws.
+  sit at maximum. This caveat was recorded as "inflates `F6` by an unmeasured
+  amount"; **`F17` measured it: 29.3x** on the glyph-bounds node. It may also be why
+  `F4` finds the two churn workloads identical. **Any share in `F3` for one of the
+  three churn workloads carries this inflation to the extent it scales with glyphs
+  drawn** -- `scrollback-stream` does not, which is why its column repeatedly
+  disagrees and repeatedly turns out to be the truthful one.
+- **`F6`'s elasticity is confirmed** (`F16`) and **its magnitude is retired**
+  (`F17`). The mechanism scales at 95.1% of linear; the 16.8% attached to it was the
+  benchmark's stimulus, not the app's behavior. Superseded caveat, kept for the
+  chain: *"nothing here varied glyph count and showed the node move."* Both
+  questions this file left open about `F6` are now answered, in opposite
+  directions.
 - **The churn workloads are frame-rate-capped, not CPU-bound** (`F16`). 119.10/s and
   119.32/s across a 5.9x change in per-frame glyph work, on a 120Hz panel. Any
   reading of these workloads that treats a CPU reduction as a throughput win is
@@ -1580,23 +1690,27 @@ separate a *verdict* by freezing one axis, which is what they exist for.
 
 ## Outcome
 
-**Phases 1-4 complete; Phase 5 open with one candidate confirmed and deliberately
-not started.** Eight on-CPU traces, sixteen findings, five ranked code candidates,
+**Phases 1-5 complete; no open code candidate.** Nine on-CPU traces, seventeen
+findings, five ranked code candidates all resolved,
 two tooling fixes shipped plus one calibration screen, seven pre-rejections, **one
 code candidate kept** (B: `terminal-feed` -14.59%, `scrollback-stream` -10.78%),
 **one rejected on measurement** (C: nothing vanished when it was deleted outright),
 **one metric screened and refused a verdict** (`processCPUNanosecondsPerDraw`), and
-**the headline finding put through the elasticity test it had failed to face** (A:
-95.1% of linear, `F16`).
+**the headline finding confirmed in mechanism and retired in magnitude** (A: elastic
+at 95.1% of linear per `F16`, but 29.3x smaller under a realistic stimulus per
+`F17`, and closed by `D8`).
 
-Nine results are worth more than the ranking:
+Ten results are worth more than the ranking:
 
 1. **The two regions this project has spent four documents optimizing are no
    longer where the time is.** `planFrame` and `drawRenderFrame` are 10.5% and
    10.4% of the workload where each is largest. The three biggest
    app-attributable quantities in the sweep -- CA's per-glyph bounds (16.8%),
    `applyOutput`'s non-feed body (up to 23.8%), and `recordDamage` (15.8%) -- were
-   ranked first by nobody.
+   ranked first by nobody. **Read this alongside result 10: two of those three
+   numbers did not survive the file that produced them.** The 23.8% was retired as
+   unsound (`F14`) and the 16.8% as unrealistic (`F17`); only `recordDamage` held,
+   and it is the one that shipped.
 2. **The largest cost in the app is in no benchmark bracket** (`F2`, `F6`). The
    draw verdict measures 10.43% of `content-churn` while CA's replay of that same
    draw costs 23.15%, on threads the draw timer never sees. This confirms
@@ -1671,7 +1785,20 @@ Nine results are worth more than the ranking:
    two different experiments, and passing the first is what makes the second worth
    designing.
 
-Findings F1-F16 are recorded; the next free ID is **F17**. Decisions D1-D7 are
-recorded; D2, D4, D5 and D6 are closed and acted on; candidates B and D are done, C
-is rejected, the A/A screen is done and earned no rule, and **A is confirmed, open,
-and deliberately not started (`D7`)**; the next free ID is **D8**.
+10. **The headline finding was confirmed and then demoted, and the second step is
+    the one that mattered** (`F16`, `F17`, `D8`). `F6` ranked candidate A first on a
+    16.8% share. `F16` ran the elasticity test A had never faced and it passed at
+    95.1% of linear -- which reads as vindication and is not. One further capture
+    under a *damage-scoped* stimulus put the same node at 27.3 us/draw against
+    801.0, and `F3`'s 1.85% on `scrollback-stream` had been saying so all along. The
+    generalizable lesson: **an elasticity test confirms a mechanism and says nothing
+    about whether the mechanism's input is realistic.** Ask what the input is worth
+    before asking whether the cost scales with it. The defence costs one capture
+    under a different stimulus shape, and here it would have reordered `D1` at the
+    top of the file.
+
+Findings F1-F17 are recorded; the next free ID is **F18**. Decisions D1-D8 are
+recorded; D2 and D4-D8 are closed and acted on; **every ranked code candidate is
+resolved** -- B kept, C rejected, D done, A closed (`D8`), E and F small and
+untaken, G not to be taken -- and the A/A screen is done and earned no rule; the
+next free ID is **D9**.

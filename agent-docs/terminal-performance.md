@@ -171,8 +171,13 @@ The draw verdict times elapsed work between two points on the **main thread**, s
 work on any other thread is invisible to it at any size. That is not a corner
 case: `docs/research/17-cpu-profile-sweep.md` `F6` found the largest single cost
 in the app -- Core Animation recomputing every glyph's bounds while replaying the
-display list, 16.8% of `content-churn`'s on-CPU total -- living entirely in that
-blind spot.
+display list -- living entirely in that blind spot. **Do not quote its 16.8%
+figure**: that share came from a stimulus republishing every glyph on screen 120
+times a second, and `17/F17` measured the same node at **27.3 us/draw against
+801.0 -- 29.3x smaller -- under a damage-scoped draw**, with `17/F3`'s 1.85% on
+`scrollback-stream` agreeing. The mechanism is real and elastic (`17/F16`, 95.1%
+of linear); the magnitude was the benchmark's. The blind spot is the durable
+point here, not the number that was found in it.
 
 So the three serialized-draw workloads also report
 `processCPUNanosecondsPerDraw`: CPU time summed over **every thread**, taken from

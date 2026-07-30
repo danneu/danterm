@@ -183,4 +183,24 @@ awk '
     }
     END { exit(found ? 0 : 1) }
 ' "$ROOT/app/AppDelegate.swift"
+# Localized profiling (research doc 17, F17). The three churn workloads force a
+# republished full viewport every frame, which pins per-frame glyph counts at
+# maximum; `localized-draw-acceptance` is the opposite extreme -- one damaged row
+# against a dense screen -- and the two together bracket what live use costs.
+# Without the env var below the case would silently profile a workload that never
+# writes an update, so the run would look valid and measure an idle app.
+grep -q 'DANTERM_TERMINAL_BENCHMARK_LOCALIZED_UPDATES="$localized_updates"' "$PROFILE"
+grep -q 'localized-draw-acceptance)' "$PROFILE"
+
+# Provenance: `fixtureIdentity` must carry the geometry actually measured. The
+# harness takes DANTERM_TERMINAL_BENCHMARK_COLUMNS/_ROWS, so a hardcoded 179x66
+# in the identity is a lie the moment anyone varies geometry -- as doc 17's `F16`
+# did, producing artifacts whose fixtureIdentity disagreed with their own
+# geometry field.
+if grep -q '179x66' "$PROFILE"; then
+    echo "profile fixture identity must derive geometry, not hardcode 179x66" >&2
+    exit 1
+fi
+grep -q 'geometry_label=' "$PROFILE"
+
 echo "terminal benchmark harness contract: ok"

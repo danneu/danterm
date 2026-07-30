@@ -111,6 +111,12 @@ HARNESS_PID=""
 mkdir -p "$PROFILE_ROOT"
 trap 'terminate_owned_pid "$HARNESS_PID"' EXIT INT TERM
 
+# The stimulus is generated from the live geometry
+# (`terminal-benchmark-producer.py`), so the identity has to name the geometry it
+# actually ran at. Hardcoding one made every varied-geometry artifact claim a
+# fixture it had not used -- see doc 17 `F16`, which varied it deliberately.
+geometry_label="${DANTERM_TERMINAL_BENCHMARK_COLUMNS:-179}x${DANTERM_TERMINAL_BENCHMARK_ROWS:-66}"
+localized_updates=0
 case "$WORKLOAD" in
     scrollback-stream)
         fixture_identity="$(jq -er '.workloads["scrollback-stream"].identity' "$REPO_ROOT/benchmarks/fixtures/terminal-app.json")"
@@ -118,19 +124,29 @@ case "$WORKLOAD" in
         redraw_updates=0
         ;;
     full-screen-content-churn)
-        fixture_identity="full-screen-content-churn-v2-serialized-179x66"
+        fixture_identity="full-screen-content-churn-v2-serialized-$geometry_label"
         reset_behavior="full-screen deterministic setup plus excluded settling draw before serialized draws"
         redraw_updates=1000000
         ;;
     full-screen-style-churn)
-        fixture_identity="full-screen-style-churn-v2-serialized-179x66"
+        fixture_identity="full-screen-style-churn-v2-serialized-$geometry_label"
         reset_behavior="full-screen deterministic setup plus excluded settling draw before serialized draws"
         redraw_updates=1000000
         ;;
     full-screen-incremental-mixed-churn)
-        fixture_identity="full-screen-incremental-mixed-churn-v2-four-rows-six-damage-179x66"
+        fixture_identity="full-screen-incremental-mixed-churn-v2-four-rows-six-damage-$geometry_label"
         reset_behavior="dense deterministic setup plus excluded settling draw before four-row content-and-style updates with six-row glyph-halo damage"
         redraw_updates=1000000
+        ;;
+    localized-draw-acceptance)
+        # The other sustained workloads republish the whole viewport every frame,
+        # which pins per-frame glyph counts at maximum and inflates anything that
+        # scales with glyphs drawn. This one damages a single row against a dense
+        # screen, so the pair brackets what live use actually costs.
+        fixture_identity="localized-draw-acceptance-single-row-$geometry_label"
+        reset_behavior="dense deterministic setup plus excluded settling draw before single-row localized updates"
+        redraw_updates=0
+        localized_updates=1000000
         ;;
     *)
         echo "Unsupported sustained app profiling workload: $WORKLOAD" >&2
@@ -141,6 +157,7 @@ esac
 DANTERM_BENCHMARK_MODE=loop DANTERM_BENCHMARK_PROFILING=1 \
     DANTERM_BENCHMARK_IDENTITY_PATH="$HARNESS_IDENTITY_PATH" \
     DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES="$redraw_updates" \
+    DANTERM_TERMINAL_BENCHMARK_LOCALIZED_UPDATES="$localized_updates" \
     DANTERM_TERMINAL_BENCHMARK_ACTIVITY_PATH="$ACTIVITY_PATH" \
     "$SCRIPT_DIR/terminal-benchmark.sh" "$WORKLOAD" "$BACKEND" >"$HARNESS_LOG" 2>&1 &
 HARNESS_PID=$!
