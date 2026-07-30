@@ -24,9 +24,15 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
     def test_manifest_predeclares_disjoint_balanced_trials(self):
         manifest = VALIDATION.make_manifest(seed=2026072402, trials_per_cell=60)
 
+        # Sized from WORKLOADS rather than a literal count, because the literal
+        # is what broke when the corpus gained its sixth workload while the
+        # structural claim -- every workload gets all three quick conditions, and
+        # both directions in confirm plus one suite-level A/A cell -- did not
+        # change at all.
+        workloads = len(VALIDATION.WORKLOADS)
         self.assertEqual(manifest["schemaVersion"], 2)
-        self.assertEqual(len(manifest["quick"]), 5 * 3 * 60)
-        self.assertEqual(len(manifest["confirm"]), (1 + 5 * 2) * 60)
+        self.assertEqual(len(manifest["quick"]), workloads * len(VALIDATION.DIRECTIONS) * 60)
+        self.assertEqual(len(manifest["confirm"]), (1 + workloads * 2) * 60)
         self.assertEqual(
             {trial["physicalCandidateArm"] for trial in manifest["quick"]},
             {"a", "b"},

@@ -19,6 +19,8 @@ WORKLOADS = (
     "content-churn",
     "style-churn",
     "incremental-mixed",
+    # Graduated from CANDIDATE_WORKLOADS by 20/D4 after 20/F11 screened it.
+    "synchronized-frames",
 )
 # Collectable, but deliberately not in WORKLOADS: that tuple is the *calibrated*
 # set, and everything downstream of it -- the predeclared manifest, the paired
@@ -26,9 +28,7 @@ WORKLOADS = (
 # has blocks and no rule, which is exactly the state an A/A screen resolves. It
 # graduates into WORKLOADS only when a human moves a screened threshold into
 # DECISION_RULES. See docs/research/20-pty-throughput-and-interactive-stimulus.md.
-CANDIDATE_WORKLOADS = (
-    "synchronized-frames",
-)
+CANDIDATE_WORKLOADS = ()
 DIRECTIONS = ("aa", "slower", "faster")
 CANONICAL_GEOMETRY = {"columns": 179, "rows": 66}
 TERMINAL_FEED_STATE_PROBE = (
@@ -100,6 +100,18 @@ DECISION_RULES = {
                 "pairCount": 2,
                 "directionalThresholdPercent": 3.8,
             },
+            # The costliest rule in the set, knowingly. Screened at 20/F11 over
+            # two replicating 48-pair A/A series, and these are the conservative
+            # envelope across them (max pair count, max threshold) rather than
+            # the better of the two. 3x scrollback-stream's pair count buys the
+            # only coverage of the frame-coalescing path (20/F9). Its A/A
+            # false-positive rate is 0.0084 against a 0.01 gate, the thinnest
+            # margin here, so read a lone quick verdict as a screen and let
+            # confirm decide.
+            "synchronized-frames": {
+                "pairCount": 6,
+                "directionalThresholdPercent": 2.65,
+            },
         },
         # Plan-time rules, calibrated separately from the draw rules above and
         # applied to the same blocks. A workload appears here only if a threshold
@@ -151,6 +163,14 @@ DECISION_RULES = {
             "incremental-mixed": {
                 "pairCount": 6,
                 "directionalThresholdPercent": 1.85,
+            },
+            # 20/F11. Detection runs 0.917-0.944 across the two screens against a
+            # 0.90 gate, the narrowest in this table, and 8 of 48 A/A pairs
+            # exceeded +/-3%. The median-symmetric estimator absorbs that tail,
+            # which is why any rule clears at all; a mean would not have.
+            "synchronized-frames": {
+                "pairCount": 8,
+                "directionalThresholdPercent": 2.15,
             },
         },
     },

@@ -26,6 +26,7 @@ def _load(name, filename):
 
 PRODUCER = _load("terminal_benchmark_producer", "terminal-benchmark-producer.py")
 VALIDATION = _load("terminal_benchmark_validation", "terminal-benchmark-validation.py")
+COMPARE = _load("terminal_benchmark_compare", "terminal-benchmark-compare.py")
 
 DRAW_WORKLOADS = (
     "full-screen-content-churn",
@@ -49,6 +50,56 @@ class TerminalBenchmarkWorkloadSetTests(unittest.TestCase):
                 VALIDATION.PersistentDrawArms(
                     {"a": ROOT, "b": ROOT}, workload=workload, output=ROOT / ".build"
                 )
+
+    def test_every_calibrated_workload_carries_a_frozen_rule_in_both_modes(self):
+        # Intent: membership in `WORKLOADS` and having a screened decision rule are
+        #   the same fact, in both directions.
+        # Why it exists: `WORKLOADS` is what `confirm` runs and what the
+        #   predeclared manifest is sized from, while `DECISION_RULES` is what
+        #   turns a block series into a verdict. A workload in one and not the
+        #   other is either a comparison that raises mid-run after collecting real
+        #   blocks, or a frozen threshold nothing can reach. Both were reachable
+        #   states while `synchronized-frames` was being screened.
+        # Scenario: spec-first; the corpus gained its sixth workload, which spent
+        #   time deliberately collectable-but-undecidable and had to graduate
+        #   cleanly rather than half-way.
+        for mode in COMPARE.MODES:
+            rule = COMPARE.decision_rule(mode)
+            with self.subTest(mode=mode):
+                self.assertEqual(
+                    set(rule["workloads"]),
+                    set(VALIDATION.WORKLOADS),
+                    f"{mode} rules and WORKLOADS disagree",
+                )
+        # And a candidate is the exact complement: collectable, never decidable.
+        for candidate in VALIDATION.CANDIDATE_WORKLOADS:
+            with self.subTest(candidate=candidate):
+                self.assertNotIn(candidate, VALIDATION.WORKLOADS)
+                for mode in COMPARE.MODES:
+                    self.assertNotIn(
+                        candidate, COMPARE.decision_rule(mode)["workloads"]
+                    )
+
+    def test_the_captured_tui_workload_is_selectable_and_decidable(self):
+        # Intent: `synchronized-frames` can be named by `quick`, is run by
+        #   `confirm`, and carries the thresholds its A/A screen proposed.
+        # Why it exists: pins the graduation from candidate to calibrated. The
+        #   numbers are the conservative envelope across two replicating 48-pair
+        #   screens (20/F11) -- not a hand-picked pair, which is the failure mode
+        #   a frozen rule cannot recover from, since every later directional claim
+        #   inherits it.
+        # Scenario: spec-first; 20/D4 froze the rule after three screens.
+        self.assertEqual(
+            COMPARE.resolve_workloads("quick", "synchronized-frames"),
+            ("synchronized-frames",),
+        )
+        self.assertIn("synchronized-frames", COMPARE.resolve_workloads("confirm"))
+        quick = COMPARE.decision_rule("quick")["workloads"]["synchronized-frames"]
+        confirm = COMPARE.decision_rule("confirm")["workloads"]["synchronized-frames"]
+        self.assertEqual(quick["pairCount"], 6)
+        self.assertEqual(quick["directionalThresholdPercent"], 2.65)
+        self.assertEqual(confirm["pairCount"], 8)
+        self.assertEqual(confirm["directionalThresholdPercent"], 2.15)
 
     def test_the_harness_rejects_a_draw_workload_outside_that_set(self):
         # Intent: `terminal-benchmark.sh` refuses any workload that is neither one

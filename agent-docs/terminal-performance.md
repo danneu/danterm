@@ -62,6 +62,7 @@ you are trying to move; a workload that does not contain it will answer
 | `content-churn` | Did replacing screen *content* get cheaper? | 50 serialized full-screen 179x66 frames; text changes every frame, style is frozen. | Glyph lookup, shaping, or text-run construction is hot. |
 | `style-churn` | Did replacing *attributes* get cheaper? | 50 serialized full-screen frames; text is frozen, only truecolor fg/bg change. | Attribute or color handling is hot and no new glyphs are involved. |
 | `incremental-mixed` | Does small damage stay small? | 50 serialized updates touching 4 rows of an already-settled dense screen. | You suspect localized updates are doing full-window work. |
+| `synchronized-frames` | Did absorbing a real TUI's output get cheaper when it coalesces its frames? | A fresh app and terminal session per block replays 95 captured btop frames through a real PTY, timed to the final completed draw. Every byte sits inside a `DECSET 2026` bracket. | Parsing, damage tracking, or the synchronized-output path is hot, or a change touches what happens while drawing is suppressed. |
 
 Every draw block is serialized: one write, then wait for that exact completed
 draw before the next write. Nothing coalesces, so the per-draw number is a real
@@ -200,6 +201,42 @@ byte count is recorded for them precisely so no rate can be derived.
 
 Like plan time and process CPU, this decides nothing. Evidence and the survey
 behind it: [docs/research/20-pty-throughput-and-interactive-stimulus.md](../docs/research/20-pty-throughput-and-interactive-stimulus.md).
+
+### `synchronized-frames` is the expensive one, and knowing why is the point
+
+It is the sixth workload and the only captured one -- 95 real btop frames rather
+than a generator we wrote. Two things about it are not like the others.
+
+**It is not a draw workload, despite being timed to a final draw.** 100% of its
+bytes arrive inside a `DECSET 2026` bracket, and `planIfNeeded` returns early
+while synchronized output is active, so the app parses the whole replay and draws
+essentially nothing until the end. Its block is ~95% drain, and its draw tail is a
+**constant ~7 ms** rather than a share of the work -- shortening the stimulus
+inflates the tail's percentage without measuring one nanosecond more drawing
+(`20/F10`). Read it as "how fast can we absorb a real TUI's output", and reach for
+`content-churn` or `style-churn` for anything about drawing.
+
+**Its rule is the loosest and costliest in the table, and its margins are thin.**
+6 pairs at +/-2.65% (quick) and 8 at +/-2.15% (confirm), against
+`scrollback-stream`'s 2 and 4. Those came from two replicating 48-pair A/A series
+and are the conservative envelope across them (`20/F11`). What that buys you:
+A/A false positives sit at 0.0084 and 0.0095 against a 0.01 gate, and confirm
+detection runs 0.917-0.944 against a 0.90 gate -- both the narrowest margins in
+this corpus. **8 of 48 A/A pairs exceeded +/-3% with no code change at all.** So a
+3-4% move on this workload alone is not a result; treat a lone quick verdict here
+as a screen and let confirm decide. The median-symmetric estimator is what absorbs
+that tail, and is why any rule clears.
+
+A first screen proposed 12 pairs at +/-1.05% and was discarded: its spread came
+from one block in 48 running 193 ms against a 164 ms median. Drop that block and
+the rest sit at CV 1.17%, *quieter* than `scrollback-stream`. The tail is rare,
+real, and lands in drain rather than draw; its cause is unidentified and belongs
+to [docs/research/19-owner-queue-occupancy.md](../docs/research/19-owner-queue-occupancy.md).
+
+Re-screen it with `scripts/terminal-benchmark-candidate-screen.py --workload
+<name> --revision <rev>`, which searches pair count alongside threshold -- a
+workload owns its blocks and so can buy more pairs, which is exactly what an
+auxiliary metric cannot do (`17/F15`). It writes a report and never a rule.
 
 ### The third reported quantity: whole-process CPU per accepted draw
 

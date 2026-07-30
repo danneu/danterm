@@ -1,12 +1,14 @@
 # PTY throughput reporting and interactive stimulus coverage
 
-Research started: 2026-07-30. **Status: OPEN -- Phases 1-2 shipped, Phase 3
-built and screened; `D4` is the one gate still open.**
-Deliverables: what throughput quantity the benchmark system should report
-(`D1`, decided and shipped), whether a keypress-driven interactive workload is
-worth building (`D2`, decided -- no, take a recording instead), whether that
-recording earns a workload (`D3`, admitted) and in what shape, and whether it
-freezes into a deciding rule (`D4`, **open**).
+Research started: 2026-07-30. **Status: OPEN -- all four direction gates
+decided and shipped; what remains is `H3` (parked) and the unclaimed vtebench
+import.**
+Deliverables, all now settled: what throughput quantity the benchmark system
+should report (`D1` -- the descriptive split, shipped), whether a keypress-driven
+interactive workload is worth building (`D2` -- no, take a recording instead),
+whether that recording earns a workload (`D3` -- admitted, and characterized
+before calibration), and whether it freezes into a deciding rule (`D4` -- yes,
+`synchronized-frames` is the corpus's sixth calibrated workload).
 Continues: no ancestor. Adjacent to doc 8 (benchmark variance) and doc 17
 (auxiliary metrics and their calibration), whose rules are inherited rather than
 re-derived.
@@ -863,7 +865,24 @@ improvement as a failure.
 - Recommendation: **(1)**, with `F11`'s caveats recorded in
   `agent-docs/terminal-performance.md` beside the rule, and the tail called out
   explicitly so a future reader does not mistake a 4% A/A pair for a regression.
-- Direction review: pending.
+- Direction review: user, 2026-07-30. Selected (1) as recommended.
+- Selected direction: **freeze the conservative envelope.** Landed: quick 6 pairs
+  at +/-2.65%, confirm 8 pairs at +/-2.15% in `DECISION_RULES`;
+  `synchronized-frames` moved from `CANDIDATE_WORKLOADS` into `WORKLOADS`, which
+  emptied the candidate tuple; `agent-docs/terminal-performance.md` carries the
+  workload row and `F11`'s caveats beside the rule.
+- Behavioral verification: two tests in
+  `scripts/tests/terminal_benchmark_workloads_test.py` -- one pinning the frozen
+  numbers and the workload's selectability in both modes, one asserting that
+  `WORKLOADS` and the rule tables agree in *both* directions and that a candidate
+  is their exact complement. The second is the guard that a future graduation
+  cannot land half-way. `just test` green.
+- One thing the freeze changed that was not in the proposal: the manifest-sizing
+  test asserted `5 * 3 * 60` literals and broke. Re-expressed in terms of
+  `len(WORKLOADS)`, because the structural claim it makes -- every workload gets
+  all three quick conditions, both confirm directions, and one suite-level A/A
+  cell -- did not change when the sixth workload arrived, and only the literal
+  did.
 - Not decided here, and deliberately: the tail's cause. A 29 ms excess in drain
   on ~1 block in 24 is a real phenomenon, but it belongs to whoever owns queue
   occupancy (doc 19), not to the file that found it.
