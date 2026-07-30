@@ -733,6 +733,69 @@ improvement as a failure.
   re-screen, which tests this without a new capture. A flat percent SD refutes
   it; a 1/sqrt(N) fall confirms it and justifies re-freezing the rule.
 
+### F13 -- a 5x replay buys a tighter rule *and* a cheaper one, and a fourth 1x screen undercuts `D4`
+
+- Status: complete for the length question, **one screen only** -- so it sizes a
+  lever and does not yet license a re-freeze. `D4` was frozen on two replicating
+  screens and this has one.
+- Date: 2026-07-30. Feature at `6950d51`; the measured tree is `dc2402d5`, an
+  unreferenced `commit-tree` off `HEAD` differing in exactly one path
+  (`benchmarks/fixtures/terminal-app.json`), so the branch carries no experiment
+  commit and the artifact still names a real tree.
+- Method: `replayCount: 5` on the committed capture -- 3.02 -> 15.10 MB, no new
+  capture -- then the same A/A screen `F11` ran: one immutable root under both
+  arms, 24 balanced quartets, 50,000 trials, seed unchanged.
+- **`F12`'s additive prediction is confirmed, at the block level and in the
+  right units.** Absolute block SD is what stays put; percent is what moves:
+
+  | stimulus | blocks | median | SD (abs) | SD (%) | trimmed SD (abs) | draw tail |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | 3.02 MB | 246 | 165.3 ms | 3.01 ms | 1.82% | -- | 8.8 ms |
+  | 15.10 MB | 96 | 739.7 ms | 8.55 ms | 1.16% | **3.34 ms** | 10.3 ms |
+
+  Trimmed absolute SD moves 3.01 -> 3.34 ms across a **4.5x** change in block
+  length. That is the fixed per-run perturbation `F12` inferred, now measured
+  directly rather than across two workloads or five blocks.
+- **The raw SD understates it, and the reason is one block.** Untrimmed SD only
+  falls 1.82% -> 1.16% because a single block ran 811.8 ms against a 739.7 ms
+  median (+9.7%), carrying one pair to +10.36%. 1 of 96 blocks exceeds +5% and
+  **none exceeds +10%**. Trimmed, the series is 0.45% at the block level and
+  **0.56% at the pair level against 1.30-1.72% at 1x** -- a 2.5-3x improvement in
+  the quantity a threshold is actually set from.
+- **Both proposed rules improve on both axes at once, which is the unusual part:**
+
+  | screen | sec/pair | SD | trimmed | quick | confirm | confirm wall |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | 2 (1x) | 9.90 | 1.97% | 1.49% | 6p @2.65% | 8p @2.15% | ~79 s |
+  | 3 (1x) | 8.47 | 1.83% | 1.30% | 4p @2.50% | 8p @1.95% | ~68 s |
+  | 4 (1x) | 10.12 | 2.37% | 1.72% | 6p @2.45% | 12p @1.85% | ~121 s |
+  | **5 (5x)** | **10.83** | 1.65% | **0.56%** | **4p @1.05%** | **4p @1.9%** | **~43 s** |
+
+  A 4.5x longer block costs **+0.7 to +2.4 s per pair**, because `F12`'s wall
+  accounting holds: the block was never the expensive part of a pair. Halving the
+  confirm pair count then makes the whole verdict *cheaper in wall clock than any
+  1x screen proposed* while resolving 2.5x more finely at `quick`.
+- **Screen 4 is the other result here, and it is bad news for `D4`.** It is an
+  accidental 1x replicate -- run against `HEAD` when a working-tree change failed
+  to reach the arm -- and it is noisier than either screen `D4` rests on (SD
+  2.37% against 1.83/1.97) and asks for **12 confirm pairs against the frozen 8**.
+  So the "conservative envelope across two replicating screens" was drawn from
+  two of three, and **screen-to-screen variability is itself an unbounded
+  quantity here**. Two screens agreeing is weaker evidence than `D4` treated it
+  as. This is an argument for re-screening at 5x rather than for patching `D4`'s
+  numbers: the frozen rule's problem is the noise, and the length lever addresses
+  the noise.
+- Uncertainty, and it gates the next step: **one 5x screen.** The single +9.7%
+  block matters more at 4 pairs than at 8, though the resampler drew from the
+  empirical distribution and still cleared both gates with room (false positives
+  0.0031 quick / 0.0019 confirm against 0.01; detection >= 0.998 against 0.90).
+  The tail also grew 8.8 -> 10.3 ms, so it is near-constant rather than constant,
+  and nothing here establishes 5x as the right multiple over 3x or 10x.
+- Next action: replicate at 5x before `D5` proposes any rule. A second screen
+  agreeing licenses a re-freeze; a second screen at 1x-like spread would say the
+  0.56% was the lucky draw, which is precisely the mistake screen 4 shows is
+  available.
+
 ## Decision log
 
 ### D1 -- what the benchmark system should report about PTY throughput
