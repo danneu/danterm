@@ -191,6 +191,65 @@ struct TerminalSearchTests {
         #expect(terminal.activeSearchMatchRange?.start.row == 1)
     }
 
+    @Test("evicting the selected match keeps the needle and lets navigation re-attach")
+    func evictingTheSelectedMatchKeepsTheNeedle() throws {
+        // Intent: when the row holding the selected match falls off the end of
+        //   scrollback, the search stays open -- the needle survives, the status keeps
+        //   reporting the matches that remain, and the next navigation adopts one.
+        // Why it exists: eviction used to drop the whole search rather than just its
+        //   occurrence, which made `searchNext` return false forever. The recovery for
+        //   exactly this state already existed (`reattachToNewestMatch`) and eviction
+        //   bypassed it by nulling the query too.
+        // Scenario: a user searches a busy pane, walks to an old match, and the tail
+        //   keeps streaming until that match scrolls out of history. Enter then stopped
+        //   responding and the overlay froze on its last count, with no way back except
+        //   retyping the needle.
+        var terminal = try #require(Terminal(
+            columns: 8,
+            rows: 2,
+            scrollbackBudgetBytes: historyRowCost(columns: 8) * 2
+        ))
+        terminal.feed(Array("hit\r\na".utf8))
+
+        let found = terminal.beginSearch("hit")
+        #expect(found)
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
+
+        // Pushes the selected match past the two rows history can hold, while leaving a
+        // newer occurrence for navigation to find.
+        terminal.feed(Array("\r\nb\r\nc\r\nhit".utf8))
+
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
+        let moved = terminal.searchNext()
+        #expect(moved)
+        #expect(terminal.activeSearchMatchRange != nil)
+    }
+
+    @Test("overwriting the selected match keeps the needle and lets navigation re-attach")
+    func overwritingTheSelectedMatchKeepsTheNeedle() throws {
+        // Intent: output that rewrites the row holding the selected match drops the
+        //   occurrence and keeps the search itself open.
+        // Why it exists: the sibling of the eviction defect above, on the path that
+        //   invalidates by row intersection rather than by retention. It is reachable
+        //   without any scrollback at all -- a `\r`-redrawn progress line is enough.
+        // Scenario: a user searches, then the running program repaints the matched row.
+        var terminal = try #require(Terminal(columns: 8, rows: 3))
+        terminal.feed(Array("hit\r\nzzz\r\nhit".utf8))
+
+        let found = terminal.beginSearch("hit")
+        #expect(found)
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 2))
+
+        // Rewrites row 1 -- where `beginSearch` left the selected (newest) match.
+        terminal.feed(Array("\u{1B}[3;1HZZZ".utf8))
+
+        #expect(terminal.activeSearchMatchRange == nil)
+        #expect(terminal.searchStatus == .matched(selected: 0, total: 1))
+        let moved = terminal.searchNext()
+        #expect(moved)
+        #expect(terminal.activeSearchMatchRange != nil)
+    }
+
     @Test("the alternate screen suppresses both search reads")
     func alternateScreenReportsNoSearch() throws {
         // Intent: while the alternate screen is active, both `searchStatus` and

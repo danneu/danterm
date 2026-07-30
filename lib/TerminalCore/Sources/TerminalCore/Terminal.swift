@@ -3075,8 +3075,12 @@ public struct Terminal: Equatable, Sendable {
         if let selection, range(selection, intersects: rows) {
             self.selection = nil
         }
+        // Only the occurrence, never the needle: a search whose match was overwritten is
+        // still an open search, and `reattachToNewestMatch` is what re-selects for it.
+        // Dropping the whole search here would strand the user in a state only retyping
+        // the needle can leave, because navigation short-circuits on a nil query.
         if let match = search?.range, range(match, intersects: rows) {
-            self.search = nil
+            self.search?.range = nil
         }
         if let hoveredLinkState, range(hoveredLinkState.range, intersects: rows) {
             self.hoveredLinkState = nil
@@ -3123,8 +3127,12 @@ public struct Terminal: Equatable, Sendable {
                 self.selection = selection
             }
         }
+        // Occurrence only, for the reason on `invalidateInspection`. Note the contrast
+        // with `selection` just above, which clamps its start forward and drops only
+        // when it is entirely gone -- an evicted match has no equivalent clamp, so it
+        // releases the occurrence and leaves the needle for navigation to re-attach.
         if let match = search?.range, match.start < firstRetained {
-            self.search = nil
+            self.search?.range = nil
         }
         if let hoveredLinkState, hoveredLinkState.range.start < firstRetained {
             self.hoveredLinkState = nil
