@@ -2,10 +2,10 @@
 
 Research started: 2026-07-29. **Status: OPEN -- survey complete; two of the five
 tier-1 leads taken and confirmed (`L3`/`F10`, `L2`/`F11`), the bracket re-captured
-and the remainder re-ranked (`F12`/`D3`), the rest still gated.**
+and the remainder re-ranked (`F12`, `D3`->`D4`), the rest still gated.**
 Deliverable is the API inventory (`F1`), the decomposition of the one decidable
 renderer bracket (`F4`-`F8`, superseded in its shares by `F12`), the ranked lead
-list (`D1`, re-ordered by `D3`), and the paired-benchmark verdict for each lead as
+list (`D1`, re-ordered by `D4`), and the paired-benchmark verdict for each lead as
 it lands (`F10` onward). Together the two taken leads cut the draw bracket roughly
 in half on all three draw workloads -- **confirmed independently at -42.8% on-CPU
 by `F12`** -- which also halved the denominator every remaining lead is quoted in.
@@ -104,7 +104,7 @@ Added here:
 
 **Opened by user direction on 2026-07-29 for `L3`, then `L2`.** Each entry is one
 commit-sized candidate with its own paired benchmark. The first two were taken in
-`D1`'s order; everything after the re-capture is in `D3`'s. Everything still
+`D1`'s order; everything after the re-capture is in `D4`'s. Everything still
 unchecked remains gated.
 
 - [x] **`L3` -- guard the sprite switch** (`>= 0x2500`). ~5% of the bracket.
@@ -121,32 +121,32 @@ unchecked remains gated.
       `incremental-mixed` -42.95%. Four times the estimate, because a table hit
       also skips the intermediate buffers -- see `F11`.**
 
-**Order below is `D3`'s, which supersedes `D1`'s for everything unchecked.**
+**Order below is `D4`'s.** `D3` ordered these too, on `F12`'s first grouping, and
+that grouping had an attribution bug; `D4` corrects both the sizes and the order.
 
 - [x] Capture at HEAD, both churn workloads. **Done -- `F12`. Retired every share
-      in `F4`, promoted `L4` from tier 2 to first, and reversed `L5` and `L1`.**
-- [ ] **`L4` -- write into pre-sized buffers** instead of per-element `Array.append`
-      in the run loop. **25-28% of the live bracket, the largest single mechanism
-      in it** (`F12`). Was tier 2 solely because `F8`'s attribution was unconfirmed;
-      `F11` and `F12` confirmed it by deletion-and-measure, so it is tier 1 and
-      first. Changes no output and no draw order.
-- [ ] **`L5` -- intern `CGColor`s and hoist the color space.** Up to ~23% of the
-      live bracket, shared with `L1`: `F12` finding 2 shows the two attack one
-      dedup block from opposite ends, and this is its Low-risk end. Carries a
-      pre-registered mechanism prediction (`D3`) resting on one unverified
-      assumption about `CGColorCompare` -- check that first.
-- [ ] **`L1` -- batch glyph submission** by (face, color) across the damaged
-      region. ~12% of its own plus the dedup block `L5` shares. Third now, not
-      because it shrank -- it did not -- but because `D3` prefers the low-risk half
-      of a shared mechanism first, and because `L1` is the only tier-1 lead with a
-      real ordering risk. Still the only tier-1 lead whose *mechanism* the benchmark
-      can confirm or refute, via `F9`'s prediction that `content-churn` and
-      `style-churn` must diverge -- now readable against `F12`'s measured
-      per-workload baselines instead of `17/F4`'s assumed-identical ones.
-- [ ] **`L6` -- batch fills by color.** 7-19% and sharply content-dependent
-      (`F12`): 18.6% of the `content-churn` bracket, 7.0% of `style-churn`'s. Size
-      it from the inclusive figure, not `F12`'s leaf row, which reads ~0% because
-      `fill`'s cost is inside the recorder.
+      in `F4`, confirmed the bracket is ~60% CoreGraphics entry recording, and
+      re-ranked the remainder.**
+- [ ] **`L1` -- batch glyph submission** by (face, color) across the damaged region,
+      one `CTFontDrawGlyphs` per batch instead of one per row per style.
+      **18.8-21.6% of the live bracket on its own, plus a proportional share of the
+      26.7% per-entry dedup block** (`F12`). First on size, and first on structure:
+      `L1` replaces the run loop's per-run buffers, so taking `L4` before it would
+      pre-size a topology `L1` deletes. **Fires `F9`'s pre-registered prediction** --
+      `content-churn` must move materially and `style-churn` little; them moving
+      together refutes the entry-count mechanism rather than just this lead.
+      Ordering risk must be asserted by a test, not assumed (`D4`).
+- [ ] **`L4` -- write into pre-sized buffers** instead of per-element `Array.append`.
+      **24.5%** of the live bracket -- `isUniquelyReferenced` plus its stub is
+      8.9-10.9% of it. Tier 1 now that `F8`'s precondition is met (`F11`, `F12`), but
+      second: it should pre-size whatever buffer shape `L1` leaves behind.
+- [ ] **`L5` -- intern `CGColor`s and hoist the color space.** Floor ~5.5% (our own
+      construction), ceiling whatever of the dedup block `L1` leaves. Its stronger
+      form rests on a `CGColorCompare` pointer fast path the SDK does not document
+      (`D3`) -- do not pitch the big number.
+- [ ] **`L6` -- batch fills by color.** 7-19% inclusive and sharply
+      content-dependent (`F12`): 18.6% of the `content-churn` bracket, 7.0% of
+      `style-churn`'s. Size it from the inclusive figure, not `F12`'s entry row.
 - [ ] Optional tooling, not a decision rule: the per-draw run-count and
       glyph-call counters `F9` asks for, which would make `L1`/`L6` predictable
       in advance instead of only measurable afterwards.
@@ -162,7 +162,7 @@ unchecked remains gated.
 
 The remaining tier 2 and tier 3 leads (`L9`-`L13` minus `L4`, plus `L14`-`L15`) are
 deliberately absent from this ledger. `L4` is present because `D3` promoted it to
-tier 1 on `F12`'s evidence; the rest of tier 2 is available but unranked against
+tier 1 on `F12`'s evidence (`D4` keeps it there, second); the rest of tier 2 is available but unranked against
 tier 1 until tier 1 is spent, and tier 3 has no instrument that can score it and
 would need a new decision rule first.
 
@@ -704,57 +704,83 @@ produces, and `F9` says so.
   that no third thing changed between the two commits. Both commits are small and
   touch disjoint code, so the assumption is cheap, but it is an assumption.
 
-**Leaf weight inside the bracket, grouped by the mechanism each lead targets.**
-Additive, and this is the ranking table that replaces `F4`:
+**Bracket weight partitioned by which code owns it.** Every sample is charged to
+the nearest ancestor that names a mechanism, walking up past generic frames
+(`memmove`, `malloc`, retain/release, allocation lambdas, `shared_ptr`
+constructors). That walk is what makes this table trustworthy and the first
+version of it wrong -- see the correction below.
+
+| owner | `content-churn` | `style-churn` |
+| --- | ---: | ---: |
+| **CoreGraphics display-list entry recording** (`L1`, `L5`, `L6`) | 639 ms **59.4%** | 592 ms **58.4%** |
+| **Swift array / COW traffic in our run loop** (`L4`) | 264 ms **24.6%** | 247 ms **24.4%** |
+| our own Swift loop bodies (`L3`, `L13`, classification) | 88 ms 8.2% | 104 ms 10.3% |
+| other | 84 ms 7.8% | 70 ms 6.9% |
+
+Inside that 59%, what each entry costs:
 
 | mechanism | `content-churn` | `style-churn` |
 | --- | ---: | ---: |
-| `L4` Swift array / COW traffic | 272 ms **25.3%** | 283 ms **27.9%** |
-| `L1`+`L5` display-list state and color dedup | 247 ms **23.0%** | 223 ms **22.0%** |
-| `L1` glyph entry recording (per call) | 127 ms **11.8%** | 131 ms **12.9%** |
-| allocator | 72 ms 6.7% | 53 ms 5.2% |
-| CF retain / release | 34 ms 3.2% | 25 ms 2.5% |
-| `L13` `TerminalScalars` copy/consume | 25 ms 2.3% | 27 ms 2.7% |
-| `L3` sprite classification (residual) | 11 ms 1.0% | 20 ms 2.0% |
-| `L6` fill submission (leaf only -- see below) | 1 ms 0.1% | 0 ms 0.0% |
-| unattributed long tail (168 / 141 distinct leaves) | 286 ms 26.6% | 251 ms 24.8% |
+| per-entry color + state dedup (`L5` shrinks the cost, `L1` the count) | 287 ms **26.7%** | 276 ms **27.2%** |
+| glyph entry recording incl. payload copy (`L1`) | 202 ms **18.8%** | 219 ms **21.6%** |
+| fill entry recording (`L6`) | 12 ms 1.1% | 5 ms 0.5% |
+| entry + state allocation | the balance | the balance |
 
-- The unattributed bucket was inspected and holds nothing large: its biggest entry
-  is `drawTextRuns`'s own body at 2.7%, then a flat tail of sub-1% frames. It is
-  tail, not a hidden mechanism.
-- **`L6` reads as ~0% as a leaf and 7-19% inclusive**, because `fill(rect)`'s cost
-  is *inside* the recorder -- it lands in the state/color dedup group and the tail.
-  Size `L6` from the inclusive figure (`CGContextFillRect` 200 ms = 18.6% on
-  `content-churn`, 71 ms = 7.0% on `style-churn`), and treat the leaf row as a
-  reminder that batching fills buys entry-dedup work, not `fill` calls.
+- The dedup row's contents: `CGColorCompare` (5.4% / 4.0% as a leaf),
+  `CompareEntryStateDrawing`, red-black-tree inserts, `__CFStringEqual`,
+  `getEntryFillState`, `getEntryDrawingState`, `colorResourceForColor`,
+  `CGColorGetContentHeadroom`, `pow`, `CGColorSpaceCopyFlexGTCInfo`, `create_color`.
+- **`L6` reads at ~1% here but 7-19% inclusive** (`CGContextFillRect` 200 ms =
+  18.6% on `content-churn`, 71 ms = 7.0% on `style-churn`), because `fill(rect)`'s
+  cost lands inside the recorder and is charged to the entry rows above. Size `L6`
+  from the inclusive figure and read this row as "batching fills buys entry work,
+  not `fill` calls."
+- **Correction, recorded rather than quietly fixed, because the wrong version was
+  committed as `7faad34` and a decision was taken on it.** The first grouping
+  assigned each leaf by its own symbol name. That charged `_platform_memmove`
+  (6.7% / 7.5% of the bracket) to Swift array growth -- but its callers are
+  `DisplayListEntryGlyphs::setGlyphsAndPositions` (3.6% / 5.2%) and `CGColorCompare`
+  (2.1% / 2.2%): CoreGraphics copying the glyph payload and comparing colors, with
+  only 0.4% actually array growth. It also stranded 5.2% / 3.7% of display-list
+  entry allocation in an "unattributed" bucket because the leaf was an allocator
+  lambda. Fixing the walk moved `L4` **down** from 25-28% to 24.5% and `L1`'s own
+  share **up** from 11.8% to 18.8-21.6%, which reversed the ranking (`D3` -> `D4`).
+  The lesson is `F6`'s and `F8`'s one level down: **a generic leaf names an
+  operation, not a mechanism, and grouping by leaf symbol silently charges shared
+  primitives to whichever mechanism you listed first.**
 
-**Three things this changes.**
+**Four things this changes.**
 
-1. **`L4` is not spent.** `F11` and an earlier revision of this ledger said `L4`
-   was "mostly spent" because `L2` removed the ASCII glyph buffers. Wrong: Swift
-   array and COW traffic is still the **single largest mechanism in the bracket**
-   at 25-28%, ahead of everything else. `swift_isUniquelyReferenced_nonNull_native`
-   plus its DYLD stub alone is 8.9% / 10.9%, with `_platform_memmove` at 5.8% /
-   7.2% and `Array._getElement` / `_checkSubscript` / `append` /
-   `_reserveCapacityAssumingUniqueBuffer` filling the rest. `L2` removed three
-   arrays from one path; the rest of the run loop still appends per element. `L4`
-   is promoted to tier 1 on this evidence -- its precondition is met (`F11`,
-   `F8`) and it is now the largest item.
-2. **`L1` and `L5` are one mechanism, and the leaf census says which half is
-   cheap.** The 23% dedup group is not generic bookkeeping: its contents are
-   `CGColorCompare` (5.4% / 4.0%), `CompareEntryStateDrawing` (3.3% / 2.8%),
-   red-black-tree inserts (1.4% / 2.0%), `__CFStringEqual` (1.7% / 1.8%),
-   `getEntryFillState`, `getEntryDrawingState`, `CGColorGetContentHeadroom`, and
-   `pow` (1.9% / 2.0%). That is CoreGraphics **deduplicating each entry's color and
-   state against the resources it has already recorded, by value comparison**.
+1. **The bracket is a display-list recording cost, not a Swift cost.** Nearly 60%
+   of it is CoreGraphics building display-list entries, against 24.5% for all Swift
+   array and COW traffic in our run loop and 8-10% for our own loop bodies. `F5`
+   asserted that cost is per-entry rather than per-pixel; this is the first
+   measurement that *partitions* the bracket that way, and it means the three leads
+   that reduce entry count or per-entry cost (`L1`, `L5`, `L6`) collectively address
+   more than the rest of the bracket combined.
+2. **`L4` is not spent, but it is not the largest either.** `F11` and an earlier
+   revision of this ledger said `L4` was "mostly spent" because `L2` removed the
+   ASCII glyph buffers. That was wrong -- Swift array and COW traffic is still
+   24.5%, with `swift_isUniquelyReferenced_nonNull_native` plus its DYLD stub at
+   8.9% / 10.9% and `Array._getElement` / `_checkSubscript` / `append` /
+   `_reserveCapacityAssumingUniqueBuffer` behind it, because `L2` removed three
+   arrays from one path and the rest of the run loop still appends per element. But
+   the first version of this finding then over-corrected and called it the largest
+   item, which it is not (see the correction above). `L4`'s precondition is met
+   (`F8`, `F11`) so it is tier 1; it is not first.
+3. **`L1` and `L5` are one mechanism, and this says which half is which.** The
+   26.7% / 27.2% dedup block is not generic bookkeeping: `CGColorCompare`,
+   `CompareEntryStateDrawing`, red-black-tree inserts, `__CFStringEqual`,
+   `getEntryFillState`, `getEntryDrawingState`, `CGColorGetContentHeadroom`, `pow`,
+   `CGColorSpaceCopyFlexGTCInfo`. That is CoreGraphics **deduplicating each entry's
+   color and state against the resources it already recorded, by value comparison**.
    `F1` item 3 says DanTerm hands it a freshly allocated `CGColor` per color per
-   run, so every entry forces a full component compare and colorimetry. `L1`
-   reduces how many entries pay that; `L5` reduces the cost each payment incurs.
-   **`L5` is the Low-risk half of the same 23%**, and `pow` +
-   `CGColorGetContentHeadroom` appearing at all is direct evidence that per-draw
-   `CGColor` construction is doing colorimetric work a hoisted, interned color
-   would do once.
-3. **`content-churn` and `style-churn` are no longer interchangeable, so
+   run, so every entry forces a full component compare and colorimetry. **`L1`
+   reduces how many entries pay it; `L5` reduces what each payment costs** -- and
+   `pow` + `CGColorGetContentHeadroom` + `CGColorSpaceCopyFlexGTCInfo` appearing at
+   all is direct evidence that per-draw `CGColor` construction repeats colorimetric
+   work an interned color would do once.
+4. **`content-churn` and `style-churn` are no longer interchangeable, so
    `17/F4`'s assumption is now false where `F9` needs it most.** Their bracket
    *totals* are close (1,075 vs 1,013 ms), which is why `17/F4` read them as
    indistinguishable, but their *composition* diverges sharply: `drawTextRuns` is
@@ -811,7 +837,7 @@ Additive, and this is the ranking table that replaces `F4`:
 
 | # | Lead | Size | Note |
 | --- | --- | ---: | --- |
-| `L4` | **Replace per-element `Array.append` in the run loop with writes into pre-sized unsafe buffers.** | was 27% of `F4`'s bracket, unconfirmed; **now confirmed and measured at 25-28% of the live bracket** | **Promoted to tier 1 and to first position by `D3`.** It sat here only because `F8`'s inlining attribution was the shape `17/D5` retired a candidate for. `F11` met that precondition by deletion-and-measure and `F12` measured what remains: still the largest single mechanism in the bracket. |
+| `L4` | **Replace per-element `Array.append` in the run loop with writes into pre-sized unsafe buffers.** | was 27% of `F4`'s bracket, unconfirmed; **now confirmed and measured at 24.5% of the live bracket** | **Promoted to tier 1 by `D3`, and to second position by `D4`.** It sat here only because `F8`'s inlining attribution was the shape `17/D5` retired a candidate for. `F11` met that precondition by deletion-and-measure and `F12` measured what remains: the largest cost we own, though smaller than the CoreGraphics entry work `L1` targets. |
 | `L10` | **Multiple dirty rects.** Use `getRectsBeingDrawn(_:count:)` instead of the union `dirtyRect`, so damage on rows 3 and 60 stops repainting rows 3-60. | 0% on this workload; potentially large on real incremental output | `F1` item 5 + `F3`. Invisible to all three churn workloads (full-viewport damage) -- it would be decided by `incremental-mixed`, whose draw verdict is real but whose trace is ~1/6 instrument (`17/F2`). Correctness-positive regardless. |
 | `L11` | **View/layer configuration:** `isOpaque = true`, `wantsDefaultClipping = false`, `layerContentsRedrawPolicy = .onSetNeedsDisplay`, and drop one of the two background fills (`F1` item 6). | unmeasured; individually small | `F3`'s WWDC checklist. Cheap, low-risk, and each item is independently revertible. `isOpaque` has a visual precondition: the view must genuinely paint every pixel of its bounds, which `F1` item 6 says it does. |
 | `L12` | **Bypass the CoreText wrapper** for the common path: cache `CGFont` per face, `setFont` + `setFontSize` once, then `showGlyphs(_:at:)`. | ~2.7% of the bracket (`F6`) | **Strictly a subset of `L1`'s win.** Do not take it before `L1`; reconsider only if `L1` leaves a measurable wrapper residue. Loses CTFont matrix/variation handling, which DanTerm does not currently use but which a future font feature might. |
@@ -825,7 +851,7 @@ Additive, and this is the ranking table that replaces `F4`:
 | `L14` | **Rasterize into an owned bitmap and hand the layer a `CGImage`** via `wantsUpdateLayer`/`updateLayer`, eliminating display-list recording and CA's replay entirely, and enabling a scroll to become a blit of the previous frame. | The architectural answer to `F5`, and the only lead that could remove `17/F6`'s node rather than shrink it. It moves rasterization onto DanTerm's thread, so it would make the draw verdict *larger* while making total process CPU smaller -- i.e. it is scored `slower` by the only calibrated rule available. Needs a new decision rule before it can be attempted honestly. |
 | `L15` | **Metal glyph atlas.** | `09-renderer.md` defers it by design (`plan-terminal-engine/09-renderer.md:35, 62, 75`), and `F3` notes it is what every fast terminal did. Out of scope for a *CPU renderer* file; recorded so the ranking is not mistaken for a claim that the CPU path can win outright. |
 
-- Recommended order **as written on 2026-07-29 before any lead landed; see `D3`
+- Recommended order **as written on 2026-07-29 before any lead landed; see `D4`
   for the order in force**: `L3`, then `L2`, then `L1`, then `L6`/`L5`. `L3` first
   because it is a few lines, has a test that outlives it, and its ~5% is real:
   it establishes whether the draw verdict can see a change of that size at all,
@@ -918,6 +944,50 @@ Additive, and this is the ranking table that replaces `F4`:
   that re-reading is now cheap and mandatory: the last two commits moved the
   denominator by half, and nobody noticed until the capture.
 
+### D4 -- `L1` first after all, and the sequencing reason is structural, not just size
+
+- Status: **in force. Supersedes `D3`, which was decided on `F12`'s flawed first
+  grouping** (`memmove` charged to Swift array growth, entry allocation stranded as
+  unattributed). `D3` is left in place because the correction is instructive, not
+  because its order should be followed.
+- Corrected sizes, from `F12`'s caller-aware partition:
+
+| lead | `D3` said | `F12` corrected | risk | rank |
+| --- | ---: | ---: | --- | ---: |
+| `L1` batch glyph submission by (face, color) | ~12% own, 3rd | **18.8-21.6% own, plus most of the 26.7% dedup block it also shrinks** | Medium | **1st** |
+| `L4` pre-sized buffers instead of per-element `append` | 25-28%, 1st | **24.5%** | Low | **2nd** |
+| `L5` intern `CGColor`s + hoist the color space | up to 23%, 2nd | floor ~5.5%, ceiling the dedup block `L1` does not take | Low | 3rd |
+| `L6` batch fills by color | 7-19% | 7-19% inclusive, 1% as entry work | Low | 4th |
+
+- **`L1` first on size:** it is the only lead that reduces the *number* of
+  display-list entries on the text path, so it takes its own 18.8-21.6% and a
+  proportional share of the 26.7% dedup block and the entry allocation behind it.
+  Nothing else in tier 1 reaches half that.
+- **`L1` first on structure, which is the stronger reason.** `L4` pre-sizes the
+  run loop's buffers; `L1` *replaces* them, accumulating across all rows into one
+  buffer per (face, color) for the whole draw instead of one buffer per run. Taking
+  `L4` first means optimizing a buffer topology `L1` then deletes -- the work would
+  be thrown away and the second commit would be harder to review against the first.
+  **`L1` decides the buffer shape; `L4` pre-sizes whatever shape survives.** That
+  ordering is forced regardless of the sizes.
+- **`L5` moves after `L4`** because `L1` will already have collapsed most of the
+  entries whose per-entry color cost `L5` targets. Re-read the bracket before
+  pitching it; on `F12`'s evidence its floor is `F4`'s ~5.5% of *our own* `CGColor`
+  construction and its ceiling depends on how much dedup `L1` leaves behind.
+- **`F9`'s prediction is now live and this is the commit that fires it.**
+  `content-churn` must improve materially and `style-churn` little or not at all;
+  the two *disagreeing* is the expected result. `F12` finding 4 makes the read
+  sharper than `F9` could: the two workloads are now known to differ in composition
+  (`drawTextRuns` 68.4% vs 81.3%), so the baselines are measured rather than
+  assumed. If both move together by similar amounts, the entry-count mechanism
+  attributed across `F5`, `F6`, and `F12` is wrong and `D1`'s whole tier-1 rationale
+  needs re-examining, not just this lead.
+- Risk, restated from `D1` and unchanged by the re-ranking: draw order changes, so
+  all text of one color is submitted before another color's. Text runs do not
+  overlap by construction -- one glyph per cell at a cell-quantized position -- so
+  the composite is identical, **but that invariant must be asserted by a test, not
+  assumed**, and decorations and the cursor must stay ordered after text.
+
 ## Pre-rejected
 
 Inherits doc 17's list in full. Re-proposing anything there needs the kind of
@@ -993,16 +1063,17 @@ Added by this file:
 ## Outcome
 
 **Survey complete; ranked; `L3` (`F10`) and `L2` (`F11`) implemented and confirmed;
-bracket re-captured and the remainder re-ranked (`F12`, `D3`); the rest of Phase 4
+bracket re-captured and the remainder re-ranked (`F12`, `D4`); the rest of Phase 4
 still gated.** Fifteen leads, five of them decidable today by the frozen draw
 verdict, three pre-rejections added, one reading corrected before it reached code
 (`F6`), and one corrected after (`F11`'s withdrawn bound).
 
 The two landed commits cut the draw bracket from 1,879 ms to 1,075 ms of on-CPU
 time on `content-churn` (-42.8%, `F12`) -- corroborating the paired benchmark's
--49.4% on an independent instrument -- and the remaining tier 1 is worth roughly
-25% (`L4`), up to 23% (`L5`/`L1`, shared), and 7-19% (`L6`) of what is left,
-non-additively.
+-49.4% on an independent instrument -- and the bracket is now ~60%
+CoreGraphics display-list entry recording, which is what makes `L1` (18.8-21.6%
+plus the dedup block it shrinks) the largest remaining lead, ahead of `L4` (24.5%),
+`L5`, and `L6` -- non-additively.
 
 Eight results are worth more than the ranking:
 
@@ -1037,10 +1108,10 @@ Eight results are worth more than the ranking:
    change actually built skipped the surrounding buffer traffic too, so it
    measured ~4x larger. Both failures come from the same habit -- sizing a node
    instead of sizing the code path a specific edit removes.
-7. **A ranked lead list decays as soon as you start spending it** (`F12`, `D3`).
+7. **A ranked lead list decays as soon as you start spending it** (`F12`, `D4`).
    Two commits halved the bracket, and with it every share the ranking was built
-   from -- promoting `L4` from unconfirmed tier 2 to largest-remaining, reversing
-   `L5` and `L1`, and falsifying an inherited assumption that the two churn
+   from -- promoting `L4` from unconfirmed tier 2 into tier 1, re-sizing `L1`
+   upward, and falsifying an inherited assumption that the two churn
    workloads decompose alike. None of that was visible without a capture, and the
    ledger had explicitly argued a capture was unnecessary. **Re-measure the
    denominator after every landed lead, not after the last one.**
