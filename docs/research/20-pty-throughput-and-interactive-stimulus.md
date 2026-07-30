@@ -192,9 +192,18 @@ improvement as a failure.
       threshold in both modes, which is the same process `17/F15` ran and
       refused. **Recommendation made: admit, characterize the composition, then
       calibrate. Awaiting the user.**
-- [ ] Land the fixture and a runner, with provenance recording the geometry, the
+- [x] Land the fixture and a runner, with provenance recording the geometry, the
       btop version, the `--update 250` deviation, and the fact that a capture of
-      live system state is not regenerable.
+      live system state is not regenerable -- `6849c24`, resized in `8f7bddc`
+      after `F10`, wired for collection in `6108389`.
+- [x] Characterize the block's composition before calibrating anything --
+      recorded in `F10`, which found the draw tail is a constant and retired the
+      idea that this is a draw workload.
+- [x] Run the A/A screen and report the rule it implies -- recorded in `F11`;
+      three screens, the last two replicating.
+- [ ] `D4` freeze gate: move the screened thresholds into `DECISION_RULES` and
+      the workload into `WORKLOADS`, or leave it a candidate. **Recommendation
+      made: freeze the conservative envelope. Awaiting the user.**
 - [x] ~~Resolve the license question before the fixture is committed.~~
       Dismissed by the user, 2026-07-30; see `D3`.
 
@@ -587,6 +596,57 @@ improvement as a failure.
 - Next action: `D3`'s remaining leg -- the A/A screen, now with a specific
   question to answer rather than a box to tick.
 
+### F11 -- the workload screens decidable, at 2-3x the pair count of any existing one
+
+- Status: complete. Three A/A screens, the last two replicating.
+- Date: 2026-07-30. Trees `13f537ae` and `e54505ef` (script-only differences; the
+  measured app is identical). Machine idle, on AC, windows visible.
+  `scripts/terminal-benchmark-candidate-screen.py --workload synchronized-frames`.
+- Method: both physical arms bound to one immutable root, so every measured
+  difference is noise by construction; balanced ABBA/BAAB quartets; 50,000
+  resampling trials per condition; pair count searched cheapest-first alongside
+  the threshold, which an auxiliary metric cannot do (`17/F15`) and a workload
+  can, because it owns its blocks.
+
+  | screen | pairs | median | SD | trimmed SD | range | quick | confirm |
+  | --- | --- | --- | --- | --- | --- | --- | --- |
+  | 1 | 24 | -0.03% | 3.41% | -- | -16.01 .. +1.63 | 12p @1.05% | 12p @0.80% |
+  | 2 | 48 | +0.15% | 1.97% | 1.49% | -4.78 .. +5.06 | 6p @2.65% | 8p @2.15% |
+  | 3 | 48 | -0.26% | 1.83% | 1.30% | -6.08 .. +4.97 | 4p @2.50% | 8p @1.95% |
+
+- **Screen 1 is discarded as unrepresentative, and saying why matters.** Its SD
+  was set by a single pair of 24: one block ran 193 ms against a 164 ms median,
+  +18%, and its partner carried that to -16%. Drop that one block and the other
+  47 have CV **1.17%** -- *quieter than `scrollback-stream`'s 1.24%*. The
+  proposal it produced (12 pairs) was the resampler repeatedly drawing the bad
+  pair and failing the false-positive gate at every cheaper count.
+- **Screens 2 and 3 replicate**, which is what licenses reading them at all: SD
+  1.97/1.83, trimmed 1.49/1.30, confirm 8 pairs in both. That replication is the
+  finding -- one screen could not distinguish "unlucky series" from "unstable
+  workload", and the two possibilities have opposite conclusions.
+- Conservative envelope across the replicates -- max pair count, max threshold:
+  **quick 6 pairs at +/-2.65%, confirm 8 pairs at +/-2.15%.**
+- **The honest price.** `scrollback-stream` decides on 2 pairs (quick) and 4
+  (confirm). This workload wants 3x and 2x that, and lands on a *looser* confirm
+  threshold than its 1.85%. So it costs more machine time per verdict and
+  resolves less finely -- it earns its place on the path it covers (`F9`), not on
+  its statistics.
+- Caveats that belong with any rule taken from this:
+  - **Both false-positive rates sit against the ceiling** -- 0.0084 and 0.0095
+    against a 0.01 gate -- where `content-churn` and `style-churn` were screened
+    at 0.0000 (`17/F15`'s plan-time note). There is no margin here.
+  - **Confirm detection is thin**: 0.9437/0.9487 in screen 2 and 0.9170/0.9440 in
+    screen 3, against a 0.90 gate.
+  - **The tail is real and is not one bad block.** In screen 2, 8 of 48 pairs
+    exceed +/-3% and 5 exceed +/-4%, with no single dominating outlier. The
+    median-symmetric estimator absorbs it, which is why a rule clears at all.
+- Uncertainty: three screens on one machine on one afternoon. The tail's *cause*
+  is unidentified -- 193 ms against a 164 ms median is a 29 ms excess that landed
+  in drain, not draw, so it is not a rendering event. Not chased, because it does
+  not change the rule and `20` is not the file that owns queue occupancy (doc 19
+  is).
+- Next action: `D4`.
+
 ## Decision log
 
 ### D1 -- what the benchmark system should report about PTY throughput
@@ -765,6 +825,43 @@ improvement as a failure.
     The mechanical part still stands: `NeutralTerminalProvenance.validate`
     accepts only `libvterm`, `alacritty`, and `danterm` sources, so the fixture
     declares `danterm` and describes the subject in its provenance text.
+
+### D4 -- whether to freeze `synchronized-frames` as a deciding workload
+
+- Status: **recommendation made, awaiting user direction gate.** Moving a
+  threshold into `DECISION_RULES` is a human act by design; the screen writes a
+  report and never a rule.
+- Evidence used: `F9`, `F10`, `F11`.
+- Candidate solutions:
+  1. **Freeze the conservative envelope** (recommended). `DECISION_RULES["quick"]`
+     gets 6 pairs at +/-2.65%, `["confirm"]` 8 pairs at +/-2.15%; the workload
+     moves from `CANDIDATE_WORKLOADS` into `WORKLOADS`. It then runs in
+     `benchmark-confirm` alongside the other five.
+  2. **Freeze quick only.** Quick's gates clear with more room (detection 0.993
+     against confirm's 0.917-0.944); leave confirm descriptive.
+  3. **Leave it a candidate.** Keep it collectable and undecidable, run by hand
+     when a change plausibly touches the coalescing path.
+- Tradeoffs and correctness risks:
+  - (1) costs the most machine time of any workload in the set -- 6 pairs is 3x
+    `scrollback-stream`'s quick count -- and adds it to every
+    `benchmark-confirm`, which already runs five workloads. The gain is that the
+    only stimulus covering `F9`'s path can return a verdict rather than a number
+    someone has to interpret.
+  - (1) and (2) both inherit `F11`'s thin margins: false positives at 0.0084 and
+    0.0095 against a 0.01 gate. A rule that clears by that little will
+    occasionally cry wolf, and the mitigation is the one this corpus already
+    uses -- `quick` is a screen, `confirm` is the verdict.
+  - (3) is defensible and is what `17/D6` chose for process CPU. But the reason
+    that metric was refused does not apply here (`17/F15`: it could not buy more
+    pairs; this can, and did), so declining would be declining despite the
+    evidence rather than because of it.
+- Recommendation: **(1)**, with `F11`'s caveats recorded in
+  `agent-docs/terminal-performance.md` beside the rule, and the tail called out
+  explicitly so a future reader does not mistake a 4% A/A pair for a regression.
+- Direction review: pending.
+- Not decided here, and deliberately: the tail's cause. A 29 ms excess in drain
+  on ~1 block in 24 is a real phenomenon, but it belongs to whoever owns queue
+  occupancy (doc 19), not to the file that found it.
 
 ## Rejected
 
