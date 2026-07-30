@@ -933,10 +933,26 @@ public actor TerminalPTYHost {
         childExited()
     }
 
+    /// Reads at most `turnLimit` bytes, then returns and lets the level-triggered read
+    /// source re-fire for the remainder.
+    ///
+    /// The cap sizes the longest contiguous slice anything else can wait behind on this
+    /// queue, because a turn does not yield: the main actor's `queue.sync` drain fence,
+    /// every actor call, and the teardown acknowledgements all queue behind whatever turn
+    /// is running. Measured on `scrollback-stream`, worst-case fence wait tracks the
+    /// constant linearly across an 8x range -- 6.66ms at 64 KiB, 1.78ms at 16 KiB, 0.92ms
+    /// at 8 KiB -- because the parse rate is a stable ~10 MB/s and a fence reliably lands
+    /// at the start of a fresh turn.
+    ///
+    /// 16 KiB is where that stops being free. Shrinking a turn multiplies turns, and 8 KiB
+    /// took the flood workload's draw metric to a `slower` verdict (+5.1%, three of three
+    /// runs) for 0.86ms of further latency; 16 KiB holds `inconclusive` (+3.69% against the
+    /// uncapped tree). Lowering it further also stops working on the constant alone -- the
+    /// chunk buffer below is 16 KiB, so a turn is already a single `read`.
     private func readReady() {
         guard masterFD >= 0 else { return }
         var bytesReadThisTurn = 0
-        let turnLimit = 64 * 1024
+        let turnLimit = 16 * 1024
         var buffer = [UInt8](repeating: 0, count: 16 * 1024)
         while bytesReadThisTurn < turnLimit {
             let result = buffer.withUnsafeMutableBytes {
