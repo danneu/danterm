@@ -70,14 +70,14 @@ struct TerminalPTYHostTests {
         // Scenario: a child writes OSC 52, asks to read it, and remains alive for inspection.
         let host = try makeHost()
         _ = host.fencedFrameState()
-        let command = "printf '__READY__'; sleep 0.1; printf '\\033]52;c;aGVsbG8=\\007\\033]52;c;?\\007'; exec sleep 30"
+        let command = "\(printMarker("READY", newline: false)); sleep 0.1; printf '\\033]52;c;aGVsbG8=\\007\\033]52;c;?\\007'; exec sleep 30"
         await host.start(makeLaunchInput(command: command))
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
         _ = host.fencedFrameState()
 
         var clipboardWrite: String?
         for await _ in host.updates {
-            let state = await host.frameState()
+            let state = host.fencedFrameState()
             if state.clipboardWrite != nil {
                 clipboardWrite = state.clipboardWrite
                 break
@@ -444,9 +444,10 @@ struct TerminalPTYHostTests {
         let descendant = try taggedInt("__DESCENDANT__", in: output)
 
         #expect(output.contains("__FINAL_MARKER__"))
-        errno = 0
-        #expect(kill(pid_t(descendant), 0) == -1)
-        #expect(errno == ESRCH)
+        // Bounded rather than immediate for the same reason as the teardown ladder: the
+        // descendant dies when its write fails, and the reparented corpse is reaped by
+        // launchd on its own schedule, so `kill(pid, 0)` keeps succeeding for a moment.
+        #expect(await waitForProcessExit(descendant))
     }
 
     @Test("recorded output-resize-output order replays to the live Terminal", .timeLimit(.minutes(1)))
@@ -518,13 +519,18 @@ struct TerminalPTYHostTests {
         await host.close()
 
         for pid in ownedPIDs {
-            #expect(processExists(pid) == false, "Owned process \(pid) survived pane close")
+            #expect(
+                await waitForProcessExit(pid),
+                "Owned process \(pid) survived pane close"
+            )
         }
+        // Immediate on purpose: the claim is that the sibling was never signalled, and a
+        // bounded wait for something that must still be alive would only hide the opposite.
         #expect(processExists(siblingPID))
         #expect((await host.resourceSnapshot()).isReleased)
 
         await sibling.close()
-        #expect(processExists(siblingPID) == false)
+        #expect(await waitForProcessExit(siblingPID))
         #expect((await sibling.resourceSnapshot()).isReleased)
     }
 
@@ -601,8 +607,15 @@ struct TerminalPTYHostTests {
         await ordinary.start(makeLaunchInput(
             command: "exec \(try probeExecutable()) hold \"$0\""
         ))
-        for host in [stalled, chatty, ordinary] {
-            #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+        // Named, because these three fail for different reasons: a bare `host` in the message
+        // cannot say which pane never reported ready. The flooding one is the slow case --
+        // its child saturates its own owner queue, so even answering this call waits behind a
+        // read turn (measured 0.03s to 2.6s, against under a millisecond for the quiet two).
+        for (name, host) in [("stalled", stalled), ("chatty", chatty), ("ordinary", ordinary)] {
+            #expect(
+                await host.waitForOutput(containing: Array("__READY__".utf8)),
+                "the \(name) pane never reported ready"
+            )
         }
 
         stalled.send([UInt8](repeating: 65, count: 4 * 1024 * 1024))
@@ -1103,7 +1116,7 @@ struct TerminalPTYHostTests {
         //   no further child events.
         let host = try makeHost(captureTransitions: false)
         await host.injectTransientChildWaits(3)
-        await host.start(makeLaunchInput(command: "printf '__READY__\\n'; exit 7"))
+        await host.start(makeLaunchInput(command: "\(printMarker("READY")); exit 7"))
 
         let result = await value(
             of: Task { await host.waitForResult() },
@@ -1195,6 +1208,18 @@ private func scrollbackCommand(disableEcho: Bool = false) throws -> String {
     return "i=0; while [ $i -lt 40 ]; do printf 'line-%s\\n' \"$i\"; i=$((i+1)); done; \(echoPolicy)exec \(try probeExecutable()) hold \"$0\""
 }
 
+/// Shell that prints a `__MARKER__` the launch command itself never spells.
+///
+/// The command line is echoed to the tty before the child runs it, so a command
+/// containing its own marker satisfies `waitForOutput(containing:)` immediately: the
+/// wait then means "the shell read this line", not "the child reached this point", and
+/// the test proceeds against a pane that has produced nothing. Assembling the marker at
+/// runtime is what makes the wait mean what it reads as. `stty -echo` does not help --
+/// the line is echoed as it is read, before any command in it runs.
+private func printMarker(_ body: String, newline: Bool = true) -> String {
+    "m=\(body); printf '__%s__\(newline ? "\\n" : "")' \"$m\""
+}
+
 private func makeHost(captureTransitions: Bool = true) throws -> TerminalPTYHost {
     try TerminalPTYHost(
         initialDimensions: .init(columns: 80, rows: 24),
@@ -1277,6 +1302,26 @@ private struct InitialInputCase {
 private func processExists(_ processID: Int) -> Bool {
     errno = 0
     return kill(pid_t(processID), 0) == 0 || errno == EPERM
+}
+
+/// Waits for `processID` to leave the process table, which teardown does not do synchronously.
+///
+/// `kill(pid, 0)` still succeeds for a zombie, and a pane's owned jobs are the probe leader's
+/// children: once the leader dies they are reparented and reaped by launchd, on its schedule
+/// rather than ours. Asserting absence the instant `close()` returns therefore measures the
+/// reaper's latency and not the teardown ladder, and it fails under load for a pane that
+/// converged correctly. The bound keeps the real claim -- teardown converges -- while still
+/// failing for a job actually left running.
+private func waitForProcessExit(
+    _ processID: Int,
+    within limit: Duration = .seconds(10)
+) async -> Bool {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: limit)
+    while processExists(processID), clock.now < deadline {
+        try? await Task.sleep(for: .milliseconds(20))
+    }
+    return processExists(processID) == false
 }
 
 private func openFileDescriptorCount() throws -> Int {

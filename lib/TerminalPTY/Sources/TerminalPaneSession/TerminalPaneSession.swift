@@ -199,9 +199,21 @@ public final class TerminalPaneSessionController {
                 } else {
                     transitions = nil
                 }
-                let frameState = await host.frameState()
                 guard let self, self.isTornDown == false else { break }
-                self.consume(frameState: frameState, result: result, transitions: transitions)
+                // Drained synchronously, not with `await host.frameState()`: the drain hands
+                // over damage exactly once, so it has to be indivisible from the `consume`
+                // that records it. An awaited drain resolves on the host's queue and delivers
+                // on the main actor, and any fence landing in that gap (`synchronizeState`,
+                // `diagnosticCapture`, `readSelectedTextSynchronizing`) sees a terminal newer
+                // than the damage still in flight -- so it plans reusing rows that did move,
+                // and the pane keeps stale content until later damage happens to cover it.
+                // Fencing here instead puts both halves in one main-actor step, which is what
+                // makes the gap unrepresentable rather than merely unlikely.
+                self.consume(
+                    frameState: host.fencedFrameState(),
+                    result: result,
+                    transitions: transitions
+                )
             }
         }
     }

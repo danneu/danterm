@@ -148,12 +148,30 @@ static int run_eof_first_probe(void) {
     return 6;
 }
 
+// Releases the descendant's flood once the leader's markers are out.
+static int exit_first_pipe[2] = {-1, -1};
+
+// The descendant floods the same pty the leader writes its markers to, so it waits for the
+// go-ahead rather than starting immediately. Without that, the flood can land inside the
+// leader's own line -- a partial write to a full pty buffer resumes only after the
+// descendant's next 4 KiB -- and `__DESCENDANT__=<pid>` reaches the reader split in two,
+// which no line-oriented parse can recover. What this probe exists to exercise is a
+// descendant holding the slave open across the leader's exit, and that is unchanged by
+// starting the flood a moment later. A leader that dies first closes the write end, so the
+// descendant is released by EOF too and can never be stranded.
 static int run_exit_first_probe(void) {
+    if (pipe(exit_first_pipe) < 0) {
+        return 78;
+    }
     pid_t descendant = fork();
     if (descendant < 0) {
         return 78;
     }
     if (descendant == 0) {
+        close(exit_first_pipe[1]);
+        uint8_t go = 0;
+        while (read(exit_first_pipe[0], &go, sizeof(go)) < 0 && errno == EINTR) {
+        }
         uint8_t bytes[4096];
         memset(bytes, 'x', sizeof(bytes));
         for (;;) {
@@ -162,9 +180,12 @@ static int run_exit_first_probe(void) {
             }
         }
     }
+    close(exit_first_pipe[0]);
     printf("__DESCENDANT__=%d\n", descendant);
     printf("__FINAL_MARKER__\n");
     fflush(stdout);
+    uint8_t go = 1;
+    (void)write_all(exit_first_pipe[1], &go, sizeof(go));
     _exit(9);
 }
 

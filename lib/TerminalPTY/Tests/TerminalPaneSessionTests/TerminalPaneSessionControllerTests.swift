@@ -255,9 +255,15 @@ struct TerminalPaneSessionControllerTests {
         // Why it exists: recovery reads primary history only after this payload-free signal fires.
         // Scenario: a child changes cursor/presentation, visits alternate, then prints primary text.
         let host = try makeHost()
-        let command = "stty -echo; printf '__READY__'; read ignored; "
-            + "printf '\\033[2;2H\\033[?25l\\033[?1049hALT\\033[?1049l'; "
-            + "read ignored; printf '__PRIMARY__'; exec sleep 30"
+        // `A%sT` and `printMarker` keep every awaited marker out of the command text. The line
+        // is echoed to the tty before the `stty -echo` in it can run, so a literal `ALT` here
+        // satisfies the wait below at startup -- before the child has visited the alternate
+        // screen at all. That left the alternate-then-primary ordering this test is about up to
+        // scheduling, and let the `__PRIMARY__` assertion pass off the echo rather than off the
+        // child's output.
+        let command = "stty -echo; \(printMarker("READY", newline: false)); read ignored; "
+            + "printf '\\033[2;2H\\033[?25l\\033[?1049hA%sT\\033[?1049l' L; "
+            + "read ignored; \(printMarker("PRIMARY", newline: false)); exec sleep 30"
         let controller = TerminalPaneSessionController(
             host: host,
             launchInput: makeLaunchInput(command: command)
@@ -297,7 +303,7 @@ struct TerminalPaneSessionControllerTests {
         let host = try makeHost()
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: "stty -echo; printf '__READY__\\n'")
+            launchInput: makeLaunchInput(command: "stty -echo; \(printMarker("READY"))")
         )
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
 
@@ -360,6 +366,12 @@ struct TerminalPaneSessionControllerTests {
     }
     @Test("visible creation retains one full frame and repeat synchronization is idle")
     func visibleCreationRetainsInitialFrame() async throws {
+        // Intent: a visible pane holds a full-damage plan from construction, and fencing
+        //   again once the pane's output is consumed publishes nothing further.
+        // Why it exists: the construction-time frame is what lets a pane draw before its
+        //   child writes anything, and the idle half is what stops every recovery
+        //   checkpoint from costing a redraw.
+        // Scenario: a pane launches a silent long-running command and the app fences twice.
         let host = try makeHost()
         let controller = TerminalPaneSessionController(
             host: host,
@@ -370,9 +382,28 @@ struct TerminalPaneSessionControllerTests {
 
         #expect(controller.currentPlan != nil)
         #expect(controller.currentDamage == .full)
-        controller.synchronizeState()
-        controller.synchronizeState()
-        #expect(frames.isEmpty)
+
+        // `sleep 30` writes nothing, but the tty echoes the launch command line back, so the
+        // pane is never output-free and "no frame at all" just races that echo -- including
+        // the echoed newline, which can arrive as its own chunk after the text.
+        //
+        // So the idle claim is tested against its own premise rather than against a guess
+        // about when the echo lands: a fence that finds the terminal unchanged must publish
+        // nothing. Pairs where output did arrive prove nothing either way and are skipped,
+        // and the count below is what stops every pair from being skipped silently.
+        var idlePairs = 0
+        for _ in 0..<200 where idlePairs < 3 {
+            controller.synchronizeState()
+            let published = frames.count
+            let before = controller.terminalSnapshot()
+            controller.synchronizeState()
+            if controller.terminalSnapshot() == before {
+                idlePairs += 1
+                #expect(frames.count == published, "an idle fence published a frame")
+            }
+            await Task.yield()
+        }
+        #expect(idlePairs == 3, "the pane never went idle, so idleness was never tested")
 
         controller.tearDown()
         await host.close()
@@ -405,7 +436,7 @@ struct TerminalPaneSessionControllerTests {
         // Why it exists: visibility and damage gates must not suppress grid-silent semantic effects.
         // Scenario: a hidden pane receives a remote OSC 52 write and synchronously fences it.
         let host = try makeHost()
-        let command = "printf '__READY__'; read ignored; printf '\\033]52;c;aGVsbG8=\\007'; exec sleep 30"
+        let command = "\(printMarker("READY", newline: false)); read ignored; printf '\\033]52;c;aGVsbG8=\\007'; exec sleep 30"
         let controller = TerminalPaneSessionController(
             host: host,
             launchInput: makeLaunchInput(command: command),
@@ -629,7 +660,7 @@ struct TerminalPaneSessionControllerTests {
         let host = try makeHost()
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: "printf '__READY__\\n'")
+            launchInput: makeLaunchInput(command: printMarker("READY"))
         )
         var plans: [RenderFramePlan] = []
         controller.onFrame = { plans.append($0.plan) }
@@ -697,14 +728,14 @@ struct TerminalPaneSessionControllerTests {
         let host = try makeHost()
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: "printf '__READY__\\n'"),
+            launchInput: makeLaunchInput(command: printMarker("READY")),
             isVisible: false
         )
         var plans: [RenderFramePlan] = []
         controller.onFrame = { plans.append($0.plan) }
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
 
-        controller.sendText("printf '__HIDDEN_OUTPUT__\\n'\n")
+        controller.sendText("printf '__HIDDEN_%s__\\n' OUTPUT\n")
         #expect(await host.waitForOutput(containing: Array("__HIDDEN_OUTPUT__".utf8)))
         controller.synchronizeState()
 
@@ -817,7 +848,7 @@ struct TerminalPaneSessionControllerTests {
         let host = try makeHost()
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: "printf '__READY__\\n'")
+            launchInput: makeLaunchInput(command: printMarker("READY"))
         )
         var ended: [PaneLifecycleResult] = []
         let resultChannel = AsyncStream<PaneLifecycleResult>.makeStream(
@@ -961,7 +992,11 @@ struct TerminalPaneSessionControllerTests {
         let host = try makeHost()
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: "printf '__READY__\\n'; cat")
+            // `stty -echo` is what makes the two waits below mean what they read as: with echo
+            // left on, a marker sent as input arrives twice -- once from the tty, once from
+            // `cat` -- and `waitForOutput` returns on the first, mid-scenario. `printMarker`
+            // covers the other direction for the readiness wait.
+            launchInput: makeLaunchInput(command: "stty -echo; \(printMarker("READY")); cat")
         )
         var plans: [RenderFramePlan] = []
         controller.onFrame = { plans.append($0.plan) }
@@ -976,7 +1011,10 @@ struct TerminalPaneSessionControllerTests {
         #expect(await host.waitForOutput(containing: Array("__AFTER__".utf8)))
         controller.synchronizeState()
 
-        let finalTerminal = host.fencedSnapshot()
+        // The controller's own fenced terminal, not a second `host.fencedSnapshot()`: a
+        // separate later fence can see output that arrived after the plan was published,
+        // which fails the comparison for a reason this test is not about.
+        let finalTerminal = controller.terminalSnapshot()
         let expected = planFrame(
             for: finalTerminal,
             presentation: RenderPresentation(
@@ -985,7 +1023,90 @@ struct TerminalPaneSessionControllerTests {
                 cursorShape: finalTerminal.presentation.cursorShape
             )
         )
+        #expect(finalTerminal.fullHistoryText.contains("__AFTER__"))
         #expect(try #require(plans.last) == expected)
+
+        controller.tearDown()
+        await host.close()
+    }
+
+    @Test("every synchronization fence leaves the plan stream current", .timeLimit(.minutes(1)))
+    func synchronizeStateNeverPublishesAStaleRow() async throws {
+        // Intent: after any `synchronizeState()`, the newest published plan equals a
+        //   from-scratch plan of the terminal that fence returned.
+        // Why it exists: damage is drained on the host's queue but consumed on the main
+        //   actor, so a synchronous fence can land between an asynchronous drain and its
+        //   delivery -- advancing the cached terminal while the rows that moved are still
+        //   in flight. Row reuse then copies rows from a frame that predates them, which
+        //   surfaces as a cursor left unpainted or a row frozen at old content. The
+        //   assertion is deliberately main-actor-local: both operands come from the
+        //   controller, so nothing here depends on when the child writes.
+        // Scenario: a pane rewrites viewport rows in place while the app fences repeatedly
+        //   for recovery checkpoints -- the ordinary steady state of a live pane.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            // `-echo` so each write below comes back exactly once, from `cat`, and `-icanon`
+            // so it comes back at all: the writes carry no newline, and a canonical-mode tty
+            // holds input from its reader until one arrives.
+            launchInput: makeLaunchInput(
+                command: "stty -echo -icanon; \(printMarker("READY")); cat"
+            )
+        )
+        var plans: [RenderFramePlan] = []
+        controller.onFrame = { plans.append($0.plan) }
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+
+        // The pane's output is driven from here, one small write per fence, rather than by a
+        // child looping on its own. A child flooding the pty saturates the host's queue, and
+        // every `synchronizeState` then blocks behind a read turn -- around 115ms per fence,
+        // which is slow enough that the fence count needed to cover the race runs into the
+        // test's own time limit. Pacing the writes keeps each fence cheap while still leaving
+        // output in flight across it, which is the only condition the race needs.
+        var checks = 0
+        var mismatches = 0
+        var firstMismatch = ""
+        for fence in 0..<120 {
+            // Absolute row addressing inside the first 20 rows, never past column 80: any
+            // scroll reports full damage, which replans every row and would hide the stale
+            // reuse this test exists to catch.
+            controller.sendText("\u{1B}[\(fence % 20 + 1);1Hmark \(fence) ")
+            controller.synchronizeState()
+            let snapshot = controller.terminalSnapshot()
+            guard let published = plans.last else {
+                await Task.yield()
+                continue
+            }
+            checks += 1
+            let fresh = planFrame(
+                for: snapshot,
+                presentation: RenderPresentation(
+                    theme: .dark,
+                    isCursorVisible: snapshot.presentation.isCursorVisible,
+                    cursorShape: snapshot.presentation.cursorShape
+                )
+            )
+            // Counted rather than asserted per iteration: a whole `RenderFramePlan` in the
+            // failure message buries the one field that differs under every field that does not.
+            if published != fresh {
+                mismatches += 1
+                if firstMismatch.isEmpty {
+                    firstMismatch = """
+                        fence \(fence): background \(published.backgroundRuns == fresh.backgroundRuns) \
+                        text \(published.textRuns == fresh.textRuns) \
+                        decoration \(published.decorationRuns == fresh.decorationRuns) \
+                        cursor \(published.cursor == fresh.cursor) \
+                        selection \(published.selectionRuns == fresh.selectionRuns)
+                        """
+                }
+            }
+            await Task.yield()
+        }
+        #expect(mismatches == 0, "\(mismatches) of \(checks) fences disagreed -- \(firstMismatch)")
+        // A run whose pane produced almost nothing never opened the window, so a green result
+        // would say nothing about the race.
+        #expect(checks > 90, "only \(checks) of 120 fences saw a published plan")
+        #expect(plans.count > 20, "the pane published only \(plans.count) frames")
 
         controller.tearDown()
         await host.close()
@@ -1029,11 +1150,11 @@ struct TerminalPaneSessionControllerTests {
         let host = try makeHost()
         let controller = TerminalPaneSessionController(
             host: host,
-            launchInput: makeLaunchInput(command: "printf '__READY__\\n'"),
+            launchInput: makeLaunchInput(command: printMarker("READY")),
             isVisible: false
         )
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
-        controller.sendText("printf '__FINAL_CHECKPOINT__\\n'\n")
+        controller.sendText("printf '__FINAL_%s__\\n' CHECKPOINT\n")
         #expect(await host.waitForOutput(containing: Array("__FINAL_CHECKPOINT__".utf8)))
 
         controller.tearDown()
@@ -1362,7 +1483,7 @@ struct TerminalPaneSessionControllerTests {
             releasedHost = host
             let controller = TerminalPaneSessionController(
                 host: host,
-                launchInput: makeLaunchInput(command: "printf '__READY__\\n'")
+                launchInput: makeLaunchInput(command: printMarker("READY"))
             )
             releasedController = controller
             #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
@@ -1387,6 +1508,18 @@ struct TerminalPaneSessionControllerTests {
         #expect(releasedController == nil)
         #expect(releasedHost == nil)
     }
+}
+
+/// Shell that prints a `__MARKER__` the launch command itself never spells.
+///
+/// The command line is echoed to the tty before the child runs it, so a command
+/// containing its own marker satisfies `waitForOutput(containing:)` immediately: the
+/// wait then means "the shell read this line", not "the child reached this point", and
+/// the test proceeds against a pane that has produced nothing. Assembling the marker at
+/// runtime is what makes the wait mean what it reads as. `stty -echo` does not help --
+/// the line is echoed as it is read, before any command in it runs.
+private func printMarker(_ body: String, newline: Bool = true) -> String {
+    "m=\(body); printf '__%s__\(newline ? "\\n" : "")' \"$m\""
 }
 
 private func makeHost(

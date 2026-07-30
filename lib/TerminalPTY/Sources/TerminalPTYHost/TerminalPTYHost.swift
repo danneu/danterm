@@ -375,10 +375,12 @@ public actor TerminalPTYHost {
         terminal
     }
 
-    /// Drains render damage while returning the newest immutable terminal value.
-    public func frameState() -> TerminalPTYFrameState {
-        drainedFrameState()
-    }
+    // Deliberately no `async` counterpart to `fencedFrameState()`. Draining hands each row's
+    // damage to exactly one caller, so the drain and the bookkeeping that records it have to
+    // be one indivisible step. An awaited drain resolves here and delivers on the consumer's
+    // actor, and a synchronous fence taken in that gap reads a terminal newer than the damage
+    // still in flight -- it then reuses rows that did move, and the pane holds stale content
+    // until later damage happens to cover it. Every drain therefore goes through the fence.
 
     /// Fences earlier owner-queue work for synchronous session recovery reads.
     nonisolated public func fencedSnapshot() -> Terminal {
