@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
-"""Collect an A/A plan-time series and choose fixed-N decision rules from it.
+"""Collect an A/A series for one auxiliary per-block metric and choose fixed-N rules from it.
 
 The paired comparison decides `faster`/`slower`/`equivalent` from the serialized
-draw metric alone. That metric brackets clipping and drawing, so it structurally
-cannot observe `planFrame`, which runs on the PTY-output path; plan time is
-therefore reported beside the verdict as descriptive evidence with no thresholds
-behind it. Giving it a verdict needs exactly what the draw rules already have:
-an A/A series measuring the same tree against itself, and thresholds chosen so
-that series' own noise almost never reads as a direction.
+draw metric alone. That metric brackets clipping and drawing on the main thread,
+so it structurally cannot observe `planFrame`, which runs on the PTY-output path,
+nor any work on another thread at all; those quantities are therefore reported
+beside the verdict as descriptive evidence with no thresholds behind them. Giving
+one a verdict needs exactly what the draw rules already have: an A/A series
+measuring the same tree against itself, and thresholds chosen so that series' own
+noise almost never reads as a direction.
+
+Which quantity is screened is chosen per run by `--metric`, from
+`terminal-benchmark-compare.CALIBRATABLE_METRIC_TABLES`. Plan time was the first
+and the file is still named for it, because doc 8's record cites this path and
+that record is append-only.
 
 This script collects that series and reports the rule it implies. It never edits
 the frozen rules -- `terminal-benchmark-validation.DECISION_RULES` stays a
@@ -49,18 +55,35 @@ COMPARE = _load(
     "terminal_benchmark_compare", "scripts/terminal-benchmark-compare.py"
 )
 
-# Only the workloads whose blocks carry a plan-time measurement can calibrate a
-# plan-time rule. `terminal-feed` never plans and `scrollback-stream` reports one
-# final draw rather than a normalized per-draw series.
-PLAN_WORKLOADS = tuple(COMPARE.AUXILIARY_BLOCK_METRICS)
+METRIC_TABLES = COMPARE.CALIBRATABLE_METRIC_TABLES
+DEFAULT_METRIC = "plan"
 QUARTET_PATTERNS = COMPARE.QUARTET_PATTERNS
 # The thresholds a rule may claim. Only the threshold is searched; the pair count
-# comes from the mode's existing draw rule, because plan time is measured on the
-# same blocks and cannot buy itself more of them.
+# comes from the mode's existing draw rule, because an auxiliary metric is
+# measured on the same blocks and cannot buy itself more of them.
 THRESHOLD_GRID = tuple(round(1.0 + 0.25 * step, 2) for step in range(37))
 
 
-def make_aa_schedule(workloads, quartets):
+def metric_workloads(metric):
+    """Name the workloads whose blocks carry one metric, refusing an unknown metric by name.
+
+    Only the workloads whose blocks carry a measurement can calibrate a rule for
+    it: `terminal-feed` never plans a frame and `scrollback-stream` reports one
+    final draw rather than a normalized per-draw series, so neither appears in any
+    auxiliary table. Refusing here rather than at pairing time is the point: an
+    unknown metric and a workload that never reports it are both mistakes that
+    would otherwise surface only after the machine has spent an hour collecting.
+    """
+    table = METRIC_TABLES.get(metric)
+    if table is None:
+        raise ValueError(
+            f"unknown metric {metric}; expected one of "
+            f"{', '.join(sorted(METRIC_TABLES))}"
+        )
+    return tuple(table)
+
+
+def make_aa_schedule(workloads, quartets, *, metric=DEFAULT_METRIC):
     """Lay out a balanced A/A schedule whose two roles resolve to the same arm.
 
     Position balance still matters with one binary: block order, thermal drift,
@@ -69,9 +92,12 @@ def make_aa_schedule(workloads, quartets):
     """
     if quartets <= 0:
         raise ValueError("an A/A series requires at least one quartet")
-    unknown = [name for name in workloads if name not in PLAN_WORKLOADS]
+    carriers = metric_workloads(metric)
+    unknown = [name for name in workloads if name not in carriers]
     if unknown:
-        raise ValueError(f"workloads carry no plan metric: {sorted(unknown)}")
+        raise ValueError(
+            f"workloads carry no {metric} metric: {sorted(unknown)}"
+        )
     if not workloads:
         raise ValueError("an A/A series requires at least one workload")
     schedule = {}
@@ -88,7 +114,9 @@ def make_aa_schedule(workloads, quartets):
     return schedule
 
 
-def collect_quartets(workload, collector, *, quartets, maximum_attempts, emit=None):
+def collect_quartets(
+    workload, collector, *, quartets, maximum_attempts, metric=DEFAULT_METRIC, emit=None
+):
     """Collect complete quartets one at a time, discarding and retrying invalid ones.
 
     A comparison voids its whole invocation on one invalid block, because a
@@ -102,7 +130,7 @@ def collect_quartets(workload, collector, *, quartets, maximum_attempts, emit=No
     """
     if maximum_attempts < 1:
         raise ValueError("collection requires at least one attempt per quartet")
-    pattern_blocks = make_aa_schedule((workload,), quartets)[workload]
+    pattern_blocks = make_aa_schedule((workload,), quartets, metric=metric)[workload]
     kept = []
     discarded = 0
     for index in range(quartets):
@@ -138,23 +166,23 @@ def collect_quartets(workload, collector, *, quartets, maximum_attempts, emit=No
     return kept, discarded
 
 
-def plan_quartets(workload, raw_blocks):
-    """Reduce collected blocks to the quartet-grouped plan-time paired differences.
+def auxiliary_quartets(workload, raw_blocks, *, metric=DEFAULT_METRIC):
+    """Reduce collected blocks to one metric's quartet-grouped paired differences.
 
     Grouped rather than flat because resampling draws whole quartets: adjacent
     pairs within one share a thermal and scheduling neighborhood, and flattening
     would let calibration assume an independence the measurement does not have.
     """
-    metric = COMPARE.AUXILIARY_BLOCK_METRICS.get(workload)
-    if metric is None:
-        raise ValueError(f"{workload} carries no plan-time metric")
+    if workload not in metric_workloads(metric):
+        raise ValueError(f"{workload} carries no {metric} metric")
+    field = METRIC_TABLES[metric][workload]
     if not raw_blocks or len(raw_blocks) % 4:
         raise ValueError(f"{workload} calibration requires complete quartets")
-    missing = [block["index"] for block in raw_blocks if block.get(metric) is None]
+    missing = [block["index"] for block in raw_blocks if block.get(field) is None]
     if missing:
         raise ValueError(
-            f"{workload} blocks {missing} report no plan time; the measured arm "
-            "predates the plan timer"
+            f"{workload} blocks {missing} report no {field}; the measured arm "
+            "predates that timer"
         )
     quartets = []
     for offset in range(0, len(raw_blocks), 4):
@@ -168,7 +196,7 @@ def plan_quartets(workload, raw_blocks):
                 )
             pairs.append(
                 CALIBRATION.symmetric_difference(
-                    by_role["A"][metric], by_role["B"][metric]
+                    by_role["A"][field], by_role["B"][field]
                 )
             )
         quartets.append(pairs)
@@ -293,8 +321,9 @@ def quartets_from_report(report):
 
 def render_report(report):
     """Render the proposed rule in the terms a human needs to freeze or reject it."""
+    metric = report.get("metric", DEFAULT_METRIC)
     lines = [
-        f"plan-time A/A calibration from {report['arm']['revision']} "
+        f"{metric} A/A calibration from {report['arm']['revision']} "
         f"(tree {report['arm']['tree'][:12]})",
     ]
     for workload, result in report["workloads"].items():
@@ -316,7 +345,7 @@ def render_report(report):
                 lines.append(
                     f"    {mode}: no threshold clears the gates at its "
                     f"{COMPARE.decision_rule(mode)['workloads'][workload]['pairCount']}"
-                    " pairs -- keep reporting plan time descriptively"
+                    f" pairs -- keep reporting {metric} descriptively"
                 )
                 continue
             lines.append(
@@ -336,6 +365,7 @@ def run_calibration(
     revision,
     workloads,
     quartets,
+    metric=DEFAULT_METRIC,
     trials,
     seed,
     repository_root,
@@ -349,12 +379,13 @@ def run_calibration(
     monotonic=time.monotonic,
 ):
     """Collect one A/A series per workload and report the rule each one implies."""
+    metric_workloads(metric)
     resolve_baseline = resolve_baseline or SNAPSHOT.resolve_baseline
     materialize = materialize or SNAPSHOT.materialize_arm
     started = monotonic()
     arm_source = resolve_baseline(repository_root, revision)
     arm = materialize(repository_root, arm_source, cache_root=cache_root)
-    schedule = make_aa_schedule(workloads, quartets)
+    schedule = make_aa_schedule(workloads, quartets, metric=metric)
     artifacts = _run_directory(artifacts_root, arm_source["tree"])
     collectors, close = make_collectors(
         schedule,
@@ -370,6 +401,7 @@ def run_calibration(
                 collectors[workload],
                 quartets=quartets,
                 maximum_attempts=maximum_attempts,
+                metric=metric,
                 emit=emit,
             )
     finally:
@@ -381,7 +413,7 @@ def run_calibration(
         series_quartets = [
             pairs
             for blocks in kept
-            for pairs in plan_quartets(workload, blocks)
+            for pairs in auxiliary_quartets(workload, blocks, metric=metric)
         ]
         modes = {}
         for mode in COMPARE.MODES:
@@ -402,7 +434,8 @@ def run_calibration(
 
     report = {
         "schemaVersion": 1,
-        "purpose": "plan-time-aa-calibration-only",
+        "purpose": f"{metric}-aa-calibration-only",
+        "metric": metric,
         "arm": {**arm_source, "root": arm["root"], "cacheHit": arm["cacheHit"]},
         "quartetsPerWorkload": quartets,
         "trialCountPerCondition": trials,
@@ -410,7 +443,7 @@ def run_calibration(
         "workloads": results,
         "wallSeconds": monotonic() - started,
     }
-    (artifacts / "plan-calibration.json").write_text(
+    (artifacts / f"{metric}-calibration.json").write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     (artifacts / "blocks.json").write_text(
@@ -442,18 +475,20 @@ def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--revision", default=None)
     parser.add_argument(
+        "--metric",
+        choices=sorted(METRIC_TABLES),
+        default=DEFAULT_METRIC,
+        help="which auxiliary per-block quantity to screen",
+    )
+    parser.add_argument(
         "--reanalyze",
         type=pathlib.Path,
         default=None,
-        help="decide a stored plan-calibration.json again without re-measuring",
+        help="decide a stored calibration report again without re-measuring",
     )
-    parser.add_argument(
-        "--workload",
-        action="append",
-        dest="workloads",
-        choices=PLAN_WORKLOADS,
-        default=None,
-    )
+    # Not `choices=`: which workloads are valid depends on `--metric`, and the
+    # check belongs to `make_aa_schedule`, which owns the metric tables.
+    parser.add_argument("--workload", action="append", dest="workloads", default=None)
     parser.add_argument("--quartets", type=int, default=12)
     # The grid searches 6 pair counts x 37 thresholds x 2 modes per workload, and
     # every cell resamples independently, so trial count multiplies out fast: the
@@ -468,12 +503,11 @@ def main(argv=None):
         type=pathlib.Path,
         default=ROOT / ".build" / "terminal-benchmark-arms",
     )
-    parser.add_argument(
-        "--artifacts-root",
-        type=pathlib.Path,
-        default=ROOT / ".build" / "terminal-benchmark-plan-calibration",
-    )
+    parser.add_argument("--artifacts-root", type=pathlib.Path, default=None)
     arguments = parser.parse_args(argv)
+    artifacts_root = arguments.artifacts_root or (
+        ROOT / ".build" / f"terminal-benchmark-{arguments.metric}-calibration"
+    )
     if arguments.reanalyze is not None:
         stored = json.loads(arguments.reanalyze.read_text(encoding="utf-8"))
         print(render_report({
@@ -489,13 +523,14 @@ def main(argv=None):
         parser.error("--revision is required unless --reanalyze is given")
     run_calibration(
         revision=arguments.revision,
-        workloads=tuple(arguments.workloads or PLAN_WORKLOADS),
+        workloads=tuple(arguments.workloads or metric_workloads(arguments.metric)),
+        metric=arguments.metric,
         quartets=arguments.quartets,
         trials=arguments.trials,
         seed=arguments.seed,
         repository_root=arguments.repository_root,
         cache_root=arguments.cache_root,
-        artifacts_root=arguments.artifacts_root,
+        artifacts_root=artifacts_root,
     )
     return 0
 

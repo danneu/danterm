@@ -73,16 +73,32 @@ AUXILIARY_BLOCK_METRICS = {
 # found the app's largest single cost, Core Animation recomputing per-glyph
 # bounds during display-list replay, living precisely there.
 #
-# Kept out of `AUXILIARY_BLOCK_METRICS` rather than added to it because that
-# table is the plan calibrator's input (`PLAN_WORKLOADS`) and drives the
-# `planWorkloads` rule lookup. No calibration exists for this metric yet, so it
-# is reported unclassified on every workload, which is what an uncalibrated
-# metric is allowed to be. Moving an entry here into the table above is what
-# calibrating it would mean.
+# Kept out of `AUXILIARY_BLOCK_METRICS` rather than added to it because that table
+# drives the `planWorkloads` rule lookup, and this metric has no rule to look up.
+# That is a measured outcome, not a gap: a 24-pair paired A/A screen (doc 17 `F15`)
+# found that on every workload, in both modes, the threshold quiet enough to clear a
+# 1% false-positive rate is already too wide to detect the mode's own effect size --
+# the two gates cross with no overlap. An auxiliary metric rides the deciding
+# metric's blocks and so cannot buy more pairs, which is the only knob that would
+# close the gap. It is therefore reported unclassified permanently, and doc 17 `D6`
+# names the uses that remain (undermining a suspect verdict, sizing an off-thread
+# cost) and the one that does not (confirming a win).
 UNCALIBRATED_BLOCK_METRICS = {
     "content-churn": "processCPUNanosecondsPerDraw",
     "style-churn": "processCPUNanosecondsPerDraw",
     "incremental-mixed": "processCPUNanosecondsPerDraw",
+}
+# The auxiliary tables an A/A calibration run may screen, keyed by the name its
+# operator types. It exists so the calibrator names a metric instead of reaching
+# into one hardcoded table: the two above ride the very same blocks, so one
+# collection can screen either, and a run that meant CPU must not be able to
+# quietly report plan-time noise instead. Adding an entry here is what makes a
+# new auxiliary quantity screenable; moving that quantity from
+# `UNCALIBRATED_BLOCK_METRICS` into `AUXILIARY_BLOCK_METRICS` is what freezing
+# its rule means.
+CALIBRATABLE_METRIC_TABLES = {
+    "plan": AUXILIARY_BLOCK_METRICS,
+    "process-cpu": UNCALIBRATED_BLOCK_METRICS,
 }
 # Alternated across quartets so neither source sits first in every group of four.
 QUARTET_PATTERNS = ("ABBA", "BAAB")
@@ -247,10 +263,11 @@ def summarize_uncalibrated(workload, raw_blocks):
     """Describe an uncalibrated metric's paired spread without ever classifying it.
 
     Takes no `mode` and consults no rule table, so there is no code path by which
-    this can produce a verdict. That is the point: the number is useful for
-    sizing a candidate and for the A/A screening that would calibrate it, and
-    until that screening exists any threshold applied to it would be invented
-    rather than measured.
+    this can produce a verdict. That is the point, and it is now settled rather
+    than provisional: the A/A screening that would have calibrated this metric was
+    run and refused it a rule at every mode's pair count (doc 17 `F15`). Any
+    threshold applied to this number would be invented rather than measured, and
+    the measurement says no honest one exists here.
     """
     differences = auxiliary_differences(
         workload, raw_blocks, metrics=UNCALIBRATED_BLOCK_METRICS

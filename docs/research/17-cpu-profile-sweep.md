@@ -181,10 +181,16 @@ measures. Not hypothesised in advance; it emerged from the sweep.
       body 14.95% -> 15.24%); `scrollback-stream` flipped sign between 2 and 4
       pairs. It also refuted the method that sized C: `F9`'s frame subtraction is
       unsound because `Terminal.feed` is partially inlined. Diagnostic reverted.
-- [ ] A/A screen to freeze a rule for `processCPUNanosecondsPerDraw` -- open, and
-      now the cheapest useful step (`D5`). Prerequisite for reading candidate A
-      partially.
-- [ ] Candidate A (`F6`) -- open, largest, elasticity still unconfirmed.
+- [x] **A/A screen for `processCPUNanosecondsPerDraw` done; no rule earned. `F15`,
+      `D6`.** 24 A/A pairs per workload at one immutable arm root. The two accuracy
+      gates cross with no overlap on every workload in both modes -- the closest
+      case, `content-churn`/`quick`, reaches a 0.0000 false-positive rate only at a
+      threshold where detection has fallen to 0.8320 against a 0.90 gate. The metric
+      is now screened-and-refused rather than unscreened, and `D6` names the one use
+      it does have. **`D5` logged this as "prerequisite for reading candidate A
+      partially"; it turned out to be a prerequisite that cannot be met.**
+- [ ] Candidate A (`F6`) -- open, largest, elasticity still unconfirmed, and now
+      known **not** to be decidable by any frozen rule on its own region (`D6`).
 
 ## Findings log
 
@@ -887,6 +893,86 @@ measures. Not hypothesised in advance; it emerged from the sweep.
   Nothing here recommends spending the `waitForOutput` decision on it.
 - Next action: `D5`.
 
+### F15 -- the CPU metric is screened and cannot be calibrated: both gates cannot be met at once
+
+- Status: **closed.** The A/A screen `D2` deferred and `D5` promoted is done. The
+  answer is that `processCPUNanosecondsPerDraw` earns **no rule on any workload in
+  either mode**, and this is a measured refusal rather than an unfinished search.
+- Method: `scripts/terminal-benchmark-plan-calibration.py --metric process-cpu
+  --revision HEAD --quartets 12`, generalized for this run so the calibrator names
+  a metric instead of reaching into one hardcoded table (see below). 12 quartets =
+  **24 A/A pairs** per workload, both roles bound to one immutable arm root, so
+  every difference is machine and schedule noise with no code difference present.
+  Zero quartets discarded. 443s of machine time, 20,000 resampling trials per
+  searched cell.
+- The series, against the plan-time series that *did* freeze a rule:
+
+  | Workload | CPU median | CPU SD | CPU range | plan SD (frozen) |
+  | --- | --- | --- | --- | --- |
+  | `content-churn` | -0.84% | **1.88%** | -3.02%..+3.77% | 1.48% |
+  | `style-churn` | +0.60% | **3.52%** | -8.54%..+4.44% | 1.22% |
+  | `incremental-mixed` | +1.23% | **8.75%** | -27.63%..+13.23% | 5.75% (no rule) |
+
+- **Why nothing clears, stated precisely.** The two accuracy gates cross with no
+  overlap: the threshold where the false-positive rate falls to the 1% gate is
+  already above the threshold where detection is still 90%. `content-churn`/`quick`
+  is the closest case in the whole grid and it misses by a knowable margin:
+
+  | Threshold | A/A false positives (gate <=0.01) | Detection at 5% (gate >=0.90) |
+  | --- | --- | --- |
+  | +/-2.5% | 0.0855 | 0.9568 |
+  | +/-2.75% | 0.0855 | 0.9139 |
+  | **+/-3.0%** | **0.0000** | **0.8320** |
+
+  So at the first threshold quiet enough, detection has already fallen 7 points
+  under its gate. `content-churn`/`confirm` fails from the other side -- +/-2.5%
+  gives false positives 0.0084, which *clears*, with detection 0.5954 against a 3%
+  effect. `style-churn` never reaches the false-positive gate until +/-5.75%, where
+  detection is 0.2485. This is the same shape of answer plan time gave for
+  `incremental-mixed`, one workload wider.
+- **The pair count is not available as a fix.** An auxiliary metric rides the
+  deciding metric's own blocks, so the only pair count a CPU rule could ever be
+  applied at is the one that mode already collects (2, 4, or 6). Buying more pairs
+  means changing what a `quick` or a `confirm` *is*, which is a different decision
+  from calibrating a metric.
+- **The retro-test, and it is why this screen was worth the 443s even though no
+  rule came out of it.** `F14` read `style-churn`'s lone `faster` verdict (-3.02%
+  draw, -3.07% CPU, -3.08% plan) as arm-level drift, on a mechanism argument and
+  without a repeat run. This series prices that call: **5 of 24 A/A pairs sit at or
+  below -3.02%** on `style-churn` with no code difference at all, and the resampled
+  median-of-4 rule at a +/-3.0% threshold produces a directional verdict on **5.91%
+  of pure-noise runs**. A -3% CPU move on that workload is a one-in-seventeen event
+  under noise -- not rare, entirely consistent with drift, and exactly the size that
+  needs corroboration rather than a face-value reading. `F14`'s judgement stands,
+  and is now quantified instead of argued.
+- **A prediction registered before the report was read, scored honestly.** Four
+  predictions; the direction held on all four, the magnitude was wrong on two.
+  Correct: the CPU spread is wider than plan time's on every workload; `confirm`
+  earns a rule on none; `incremental-mixed` is the worst; `F14`'s -3.02% falls
+  inside the A/A band. Wrong: I put the SD band at 2.5%-5%, and `content-churn`
+  came in *under* it at 1.88% while `incremental-mixed` came in at 8.75%, well over.
+  I also expected `quick` to be the likelier place a rule would clear on a churn
+  workload; nothing cleared there either.
+- **`incremental-mixed` carries one pair at -27.63%**, more than three times its own
+  SD and roughly twice its next-worst pair. A single block whose scheduler luck ran
+  out dominates that workload's spread. Not excluded: the calibration's whole job is
+  to measure this distribution as the harness actually produces it, and a screen
+  that trims its own worst observation would understate the false-positive rate it
+  exists to bound.
+- Tooling shipped alongside, and its one real risk: the calibrator now takes
+  `--metric {plan,process-cpu}`, selecting from a new
+  `COMPARE.CALIBRATABLE_METRIC_TABLES` registry. Both quantities ride the *same
+  blocks*, so a generalization that kept silently reading `planNanosecondsPerDraw`
+  would have reported plan-time noise under a CPU heading and nothing in the numbers
+  would have looked wrong. That is the test that was written first and failed first.
+  Report and default artifact directory are named per metric, which leaves plan
+  time's existing `plan-calibration.json` path -- cited by doc 8, which is
+  append-only -- undisturbed.
+- Artifacts: `.build/terminal-benchmark-process-cpu-calibration/67cf8d58a35e-0000/`
+  (`process-cpu-calibration.json`, `blocks.json`). Disposable; the report carries
+  the full 24-pair series per workload, so the grid can be re-searched with
+  `--reanalyze` without re-measuring.
+
 ## Decision log
 
 ### D1 -- which CPU opportunity to take first
@@ -1199,6 +1285,50 @@ input shapes.
 - Next action: none forced. The A/A screen is the recommended next step; `A` remains
   the largest and least decidable.
 
+### D6 -- the CPU metric stays permanently descriptive, and its one legitimate use is named
+
+- Status: **closed.** Evidence: `F15`, with `F14` as the worked example.
+- Decision: **stop trying to give `processCPUNanosecondsPerDraw` a verdict.** It is
+  screened, not unscreened; `F15` is the measurement that closes the question rather
+  than an admission that the search was too shallow. `UNCALIBRATED_BLOCK_METRICS`
+  stays where it is, `summarize_uncalibrated` keeps taking no `mode` and consulting
+  no rule table, and the code comments that said "no calibration exists yet" are
+  corrected to say what was measured instead.
+- **What it may be used for, stated as a rule rather than left to improvisation.**
+  `F14` used this metric to *undermine* a verdict, and that use is sound and
+  asymmetric:
+  - **Legitimate -- disconfirming.** When the draw metric returns a direction and
+    plan time and CPU move by the same amount on a change with no causal path to
+    planning, that co-movement is evidence of arm-level drift. Three unrelated
+    regions do not shift together because one of them got faster.
+  - **Legitimate -- sizing.** A CPU move with no draw move is the signature of
+    off-main-thread work, which is what `F12` showed the draw bracket cannot see.
+    That is a reason to profile, not a result.
+  - **Never -- confirming.** Agreement across regions cannot establish a targeted
+    win, and no threshold on this number may be quoted as an effect. `F15`'s bands
+    are the reason: on `style-churn`, 21% of pure-noise pairs clear 3%.
+- **This is a genuine cost to `D2`.** `D2` fixed the instrument so candidate A could
+  be decided, and T1 was half of that fix. T1 delivered *sizing* -- `F12`'s result
+  that the deciding metric brackets 11% of a frame is the sharpest thing in this
+  file -- but it did **not** deliver decidability. Candidate A is still not decidable
+  by any frozen rule on the region it lives in, and `F15` says a paired A/A screen
+  cannot make it so at these pair counts. The honest statement of `D2`'s outcome:
+  it bought a much better *description* of the gap and no new verdict.
+- **What would change this**, none of it taken here: a lower-variance formulation of
+  the same quantity (per-thread attribution rather than whole-process, so scheduler
+  luck on unrelated threads stops entering the numerator); a winsorized or trimmed
+  estimator, for which `scripts/terminal-benchmark-winsorized-{freeze,screen}.py`
+  already exist from a prior investigation; or a mode that collects more blocks,
+  which is a change to what `confirm` means and not a calibration.
+- Cost: 443s of collection plus the calibrator generalization. Bought a closed
+  question, a quantified `F14`, and a named practice.
+- Next action: **candidate A is now the only open item**, and it is open with its
+  decidability question answered in the negative. Read `D3`'s framing accordingly --
+  A cannot be settled by the benchmark's frozen rules on the region that makes it
+  worth 16.8%, so taking it means either accepting a profiler-share verdict or
+  building the bracket first. `F6`'s elasticity is still unconfirmed and remains the
+  cheaper prerequisite.
+
 ## Pre-rejected
 
 Candidates a fresh survey would plausibly re-propose, with the evidence that
@@ -1266,10 +1396,13 @@ separate a *verdict* by freezing one axis, which is what they exist for.
   provenance rather than on the trace. **Fixed for future captures by T2 (`F11`),
   not retroactively for the four traces in `F3`** -- those were taken before the
   counter existed and cannot be renormalized without re-tracing.
-- **The new CPU metric classifies nothing, and its noise floor is ~6%** (`F12`).
-  Three sequential unpaired blocks are not a paired A/A screen. Do not quote a
-  `processCPUNanosecondsPerDraw` difference smaller than that as an effect, and do
-  not quote any of them as a verdict.
+- **The new CPU metric classifies nothing, and now never will** (`F12`, `F15`,
+  `D6`). `F12`'s ~6% figure came from three sequential unpaired blocks; the paired
+  A/A screen replaces it with a per-workload band (SD 1.88% / 3.52% / 8.75%) and the
+  finding that no threshold clears the accuracy gates at any mode's pair count. Do
+  not quote a `processCPUNanosecondsPerDraw` difference as an effect or a verdict.
+  `D6` names the two uses that remain, both of which point at a profiler rather than
+  at a conclusion.
 - **`frame-accounting.json`'s counted window is ~67% longer than the trace it
   brackets** (`F11`), because a profiler spends seconds attaching and saving. Use
   `measured.drawsPerSecond`; `measured.draws` is not the draw count during the
@@ -1295,8 +1428,10 @@ separate a *verdict* by freezing one axis, which is what they exist for.
 - The one `faster` verdict in `F14` (`style-churn` -3.02%) is read as an arm-level
   artifact on the strength of its plan-time co-movement, not on a repeat run. A
   second paired run would settle it, and was not spent: no mechanism connects
-  `recentOutput` to plan time, so the candidate's fate does not turn on it. It is
-  also an unquantified data point about `confirm`'s false-positive rate at 4 pairs.
+  `recentOutput` to plan time, so the candidate's fate does not turn on it.
+  **`F15` since priced it**: 5 of 24 A/A pairs on that workload sit at or below
+  -3.02% with no code difference present, and a +/-3.0% rule fires on 5.91% of
+  pure-noise runs. Still not a repeat run, but no longer unquantified.
 - Untracked `notes.md` and `plans/wip/*` were present during capture. They cannot
   affect a profile, but they **would** be captured into a paired comparison's
   candidate tree -- read the printed path list before believing any benchmark run
@@ -1304,13 +1439,14 @@ separate a *verdict* by freezing one axis, which is what they exist for.
 
 ## Outcome
 
-**Phases 1-4 complete; Phase 5 open, two candidates resolved.** Six on-CPU traces,
-fourteen findings, five ranked code candidates, two tooling fixes shipped, seven
-pre-rejections, **one code candidate kept** (B: `terminal-feed` -14.59%,
-`scrollback-stream` -10.78%) and **one rejected on measurement** (C: nothing
-vanished when it was deleted outright).
+**Phases 1-4 complete; Phase 5 open with one candidate left.** Six on-CPU traces,
+fifteen findings, five ranked code candidates, two tooling fixes shipped plus one
+calibration screen, seven pre-rejections, **one code candidate kept** (B:
+`terminal-feed` -14.59%, `scrollback-stream` -10.78%), **one rejected on
+measurement** (C: nothing vanished when it was deleted outright), and **one metric
+screened and refused a verdict** (`processCPUNanosecondsPerDraw`).
 
-Seven results are worth more than the ranking:
+Eight results are worth more than the ranking:
 
 1. **The two regions this project has spent four documents optimizing are no
    longer where the time is.** `planFrame` and `drawRenderFrame` are 10.5% and
@@ -1364,7 +1500,21 @@ Seven results are worth more than the ranking:
    excludes. Size a "X minus Y" region by ablation, or check that Y's callees are
    absent too.
 
-Findings F1-F14 are recorded; the next free ID is **F15**. Decisions D1-D5 are
-recorded; D2, D4 and D5 are closed and acted on; candidates B and D are done, C is
-rejected, and the A/A screen and A remain open in that order; the next free ID is
-**D6**.
+8. **The instrument fix bought a better description and no new verdict** (`F15`,
+   `D6`). `D2` fixed the tooling specifically so candidate A could be decided, and
+   the paired A/A screen now says the CPU metric cannot carry a rule at any mode's
+   pair count: the false-positive and detection gates cross with no overlap on all
+   three workloads. What T1 did deliver is `F12` -- the single sharpest number in
+   this file. So the ledger is honest and lopsided: A is still the largest candidate
+   and is now *known* to be undecidable by frozen rule on its own region, rather than
+   merely awaiting a screen. The generalizable lesson: "the metric is uncalibrated"
+   and "the metric is uncalibratable at this sample size" feel like the same
+   sentence and license opposite next steps, and only a screen distinguishes them.
+   The screen also retro-priced a judgement (`F14`'s artifact reading) that had been
+   made on mechanism alone -- calibration evidence is worth collecting even when it
+   freezes nothing.
+
+Findings F1-F15 are recorded; the next free ID is **F16**. Decisions D1-D6 are
+recorded; D2, D4, D5 and D6 are closed and acted on; candidates B and D are done, C
+is rejected, the A/A screen is done and earned no rule, and **A is the only open
+candidate**; the next free ID is **D7**.

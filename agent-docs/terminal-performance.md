@@ -201,12 +201,26 @@ Four things it is not, each of which invites a misreading:
    writes. That width is deliberate -- replay does not finish inside the draw that
    queued it, so any narrower bracket would exclude the thing worth measuring --
    but it means the series is meaningful in aggregate, not at a single index.
-3. **It is not calibrated, so it never carries a verdict.** It is reported through
-   `UNCALIBRATED_BLOCK_METRICS`, which consults no rule table; there is no code
-   path by which it can classify. Its block-to-block spread was 5.60% against the
-   draw metric's 0.41% (`17/F12`), so treat anything under ~6% as indistinguishable
-   from nothing. Freezing a rule needs an A/A screening pass of the same shape as
-   the plan-time one below.
+3. **It cannot be calibrated, so it never carries a verdict.** It is reported
+   through `UNCALIBRATED_BLOCK_METRICS`, which consults no rule table; there is no
+   code path by which it can classify. That is settled, not pending: the A/A
+   screening pass was run (`17/F15`, 24 paired A/A blocks per workload) and **no
+   threshold clears the accuracy gates on any workload in either mode**. The
+   false-positive gate and the detection gate cross with no overlap -- the closest
+   case, `content-churn`/`quick`, reaches a 0.0000 false-positive rate only at a
+   +/-3.0% threshold where detection has already fallen to 0.8320 against a 0.90
+   gate. Its paired A/A spread: SD 1.88% (`content-churn`), 3.52% (`style-churn`),
+   8.75% (`incremental-mixed`, one pair at -27.63%). Because an auxiliary metric
+   rides the deciding metric's own blocks, it cannot buy more pairs, which is the
+   only knob that would close the gap.
+
+   **What you may still do with it** (`17/D6`): use a co-movement to *undermine* a
+   draw verdict -- if plan time and CPU shift by the same amount on a change with
+   no causal path to planning, that is arm-level drift, and `17/F14` caught a
+   spurious `faster` exactly this way. Use a CPU move with no draw move as a reason
+   to profile for off-main-thread work. Never use it to *confirm* a win, and never
+   quote a difference as an effect: on `style-churn`, 5 of 24 pure-noise pairs sit
+   at or below -3.02%.
 4. **It includes the instrument**, which on `incremental-mixed` is a large term --
    the observer's acknowledgment `open()` alone was 9.8% of that workload's on-CPU
    total (`17/F2`).
@@ -214,12 +228,16 @@ Four things it is not, each of which invites a misreading:
 The line is absent whenever either arm lacks it, exactly like plan time, which is
 the normal case for any baseline predating this reading.
 
-Recalibrate plan-time rules with
-`scripts/terminal-benchmark-plan-calibration.py --revision <rev>`, which
-collects an A/A series with both arms bound to one immutable root and reports
-the cheapest pair count and threshold clearing the gates. It never edits the
-frozen rules: a human moves
-`DECISION_RULES[mode]["planWorkloads"]` after reading the report.
+Recalibrate an auxiliary metric's rules with
+`scripts/terminal-benchmark-plan-calibration.py --metric {plan,process-cpu}
+--revision <rev>`, which collects an A/A series with both arms bound to one
+immutable root and reports the threshold clearing the gates at the pair count that
+mode already collects. `--metric` selects from `CALIBRATABLE_METRIC_TABLES`; both
+quantities ride the same blocks, so one collection can screen either, and the
+report and its artifact directory are named for the metric that was screened. It
+never edits the frozen rules: a human moves
+`DECISION_RULES[mode]["planWorkloads"]` after reading the report. A report that
+proposes nothing is a real answer -- see point 3 above and `17/F15`.
 
 An invalid invocation is not a verdict and never becomes one by retrying. It
 means a stated measurement condition failed, so fix the condition -- put the

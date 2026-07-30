@@ -63,7 +63,7 @@ class PlanCalibrationPairingTests(unittest.TestCase):
         # Resampling draws whole quartets so adjacent pairs keep the thermal and
         # scheduling neighborhood they were measured in; flattening here would
         # assume an independence the measurement does not have.
-        quartets = PLAN_CALIBRATION.plan_quartets(
+        quartets = PLAN_CALIBRATION.auxiliary_quartets(
             "incremental-mixed", _blocks([100, 100, 110, 100, 100, 100, 100, 100])
         )
 
@@ -84,11 +84,61 @@ class PlanCalibrationPairingTests(unittest.TestCase):
         blocks[2]["planNanosecondsPerDraw"] = None
 
         with self.assertRaises(ValueError):
-            PLAN_CALIBRATION.plan_quartets("content-churn", blocks)
+            PLAN_CALIBRATION.auxiliary_quartets("content-churn", blocks)
 
     def test_an_incomplete_quartet_is_refused(self):
         with self.assertRaises(ValueError):
-            PLAN_CALIBRATION.plan_quartets("content-churn", _blocks([100, 100, 100, 100])[:2])
+            PLAN_CALIBRATION.auxiliary_quartets("content-churn", _blocks([100, 100, 100, 100])[:2])
+
+
+class MetricSelectionTests(unittest.TestCase):
+    def test_the_named_metric_decides_which_field_is_paired(self):
+        # Intent: asking for `process-cpu` pairs whole-process CPU, not plan time,
+        #   even though both quantities ride the same blocks.
+        # Why it exists: this calibrator was written for plan time and every field
+        #   it reads used to be hardcoded. A generalization that still silently
+        #   read `planNanosecondsPerDraw` would report a plan-time noise estimate
+        #   under a CPU heading -- a rule frozen against the wrong series, and
+        #   nothing in the numbers themselves would look wrong.
+        blocks = _blocks([100, 100, 100, 100])
+        for block, cpu in zip(blocks, (200, 200, 260, 200)):
+            block["processCPUNanosecondsPerDraw"] = cpu
+
+        plan = PLAN_CALIBRATION.auxiliary_quartets("content-churn", blocks, metric="plan")
+        cpu = PLAN_CALIBRATION.auxiliary_quartets(
+            "content-churn", blocks, metric="process-cpu"
+        )
+
+        self.assertEqual(plan, [[0.0, 0.0]])
+        self.assertEqual(cpu[0][0], 0.0)
+        self.assertAlmostEqual(
+            cpu[0][1], PLAN_CALIBRATION.CALIBRATION.symmetric_difference(200, 260)
+        )
+
+    def test_blocks_from_an_arm_without_the_named_metrics_timer_are_refused(self):
+        # The CPU timer is newer than the plan timer, so a series can legitimately
+        # carry one and not the other. Refusing per named metric -- rather than
+        # per block -- is what keeps a CPU rule from being chosen from whichever
+        # subset of blocks happened to report it.
+        with self.assertRaises(ValueError):
+            PLAN_CALIBRATION.auxiliary_quartets(
+                "content-churn", _blocks([100, 100, 100, 100]), metric="process-cpu"
+            )
+
+    def test_an_unknown_metric_is_refused_before_any_blocks_are_collected(self):
+        with self.assertRaises(ValueError):
+            PLAN_CALIBRATION.make_aa_schedule(("content-churn",), 1, metric="draw")
+        with self.assertRaises(ValueError):
+            PLAN_CALIBRATION.metric_workloads("draw")
+
+    def test_a_workload_is_refused_against_a_metric_it_does_not_carry(self):
+        # `scrollback-stream` reports one final draw and never a per-draw CPU
+        # figure, so scheduling it for the CPU metric would spend the machine time
+        # and only then fail at pairing.
+        with self.assertRaises(ValueError):
+            PLAN_CALIBRATION.make_aa_schedule(
+                ("scrollback-stream",), 1, metric="process-cpu"
+            )
 
 
 class PlanCalibrationCollectionTests(unittest.TestCase):
