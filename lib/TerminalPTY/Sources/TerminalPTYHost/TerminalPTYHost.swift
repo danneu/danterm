@@ -120,10 +120,6 @@ public actor TerminalPTYHost {
     private let initialDimensions: TerminalDimensions
     package nonisolated let captureTransitions: Bool
     private let bootstrapExecutable: String
-    private let updateContinuation: AsyncStream<Void>.Continuation
-
-    /// Conflates terminal and lifecycle changes into one pull-driven wakeup channel.
-    nonisolated public let updates: AsyncStream<Void>
 
     private var masterFD: Int32 = -1
     private var leaderPID: pid_t?
@@ -188,8 +184,6 @@ public actor TerminalPTYHost {
     private var quiescenceObservers: [@Sendable () -> Void] = []
     private var exitBoundSource: (any DispatchSourceTimer)?
     private var forcedQuiescenceCount = 0
-    private var waiterSlots: [Int: WaiterSlot] = [:]
-    private var nextWaiterID = 0
     private var transientChildWaitInjections = 0
     private var callbacksAfterTeardown = 0
     private var updatePending = false
@@ -199,6 +193,9 @@ public actor TerminalPTYHost {
     private var updateSignalsAfterTermination = 0
     private var consumerWorkWasSignaled = false
     private var updateHandler: (@Sendable () -> Void)?
+    private var testUpdateHandler:
+        (@Sendable ([UInt8], PaneLifecycleResult?) -> Void)?
+    private var testOutputHandler: (@Sendable ([UInt8]) -> Void)?
 
     /// Binds Swift actor jobs to the FIFO queue that also delivers every system callback.
     nonisolated public var unownedExecutor: UnownedSerialExecutor {
@@ -240,11 +237,6 @@ public actor TerminalPTYHost {
             throw TerminalPTYHostError.invalidDimensions
         }
         queue = DispatchSerialQueue(label: "com.danneu.danterm.terminal-pty-host")
-        let updateChannel = AsyncStream<Void>.makeStream(
-            bufferingPolicy: .bufferingNewest(1)
-        )
-        updates = updateChannel.stream
-        updateContinuation = updateChannel.continuation
         self.terminal = terminal
         self.initialDimensions = initialDimensions
         self.bootstrapExecutable = bootstrapExecutable
@@ -438,13 +430,6 @@ public actor TerminalPTYHost {
     nonisolated public func cancelLinkInteraction() {
         queueClosingResizeRun().async { [weak self] in
             self?.assumeIsolated { owner in owner.applyLinkCancellation() }
-        }
-    }
-
-    /// Closes one pane and returns only after its owned process session is gone.
-    public func close() async {
-        await withCheckedContinuation { continuation in
-            requestShutdown { continuation.resume() }
         }
     }
 
@@ -715,82 +700,64 @@ public actor TerminalPTYHost {
         }
     }
 
+    /// Installs the test-support wakeup separately so adapters do not displace the pane consumer.
+    package nonisolated func setTestUpdateHandler(
+        _ handler: @escaping @Sendable ([UInt8], PaneLifecycleResult?) -> Void
+    ) -> (
+        recentOutput: [UInt8],
+        result: PaneLifecycleResult?,
+        hasEmittedUpdate: Bool
+    ) {
+        queue.sync {
+            assumeIsolated { owner in
+                if owner.teardownFinished == false {
+                    owner.testUpdateHandler = handler
+                }
+                return (
+                    recentOutput: owner.recentOutput,
+                    result: owner.reportedResult,
+                    hasEmittedUpdate: owner.emittedUpdateSignalCount > 0
+                )
+            }
+        }
+    }
+
+    /// Returns whether retained test evidence already contains the requested byte sequence.
+    package nonisolated func observedOutputContains(_ bytes: [UInt8]) -> Bool {
+        queue.sync {
+            assumeIsolated { owner in
+                owner.recentOutput.containsSubsequence(bytes)
+            }
+        }
+    }
+
+    /// Installs a test-support observer for every raw-output callback and returns prior evidence.
+    package nonisolated func setTestOutputHandler(
+        _ handler: @escaping @Sendable ([UInt8]) -> Void
+    ) -> [UInt8] {
+        queue.sync {
+            assumeIsolated { owner in
+                if owner.teardownFinished == false {
+                    owner.testOutputHandler = handler
+                }
+                return owner.recentOutput
+            }
+        }
+    }
+
+    /// Applies output synchronously so delivery-fence tests can queue callbacks without yielding main.
+    package nonisolated func deliverOutputForTesting(_ bytes: [UInt8]) {
+        guard bytes.isEmpty == false else { return }
+        queue.sync {
+            assumeIsolated { owner in
+                owner.process(.output(bytes))
+            }
+        }
+    }
+
     /// Returns the reported child result without waiting for future lifecycle work.
     public func result() -> PaneLifecycleResult? {
         reportedResult
-    }
-
-    /// Suspends until teardown, returning nil when no child result was produced.
-    /// Cancellation resumes the wait with nil without disturbing the pane.
-    public func waitForResult() async -> PaneLifecycleResult? {
-        if let reportedResult { return reportedResult }
-        if teardownFinished { return nil }
-        let id = allocateWaiterID()
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                registerWaiter(id: id, slot: .result(continuation))
-            }
-        } onCancel: {
-            Task { await self.cancelWaiter(id) }
-        }
-    }
-
-    /// Test synchronization waits on observed bytes rather than elapsed time.
-    /// Cancellation resumes the wait with false without disturbing the pane.
-    func waitForOutput(containing bytes: [UInt8]) async -> Bool {
-        guard bytes.isEmpty == false else { return true }
-        if recentOutput.containsSubsequence(bytes) { return true }
-        if teardownFinished { return false }
-        let id = allocateWaiterID()
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                registerWaiter(id: id, slot: .output(
-                    OutputWaiter(needle: bytes, continuation: continuation)
-                ))
-            }
-        } onCancel: {
-            Task { await self.cancelWaiter(id) }
-        }
-    }
-
-    /// Waiter identity lets cancellation remove exactly its own continuation.
-    private func allocateWaiterID() -> Int {
-        defer { nextWaiterID += 1 }
-        waiterSlots[nextWaiterID] = .pending
-        return nextWaiterID
-    }
-
-    /// Exactly-once resumption invariant: whichever path removes a waiter's slot
-    /// (delivery, teardown, or cancellation) is the one that resumes it; a
-    /// missing slot is always a no-op. All paths are actor-serialized.
-    private func registerWaiter(id: Int, slot: WaiterSlot) {
-        switch waiterSlots[id] {
-        case .cancelled:
-            waiterSlots[id] = nil
-            slot.resumeCancelled()
-        case .pending:
-            if teardownFinished {
-                waiterSlots[id] = nil
-                slot.resumeCancelled()
-            } else {
-                waiterSlots[id] = slot
-            }
-        default:
-            waiterSlots[id] = nil
-            slot.resumeCancelled()
-        }
-    }
-
-    private func cancelWaiter(_ id: Int) {
-        switch waiterSlots[id] {
-        case .pending:
-            waiterSlots[id] = .cancelled
-        case .cancelled, nil:
-            break
-        case .some(let slot):
-            waiterSlots[id] = nil
-            slot.resumeCancelled()
-        }
     }
 
     /// Returns raw bytes only when explicit test-support capture was enabled.
@@ -1520,11 +1487,11 @@ public actor TerminalPTYHost {
         if recentOutput.count > 64 * 1024 {
             recentOutput.removeFirst(recentOutput.count - 64 * 1024)
         }
+        testOutputHandler?(recentOutput)
         if captureTransitions {
             capturedOutput.append(contentsOf: bytes)
             appliedTransitions.append(.feed(bytes))
         }
-        resumeOutputWaiters()
     }
 
     private func applyResize(_ dimensions: TerminalDimensions) {
@@ -1745,11 +1712,6 @@ public actor TerminalPTYHost {
         guard reportedResult == nil else { return }
         reportedResult = result
         markUpdatePending()
-        for id in waiterSlots.keys {
-            guard case .result(let continuation) = waiterSlots[id] else { continue }
-            waiterSlots[id] = nil
-            continuation.resume(returning: result)
-        }
     }
 
     private func finishTeardown() {
@@ -1767,18 +1729,6 @@ public actor TerminalPTYHost {
         cancelChildExitPoll()
         leaderPID = nil
         sessionID = nil
-        for id in waiterSlots.keys {
-            switch waiterSlots[id] {
-            case .output(let waiter):
-                waiterSlots[id] = nil
-                waiter.continuation.resume(returning: false)
-            case .result(let continuation):
-                waiterSlots[id] = nil
-                continuation.resume(returning: nil)
-            default:
-                break
-            }
-        }
         teardownFinalizationRequested = true
         completeTeardownIfPossible()
     }
@@ -1809,60 +1759,22 @@ public actor TerminalPTYHost {
     private func publishPendingUpdate() {
         if updatePending {
             updatePending = false
-            updateContinuation.yield()
             updateHandler?()
+            testUpdateHandler?(recentOutput, reportedResult)
             emittedUpdateSignalCount += 1
         }
         guard shouldFinishUpdates else { return }
         shouldFinishUpdates = false
         updateHandler = nil
-        updateContinuation.finish()
+        testUpdateHandler = nil
+        testOutputHandler = nil
         updateSignalFinished = true
-        // Last, and on this queue: quiescence is only irreversible once the update
-        // stream is finished and every waiter is settled, and the exit path treats
-        // a completion as meaning exactly that.
+        // Last, and on this queue: quiescence is only irreversible once every
+        // callback is detached, and the exit path treats completion as exactly that.
         let observers = quiescenceObservers
         quiescenceObservers.removeAll()
         for observer in observers { observer() }
     }
-
-    private func resumeOutputWaiters() {
-        for id in waiterSlots.keys {
-            guard case .output(let waiter) = waiterSlots[id],
-                  recentOutput.containsSubsequence(waiter.needle)
-            else { continue }
-            waiterSlots[id] = nil
-            waiter.continuation.resume(returning: true)
-        }
-    }
-}
-
-/// One suspended waiter's lifecycle: allocated `.pending`, then either upgraded
-/// to a continuation-bearing case or marked `.cancelled` if the owning task was
-/// cancelled before registration could store its continuation.
-private enum WaiterSlot {
-    case pending
-    case cancelled
-    case result(CheckedContinuation<PaneLifecycleResult?, Never>)
-    case output(OutputWaiter)
-
-    /// Resumes with the "wait abandoned" value for the slot's wait kind.
-    func resumeCancelled() {
-        switch self {
-        case .pending, .cancelled:
-            break
-        case .result(let continuation):
-            continuation.resume(returning: nil)
-        case .output(let waiter):
-            waiter.continuation.resume(returning: false)
-        }
-    }
-}
-
-/// One marker-based test wait kept actor-isolated until matching bytes arrive.
-private struct OutputWaiter {
-    let needle: [UInt8]
-    let continuation: CheckedContinuation<Bool, Never>
 }
 
 private extension Array where Element == UInt8 {

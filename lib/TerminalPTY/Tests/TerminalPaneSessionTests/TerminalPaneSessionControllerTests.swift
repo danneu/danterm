@@ -6,6 +6,7 @@ import TerminalCoreRecording
 import TerminalRenderPlanning
 import Testing
 @testable import TerminalPTYHost
+import TerminalPTYTestSupport
 @testable import TerminalPaneSession
 
 /// Exercises the headless pane controller through one real native PTY per scenario.
@@ -316,6 +317,68 @@ struct TerminalPaneSessionControllerTests {
         controller.sendText("printf '__TOO_LATE__'\n")
         controller.synchronizeState()
         #expect(controller.readPrimaryHistoryText() == finalHistory)
+        await host.close()
+    }
+
+    @Test("application-exit fence suppresses every queued main delivery")
+    func applicationExitFenceSuppressesQueuedDeliveries() async throws {
+        // Intent: one synchronous fence makes queued frame, pane-menu, link, and search
+        //   callbacks inert before host shutdown begins.
+        // Why it exists: separately owned Task relays can resume after the recovery
+        //   snapshot and touch AppKit state while application termination blocks main.
+        // Scenario: output, two pointer gestures, and a search all reach the host while
+        //   main is busy handling Cmd-Q; none may cross the ensuing exit fence.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
+        )
+        var frameCount = 0
+        var paneMenuCount = 0
+        var linkCount = 0
+        var searchCount = 0
+        controller.onFrame = { _ in frameCount += 1 }
+        controller.onPaneMenu = { _ in paneMenuCount += 1 }
+        controller.onOpenLink = { _ in linkCount += 1 }
+        controller.onSearchStatus = { _ in searchCount += 1 }
+        #expect(host.waitForOutputSynchronously(
+            containing: Array("__READY__".utf8),
+            timeout: .seconds(10)
+        ))
+
+        host.deliverOutputForTesting(
+            Array("\u{1B}]8;;https://a.co\u{7}link\u{1B}]8;;\u{7}".utf8)
+        )
+        let snapshot = host.fencedSnapshot()
+        let lines = snapshot.viewportText.split(separator: "\n", omittingEmptySubsequences: false)
+        let viewportRow = try #require(lines.firstIndex(where: { $0.contains("link") }))
+        let linkRange = try #require(lines[viewportRow].range(of: "link"))
+        let column = lines[viewportRow].distance(
+            from: lines[viewportRow].startIndex,
+            to: linkRange.lowerBound
+        )
+        controller.sendPointer(.down(.right, column: 0, row: 0))
+        controller.sendPointer(.up(.right, column: 0, row: 0))
+        controller.sendPointer(.down(
+            .left, column: column, row: viewportRow, modifiers: [.command]
+        ))
+        controller.sendPointer(.up(
+            .left, column: column, row: viewportRow, modifiers: [.command]
+        ))
+        controller.beginSearch("link")
+        _ = host.fencedSnapshot()
+
+        controller.fenceForApplicationExit()
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async {
+                continuation.resume()
+            }
+        }
+
+        #expect(frameCount == 0)
+        #expect(paneMenuCount == 0)
+        #expect(linkCount == 0)
+        #expect(searchCount == 0)
         await host.close()
     }
 

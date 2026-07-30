@@ -68,6 +68,15 @@ let package = Package(
             path: "TestSupport/TerminalProtocolProbeSupport",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
+        .target(
+            name: "TerminalPTYTestSupport",
+            dependencies: [
+                "PaneLifecycle",
+                "TerminalPTYHost",
+            ],
+            path: "TestSupport/TerminalPTYTestSupport",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         .executableTarget(
             name: "PTYProbe",
             path: "Sources/PTYProbe"
@@ -103,6 +112,7 @@ let package = Package(
             dependencies: [
                 "PaneLifecycle",
                 "TerminalPTYHost",
+                "TerminalPTYTestSupport",
                 "PTYSessionBootstrap",
                 "PTYProbe",
                 .product(name: "TerminalCoreRecording", package: "TerminalCore"),
@@ -115,6 +125,7 @@ let package = Package(
             dependencies: [
                 "PaneLifecycle",
                 "TerminalPTYHost",
+                "TerminalPTYTestSupport",
                 "TerminalPaneSession",
                 "PTYSessionBootstrap",
                 "PTYProbe",

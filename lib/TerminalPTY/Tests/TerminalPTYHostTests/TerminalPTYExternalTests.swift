@@ -5,6 +5,7 @@ import Foundation
 import PaneLifecycle
 import Testing
 @testable import TerminalPTYHost
+import TerminalPTYTestSupport
 
 /// Runs machine-state-dependent teardown cases only through `just test-pty-external`.
 @Suite(.serialized, .disabled(

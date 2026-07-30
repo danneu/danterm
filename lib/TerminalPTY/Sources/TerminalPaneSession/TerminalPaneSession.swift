@@ -8,28 +8,41 @@ import TerminalCoreRecording
 import TerminalPTYHost
 import TerminalRenderPlanning
 
-/// Coalesces host wakeups onto main and makes queued deliveries inert at teardown.
-private final class TerminalPaneUpdateDelivery: Sendable {
+/// Owns the controller's sole main-queue crossing so teardown can stop every delivery at once.
+private final class TerminalPaneDeliveryBoundary: Sendable {
     private struct State {
-        var isScheduled = false
+        var isFrameScheduled = false
         var isStopped = false
     }
 
     private let state = Mutex(State())
 
-    func schedule(_ delivery: @escaping @MainActor @Sendable () -> Void) {
+    func scheduleFrame(_ delivery: @escaping @MainActor @Sendable () -> Void) {
         let shouldSchedule = state.withLock { state in
-            guard state.isStopped == false, state.isScheduled == false else { return false }
-            state.isScheduled = true
+            guard state.isStopped == false, state.isFrameScheduled == false else { return false }
+            state.isFrameScheduled = true
             return true
         }
         guard shouldSchedule else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             let shouldDeliver = self.state.withLock { state in
-                state.isScheduled = false
+                state.isFrameScheduled = false
                 return state.isStopped == false
             }
+            guard shouldDeliver else { return }
+            MainActor.assumeIsolated {
+                delivery()
+            }
+        }
+    }
+
+    func enqueue(_ delivery: @escaping @MainActor @Sendable () -> Void) {
+        let shouldEnqueue = state.withLock { $0.isStopped == false }
+        guard shouldEnqueue else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let shouldDeliver = self.state.withLock { $0.isStopped == false }
             guard shouldDeliver else { return }
             MainActor.assumeIsolated {
                 delivery()
@@ -82,7 +95,7 @@ package struct TerminalPaneDiagnosticCapture: Sendable {
 @MainActor
 public final class TerminalPaneSessionController {
     private let host: TerminalPTYHost
-    private let updateDelivery = TerminalPaneUpdateDelivery()
+    private let deliveryBoundary = TerminalPaneDeliveryBoundary()
     private var cachedTerminal: Terminal
     private let initialDimensions: TerminalDimensions
     private var lastPlannedTerminal: Terminal?
@@ -253,9 +266,9 @@ public final class TerminalPaneSessionController {
 
         if isVisible { planIfNeeded(cachedTerminal) }
 
-        let updateDelivery = updateDelivery
+        let deliveryBoundary = deliveryBoundary
         host.setUpdateHandler { [weak host] in
-            updateDelivery.schedule { [weak self, weak host] in
+            deliveryBoundary.scheduleFrame { [weak self, weak host] in
                 guard let self, let host else { return }
                 self.consumeHostUpdate(host)
             }
@@ -318,16 +331,17 @@ public final class TerminalPaneSessionController {
     /// Forwards normalized pointer input without mirroring child modes on the main actor.
     public func sendPointer(_ event: TerminalPointerEvent) {
         guard isTornDown == false else { return }
+        let deliveryBoundary = deliveryBoundary
         host.sendPointer(
             event,
             onPaneMenu: { [weak self] cell in
-                Task { @MainActor [weak self] in
+                deliveryBoundary.enqueue { [weak self] in
                     guard let self, self.isTornDown == false else { return }
                     self.onPaneMenu?(cell)
                 }
             },
             onOpenLink: { [weak self] link in
-                Task { @MainActor [weak self] in
+                deliveryBoundary.enqueue { [weak self] in
                     guard let self, self.isTornDown == false else { return }
                     self.onOpenLink?(link)
                 }
@@ -389,7 +403,7 @@ public final class TerminalPaneSessionController {
     /// Fences accepted owner work and freezes the recovery projection before app exit capture.
     public func fenceForApplicationExit() {
         guard isTornDown == false else { return }
-        updateDelivery.stop()
+        deliveryBoundary.stop()
         cachedTerminal = host.beginCloseAndSnapshot()
         emitPrimaryHistoryMutationIfNeeded()
         isTornDown = true
@@ -472,8 +486,9 @@ public final class TerminalPaneSessionController {
     }
 
     private func searchStatusRelay() -> @Sendable (TerminalSearchStatus?) -> Void {
-        { [weak self] status in
-            Task { @MainActor [weak self] in
+        let deliveryBoundary = deliveryBoundary
+        return { [weak self] status in
+            deliveryBoundary.enqueue { [weak self] in
                 guard let self, self.isTornDown == false else { return }
                 self.onSearchStatus?(status)
             }
@@ -551,7 +566,7 @@ public final class TerminalPaneSessionController {
     /// Ends callbacks immediately and lets the host queue finish bounded teardown.
     public func tearDown() {
         guard isTornDown == false else { return }
-        updateDelivery.stop()
+        deliveryBoundary.stop()
         cachedTerminal = host.beginCloseAndSnapshot()
         isTornDown = true
         onFrame = nil

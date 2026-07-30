@@ -3,6 +3,7 @@ import Darwin
 import Foundation
 import Testing
 @testable import TerminalPTYHost
+import TerminalPTYTestSupport
 import PaneLifecycle
 import TerminalCore
 import TerminalCoreRecording

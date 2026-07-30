@@ -178,5 +178,5 @@ application-level timeout.
 
 - [x] 1. refactor(pty): unify shutdown observation around host callbacks
 - [x] 2. fix(pty): join dispatch resources before publishing quiescence
-- [ ] 3. fix(terminal): fence UI delivery without Swift concurrency
+- [x] 3. fix(terminal): fence UI delivery without Swift concurrency
 - [ ] 4. fix(app): retain terminal hosts through exit quiescence
