@@ -96,15 +96,77 @@ def propose_rule(quartets, *, effect_percent, equivalence_band_percent, trials, 
     return None
 
 
+def collect_quartets(workload, collector, *, quartets, maximum_attempts, emit):
+    """Collect complete quartets one at a time, discarding and retrying invalid ones.
+
+    Deliberately not `plan-calibration.collect_quartets`, which rebuilds its
+    schedule through an auxiliary-metric registry a candidate workload is not in
+    and cannot be -- the metric being screened here is the workload's own primary
+    one. The retry rule is the same and is the part worth sharing conceptually: a
+    quartet is kept only if all four blocks are valid and discarded whole
+    otherwise, so no kept quartet mixes attempts and schedule balance survives.
+    """
+    if maximum_attempts < 1:
+        raise ValueError("collection requires at least one attempt per quartet")
+    kept = []
+    discarded = 0
+    for index in range(quartets):
+        planned = [
+            {"measurementRole": role, "physicalArm": "a", "quartet": index}
+            for role in PLAN.QUARTET_PATTERNS[index % len(PLAN.QUARTET_PATTERNS)]
+        ]
+        for attempt in range(maximum_attempts):
+            try:
+                evidence = collector(planned)
+                reasons = evidence.get("invalidationReasons") or []
+            except (TimeoutError, json.JSONDecodeError, OSError) as error:
+                evidence, reasons = None, [f"collector-{type(error).__name__}:{error}"]
+            if not reasons:
+                kept.append(evidence["rawBlocks"])
+                break
+            discarded += 1
+            emit(f"  {workload}: quartet {index} attempt {attempt} discarded "
+                 f"({len(reasons)} reasons: {reasons[:3]})")
+        else:
+            raise RuntimeError(
+                f"{workload} quartet {index} never produced four valid blocks in "
+                f"{maximum_attempts} attempts"
+            )
+    return kept, discarded
+
+
 def describe_series(quartets):
-    """Summarize the raw A/A spread, which is what makes a rule plausible or not."""
+    """Summarize the raw A/A spread, which is what makes a rule plausible or not.
+
+    Reports a trimmed spread beside the plain one because the first screen run of
+    `synchronized-frames` was decided by a single pair: 23 pairs inside +/-1.7%
+    and one at -16%, which tripled the SD and pushed the cheapest clearing rule
+    from 2 pairs to 12. A summary that showed only the SD would have hidden which
+    of those two worlds the workload lives in, and they call for opposite
+    responses -- one is a noisy stimulus, the other is a rare event whose
+    frequency is the thing to measure.
+    """
     values = [value for pairs in quartets for value in pairs]
+    ordered = sorted(values)
+    # Drop the most extreme 5% from each end, but at least one pair once the
+    # series is big enough to spare it. A plain len//20 is zero below 20 pairs,
+    # which is exactly the size where one bad pair does the most damage and the
+    # trimmed figure would silently equal the untrimmed one.
+    trim = max(1, len(ordered) // 20) if len(ordered) >= 8 else 0
+    trimmed = ordered[trim:len(ordered) - trim] if trim else ordered
     return {
         "pairCount": len(values),
         "medianPercent": round(statistics.median(values), 4),
         "standardDeviationPercent": round(statistics.pstdev(values), 4),
+        "trimmedStandardDeviationPercent": round(statistics.pstdev(trimmed), 4),
+        "trimmedPairCount": len(trimmed),
         "minimumPercent": round(min(values), 4),
         "maximumPercent": round(max(values), 4),
+        # Persisted whole so a proposal can be re-examined, or re-analyzed under
+        # different gates, without spending the machine time again. The first run
+        # kept only the summary and the outlier had to be recovered by hand from
+        # per-block harness artifacts.
+        "pairsPercent": [round(value, 4) for value in values],
     }
 
 
@@ -132,9 +194,9 @@ def run_screen(*, workload, revision, quartets, trials, seed, repository_root,
         repository_root=arm["root"],
     )
     try:
-        kept, discarded = PLAN.collect_quartets(
+        kept, discarded = collect_quartets(
             workload, collectors[workload], quartets=quartets,
-            maximum_attempts=maximum_attempts, metric=None, emit=emit,
+            maximum_attempts=maximum_attempts, emit=emit,
         )
     finally:
         close()
@@ -178,7 +240,8 @@ def render_report(report):
         f"discarded {report['quartetsDiscarded']}",
         f"  A/A spread: {report['series']['pairCount']} pairs, "
         f"median {report['series']['medianPercent']:+.2f}%, "
-        f"SD {report['series']['standardDeviationPercent']:.2f}%, "
+        f"SD {report['series']['standardDeviationPercent']:.2f}% "
+        f"(trimmed {report['series']['trimmedStandardDeviationPercent']:.2f}%), "
         f"range {report['series']['minimumPercent']:+.2f}%.."
         f"{report['series']['maximumPercent']:+.2f}%",
     ]
@@ -188,11 +251,13 @@ def render_report(report):
                          f"pair count -- keep reporting descriptively")
             continue
         selected = proposal["selected"]
+        conditions = selected["conditions"]
         lines.append(
             f"  {mode}: {proposal['pairCount']} pairs, "
-            f"+/-{selected['thresholdPercent']}%  "
-            f"(A/A false positives {selected['falsePositiveRate']:.4f}, "
-            f"detection {selected['detectionRate']:.4f})"
+            f"+/-{selected['directionalThresholdPercent']}%  "
+            f"(A/A false positives {conditions['aa']['falsePositiveRate']:.4f}, "
+            f"detection {conditions['positive']['detectionRate']:.4f}/"
+            f"{conditions['negative']['detectionRate']:.4f})"
         )
     lines.append("  nothing was written to DECISION_RULES; a human moves a rule.")
     return "\n".join(lines)
