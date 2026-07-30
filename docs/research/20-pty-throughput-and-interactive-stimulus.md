@@ -667,7 +667,7 @@ improvement as a failure.
   pair-spread claim two bullets above is unaffected.
 - Next action: `D4`.
 
-### F12 -- there is no block-level tail, and the noise is additive rather than proportional
+### F12 -- there is no block-level tail (stands); the noise is additive (REFUTED by `F16`)
 
 - Status: complete, and it **supersedes `F11`'s Uncertainty bullet** on two
   counts. That bullet reported an unexplained 29 ms drain excess as a standing
@@ -704,7 +704,9 @@ improvement as a failure.
   not one bad block" is about the *pair* spread -- 8 of 48 pairs beyond +/-3% --
   and that survives untouched. Pair spread and block outliers are separate
   quantities; only the block-outlier reading was wrong.
-- **Result 2, and the substantive one: the noise is additive.** Bucketing every
+- **Result 2 -- REFUTED by `F16`, which measured 2x and 3x and found them flat.
+  Read this bullet as the error it was, not as evidence.** ~~The noise is
+  additive.~~ Bucketing every
   retained block by stimulus length:
 
   | stimulus | blocks | median | SD (abs) | SD (%) | draw tail |
@@ -1323,16 +1325,15 @@ screens (`F11`).
 
 What is open, and why this file is not closed:
 
-- **`D5`, opened by `F12` and now carrying a recommendation.** The
-  frozen rule is the loosest and costliest in the corpus, and `F12` shows why
-  that is fixable: this workload's noise is **additive, not proportional** --
-  absolute SD is near-flat across a 2.24x change in block length while percent
-  SD nearly halves. Since ~98% of a pair's wall clock is launch overhead, a
-  longer replay is nearly free. **Tested and confirmed** (`F13`, `F14`): two
-  replicating 5x screens improve cost, resolution and safety margin at once, and
-  `D5` recommends re-freezing at quick 4p @2.10% and confirm 4p @1.90%. `F15`
-  retracts `F14`'s claim of an unsound combination method and replaces it with a
-  measured one: the frozen confirm cell fails detection on two of three screens.
+- **`D5`, opened by `F12` and closed by `F16` as a decline.** `F12` proposed that
+  this workload's noise was **additive**, so a longer replay would divide it, and
+  `F13` measured a 5x replay that appeared to confirm it. `F16` then measured the
+  intermediate 2x and 3x points and **refuted the model**: 1x, 2x and 3x all sit
+  at 1.30-1.72% trimmed SD, which is constant-percent noise, leaving 5x an
+  unexplained two-screen anomaly. `D5` declines, the fixture stays at 1x, and no
+  rule moved. `F15` separately retracts `F14`'s claim of an unsound combination
+  method -- a misread gate -- and replaces it with two measured defects: the
+  frozen confirm cell fails detection on two of three individual screens.
   The other five workloads are unaffected -- doc 7 records a separate
   100,000-trial freeze for them that `D4` skipped. `F12` **withdrew a claim this
   file made twice** -- the unexplained drain tail was screen 1's discarded
