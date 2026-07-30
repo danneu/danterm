@@ -1,13 +1,16 @@
 # PTY throughput reporting and interactive stimulus coverage
 
 Research started: 2026-07-30. **Status: OPEN -- the four original direction
-gates are decided and shipped, but `F12` reopened the workload's calibration:
-its noise is additive, so a longer replay tightens the rule `D4` froze. `D5`
-now carries a recommendation (quick 4p @2.10%, confirm 4p @1.90%) and awaits a
-user gate. `F15` retracts `F14`'s claim that `D4` combined replicates unsoundly
--- that was a measurement error -- but finds a real weakness: the frozen confirm
-cell fails its detection gate on two of three individual screens. Also outstanding: `H3` (parked) and the
-unclaimed vtebench import.**
+gates are decided and shipped. `F12` reopened the workload's calibration on the
+theory that its noise is additive; `F16` measured four block lengths and
+**refuted that**, so `D5` declines the lengthening and the fixture stays at 1x.
+Two findings survive and are actionable: the frozen `confirm 8p@2.15%` fails its
+detection gate on two of three individual screens (`F15`), and this workload
+never received the 100,000-trial confirmation stage doc 7 records for the other
+five (`F15`). `F14`'s claim that `D4` combined replicates unsoundly is
+**retracted** -- it was my own misreading of which condition the inconclusive
+gate is read from. Also outstanding: `H3` (parked) and the unclaimed vtebench
+import.**
 Deliverables, all now settled: what throughput quantity the benchmark system
 should report (`D1` -- the descriptive split, shipped), whether a keypress-driven
 interactive workload is worth building (`D2` -- no, take a recording instead),
@@ -1153,6 +1156,49 @@ improvement as a failure.
   plausible.
 - Next action: `D5`, with the corrected cell.
 
+### F16 -- 2x and 3x break the additive model, and the 5x result has no mechanism
+
+- Status: complete, and it is a **negative result that retracts `F12`'s central
+  claim**. Block length is not a lever on this workload's noise.
+- Date: 2026-07-30. Unreferenced experiment commits at `replayCount` 2 and 3,
+  same `commit-tree` method as `F13`, same screen design, same seed.
+- **The intermediate points do not lie on the predicted curve:**
+
+  | replay | block | fence frames | max stall | stall share | trimmed pair SD |
+  | --- | --- | --- | --- | --- | --- |
+  | 1x | 165 ms | 9 | 16 ms | 23% | 1.30 / 1.49 / 1.72% |
+  | 2x | 308 ms | 1 | 126 ms | 41% | **1.65%** |
+  | 3x | 454 ms | 2 | 185 ms | 41% | **1.62%** |
+  | 5x | 740 ms | 2 | 266 ms | 42% | 0.56 / 0.77% |
+
+  Additive noise predicts percent SD falling as 1/length: ~1.5% -> 0.75% at 2x
+  and 0.5% at 3x. **Neither moved.** 1x, 2x and 3x sit together at 1.3-1.72%,
+  which is the signature of *multiplicative* noise -- constant percent -- and the
+  opposite of what `F12` concluded.
+- **Why `F12` got it wrong.** Its additive reading rested on one comparison: five
+  40-frame blocks (SD 3.53%) against 95-frame blocks (1.82%). `F12` named the
+  n=5 estimate as its load-bearing caveat and said the magnitude was a forecast.
+  It was worse than that -- the *direction* was an artifact too. Four block
+  lengths measured properly show no trend at all.
+- **The fence-regime confound is refuted, and this is the one clean sub-result.**
+  The worry was that 5x looked quiet because the app does less main-thread work.
+  But the regime changes at **2x**, not 5x: fence frames drop 9 -> 1 and the
+  stall share jumps 23% -> 41% immediately, and 2x and 3x are *not* quiet. So
+  whatever makes 5x quiet, it is not the fence regime -- 2x, 3x and 5x share that
+  regime and only 5x is quiet.
+- **What is left is an anomaly with no mechanism.** Two 5x screens both landed at
+  roughly half the noise of every other length, which is hard to call chance
+  twice; and nothing in the four-point series explains it. `20`'s own rule --
+  `F10`'s ordering, characterize before calibrating -- says a number without a
+  mechanism is not ready to be frozen, and `D4` was criticized in `F14`/`F15` for
+  freezing on thin evidence. Freezing on this would repeat that.
+- Uncertainty: one screen each at 2x and 3x, against three at 1x and two at 5x.
+  1x alone spans 1.30-1.72% across its three screens, so a single screen's
+  trimmed SD carries real error, and 2x/3x both landing near 1x's high end is
+  within that spread. A third 5x screen would say whether the 5x result
+  replicates a third time; it would still not supply a mechanism.
+- Next action: `D5`, which should now decline.
+
 ### D5 -- whether to lengthen the replay and re-freeze the rule
 
 - Status: **recommendation made, awaiting user direction gate.** Same standard as
@@ -1162,7 +1208,8 @@ improvement as a failure.
   the noise it rests on is additive, `F13` and `F14` measured a 5x replay of the
   same committed capture, and the result improves cost, resolution, and safety
   margin simultaneously.
-- **Recommendation: take it.** Set `replayCount: 5` on `synchronized-frames` and
+- **Recommendation, revised by `F16`: decline the lengthening.** ~~Take it. Set
+  `replayCount: 5` on `synchronized-frames` and
   re-freeze at **quick 4 pairs @ +/-2.10%** and **confirm 4 pairs @ +/-1.90%**,
   against the frozen 6 @ 2.65% and 8 @ 2.15%.
   - Evidence: two replicating 5x screens (`F14`), each clearing every gate for
@@ -1174,7 +1221,13 @@ improvement as a failure.
     `quick`, ~65 s vs ~79 s at `confirm`), because the pair count falls and the
     longer block costs ~1 s per pair.
   - It moves the false-positive rate off the ceiling `F11` flagged as the frozen
-    rule's worst property: 0.0000-0.0019 against 0.0084-0.0095.
+    rule's worst property: 0.0000-0.0019 against 0.0084-0.0095.~~
+  **Withdrawn.** `F16` measured 2x and 3x and found no length effect: 1x, 2x and
+  3x all sit at 1.3-1.72% trimmed SD, so the additive model `F12` inferred and
+  `F13` appeared to confirm does not hold. The 5x result is a two-screen anomaly
+  with no mechanism, and freezing a rule on that is precisely what `F15` faulted
+  `D4` for. The `replayCount` feature stays (it is tested and defaults to 1); the
+  manifest keeps 1x.
 - **The real weakness in the frozen rule, per `F15`** -- not the one `F14` first
   claimed. `confirm 8p@2.15%` **fails the detection gate on two of the three 1x
   screens** (0.8571 on screen 3, 0.8867 on screen 4, against 0.90) and clears only
@@ -1187,16 +1240,18 @@ improvement as a failure.
   changed after screening, and the gate audit recorded. `D4` froze straight off
   50,000-trial screen reports with no such confirmation run. That gap is real and
   is independent of any threshold arithmetic.
-- What the recommendation does **not** rest on: that 5x is optimal. 3x and 10x
-  were never measured, and the tail grew slightly (8.8 -> 10.3 ms), so the
-  additive model is approximate at the edges. 5x is a measured improvement, not
-  a located optimum.
-- The dissenting consideration, stated because it is real: this is two screens on
-  one machine on one afternoon, which is the same evidence `D4` had before screen
-  4 undercut it. The honest difference is that `F14` verifies per-screen rather
-  than combining by hand, and that `synchronized-frames` would stop being the
-  corpus's outlier workload. A reader who thinks that is still too thin should
-  ask for a third 5x screen before the freeze; it costs ~10 minutes.
+- **What should still be acted on, independent of the lengthening.** `F15` found
+  two real things that survive `F16`: the frozen `confirm 8p@2.15%` fails its
+  detection gate on two of three individual 1x screens, and `synchronized-frames`
+  never received the 100,000-trial confirmation stage that doc 7 records for the
+  other five workloads. The cheap, mechanism-free fix is to run that missing
+  freeze stage at 1x and let it either confirm the current cell or replace it --
+  no fixture change, no unexplained anomaly, and it closes the procedural gap.
+- The dissenting consideration, stated because it is real: two 5x screens landing
+  at half the noise of every other length is hard to attribute to chance twice,
+  and a third 5x screen would test that for ~10 minutes. It would still not
+  supply a mechanism, which is the actual blocker -- so it is worth running only
+  if someone intends to investigate *why* 5x differs, not as a tiebreak.
 - If taken, the work is: `replayCount` in the manifest, both `DECISION_RULES`
   entries, the pinning test at
   `scripts/tests/terminal_benchmark_workloads_test.py` (which asserts 6/2.65 and
