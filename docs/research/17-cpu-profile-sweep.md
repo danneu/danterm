@@ -189,8 +189,15 @@ measures. Not hypothesised in advance; it emerged from the sweep.
       is now screened-and-refused rather than unscreened, and `D6` names the one use
       it does have. **`D5` logged this as "prerequisite for reading candidate A
       partially"; it turned out to be a prerequisite that cannot be met.**
-- [ ] Candidate A (`F6`) -- open, largest, elasticity still unconfirmed, and now
-      known **not** to be decidable by any frozen rule on its own region (`D6`).
+- [x] **`F6`'s elasticity confirmed. `F16`.** Two captures at 179x66 and 80x25
+      (5.907x glyph-occurrence lever): the `get_glyph_bboxes` subtree moves 5.62x,
+      **95.1% of linear**. The bar `11/F12` used to refute two earlier mechanisms is
+      passed. Also replicates `F6` at HEAD (16.37% vs 16.78%).
+- [ ] Candidate A (`F6`) -- **open and confirmed, but deliberately not started
+      (`D7`).** Elastic and real; the win is energy rather than frames, because the
+      draw rate is pinned at the panel's refresh at both geometries (`F16`), and no
+      instrument here can return a verdict on it (`F12`, `F15`). Cheapest next step
+      is one live capture to size the node, not the change.
 
 ## Findings log
 
@@ -973,6 +980,90 @@ measures. Not hypothesised in advance; it emerged from the sweep.
   the full 24-pair series per workload, so the grid can be re-searched with
   `--reanalyze` without re-measuring.
 
+### F16 -- `F6` passes the elasticity bar at 95% of linear, and the draw rate never moves
+
+- Status: **closed.** The test `F6` recorded as its own unmet bar, and the one
+  `11/F12` used to *refute* two earlier mechanisms, has now been run against `F6`.
+  **It passes.** Candidate A's attribution is confirmed elastic.
+- Date and investigator: 2026-07-29, Claude (agent).
+- Method: two 30s Time Profiler captures of `full-screen-content-churn` at HEAD,
+  differing only in grid geometry -- **179x66 (11,814 glyph occurrences per frame)
+  and 80x25 (2,000)**, a 5.907x lever. The producer generates the screen from the
+  live geometry (`scripts/terminal-benchmark-producer.py:73`), so the small run is a
+  genuinely smaller full-screen churn, not a cropped one. Deciding quantity is
+  **absolute microseconds in the `get_glyph_bboxes` subtree per accepted draw**,
+  normalized by T2's published draw rate -- a normalization that did not exist
+  before `F11`.
+
+  | Quantity | 179x66 | 80x25 | Ratio |
+  | --- | ---: | ---: | ---: |
+  | Glyph occurrences per frame | 11,814 | 2,000 | 5.907x |
+  | `get_glyph_bboxes` us/draw | **801.0** | **142.5** | **5.62x** |
+  | `CA::CG::DrawGlyphs::compute_dod_` us/draw | 874.6 | 158.4 | 5.52x |
+  | `get_glyph_bboxes` share of on-CPU | 16.37% | 4.15% | -- |
+  | Whole-trace on-CPU total | 17,479 ms | 12,288 ms | 1.42x |
+  | Draw rate | 119.10/s | 119.32/s | **1.00x** |
+
+- **Elasticity: 5.62x against a 5.907x lever, or 95.1% of linear.** Per occurrence
+  the cost is 67.8 ns at the large geometry and 71.3 ns at the small one -- a 5%
+  per-occurrence premium at 2,000 glyphs, which is the per-op fixed cost showing
+  through and bounds how much of the node is *not* addressable by drawing fewer
+  glyphs. `F6`'s mechanism is right: this is paid per glyph occurrence per frame.
+- **Replication, which this file's first caveat asked for.** The large-geometry
+  capture is a second `content-churn` profile on a different commit: `F6` measured
+  `get_glyph_bboxes` at 16.78% of on-CPU, this one at 16.37%. The self-frame split
+  inside the subtree is also stable across *both* geometries here
+  (`TGlyphOutlineDictionaryCache::Copy` 32.8% and 33.3%). **It is not stable against
+  `F6`, which reported 48.4%** -- a denominator discrepancy this test does not
+  resolve; treat `F6`'s split as the less trustworthy of the two, since this one is
+  reproduced twice.
+- **The finding nobody asked for, and it changes what candidate A is worth: the
+  draw rate does not move.** 119.10/s and 119.32/s across a 5.9x change in
+  per-frame glyph work. On this machine's built-in 120Hz ProMotion panel that is
+  the refresh cap, and the app is sitting on it at both geometries. So at 179x66
+  the process is paying 801 us/draw of pool-thread glyph-bounds work **and still
+  making every frame**. Removing that cost cannot raise the frame rate of this
+  workload, because the frame rate is not what it is limited by.
+- Inference: this is direct evidence for `F6`'s competing interpretation 1, which
+  it listed as "not excluded". **The win from candidate A is energy and thermal
+  headroom, not latency** -- on a laptop, battery. That is a real win and a
+  materially different one from the "largest cost in the app" framing, which
+  invites a reader to expect frames.
+- Inference 2, and it is the awkward one: **no instrument this project owns can
+  return a verdict on candidate A.** The deciding draw metric brackets main-thread
+  work and this cost is on the pool (`F12`); the frame rate is pinned, so no
+  throughput metric moves; and `F15` established that
+  `processCPUNanosecondsPerDraw` cannot be calibrated at any mode's pair count.
+  Note also that with the draw rate constant, per-draw and per-second
+  normalizations of the CPU metric differ only by a constant, so re-denominating it
+  buys no noise reduction. `D7` takes this up.
+- **Predictions registered before either trace was read, scored honestly. Two of
+  four were wrong.**
+  1. *"ms/draw falls 3x-6x"* -- **correct**, 5.62x, at the top of the range.
+  2. *"the subtree's share stays within a few points of 16.8%, so a share-only
+     reading would look like nothing happened"* -- **wrong, and backwards.** The
+     share fell 16.37% -> 4.15%, because the rest of the trace is largely *not*
+     glyph-elastic: the total fell only 1.42x. The share statistic would have shown
+     this effect plainly. Per-draw normalization was still the right choice, but the
+     reason I gave for needing it does not hold.
+  3. *"draw rate rises at the small geometry"* -- **wrong**, and this is the wrong
+     prediction worth having made. It did not move at all, which is what surfaced
+     the refresh cap and Inference 1. I had assumed the workload was CPU-bound.
+  4. *"`TGlyphOutlineDictionaryCache::Copy` stays dominant at ~48%"* -- **half
+     right**: dominant and stable across geometries, but at ~33%, not `F6`'s 48.4%.
+- **Limitation, stated before the result and unchanged by it:** the geometry lever
+  varies glyph occurrences and `DrawGlyphs` ops *together*, so this cannot separate
+  per-occurrence from per-op scaling. It answers what candidate A turns on -- does
+  the node move with content -- and not the finer question. The 5% per-occurrence
+  premium at the small geometry is the only per-op evidence here.
+- **What this does not fix:** both captures ran in loop profiling mode with
+  `DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES=1000000`, so per-frame glyph counts are
+  at maximum in both arms. The *elasticity* result transfers to live use -- the cost
+  is proportional to glyphs drawn, whatever that number is -- but the **16.4%
+  magnitude does not**, and `F6`'s second competing interpretation stands unresolved.
+- Artifacts: `.build/terminal-benchmark-profiles/2026-07-29-213635-10866/` (179x66)
+  and `.../2026-07-29-213852-13142/` (80x25).
+
 ## Decision log
 
 ### D1 -- which CPU opportunity to take first
@@ -1329,6 +1420,47 @@ input shapes.
   building the bracket first. `F6`'s elasticity is still unconfirmed and remains the
   cheaper prerequisite.
 
+### D7 -- candidate A is confirmed and still cannot be decided; what it would take
+
+- Status: **open, and open with its two questions answered in opposite
+  directions.** Evidence: `F16`, on top of `F6`, `F12`, `F15`.
+- What is now settled about A: the attribution is **real and elastic** (95.1% of
+  linear across a 5.9x lever), the mechanism `F6` proposed is the right one, and the
+  cost is paid per glyph occurrence per frame. The last remaining doubt about
+  *whether there is something there* is gone.
+- What is now settled against it: **the win is energy, not frames** (`F16` --
+  the draw rate is pinned at the panel's refresh at both geometries), and **no
+  instrument here can return a verdict on it** -- the draw rule brackets the wrong
+  thread, the frame rate does not move, and `F15` refused the CPU metric a rule.
+- Decision: **do not start candidate A as a code change.** Not because it is
+  unattractive -- it is the largest confirmed cost in the app -- but because the
+  order is wrong. A change of this size whose result cannot be measured is how a
+  project acquires an unfalsifiable optimization. `11/F12` is the precedent: two
+  plausible mechanisms for the compositing stall survived until someone ran the
+  elasticity test, and both died. A has now *passed* that test, which earns it the
+  next step and not the implementation.
+- **The next step, if A is taken: build the bracket first.** Concretely, a
+  measurement of process CPU over a **fixed wall-clock window at the pinned frame
+  rate**, with its own A/A screen -- the shape `F15` used, but as a bespoke
+  experiment rather than a rule inside `confirm`, which is what makes more blocks
+  available. `F15`'s refusal binds the frozen comparison modes, not a
+  candidate-specific measurement that may collect as many blocks as it needs. Note
+  what will *not* help: re-denominating per second instead of per draw, since `F16`
+  shows the rate is constant and the two differ by a constant factor.
+- The cheaper alternative, and its cost: **accept profiler-share evidence with two
+  independent captures**, which is exactly what doc 13 did and doc 11 explicitly
+  refused to inherit. This file has been sceptical of that standard throughout;
+  adopting it here for the largest change on the list would be the worst place to
+  start. Recorded so the option is visible, not because it is recommended.
+- **The magnitude question is still open and is cheaper than either.** Both `F16`
+  captures forced full-viewport redraws every frame. A live capture -- `F6`'s
+  second competing interpretation -- would size the node as a user actually
+  experiences it, and could plausibly move A's value by an order of magnitude in
+  either direction. **Do that before building any bracket.** It is one capture.
+- Next action: none forced, and A should not be started. In cost order: a live
+  capture to size the node (cheap), then a purpose-built CPU bracket with its own
+  A/A screen (expensive), then the change.
+
 ## Pre-rejected
 
 Candidates a fresh survey would plausibly re-propose, with the evidence that
@@ -1386,9 +1518,10 @@ separate a *verdict* by freezing one axis, which is what they exist for.
 
 ## Open questions and caveats
 
-- **One capture per workload; doc 9's two-profile rule is unsatisfied.** The two
-  churn workloads cross-validate each other (`F4`); `scrollback-stream` and
-  `incremental-mixed` have no replicate. Every share here is provisional in that
+- **One capture per workload; doc 9's two-profile rule is unsatisfied, except for
+  `content-churn`.** The two churn workloads cross-validate each other (`F4`), and
+  `content-churn` now has a genuine second capture at HEAD (`F16`);
+  `scrollback-stream` and `incremental-mixed` have no replicate. Every share here is provisional in that
   specific sense, and a candidate should get a second capture before it is
   benchmarked.
 - **No frame counts, and three proxies disagree by 1.7x** (`F2`). Absolute ms are
@@ -1414,9 +1547,17 @@ separate a *verdict* by freezing one axis, which is what they exist for.
   (`DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES=1000000`), so per-frame glyph counts
   sit at maximum. This inflates `F6` by an unmeasured amount relative to live use,
   and may be why `F4` finds the two churn workloads identical.
-- **`F6`'s elasticity is unconfirmed.** Nothing here varied glyph count and showed
-  the node move -- the exact pre-registered test `11/F12` used to refute its two
-  mechanisms. A confirmed attribution is not a confirmed win.
+- **`F6`'s elasticity is confirmed** (`F16`): 5.62x against a 5.907x lever, 95.1%
+  of linear, with a 5% per-occurrence premium at the small geometry marking the
+  per-op floor. Superseded caveat, kept for the chain: *"nothing here varied glyph
+  count and showed the node move."* What remains unconfirmed is the **magnitude** in
+  live use, not the mechanism -- see the loop-mode caveat above, which `F16` did not
+  address because both its arms force full redraws.
+- **The churn workloads are frame-rate-capped, not CPU-bound** (`F16`). 119.10/s and
+  119.32/s across a 5.9x change in per-frame glyph work, on a 120Hz panel. Any
+  reading of these workloads that treats a CPU reduction as a throughput win is
+  wrong: there is no throughput headroom to win. This also means a candidate whose
+  cost sits off the main thread has **no** metric here that can decide it (`D7`).
 - **`F9`'s central estimate is bracketed, not measured**, and its own filter is
   known to leak inlined feed frames. The probe in `D1`'s candidate C fixes both.
 - **`terminal-feed` has no on-CPU instrument** (`F2`), so doc 10's ranking still
@@ -1439,14 +1580,16 @@ separate a *verdict* by freezing one axis, which is what they exist for.
 
 ## Outcome
 
-**Phases 1-4 complete; Phase 5 open with one candidate left.** Six on-CPU traces,
-fifteen findings, five ranked code candidates, two tooling fixes shipped plus one
-calibration screen, seven pre-rejections, **one code candidate kept** (B:
-`terminal-feed` -14.59%, `scrollback-stream` -10.78%), **one rejected on
-measurement** (C: nothing vanished when it was deleted outright), and **one metric
-screened and refused a verdict** (`processCPUNanosecondsPerDraw`).
+**Phases 1-4 complete; Phase 5 open with one candidate confirmed and deliberately
+not started.** Eight on-CPU traces, sixteen findings, five ranked code candidates,
+two tooling fixes shipped plus one calibration screen, seven pre-rejections, **one
+code candidate kept** (B: `terminal-feed` -14.59%, `scrollback-stream` -10.78%),
+**one rejected on measurement** (C: nothing vanished when it was deleted outright),
+**one metric screened and refused a verdict** (`processCPUNanosecondsPerDraw`), and
+**the headline finding put through the elasticity test it had failed to face** (A:
+95.1% of linear, `F16`).
 
-Eight results are worth more than the ranking:
+Nine results are worth more than the ranking:
 
 1. **The two regions this project has spent four documents optimizing are no
    longer where the time is.** `planFrame` and `drawRenderFrame` are 10.5% and
@@ -1514,7 +1657,21 @@ Eight results are worth more than the ranking:
    made on mechanism alone -- calibration evidence is worth collecting even when it
    freezes nothing.
 
-Findings F1-F15 are recorded; the next free ID is **F16**. Decisions D1-D6 are
+9. **The headline finding survived its own kill test, and the surprise was next to
+   it** (`F16`, `D7`). `F6`'s 16.8% is elastic at 95.1% of linear across a 5.9x
+   glyph-occurrence lever, so the mechanism is right and candidate A is real. But the
+   draw rate did not move -- 119.10/s and 119.32/s, pinned at a 120Hz panel's refresh
+   at both geometries. The app pays 801 us/draw of pool-thread glyph-bounds work at
+   179x66 **and still makes every frame**. So A's win is energy, not latency, and
+   between that and `F15` there is now **no instrument in this project that can
+   return a verdict on it**. `D7` therefore declines to start the largest confirmed
+   candidate on the list: a change of this size whose result cannot be measured is
+   how a project acquires an unfalsifiable optimization. The generalizable lesson:
+   confirming that a cost is real and confirming that removing it would show up are
+   two different experiments, and passing the first is what makes the second worth
+   designing.
+
+Findings F1-F16 are recorded; the next free ID is **F17**. Decisions D1-D7 are
 recorded; D2, D4, D5 and D6 are closed and acted on; candidates B and D are done, C
-is rejected, the A/A screen is done and earned no rule, and **A is the only open
-candidate**; the next free ID is **D7**.
+is rejected, the A/A screen is done and earned no rule, and **A is confirmed, open,
+and deliberately not started (`D7`)**; the next free ID is **D8**.

@@ -190,6 +190,16 @@ the churn workloads, and about one twenty-third on `incremental-mixed`.** An
 `equivalent` draw verdict is a true statement about the draw bracket and a nearly
 empty one about total cost. Read this line before concluding a change was free.
 
+**And the churn workloads are frame-rate-capped, not CPU-bound.** `17/F16` traced
+`full-screen-content-churn` at 179x66 and at 80x25 -- a 5.9x change in per-frame
+glyph work -- and the draw rate was 119.10/s and 119.32/s, pinned at the built-in
+120Hz panel's refresh in both. The glyph-bounds cost that scaled 5.62x between those
+two runs was being paid *while every frame still landed*. Two consequences when
+reading any result on these workloads: a CPU reduction is not a throughput win
+because there is no throughput headroom to win, and a cost living off the main
+thread has no metric here that can decide it -- not the draw rule (wrong thread),
+not the frame rate (pinned), and not process CPU (uncalibratable, point 3 above).
+
 Four things it is not, each of which invites a misreading:
 
 1. **It is not latency.** Work moved off the critical path onto an idle core reads
