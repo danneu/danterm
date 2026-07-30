@@ -22,3 +22,6 @@ build/
 Package.resolved
 /scripts/__pycache__
 /scripts/tests/__pycache__
+
+# Reproducible external source checkouts (materialize with `just fetch-references`).
+/references/

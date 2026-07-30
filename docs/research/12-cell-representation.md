@@ -37,14 +37,15 @@ the visible symptom; grid-shift and erase CPU is the expensive one.
 libghostty's author about his own project. That is a claim, not evidence. Every
 libghostty number quoted here is verified against the local checkout in
 `.ghostty-src/` (which [AGENTS.md](../../AGENTS.md) designates as the reference
-for exactly this), with file and line cited. Nothing in this file may rest on the
-post alone.
+for exactly this), with file and named identifier cited. Nothing in this file
+may rest on the post alone.
 
 ## Investigation rules
 
 - **Verify every external claim against `.ghostty-src/` or
-  `references/alacritty/` before using it.** Cite the file and line. The post
-  below is a trigger and a source of *techniques*, never of numbers.
+  `references/alacritty/` before using it.** Cite `file#identifier`, using the
+  nearest enclosing named identifier when needed. The post below is a trigger
+  and a source of *techniques*, never of numbers.
 - **Report layout as `MemoryLayout` size *and* stride, and say which one
   matters.** Array storage costs stride, not size; DanTerm's cell differs by 7
   bytes between them.

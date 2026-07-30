@@ -12,6 +12,11 @@ clean:
 fetch-ghostty:
     ./build-lib.sh fetch
 
+# Materialize all pinned references, one named reference, or list them with:
+# `just fetch-references`, `just fetch-references alacritty`, or `just fetch-references --list`.
+fetch-references *args:
+    python3 ./scripts/fetch-references.py {{args}}
+
 # Fetch Ghostty source and build the GhosttyKit xcframework.
 build-lib:
     ./build-lib.sh
@@ -66,6 +71,7 @@ test:
     python3 ./scripts/tests/terminal_headless_draw_compare_test.py
     python3 ./scripts/tests/terminal_profile_report_test.py
     python3 ./scripts/tests/terminal_memory_profile_test.py
+    python3 ./scripts/tests/fetch_references_test.py
     ./scripts/tests/test-terminal-pty_test.sh
     ./scripts/tests/shell-integration_test.sh
     ./scripts/tests/agent-notifications-live_test.py
