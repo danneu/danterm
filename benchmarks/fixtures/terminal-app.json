@@ -51,6 +51,16 @@
         {"repeat": 100000, "template": "\u001b[24;1Hstatus-{index:05d}\u001b[K\u001b[12;10H\u001b[@+\u001b[P\u001b[23;1Hregion-{index:05d}\n"},
         {"bytes": "\u001b[r"}
       ]
+    },
+    "synchronized-frames": {
+      "identity": "synchronized-frames-v1-btop-40-frames",
+      "dominantQuestion": "How efficiently is work amortized when a real TUI coalesces every frame behind synchronized output?",
+      "provenance": {
+        "source": "DanTerm benchmark corpus",
+        "license": "MIT",
+        "description": "Forty consecutive btop 1.4.7 frames captured live at 179x66, every byte inside a DECSET 2026 bracket -- the frame-coalescing path no generated workload enters. Unlike its four siblings this is captured evidence rather than a regenerable generator: it holds one machine's system state at one moment, and re-running the capture produces different bytes. See docs/research/20-pty-throughput-and-interactive-stimulus.md."
+      },
+      "recording": "benchmarks/fixtures/recordings/synchronized-frames-v1-btop-40-frames.json.gz"
     }
   }
 }

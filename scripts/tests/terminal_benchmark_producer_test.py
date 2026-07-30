@@ -362,5 +362,37 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
         self.assertEqual(events, ["geometry-ready"])
 
 
+class CompletionMarkerTests(unittest.TestCase):
+    def test_the_completion_marker_leaves_drawing_enabled_after_a_synchronized_stimulus(self):
+        # Intent: appending the completion marker to a stimulus that enabled
+        #   synchronized output leaves the stream with synchronized output off.
+        # Why it exists: `TerminalPaneSession.planIfNeeded` returns early while
+        #   `isSynchronizedOutputActive`, so the marker exists to force a final
+        #   visible draw and cannot do that through a flag it never clears. The
+        #   prologue already resets SGR, the scroll region, and the alternate
+        #   screen for exactly this reason; synchronized output was the one
+        #   state-leaving-mode it missed, and the symptom is a harness that hangs
+        #   waiting for a draw rather than one that fails.
+        # Scenario: spec-first; the corpus gained its first captured workload, in
+        #   which 100% of the bytes sit inside a DECSET 2026 bracket.
+        stimulus = b"\x1b[?2026h" + b"payload"
+        stream = stimulus + PRODUCER.completion_bytes("FINAL-STATE", "MARKER")
+        self.assertGreater(
+            stream.rfind(b"\x1b[?2026l"),
+            stream.rfind(b"\x1b[?2026h"),
+            "completion left synchronized output enabled, which suppresses the draw",
+        )
+
+    def test_the_completion_marker_carries_both_harness_markers(self):
+        # Intent: the marker text the observer matches on survives the prologue.
+        # Why it exists: the prologue is a pile of escape sequences and the two
+        #   marker strings are the only part the harness actually reads; a
+        #   prologue edit that ate one would be invisible until a run failed to
+        #   detect its own completion.
+        completion = PRODUCER.completion_bytes("FINAL-STATE", "MARKER")
+        self.assertIn(b"FINAL-STATE", completion)
+        self.assertIn(b"MARKER", completion)
+
+
 if __name__ == "__main__":
     unittest.main()

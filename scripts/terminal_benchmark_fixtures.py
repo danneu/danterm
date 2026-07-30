@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Load provenance-bearing byte streams for the real-app benchmark corpus."""
+import gzip
 import json
 import os
 
@@ -28,7 +29,15 @@ def load_corpus(root):
 def iter_bytes(root, workload):
     """Yield a workload's committed bytes without constructing one giant buffer."""
     if "recording" in workload:
-        recording = json.loads((root / workload["recording"]).read_text(encoding="utf-8"))
+        path = root / workload["recording"]
+        # Captured workloads are stored gzipped because a real one cannot be
+        # committed otherwise: 1.25 MB of btop is 6.2 MB as JSON hex and 149 KB
+        # packed. Generated workloads stay plain -- they are a manifest, not a
+        # payload. Keyed on the suffix so both forms remain readable by hand.
+        if path.suffix == ".gz":
+            recording = json.loads(gzip.decompress(path.read_bytes()).decode("utf-8"))
+        else:
+            recording = json.loads(path.read_text(encoding="utf-8"))
         for event in recording["events"]:
             if event.get("type") == "feed":
                 yield bytes.fromhex(event["hex"])

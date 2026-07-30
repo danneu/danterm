@@ -271,6 +271,27 @@ class AcknowledgmentLog:
         return {"observed": list(self.observed), "awaiting": self.awaiting}
 
 
+def completion_bytes(expected_final_state, completion_marker):
+    """Build the trailer whose job is to force one final, visible draw.
+
+    The prologue exists to undo whatever mode state the stimulus left behind, so
+    the marker text is guaranteed to reach the screen: SGR, scroll region,
+    alternate screen, and synchronized output. That last one is not decorative --
+    `TerminalPaneSession.planIfNeeded` returns early while synchronized output is
+    active, so a stimulus that ends with it set would suppress the very draw this
+    trailer is here to produce, and the harness would wait for a draw that can
+    never arrive. Every byte of the captured `synchronized-frames` workload sits
+    inside such a bracket.
+    """
+    return (
+        "\x1b[0m\x1b[r\x1b[?2026l\x1b[?1049l"
+        + expected_final_state
+        + "\n"
+        + completion_marker
+        + "\n"
+    ).encode()
+
+
 def main():
     """Load the harness contract from the environment and run the producer."""
     environment = os.environ
@@ -299,13 +320,10 @@ def main():
         int(environment["DANTERM_TERMINAL_BENCHMARK_COLUMNS"]),
         int(environment["DANTERM_TERMINAL_BENCHMARK_ROWS"]),
     ))
-    completion = (
-        "\x1b[0m\x1b[r\x1b[?1049l"
-        + environment["DANTERM_TERMINAL_BENCHMARK_EXPECTED_FINAL_STATE"]
-        + "\n"
-        + environment["DANTERM_TERMINAL_BENCHMARK_COMPLETION_MARKER"]
-        + "\n"
-    ).encode()
+    completion = completion_bytes(
+        environment["DANTERM_TERMINAL_BENCHMARK_EXPECTED_FINAL_STATE"],
+        environment["DANTERM_TERMINAL_BENCHMARK_COMPLETION_MARKER"],
+    )
 
     def write_result(elapsed, geometry, written=None):
         result = {
