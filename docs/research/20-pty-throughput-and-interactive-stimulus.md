@@ -542,6 +542,51 @@ improvement as a failure.
   provenance if this is committed. It changes frame *rate*, not frame *content*.
 - Next action: `D3`.
 
+### F10 -- the new workload's draw tail is a constant, so it is not the draw lever it briefly looked like
+
+- Status: complete. This is the finding `D3`'s ordering existed to catch, and it
+  **refutes the most attractive reading of the first measurement.**
+- Date: 2026-07-30, at `6849c24`. Ten single blocks, machine **not idle** (an
+  agent session was working alongside), so treat spreads as upper bounds.
+- Method: build the fixture at two stimulus lengths and run five blocks of each,
+  reading `producerWriteNanoseconds` against `finalDrawNanoseconds` exactly as
+  `F2` does for `scrollback-stream`.
+- Result at 40 frames (1.25 MB): median block **73.7 ms**, drain share 88.9%,
+  **draw tail 11.1%** -- 2.6x `scrollback-stream`'s 4.3%. Read alone, that says
+  the corpus just gained a far more draw-sensitive workload.
+- Result at 95 frames (3.02 MB): median block **164.2 ms**, **draw tail 4.4%** --
+  indistinguishable from `scrollback-stream`.
+- **The reconciliation, and the actual finding: the tail is constant in absolute
+  terms.** 8.2 ms median at 40 frames, 7.2 ms at 95, against stimulus lengths
+  differing 2.4x. The tail share moved because the *denominator* grew; the
+  numerator never did. So the apparent draw sensitivity at 40 frames was an
+  artifact of a short block, and shrinking the stimulus further would have
+  inflated the share without adding one nanosecond of measured draw work.
+- Why the tail is constant, and it follows from `F9`: drawing is suppressed for
+  the whole replay, so the tail brackets **one final draw**, not the sum of 95.
+  Whatever intermediate draws occur land inside `producerWriteNanoseconds` while
+  the producer is still writing -- which is `F2`'s composition again, reached by
+  a different route.
+- **Consequence for `D3`: this workload is not a draw instrument.** Its block is
+  ~95% drain at any honest length, so what it decides is the speed of parsing and
+  damage-tracking a real TUI's output under frame coalescing. That is a genuinely
+  unexercised path (`F9`) and worth having. It is not a better handle on drawing
+  than what already exists, and the corpus manifest's `dominantQuestion` should
+  not imply that it is.
+- Noise, and it is the open problem: block CV **3.87%** at 40 frames and
+  **2.35%** at 95, against `scrollback-stream`'s 1.24% within-arm figure from
+  `F4`. Longer blocks help, which is why the committed fixture is the 95-frame
+  build; but 2.35% on a busy machine still forecasts a looser threshold than any
+  existing workload carries. Whether it is looser than useful is what the A/A
+  screen decides, and this is the number that makes running one worthwhile rather
+  than a formality.
+- Uncertainty: five blocks per length on a non-idle machine is a characterization,
+  not a screen. The constancy of the tail is robust to that -- it is a 2.4x lever
+  moving a quantity by 12% in the *wrong* direction for the alternative
+  explanation -- but every CV here is an upper bound.
+- Next action: `D3`'s remaining leg -- the A/A screen, now with a specific
+  question to answer rather than a box to tick.
+
 ## Decision log
 
 ### D1 -- what the benchmark system should report about PTY throughput

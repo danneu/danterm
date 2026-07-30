@@ -53,14 +53,14 @@
       ]
     },
     "synchronized-frames": {
-      "identity": "synchronized-frames-v1-btop-40-frames",
-      "dominantQuestion": "How efficiently is work amortized when a real TUI coalesces every frame behind synchronized output?",
+      "identity": "synchronized-frames-v1-btop-95-frames",
+      "dominantQuestion": "How fast can a real TUI's output be parsed and damage-tracked when frame coalescing suppresses drawing throughout?",
       "provenance": {
         "source": "DanTerm benchmark corpus",
         "license": "MIT",
-        "description": "Forty consecutive btop 1.4.7 frames captured live at 179x66, every byte inside a DECSET 2026 bracket -- the frame-coalescing path no generated workload enters. Unlike its four siblings this is captured evidence rather than a regenerable generator: it holds one machine's system state at one moment, and re-running the capture produces different bytes. See docs/research/20-pty-throughput-and-interactive-stimulus.md."
+        "description": "Ninety-five consecutive btop 1.4.7 frames captured live at 179x66, every byte inside a DECSET 2026 bracket -- the frame-coalescing path no generated workload enters. Sized by block duration rather than byte count: the draw tail is a constant ~7 ms regardless of stimulus length, so only a longer block lowers the noise floor. Unlike its four siblings this is captured evidence rather than a regenerable generator: it holds one machine's system state at one moment, and re-running the capture produces different bytes. See docs/research/20-pty-throughput-and-interactive-stimulus.md."
       },
-      "recording": "benchmarks/fixtures/recordings/synchronized-frames-v1-btop-40-frames.json.gz"
+      "recording": "benchmarks/fixtures/recordings/synchronized-frames-v1-btop-95-frames.json.gz"
     }
   }
 }
