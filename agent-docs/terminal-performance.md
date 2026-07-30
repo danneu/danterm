@@ -713,6 +713,57 @@ CoreText line.
 Do not implement an optimization until the user has had an opportunity to
 review the evidence and choose or revise the proposed direction.
 
+## Make an instrument report its own coverage
+
+Every metric here must be able to say "not measured" separately from "measured
+zero". An instrument whose blind spot renders as `0` reports the reassuring
+answer exactly when it is blind, and nothing downstream can tell the difference
+-- so the failure is silent and always in the direction that ends the
+investigation early.
+
+Four instances cost real time on this code, all the same shape:
+
+- A mutation harness grepped for `✘`, which Swift Testing does not emit (it uses
+  `􀢄`). Caught mutations rendered as clean runs.
+- `cumulativePlanNanoseconds` is promoted from pending to accepted only when a
+  draw is accepted, and `scrollback-stream` accepts none. It reads `0.00` on the
+  one workload whose sustained output the number was wanted for.
+- The fence-stall counter first shipped latched at drain time, so a delivery
+  whose publish the synchronized-output guard suppressed lost its stall
+  entirely -- understating precisely the full-screen TUI floods worth measuring.
+- A flake rate sampled from single-test runs (~1 failure in 60) instead of
+  full-suite runs (~3 in 14). Twenty clean runs in the wrong denominator prove
+  nothing, at any sample size.
+
+Practical rules:
+
+- Emit a count beside every aggregate. `cumulative...Nanoseconds` without its
+  sample count cannot distinguish "no cost" from "no samples". Assert a floor on
+  that count where the number drives a decision.
+- Check that a new field is actually present in the artifact before reading its
+  value. Both benchmark blind spots above were guards inherited by copying a
+  neighbouring metric's emit site.
+- Prefer the continuous quantity to the thresholded one. A pass/fail at a 60s
+  time limit is one bit; the test's wall time underneath it shows a distribution
+  shifting before any verdict flips. The read-turn cap moved the termination
+  test from 7.70s to 0.82s and the PTY suite from 116s to 12.7s -- visible in
+  timings long before it would have been visible in a pass rate.
+- Verify a weakened or cheapened measurement still detects what it was built to
+  detect, by reintroducing the defect and confirming it goes red.
+- Derive nothing that one more run could measure.
+- Give every comparison a control the change cannot reach, measured in the same
+  session. A read-turn constant in `TerminalPTYHost` cannot touch the 679 pure
+  `TerminalCore` tests, so those are the control for any claim about the PTY
+  suite's wall time. This is what separates an effect from a machine state: a
+  9.1x PTY "speedup" read out of two archived gate logs evaporated when the
+  control showed the untouched core suite had moved 13x across the same pair.
+  Measured properly, interleaved and same-session, the real effect was 24%.
+  Every comparative claim that survived this investigation came from
+  contemporaneous interleaved arms; every one that fell came from comparing logs
+  across sessions. Subtracting medians of two
+  comparisons put the read-turn cap's cost at ~+1%; measured directly against
+  the same baseline it was +3.69%.
+
 ## Optimize safely
 
 Note the pre-change revision before you start -- that is the baseline the
