@@ -257,14 +257,3 @@ Critical files:
   test gate, including the dispatch-only mid-close and spawn regressions, passed;
   a post-fix GUI Cmd-Q check remains manual until app identity is enforced at the
   control boundary.
-
-## Follow Up
-
-- `docs/research/README.md` has no row for doc 22. It was left untouched because
-  it carries unstaged in-flight edits of its own, and that file's own rule is
-  that the table is the only record of which files are live -- so doc 22 is
-  currently invisible to that index.
-- Add a server-validated app identity handshake and a dev-only quit/test command
-  to the `danterm` control boundary. Destructive automation must bind an explicit
-  socket, PID, bundle identifier, and executable path, and production quit must
-  fail closed without a separate user-authorized override.

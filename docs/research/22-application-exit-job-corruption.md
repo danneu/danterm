@@ -1,12 +1,13 @@
 # Application-exit job corruption (SIGSEGV on Cmd-Q)
 
-Research started: 2026-07-30. **Status: OPEN -- the victim, the fault class, the
-corrupted value's provenance, the reproduction, and the arena are all settled
-(`F1`-`F5`, `F8`-`F10`, `F12`, `F13`); the write that installs the bad resume
-pointer is not (`D1`). Static analysis is exhausted (`F6`, `F7`) and the one
-budgeted live-debugger attempt closed inconclusive because its instrumentation
-silently never fired (`F11`). Phase F proceeds under `AR2`, but against an arena
-that is now confirmed rather than assumed (`D2`).**
+Research started: 2026-07-30. **Status: CLOSED INCONCLUSIVE -- the victim, the
+fault class, the corrupted value's provenance, the reproduction, and the arena
+are all settled (`F1`-`F5`, `F8`-`F10`, `F12`, `F13`); the write that installed
+the bad resume pointer is not (`D1`). Static analysis was exhausted (`F6`, `F7`)
+and the one budgeted live-debugger attempt closed inconclusive because its
+instrumentation silently never fired (`F11`). Phase F then removed the entire
+Swift Concurrency exit arena in `6d97878` and `50c5240`; the user verified the
+optimized build quits cleanly. Reopen only if the crash returns.**
 Deliverable: `PO1` of the exit-crash plan -- name the root cause, or record the
 diagnosis as inconclusive so the D/F gate can be re-decided. This file exists
 because the arena is about to be demolished: the fix takes Swift Concurrency out
@@ -227,7 +228,7 @@ about the exit path is therefore about the right code. What remains unknown is
 only the write, not the arena -- so `AR2`'s risk is narrower than it was before
 this attempt, though not eliminated.
 
-## Open
+## Residual uncertainty
 
 - The write that installs `0xF01CAA94`. Unanswered.
 - If the crash survives Phase F, the next probe needs working instrumentation
