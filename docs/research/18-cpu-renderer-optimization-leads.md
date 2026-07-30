@@ -2,7 +2,8 @@
 
 Research started: 2026-07-29. **Status: OPEN -- survey complete; two of the five
 tier-1 leads taken and confirmed (`L3`/`F10`, `L2`/`F11`), the bracket re-captured
-and the remainder re-ranked (`F12`, `D3`->`D4`), the rest still gated.**
+the remainder re-ranked (`F12`, `D4`), and `L1` taken and rejected
+(`F13`, `D5`) -- the rest still gated.**
 Deliverable is the API inventory (`F1`), the decomposition of the one decidable
 renderer bracket (`F4`-`F8`, superseded in its shares by `F12`), the ranked lead
 list (`D1`, re-ordered by `D4`), and the paired-benchmark verdict for each lead as
@@ -127,26 +128,35 @@ that grouping had an attribution bug; `D4` corrects both the sizes and the order
 - [x] Capture at HEAD, both churn workloads. **Done -- `F12`. Retired every share
       in `F4`, confirmed the bracket is ~60% CoreGraphics entry recording, and
       re-ranked the remainder.**
-- [ ] **`L1` -- batch glyph submission** by (face, color) across the damaged region,
-      one `CTFontDrawGlyphs` per batch instead of one per row per style.
-      **18.8-21.6% of the live bracket on its own, plus a proportional share of the
-      26.7% per-entry dedup block** (`F12`). First on size, and first on structure:
-      `L1` replaces the run loop's per-run buffers, so taking `L4` before it would
-      pre-size a topology `L1` deletes. **Fires `F9`'s pre-registered prediction** --
-      `content-churn` must move materially and `style-churn` little; them moving
-      together refutes the entry-count mechanism rather than just this lead.
-      Ordering risk must be asserted by a test, not assumed (`D4`).
+- [x] **`L1` -- batch glyph submission** by (face, color) across the damaged region.
+      **Done, and REJECTED -- `F13`, `D5`. `slower` +30.67% (`content-churn`) and
+      +31.55% (`style-churn`), reverted.** `CTFontDrawGlyphs` enumerates its glyph
+      array and calls the context delegate once per non-overlapping sub-run, so our
+      call count never controlled the entry count. `F9`'s prediction fired against it:
+      both workloads moved together, which `F9` named in advance as refuting the
+      mechanism. Tests kept as `MultiStyleFrameTests`.
+- [ ] **`L12` -- bypass `CTFontDrawGlyphs`** for the mapped-glyph path: cache `CGFont`
+      per face, `setFont` + `setFontSize`, then `showGlyphs(_:at:)`. Promoted out of
+      "Pre-rejected" by `D5`. `F13` measures `EnumerateOverlappingGlyphs` at **385 ms =
+      35.8% of the bracket**; if the lower-level entry point reaches the recorder
+      without it, this is the largest item on the text path. **If it does the same
+      enumeration internally, this is worth zero** -- which is why it goes first: one
+      commit and one `quick` run re-rank everything after it.
 - [ ] **`L4` -- write into pre-sized buffers** instead of per-element `Array.append`.
       **24.5%** of the live bracket -- `isUniquelyReferenced` plus its stub is
-      8.9-10.9% of it. Tier 1 now that `F8`'s precondition is met (`F11`, `F12`), but
-      second: it should pre-size whatever buffer shape `L1` leaves behind.
+      8.9-10.9% of it. Tier 1 now that `F8`'s precondition is met (`F11`, `F12`).
+      `L1`'s rejection removes the reason it was sequenced second, so it is blocked
+      only on `L12`, which may change the buffer shape it should pre-size.
 - [ ] **`L5` -- intern `CGColor`s and hoist the color space.** Floor ~5.5% (our own
-      construction), ceiling whatever of the dedup block `L1` leaves. Its stronger
+      construction), ceiling whatever of the dedup block `L6` leaves. Its stronger
       form rests on a `CGColorCompare` pointer fast path the SDK does not document
       (`D3`) -- do not pitch the big number.
 - [ ] **`L6` -- batch fills by color.** 7-19% inclusive and sharply
       content-dependent (`F12`): 18.6% of the `content-churn` bracket, 7.0% of
       `style-churn`'s. Size it from the inclusive figure, not `F12`'s entry row.
+      **Its premise survives `F13` where `L1`'s did not:** `fill(rect)` maps one call
+      to one display-list entry, and 71 ms of the dedup block sits under fill entries
+      rather than glyph entries.
 - [ ] Optional tooling, not a decision rule: the per-draw run-count and
       glyph-call counters `F9` asks for, which would make `L1`/`L6` predictable
       in advance instead of only measurable afterwards.
@@ -811,6 +821,78 @@ Inside that 59%, what each entry costs:
   captures.** Compare the bracket total, and compare mechanism groups within one
   capture.
 
+### F13 -- `L1` implemented and rejected: batching made the draw ~31% *slower*, because `CTFontDrawGlyphs` re-splits a call into entries itself
+
+- Status: **confirmed slower by paired benchmark on both draw workloads, cause
+  identified by capture, change reverted.** This refutes the mechanism `L1`, `L12`,
+  and part of `D1`'s tier-1 rationale rested on.
+- Method: implemented batching by (face, colour) across the whole damaged region --
+  one accumulator per key for the entire draw, one `CTFontDrawGlyphs` per key after
+  the run loop, sprites and fills left per-run exactly as `D1`'s "smallest first
+  experiment" specified. Baseline `927c0ee`, candidate tree `352fb074731b`. Then
+  `just benchmark-trace full-screen-content-churn "Time Profiler" 30` on the
+  candidate to find the cause.
+- Measurements:
+  - `content-churn`: **`slower` +30.67%** (2 pairs). Plan time +2.39%, `inconclusive`.
+  - `style-churn`: **`slower` +31.55%** (2 pairs). Plan time +1.24%, `inconclusive`.
+  - Capture, candidate versus HEAD, same workload and denominator: bracket
+    **1,075 -> 1,294 ms (+20.4%)**, agreeing in direction with the paired benchmark.
+- **The cause, and it is a documented-behaviour error, not an implementation one.**
+  Every stage of the CoreText submission chain grew, and the *delegate* grew with it:
+
+| chain node (inclusive, ms) | HEAD | batched | delta |
+| --- | ---: | ---: | ---: |
+| `CTFontDrawGlyphs` | 431 | 576 | **+145** |
+| `DrawGlyphsAtPositions` | 407 | 557 | +150 |
+| `EnumerateOverlappingGlyphs` | 385 | 529 | **+144** |
+| `CGContextDelegateDrawGlyphs` | 600 | 706 | **+106** |
+| `dlRecorder_DrawGlyphs` | 331 | 460 | **+129** |
+| `colorResourceForColor` under `dlRecorder_DrawGlyphs` | 92 | 119 | +27 |
+
+- Inference: **one `CTFontDrawGlyphs` call is not one display-list entry.** The
+  wrapper enumerates the glyph array and invokes the context delegate once per
+  *non-overlapping sub-run* -- that is what `EnumerateOverlappingGlyphs` is for. So
+  collapsing 66 row-sized calls into a handful of frame-sized ones does not reduce
+  the number of entries CoreGraphics records; the enumeration re-derives roughly the
+  same split from geometry. What batching does change is that the enumeration now
+  runs over ~11,800 glyphs per call instead of ~179, and the per-entry dedup work it
+  was supposed to eliminate went *up* rather than down. Add the Swift-side cost of
+  accumulators that grow to full-frame size every draw -- allocator traffic and
+  `beginCOWMutation` both rose visibly -- and the result is ~31% slower.
+- **`F6` had this evidence and read it backwards, which is the finding's real
+  lesson.** `F6` saw the chain `CTFontDrawGlyphs -> DrawGlyphsAtPositions (95.3%) ->
+  EnumerateOverlappingGlyphs (93.2%) -> ... -> CGContextDelegateDrawGlyphs (99.4%)`
+  and concluded "over 85% of the wrapper's time *reaches the context delegate*. The
+  wrapper is a pass-through, not the cost." The percentages are right and the
+  conclusion does not follow: time reaches the delegate because the enumeration
+  **calls the delegate repeatedly**, which is the opposite of a pass-through. A
+  frame name containing "Enumerate" was the clue, and `F6` spent its scepticism on
+  the size of the node rather than on what the node does.
+- What survives: `F5` (the context is a recorder) and `F12`'s partition (~59% of the
+  bracket is entry recording) are both untouched -- entries are still where the cost
+  is. What is refuted is that *our call count* controls the entry count on the text
+  path. It does not; glyph geometry does.
+- Also measured, and it bears on `L6`: fill-side work went *down* slightly
+  (`dlRecorder_DrawRects` 168 -> 141 ms, `CGContextFillRect` 200 -> 176 ms) purely
+  as a side effect of the text path getting slower and the frame-capped workload
+  drawing the same number of frames. Read it as noise, not as evidence about `L6`.
+  But note that `colorResourceForColor` sits **71 ms under `dlRecorder_DrawRects`
+  versus 92 ms under `dlRecorder_DrawGlyphs`** at HEAD: a large minority of the
+  dedup block is fill entries, and `fill(rect)` *does* map one call to one entry.
+- Uncertainty: 2 pairs each, the `quick` schedule. No `confirm` was run, because two
+  independent `slower` verdicts 31% deep and a corroborating capture answer the
+  question, and `confirm` on a rejected candidate spends 20 minutes to sharpen a
+  number nobody will quote.
+- Competing interpretation considered and rejected: that the regression is my
+  accumulator's per-draw growth rather than the enumeration. Growth is real and
+  visible in the capture, but it cannot be the main term --
+  `EnumerateOverlappingGlyphs` alone grew +144 ms of the bracket's +219 ms, and it
+  contains no Swift code at all.
+- The tests written for the change were kept and renamed (`MultiStyleFrameTests`).
+  They pin whole-frame parity across faces, truecolor, sprites, and the fallback
+  path, which is the executor's contract rather than the candidate's, and they pass
+  on the reverted renderer.
+
 ## Decision log
 
 ### D1 -- the ranked lead list
@@ -827,7 +909,7 @@ Inside that 59%, what each entry costs:
 
 | # | Lead | Size (% of bracket) | Risk | Smallest first experiment |
 | --- | --- | ---: | --- | --- |
-| `L1` | **Batch glyph submission.** Accumulate glyphs and positions across *all* rows into one buffer per (face, color) for the whole draw; issue one `CTFontDrawGlyphs` per batch instead of one per row per style. Attacks the per-entry color-resource and fill-state construction in `F6`, plus the wrapper and antialias-style lookups. | **~11%** of `F4`'s bracket (`F6`) = **~20-22% of the post-`F11` bracket**, since `L2` left this node untouched while halving the denominator; it also cuts CA-side replay entries | Medium. Draw order changes: all text of one color is submitted before another color's. Text runs do not overlap by construction -- one glyph per cell at a cell-quantized position (`F1` item 1 for the run shape, `TerminalRenderExecution.swift:649-653` for the position derivation) -- so the composite result is identical, but that invariant must be asserted, not assumed. Decorations and cursor must stay ordered after text. | Batch by (face, color) only, keep the existing per-row loop for sprites and fills. Snapshot-test a frame containing every style combination, then run `just benchmark-quick` and read `content-churn` against `style-churn` per `F9`'s prediction. |
+| `L1` | **REJECTED by `F13`/`D5`: +31% slower on both draw workloads, reverted.** ~~Batch glyph submission.~~ Accumulate glyphs and positions across *all* rows into one buffer per (face, color) for the whole draw; issue one `CTFontDrawGlyphs` per batch instead of one per row per style. Attacks the per-entry color-resource and fill-state construction in `F6`, plus the wrapper and antialias-style lookups. | **~11%** of `F4`'s bracket (`F6`) = **~20-22% of the post-`F11` bracket**, since `L2` left this node untouched while halving the denominator; it also cuts CA-side replay entries | Medium. Draw order changes: all text of one color is submitted before another color's. Text runs do not overlap by construction -- one glyph per cell at a cell-quantized position (`F1` item 1 for the run shape, `TerminalRenderExecution.swift:649-653` for the position derivation) -- so the composite result is identical, but that invariant must be asserted, not assumed. Decorations and cursor must stay ordered after text. | Batch by (face, color) only, keep the existing per-row loop for sprites and fills. Snapshot-test a frame containing every style combination, then run `just benchmark-quick` and read `content-churn` against `style-churn` per `F9`'s prediction. |
 | `L2` | **Taken; `faster` on all three draw workloads at ~4x the estimate -- see `F11`. Memoize character-to-glyph mapping** per face: 128-entry direct array for ASCII plus a dictionary tail, built lazily, owned by `TerminalFontSet` (`TerminalRenderExecution.swift:111-141` -- immutable after `init` and already `@unchecked Sendable`, so adding mutable state to it is a synchronization decision, not a free change; prefer per-draw-thread ownership over a lock). | **10-14%** (`F7`); measured -49% to -53% | Low. `F2` proves purity from the header. Behavior-preserving by construction. | Cache only the ASCII range first; measure; extend to the dictionary tail only if the residue justifies it. Test: a run of every BMP scalar the fixtures cover maps identically with and without the cache. |
 | `L3` | **Guard the sprite switch** with `scalar.value >= 0x2500` before the eight-arm range match. **Taken; `faster` on both draw workloads -- see `F10`.** | **~5%** (`F8`); measured -6.76% / -6.08% | Very low. Pure control flow; the guard's bound is verifiable against the eight constants in one grep. | Add the guard plus a test that asserts every family's `coarseRange.lowerBound >= 0x2500`, so the guard cannot silently outlive the constant that justifies it. This is the file's recommended *first* commit regardless of what else is taken. |
 | `L6` | **Batch fills by color.** Background, selection, and search-match runs each call `fill(rect)` per run; group by color and issue one `fill(rects)` per color per draw, and merge vertically adjacent equal-color spans. Each avoided call is also an avoided display-list entry with its own `colorResourceForColor` + `getEntryFillState` (`F6`). | up to **~14%** (`F4`, `CGContextFillRect`/`FillRects`); content-dependent per `F9` | Low. Fills are opaque and non-overlapping within a layer; the three layers keep their existing relative order. | Backgrounds only, grouped by color. `fill(rects)` is already used by the sprite path, so the idiom is established. |
@@ -988,6 +1070,46 @@ Inside that 59%, what each entry costs:
   the composite is identical, **but that invariant must be asserted by a test, not
   assumed**, and decorations and the cursor must stay ordered after text.
 
+### D5 -- `L1` rejected; `F9`'s prediction fired and the mechanism it tested is dead
+
+- Status: **decided by measurement (`F13`). `L1` is closed. `D4`'s order is void for
+  `L1` and survives for the rest.**
+- `L1` is not "not yet worth taking" -- it is **wrong**. It reduces a call count that
+  does not control the cost it was aimed at, and it costs ~31% to do so. Do not
+  reopen it without new evidence that `EnumerateOverlappingGlyphs`'s split can be
+  influenced by how glyphs are submitted.
+- **`F9`'s pre-registered prediction fired, and the result is the one `F9` named as
+  fatal.** `F9` said `content-churn` must improve materially and `style-churn` little
+  or not at all, and that "if instead both move together, the mechanism attributed
+  here is wrong." Both moved together (+30.67%, +31.55%) -- same direction, within a
+  point of each other -- while the two workloads' run counts differ by a large
+  factor. The prediction was honoured exactly as written: the mechanism is wrong.
+  Recording this because a pre-registered test that fires against the file's own
+  favourite lead is the strongest evidence this method produces, and it only counts
+  if it is allowed to.
+- **`L12` is un-pre-rejected, and it is now the most interesting remaining lead.**
+  The "Pre-rejected" entry below dismissed bypassing `CTFontDrawGlyphs` as "a
+  ~2.7%-of-bracket pass-through and a strict subset of `L1`". Both halves are void:
+  `L1` is dead so nothing can be a subset of it, and the 2.7% came from
+  `F6`'s subtraction `359 - 284 - 24`, which is the parent-minus-child sizing
+  `17/D5` retired. `F13` measures the enumeration directly at **385 ms = 35.8% of
+  the HEAD bracket**. If `CGContextShowGlyphsAtPositions` reaches the recorder
+  without it, that is the largest single item this file has found on the text path.
+  **This is a hypothesis, not a size:** the lower-level API may perform the same
+  overlap handling internally, in which case `L12` is worth nothing. It is cheap to
+  settle -- one commit, one `quick` run -- and it is the natural next candidate.
+- Order in force for the remainder, unchanged from `D4` except for `L1`'s removal
+  and `L12`'s promotion: **`L12` (measure the enumeration hypothesis first, since it
+  is cheap and would re-rank everything), then `L4` (24.5%), then `L6`, then `L5`.**
+  `L6` rises relative to `D4`: `F13` found `fill(rect)` does map one call to one
+  entry, and 71 ms of the dedup block sits under fill entries, so `L6`'s premise
+  survives `F13` intact where `L1`'s did not.
+- What every remaining lead now has to answer before implementation: **does the API
+  I am calling fewer times map my calls to display-list entries one-for-one?** For
+  `fill(rect)` -> `fill(rects)` the answer is yes and it is visible in `F1`'s
+  inventory. For `CTFontDrawGlyphs` it was no, and nothing in this file asked the
+  question until a benchmark did.
+
 ## Pre-rejected
 
 Inherits doc 17's list in full. Re-proposing anything there needs the kind of
@@ -1005,10 +1127,12 @@ evidence that section names. Two of its entries bear directly on this file:
 
 Added by this file:
 
-- **Bypassing `CTFontDrawGlyphs` as a standalone candidate.** `F6`: the wrapper
-  is a ~2.7%-of-bracket pass-through and a strict subset of `L1`. Taking it first
-  would spend a paired benchmark on the small half of the same win. Reopen only
-  as `L1`'s residue.
+- ~~**Bypassing `CTFontDrawGlyphs` as a standalone candidate.**~~ **VOID -- see
+  `D5`.** This entry read: "`F6`: the wrapper is a ~2.7%-of-bracket pass-through and
+  a strict subset of `L1`." Both halves failed. `L1` is rejected (`F13`), so nothing
+  is a subset of it, and the 2.7% came from `F6`'s `359 - 284 - 24` subtraction --
+  the parent-minus-child sizing `17/D5` retired. The wrapper's enumeration measures
+  385 ms, 35.8% of the bracket. `L12` is a live lead and goes first.
 - **Sizing any glyph-drawing candidate per glyph.** `F6` measured the split:
   59% per-call, ~15% per-glyph. A pitch that multiplies a per-glyph cost by the
   cell count is wrong by roughly 4x in the direction that makes it look good.
@@ -1075,7 +1199,7 @@ CoreGraphics display-list entry recording, which is what makes `L1` (18.8-21.6%
 plus the dedup block it shrinks) the largest remaining lead, ahead of `L4` (24.5%),
 `L5`, and `L6` -- non-additively.
 
-Eight results are worth more than the ranking:
+Ten results are worth more than the ranking:
 
 1. **DanTerm's draw does not rasterize -- it records a CoreGraphics display
    list** (`F5`). That single fact reframes the whole bracket: inside `draw(_:)`,
@@ -1115,7 +1239,21 @@ Eight results are worth more than the ranking:
    workloads decompose alike. None of that was visible without a capture, and the
    ledger had explicitly argued a capture was unnecessary. **Re-measure the
    denominator after every landed lead, not after the last one.**
-8. **The decidable region is now the small one.** The draw bracket is 6% of the
+8. **A pre-registered prediction fired against this file's own favourite lead, and
+   was allowed to kill it** (`F9`, `F13`, `D5`). `L1` was ranked first in `D1` and
+   again in `D4`, and `F9` had written down in advance that `content-churn` and
+   `style-churn` moving *together* would mean the mechanism was misattributed. They
+   moved together, 31% in the wrong direction. The mechanism -- that our
+   `CTFontDrawGlyphs` call count controls the display-list entry count -- was false:
+   the wrapper enumerates and re-splits by geometry. `F6` had the evidence and read
+   "time reaches the delegate" as "the wrapper is a pass-through" when it meant "the
+   wrapper calls the delegate repeatedly."
+9. **The question every batching lead has to answer, which this file did not ask
+   until a benchmark asked it for us:** does the API I intend to call fewer times map
+   my calls one-for-one onto display-list entries? For `fill(rect)` yes; for
+   `CTFontDrawGlyphs` no. Reducing call counts is only a proxy for reducing entries,
+   and a proxy is not a mechanism.
+10. **The decidable region is now the small one.** The draw bracket is 6% of the
    workload and `TGlyphOutlineDictionaryCache` alone is 10% -- 1.7x the bracket,
    off-thread, and unscoreable by any rule this project has (`17/D7`, `L9`).
    Tier 1's remaining leads are real and worth taking, and they optimize 6% of the
