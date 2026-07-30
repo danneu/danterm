@@ -109,11 +109,29 @@ run there -- `planFrame` runs on the PTY-output path, when a pane applies child
 output -- so **the draw verdict cannot see a planner change at all**. It is not
 that planning is a small term in that number; it is not in that number.
 
-That is not a small blind spot. Measured on this machine, one accepted draw
-costs about 0.9M ns to draw and 1.16M ns to plan on `content-churn`, and about
-0.16M ns to draw against the same 1.15M ns to plan on `incremental-mixed`.
-Planning is the larger cost in both, and it barely moves when damage shrinks
-from 66 rows to 6, because the planner plans the whole viewport regardless.
+That is not a small blind spot. Measured on this machine at `4ecb032`, one
+accepted draw costs about 540k ns to draw against 501k-510k ns to plan on
+`content-churn`, and about 86k ns to draw against 66k ns to plan on
+`incremental-mixed`.
+
+Planning is the **smaller** cost on both, and it shrinks by ~7.6x when damage goes
+from 66 rows to 6, because **the planner is damage-scoped**. Production planning
+runs through `PaneFramePlanner.planFrame(for:presentation:damage:)`, which replans
+only the rows `damage` marks and copies an undamaged row's runs forward from the
+retained frame instead of re-inspecting its cells. (`RenderFramePlanner`'s
+free-function `planFrame(for:presentation:)` does pass `damage: .full`, but it is
+not the pane path -- reading it as the production entry point is the likely origin
+of the superseded claim below.)
+
+> Superseded text, kept because a reader may be working from it: this section
+> previously said one draw cost ~0.9M ns to draw and ~1.16M ns to plan on
+> `content-churn`, ~0.16M/~1.15M on `incremental-mixed`, that planning was the
+> larger cost in both, and that "the planner plans the whole viewport
+> regardless". All four claims were wrong. Damage scoping landed in `8188b9a`,
+> three days after the text was written, and the figures were 1.7x-17.5x too
+> high. See `docs/research/17-cpu-profile-sweep.md` `F5` (the mechanism) and
+> `F12` (the replacement numbers). **Date a performance number before planning
+> against it.**
 
 So each of those workloads also reports a plan-time estimate, normalized over
 the same 50 accepted draws:
@@ -146,6 +164,55 @@ length does not match the count it was calibrated at.
 - Judging a planner change means reading this line. Judging a drawing change
   means reading the draw verdict. A change that moves only planning will
   correctly read `equivalent` on all three draw verdicts.
+
+### The third reported quantity: whole-process CPU per accepted draw
+
+The draw verdict times elapsed work between two points on the **main thread**, so
+work on any other thread is invisible to it at any size. That is not a corner
+case: `docs/research/17-cpu-profile-sweep.md` `F6` found the largest single cost
+in the app -- Core Animation recomputing every glyph's bounds while replaying the
+display list, 16.8% of `content-churn`'s on-CPU total -- living entirely in that
+blind spot.
+
+So the three serialized-draw workloads also report
+`processCPUNanosecondsPerDraw`: CPU time summed over **every thread**, taken from
+`task_info(TASK_ABSOLUTETIME_INFO)` and charged to each accepted draw as the delta
+since the previously accepted one. Measured at `4ecb032` (`17/F12`):
+
+| workload | draw (main thread) | process CPU (all threads) | ratio |
+| --- | ---: | ---: | ---: |
+| `content-churn` | ~540k ns | ~4.9M-5.2M ns | ~9.0x-9.5x |
+| `style-churn` | ~546k ns | ~5.2M ns | ~9.4x |
+| `incremental-mixed` | ~86k ns | ~2.0M ns | **~23x** |
+
+**The draw verdict therefore constrains about one ninth of what a frame costs on
+the churn workloads, and about one twenty-third on `incremental-mixed`.** An
+`equivalent` draw verdict is a true statement about the draw bracket and a nearly
+empty one about total cost. Read this line before concluding a change was free.
+
+Four things it is not, each of which invites a misreading:
+
+1. **It is not latency.** Work moved off the critical path onto an idle core reads
+   as neutral. It answers "did we stop doing work" -- the right question for
+   replay cost and the only one that maps to battery.
+2. **It is not a per-draw bracket.** The interval between two accepted draws
+   contains everything the process did in it: this draw, the *previous* draw's
+   asynchronous replay, parsing, planning, and the observer's own acknowledgment
+   writes. That width is deliberate -- replay does not finish inside the draw that
+   queued it, so any narrower bracket would exclude the thing worth measuring --
+   but it means the series is meaningful in aggregate, not at a single index.
+3. **It is not calibrated, so it never carries a verdict.** It is reported through
+   `UNCALIBRATED_BLOCK_METRICS`, which consults no rule table; there is no code
+   path by which it can classify. Its block-to-block spread was 5.60% against the
+   draw metric's 0.41% (`17/F12`), so treat anything under ~6% as indistinguishable
+   from nothing. Freezing a rule needs an A/A screening pass of the same shape as
+   the plan-time one below.
+4. **It includes the instrument**, which on `incremental-mixed` is a large term --
+   the observer's acknowledgment `open()` alone was 9.8% of that workload's on-CPU
+   total (`17/F2`).
+
+The line is absent whenever either arm lacks it, exactly like plan time, which is
+the normal case for any baseline predating this reading.
 
 Recalibrate plan-time rules with
 `scripts/terminal-benchmark-plan-calibration.py --revision <rev>`, which
@@ -278,6 +345,33 @@ report existed, with `just benchmark-report <dir>`. It accepts a profile
 directory, a `.trace` bundle (which it exports first), an exported XML, or a
 `sample.txt`. Pass flags through as one quoted argument:
 `just benchmark-report <dir> '--state Running --thread Main --top 40'`.
+
+### State a profile's costs per frame, not per second
+
+`sample` and `trace` modes also write `frame-accounting.json`, which is how a
+profile share becomes a per-frame cost:
+
+```
+cost per frame = (node share x on-CPU total) / (drawsPerSecond x traceSeconds)
+```
+
+The app publishes a running count of **every** draw and plan-publish -- not only
+the ones a measured block accepts, since a `loop`-mode app never completes a block
+-- and the profiling script snapshots it before the profiler attaches and after it
+detaches.
+
+**Use `measured.drawsPerSecond`; do not use `measured.draws` as the draw count
+during the trace.** Both snapshots necessarily sit outside the profiler's window
+and a profiler spends seconds attaching and saving, so the counted window
+overshoots: 20.1 s counted for a 12 s trace, 67% long (`17/F11`). The artifact
+separates `measured` from `estimated` and carries that warning in its own text.
+The rate is only a valid conversion because these workloads are sustained and
+steady-state; nothing here would notice if one started trending.
+
+Without this, a trace cannot be normalized per frame at all. Before it existed,
+the three available frame-count proxies (`__open`, `iokit_user_client_trap`,
+`mach_msg2_trap`) disagreed by 1.7x, which forced `17/F5` to rest on commit
+history instead of on its own measurement.
 
 One reading trap, and it is the reason the thread filter exists: `sample`
 captures every thread whether or not it is on-CPU, so an idle app's report is

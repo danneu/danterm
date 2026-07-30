@@ -1363,3 +1363,11 @@ classify plan time at all -- the calibrated plan rule exists only in
 public inspection API for 167 test call sites (D3).
 
 Nothing is parked. C3 is committed (`97a594b`). **This file is closed.**
+
+**Successor, 2026-07-29:** [17-cpu-profile-sweep.md](17-cpu-profile-sweep.md)
+generalizes this file's one-trace method to every workload with an on-CPU mode.
+It vindicates the pivot and bounds it: F6's single capture could not see that
+CoreAnimation's replay of the same draw costs more than the whole
+`drawRenderFrame` region (`17/F6`), nor that this file's own workload is
+CPU-indistinguishable from `style-churn` (`17/F4`). This pointer does not reopen
+this file.

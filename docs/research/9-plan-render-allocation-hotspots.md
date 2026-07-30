@@ -1057,6 +1057,15 @@ discount on `sample` shares is real and was earned twice.
 
 ### Why Phase 5 closes as a backlog rather than as work
 
+**Amendment 2026-07-29, from [17-cpu-profile-sweep.md](17-cpu-profile-sweep.md)
+(`17/F5`): H2 is retired -- it was implemented two days after this file closed.**
+`8188b9a` ("plan only the rows the terminal damaged", 2026-07-27) gave the planner
+per-row retained reuse, so the planner no longer plans the whole viewport
+regardless of damage. `17/F3` sizes the remaining glyph cache (H3) at 1.67% of
+`content-churn` and the sprite geometry cache at 0.37%, both on an on-CPU
+instrument. The paragraph below stands as written for H3 and the sprite cache; its
+H2 clause does not. This pointer does not reopen this file.
+
 H2 (whole-viewport geometry per plan), H3's remaining glyph cache, and the
 sprite geometry cache handed over by `11/F6` are all evidenced and unrefuted.
 None is scheduled, and the reason is a ceiling measured after they were logged:

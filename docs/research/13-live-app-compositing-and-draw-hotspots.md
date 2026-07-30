@@ -479,6 +479,19 @@ this result.
 
 ### H3 -- the main thread's largest single stall is waiting on CoreAnimation's glyph-bounds computation, and the bounds are computed by copying glyph outlines
 
+**Confirmed 2026-07-29 by [17-cpu-profile-sweep.md](17-cpu-profile-sweep.md)
+(`17/F6`), on an on-CPU instrument and a reproducible workload.** The glyph-bounds
+attribution this file kept research-only, and doc 11 refused to inherit as
+settled, holds: `CA::CG::DrawGlyphs::compute_dod_ → get_glyph_bboxes →
+FPFontGetGlyphIdealBounds → TFPFont::CopyGlyphPath →
+TGlyphOutlineDictionaryCache::Copy` is **16.78% of `content-churn`'s total on-CPU
+time**, one dictionary lookup and outline-path copy per glyph *occurrence* per
+frame. Two limits carry forward: the *elasticity* is still unconfirmed (nothing has
+varied glyph count and shown the node move -- the pre-registered test `11/F12`
+used to refute its two mechanisms), and `17/F6` reopens the compositing **cost**,
+not the **stall** -- `13/D2` and `11/F12`'s slack conclusion are untouched. This
+pointer does not reopen this file.
+
 `CABackingStoreGetFrontTexture` is 1,079 main-thread samples, of which **1,064
 (98.6%) are `_dispatch_sync_f_slow` → `__DISPATCH_WAIT_FOR_QUEUE__` →
 `kevent_id`**: the main thread synchronously waiting on `CA::CG::Queue` to finish
