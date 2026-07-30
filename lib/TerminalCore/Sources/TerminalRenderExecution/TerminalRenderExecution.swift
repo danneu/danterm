@@ -109,9 +109,9 @@ let asciiGlyphTableRange: ClosedRange<UInt32> = 0x20...0x7E
 /// already mapped. `CTFontGetGlyphsForCharacters` is documented as the font's
 /// nominal cmap mapping (`CTFont.h`, `CTFontGetGlyphsForCharacters`) -- a pure
 /// function of face and code unit, with no context, no shaping, and no state --
-/// which is what makes caching
-/// it sound rather than merely convenient. The alternative, a memo filled during
-/// draws, would put mutable state inside a `Sendable` value; this stays immutable.
+/// which is what makes caching it sound rather than merely convenient. The
+/// alternative, a memo filled during draws, would put mutable state inside a
+/// `Sendable` value; this stays immutable.
 struct TerminalFace: @unchecked Sendable {
     let font: CTFont
 
@@ -124,10 +124,11 @@ struct TerminalFace: @unchecked Sendable {
     ///
     /// `CTFontDrawGlyphs` is documented to apply the CTFont's size *and matrix* to the
     /// context and to leave them unrestored (`CTFont.h`, `CTFontDrawGlyphs`). The
-    /// direct path applies the size but has no way to apply a matrix -- the text matrix it sets is
-    /// the executor's own y-flip -- so a face carrying one is refused here rather than
-    /// rendered without its transform. In practice every face of the monospaced system
-    /// font is a real designed face with an identity matrix, so the common case
+    /// direct path applies the size but has no way to apply a matrix -- the text
+    /// matrix it sets is the executor's own y-flip -- so a face carrying one is
+    /// refused here rather than rendered without its transform. In practice every
+    /// face of the monospaced system font is a real designed face with an identity
+    /// matrix, so the common case
     /// qualifies; the refusal exists for a family with no true italic, where CoreText
     /// synthesizes the slant as a matrix.
     let directDrawFont: CGFont?

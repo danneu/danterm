@@ -2,8 +2,10 @@
 
 Research started: 2026-07-29. **Status: OPEN -- survey complete; three leads taken
 and kept (`L3`/`F10`, `L2`/`F11`, `L12`/`F14`), the bracket re-captured and the
-remainder re-ranked (`F12`, `D4`), and one lead taken and rejected (`L1`/`F13`,
-`D5`) -- `L4`, `L6` and `L5` still gated.**
+remainder re-ranked (`F12`, `D4`), one lead taken and rejected on its measurement
+(`L1`/`F13`, `D5`), and one taken, measured `faster`, and reverted on cost
+(`L4`/`F15`, `D7`) -- `L6` and `L5` still gated, behind a variance measurement
+`D7` ranks above them.**
 Deliverable is the API inventory (`F1`), the decomposition of the one decidable
 renderer bracket (`F4`-`F8`, superseded in its shares by `F12`), the ranked lead
 list (`D1`, re-ordered by `D4`), and the paired-benchmark verdict for each lead as
@@ -11,7 +13,9 @@ it lands (`F10` onward). The first two taken leads cut the draw bracket roughly
 in half on all three draw workloads -- **confirmed independently at -42.8% on-CPU
 by `F12`** -- which also halved the denominator every remaining lead is quoted in;
 `L12` then took a further -5.25% and -10.60% off two workloads by dropping the
-CoreText glyph wrapper (`F14`).
+CoreText glyph wrapper (`F14`). `L4` measured `faster` on two workloads and was
+reverted anyway, because the only implementation the API permits is memory-unsafe for
+~2.5% (`F15`, `D7`).
 Continues: [17-cpu-profile-sweep.md](17-cpu-profile-sweep.md) (`17/F2`, `17/F3`,
 `17/F6`, `17/F17`, `17/D8`), [11-render-frame-budget.md](11-render-frame-budget.md)
 (`11/F7`, `11/F8`, `11/F10`).
@@ -145,11 +149,14 @@ that grouping had an attribution bug; `D4` corrects both the sizes and the order
       enumeration is the CoreText wrapper's, and `EnumerateOverlappingGlyphs` has zero
       samples once the wrapper is gone. Landed as `TerminalFace.directDrawFont`, nil
       for a matrix-bearing face, with `DirectGlyphDrawTests`.
-- [ ] **`L4` -- write into pre-sized buffers** instead of per-element `Array.append`.
-      **24.5%** of the live bracket -- `isUniquelyReferenced` plus its stub is
-      8.9-10.9% of it. Tier 1 now that `F8`'s precondition is met (`F11`, `F12`).
-      `L1`'s rejection removed the reason it was sequenced second, and `F14` landed
-      without changing the buffer shape (`D6`), so **it is next and unblocked**.
+- [x] **`L4` -- write into pre-sized buffers** instead of per-element `Array.append`.
+      **Done, measured `faster`, and REVERTED -- `F15`, `D7`. `confirm`:
+      `scrollback-stream` `faster` -2.98%, `style-churn` `faster` -2.49%, two
+      `equivalent`, none `slower`.** Uniqueness checks in the bracket 94 ms -> 6 ms, so
+      the mechanism is real -- but the win is ~2.5% (5x under the reachable share) and
+      `showGlyphs`' exact-count `[CGGlyph]` requirement means the only implementation
+      the API permits is 73 lines of unchecked pointer writes in the hottest loop.
+      Closed on cost, not on verdict. Do not re-propose (`D7`).
 - [ ] **`L5` -- intern `CGColor`s and hoist the color space.** Floor ~5.5% (our own
       construction), ceiling whatever of the dedup block `L6` leaves. Its stronger
       form rests on a `CGColorCompare` pointer fast path the SDK does not document
@@ -160,6 +167,11 @@ that grouping had an attribution bug; `D4` corrects both the sizes and the order
       **Its premise survives `F13` where `L1`'s did not:** `fill(rect)` maps one call
       to one display-list entry, and 71 ms of the dedup block sits under fill entries
       rather than glyph entries.
+- [ ] **Measure the profiler's bracket-total run-to-run variance** -- three captures
+      of one unchanged build, bracket total only, no code change. **Ranked above `L6`
+      by `D7`:** `F14` and `F15` both produced bracket totals contradicting the
+      calibrated benchmark, in opposite directions, and every profiler-sourced share
+      still quoted in this file rests on that variance being small. Three trace runs.
 - [ ] Optional tooling, not a decision rule: the per-draw run-count and
       glyph-call counters `F9` asks for, which would make `L1`/`L6` predictable
       in advance instead of only measurable afterwards.
@@ -973,6 +985,112 @@ Inside that 59%, what each entry costs:
   were: `TextExecutionTests.fontTraitsPreserveGridGeometry` and
   `MultiStyleFrameTests` passed unchanged, byte-identical, through the new path.
 
+### F15 -- `L4` implemented, measured `faster`, and reverted anyway: ~2.5% is not worth unsafe pointers in the hottest loop
+
+- Status: **measured, then REVERTED on cost/benefit -- not on its verdict, which was
+  positive. `confirm`: `scrollback-stream` `faster` **-2.98%** (4 pairs),
+  `style-churn` `faster` **-2.49%** (4 pairs), `content-churn` inconclusive -2.05%
+  (4 pairs), `terminal-feed` `equivalent` +0.58%, `incremental-mixed` `equivalent`
+  +0.62%. No workload `slower`.** Baseline `1d6ab68`, candidate tree `405806ac2cfe`.
+  The renderer is back at `1d6ab68`; this entry is the record of what the mechanism is
+  worth, so that nobody spends the measurement again.
+- Method: the two buffers written once per *cell* (`mappedGlyphs`, `positions`) become
+  raw scratch sized to the longest run, filled through a cursor, and copied into
+  exact-count arrays at submission. The other eleven scratch buffers were left alone
+  deliberately -- see the sizing below. Then one capture on `content-churn`
+  (`.build/terminal-benchmark-profiles/2026-07-30-010807-26003`, **disposable**).
+- **`L4`'s stated form is impossible for the buffers that carry its cost, and this is
+  an API fact worth recording before anyone re-proposes it.** `D1` specified "writes
+  into pre-sized unsafe buffers". But `CGContextShowGlyphsAtPositions` is marked
+  `unavailable` in Swift ("Use showGlyphs(_:at:)"), and `showGlyphs` takes `[CGGlyph]`
+  and `[CGPoint]` -- **not a slice, not a pointer, and with no count parameter**, so it
+  derives the glyph count from `Array.count`. An over-sized buffer would draw its stale
+  tail. The count-taking C entry points (`CGContextShowGlyphs`,
+  `CGContextShowGlyphsWithAdvances`) are deprecated and position glyphs differently.
+  So the submission arrays must be exact-count `Array`s; only the *accumulation* can be
+  unsafe, which is why this landed as scratch-plus-copy rather than as pre-sized
+  buffers. `L12`'s win depends on `showGlyphs`, so going back to a count-taking API to
+  enable `L4` would cost more than `L4` can return.
+- **The 24.6% group was not all reachable, and this was recorded before measuring.**
+  Splitting the group's leaves on the post-`L12` capture:
+
+  | leaf | ms | % bracket | reachable by this change? |
+  | --- | ---: | ---: | --- |
+  | `swift_isUniquelyReferenced` + its DYLD stub | 88 | 10.4% | yes |
+  | `append` + `_reserveCapacityAssumingUniqueBuffer` + buffer init | 37 | 4.4% | yes |
+  | `Array._getElement` + `_checkSubscript` | 40 | 4.7% | no -- reads, not mutations |
+  | Swift dictionary hashing and lookup | ~20 | 2.4% | no |
+
+  So `L4`'s honest ceiling was **~15% of the bracket, not 24.6%** -- pre-sizing does
+  nothing about array *reads* or dictionary hashing, and the group's name had implied
+  otherwise. Pre-registered expectation, written before the run: ~10% of the bracket,
+  which is at or below what the draw rule resolves, so **an `inconclusive` result would
+  not refute the mechanism**.
+- **The mechanism is confirmed, unambiguously, at the leaf level.**
+  `swift_isUniquelyReferenced_nonNull_native` inside the bracket: **94 ms -> 6 ms**.
+  `Array.append` (16 ms) and `Array._reserveCapacityAssumingUniqueBuffer` (17 ms) drop
+  out of the bracket's top leaves entirely. The array-traffic group falls from 209 ms
+  (24.6%) to **115 ms (11.6%)**. Whatever the size of the user-visible win, the work
+  this change was aimed at is gone.
+- **It delivered ~2.5%, roughly 5x less than the reachable share predicted.** Three
+  reasons, in the order they matter: the 88 ms of uniqueness checks was spread across
+  *thirteen* scratch buffers and two dictionaries rather than concentrated in the two
+  converted ones; the replacement is not free (two `memmove`s per run, plus a
+  reallocation whenever a run's glyph count differs from the previous run's); and the
+  residual 11.6% shows the remaining buffers still pay. `_platform_memmove` in the
+  bracket *grew* 58 -> 76 ms, which is the copy this design trades for the checks.
+- **`incremental-mixed` came back `equivalent` (+0.62%), and that is the mechanism
+  showing its shape.** Clipped draws submit many short runs of *varying* length, so the
+  exact-count arrays are reallocated nearly every run and the length cache never pays.
+  `L12` gained most on exactly this workload; `L4` gains nothing there. The two leads
+  are complementary rather than additive, which is a caution against reading `D1`'s
+  percentages as a sum.
+- **Instrument note, now established twice and reversed both times.** The profiler's
+  bracket total moved the *wrong way* on this change: 849 -> 995 ms. Meanwhile the
+  calibrated benchmark measured two `faster` verdicts and no regression, and the leaf
+  evidence above is unambiguous. `F14` had the same instruments disagreeing by ~16
+  points in the other direction. The rule this file now follows, stated plainly:
+  **on-CPU bracket totals from single captures are not usable at ~5% granularity;
+  presence-or-absence of a named leaf across captures is.** `94 ms -> 6 ms` is a fact;
+  `849 -> 995` is not, and `F12`'s own caveat against comparing node weights across
+  captures with different inlining already predicted why.
+- Uncertainty: one capture per side, no replicate, and the bracket-total disagreement
+  above is unexplained -- it could be re-attribution after inlining changed, or
+  run-to-run variance whose magnitude this project has never measured. **Measuring that
+  variance (three captures of one unchanged build) is the cheapest way to make every
+  future profiler claim in this file stronger**, and it is not yet done.
+- **Why it was reverted despite two `faster` verdicts.** The change added **73 lines**
+  to the renderer's hottest function, and not ordinary ones: raw
+  `UnsafeMutableBufferPointer` accumulation with manual `defer`-deallocation, a cursor
+  invariant replacing a documented `removeAll` sweep, a length-cached submission array
+  whose failure mode is drawing a stale tail, and an `assert` whose only job is to turn
+  release-mode *memory corruption* into a trap. Set against the other landed leads,
+  the return is an order of magnitude worse per unit of risk: `L2` bought -49% with an
+  immutable lookup table, `L12` -5.25%/-10.60% with a precomputed `CGFont` and a nil
+  check, `L3` -6.8% with one integer comparison. `L4` bought ~2.5% -- and
+  `content-churn`, the workload most about drawing, would not even resolve it.
+  **A verdict that clears the bar is a necessary condition for landing a change, not a
+  sufficient one.** This file's rule decides whether a mechanism is real; it does not
+  decide whether the code is worth keeping, and `D1` never claimed it did.
+- Tests: no new suite, and none retained --
+  `RunScratchResidueTests.glyphPipelineDoesNotLeakIntoAShorterRun`
+  already pinned the exact hazard the length cache introduces ("a long line of output
+  followed by a short one"), which is why it was checked *before* the design was
+  chosen. Mutation-verified three ways: resizing only when growing (caught by 3 tests,
+  across two suites), copying one glyph short (caught by 13), and dropping the per-run
+  cursor reset (**traps the test process** on the buffer's debug bounds check rather
+  than failing an assertion -- detection, but of a different kind, and in release that
+  same mutation would be silent corruption). That three of three mutations found live
+  hazards is itself part of the reversion case: the design had three independent ways
+  to be wrong, where the reverted code has none.
+- Correction to this session's own method: the first mutation run reported M1 and M3 as
+  *surviving*. They had not -- the grep matched `✘`, which Swift Testing does not emit
+  (it marks issues with a different glyph), so a caught mutation looked clean. The
+  earlier `L12` mutation counts were non-zero and their conclusions hold, but the
+  counts themselves were undercounted by the same bug. **A mutation-testing harness
+  that cannot tell "no failures" from "failures I cannot see" reports the wrong answer
+  in the safe-looking direction.**
+
 ## Decision log
 
 ### D1 -- the ranked lead list
@@ -1226,6 +1344,56 @@ Inside that 59%, what each entry costs:
   `D5`'s reason for sequencing `L4` behind it is discharged. `L4` pre-sizes
   `mappedGlyphs` and `positions`, which both paths still fill identically.
 
+### D7 -- `L4` closed: measured `faster`, reverted on cost, and the verdict rule is not a landing rule
+
+- Status: **decided (`F15`). `L4` is closed -- the mechanism is real and sized, the
+  code is reverted. Remaining order: `L6`, then `L5`.**
+- **`L4` measured `faster` twice and was still the wrong change to keep.** ~2.5% for
+  73 lines of unchecked pointer arithmetic in the renderer's hottest loop, where the
+  other three landed leads bought 5-20x more for code a reader can verify at a glance.
+  The mechanism is confirmed (uniqueness checks 94 ms -> 6 ms) and that is worth
+  knowing; the code is not worth carrying.
+- **The rule this exposes, which `D1` implied but never stated.** The calibrated draw
+  verdict answers "is this mechanism real and how big is it". It does not answer
+  "should this code exist". This file spent four leads before hitting a case where the
+  two answers diverged, and the divergence was not close. **State the maintenance and
+  safety cost of a candidate next to its estimate, before implementing it** -- `L4`'s
+  cost was foreseeable from `F15`'s API constraint (exact-count arrays forbid the safe
+  version) and was not written down until after the benchmark had run.
+- **Do not re-propose `L4`.** Not because the mechanism failed -- it worked exactly as
+  designed -- but because its ceiling is now measured at ~2.5% and the only
+  implementation the CoreGraphics API permits is memory-unsafe. A future proposal needs
+  either a safe fill path (none exists in Swift: filling an array without per-element
+  COW checks requires unsafe pointers) or a reason the number is bigger than measured.
+- **The estimate was 5x high, and the reason generalizes.** `F15`'s reachable-share
+  table is the useful artifact: a mechanism group named after a lead (`L4`) is not the
+  same thing as the work that lead's *specific edit* removes. `F12` learned this from
+  the other side (a generic leaf charged to the wrong mechanism); `F11` learned the
+  mirror image (an estimate 4x too *low*). All three are the same error -- sizing a
+  profile grouping instead of sizing the code path an edit deletes. **Any remaining
+  estimate in `D1` should be re-derived that way before it is spent.**
+- **`L6` is next, and `F15` sharpens how to read it.** `L6` is 18.6% of the
+  `content-churn` bracket inclusive and 7.0% of `style-churn`'s -- but that is
+  `CGContextFillRect`'s inclusive time, and by `F15`'s rule the question is what
+  `fill(rects)` actually deletes: one display-list entry per call becomes one per
+  batch, which `F13` confirmed is a real one-for-one mapping. So `L6` is the one
+  remaining lead whose mechanism is already verified rather than assumed. Expect it to
+  be sharply content-dependent (`F9`), and note that `L4` just demonstrated a lead can
+  gain on sustained workloads and nothing on clipped ones.
+- **Before `L6`, measure the profiler's run-to-run variance.** Three captures of one
+  unchanged build, bracket total only. Two consecutive changes have now produced
+  bracket totals that contradict the calibrated benchmark in *opposite* directions
+  (`F14`: -21% profiler vs -5.25% benchmark; `F15`: +17% profiler vs two `faster`
+  verdicts). Either the bracket total is noisy at this granularity or something
+  systematic is happening, and this file cannot tell which -- which means every
+  profiler-sourced share it still quotes rests on an unmeasured assumption. It is
+  three trace runs and no code, and it would either restore confidence in the
+  instrument or retire a class of claim. **This is now ranked above `L6`.**
+- What does *not* change: the calibrated draw verdict remains the only thing that
+  decides a lead (`17/F15`, `17/D6`). The variance measurement is about how much
+  weight the descriptive instrument may carry in an *explanation*, not about moving
+  the verdict.
+
 ## Pre-rejected
 
 Inherits doc 17's list in full. Re-proposing anything there needs the kind of
@@ -1306,8 +1474,10 @@ Added by this file:
 ## Outcome
 
 **Survey complete; ranked; `L3` (`F10`), `L2` (`F11`) and `L12` (`F14`) implemented
-and kept; `L1` implemented and rejected (`F13`); bracket re-captured and the
-remainder re-ranked (`F12`, `D4`); `L4`, `L6` and `L5` still gated.** Fifteen leads,
+and kept; `L1` implemented and rejected on its verdict (`F13`); `L4` implemented,
+measured `faster`, and reverted on cost (`F15`); bracket re-captured and the remainder
+re-ranked (`F12`, `D4`); `L6` and `L5` gated, behind the variance measurement `D7`
+ranks above them.** Fifteen leads,
 five of them decidable today by the frozen draw verdict, three pre-rejections added
 and one un-added (`L12`), one reading corrected before it reached code (`F6`), and
 two corrected after (`F11`'s withdrawn bound, `F12`'s grouping).
@@ -1317,9 +1487,14 @@ two corrected after (`F11`'s withdrawn bound, `F12`'s grouping).
 independent instrument -- and left the bracket ~60% CoreGraphics display-list entry
 recording. `L12` then removed the CoreText glyph wrapper from that path for a
 further `faster` -5.25% (`content-churn`) and -10.60% (`incremental-mixed`). What
-remains is `L4` (24.5%), `L6` (7-19% inclusive) and `L5` -- non-additively.
+`L4` demonstrably removed the run loop's per-cell COW traffic -- uniqueness checks in
+the bracket 94 ms -> 6 ms -- for `faster` -2.98% and -2.49%, and was still reverted:
+`showGlyphs` forbids the safe implementation, and ~2.5% does not buy 73 lines of
+unchecked pointer writes in the hottest loop (`F15`, `D7`). What remains is `L6`
+(7-19% inclusive) and `L5` -- non-additively, and behind a measurement of how much the
+descriptive instrument can be trusted at all (`D7`).
 
-Twelve results are worth more than the ranking:
+Fifteen results are worth more than the ranking:
 
 1. **DanTerm's draw does not rasterize -- it records a CoreGraphics display
    list** (`F5`). That single fact reframes the whole bracket: inside `draw(_:)`,
@@ -1387,7 +1562,33 @@ Twelve results are worth more than the ranking:
    ~6.6-point one. The verdict recorded is the benchmark's, and the capture is
    credited only for the mechanism it named. A calibration rule that is only
    honoured when it agrees with the profiler is not a rule.
-12. **The decidable region is now the small one.** The draw bracket is 6% of the
+12. **A positive verdict is not a reason to keep code** (`F15`, `D7`). `L4` measured
+   `faster` on two workloads with no regression anywhere, and was reverted: ~2.5% for
+   73 lines of unchecked pointer arithmetic in the hottest loop, where the three
+   landed leads bought 5-20x more for code a reader can verify at a glance. The
+   calibrated verdict answers "is this mechanism real and how big"; it never answered
+   "should this code exist", and this file went four leads before the two answers
+   diverged. **Write a candidate's maintenance and safety cost next to its estimate
+   before implementing it** -- `L4`'s was foreseeable from the API constraint and got
+   written down only after the benchmark had run.
+13. **A mechanism group named after a lead is not the work that lead removes**
+   (`F15`). `L4` was quoted at 24.6% of the bracket; the share its actual edit could
+   reach was ~15%, because the group also contained array *reads* and dictionary
+   hashing that pre-sizing does nothing about -- and it delivered ~2.5%, because the
+   COW checks it removed were spread across thirteen buffers rather than the two it
+   converted. With `F11` (4x too low) and `F12` (wrong mechanism entirely), that is
+   three sizing errors in one file with one cause: **size the code path an edit
+   deletes, never the profile grouping it is named after.**
+14. **Two consecutive changes had the descriptive instrument contradict the
+   calibrated one, in opposite directions** (`F14`, `F15`). The profiler put `L12` at
+   -21% where the benchmark said -5.25%, then put `L4` at +17% where the benchmark
+   found two `faster` verdicts. What survived both times was leaf-level presence or
+   absence -- `EnumerateOverlappingGlyphs` gone, `isUniquelyReferenced` 94 ms -> 6 ms
+   -- and what failed both times was the bracket *total*. This file never measured
+   that instrument's run-to-run variance, which `D7` now ranks above the remaining
+   leads: an unmeasured instrument was quietly load-bearing for every share quoted
+   here.
+15. **The decidable region is now the small one.** The draw bracket is 6% of the
    workload and `TGlyphOutlineDictionaryCache` alone is 10% -- 1.7x the bracket,
    off-thread, and unscoreable by any rule this project has (`17/D7`, `L9`).
    Tier 1's remaining leads are real and worth taking, and they optimize 6% of the
