@@ -53,6 +53,11 @@ BLOCK_METRICS = {
     "content-churn": "drawNanosecondsPerDraw",
     "style-churn": "drawNanosecondsPerDraw",
     "incremental-mixed": "drawNanosecondsPerDraw",
+    # Present so a candidate workload can be screened, and absent from
+    # DECISION_RULES until one is: naming the metric is what lets an A/A series be
+    # reduced to paired differences at all. A workload here but not there is
+    # collectable and undecidable, which is the state a screen resolves.
+    "synchronized-frames": "finalDrawNanoseconds",
 }
 # Reported beside the draw verdict and decided separately from it. The
 # serialized-draw metric above brackets only clipping and drawing, so it

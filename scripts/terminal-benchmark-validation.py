@@ -20,6 +20,15 @@ WORKLOADS = (
     "style-churn",
     "incremental-mixed",
 )
+# Collectable, but deliberately not in WORKLOADS: that tuple is the *calibrated*
+# set, and everything downstream of it -- the predeclared manifest, the paired
+# schedule, the decision rules -- assumes a frozen threshold exists. A candidate
+# has blocks and no rule, which is exactly the state an A/A screen resolves. It
+# graduates into WORKLOADS only when a human moves a screened threshold into
+# DECISION_RULES. See docs/research/20-pty-throughput-and-interactive-stimulus.md.
+CANDIDATE_WORKLOADS = (
+    "synchronized-frames",
+)
 DIRECTIONS = ("aa", "slower", "faster")
 CANONICAL_GEOMETRY = {"columns": 179, "rows": 66}
 TERMINAL_FEED_STATE_PROBE = (
@@ -54,6 +63,15 @@ BLOCK_CONTRACTS = {
         "measuredUnit": "serialized-completed-draw",
         "exactCompletedDraws": 50,
         "reset": "settled-dense-screen-before-block",
+    },
+    # Same bracket as scrollback-stream, different stimulus. 20/F10: drawing is
+    # suppressed for the whole replay, so this block is ~95% parse and damage
+    # tracking and its draw tail is a constant ~7 ms rather than a share of the
+    # work. Do not read it as a draw measurement.
+    "synchronized-frames": {
+        "metric": "final-draw-nanoseconds-per-fixture-replay",
+        "measuredUnit": "one-95-frame-captured-tui-replay",
+        "reset": "fresh-optimized-app-and-terminal-session-per-block",
     },
 }
 DECISION_RULES = {
@@ -632,10 +650,18 @@ def make_terminal_feed_runner(arm_roots, framed_fixture):
     return run
 
 
-def collect_scrollback_stream(blocks, *, run_block):
-    """Collect fresh app replays and validate their exact marker-to-draw boundary."""
+def collect_fixture_replay(blocks, *, workload, fixture_identity, run_block):
+    """Collect fresh app replays and validate their exact marker-to-draw boundary.
+
+    Shared by every corpus workload that replays a committed fixture into a fresh
+    app, because the contract is the workload-independent part: a fresh process and
+    session per block, markers that pair, a producer write that precedes the draw
+    it is measured against, and machine state sampled at both ends. Only the name
+    and the fixture identity vary, and they are the two things a block must be
+    checked against rather than assumed.
+    """
     if not blocks:
-        raise ValueError("scrollback-stream collection requires at least one block")
+        raise ValueError(f"{workload} collection requires at least one block")
     raw_blocks = []
     reasons = []
     process_ids = set()
@@ -669,11 +695,9 @@ def collect_scrollback_stream(blocks, *, run_block):
 
         if artifact.get("backend") != "swift":
             _append_reason(reasons, f"{prefix}-wrong-backend")
-        if artifact.get("workload") != "scrollback-stream":
+        if artifact.get("workload") != workload:
             _append_reason(reasons, f"{prefix}-wrong-workload")
-        if artifact.get("fixtureIdentity") != (
-            "scrollback-stream-v1-25000-lines"
-        ):
+        if artifact.get("fixtureIdentity") != fixture_identity:
             _append_reason(reasons, f"{prefix}-wrong-fixture")
         if artifact.get("geometry") != CANONICAL_GEOMETRY:
             _append_reason(reasons, f"{prefix}-wrong-geometry")
@@ -738,16 +762,41 @@ def collect_scrollback_stream(blocks, *, run_block):
             _append_reason(reasons, f"{prefix}-missing-machine-state")
 
     return {
-        "workload": "scrollback-stream",
-        "fixtureIdentity": "scrollback-stream-v1-25000-lines",
+        "workload": workload,
+        "fixtureIdentity": fixture_identity,
         "rawBlocks": raw_blocks,
         "valid": not reasons,
         "invalidationReasons": reasons,
     }
 
 
-def make_scrollback_stream_runner(arm_roots):
+def collect_scrollback_stream(blocks, *, run_block):
+    """Collect the generated 25,000-line replay."""
+    return collect_fixture_replay(
+        blocks,
+        workload="scrollback-stream",
+        fixture_identity="scrollback-stream-v1-25000-lines",
+        run_block=run_block,
+    )
+
+
+def collect_synchronized_frames(blocks, *, run_block):
+    """Collect the captured btop replay, whose bytes sit inside DECSET 2026."""
+    return collect_fixture_replay(
+        blocks,
+        workload="synchronized-frames",
+        fixture_identity="synchronized-frames-v1-btop-95-frames",
+        run_block=run_block,
+    )
+
+
+def make_scrollback_stream_runner(arm_roots, *, workload="scrollback-stream"):
     """Bind each arm to a fresh optimized app harness invocation per block.
+
+    Shared by every fresh-app replay workload; `workload` selects which committed
+    fixture the harness replays. It stays defaulted so the parameter cannot
+    silently change scrollback's invocation, whose distribution a frozen threshold
+    already rests on.
 
     The per-arm `.a`/`.b` bundle namespace is deliberate and calibrated, not an
     oversight. The shared-namespace correction that the persistent draw arms use
@@ -759,11 +808,11 @@ def make_scrollback_stream_runner(arm_roots):
     """
     roots = {arm: pathlib.Path(root) for arm, root in arm_roots.items()}
     if set(roots) != {"a", "b"}:
-        raise ValueError("scrollback-stream runner requires physical arms a and b")
+        raise ValueError(f"{workload} runner requires physical arms a and b")
 
     def run(arm):
         if arm not in roots:
-            raise ValueError(f"unknown scrollback-stream physical arm {arm}")
+            raise ValueError(f"unknown {workload} physical arm {arm}")
         environment = dict(os.environ)
         environment.update({
             "DANTERM_BENCHMARK_BUNDLE_SUFFIX": f".{arm}",
@@ -773,7 +822,7 @@ def make_scrollback_stream_runner(arm_roots):
         completed = subprocess.run(
             [
                 str(roots[arm] / "scripts" / "terminal-benchmark.sh"),
-                "scrollback-stream",
+                workload,
                 "swift",
             ],
             cwd=roots[arm],
@@ -783,14 +832,14 @@ def make_scrollback_stream_runner(arm_roots):
         )
         if completed.returncode != 0:
             raise RuntimeError(
-                f"scrollback-stream arm {arm} benchmark failed: "
+                f"{workload} arm {arm} benchmark failed: "
                 f"{completed.stderr.strip()}"
             )
         try:
             return json.loads(completed.stdout)
         except json.JSONDecodeError as error:
             raise RuntimeError(
-                f"scrollback-stream arm {arm} returned invalid JSON"
+                f"{workload} arm {arm} returned invalid JSON"
             ) from error
 
     return run
@@ -1402,7 +1451,7 @@ def make_production_collectors(
     draw_runner_factory=make_persistent_draw_runner,
 ):
     """Bind a pending plan to production runners while owning all persistent apps."""
-    unknown = set(plan) - set(WORKLOADS)
+    unknown = set(plan) - set(WORKLOADS) - set(CANDIDATE_WORKLOADS)
     if unknown:
         raise ValueError(f"unknown planned workloads: {sorted(unknown)}")
     attempt_directory = pathlib.Path(attempt_directory)
@@ -1441,11 +1490,18 @@ def make_production_collectors(
                 run_benchmark=feed_runner,
                 sample_state=sample_state,
             )
-        if "scrollback-stream" in plan:
-            scrollback_runner = scrollback_runner_factory(arm_roots)
-            collectors["scrollback-stream"] = (
-                lambda blocks: collect_scrollback_stream(
-                    blocks, run_block=scrollback_runner
+        for replay_workload, collector in (
+            ("scrollback-stream", collect_scrollback_stream),
+            ("synchronized-frames", collect_synchronized_frames),
+        ):
+            if replay_workload not in plan:
+                continue
+            replay_runner = scrollback_runner_factory(
+                arm_roots, workload=replay_workload
+            )
+            collectors[replay_workload] = (
+                lambda blocks, collect=collector, run=replay_runner: collect(
+                    blocks, run_block=run
                 )
             )
         for planned_workload, (app_workload, collector) in draw_workloads.items():

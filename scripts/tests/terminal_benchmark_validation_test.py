@@ -615,6 +615,73 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
             ],
         )
 
+    def test_synchronized_frames_collector_holds_the_same_contract_as_scrollback(self):
+        # Intent: the captured-replay workload is collected and validated by the
+        #   same rules as the generated replay workload, against its own name and
+        #   fixture identity.
+        # Why it exists: `scrollback-stream`'s collector encodes the whole fresh-app
+        #   replay contract -- fresh process, fresh session, matched markers,
+        #   producer write preceding the final draw, machine state sampled. A
+        #   second replay workload that got its own copy of that would drift from
+        #   it silently, and the drift would show up as blocks that pass validation
+        #   while measuring something subtly different.
+        # Scenario: spec-first; the corpus gained `synchronized-frames`, whose
+        #   blocks are collected exactly like scrollback's but must not be accepted
+        #   when an artifact claims the other workload's identity.
+        def artifact_for(workload, fixture_identity):
+            return {
+                "schemaVersion": 1,
+                "backend": "swift",
+                "workload": workload,
+                "fixtureIdentity": fixture_identity,
+                "processId": 101,
+                "sessionId": "pane-1",
+                "geometry": {"columns": 179, "rows": 66},
+                "producerWrite": {
+                    "event": "producer-final-write-returned",
+                    "elapsedNanoseconds": 155_000_000,
+                    "bytesWritten": 3_020_662,
+                },
+                "finalDraw": {
+                    "available": True,
+                    "event": "final-draw-completed",
+                    "startMarker": "DANTERM-BENCH-START-7",
+                    "expectedFinalState": "DANTERM-BENCH-FINAL-STATE-7",
+                    "elapsedNanoseconds": 163_000_000,
+                    "machineStateSamples": [{
+                        "activeSpaceChanged": False,
+                        "lowPowerMode": False,
+                        "thermalState": "nominal",
+                        "visible": True,
+                    }],
+                },
+            }
+
+        matching = VALIDATION.collect_synchronized_frames(
+            [{"measurementRole": "A", "physicalArm": "a"}],
+            run_block=lambda _arm: artifact_for(
+                "synchronized-frames", "synchronized-frames-v1-btop-95-frames"
+            ),
+        )
+        self.assertTrue(matching["valid"], matching["invalidationReasons"])
+        self.assertEqual(
+            matching["rawBlocks"][0]["finalDrawNanoseconds"], 163_000_000
+        )
+        self.assertEqual(
+            matching["rawBlocks"][0]["producerWriteBytes"], 3_020_662
+        )
+
+        # An artifact from the other replay workload must not satisfy this one.
+        mismatched = VALIDATION.collect_synchronized_frames(
+            [{"measurementRole": "A", "physicalArm": "a"}],
+            run_block=lambda _arm: artifact_for(
+                "scrollback-stream", "scrollback-stream-v1-25000-lines"
+            ),
+        )
+        self.assertFalse(mismatched["valid"])
+        self.assertIn("block-0-wrong-workload", mismatched["invalidationReasons"])
+        self.assertIn("block-0-wrong-fixture", mismatched["invalidationReasons"])
+
     def test_content_churn_collector_retains_settled_serialized_draw_evidence(self):
         blocks = [
             {"measurementRole": "A", "physicalArm": "a"},
