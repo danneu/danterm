@@ -117,10 +117,13 @@ enough to obstruct work.
 
 ### H4 -- a keypress-driven stimulus measures something no current workload does
 
-Unmeasured. Every existing workload writes bytes and waits; none contains the
-key-encode -> PTY -> app -> draw loop. Whether that loop holds any cost worth
-seeing is unknown, and `F1` establishes that no upstream project has looked
-either. See `D2`.
+Still unmeasured, but **largely answered structurally by `F8`.** Every existing
+workload writes bytes and waits, so none contains the key-encode -> PTY -> app ->
+draw loop, and `F1` establishes that no upstream project has looked either. What
+`F8` adds from source: the loop's *unique* segment is thin -- AppKit key handling
+plus one enqueue -- while its expensive segments are already owned, the drain and
+draw by the five existing workloads and the queue wait by doc 19. So the
+hypothesis is true as stated and much less interesting than it sounded. See `D2`.
 
 ## Candidate direction, pending evidence
 
@@ -162,9 +165,13 @@ improvement as a failure.
 
 ### Phase 3 -- interactive stimulus, only after Phase 2
 
+- [x] Decompose the keypress loop and price the mechanisms a workload would need,
+      so `D2` is argued rather than guessed -- recorded in `F8`.
 - [ ] `D2` direction gate: is a keypress-driven workload worth building, and
       which subject (`less`, vim, btop)? Sequenced after Phase 2 deliberately --
       Phase 2 is cheap and certain, Phase 3 is neither.
+      **Recommendation made (`F8` -> `D2`): take the recording, reject the
+      keypress workload. Awaiting the user.**
 - [ ] If taken: decide diagnostic-only versus decidable *before* building. `F1`'s
       subjects split on exactly this line and the split is not obvious.
 
@@ -405,6 +412,63 @@ improvement as a failure.
   field's presence and arithmetic, not the timing.
 - Next action: none. The reporting leg of `D1` is complete.
 
+### F8 -- the keypress loop decomposes into one thin new segment and two other files' subjects
+
+- Status: complete, **from source; nothing measured.** Read as a structural
+  decomposition and a build-cost estimate, not as timing. It answers `H4` far
+  enough to argue `D2`, and does not close `H4`.
+- Date: 2026-07-30. Read at `f076684`.
+- Method: follow a keystroke from the AppKit event to a published frame, then
+  check what the paired harness would need in order to bracket it.
+- Result 1 -- **no synthetic-input mechanism exists anywhere in this repo.** The
+  only `CGEvent` reference is `scripts/terminal-viability.sh:55`, which *reads*
+  modifier-flag state and posts nothing. A keypress workload builds its driver
+  from zero.
+- Result 2 -- **both injection seams are bad, in opposite ways.** Above
+  `SwiftTerminalSessionView.keyDown` (`app/SwiftTerminalSessionView.swift:332`)
+  means posting `CGEvent`s, which needs an Accessibility grant no other part of
+  the harness requires and which no CI or fresh machine has. Below it -- an
+  env-gated hook calling `sendKey`/`sendText` directly -- skips
+  `interpretKeyEvents`, the marked-text/IME branch, and the keypad and
+  committed-text paths, which is *precisely* the segment a keypress workload
+  would exist to measure. The cheap seam measures everything except the new part.
+- Result 3 -- **the block-boundary contract does not transfer.** Every block
+  boundary in this harness comes from in-band markers the *producer* writes,
+  found in frame text by `TerminalBenchmarkMarkers` and consumed by the observer
+  in `app/TerminalBenchmark.swift`. `less`, vim, and btop emit no such markers,
+  so start/end detection has to be reinvented against a subject whose output we
+  do not control. That mechanism is what makes the paired rule work at all.
+- Result 4 -- **the subject is not a deterministic byte generator**, which is the
+  contract every existing workload meets. A child process's version, terminfo
+  entry, and internal timers are all inputs we neither pin nor see.
+- Result 5, and this is the finding -- **the loop is mostly other files'
+  subjects.** It splits into (i) AppKit `keyDown` -> `interpretKeyEvents` ->
+  `controller.sendText`/`sendKey`; (ii) `TerminalPTYHost.sendKey`
+  (`lib/TerminalPTY/Sources/TerminalPTYHost/TerminalPTYHost.swift:219`), which is
+  a `queue.async` onto **the same serial queue doc 19 owns**; and (iii)
+  everything downstream -- the child's output drained and drawn, which is what
+  all five existing workloads already measure, plus queue occupancy, which
+  `19/F5`-`19/F9` already measure. The segment genuinely unique to a keypress
+  workload is (i) plus one enqueue, at key-repeat rate of roughly 15-30 events a
+  second.
+- Result 6 -- **the cheap half of the original question is already reachable.**
+  `iter_bytes` already replays a `recording` workload
+  (`scripts/terminal_benchmark_fixtures.py:30`), and `PTYRecordingRecorder` plus
+  `NeutralTerminalRecording`'s provenance schema already exist. "Benchmark a real
+  TUI's output shape" costs a recording and a fixture entry; it needs no driver,
+  no permission, and no new boundary mechanism, and it stays deterministic.
+- Bearing on `H4`: the hypothesis said a keypress stimulus "measures something no
+  current workload does." True, but the something is thin -- an AppKit segment
+  and an enqueue -- while the parts with known cost are owned elsewhere. And the
+  one interactive complaint that actually exists in this corpus, `19/F9`'s
+  held-Enter chop, was found and diagnosed on doc 19's occupancy axis with a
+  shell script and a live session, without any of the machinery above.
+- Uncertainty: segment (i) is unmeasured, so "thin" is a structural claim about
+  what the code does per event, not a timing bound. If AppKit's key handling ever
+  looks implicated, it is measurable directly with a `sample` under a held key --
+  which is cheaper than everything in Results 1-4 combined.
+- Next action: `D2`.
+
 ## Decision log
 
 ### D1 -- what the benchmark system should report about PTY throughput
@@ -459,14 +523,61 @@ improvement as a failure.
 
 ### D2 -- whether to build a keypress-driven interactive workload
 
-- Status: **open, deliberately not yet argued.** Sequenced after `D1`.
-- Evidence used so far: `F1` only. `H4` is unmeasured.
-- Note for whoever takes it: the subject choice is load-bearing and is not a
-  detail. btop redraws on its own timer regardless of input, so a keypress cannot
-  be attributed to a draw; `less` and vim redraw only on input, which makes
-  attribution clean and matches kitty's precedent (`F1`). The original question
-  named btop, so the substitution needs to be raised with the user rather than
-  made silently.
+- Status: **recommendation made, awaiting user direction gate.**
+- Evidence used: `F1`, `F8`. `H4` remains unmeasured but is largely answered
+  structurally by `F8`.
+- The question splits, and separating the halves is most of the decision. The
+  trigger asked for "btop under a held down-arrow," which conflates **(a) measure
+  a real TUI's output shape** with **(b) measure the keypress-to-draw loop**.
+  They have wildly different prices.
+- Candidate solutions:
+  1. **Take (a) only, via a recording** (recommended). Record a real TUI session
+     with `PTYRecordingRecorder`, freeze it as a neutral fixture, add it as a
+     sixth workload. `F8`'s Result 6: the replay path already exists, it is
+     deterministic, and it needs no input driver, no Accessibility grant, and no
+     new block-boundary mechanism. btop is a *fine* subject here, because a
+     recording is bytes and its self-timed redraws are baked into the capture.
+  2. **Take (b) as a diagnostic-only probe.** A scratch driver under a held key,
+     read with `sample`, reported as a description and never as a verdict --
+     `21/D2`'s precedent for a path no calibrated workload contains.
+  3. **Take (b) as a calibrated workload.** Input driver, new boundary
+     detection, a real child process, then an A/A screen to earn a rule.
+  4. **Nothing.** Close the file on the interactive question.
+- Tradeoffs and correctness risks:
+  - (3) is the expensive one and buys the least. It needs all four mechanisms in
+    `F8`'s Results 1-4, and by Result 5 the thing it uniquely adds is an AppKit
+    segment plus one `queue.async`; everything with known cost in that loop is
+    already measured by the five existing workloads or by doc 19. It also seats
+    a **nondeterministic child process** inside a contract whose every other
+    member is a frozen byte generator -- and a workload that drifts with a vim
+    version silently poisons the paired rule rather than failing loudly.
+  - (2) is honest and cheap, but `19/F9` has *already done* the interactive
+    diagnosis that motivated this, on the axis that turned out to matter
+    (occupancy, not key encoding). Doing it again here would likely rediscover
+    doc 19's result through a worse instrument.
+  - (1) answers the half of the trigger that was always tractable. Its real risk
+    is `17/F17`'s: a captured stimulus can be unrepresentative, and a
+    full-screen self-redrawing TUI is exactly the shape that produced doc 17's
+    retired headline. Mitigation is to capture a session that resembles use --
+    and to treat any resulting number as a property of that capture, which the
+    fixture provenance already records.
+  - (4) is defensible but discards Result 6, where the mechanism is already
+    built and unused.
+- Recommendation: **(1), and explicitly reject (3).** The keypress loop is not
+  where the unexplained cost lives, and `F8` says so from source; the real TUI
+  *corpus* gap is real, unclaimed, and cheap. Hold (2) in reserve behind a
+  specific trigger: a `sample` under a held key that implicates AppKit key
+  handling, which is itself cheaper than building any of this.
+- Direction review: user, 2026-07-30. Selected (1) as recommended.
+- Selected direction: **the recording workload; (3) is rejected.** Capture a real
+  TUI session, freeze it as a neutral fixture, add it as a sixth workload. No
+  input driver is built. (2) stays in reserve behind `D2`'s stated trigger.
+- Note preserved from before this was argued: if (2) or (3) is ever taken, the
+  subject choice is load-bearing. btop redraws on its own timer regardless of
+  input, so a keypress cannot be attributed to a draw; `less` and vim redraw only
+  on input, which makes attribution clean and matches kitty's precedent (`F1`).
+  Under (1) the concern evaporates -- a recording is bytes, and btop's timer is
+  captured rather than raced.
 
 ## Rejected
 
