@@ -26,8 +26,9 @@ struct AsciiGlyphTableTests {
         //   ASCII scalar is the glyph CoreText maps that scalar to right now.
         // Why it exists: the table replaces a per-draw call with a value computed once, so
         //   nothing at draw time can notice a wrong entry -- the wrong glyph just renders.
-        //   The mapping is a pure function of face and code unit (`CTFont.h:820-846`), which
-        //   is the only reason precomputing it is sound; this test is that reasoning made
+        //   The mapping is a pure function of face and code unit
+        //   (`CTFont.h`, `CTFontGetGlyphsForCharacters`), which is the only reason
+        //   precomputing it is sound; this test is that reasoning made
         //   executable. Indexing is the real risk: an off-by-one against the table's base
         //   would shift every character by one.
         let metrics = try #require(TerminalRenderMetrics(displayScale: scale))

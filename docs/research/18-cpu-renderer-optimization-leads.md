@@ -1,15 +1,17 @@
 # CPU renderer optimization leads
 
-Research started: 2026-07-29. **Status: OPEN -- survey complete; two of the five
-tier-1 leads taken and confirmed (`L3`/`F10`, `L2`/`F11`), the bracket re-captured
-the remainder re-ranked (`F12`, `D4`), and `L1` taken and rejected
-(`F13`, `D5`) -- the rest still gated.**
+Research started: 2026-07-29. **Status: OPEN -- survey complete; three leads taken
+and kept (`L3`/`F10`, `L2`/`F11`, `L12`/`F14`), the bracket re-captured and the
+remainder re-ranked (`F12`, `D4`), and one lead taken and rejected (`L1`/`F13`,
+`D5`) -- `L4`, `L6` and `L5` still gated.**
 Deliverable is the API inventory (`F1`), the decomposition of the one decidable
 renderer bracket (`F4`-`F8`, superseded in its shares by `F12`), the ranked lead
 list (`D1`, re-ordered by `D4`), and the paired-benchmark verdict for each lead as
-it lands (`F10` onward). Together the two taken leads cut the draw bracket roughly
+it lands (`F10` onward). The first two taken leads cut the draw bracket roughly
 in half on all three draw workloads -- **confirmed independently at -42.8% on-CPU
-by `F12`** -- which also halved the denominator every remaining lead is quoted in.
+by `F12`** -- which also halved the denominator every remaining lead is quoted in;
+`L12` then took a further -5.25% and -10.60% off two workloads by dropping the
+CoreText glyph wrapper (`F14`).
 Continues: [17-cpu-profile-sweep.md](17-cpu-profile-sweep.md) (`17/F2`, `17/F3`,
 `17/F6`, `17/F17`, `17/D8`), [11-render-frame-budget.md](11-render-frame-budget.md)
 (`11/F7`, `11/F8`, `11/F10`).
@@ -135,18 +137,19 @@ that grouping had an attribution bug; `D4` corrects both the sizes and the order
       call count never controlled the entry count. `F9`'s prediction fired against it:
       both workloads moved together, which `F9` named in advance as refuting the
       mechanism. Tests kept as `MultiStyleFrameTests`.
-- [ ] **`L12` -- bypass `CTFontDrawGlyphs`** for the mapped-glyph path: cache `CGFont`
+- [x] **`L12` -- bypass `CTFontDrawGlyphs`** for the mapped-glyph path: cache `CGFont`
       per face, `setFont` + `setFontSize`, then `showGlyphs(_:at:)`. Promoted out of
-      "Pre-rejected" by `D5`. `F13` measures `EnumerateOverlappingGlyphs` at **385 ms =
-      35.8% of the bracket**; if the lower-level entry point reaches the recorder
-      without it, this is the largest item on the text path. **If it does the same
-      enumeration internally, this is worth zero** -- which is why it goes first: one
-      commit and one `quick` run re-rank everything after it.
+      "Pre-rejected" by `D5`. **Done and KEPT -- `F14`, `D6`. `confirm`:
+      `incremental-mixed` `faster` -10.60%, `content-churn` `faster` -5.25%, no
+      workload `slower`.** `D5`'s hypothesis resolved in the affirmative: the overlap
+      enumeration is the CoreText wrapper's, and `EnumerateOverlappingGlyphs` has zero
+      samples once the wrapper is gone. Landed as `TerminalFace.directDrawFont`, nil
+      for a matrix-bearing face, with `DirectGlyphDrawTests`.
 - [ ] **`L4` -- write into pre-sized buffers** instead of per-element `Array.append`.
       **24.5%** of the live bracket -- `isUniquelyReferenced` plus its stub is
       8.9-10.9% of it. Tier 1 now that `F8`'s precondition is met (`F11`, `F12`).
-      `L1`'s rejection removes the reason it was sequenced second, so it is blocked
-      only on `L12`, which may change the buffer shape it should pre-size.
+      `L1`'s rejection removed the reason it was sequenced second, and `F14` landed
+      without changing the buffer shape (`D6`), so **it is next and unblocked**.
 - [ ] **`L5` -- intern `CGColor`s and hoist the color space.** Floor ~5.5% (our own
       construction), ceiling whatever of the dedup block `L6` leaves. Its stronger
       form rests on a `CGColorCompare` pointer fast path the SDK does not document
@@ -235,7 +238,7 @@ Structural facts that decide what the leads can be:
   re-read them rather than trust this table.
 - Source: `$(xcrun --show-sdk-path)/System/Library/Frameworks/`.
 
-**`CoreText.framework/Headers/CTFont.h:1607-1633` (`CTFontDrawGlyphs`)** -- "This
+**`CoreText.framework/Headers/CTFont.h`, `CTFontDrawGlyphs`** -- "This
 function will modify the CGContext's font, text size, and text matrix if
 specified in the CTFont. These attributes will not be restored." And: "The given
 glyphs should be the result of proper Unicode text layout operations (such as
@@ -248,19 +251,20 @@ perform any Unicode text layout."
   not from shaping. Second, the "will not be restored" clause is why
   `drawRenderFrame` saves and restores `textMatrix` by hand (`:244`, `:248`).
 
-**`CTFont.h:820-846` (`CTFontGetGlyphsForCharacters`)** -- "This function only
+**`CTFont.h`, `CTFontGetGlyphsForCharacters`** -- "This function only
 provides the nominal mapping as specified by the font's Unicode cmap (or
 equivalent)". A nominal cmap mapping is a **pure function of (face, UTF-16 code
 unit)**. Nothing in the header makes it context-, position-, or state-dependent.
 That is the entire correctness argument for memoizing it (lead `L2`).
 
-**`CoreGraphics.framework/Headers/CGContext.h:860-863`
-(`CGContextShowGlyphsAtPositions`)** -- "Draw `glyphs', an array of `count'
+**`CoreGraphics.framework/Headers/CGContext.h`,
+`CGContextShowGlyphsAtPositions`** -- "Draw `glyphs', an array of `count'
 CGGlyphs, at the points specified by `positions'". This is the lower-level
 alternative to `CTFontDrawGlyphs`, reached via `setFont(CGFont)` +
 `setFontSize`. `F6` sizes what skipping the CoreText wrapper is actually worth.
 
-**`CGContext.h:957-993`** -- four separate switches govern glyph positioning:
+**`CGContext.h`, `CGContextSetAllowsFontSmoothing` through
+`CGContextSetAllowsFontSubpixelQuantization`** -- four separate switches govern glyph positioning:
 `ShouldSubpixelPositionFonts` and `ShouldSubpixelQuantizeFonts` are graphics
 state; `AllowsFontSubpixelPositioning` and `AllowsFontSubpixelQuantization` are
 not. Both halves of a pair must be true for the behavior to occur. A terminal
@@ -893,6 +897,82 @@ Inside that 59%, what each entry costs:
   path, which is the executor's contract rather than the candidate's, and they pass
   on the reverted renderer.
 
+### F14 -- `L12` taken and kept: the enumeration is the wrapper's, and dropping it is worth -5.25% and -10.60%
+
+- Status: **landed. `confirm`: `content-churn` `faster` **-5.25%** (4 pairs),
+  `incremental-mixed` `faster` **-10.60%** (6 pairs), `style-churn` inconclusive
+  -1.43% (4 pairs), `scrollback-stream` inconclusive -1.75%, `terminal-feed`
+  inconclusive -0.89%. No workload measured `slower`.** Baseline `707f8a0`,
+  candidate tree `288200911d0e`.
+- Method: replace the single `CTFontDrawGlyphs` call in `drawTextRuns` with
+  `setFont` + `setFontSize` + `showGlyphs(_:at:)`, using a `CGFont` and point size
+  precomputed on `TerminalFace`. Then one capture of the candidate on
+  `content-churn` (`.build/terminal-benchmark-profiles/2026-07-30-003651-74773`,
+  **disposable**; 16,372 ms on-CPU) against `F12`'s HEAD capture.
+- **`D5`'s hypothesis resolved in the affirmative: the overlap enumeration belongs
+  to the CoreText wrapper, not to CoreGraphics' glyph entry point.** In the
+  candidate capture `EnumerateOverlappingGlyphs` and `DrawGlyphsAtPositions` have
+  **zero samples** (381 ms and 407 ms at HEAD), and the chain is flat:
+
+  | | HEAD | `L12` |
+  | --- | --- | --- |
+  | chain | `drawTextRuns` -> `CTFontDrawGlyphs` -> `DrawGlyphsAtPositions` -> `EnumerateOverlappingGlyphs` -> `CGContextDelegateDrawGlyphs` -> `dlRecorder_DrawGlyphs` | `drawTextRuns` -> `draw_glyphs` -> `CGContextDelegateDrawGlyphs` -> `dlRecorder_DrawGlyphs` |
+  | draw bracket | 1,075 ms | **849 ms (-21.0%)** |
+  | workload minus bracket | 15,743 ms | 15,523 ms (-1.4%) |
+  | `colorResourceForColor` (incl.) | 159 ms | 110 ms |
+
+  The last row of the middle block is again what licenses comparing absolute
+  milliseconds: non-draw work held to 1.4%.
+- **Instrument disagreement, larger than `F12`'s and not resolved.** The profiler
+  puts the bracket 21.0% cheaper; the calibrated paired benchmark puts the same
+  workload's draw 5.25% cheaper. `F12` recorded a ~6.6-point spread between these
+  two instruments; this is ~16 points, and in the *opposite* direction (there the
+  benchmark saw the larger win). **The verdict is the benchmark's** -- that is
+  `17/F15` and `17/D6`, and this file does not get to re-open the calibration
+  question because the descriptive instrument flatters the change it just made.
+  What the capture is used for here is the *mechanism* (which frames exist), not
+  the size. Anyone quoting a number for `L12` should quote -5.25%.
+- The gap's most likely cause, stated as a caveat rather than a finding: on-CPU
+  sampling charges the delegate's work to whichever thread ran it, and the removed
+  frames are pure overhead that a wall-clock draw measurement may already overlap
+  with work the profiler serializes. Untested. It would take a third instrument to
+  settle, and nothing decidable depends on the answer.
+- **`incremental-mixed` gaining twice what `content-churn` did is the shape this
+  mechanism predicts, and it was not predicted in advance.** The enumeration is
+  per-call fixed cost plus per-glyph scanning; damage-clipped draws submit many
+  small runs, so they pay the fixed part most often relative to the pixels they
+  produce. `F11` saw the same workload move most for the same structural reason.
+  Recording that this was read off the result rather than before it.
+- `style-churn` came back inconclusive at -1.43% while `content-churn` cleared the
+  bar at -5.25%. That asymmetry is consistent with `F12`'s finding that the two
+  workloads no longer decompose alike, and it is **not** `F9`'s prediction firing:
+  `F9` was written about `L1`'s batching mechanism, which is dead. Do not credit it
+  to a prediction it was not making.
+- Uncertainty: one candidate capture, no replicate, and the two captures are
+  separate 30-second runs. The mechanism claim (frames present versus absent) is
+  robust to that; the 21.0% is not, and is not relied on.
+- Correctness, and why the bypass is narrower than it looks: `CTFontDrawGlyphs` is
+  documented to set the context's font, size **and matrix** from the CTFont and to
+  leave them unrestored (`CTFont.h`, `CTFontDrawGlyphs`). The direct path reproduces the
+  first two from precomputed values and **cannot** reproduce the third, since the
+  text matrix it sets is the executor's own y-flip. So `TerminalFace.directDrawFont`
+  is nil for any face whose `CTFontGetMatrix` is not the identity, and such a face
+  keeps going through the wrapper. Probed before writing the code: all four faces
+  of the monospaced system font are real designed faces
+  (`.SFNSMono-Regular`/`-Semibold`/`-RegularItalic`/`-SemiboldItalic`) with identity
+  matrices, so the shipped configuration takes the fast path on every run. The
+  refusal exists for a family with no true italic, where CoreText synthesizes the
+  slant as a matrix.
+- Tests: `DirectGlyphDrawTests` (new, red first -- it failed to compile for the
+  absent `directDrawFont`), which pins that every shipped face qualifies and gets
+  its *own* `CGFont`, and that a matrix-bearing face is refused with a same-family
+  control proving the refusal is attributable to the matrix. Mutation-verified
+  three ways: dropping `setFontSize` (57 failures), drawing every face with the
+  regular face's `CGFont` (10), and removing the matrix gate (4, all in the new
+  suite -- nothing else can see it). The pixel-level guarantees stayed where they
+  were: `TextExecutionTests.fontTraitsPreserveGridGeometry` and
+  `MultiStyleFrameTests` passed unchanged, byte-identical, through the new path.
+
 ## Decision log
 
 ### D1 -- the ranked lead list
@@ -1007,7 +1087,7 @@ Inside that 59%, what each entry costs:
   entry-count reduction is the only route to that 23%.
 - **The assumption underneath that prediction is unverified, and the headers cannot
   settle it.** The prediction's strong form needs `CGColorCompare` to short-circuit
-  on pointer equality. `CGColor.h:110-112` documents `CGColorEqualToColor` as only
+  on pointer equality. `CGColor.h` documents `CGColorEqualToColor` as only
   "Return true if `color1' is equal to `color2'; false otherwise" -- no statement
   about identity, and `CGColorCompare` is not public at all. Checked so nobody
   re-checks: **this is not answerable from the SDK.** Treat `L5` as sized at "up to
@@ -1101,6 +1181,7 @@ Inside that 59%, what each entry costs:
 - Order in force for the remainder, unchanged from `D4` except for `L1`'s removal
   and `L12`'s promotion: **`L12` (measure the enumeration hypothesis first, since it
   is cheap and would re-rank everything), then `L4` (24.5%), then `L6`, then `L5`.**
+  `L12` has since been taken and kept (`F14`, `D6`); the remainder is unchanged.
   `L6` rises relative to `D4`: `F13` found `fill(rect)` does map one call to one
   entry, and 71 ms of the dedup block sits under fill entries, so `L6`'s premise
   survives `F13` intact where `L1`'s did not.
@@ -1109,6 +1190,41 @@ Inside that 59%, what each entry costs:
   `fill(rect)` -> `fill(rects)` the answer is yes and it is visible in `F1`'s
   inventory. For `CTFontDrawGlyphs` it was no, and nothing in this file asked the
   question until a benchmark did.
+
+### D6 -- `L12` kept; the wrapper was the cost, and `L1` died of aiming one level too high
+
+- Status: **decided by measurement (`F14`). `L12` is landed. `D5`'s order stands for
+  the remainder: `L4`, then `L6`, then `L5`.**
+- **The two glyph leads were opposites, and only the measurement could tell them
+  apart.** `L1` reduced the number of `CTFontDrawGlyphs` calls and cost +31%. `L12`
+  keeps every call and removes the wrapper *under* them, and gains -5.25% and
+  -10.60%. Both were aimed at the same 385 ms node; one aimed at its *input*, which
+  it did not control, and the other at the node itself. The distinction worth
+  carrying forward is not "batching is bad" but: **a lead must remove work, not
+  redistribute the calls that request it.**
+- **`F13`'s diagnosis is confirmed from the other side.** `F13` inferred that the
+  enumeration belongs to the wrapper, from the delegate being entered *more* under
+  batching. `F14` shows the frames simply absent once the wrapper is gone. An
+  inference from a regression and a direct observation from a fix now agree, which
+  is stronger than either -- and it is why `D5` was right to state `L12` as a
+  hypothesis with "worth zero" as a live outcome rather than pre-claiming 35.8%.
+- **What `L12` costs in exchange, and why it is bounded:** the fast path cannot apply
+  a CTFont matrix, so `TerminalFace` refuses it for any face carrying one and that
+  face keeps the wrapper. This is not a fallback that might silently never run --
+  it is measured for the shipped font (all four faces qualify) and pinned by
+  `DirectGlyphDrawTests` in both directions. The renderer now has two glyph
+  submission paths where it had one; that is the real maintenance cost of this
+  commit, and it is the reason the gate is a precomputed value on the face rather
+  than a per-run test.
+- **Do not quote -21.0%.** The profiler and the paired benchmark disagree by ~16
+  points on this change (`F14`), the calibrated instrument is the benchmark
+  (`17/F15`, `17/D6`), and the capture earned its keep by naming the mechanism, not
+  by sizing it. `F12` already fixed the rule -- profiler shares are descriptive
+  here -- and this is the first time following it costs the file a flattering
+  number.
+- Consequence for `L4`, next in order: `L12` did not change the buffer shape, so
+  `D5`'s reason for sequencing `L4` behind it is discharged. `L4` pre-sizes
+  `mappedGlyphs` and `positions`, which both paths still fill identically.
 
 ## Pre-rejected
 
@@ -1132,7 +1248,10 @@ Added by this file:
   a strict subset of `L1`." Both halves failed. `L1` is rejected (`F13`), so nothing
   is a subset of it, and the 2.7% came from `F6`'s `359 - 284 - 24` subtraction --
   the parent-minus-child sizing `17/D5` retired. The wrapper's enumeration measures
-  385 ms, 35.8% of the bracket. `L12` is a live lead and goes first.
+  385 ms, 35.8% of the bracket. `L12` is a live lead and goes first. **It was taken
+  and kept -- `F14`, `D6`.** Recorded here rather than deleted: this is the one
+  pre-rejection in this file that was wrong, and it was wrong for a reason the file
+  had already retired elsewhere.
 - **Sizing any glyph-drawing candidate per glyph.** `F6` measured the split:
   59% per-call, ~15% per-glyph. A pitch that multiplies a per-glyph cost by the
   cell count is wrong by roughly 4x in the direction that makes it look good.
@@ -1186,20 +1305,21 @@ Added by this file:
 
 ## Outcome
 
-**Survey complete; ranked; `L3` (`F10`) and `L2` (`F11`) implemented and confirmed;
-bracket re-captured and the remainder re-ranked (`F12`, `D4`); the rest of Phase 4
-still gated.** Fifteen leads, five of them decidable today by the frozen draw
-verdict, three pre-rejections added, one reading corrected before it reached code
-(`F6`), and one corrected after (`F11`'s withdrawn bound).
+**Survey complete; ranked; `L3` (`F10`), `L2` (`F11`) and `L12` (`F14`) implemented
+and kept; `L1` implemented and rejected (`F13`); bracket re-captured and the
+remainder re-ranked (`F12`, `D4`); `L4`, `L6` and `L5` still gated.** Fifteen leads,
+five of them decidable today by the frozen draw verdict, three pre-rejections added
+and one un-added (`L12`), one reading corrected before it reached code (`F6`), and
+two corrected after (`F11`'s withdrawn bound, `F12`'s grouping).
 
-The two landed commits cut the draw bracket from 1,879 ms to 1,075 ms of on-CPU
-time on `content-churn` (-42.8%, `F12`) -- corroborating the paired benchmark's
--49.4% on an independent instrument -- and the bracket is now ~60%
-CoreGraphics display-list entry recording, which is what makes `L1` (18.8-21.6%
-plus the dedup block it shrinks) the largest remaining lead, ahead of `L4` (24.5%),
-`L5`, and `L6` -- non-additively.
+`L3` and `L2` cut the draw bracket from 1,879 ms to 1,075 ms of on-CPU time on
+`content-churn` (-42.8%, `F12`) -- corroborating the paired benchmark's -49.4% on an
+independent instrument -- and left the bracket ~60% CoreGraphics display-list entry
+recording. `L12` then removed the CoreText glyph wrapper from that path for a
+further `faster` -5.25% (`content-churn`) and -10.60% (`incremental-mixed`). What
+remains is `L4` (24.5%), `L6` (7-19% inclusive) and `L5` -- non-additively.
 
-Ten results are worth more than the ranking:
+Twelve results are worth more than the ranking:
 
 1. **DanTerm's draw does not rasterize -- it records a CoreGraphics display
    list** (`F5`). That single fact reframes the whole bracket: inside `draw(_:)`,
@@ -1253,7 +1373,21 @@ Ten results are worth more than the ranking:
    my calls one-for-one onto display-list entries? For `fill(rect)` yes; for
    `CTFontDrawGlyphs` no. Reducing call counts is only a proxy for reducing entries,
    and a proxy is not a mechanism.
-10. **The decidable region is now the small one.** The draw bracket is 6% of the
+10. **Two leads aimed at the same 385 ms node, and their signs were opposite**
+   (`F13`, `F14`, `D6`). `L1` reduced the number of calls into
+   `CTFontDrawGlyphs` and cost +31%; `L12` kept every call and deleted the wrapper
+   beneath them, and gained -5.25% and -10.60%. Same node, same profile, same file
+   -- and no amount of further reading would have separated them, because the
+   distinguishing fact (who owns the overlap enumeration) is not in the header. The
+   generalization is not "batching is bad": it is that a lead must **remove work**,
+   not redistribute the calls that request it.
+11. **Following the calibration rule cost this file a flattering number** (`F14`).
+   The profiler put `L12` at -21.0% of the bracket; the calibrated paired benchmark
+   put it at -5.25%, a ~16-point spread in the opposite direction from `F12`'s
+   ~6.6-point one. The verdict recorded is the benchmark's, and the capture is
+   credited only for the mechanism it named. A calibration rule that is only
+   honoured when it agrees with the profiler is not a rule.
+12. **The decidable region is now the small one.** The draw bracket is 6% of the
    workload and `TGlyphOutlineDictionaryCache` alone is 10% -- 1.7x the bracket,
    off-thread, and unscoreable by any rule this project has (`17/D7`, `L9`).
    Tier 1's remaining leads are real and worth taking, and they optimize 6% of the

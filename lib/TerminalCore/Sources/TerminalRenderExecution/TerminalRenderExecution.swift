@@ -107,12 +107,30 @@ let asciiGlyphTableRange: ClosedRange<UInt32> = 0x20...0x7E
 /// One styled face together with its printable-ASCII glyphs, resolved eagerly at
 /// construction so the draw loop never asks CoreText to map a character it has
 /// already mapped. `CTFontGetGlyphsForCharacters` is documented as the font's
-/// nominal cmap mapping (`CTFont.h:820-846`) -- a pure function of face and code
-/// unit, with no context, no shaping, and no state -- which is what makes caching
+/// nominal cmap mapping (`CTFont.h`, `CTFontGetGlyphsForCharacters`) -- a pure
+/// function of face and code unit, with no context, no shaping, and no state --
+/// which is what makes caching
 /// it sound rather than merely convenient. The alternative, a memo filled during
 /// draws, would put mutable state inside a `Sendable` value; this stays immutable.
 struct TerminalFace: @unchecked Sendable {
     let font: CTFont
+
+    /// The face's point size, kept beside the font so the draw loop can set it on the
+    /// context without a CoreText call per run.
+    let pointSize: CGFloat
+
+    /// The `CGFont` to hand `setFont` when drawing this face's mapped glyphs directly,
+    /// or nil when the face must go through `CTFontDrawGlyphs`.
+    ///
+    /// `CTFontDrawGlyphs` is documented to apply the CTFont's size *and matrix* to the
+    /// context and to leave them unrestored (`CTFont.h`, `CTFontDrawGlyphs`). The
+    /// direct path applies the size but has no way to apply a matrix -- the text matrix it sets is
+    /// the executor's own y-flip -- so a face carrying one is refused here rather than
+    /// rendered without its transform. In practice every face of the monospaced system
+    /// font is a real designed face with an identity matrix, so the common case
+    /// qualifies; the refusal exists for a family with no true italic, where CoreText
+    /// synthesizes the slant as a matrix.
+    let directDrawFont: CGFont?
 
     /// `asciiGlyphTableRange`'s glyphs, indexed by `value - lowerBound`. A zero
     /// entry means the face cannot map that scalar and preserves the draw loop's
@@ -121,6 +139,10 @@ struct TerminalFace: @unchecked Sendable {
 
     init(font: CTFont) {
         self.font = font
+        self.pointSize = CTFontGetSize(font)
+        self.directDrawFont = CTFontGetMatrix(font) == .identity
+            ? CTFontCopyGraphicsFont(font, nil)
+            : nil
         var characters = asciiGlyphTableRange.map { UniChar($0) }
         var resolved = [CGGlyph](repeating: 0, count: characters.count)
         // The return value is false when *any* character is unmapped, so it cannot
@@ -746,14 +768,29 @@ private extension CGContext {
 
             if mappedGlyphs.isEmpty == false {
                 setFillColor(foreground)
+                // The text matrix is not part of the graphics state, and both branches
+                // below leave it modified (see `CTFontDrawGlyphs` in `CTFont.h` for
+                // the wrapper), so it is re-set per submission rather than hoisted
+                // out of the run loop.
                 textMatrix = CGAffineTransform(scaleX: 1, y: -1)
-                CTFontDrawGlyphs(
-                    font,
-                    mappedGlyphs,
-                    positions,
-                    mappedGlyphs.count,
-                    self
-                )
+                if let directDrawFont = face.directDrawFont {
+                    // Same submission one level down: the wrapper's documented job is to
+                    // set the context's font, size and matrix from the CTFont and then
+                    // hand the arrays to CoreGraphics, and the face precomputed both
+                    // values it would derive. `directDrawFont` is nil exactly when there
+                    // is a matrix to apply, which this path cannot reproduce.
+                    setFont(directDrawFont)
+                    setFontSize(face.pointSize)
+                    showGlyphs(mappedGlyphs, at: positions)
+                } else {
+                    CTFontDrawGlyphs(
+                        font,
+                        mappedGlyphs,
+                        positions,
+                        mappedGlyphs.count,
+                        self
+                    )
+                }
             }
             // Built inside the guard, not per run: only the fallback path reads
             // these attributes, and a run produces fallback cells only for
