@@ -15,6 +15,7 @@ let package = Package(
         .executable(name: "TerminalDrawBenchmark", targets: ["TerminalDrawBenchmark"]),
         .executable(name: "GlyphPreview", targets: ["GlyphPreview"]),
         .executable(name: "TerminalMemoryProbe", targets: ["TerminalMemoryProbe"]),
+        .executable(name: "TerminalOccupancyProbe", targets: ["TerminalOccupancyProbe"]),
     ],
     targets: [
         .target(
@@ -61,6 +62,24 @@ let package = Package(
             name: "TerminalMemoryProbeSupport",
             dependencies: ["TerminalCore"],
             path: "Sources/TerminalMemoryProbeSupport",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .executableTarget(
+            name: "TerminalOccupancyProbe",
+            dependencies: ["TerminalOccupancyProbeSupport"],
+            path: "Sources/TerminalOccupancyProbe",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .target(
+            name: "TerminalOccupancyProbeSupport",
+            dependencies: ["TerminalCore"],
+            path: "Sources/TerminalOccupancyProbeSupport",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "TerminalOccupancyProbeSupportTests",
+            dependencies: ["TerminalOccupancyProbeSupport", "TerminalCore"],
+            path: "Tests/TerminalOccupancyProbeSupportTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(

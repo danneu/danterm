@@ -60,6 +60,7 @@ test:
     python3 ./scripts/tests/terminal_benchmark_validation_test.py
     python3 ./scripts/tests/terminal_benchmark_compare_test.py
     python3 ./scripts/tests/terminal_benchmark_producer_test.py
+    python3 ./scripts/tests/terminal_benchmark_fixtures_test.py
     python3 ./scripts/tests/terminal_benchmark_workloads_test.py
     python3 ./scripts/tests/terminal_draw_acceptance_test.py
     python3 ./scripts/tests/terminal_headless_draw_compare_test.py
@@ -114,6 +115,27 @@ benchmark-confirm baseline:
 terminal-memory-probe flags="":
     swift build -c release --package-path lib/TerminalCore --product TerminalMemoryProbe
     lib/TerminalCore/.build/release/TerminalMemoryProbe {{flags}}
+
+# Measure how long a single job holds TerminalPTYHost's serial queue, at a saturated history.
+#
+# Use this -- not `benchmark-quick` -- for any question of the form "can the main thread's
+# drain fence end up waiting behind this". No calibrated workload searches, selects, or
+# resizes at all, so none of the frozen benchmark rules apply to these jobs and none can
+# (docs/research/19, D2). Reports wall-clock, not CPU: a job that blocks holds the queue
+# exactly as hard as one that burns CPU, so an on-CPU instrument would understate precisely
+# the jobs worth finding (19's inverted rule).
+#
+# Compares across revisions by hand -- run it, stash or check out the other revision, run it
+# again. There is no paired arm here and no threshold; at the 5x-50x effect sizes this file
+# deals in, that is enough (19/D2).
+#
+#   just terminal-occupancy-probe                          # full case list, 179x66
+#   just terminal-occupancy-probe "--json"                 # machine-readable
+#   just terminal-occupancy-probe "--iterations 10"        # quicker, noisier
+#   just terminal-occupancy-probe "--columns 80 --rows 24"
+terminal-occupancy-probe flags="":
+    swift build -c release --package-path lib/TerminalCore --product TerminalOccupancyProbe
+    lib/TerminalCore/.build/release/TerminalOccupancyProbe {{flags}}
 
 # Benchmark full-frame and damage-clipped CoreText drawing headlessly.
 benchmark-draw iterations="15":

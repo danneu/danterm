@@ -696,17 +696,35 @@ invalidation added. A cache's whole failure mode is silently serving a stale
 answer, and a test suite that has never been shown to fail against a stale answer
 is not evidence.
 
-**`D2`'s recommended first commit was skipped, deliberately.** That decision said
-to land `F5`'s probe as a checked-in occupancy benchmark before taking any
-candidate. It was not done: the probe is still in a scratchpad. The reasoning that
-`D2` itself supplies is why -- effects of 5x-50x are decidable by a stopwatch, and
-the before/after here is 99.3 ms to 0.00 ms, which no one needs a harness to
-believe. What it costs is real and should be stated rather than waved away: **the
-99.3 ms baseline in this file is now unreproducible**, because the code that
-produced it is gone. Anyone re-deriving it has to check out `364af5c`. That is an
-acceptable price for a result this size and a bad one for `C5`, whose remaining
-48.8 ms is a 2x-class change where a stopwatch stops being enough. **If `C5` is
-taken, `D2` applies to it in full and the probe lands first.**
+**`D2`'s recommended first commit was skipped, then paid back.** That decision said
+to land `F5`'s probe as a checked-in occupancy benchmark *before* taking any
+candidate. It was not done, and the reasoning `D2` itself supplies is why --
+effects of 5x-50x are decidable by a stopwatch, and the before/after here is
+99.3 ms to 0.00 ms, which no one needs a harness to believe. The cost is real and
+should be stated rather than waved away: **the 99.3 ms baseline in this file is
+permanently unreproducible**, because the code that produced it is gone. Anyone
+re-deriving it has to check out `364af5c`. Landing the probe afterwards does not
+undo that -- a harness cannot measure a revision that no longer exists -- which is
+the whole argument for `D2`'s ordering and the reason to treat this as a debt
+that was incurred rather than avoided.
+
+The probe now exists as `just terminal-occupancy-probe`
+(`lib/TerminalCore/Sources/TerminalOccupancyProbe`), so `C5` starts from a
+measurable baseline rather than this one. It reproduces `F5`'s pane exactly --
+316,472 cells, 1,702 history rows at 179x66 -- which is the strongest available
+check that its corpus matches the one those numbers came from. Five cases: a new
+needle, held Enter quiet, held Enter with output arriving, Cmd-A, and one reflow
+step. Its stimulus is kept line-for-line identical to
+`scripts/saturate-scrollback.sh` on purpose, so the felt behavior in the live app
+and the measured behavior here are the same workload; if one changes, both must.
+
+Two things about it are worth knowing before reading its output. It reports **no
+rate below 0.01 ms** rather than a large one: a bracket around a cache hit reads a
+few hundred nanoseconds, and dividing that into 1000 produces a confident
+"3.8 million presses/second" that is the timer's noise floor printed beside a real
+key-repeat rate. And it has **no paired arm and no threshold** -- comparison is by
+hand across two checkouts. That is deliberate per `D2` and is exactly what makes it
+insufficient for anything smaller than the effects this file deals in.
 
 ### `C5` -- incremental tail rescan, the streaming case `C1` leaves
 
