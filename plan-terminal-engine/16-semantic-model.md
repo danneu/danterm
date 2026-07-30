@@ -58,7 +58,7 @@ terminal core as deterministic state alongside selection and search. The
 envelope is the journal's only source; everything lowers into one stream:
 
 - DanTermShell envelope events are the sole record authority: command-start
-  carries the required command text and is the only record opener;
+  carries the required command text and cwd and is the only record opener;
   command-end carries the exit status and closes the record; remote identity
   decorates it. DanTerm owns both ends of the envelope, so the journal
   parses no foreign dialect.
@@ -68,6 +68,11 @@ envelope is the journal's only source; everything lowers into one stream:
   and stay parsed by the engine, where they drive prompt/input/output row
   classification, navigation, and prompt redraw for DanTerm's scripts and
   foreign integrations alike. The journal never listens to them.
+- OSC 7 likewise stays parsed for pane chrome (new splits inherit cwd), but
+  the journal never listens to it either: a record's cwd arrives on
+  command-start, from the same reporter, on the same host, in the same verb
+  as its text -- never snapshotted from pane state that may be stale or
+  belong to a different host.
 - Parser facts supply presentation transitions during the command.
 
 Envelope, IPC, and parser inputs lower into a single ordered stream that the
@@ -82,12 +87,12 @@ through the pane owner: an attached agent session becomes part of records
 opened while it is active, and a command launched through the `danterm` CLI
 records the requesting context as launch provenance.
 
-A record carries the reported command text (required -- a record without
-identity cannot exist), stream order, injected wall-clock timestamps
-(stamped at the owner boundary under the existing save/send/assert injection
-rule), the cwd and connection facets at start, exit status when reported
-(absent only when the record was sealed rather than closed), and an output
-span.
+A record carries the reported command text and cwd (both required, both
+carried on command-start -- a record without identity or location cannot
+exist), stream order, injected wall-clock timestamps (stamped at the owner
+boundary under the existing save/send/assert injection rule), the
+connection facet at start, exit status when reported (absent only when the
+record was sealed rather than closed), and an output span.
 
 A record stores no output text. Its output span is a reflow-attached logical
 range into primary history under the same anchor contract selection and
@@ -121,8 +126,8 @@ share one concrete picture of the stream, the facets, and a record:
 /// pane-scoped IPC inputs lower into one ordered stream; the journal
 /// reducer never sees an OSC.
 enum CommandJournalEvent {
-    case commandStarted(text: String)      // envelope command-start; the only opener
-    case commandEnded(exitStatus: Int32?)  // envelope command-end, carrying $?
+    case commandStarted(text: String, cwd: String)  // envelope command-start; the only opener
+    case commandEnded(exitStatus: Int32?)           // envelope command-end, carrying $?
     case remoteIdentity(user: String, host: String)
     case agentAttached(kind: String, sessionId: String)  // IPC, via the pane owner
 }
@@ -141,10 +146,10 @@ struct PaneSemanticState {
 struct CommandRecord {
     let id: CommandRecordId
     var text: String                  // required; no partial records exist
+    var cwd: String                   // required; reported on command-start
     var exitStatus: Int32?            // nil only when sealed, not closed
     var startedAt: Date               // injected at the owner boundary
     var endedAt: Date?
-    var cwd: String?                  // at start
     var connection: ConnectionFacet   // at start
     var agent: AgentProvenance?       // attached session and/or launch requester
     var output: OutputSpan            // reflow-attached; clamps under eviction
@@ -183,8 +188,8 @@ A user runs `claude` in a pane at `~/Code/danterm`:
 
 1. The shell integration reports the command through the envelope's
    command-start. The command facet becomes running, and the journal opens a
-   record with the required command text, the pane's cwd, connection facet,
-   and an injected start timestamp. The integration's OSC 133 marks classify
+   record with the required command text and cwd (both carried on
+   command-start), the connection facet, and an injected start timestamp. The integration's OSC 133 marks classify
    the prompt and output rows for navigation; the journal takes nothing from
    them.
 2. Claude Code's session-start hook runs
@@ -256,8 +261,8 @@ feed-throughput work.
 
 This direction gates nothing in Milestones 8-10 and adds no replacement proof
 obligation. Its early protocol needs are small and DanTerm-owned: the
-versioned envelope grows exit status on command-end, and the bundled shell
-integrations start emitting the
+versioned envelope grows cwd on command-start and exit status on
+command-end, and the bundled shell integrations start emitting the
 OSC 133 marks the engine already parses -- which independently activates the
 existing prompt-redraw-on-resize behavior for every DanTerm user, and which
 serves navigation, never the journal.
@@ -289,9 +294,9 @@ introducing a new subsystem.
   re-entrant envelope events (an end while idle, a start while running) have
   pinned outcomes, never a partial or duplicate record. Marks alone never
   produce a record.
-- Every record carries its command text; the journal admits no partial
-  records. An empty journal is honest: a consumer can distinguish a pane
-  whose integration has never reported from an integrated pane where no
+- Every record carries its command text and cwd; the journal admits no
+  partial records. An empty journal is honest: a consumer can distinguish a
+  pane whose integration has never reported from an integrated pane where no
   commands ran.
 - The journal lives with the pane owner; the top-level model continues to
   receive only product-level latest values.
@@ -365,8 +370,9 @@ introducing a new subsystem.
   lacking a first-release consumer after carrying a research item, an
   envelope verb, and freshness semantics. Two points are settled if a
   consumer ever revives it: the shell reports its own repo context at
-  prompt boundaries over the versioned envelope (the OSC 7 cwd pattern,
-  with honest prompt-time staleness), and app-side filesystem watching
+  prompt boundaries over the versioned envelope (the same
+  shell-reports-its-own-state pattern as the record's cwd, with honest
+  report-time staleness), and app-side filesystem watching
   stays rejected -- it breaks remote panes, races cwd changes, and
   reintroduces the ambient-IO enrichment the declared-sources rule forbids.
 - Driving the journal from OSC 133 marks (dual-source records with an
@@ -406,7 +412,9 @@ None of this gates Milestones 8-10.
 - [ ] **R3: Audit reusable engine state.** Map today's row classification,
   semantic-content tracking, and reflow-attached anchor machinery against
   the journal's needs; decide where journal state sits beside selection and
-  search and what the record's span representation reuses.
+  search and what the record's span representation reuses -- including what
+  span-anchor maintenance costs under resize at journal scale (thousands of
+  endpoints per pane, not selection's handful).
 - [ ] **1: Bundled integrations emit marks.** zsh, Bash, and fish scripts
   emit the authored marks alongside the existing envelope; prompt redraw on
   primary-screen resize activates with only DanTerm's integration installed;
@@ -415,12 +423,14 @@ None of this gates Milestones 8-10.
   contract in
   [Protocols and shell integration](10-protocols-shell-integration.md)
   records the emission.
-- [ ] **2: Exit status over the envelope.** The bundled scripts report `$?`
-  on command-end through the versioned envelope, and the engine retains it
-  through pane-scoped semantics under the existing bounds.
+- [ ] **2: Exit status and cwd over the envelope.** The bundled scripts
+  report cwd on command-start and `$?` on command-end through the versioned
+  envelope, and the engine retains both through pane-scoped semantics under
+  the existing bounds.
 - [ ] **3: Command facet and record lifecycle.** Envelope events alone drive
   idle/running transitions and open/close bounded journal records --
-  command-start opens with required text, sealing any dangling predecessor;
+  command-start opens with required text and cwd, sealing any dangling
+  predecessor;
   command-end closes with exit status; teardown seals; behavior is
   chunk-invariant and proven by neutral replay, including the unmatched and
   re-entrant traces.
