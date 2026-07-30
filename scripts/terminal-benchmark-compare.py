@@ -88,6 +88,27 @@ UNCALIBRATED_BLOCK_METRICS = {
     "style-churn": "processCPUNanosecondsPerDraw",
     "incremental-mixed": "processCPUNanosecondsPerDraw",
 }
+# Workloads that report an absolute cost *composition* rather than a paired
+# percentage: how the measured block divides into draining the PTY and the draw
+# tail that follows it. This is not a third metric competing for a verdict, and
+# it is deliberately in neither table above -- it pairs nothing and classifies
+# nothing, so there is no rule for it to look up and nothing for a screen to
+# calibrate.
+#
+# It exists because research doc 20 (`20/F2`) found `producerWriteNanoseconds`
+# recorded in every `scrollback-stream` block since the harness was written,
+# referenced by no metric table, and sitting at 95.7% of the deciding metric.
+# Two consequences follow, and neither was readable from the verdict alone: this
+# workload has always been ~96% a PTY throughput measurement, and a change that
+# touches only the draw path can move it by at most ~4%, because the draw tail is
+# all that is left. Reporting the split is what makes a flat verdict on a real
+# drawing win legible as the expected result rather than a failure.
+#
+# Only this workload qualifies. The three serialized-draw workloads write one
+# update and then wait for that exact draw, so their producer write time measures
+# the handshake rather than throughput, and a rate derived from it would invite a
+# comparison the number cannot support.
+COMPOSITION_WORKLOADS = {"scrollback-stream"}
 # The auxiliary tables an A/A calibration run may screen, keyed by the name its
 # operator types. It exists so the calibrator names a metric instead of reaching
 # into one hardcoded table: the two above ride the very same blocks, so one
@@ -284,6 +305,72 @@ def summarize_uncalibrated(workload, raw_blocks):
     }
 
 
+def summarize_composition(workload, raw_blocks):
+    """Describe how a block divides into PTY drain and draw tail, per arm, deciding nothing.
+
+    Returns None rather than raising or assuming a corpus size whenever the
+    evidence cannot support a rate: a baseline arm predating the byte counter has
+    none, and two arms that drained different byte totals have no shared
+    denominator. Averaging across those would yield a rate belonging to neither
+    arm while looking exactly like a valid one.
+
+    Reported per arm rather than as one figure because the drain rate is the
+    marker an operator watches move between revisions; the paired verdict above
+    already answers the direction question for the block as a whole.
+    """
+    if workload not in COMPOSITION_WORKLOADS or not raw_blocks:
+        return None
+    metric = BLOCK_METRICS[workload]
+    if any(
+        block.get("producerWriteNanoseconds") is None
+        or block.get("producerWriteBytes") is None
+        or block.get(metric) is None
+        for block in raw_blocks
+    ):
+        return None
+    corpus_bytes = {block["producerWriteBytes"] for block in raw_blocks}
+    if len(corpus_bytes) != 1:
+        return None
+    corpus = next(iter(corpus_bytes))
+    geometries = {
+        json.dumps(block.get("producerWriteGeometry"), sort_keys=True)
+        for block in raw_blocks
+    }
+    by_role = {"A": "baseline", "B": "candidate"}
+    arms = {}
+    for role, arm in by_role.items():
+        blocks = [
+            block for block in raw_blocks if block.get("measurementRole") == role
+        ]
+        if not blocks:
+            return None
+        drain = [float(block["producerWriteNanoseconds"]) for block in blocks]
+        tail = [
+            float(block[metric]) - float(block["producerWriteNanoseconds"])
+            for block in blocks
+        ]
+        arms[arm] = {
+            "drainNanoseconds": statistics.median(drain),
+            "drainMegabytesPerSecond": statistics.median(
+                corpus / (value / 1e9) / 1e6 for value in drain
+            ),
+            "tailNanoseconds": statistics.median(tail),
+            "tailPercent": statistics.median(
+                (float(block[metric]) - float(block["producerWriteNanoseconds"]))
+                / float(block[metric])
+                * 100.0
+                for block in blocks
+            ),
+        }
+    return {
+        "corpusBytes": corpus,
+        "geometry": (
+            json.loads(geometries.pop()) if len(geometries) == 1 else None
+        ),
+        "arms": arms,
+    }
+
+
 def decide_workload(mode, workload, differences):
     """Apply the frozen fixed-N median rule, refusing any other number of pairs."""
     rule = decision_rule(mode)
@@ -329,6 +416,11 @@ def summarize_comparison(mode, evidence):
             ),
             "uncalibrated": (
                 summarize_uncalibrated(workload, raw_blocks)
+                if eligible
+                else None
+            ),
+            "composition": (
+                summarize_composition(workload, raw_blocks)
                 if eligible
                 else None
             ),
@@ -388,6 +480,27 @@ def render_decisions(summary):
                 "(descriptive, no verdict -- uncalibrated; all threads, CPU "
                 "consumed not latency)"
             )
+        composition = result.get("composition")
+        if composition:
+            # Absolute costs, not a paired percentage, and the denominator is
+            # spelled out on the line: a rate is meaningless without the corpus
+            # and geometry that produced it, and a reader who cannot reconstruct
+            # the arithmetic cannot tell this apart from a verdict.
+            geometry = composition["geometry"]
+            denominator = f"{composition['corpusBytes'] / 1e6:.2f} MB corpus"
+            if geometry:
+                denominator += f" at {geometry['columns']}x{geometry['rows']}"
+            for arm in ("baseline", "candidate"):
+                values = composition["arms"][arm]
+                lines.append(
+                    f"    drain ({arm}): {values['drainNanoseconds'] / 1e6:.1f} ms, "
+                    f"{values['drainMegabytesPerSecond']:.1f} MB/s "
+                    f"({denominator}; descriptive, no verdict)"
+                )
+                lines.append(
+                    f"    draw tail ({arm}): {values['tailNanoseconds'] / 1e6:.1f} ms "
+                    f"({values['tailPercent']:.1f}% of block)"
+                )
     return "\n".join(lines)
 
 

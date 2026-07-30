@@ -1237,5 +1237,182 @@ class UncalibratedProcessCPUMetricTests(unittest.TestCase):
         )
 
 
+class ThroughputCompositionTests(unittest.TestCase):
+    """The descriptive drain/draw-tail split, which reports absolute cost and never decides.
+
+    Research doc 20 (`20/F2`) found `producerWriteNanoseconds` recorded in every
+    `scrollback-stream` block since the harness was written and referenced by no
+    metric table: it is 95.7% of `finalDrawNanoseconds`, so the workload's verdict
+    has always been ~96% a PTY drain measurement with a ~9.5 ms draw tail on the
+    end. These tests pin the split that makes that composition visible.
+    """
+
+    WORKLOAD = "scrollback-stream"
+    CORPUS_BYTES = 1_525_000
+
+    def _blocks(self, schedule, drain_share=0.96, final_draw_nanoseconds=None):
+        """Build a block series whose drain is a fixed share of its final draw."""
+        final_draw = final_draw_nanoseconds or 200_000_000.0
+        blocks = raw_blocks(
+            self.WORKLOAD,
+            schedule,
+            [final_draw] * len(schedule),
+        )
+        for block in blocks:
+            block["producerWriteNanoseconds"] = final_draw * drain_share
+            block["producerWriteBytes"] = self.CORPUS_BYTES
+            block["producerWriteGeometry"] = {"columns": 179, "rows": 66}
+        return blocks
+
+    def _evidence(self, blocks):
+        return collection({
+            self.WORKLOAD: {
+                "workload": self.WORKLOAD,
+                "rawBlocks": blocks,
+                "valid": True,
+                "invalidationReasons": [],
+            }
+        })
+
+    def _schedule(self):
+        return COMPARE.make_schedule(
+            "quick", (self.WORKLOAD,), physical_candidate_arm="b"
+        )[self.WORKLOAD]
+
+    def test_the_drain_and_draw_tail_are_reported_beside_the_verdict(self):
+        # Intent: a `scrollback-stream` result reports how its measured block
+        #   decomposes into PTY drain and the draw tail that follows it.
+        # Why it exists: the verdict is one number for two very different costs.
+        #   `20/F2` measured the drain at 95.7% of the block, which means a change
+        #   touching only the draw path can move this workload by at most ~4% --
+        #   so a flat verdict on a real drawing win is the expected reading, not a
+        #   failure. Nothing reported that until now.
+        # Scenario: spec-first -- an operator reads a block that is 96% drain.
+        schedule = self._schedule()
+        blocks = self._blocks(schedule, drain_share=0.96)
+
+        summary = COMPARE.summarize_comparison("quick", self._evidence(blocks))
+        composition = summary["workloads"][self.WORKLOAD]["composition"]
+
+        self.assertEqual(composition["corpusBytes"], self.CORPUS_BYTES)
+        for arm in ("baseline", "candidate"):
+            with self.subTest(arm=arm):
+                self.assertAlmostEqual(
+                    composition["arms"][arm]["drainNanoseconds"], 192_000_000.0
+                )
+                self.assertAlmostEqual(
+                    composition["arms"][arm]["tailNanoseconds"], 8_000_000.0
+                )
+                self.assertAlmostEqual(
+                    composition["arms"][arm]["tailPercent"], 4.0
+                )
+                self.assertAlmostEqual(
+                    composition["arms"][arm]["drainMegabytesPerSecond"],
+                    self.CORPUS_BYTES / 0.192 / 1e6,
+                )
+
+    def test_the_composition_never_changes_the_draw_verdict(self):
+        # Intent: adding the split leaves the frozen decision rule's output
+        #   bit-identical.
+        # Why it exists: this quantity is 95.7% the same number as the deciding
+        #   metric (`20/F2`), which is exactly why it must decide nothing --
+        #   `20/D1` rejected a second verdict on it as double-counting evidence.
+        #   If it could move a verdict it would silently redefine the frozen rule.
+        # Scenario: spec-first -- two block series with identical final draws and
+        #   wildly different drain shares must decide identically.
+        schedule = self._schedule()
+        drain_heavy = self._blocks(schedule, drain_share=0.98)
+        draw_heavy = self._blocks(schedule, drain_share=0.50)
+
+        heavy = COMPARE.summarize_comparison("quick", self._evidence(drain_heavy))
+        light = COMPARE.summarize_comparison("quick", self._evidence(draw_heavy))
+
+        self.assertEqual(
+            heavy["workloads"][self.WORKLOAD]["decision"],
+            light["workloads"][self.WORKLOAD]["decision"],
+        )
+
+    def test_blocks_without_drain_evidence_report_no_composition(self):
+        # Intent: a block series missing the byte count still pairs, decides, and
+        #   renders, reporting no composition at all.
+        # Why it exists: the paired harness compares one revision against another,
+        #   so a baseline arm predating the byte counter is the normal case for
+        #   the first several comparisons after it lands. Fabricating a rate from
+        #   an assumed corpus size would silently misreport whichever arm ran a
+        #   different corpus.
+        # Scenario: spec-first -- baseline blocks carry no recorded byte count.
+        schedule = self._schedule()
+        blocks = self._blocks(schedule)
+        for block in blocks:
+            if block["measurementRole"] == "A":
+                del block["producerWriteBytes"]
+
+        summary = COMPARE.summarize_comparison("quick", self._evidence(blocks))
+
+        self.assertIsNone(summary["workloads"][self.WORKLOAD]["composition"])
+        self.assertIsNotNone(summary["workloads"][self.WORKLOAD]["decision"])
+        self.assertNotIn("drain (", COMPARE.render_decisions(summary))
+
+    def test_disagreeing_byte_counts_report_no_rate(self):
+        # Intent: two arms that wrote different byte totals report no composition.
+        # Why it exists: the rate's denominator is the corpus, and a paired
+        #   comparison is only meaningful when both arms drained the same bytes.
+        #   Averaging across two corpora would produce a rate belonging to
+        #   neither arm while looking exactly like a valid one.
+        # Scenario: spec-first -- an arm pair straddling a corpus change.
+        schedule = self._schedule()
+        blocks = self._blocks(schedule)
+        for block in blocks:
+            if block["measurementRole"] == "B":
+                block["producerWriteBytes"] = self.CORPUS_BYTES * 2
+
+        summary = COMPARE.summarize_comparison("quick", self._evidence(blocks))
+
+        self.assertIsNone(summary["workloads"][self.WORKLOAD]["composition"])
+
+    def test_the_rendered_split_names_its_denominator_and_carries_no_verdict(self):
+        # Intent: the rendered lines state the corpus and geometry the rate is
+        #   derived from, and say in words that they decide nothing.
+        # Why it exists: `17/D6` established that a bare number printed under a
+        #   classified verdict reads as a second verdict. A rate is worse than a
+        #   percentage here, because "10.5 MB/s" is meaningless without the corpus
+        #   and geometry that produced it -- doc 20's investigation rules require
+        #   both to appear beside any rate.
+        # Scenario: spec-first -- an operator reads the report and can reconstruct
+        #   the arithmetic from the line itself.
+        schedule = self._schedule()
+        summary = COMPARE.summarize_comparison(
+            "quick", self._evidence(self._blocks(schedule))
+        )
+
+        render = COMPARE.render_decisions(summary)
+
+        self.assertIn("drain (baseline):", render)
+        self.assertIn("drain (candidate):", render)
+        self.assertIn("draw tail (baseline):", render)
+        self.assertIn("MB/s", render)
+        self.assertIn("MB corpus", render)
+        self.assertIn("179x66", render)
+        self.assertIn("descriptive, no verdict", render)
+
+    def test_the_split_is_confined_to_the_workload_that_measures_throughput(self):
+        # Intent: no serialized-draw workload reports a drain composition.
+        # Why it exists: those three workloads write one update and then wait for
+        #   that exact draw, so their producer write time measures the handshake,
+        #   not throughput. Reporting a rate there would invite exactly the
+        #   comparison the numbers cannot support -- doc 20's caveats say so in
+        #   as many words.
+        # Scenario: spec-first -- both frozen tables are read directly.
+        self.assertEqual(COMPARE.COMPOSITION_WORKLOADS, {"scrollback-stream"})
+        self.assertTrue(
+            COMPARE.COMPOSITION_WORKLOADS <= set(COMPARE.BLOCK_METRICS)
+        )
+        self.assertTrue(
+            COMPARE.COMPOSITION_WORKLOADS.isdisjoint(
+                COMPARE.AUXILIARY_BLOCK_METRICS
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

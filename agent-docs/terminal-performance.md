@@ -165,6 +165,42 @@ length does not match the count it was calibrated at.
   means reading the draw verdict. A change that moves only planning will
   correctly read `equivalent` on all three draw verdicts.
 
+### `scrollback-stream` reports how its block splits into drain and draw tail
+
+    scrollback-stream: equivalent (+0.10% symmetric median of 2 pairs)
+        drain (baseline): 146.4 ms, 10.4 MB/s (1.52 MB corpus at 179x66; descriptive, no verdict)
+        draw tail (baseline): 9.0 ms (5.8% of block)
+        drain (candidate): 145.9 ms, 10.5 MB/s (1.52 MB corpus at 179x66; descriptive, no verdict)
+        draw tail (candidate): 10.8 ms (6.9% of block)
+
+`drain` is the time the producer spent writing the corpus into the PTY. Because
+the producer blocks on `write()` once the buffer fills, that is the rate at which
+the app drained it -- **the PTY throughput number**, reported per arm because it
+is the marker you watch move between revisions.
+
+**Read this before concluding a drawing change failed on this workload.** The
+drain is ~96% of the measured block (median 95.7% over 368 archived blocks), so
+the draw tail is ~4-7% and **a change touching only the draw path can move
+`scrollback-stream`'s verdict by at most about 4%.** A flat verdict there is the
+expected reading of a real drawing win, not evidence against it. That also means
+the verdict has always been ~96% a throughput measurement wearing a draw
+metric's name.
+
+Three limits. The rate is the app's, not the harness's: the Python producer can
+push the same chunk sequence in 30.2 ms against a reader that never blocks, but
+that overhead is **fully absorbed** once the consumer runs at the app's real
+rate -- rechunking the writes moves the block by 0.0 ms there, against 20.4 ms
+unthrottled, because the writer is parked on a full PTY buffer either way. So
+quote the MB/s as measured; it needs no correction. The lines
+are **absent rather than wrong** when an arm predates the byte counter or when
+the two arms drained different byte totals; there is no assumed corpus size. And
+they exist only for `scrollback-stream` -- the serialized-draw workloads write one
+update and wait for that exact draw, so their write time is a handshake, and no
+byte count is recorded for them precisely so no rate can be derived.
+
+Like plan time and process CPU, this decides nothing. Evidence and the survey
+behind it: [docs/research/20-pty-throughput-and-interactive-stimulus.md](../docs/research/20-pty-throughput-and-interactive-stimulus.md).
+
 ### The third reported quantity: whole-process CPU per accepted draw
 
 The draw verdict times elapsed work between two points on the **main thread**, so

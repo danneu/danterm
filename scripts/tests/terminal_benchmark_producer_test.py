@@ -204,7 +204,7 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
                     await_start_ack=lambda: None,
                     await_draw_result=lambda: None,
                     acknowledge_geometry=lambda: events.append("geometry-ready"),
-                    write_result=lambda _elapsed, _geometry: events.append("result"),
+                    write_result=lambda _elapsed, _geometry, _written=None: events.append("result"),
                     backend="ghostty",
                     start_marker=b"start\n",
                     completion=b"complete\n",
@@ -220,6 +220,39 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
                     self.assertLess(events.index("clock"), events.index(payload_write))
                 else:
                     self.assertNotIn("clock", events)
+
+    def test_the_recorded_byte_count_is_exactly_what_the_timed_bracket_wrote(self):
+        # Intent: the producer reports the number of bytes it wrote inside the
+        #   timed region -- the workload chunks plus the completion marker, and
+        #   not the start marker that precedes the clock.
+        # Why it exists: research doc 20 turned this bracket into a reported
+        #   throughput rate (`20/D1`), and a rate is only as trustworthy as its
+        #   denominator. Deriving that denominator by re-reading the corpus at
+        #   report time would silently misreport any block whose arm ran a
+        #   different corpus, so the count has to come from the writer itself and
+        #   has to match the bracket exactly.
+        # Scenario: spec-first -- one measured block over a two-chunk workload.
+        recorded = []
+
+        PRODUCER.run_workload(
+            mode="measure",
+            target=os.terminal_size((80, 24)),
+            terminal_size=lambda: os.terminal_size((80, 24)),
+            monotonic=lambda: 0,
+            monotonic_ns=lambda: 0,
+            sleep=lambda _interval: None,
+            write=lambda _chunk: None,
+            workload_chunks=lambda: (b"first", b"second"),
+            await_start_ack=lambda: None,
+            await_draw_result=lambda: None,
+            acknowledge_geometry=lambda: None,
+            write_result=lambda _elapsed, _geometry, written: recorded.append(written),
+            backend="swift",
+            start_marker=b"start-marker\n",
+            completion=b"complete\n",
+        )
+
+        self.assertEqual(recorded, [len(b"first") + len(b"second") + len(b"complete\n")])
 
     def test_acknowledgment_log_names_what_was_seen_and_what_it_gave_up_on(self):
         # Intent: when a wait for an app-side acknowledgment expires, the log
@@ -320,7 +353,7 @@ class TerminalBenchmarkProducerTests(unittest.TestCase):
             await_start_ack=lambda: events.append("start-ack"),
             await_draw_result=lambda: events.append("draw-result"),
             acknowledge_geometry=lambda: events.append("geometry-ready"),
-            write_result=lambda _elapsed, _geometry: events.append("result"),
+            write_result=lambda _elapsed, _geometry, _written=None: events.append("result"),
             backend="swift",
             start_marker=b"start\n",
             completion=b"complete\n",

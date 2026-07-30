@@ -655,6 +655,12 @@ def collect_scrollback_stream(blocks, *, run_block):
             "startMarker": draw.get("startMarker"),
             "expectedFinalState": draw.get("expectedFinalState"),
             "producerWriteNanoseconds": producer.get("elapsedNanoseconds"),
+            # The rate's denominator travels with the bracket it belongs to, so a
+            # block never has to be matched back to a corpus at report time.
+            # Absent on any arm predating the counter, which the comparison
+            # reports by omitting the composition rather than assuming a size.
+            "producerWriteBytes": producer.get("bytesWritten"),
+            "producerWriteGeometry": producer.get("geometry"),
             "finalDrawNanoseconds": draw.get("elapsedNanoseconds"),
             "machineStateSamples": draw.get("machineStateSamples", []),
             "artifact": artifact,

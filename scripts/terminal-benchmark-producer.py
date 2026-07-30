@@ -198,12 +198,19 @@ def run_workload(
     if backend == "swift":
         await_start_ack()
 
+    # Counted here rather than derived from the corpus at report time: the rate
+    # this feeds (`20/D1`) is only as trustworthy as its denominator, and a
+    # denominator recomputed later belongs to whatever corpus the reader loads
+    # rather than to the corpus this block actually drained.
+    written = 0
     started = monotonic_ns()
     for chunk in workload_chunks():
         write(chunk)
+        written += len(chunk)
     write(completion)
+    written += len(completion)
     elapsed = monotonic_ns() - started
-    write_result(elapsed, achieved)
+    write_result(elapsed, achieved, written)
 
     if backend == "swift":
         await_draw_result()
@@ -300,13 +307,20 @@ def main():
         + "\n"
     ).encode()
 
-    def write_result(elapsed, geometry):
-        write_json_result(output, {
+    def write_result(elapsed, geometry, written=None):
+        result = {
             "clock": "python-monotonic-nanoseconds",
             "elapsedNanoseconds": elapsed,
             "event": "producer-final-write-returned",
             "geometry": {"columns": geometry.columns, "rows": geometry.lines},
-        })
+        }
+        # Absent on the serialized-draw path on purpose. Those workloads write one
+        # update and wait for that exact draw, so the bracket measures a handshake
+        # and a byte count over it would divide into a rate that looks valid and
+        # means nothing. Recording no count is what keeps it underivable.
+        if written is not None:
+            result["bytesWritten"] = written
+        write_json_result(output, result)
 
     acknowledgments = AcknowledgmentLog()
     try:
