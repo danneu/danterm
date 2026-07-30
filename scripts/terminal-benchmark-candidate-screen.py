@@ -173,11 +173,18 @@ def describe_series(quartets):
 def run_screen(*, workload, revision, quartets, trials, seed, repository_root,
                cache_root, artifacts_root, maximum_attempts=4, emit=print,
                monotonic=time.monotonic):
-    """Collect one A/A series for a candidate workload and report its implied rule."""
-    if workload not in VALIDATION.CANDIDATE_WORKLOADS:
+    """Collect one A/A series for a screenable workload and report its implied rule."""
+    # Calibrated workloads are screenable too, and deliberately: re-screening one
+    # is how a frozen rule gets revisited when the workload's inputs change
+    # (`20/D5` lengthens a replay to test whether its threshold can be bought
+    # down). Admitting them costs no safety, because this script writes a report
+    # and never a rule -- moving a threshold into `DECISION_RULES` stays a human
+    # act. The guard remains only to reject names that belong to neither set.
+    screenable = set(VALIDATION.WORKLOADS) | set(VALIDATION.CANDIDATE_WORKLOADS)
+    if workload not in screenable:
         raise ValueError(
-            f"{workload} is not a candidate workload; "
-            f"candidates are {sorted(VALIDATION.CANDIDATE_WORKLOADS)}"
+            f"{workload} is neither calibrated nor a candidate; "
+            f"screenable workloads are {sorted(screenable)}"
         )
     started = monotonic()
     arm_source = SNAPSHOT.resolve_baseline(repository_root, revision)

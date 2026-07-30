@@ -38,9 +38,22 @@ def iter_bytes(root, workload):
             recording = json.loads(gzip.decompress(path.read_bytes()).decode("utf-8"))
         else:
             recording = json.loads(path.read_text(encoding="utf-8"))
-        for event in recording["events"]:
-            if event.get("type") == "feed":
-                yield bytes.fromhex(event["hex"])
+        chunks = [
+            bytes.fromhex(event["hex"])
+            for event in recording["events"]
+            if event.get("type") == "feed"
+        ]
+        # A capture is repeated rather than re-captured to lengthen a block.
+        # `20/F12` measured this workload's noise as additive -- near-flat
+        # absolute SD across a 2.24x change in duration -- so the denominator is
+        # the lever, and repetition moves it without a second capture session or
+        # a change to what is being exercised. Valid only because each pass is
+        # bracket-balanced and ends on the same frame, so the stream still draws
+        # and still satisfies the completion assertion; the loader test pins both.
+        # Decoded once and re-yielded: decoding per pass would charge the
+        # producer for work the block is not measuring.
+        for _ in range(workload.get("replayCount", 1)):
+            yield from chunks
         return
 
     for segment in workload["segments"]:

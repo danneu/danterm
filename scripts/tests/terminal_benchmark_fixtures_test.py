@@ -64,6 +64,46 @@ class RecordingLoaderTests(unittest.TestCase):
         self.assertEqual(packed, expected)
 
 
+    def test_a_replay_count_repeats_the_capture_without_disturbing_its_shape(self):
+        # Intent: `replayCount: N` delivers the recording's bytes N times, and the
+        #   repeated stream still begins and ends where one pass does.
+        # Why it exists: `20/F12` found this workload's block noise is additive --
+        #   a roughly fixed per-run wobble over a growing denominator -- so a
+        #   longer block is the lever on its threshold, and repeating the capture
+        #   is the way to lengthen it without a second capture session. The
+        #   repetition is only valid if it changes nothing but duration: it must
+        #   stay bracket-balanced (else `planIfNeeded` suppresses every later draw
+        #   and the harness hangs) and must end in the same final frame the
+        #   completion assertion is written against.
+        # Scenario: spec-first; `20/D5` needs a length knob that a negative result
+        #   can be trusted to have exercised honestly.
+        document = {
+            "dimensions": {"columns": 179, "rows": 66},
+            "events": [
+                {"type": "feed", "hex": "1b5b3f3230323668"},
+                {"type": "feed", "hex": "616263"},
+                {"type": "feed", "hex": "1b5b3f323032366c"},
+            ],
+        }
+        one = b"\x1b[?2026habc\x1b[?2026l"
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "plain.json").write_text(json.dumps(document), encoding="utf-8")
+            single = b"".join(iter_bytes(root, {"recording": "plain.json"}))
+            fivefold = b"".join(
+                iter_bytes(root, {"recording": "plain.json", "replayCount": 5})
+            )
+        self.assertEqual(single, one, "an absent replayCount must mean one pass")
+        self.assertEqual(fivefold, one * 5)
+        # The two properties a longer block must not break, asserted on behaviour
+        # rather than on the concatenation above: still bracket-balanced, and the
+        # stream still ends on the same trailing bytes one pass ends on.
+        self.assertGreater(
+            fivefold.rfind(SYNCHRONIZED_END), fivefold.rfind(SYNCHRONIZED_BEGIN)
+        )
+        self.assertTrue(fivefold.endswith(one[-len(SYNCHRONIZED_END) :]))
+
+
 class CommittedRecordingTests(unittest.TestCase):
     def test_every_recording_workload_closes_its_last_synchronized_bracket(self):
         # Intent: no committed recording ends while synchronized output is still
