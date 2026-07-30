@@ -3,9 +3,10 @@
 Research started: 2026-07-30. **Status: OPEN -- the four original direction
 gates are decided and shipped, but `F12` reopened the workload's calibration:
 its noise is additive, so a longer replay tightens the rule `D4` froze. `D5`
-now carries a recommendation (quick 4p @2.10%, confirm 6p @1.90%) and awaits a
-user gate, and `F14` found `D4`'s method for combining replicates unsound --
-a defect in the rule frozen today. Also outstanding: `H3` (parked) and the
+now carries a recommendation (quick 4p @2.10%, confirm 4p @1.90%) and awaits a
+user gate. `F15` retracts `F14`'s claim that `D4` combined replicates unsoundly
+-- that was a measurement error -- but finds a real weakness: the frozen confirm
+cell fails its detection gate on two of three individual screens. Also outstanding: `H3` (parked) and the
 unclaimed vtebench import.**
 Deliverables, all now settled: what throughput quantity the benchmark system
 should report (`D1` -- the descriptive split, shipped), whether a keypress-driven
@@ -818,21 +819,27 @@ improvement as a failure.
   take** -- 4p@1.05% against 2p@2.1%. Both are points on the same frontier: the
   search is cheapest-first, so a quieter series buys a lower pair count rather
   than a tighter threshold. Neither screen's proposal is the rule.
-- **`D4`'s combination method does not survive being checked.** `D4` took "max
+- ~~**`D4`'s combination method does not survive being checked.** `D4` took "max
   pair count, max threshold" across its replicates. Applying it here yields
   4p@2.1% for both modes -- and that cell **fails the inconclusive gate on
   screen 6 alone** (0.1142 against a 0.10 maximum) while passing on screen 5 and
   pooled. An envelope over *selected cells* is not itself a screened cell, and
   nothing in `D4` evaluated the combination it froze. That is a latent defect in
-  the frozen 1x rule too, not only here.
-- **The sound replacement, and what this file should use from now on: require the
-  cell to clear every gate on each screen independently *and* pooled.** Searched
-  that way over 96 pairs:
+  the frozen 1x rule too, not only here.~~ **Retracted by `F15`: this was my own
+  measurement error, not a defect in `D4`.** The inconclusive gate applies to the
+  injected-effect conditions, not to the A/A condition; I read it from `aa`. Under
+  the real gate (`select_candidate`, calibration.py:354) the envelope cell 4p@2.1%
+  **passes on both 5x screens and pooled**. `D4`'s combination method is not
+  impeached by this evidence.
+- **Require the cell to clear every gate on each screen independently *and*
+  pooled.** Still the right standard -- it is what `F15` uses to find the real
+  weakness in the frozen rule -- but a strengthening, not a correction of a
+  defect. Searched that way over 96 pairs (numbers below corrected by `F15`):
 
   | mode | frozen (1x) | recommended (5x) | FP margin | detection | inconclusive |
   | --- | --- | --- | --- | --- | --- |
   | quick | 6p @2.65% | **4p @2.10%** | 0.0000-0.0019 (was 0.0084) | >= 0.9990 | <= 0.0695 |
-  | confirm | 8p @2.15% | **6p @1.90%** | 0.0000-0.0001 (was 0.0095) | >= 0.9916 | <= 0.0424 |
+  | confirm | 8p @2.15% | **4p @1.90%** (was stated as 6p) | <= 0.0019 (was 0.0095) | >= 0.9680 | <= 0.0320 |
 
   The strictly-cheapest passing cell at `quick` is 4p@1.45%, and it is **not**
   recommended: its false-positive rate reaches 0.0091 against the 0.01 gate,
@@ -840,7 +847,7 @@ improvement as a failure.
   property. 4p@2.10% is one grid step looser and buys an order of magnitude of
   margin. Cheapest-first is the right search and the wrong tiebreak.
 - **This improves all three axes at once, which is why it is worth taking**:
-  fewer pairs (6 -> 4, 8 -> 6), a tighter threshold, and a false-positive rate
+  fewer pairs (6 -> 4, 8 -> 4), a tighter threshold, and a false-positive rate
   that moves off the ceiling `F11` warned about. Wall cost per verdict falls
   ~59 -> ~43 s at `quick` and ~79 -> ~65 s at `confirm`, because `F13`'s
   accounting holds: the longer block costs ~1 s per pair and the pair count is
@@ -1088,6 +1095,64 @@ improvement as a failure.
   it is not a real phenomenon. That excess is screen 1's discarded outlier, seen
   once in 216 blocks and never again; doc 19 inherits nothing.
 
+### F15 -- I read the inconclusive gate off the wrong condition, and the real defect is elsewhere
+
+- Status: complete. **Retracts `F14`'s central methodological claim** and
+  corrects `F14`/`D5`'s recommended confirm cell. Appended rather than edited in
+  place, per this directory's append-only rule.
+- Date: 2026-07-30. No new measurement; every number here comes from series
+  already on disk, re-evaluated through `select_candidate` itself rather than
+  through a hand-rolled gate check.
+- **The error.** The accuracy gates are not all read from the same condition.
+  `select_candidate` (`scripts/terminal-benchmark-calibration.py:354`) takes the
+  false-positive rate from the **A/A** condition, and detection, inconclusive and
+  wrong-direction from the **injected-effect** conditions. I read `inconclusive`
+  off `aa`, which is a different and much larger quantity. Every "fails the
+  inconclusive gate" verdict in `F14` is void.
+- **What that retracts.** `D4`'s envelope cell 4p@2.1% does **not** fail on
+  screen 6; under the real gate it passes on both 5x screens and pooled
+  (detection 0.9575-0.9940, inconclusive 0.0060-0.0425). `F14`'s claim that
+  `D4`'s combination method is unsound rested entirely on that reading, and the
+  evidence does not support it.
+- **What that corrects.** The same error made the search over-conservative:
+  the cheapest confirm cell clearing every gate on both 5x screens and pooled is
+  **4 pairs @1.90%**, not the 6 pairs `F14` reported.
+
+  | mode | frozen (1x) | corrected recommendation | FP | detection | inconclusive |
+  | --- | --- | --- | --- | --- | --- |
+  | quick | 6p @2.65% | 4p @2.10% | <= 0.0019 | >= 0.9990 | <= 0.0010 |
+  | confirm | 8p @2.15% | **4p @1.90%** | <= 0.0019 | >= 0.9680 | <= 0.0320 |
+
+- **The real defect, which the correct gate does find.** The frozen
+  `confirm 8p@2.15%` **fails the detection gate on two of the three 1x screens**:
+
+  | series | FP | detection | verdict |
+  | --- | --- | --- | --- |
+  | screen 2 | 0.0095 | 0.9437 | pass |
+  | screen 3 | 0.0064 | **0.8571** | **fail** |
+  | screen 4 | 0.0150 | **0.8867** | **fail** (FP also over) |
+  | pooled 2+3 | 0.0062 | 0.9052 | pass |
+  | pooled 2+3+4 | 0.0059 | 0.9096 | pass |
+
+  So the rule frozen today holds on aggregate evidence and is fragile on any
+  single screen's, clearing 0.90 by half a point when pooled. That is a weaker
+  statement than `F14` made and a better-evidenced one.
+- **The five original workloads are clear, and doc 7 says why.** They went
+  through screen-then-freeze: the selected cells were re-run at **100,000 trials
+  per condition with disjoint fresh seeds** (`20265000` base), no parameter
+  changed after screening, gate audit recorded, artifacts preserved at
+  `.build/terminal-benchmark-phase4-median-fallback-freeze/`. `D4` froze directly
+  off 50,000-trial screen reports and ran no confirmation stage. **That procedural
+  gap is the genuine finding of this check** -- not a defect in how replicates
+  were combined.
+- Method note, since this is the second wrong-instrument error in this file
+  (`F12` was the first): both were caught by checking a derived number against
+  the code that owns it rather than against my reconstruction of it. The
+  reconstruction was validated first -- it reproduces all four screens' reported
+  cells exactly -- which is what made the disagreement legible instead of
+  plausible.
+- Next action: `D5`, with the corrected cell.
+
 ### D5 -- whether to lengthen the replay and re-freeze the rule
 
 - Status: **recommendation made, awaiting user direction gate.** Same standard as
@@ -1098,7 +1163,7 @@ improvement as a failure.
   same committed capture, and the result improves cost, resolution, and safety
   margin simultaneously.
 - **Recommendation: take it.** Set `replayCount: 5` on `synchronized-frames` and
-  re-freeze at **quick 4 pairs @ +/-2.10%** and **confirm 6 pairs @ +/-1.90%**,
+  re-freeze at **quick 4 pairs @ +/-2.10%** and **confirm 4 pairs @ +/-1.90%**,
   against the frozen 6 @ 2.65% and 8 @ 2.15%.
   - Evidence: two replicating 5x screens (`F14`), each clearing every gate for
     the recommended cell independently, plus pooled over 96 pairs.
@@ -1110,14 +1175,18 @@ improvement as a failure.
     longer block costs ~1 s per pair.
   - It moves the false-positive rate off the ceiling `F11` flagged as the frozen
     rule's worst property: 0.0000-0.0019 against 0.0084-0.0095.
-- **Take `F14`'s methodological correction with it, and this is the part that
-  outlives the workload.** `D4` combined replicates by taking max pair count and
-  max threshold across their *selected* cells, and never evaluated the
-  combination. Applied to the 5x screens that method yields a cell failing the
-  inconclusive gate on one of them. Any future re-screen should require the
-  candidate cell to clear every gate **on each screen independently and pooled**.
-  The frozen 1x rule was combined the unsound way; that is an argument for
-  replacing it, not for trusting it.
+- **The real weakness in the frozen rule, per `F15`** -- not the one `F14` first
+  claimed. `confirm 8p@2.15%` **fails the detection gate on two of the three 1x
+  screens** (0.8571 on screen 3, 0.8867 on screen 4, against 0.90) and clears only
+  when the screens are pooled, at 0.9052-0.9096. It is a cell that survives on
+  aggregate evidence and is fragile on any single screen's. The recommended 5x
+  cell passes every screen individually with detection >= 0.9680.
+- **`synchronized-frames` also skipped a stage the other five workloads went
+  through.** Doc 7 records screen-then-freeze for those: the selected cells were
+  re-run at **100,000 trials with disjoint fresh seeds**, with no parameter
+  changed after screening, and the gate audit recorded. `D4` froze straight off
+  50,000-trial screen reports with no such confirmation run. That gap is real and
+  is independent of any threshold arithmetic.
 - What the recommendation does **not** rest on: that 5x is optimal. 3x and 10x
   were never measured, and the tail grew slightly (8.8 -> 10.3 ms), so the
   additive model is approximate at the edges. 5x is a measured improvement, not
@@ -1206,9 +1275,11 @@ What is open, and why this file is not closed:
   SD nearly halves. Since ~98% of a pair's wall clock is launch overhead, a
   longer replay is nearly free. **Tested and confirmed** (`F13`, `F14`): two
   replicating 5x screens improve cost, resolution and safety margin at once, and
-  `D5` recommends re-freezing at quick 4p @2.10% and confirm 6p @1.90%. `F14`
-  also found `D4`'s method for combining replicates unsound, which is a defect in
-  the currently frozen rule. `F12` **withdrew a claim this
+  `D5` recommends re-freezing at quick 4p @2.10% and confirm 4p @1.90%. `F15`
+  retracts `F14`'s claim of an unsound combination method and replaces it with a
+  measured one: the frozen confirm cell fails detection on two of three screens.
+  The other five workloads are unaffected -- doc 7 records a separate
+  100,000-trial freeze for them that `D4` skipped. `F12` **withdrew a claim this
   file made twice** -- the unexplained drain tail was screen 1's discarded
   outlier counted a second time, and 192 clean blocks show no block above +6.9%.
   Nothing about the tail passes to doc 19.
