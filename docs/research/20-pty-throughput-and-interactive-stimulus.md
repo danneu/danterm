@@ -1,7 +1,9 @@
 # PTY throughput reporting and interactive stimulus coverage
 
-Research started: 2026-07-30. **Status: OPEN -- all four direction gates
-decided and shipped; what remains is `H3` (parked) and the unclaimed vtebench
+Research started: 2026-07-30. **Status: OPEN -- the four original direction
+gates are decided and shipped, but `F12` reopened the workload's calibration:
+its noise is additive, so a longer replay should tighten the rule `D4` froze.
+`D5` tests that. Also outstanding: `H3` (parked) and the unclaimed vtebench
 import.**
 Deliverables, all now settled: what throughput quantity the benchmark system
 should report (`D1` -- the descriptive split, shipped), whether a keypress-driven
@@ -647,12 +649,89 @@ improvement as a failure.
   - **The tail is real and is not one bad block.** In screen 2, 8 of 48 pairs
     exceed +/-3% and 5 exceed +/-4%, with no single dominating outlier. The
     median-symmetric estimator absorbs it, which is why a rule clears at all.
-- Uncertainty: three screens on one machine on one afternoon. The tail's *cause*
-  is unidentified -- 193 ms against a 164 ms median is a 29 ms excess that landed
-  in drain, not draw, so it is not a rendering event. Not chased, because it does
-  not change the rule and `20` is not the file that owns queue occupancy (doc 19
-  is).
+- Uncertainty: three screens on one machine on one afternoon. ~~The tail's
+  *cause* is unidentified -- 193 ms against a 164 ms median is a 29 ms excess
+  that landed in drain, not draw, so it is not a rendering event. Not chased,
+  because it does not change the rule and `20` is not the file that owns queue
+  occupancy (doc 19 is).~~ **Superseded by `F12`:** that 193 ms block is screen
+  1's discarded outlier, and treating it here as a standing property of the
+  workload counted one observation twice. Across the 192 blocks of screens 2 and
+  3, **no block exceeds +10% over median and the worst is +6.9%.** There is no
+  block-level tail to explain, and nothing for doc 19 to inherit. The
+  pair-spread claim two bullets above is unaffected.
 - Next action: `D4`.
+
+### F12 -- there is no block-level tail, and the noise is additive rather than proportional
+
+- Status: complete, and it **supersedes `F11`'s Uncertainty bullet** on two
+  counts. That bullet reported an unexplained 29 ms drain excess as a standing
+  property of the workload; it is not one. The wider reading also **reverses the
+  conclusion this file would otherwise have left** -- that block length is not a
+  lever on this workload's noise.
+- Date: 2026-07-30, at `15b6b05`. No new measurement: this re-reads block
+  artifacts already on disk under
+  `.build/terminal-benchmark-arms/ed6808ef.../**/final-draw.json` and
+  `producer-write.json`, which is why it costs nothing and could have been done
+  before `D4` was frozen.
+- Method: take every retained block, pair each `finalDrawNanoseconds` with its
+  own run's `producerWriteNanoseconds` and `bytesWritten`, and bucket by
+  stimulus size. `bytesWritten` identifies the workload unambiguously here --
+  3.02 MB is `synchronized-frames` and nothing else in the corpus is near it.
+- **Result 1: the tail is not there.** Over the 192 blocks of screens 2 and 3
+  (the two that replicate, and so the only two `D4` rests on):
+
+  | quantity | value |
+  | --- | --- |
+  | median | 165.6 ms |
+  | p95 / p99 | +3.3% / +4.3% |
+  | worst of 192 | +6.9% |
+  | blocks >5% over median | 1 / 192 |
+  | blocks >10% over median | **0 / 192** |
+
+  So the 193 ms block is not "1 in 24 runs long"; it is **1 in 216 and never
+  repeated**. It is the same event that got screen 1 discarded as
+  unrepresentative, and `F11` then carried it into its Uncertainty bullet as
+  though it were independent evidence. **One observation, counted twice.** The
+  error is worth naming because it is cheap to repeat: a discarded outlier is
+  discarded for the *whole* file, not just for the statistic that discarded it.
+- **What `F11` got right, and it is a different claim.** "The tail is real and is
+  not one bad block" is about the *pair* spread -- 8 of 48 pairs beyond +/-3% --
+  and that survives untouched. Pair spread and block outliers are separate
+  quantities; only the block-outlier reading was wrong.
+- **Result 2, and the substantive one: the noise is additive.** Bucketing every
+  retained block by stimulus length:
+
+  | stimulus | blocks | median | SD (abs) | SD (%) | draw tail |
+  | --- | --- | --- | --- | --- | --- |
+  | 1.25 MB (40 frames) | 5 | 73.7 ms | 2.60 ms | **3.53%** | 8.2 ms |
+  | 3.02 MB (95 frames) | 246 | 165.3 ms | 3.01 ms | **1.82%** | 8.8 ms |
+
+  Duration rises 2.24x; **absolute SD is near-flat (2.60 -> 3.01 ms) while
+  percent SD nearly halves.** That is the signature of a roughly fixed per-run
+  perturbation -- the constant ~8.8 ms tail of `F10` plus launch-to-launch
+  variation -- divided by a growing denominator. Proportional noise would have
+  left the percent column flat, and it did not.
+- **Consequence: block length is a real lever on this workload's threshold**, and
+  a cheap one, because `F11`'s screens cost 8.5-9.9 s of wall clock per pair to
+  collect ~165 ms of measurement. Roughly 98% of a pair is build, launch, window
+  and teardown. Lengthening the replay 5x adds ~1.5 s to a ~10 s pair -- about
+  +15% -- and, if absolute SD holds near 3 ms, forecasts percent SD near 0.4%.
+- **The reasoning this replaces, so the error is not repeated.** The tempting
+  argument is cross-workload: `scrollback-stream` runs 11.61 s/pair against
+  `incremental-mixed`'s 2.22 and lands on a *looser* threshold (2.00% vs 1.75%),
+  so length appears not to buy tightness. That comparison is confounded -- five
+  different workloads differ in intrinsic variance as well as duration, and
+  intrinsic variance dominates. **One workload at two lengths is the controlled
+  comparison; five workloads at five lengths is not.**
+- Uncertainty, and it is the load-bearing caveat: **the 40-frame row is `F10`'s
+  five blocks, re-read -- not an independent replication.** An SD from n=5 is
+  worth roughly +/-35%, and those blocks were taken on a non-idle machine. The
+  *direction* is corroborated by the tail matching `F10`'s independently recorded
+  8.2 ms exactly, and by the mechanism being one `F10` already established. The
+  *magnitude* of any predicted gain is a forecast, not a measurement.
+- Next action: `D5` -- replay the committed fixture N times within one block and
+  re-screen, which tests this without a new capture. A flat percent SD refutes
+  it; a 1/sqrt(N) fall confirms it and justifies re-freezing the rule.
 
 ## Decision log
 
@@ -924,8 +1003,9 @@ a number look better next to a blog post.
 
 ## Outcome
 
-Investigation in progress. **Phases 1 and 2 are complete and shipped in
-`995c8e8`; Phase 3 has not started.**
+Investigation in progress. **Phases 1-3 are complete and shipped; all four
+original direction gates (`D1`-`D4`) are decided, and `F12` then opened a
+fifth.**
 
 What is settled. `scrollback-stream` was already a PTY throughput benchmark and
 nobody knew (`F2`), which refuted this file's own opening hypothesis (`H1`) and
@@ -935,13 +1015,31 @@ hand-verified, and proved end to end (`F5`, `F7`), and
 producer's overhead is fully absorbed, so the reported rate needs no correction
 (`F6`).
 
+Phase 3 then answered the question that opened the file, though not in the shape
+it was asked. `D2` declined the keypress-driven workload on evidence rather than
+taste (`F8`: its one genuinely new segment is thin, and its expensive segments
+already belong to doc 19 and to existing workloads), and took a captured
+recording instead. `F9` justified the subject: **100% of btop's bytes arrive
+inside DECSET 2026 brackets**, where `planIfNeeded` suppresses planning and
+drawing outright -- a path no generated workload in the corpus enters. `D3`
+admitted it and insisted on characterizing before calibrating, which caught
+`F10`: the draw tail is a constant ~8 ms, so this is a **drain** instrument at
+~95% and not the draw lever a short block made it look like. `D4` froze it as
+the sixth deciding workload on the conservative envelope of two replicating
+screens (`F11`).
+
 What is open, and why this file is not closed:
 
-- **`D2` and the whole of Phase 3.** The question that opened this file -- can we
-  benchmark a real TUI under a held key -- has an upstream survey (`F1`) and an
-  unmeasured hypothesis (`H4`) and nothing else. No direction gate has been put
-  to the user, and the subject choice (`less`/vim over btop, on attribution
-  grounds) is a substitution that needs raising rather than assuming.
+- **`D5`, opened by `F12` and the reason this file did not close at `D4`.** The
+  frozen rule is the loosest and costliest in the corpus, and `F12` shows why
+  that is fixable: this workload's noise is **additive, not proportional** --
+  absolute SD is near-flat across a 2.24x change in block length while percent
+  SD nearly halves. Since ~98% of a pair's wall clock is launch overhead, a
+  longer replay is nearly free. `D5` tests it by repeating the committed fixture
+  within one block, which needs no new capture. `F12` also **withdrew a claim
+  this file made twice** -- the unexplained drain tail was screen 1's discarded
+  outlier counted a second time, and 192 clean blocks show no block above +6.9%.
+  Nothing about the tail passes to doc 19.
 - **`H3`, parked with a reopening condition**: drain is quieter than the metric
   that carries the frozen rule (`F4`), so it would be the better deciding metric
   for this workload -- but taking it means recalibrating thresholds that docs
@@ -950,6 +1048,7 @@ What is open, and why this file is not closed:
   obstruct work.
 - **The vtebench payload import**, logged in Open questions and owned by no file.
 
-Close this file when `D2` is decided either way. Deciding *not* to build the
-interactive workload closes it just as legitimately as building one -- the
-rejection reason is the valuable artifact, and it belongs in Rejected.
+Close this file when `D5` is decided either way. A flat percent SD closes it as
+legitimately as a fall does -- the negative result is the more valuable artifact,
+since it would establish that this workload's rule cannot be bought down with
+block length and stop anyone trying again.
