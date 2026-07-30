@@ -249,9 +249,41 @@ final class TerminalBenchmarkObserver {
     private var pendingPlanFrameCount = 0
     private var acceptedPlanDurations: [UInt64] = []
     private var acceptedPlanFrameCount = 0
+    /// Whole-process CPU time, summed over every thread, charged to each accepted
+    /// draw as the delta since the previously accepted one.
+    ///
+    /// Exists because `drawDurationNanoseconds` measures elapsed time between two
+    /// points on the main thread, so work done on any other thread is invisible
+    /// to it at any size. Doc 17's `F6` found the single largest cost in the app
+    /// -- Core Animation recomputing per-glyph bounds during display-list replay,
+    /// 16.8% of one workload's on-CPU total -- sitting in exactly that blind
+    /// spot, visible only to a diagnostic-only profiler. This is the same
+    /// quantity a decision block can carry.
+    ///
+    /// It measures CPU consumed, not latency: work moved onto an otherwise idle
+    /// core reads as neutral here. That makes it the right metric for "did we
+    /// stop doing this work" and the wrong one for frame time.
+    private var blockStartProcessCPUNanoseconds: UInt64?
+    private var lastAcceptedProcessCPUNanoseconds: UInt64?
+    private var acceptedProcessCPUDurations: [UInt64] = []
     private var pendingRedrawSequence: Int?
     private var publishedRedrawSequence: Int?
     private var redrawSequences = Set<Int>()
+    /// Where lifetime draw/plan-publish counts are republished for an attached
+    /// profiler, and the counts themselves. Absent outside profiling runs.
+    ///
+    /// A `loop`-mode app never completes a block, so none of the accepted-draw
+    /// accounting above is ever written and a profiler attached to it has no
+    /// frame count to normalize its samples by. Doc 17's `F5` had to rest on
+    /// commit history for exactly that reason, and its three substitute frame
+    /// proxies disagreed by 1.7x. These are lifetime totals over *every* draw
+    /// the app performed -- which is what a profile actually contains -- so
+    /// unlike the accepted counters they are never cleared by
+    /// `reopenCompletedBlockIfRequested`.
+    private let activityPath: String?
+    private var observedDrawCount = 0
+    private var observedPlanFrameCount = 0
+    private var lastActivityWriteNanoseconds: UInt64 = 0
     /// Retained for the lifetime of the observer, not built per frame: it holds
     /// the scratch buffer that keeps marker detection off the allocator.
     private var markerScanner: TerminalBenchmarkMarkerScanner
@@ -290,6 +322,8 @@ final class TerminalBenchmarkObserver {
             updateCount("DANTERM_TERMINAL_BENCHMARK_LOCALIZED_UPDATES") > 0
             || updateCount("DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES") > 0
         self.reusesBlocks = environment["DANTERM_BENCHMARK_MODE"] == "persistent"
+        self.activityPath = environment["DANTERM_TERMINAL_BENCHMARK_ACTIVITY_PATH"]
+            .flatMap { $0.isEmpty ? nil : $0 }
         self.resultPathBytes = resultPath.utf8CString.map { $0 }
         self.startAcknowledgmentPathBytes = startAcknowledgmentPath.utf8CString.map { $0 }
     }
@@ -306,6 +340,7 @@ final class TerminalBenchmarkObserver {
         damage: TerminalDamage,
         planDurationNanoseconds: UInt64 = 0
     ) {
+        if activityPath != nil { observedPlanFrameCount += 1 }
         reopenCompletedBlockIfRequested()
         if startNanoseconds != nil, completed == false {
             pendingPlanNanoseconds += planDurationNanoseconds
@@ -326,6 +361,12 @@ final class TerminalBenchmarkObserver {
         // block's marker and open a block no producer had started.
         guard scanMarkers(plan, damage: damage).containsStartMarker else { return }
         startNanoseconds = DispatchTime.now().uptimeNanoseconds
+        // Seeded here so the first accepted draw has a predecessor to difference
+        // against; without it that draw's interval would be unattributable and
+        // the CPU series would be one shorter than the draw series.
+        let processCPU = processCPUNanoseconds()
+        blockStartProcessCPUNanoseconds = processCPU
+        lastAcceptedProcessCPUNanoseconds = processCPU
         stateRecorder?.beginBlock()
         writeAcknowledgment(atPath: startAcknowledgmentPath)
     }
@@ -358,6 +399,9 @@ final class TerminalBenchmarkObserver {
         pendingPlanFrameCount = 0
         acceptedPlanDurations = []
         acceptedPlanFrameCount = 0
+        blockStartProcessCPUNanoseconds = nil
+        lastAcceptedProcessCPUNanoseconds = nil
+        acceptedProcessCPUDurations = []
         pendingRedrawSequence = nil
         publishedRedrawSequence = nil
         redrawSequences = []
@@ -384,6 +428,14 @@ final class TerminalBenchmarkObserver {
         metrics: TerminalRenderMetrics,
         drawDurationNanoseconds: UInt64
     ) {
+        // Counted before every gate below, because a profile contains every draw
+        // the app performed -- not only the ones a measured block accepts. In
+        // loop mode no block ever opens, so a count taken after these guards
+        // would stay at zero for the whole profiling window.
+        if let activityPath {
+            observedDrawCount += 1
+            publishActivity(atPath: activityPath)
+        }
         guard completed == false, let startNanoseconds else { return }
         stateRecorder?.observeDrawState()
         let markers = scanMarkers(plan)
@@ -400,7 +452,7 @@ final class TerminalBenchmarkObserver {
            localizedSequences.insert(sequence).inserted
         {
             localizedDrawDurations.append(drawDurationNanoseconds)
-            acceptPendingPlan()
+            acceptPendingWork()
             localizedDirtyRowCounts.append(
                 dirtyRowCount(for: dirtyRect, metrics: metrics, rowCount: plan.rows)
             )
@@ -421,7 +473,7 @@ final class TerminalBenchmarkObserver {
         {
             publishedRedrawSequence = nil
             localizedDrawDurations.append(drawDurationNanoseconds)
-            acceptPendingPlan()
+            acceptPendingWork()
             localizedDirtyRowCounts.append(redrawDirtyRowCount)
             if let localizedDrawAcknowledgmentPrefix {
                 writeAcknowledgment(
@@ -459,6 +511,23 @@ final class TerminalBenchmarkObserver {
             object["planCount"] = acceptedPlanDurations.count
             object["planFrameCount"] = acceptedPlanFrameCount
             object["planDurationsNanoseconds"] = acceptedPlanDurations
+            // Also beside, never folded in, and for a second reason: this is CPU
+            // consumed across all threads, a different quantity from the elapsed
+            // main-thread time the draw thresholds are calibrated for. Folding it
+            // in would double-count the draw itself.
+            object["cumulativeProcessCPUNanoseconds"] = acceptedProcessCPUDurations.reduce(0, +)
+            object["processCPUCount"] = acceptedProcessCPUDurations.count
+            object["processCPUDurationsNanoseconds"] = acceptedProcessCPUDurations
+            // The block's own CPU span, independent of the per-interval series, so
+            // a reader can tell whether the intervals account for the whole block
+            // or whether draws were dropped between them.
+            if let blockStartProcessCPUNanoseconds,
+               let lastAcceptedProcessCPUNanoseconds,
+               lastAcceptedProcessCPUNanoseconds >= blockStartProcessCPUNanoseconds
+            {
+                object["blockProcessCPUNanoseconds"] =
+                    lastAcceptedProcessCPUNanoseconds - blockStartProcessCPUNanoseconds
+            }
         }
         do {
             let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
@@ -466,6 +535,39 @@ final class TerminalBenchmarkObserver {
         } catch {
             print("[benchmark] Failed to write final-draw result: \(error)")
         }
+    }
+
+    /// Republishes the lifetime counters, at most every 100 ms, so a profiling
+    /// window can be converted into a draw count.
+    ///
+    /// Each snapshot carries its own clock reading rather than relying on a fixed
+    /// publish cadence: the reader differences two snapshots' (count, clock)
+    /// pairs, so the interval it reports is exactly the one the two snapshots
+    /// span and the cadence costs it no accuracy. It only has to be short
+    /// relative to a profiling run, which is seconds.
+    ///
+    /// Called from `observeCompletedDraw` after the draw timer has already
+    /// stopped, alongside the acknowledgment writes, so it is outside every
+    /// measured bracket -- and it is reached only when a profiling run supplied
+    /// a path, so decision blocks pay one nil check per draw and nothing else.
+    private func publishActivity(atPath path: String) {
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard now - lastActivityWriteNanoseconds >= 100_000_000 else { return }
+        lastActivityWriteNanoseconds = now
+        let object: [String: Any] = [
+            "schemaVersion": 1,
+            "clock": "dispatch-uptime-nanoseconds",
+            "uptimeNanoseconds": now,
+            "drawCount": observedDrawCount,
+            "planFrameCount": observedPlanFrameCount,
+        ]
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys]
+        ) else { return }
+        // Atomic because a reader snapshots this file while draws continue; a
+        // torn read would be indistinguishable from a real counter value.
+        try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
     }
 
     /// Reports whether one pre-encoded path is absent, at the cost of a single
@@ -491,16 +593,68 @@ final class TerminalBenchmarkObserver {
         close(descriptor)
     }
 
-    /// Attributes the planning done since the previous accepted draw to this one.
+    /// Attributes the work done since the previous accepted draw to this one:
+    /// planning, and whole-process CPU.
     ///
-    /// Called from every site that appends a draw duration, so `planDurations`
-    /// stays index-aligned with `drawDurations` and both normalize by the same
+    /// Called from every site that appends a draw duration, so both series stay
+    /// index-aligned with `drawDurations` and all three normalize by the same
     /// accepted-draw count.
-    private func acceptPendingPlan() {
+    ///
+    /// The CPU delta covers the whole interval between two accepted draws, so it
+    /// charges this draw with everything the process did in it -- this draw's
+    /// synchronous work, the *previous* draw's asynchronous display-list replay,
+    /// parsing, planning, and the observer itself. That is deliberate: replay is
+    /// the cost being hunted and it does not finish inside the draw that queued
+    /// it, so any bracket narrow enough to exclude the neighbours would also
+    /// exclude the thing worth measuring. It makes the series an interval series,
+    /// not a per-draw one -- meaningful in aggregate over a block, not for a
+    /// single index.
+    private func acceptPendingWork() {
         acceptedPlanDurations.append(pendingPlanNanoseconds)
         acceptedPlanFrameCount += pendingPlanFrameCount
         pendingPlanNanoseconds = 0
         pendingPlanFrameCount = 0
+        let processCPU = processCPUNanoseconds()
+        if let previous = lastAcceptedProcessCPUNanoseconds, processCPU >= previous {
+            acceptedProcessCPUDurations.append(processCPU - previous)
+        }
+        lastAcceptedProcessCPUNanoseconds = processCPU
+    }
+
+    /// Reads CPU time consumed by this process, summed across every thread.
+    ///
+    /// `TASK_ABSOLUTETIME_INFO` rather than `getrusage`: it reports the task's
+    /// own absolute-time counters, which is what makes threads other than the
+    /// caller's countable. Returns 0 on failure, which the caller's monotonicity
+    /// guard turns into a dropped sample rather than a bogus one.
+    private func processCPUNanoseconds() -> UInt64 {
+        var info = task_absolutetime_info_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<task_absolutetime_info_data_t>.size / MemoryLayout<natural_t>.size
+        )
+        let status = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { rebound in
+                task_info(mach_task_self_, task_flavor_t(TASK_ABSOLUTETIME_INFO), rebound, &count)
+            }
+        }
+        guard status == KERN_SUCCESS else { return 0 }
+        let ticks = info.total_user &+ info.total_system
+        return Self.machTicksToNanoseconds(ticks)
+    }
+
+    /// Converts mach absolute ticks to nanoseconds using the timebase read once
+    /// per process, because `mach_timebase_info` is a syscall and this runs per
+    /// accepted draw.
+    private static let machTimebase: mach_timebase_info_data_t = {
+        var timebase = mach_timebase_info_data_t()
+        guard mach_timebase_info(&timebase) == KERN_SUCCESS, timebase.denom != 0 else {
+            return mach_timebase_info_data_t(numer: 1, denom: 1)
+        }
+        return timebase
+    }()
+
+    private static func machTicksToNanoseconds(_ ticks: UInt64) -> UInt64 {
+        ticks * UInt64(machTimebase.numer) / UInt64(machTimebase.denom)
     }
 
     /// Finds every marker this frame carries in one pass over the plan's runs.

@@ -793,6 +793,76 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                     evidence["rawBlocks"][0]["planNanosecondsPerDraw"], 900_000
                 )
 
+    def test_draw_churn_collectors_normalize_process_cpu_over_the_same_draws(self):
+        # Intent: when the app reports whole-process CPU, each block carries a
+        #   `processCPUNanosecondsPerDraw` normalized over the same 50 draws as
+        #   `drawNanosecondsPerDraw`, and reports none when the count disagrees.
+        # Why it exists: the shared divisor is the whole reason the three metrics
+        #   can be read side by side. The count guard matters more here than for
+        #   plan time because the CPU series drops any interval whose reading was
+        #   non-monotonic, so a short series is a real possibility rather than a
+        #   theoretical one -- and dividing a short series by 50 would understate
+        #   CPU per draw while looking perfectly well-formed.
+        # Scenario: spec-first -- 50 intervals of 4ms CPU each against a block
+        #   whose CPU series came up one interval short.
+        for collect, workload, fixture, dirty_rows in (
+            (VALIDATION.collect_content_churn, "full-screen-content-churn",
+             "full-screen-content-churn", 66),
+            (VALIDATION.collect_style_churn, "full-screen-style-churn",
+             "full-screen-style-churn", 66),
+            (VALIDATION.collect_incremental_mixed,
+             "full-screen-incremental-mixed-churn",
+             "full-screen-incremental-mixed-churn-"
+             "v2-four-rows-six-damage-179x66", 6),
+        ):
+            for count, expected in ((50, 4_000_000), (49, None)):
+                with self.subTest(workload=workload, count=count):
+                    artifact = self._draw_churn_artifact(
+                        workload=workload, fixture=fixture, dirty_rows=dirty_rows
+                    )
+                    intervals = [4_000_000] * count
+                    artifact["finalDraw"]["processCPUCount"] = count
+                    artifact["finalDraw"]["cumulativeProcessCPUNanoseconds"] = sum(
+                        intervals
+                    )
+                    artifact["finalDraw"]["processCPUDurationsNanoseconds"] = intervals
+
+                    evidence = collect(
+                        [{"measurementRole": "A", "physicalArm": "a"}],
+                        run_block=lambda arm: artifact,
+                    )
+
+                    self.assertTrue(evidence["valid"])
+                    self.assertEqual(
+                        evidence["rawBlocks"][0]["processCPUNanosecondsPerDraw"],
+                        expected,
+                    )
+
+    def test_a_block_without_process_cpu_stays_valid_and_reports_none(self):
+        # Intent: an artifact produced before the CPU reading existed collects,
+        #   validates, and simply reports no CPU metric.
+        # Why it exists: same reason as plan time -- every paired comparison
+        #   builds its baseline arm from an older revision, so for this metric a
+        #   missing reading is the state of every baseline in existing history.
+        #   Inventing a zero would fabricate an effect and invalidating the block
+        #   would void every comparison against that history.
+        # Scenario: spec-first -- the exact artifact shape the app emitted before
+        #   this change.
+        artifact = self._draw_churn_artifact(
+            workload="full-screen-content-churn",
+            fixture="full-screen-content-churn",
+            dirty_rows=66,
+        )
+
+        evidence = VALIDATION.collect_content_churn(
+            [{"measurementRole": "A", "physicalArm": "a"}],
+            run_block=lambda arm: artifact,
+        )
+
+        self.assertTrue(evidence["valid"])
+        self.assertEqual(evidence["invalidationReasons"], [])
+        self.assertIsNone(evidence["rawBlocks"][0]["processCPUNanosecondsPerDraw"])
+
     def test_a_block_without_plan_timings_stays_valid_and_reports_none(self):
         # Intent: an artifact produced before the plan timer existed collects,
         #   validates, and simply reports no plan metric.

@@ -1152,6 +1152,18 @@ def _collect_draw_churn(
             if isinstance(cumulative_plan, int) and draw.get("planCount") == 50
             else None
         )
+        # Reported, never validated, on the same terms as plan time above -- and
+        # uncalibrated on top of that, so nothing may classify against it yet. It
+        # is CPU summed over every thread, which is the only quantity here that
+        # can see work the main-thread draw timer structurally cannot: doc 17's
+        # `F6` found the app's largest single cost on the display-list replay
+        # threads, invisible to `drawNanosecondsPerDraw` at any size.
+        cumulative_cpu = draw.get("cumulativeProcessCPUNanoseconds")
+        normalized_cpu = (
+            cumulative_cpu // 50
+            if isinstance(cumulative_cpu, int) and draw.get("processCPUCount") == 50
+            else None
+        )
         block = {
             "index": index,
             **planned,
@@ -1161,6 +1173,7 @@ def _collect_draw_churn(
             "drawCount": draw.get("drawCount"),
             "drawNanosecondsPerDraw": normalized,
             "planNanosecondsPerDraw": normalized_plan,
+            "processCPUNanosecondsPerDraw": normalized_cpu,
             "machineStateSamples": draw.get("machineStateSamples", []),
             "artifact": artifact,
         }

@@ -66,6 +66,24 @@ AUXILIARY_BLOCK_METRICS = {
     "style-churn": "planNanosecondsPerDraw",
     "incremental-mixed": "planNanosecondsPerDraw",
 }
+# A second quantity reported beside the same blocks, and deliberately not in the
+# table above: whole-process CPU summed over every thread. It is here because the
+# draw metric measures elapsed time between two points on the main thread, so
+# work on any other thread is invisible to it at any size -- and doc 17's `F6`
+# found the app's largest single cost, Core Animation recomputing per-glyph
+# bounds during display-list replay, living precisely there.
+#
+# Kept out of `AUXILIARY_BLOCK_METRICS` rather than added to it because that
+# table is the plan calibrator's input (`PLAN_WORKLOADS`) and drives the
+# `planWorkloads` rule lookup. No calibration exists for this metric yet, so it
+# is reported unclassified on every workload, which is what an uncalibrated
+# metric is allowed to be. Moving an entry here into the table above is what
+# calibrating it would mean.
+UNCALIBRATED_BLOCK_METRICS = {
+    "content-churn": "processCPUNanosecondsPerDraw",
+    "style-churn": "processCPUNanosecondsPerDraw",
+    "incremental-mixed": "processCPUNanosecondsPerDraw",
+}
 # Alternated across quartets so neither source sits first in every group of four.
 QUARTET_PATTERNS = ("ABBA", "BAAB")
 
@@ -167,14 +185,14 @@ def paired_differences(workload, raw_blocks):
     return differences
 
 
-def auxiliary_differences(workload, raw_blocks):
-    """Pair the plan-time metric the same way, or report nothing when it is absent.
+def auxiliary_differences(workload, raw_blocks, metrics=None):
+    """Pair one auxiliary metric the same way, or report nothing when it is absent.
 
     Returns None rather than raising or substituting zero: a baseline arm built
-    from a revision that predates the plan timer legitimately has no such
+    from a revision that predates the metric's timer legitimately has no such
     evidence, and that must not block the draw verdict for the same blocks.
     """
-    metric = AUXILIARY_BLOCK_METRICS.get(workload)
+    metric = (AUXILIARY_BLOCK_METRICS if metrics is None else metrics).get(workload)
     if metric is None or not raw_blocks or len(raw_blocks) % 2:
         return None
     if any(block.get(metric) is None for block in raw_blocks):
@@ -225,6 +243,30 @@ def summarize_auxiliary(mode, workload, raw_blocks):
     return summary
 
 
+def summarize_uncalibrated(workload, raw_blocks):
+    """Describe an uncalibrated metric's paired spread without ever classifying it.
+
+    Takes no `mode` and consults no rule table, so there is no code path by which
+    this can produce a verdict. That is the point: the number is useful for
+    sizing a candidate and for the A/A screening that would calibrate it, and
+    until that screening exists any threshold applied to it would be invented
+    rather than measured.
+    """
+    differences = auxiliary_differences(
+        workload, raw_blocks, metrics=UNCALIBRATED_BLOCK_METRICS
+    )
+    if not differences:
+        return None
+    return {
+        "metric": UNCALIBRATED_BLOCK_METRICS[workload],
+        "pairedSymmetricPercent": differences,
+        "estimatePercent": statistics.median(differences),
+        "sampleCount": len(differences),
+        "decision": None,
+        "calibrated": False,
+    }
+
+
 def decide_workload(mode, workload, differences):
     """Apply the frozen fixed-N median rule, refusing any other number of pairs."""
     rule = decision_rule(mode)
@@ -265,6 +307,11 @@ def summarize_comparison(mode, evidence):
             ),
             "auxiliary": (
                 summarize_auxiliary(mode, workload, raw_blocks)
+                if eligible
+                else None
+            ),
+            "uncalibrated": (
+                summarize_uncalibrated(workload, raw_blocks)
                 if eligible
                 else None
             ),
@@ -311,6 +358,18 @@ def render_decisions(summary):
             lines.append(
                 f"    plan time: {auxiliary['estimatePercent']:+.2f}% symmetric "
                 f"median of {auxiliary['sampleCount']} pairs ({qualifier})"
+            )
+        uncalibrated = result.get("uncalibrated")
+        if uncalibrated:
+            # Spelled out rather than shown as a bare percentage beside two
+            # verdicts: this line sits under a classified draw result, so the
+            # only way it cannot be misread as a third verdict is to say what it
+            # is not.
+            lines.append(
+                f"    process CPU: {uncalibrated['estimatePercent']:+.2f}% symmetric "
+                f"median of {uncalibrated['sampleCount']} pairs "
+                "(descriptive, no verdict -- uncalibrated; all threads, CPU "
+                "consumed not latency)"
             )
     return "\n".join(lines)
 

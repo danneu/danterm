@@ -9,6 +9,74 @@ terminate_owned_pid() {
     wait "$pid" 2>/dev/null || true
 }
 
+# Snapshot the app's lifetime draw counters outside the profiling window.
+#
+# A loop-mode app never completes a block, so its own accepted-draw accounting
+# is never written and an attached profiler has no frame count to normalize its
+# samples by. These two snapshots supply one. Called before the profiler
+# attaches and again after it detaches, so the counted window brackets the
+# profiled one rather than sitting inside it.
+capture_activity() {
+    local label="$1"
+    local deadline=$((SECONDS + 5))
+    while [[ ! -f "$ACTIVITY_PATH" ]]; do
+        (( SECONDS < deadline )) || {
+            echo "No draw counters published within 5s; frame accounting will be omitted." >&2
+            return 0
+        }
+        sleep 0.1
+    done
+    cp "$ACTIVITY_PATH" "$PROFILE_ROOT/activity-$label.json"
+}
+
+# Derive the workload's draw rate from the two snapshots, so a profile's node
+# costs can be stated per frame.
+#
+# The rate, not the count, is the usable output. The counted window strictly
+# contains the profiled one -- and by much more than the publish cadence, because
+# a profiler spends seconds attaching and seconds saving (measured: ~20s counted
+# for a 12s xctrace run). Converting the rate back to a count over the profiled
+# window is therefore an estimate, and is labelled as one. It is a sound estimate
+# only because these are sustained steady-state workloads whose draw rate does not
+# trend; nothing here would detect it if one did.
+report_frame_accounting() {
+    local before="$PROFILE_ROOT/activity-before.json"
+    local after="$PROFILE_ROOT/activity-after.json"
+    [[ -f "$before" && -f "$after" ]] || return 0
+    jq -n --slurpfile before "$before" --slurpfile after "$after" \
+        --argjson requestedSeconds "$DURATION" '
+        ($before[0]) as $b | ($after[0]) as $a |
+        (($a.uptimeNanoseconds - $b.uptimeNanoseconds) / 1000000000) as $elapsed |
+        ($a.drawCount - $b.drawCount) as $draws |
+        ($a.planFrameCount - $b.planFrameCount) as $planFrames |
+        (if $elapsed > 0 then $draws / $elapsed else null end) as $drawsPerSecond |
+        {
+            schemaVersion: 2,
+            clock: $a.clock,
+            countsEveryDraw: true,
+            measured: {
+                countedSeconds: $elapsed,
+                draws: $draws,
+                planFrames: $planFrames,
+                drawsPerSecond: $drawsPerSecond,
+                planFramesPerDraw: (
+                    if $draws > 0 then $planFrames / $draws else null end
+                )
+            },
+            estimated: {
+                profilerSeconds: $requestedSeconds,
+                drawsInProfilerWindow: (
+                    if $drawsPerSecond == null then null
+                    else $drawsPerSecond * $requestedSeconds end
+                ),
+                basis: "measured draw rate times the profiler window; valid only because the workload is sustained and steady-state"
+            },
+            windowRelationship: "the counted window strictly contains the profiled one -- both snapshots sit outside it, and a profiler adds seconds of attach and save on top of the 100ms publish cadence. Use the rate; treat `measured.draws` as spanning more than the trace."
+        }' >"$PROFILE_ROOT/frame-accounting.json"
+    echo "Frame accounting: $PROFILE_ROOT/frame-accounting.json"
+    jq . "$PROFILE_ROOT/frame-accounting.json"
+}
+
 MODE="${1:-loop}"
 WORKLOAD="${2:-scrollback-stream}"
 BACKEND="${3:-swift}"
@@ -38,6 +106,7 @@ PROFILE_ROOT="$REPO_ROOT/.build/terminal-benchmark-profiles/$(date +%Y-%m-%d-%H%
 IDENTITY_PATH="$PROFILE_ROOT/identity.json"
 HARNESS_IDENTITY_PATH="$PROFILE_ROOT/harness-identity.json"
 HARNESS_LOG="$PROFILE_ROOT/harness.log"
+ACTIVITY_PATH="$PROFILE_ROOT/activity.json"
 HARNESS_PID=""
 mkdir -p "$PROFILE_ROOT"
 trap 'terminate_owned_pid "$HARNESS_PID"' EXIT INT TERM
@@ -72,6 +141,7 @@ esac
 DANTERM_BENCHMARK_MODE=loop DANTERM_BENCHMARK_PROFILING=1 \
     DANTERM_BENCHMARK_IDENTITY_PATH="$HARNESS_IDENTITY_PATH" \
     DANTERM_TERMINAL_BENCHMARK_REDRAW_UPDATES="$redraw_updates" \
+    DANTERM_TERMINAL_BENCHMARK_ACTIVITY_PATH="$ACTIVITY_PATH" \
     "$SCRIPT_DIR/terminal-benchmark.sh" "$WORKLOAD" "$BACKEND" >"$HARNESS_LOG" 2>&1 &
 HARNESS_PID=$!
 deadline=$((SECONDS + 120))
@@ -132,12 +202,15 @@ case "$MODE" in
         command -v sample >/dev/null || { echo "sample is unavailable on this macOS host" >&2; exit 1; }
         printf 'sample %s %s -mayDie -fullPaths -file %s\n' \
             "$target_pid" "$DURATION" "$PROFILE_ROOT/sample.txt" >"$PROFILE_ROOT/profile-command.txt"
+        capture_activity before
         if ! sample "$target_pid" "$DURATION" -mayDie -fullPaths -file "$PROFILE_ROOT/sample.txt"; then
             echo "sample could not attach to pid $target_pid. Grant Developer Tools access to this shell and retry." >&2
             exit 1
         fi
+        capture_activity after
         echo "Sample profile: $PROFILE_ROOT/sample.txt"
         python3 "$SCRIPT_DIR/terminal-profile-report.py" "$PROFILE_ROOT/sample.txt"
+        report_frame_accounting
         ;;
     memory)
         for command in footprint leaks heap; do
@@ -152,11 +225,13 @@ case "$MODE" in
         command -v xcrun >/dev/null || { echo "xcrun is unavailable; install Xcode command-line tools" >&2; exit 1; }
         printf 'xcrun xctrace record --no-prompt --template %s --attach %s --time-limit %ss --output %s\n' \
             "$TEMPLATE" "$target_pid" "$DURATION" "$PROFILE_ROOT/profile.trace" >"$PROFILE_ROOT/profile-command.txt"
+        capture_activity before
         if ! xcrun xctrace record --no-prompt --template "$TEMPLATE" --attach "$target_pid" \
             --time-limit "${DURATION}s" --output "$PROFILE_ROOT/profile.trace"; then
             echo "xctrace could not attach to pid $target_pid. Grant Developer Tools access to this shell and retry." >&2
             exit 1
         fi
+        capture_activity after
         xcrun xctrace export --input "$PROFILE_ROOT/profile.trace" --toc --output "$PROFILE_ROOT/trace-toc.xml"
         # Only the CPU templates record a time-profile table. Recording with a
         # memory template succeeds and then exports nothing, so name the mismatch
@@ -178,5 +253,6 @@ case "$MODE" in
         echo "Trace export: $PROFILE_ROOT/trace-toc.xml"
         echo "Sample export: $PROFILE_ROOT/time-profile.xml"
         python3 "$SCRIPT_DIR/terminal-profile-report.py" "$PROFILE_ROOT/time-profile.xml"
+        report_frame_accounting
         ;;
 esac

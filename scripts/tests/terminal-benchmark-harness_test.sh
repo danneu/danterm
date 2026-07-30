@@ -49,6 +49,46 @@ grep -q 'fixtureIdentity' "$PROFILE"
 grep -q 'resetBehavior' "$PROFILE"
 grep -q 'geometry' "$PROFILE"
 grep -q 'profile-command.txt' "$PROFILE"
+
+# Draw counters (research doc 17, T2). Loop mode never completes a block, so
+# these snapshots are the only frame count an attached profiler gets.
+grep -q 'DANTERM_TERMINAL_BENCHMARK_ACTIVITY_PATH="$ACTIVITY_PATH"' "$PROFILE"
+grep -q 'DANTERM_TERMINAL_BENCHMARK_ACTIVITY_PATH="${DANTERM_TERMINAL_BENCHMARK_ACTIVITY_PATH:-}"' "$HARNESS"
+grep -q 'capture_activity before' "$PROFILE"
+grep -q 'capture_activity after' "$PROFILE"
+grep -q 'report_frame_accounting' "$PROFILE"
+# The counted window must bracket the profiled one: each `before` snapshot
+# precedes its profiler invocation and each `after` follows it. Asserted on line
+# order because a snapshot taken inside the window would still grep clean while
+# silently under-counting the run it is meant to normalize.
+python3 - "$PROFILE" <<'PY'
+import re, sys
+
+lines = open(sys.argv[1]).read().splitlines()
+def rows(pattern):
+    return [i for i, line in enumerate(lines) if re.search(pattern, line)]
+
+befores = rows(r'^\s+capture_activity before$')
+afters = rows(r'^\s+capture_activity after$')
+attaches = rows(r'^\s+if ! (sample|xcrun xctrace record)')
+assert len(befores) == len(afters) == len(attaches) == 2, (
+    f"expected two bracketed profilers, got {len(befores)}/{len(attaches)}/{len(afters)}"
+)
+for before, attach, after in zip(befores, attaches, afters):
+    assert before < attach < after, (
+        f"snapshot at {before}/{after} does not bracket the profiler at {attach}"
+    )
+PY
+
+# A decision run must never publish counters: the extra per-draw work is not in
+# the tree the paired thresholds were calibrated against.
+for decision_script in "$ROOT/scripts/terminal-benchmark-compare.py" \
+    "$ROOT/scripts/terminal-benchmark-validation.py"; do
+    if grep -q 'DANTERM_TERMINAL_BENCHMARK_ACTIVITY_PATH' "$decision_script"; then
+        echo "Decision script must not publish draw counters: $decision_script" >&2
+        exit 1
+    fi
+done
 grep -q 'get-task-allow' "$ROOT/scripts/terminal-benchmark-entitlements.plist"
 grep -q 'DANTERM_BENCHMARK_BUNDLE_SUFFIX' "$HARNESS"
 grep -q '""|.a|.b|.bystander|.isolation' "$HARNESS"

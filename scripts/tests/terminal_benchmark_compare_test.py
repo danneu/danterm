@@ -1075,5 +1075,167 @@ class AuxiliaryPlanMetricTests(unittest.TestCase):
         )
 
 
+class UncalibratedProcessCPUMetricTests(unittest.TestCase):
+    """Whole-process CPU: reported beside the verdict, never able to become one."""
+
+    def _blocks(self, workload, schedule, draw_percent, cpu_percent):
+        blocks = raw_blocks(
+            workload, schedule, constant_pair_values(workload, schedule, draw_percent)
+        )
+        metric = COMPARE.UNCALIBRATED_BLOCK_METRICS[workload]
+        cpu_values = constant_pair_values(workload, schedule, cpu_percent)
+        for block, cpu_value in zip(blocks, cpu_values):
+            block[metric] = cpu_value
+        return blocks
+
+    def _evidence(self, blocks, workload):
+        return collection({
+            workload: {
+                "workload": workload,
+                "rawBlocks": blocks,
+                "valid": True,
+                "invalidationReasons": [],
+            }
+        })
+
+    def test_process_cpu_is_reported_for_every_serialized_draw_workload(self):
+        # Intent: each serialized-draw workload reports a symmetric process-CPU
+        #   estimate beside its draw verdict.
+        # Why it exists: the draw metric times elapsed main-thread work between
+        #   two points, so work on any other thread is invisible to it at any
+        #   size. Doc 17's F6 located the app's largest single cost -- Core
+        #   Animation recomputing per-glyph bounds during display-list replay, at
+        #   16.78% of one workload's on-CPU total -- inside that blind spot, where
+        #   only a diagnostic-only profiler could see it. This metric is what lets
+        #   a decision block see it at all.
+        # Scenario: spec-first -- a candidate that burns 30% less CPU while its
+        #   main-thread draw time is unchanged, which is exactly the shape a fix
+        #   to replay-thread work would take.
+        for workload in ("content-churn", "style-churn", "incremental-mixed"):
+            with self.subTest(workload=workload):
+                schedule = COMPARE.make_schedule(
+                    "quick", (workload,), physical_candidate_arm="b"
+                )[workload]
+                blocks = self._blocks(workload, schedule, 0.0, -30.0)
+
+                summary = COMPARE.summarize_comparison(
+                    "quick", self._evidence(blocks, workload)
+                )
+                reported = summary["workloads"][workload]["uncalibrated"]
+
+                self.assertEqual(reported["metric"], "processCPUNanosecondsPerDraw")
+                self.assertAlmostEqual(reported["estimatePercent"], -30.0)
+                self.assertEqual(
+                    summary["workloads"][workload]["decision"]["decision"], "equivalent"
+                )
+
+    def test_process_cpu_never_carries_a_verdict_in_either_mode(self):
+        # Intent: the process-CPU summary reports `decision: None` and renders as
+        #   descriptive text, in `quick` and `confirm` alike.
+        # Why it exists: no A/A screening pass has calibrated this metric, so any
+        #   threshold applied to it would be invented rather than measured. The
+        #   risk is specifically that it sits one line under a classified draw
+        #   result and gets read as a third verdict.
+        # Scenario: spec-first -- a CPU swing far larger than any plausible
+        #   directional threshold must still classify nothing.
+        workload = "content-churn"
+        for mode in ("quick", "confirm"):
+            with self.subTest(mode=mode):
+                schedule = COMPARE.make_schedule(
+                    mode, (workload,), physical_candidate_arm="b"
+                )[workload]
+                blocks = self._blocks(workload, schedule, 0.0, -80.0)
+
+                summary = COMPARE.summarize_comparison(
+                    mode, self._evidence(blocks, workload)
+                )
+                rendered = COMPARE.render_decisions(summary)
+
+                self.assertIsNone(
+                    summary["workloads"][workload]["uncalibrated"]["decision"]
+                )
+                self.assertFalse(
+                    summary["workloads"][workload]["uncalibrated"]["calibrated"]
+                )
+                self.assertIn("process CPU:", rendered)
+                self.assertIn("no verdict", rendered)
+
+    def test_process_cpu_never_changes_the_draw_verdict(self):
+        # Intent: adding process-CPU evidence leaves the frozen decision rule's
+        #   output bit-identical.
+        # Why it exists: the metric is additive by construction, and this is the
+        #   assertion that keeps it additive. Its measurement is strictly wider
+        #   than the draw bracket -- it includes parsing, planning, replay, and
+        #   the observer -- so folding any part of it into the draw verdict would
+        #   redefine the calibrated metric rather than sharpen it.
+        # Scenario: spec-first -- a large CPU regression alongside an unchanged
+        #   draw time must still read as an unchanged draw time.
+        workload = "style-churn"
+        schedule = COMPARE.make_schedule(
+            "quick", (workload,), physical_candidate_arm="b"
+        )[workload]
+        without_cpu = raw_blocks(
+            workload, schedule, constant_pair_values(workload, schedule, 1.0)
+        )
+        with_cpu = self._blocks(workload, schedule, 1.0, 150.0)
+
+        bare = COMPARE.summarize_comparison(
+            "quick", self._evidence(without_cpu, workload)
+        )
+        annotated = COMPARE.summarize_comparison(
+            "quick", self._evidence(with_cpu, workload)
+        )
+
+        self.assertEqual(
+            annotated["workloads"][workload]["decision"],
+            bare["workloads"][workload]["decision"],
+        )
+        self.assertIsNone(bare["workloads"][workload]["uncalibrated"])
+
+    def test_blocks_without_process_cpu_evidence_report_no_estimate(self):
+        # Intent: artifacts collected before the CPU reading existed still pair,
+        #   decide, and render, reporting no CPU estimate at all.
+        # Why it exists: the paired harness compares one revision against another,
+        #   so a baseline arm predating this reading is the normal case for every
+        #   comparison made against existing history. Failing or substituting zero
+        #   there would either block the comparison or invent an effect.
+        # Scenario: spec-first -- baseline blocks carry no CPU metric.
+        workload = "incremental-mixed"
+        schedule = COMPARE.make_schedule(
+            "quick", (workload,), physical_candidate_arm="b"
+        )[workload]
+        blocks = self._blocks(workload, schedule, 5.0, -10.0)
+        for block in blocks:
+            if block["measurementRole"] == "A":
+                del block["processCPUNanosecondsPerDraw"]
+
+        summary = COMPARE.summarize_comparison("quick", self._evidence(blocks, workload))
+
+        self.assertIsNone(summary["workloads"][workload]["uncalibrated"])
+        self.assertNotIn("process CPU:", COMPARE.render_decisions(summary))
+
+    def test_the_cpu_metric_stays_out_of_the_calibrated_plan_table(self):
+        # Intent: the CPU metric is absent from `AUXILIARY_BLOCK_METRICS` and its
+        #   workloads still fall inside the decision table.
+        # Why it exists: `AUXILIARY_BLOCK_METRICS` is the plan calibrator's input
+        #   (`PLAN_WORKLOADS`) and drives the `planWorkloads` rule lookup, so an
+        #   entry there is a claim that a frozen rule exists for that metric.
+        #   Adding this one to that table is precisely how it would acquire a
+        #   verdict it has not earned.
+        # Scenario: spec-first -- both frozen tables are read directly.
+        self.assertEqual(
+            set(COMPARE.UNCALIBRATED_BLOCK_METRICS),
+            {"content-churn", "style-churn", "incremental-mixed"},
+        )
+        self.assertTrue(
+            set(COMPARE.UNCALIBRATED_BLOCK_METRICS) <= set(COMPARE.BLOCK_METRICS)
+        )
+        self.assertTrue(
+            set(COMPARE.UNCALIBRATED_BLOCK_METRICS.values()).isdisjoint(
+                COMPARE.AUXILIARY_BLOCK_METRICS.values()
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
