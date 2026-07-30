@@ -203,7 +203,7 @@ Critical files:
 
 - [x] 1. Phase D -- record the exit-crash diagnosis in `docs/research/22`
 - [x] 2. Phase F -- host-owned dispatch termination and completion signalling
-- [ ] 3. Phase F -- backend and pane teardown adopt host-signalled termination
+- [x] 3. Phase F -- backend and pane teardown adopt host-signalled termination
 
 ## Implementation notes
 
@@ -244,6 +244,19 @@ Critical files:
   Crash UUID `EDB156E5-870F-30C1-BE0B-FA8B44B8D081` still ran the task group at
   `SwiftTerminalBackend.swift:109`, confirming that commit 2 only establishes the
   host primitive; commit 3 must remove that backend task before PO7 can pass.
+- **Commit 3 removes the pre-existing pane consumer task as well as the exit task
+  group and detached close task.** Host updates now enter a lock-protected,
+  coalesced dispatch delivery gate that becomes inert before teardown starts.
+  Leaving the `AsyncStream` consumer in place would still let application-exit
+  cancellation or host completion enqueue a Swift job during the prohibited
+  window, even after the named backend victim was gone.
+- **The automated post-fix PO7 attempt is not valid evidence.** The optimized dev
+  build succeeded, but the ambient `danterm` client resolved the production
+  control socket during the saturated-scrollback cycle. Automation stopped after
+  that targeting failure, and no automated live cycle is credited here. The full
+  test gate, including the dispatch-only mid-close and spawn regressions, passed;
+  a post-fix GUI Cmd-Q check remains manual until app identity is enforced at the
+  control boundary.
 
 ## Follow Up
 
@@ -251,3 +264,7 @@ Critical files:
   it carries unstaged in-flight edits of its own, and that file's own rule is
   that the table is the only record of which files are live -- so doc 22 is
   currently invisible to that index.
+- Add a server-validated app identity handshake and a dev-only quit/test command
+  to the `danterm` control boundary. Destructive automation must bind an explicit
+  socket, PID, bundle identifier, and executable path, and production quit must
+  fail closed without a separate user-authorized override.

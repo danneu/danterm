@@ -181,6 +181,7 @@ public actor TerminalPTYHost {
     private var emittedUpdateSignalCount = 0
     private var updateSignalsAfterTermination = 0
     private var consumerWorkWasSignaled = false
+    private var updateHandler: (@Sendable () -> Void)?
 
     /// Binds Swift actor jobs to the FIFO queue that also delivers every system callback.
     nonisolated public var unownedExecutor: UnownedSerialExecutor {
@@ -583,6 +584,24 @@ public actor TerminalPTYHost {
         }
     }
 
+    /// Fences lifecycle evidence paired with the pane adapter's next frame drain.
+    package nonisolated func fencedConsumptionMetadata() -> (
+        result: PaneLifecycleResult?,
+        transitions: [TerminalPTYAppliedTransition]?
+    ) {
+        queue.sync {
+            assumeIsolated { owner in
+                let transitions: [TerminalPTYAppliedTransition]?
+                if case .some(.exited) = owner.reportedResult, owner.captureTransitions {
+                    transitions = owner.appliedTransitions
+                } else {
+                    transitions = nil
+                }
+                return (owner.reportedResult, transitions)
+            }
+        }
+    }
+
     /// Captures one owner-ordered diagnostic boundary before failure cleanup can discard evidence.
     package nonisolated func fencedDiagnosticState() -> (
         frameState: TerminalPTYFrameState,
@@ -612,8 +631,21 @@ public actor TerminalPTYHost {
     nonisolated public func beginCloseAndSnapshot() -> Terminal {
         queue.sync {
             assumeIsolated { owner in
+                owner.updateHandler = nil
                 owner.process(.requestClose)
                 return owner.terminal
+            }
+        }
+    }
+
+    /// Installs the pane adapter's conflated wakeup without creating a Swift task.
+    nonisolated public func setUpdateHandler(
+        _ handler: @escaping @Sendable () -> Void
+    ) {
+        queue.sync {
+            assumeIsolated { owner in
+                guard owner.teardownFinished == false else { return }
+                owner.updateHandler = handler
             }
         }
     }
@@ -1586,10 +1618,12 @@ public actor TerminalPTYHost {
         if updatePending {
             updatePending = false
             updateContinuation.yield()
+            updateHandler?()
             emittedUpdateSignalCount += 1
         }
         guard shouldFinishUpdates else { return }
         shouldFinishUpdates = false
+        updateHandler = nil
         updateContinuation.finish()
         updateSignalFinished = true
         for id in waiterSlots.keys {

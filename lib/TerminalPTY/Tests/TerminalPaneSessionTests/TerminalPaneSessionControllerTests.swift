@@ -1166,9 +1166,12 @@ struct TerminalPaneSessionControllerTests {
     @Test("application termination reaches live and already-closing pane hosts", .timeLimit(.minutes(1)))
     func applicationTerminationHandlesLiveAndMidCloseHosts() async throws {
         // Intent: backend-owned termination handles cover every native host until
-        //   teardown completes, including one whose ordinary close is in flight.
+        //   teardown completes through dispatch completions, including one whose
+        //   ordinary close is in flight.
         // Why it exists: dropping a host from the backend registry at tearDown()
-        //   would let app termination leave that pane's process ladder unfinished.
+        //   would let app termination leave that pane's process ladder unfinished,
+        //   while rebuilding the old task group around the handles recreates the
+        //   exit-crash victim.
         // Scenario: the app quits while one shell is live and another pane has
         //   just begun closing; both must release their complete process sessions.
         let liveHost = try makeHost()
@@ -1186,15 +1189,43 @@ struct TerminalPaneSessionControllerTests {
         #expect(await closingHost.waitForOutput(containing: Array("__READY__".utf8)))
 
         closingController.tearDown()
-        await withTaskGroup(of: Void.self) { group in
-            for handle in handles {
-                group.addTask { await handle.terminateForApplicationExit() }
+        let completions = PaneExitCompletionRecorder(expecting: handles.count)
+        for handle in handles {
+            handle.submitApplicationExitTermination {
+                completions.signal()
             }
         }
+        #expect(completions.waitForAll(within: .seconds(20)))
 
         #expect((await liveHost.resourceSnapshot()).isReleased)
         #expect((await closingHost.resourceSnapshot()).isReleased)
         liveController.tearDown()
+    }
+
+    @Test("pane teardown completion does not require main-actor progress", .timeLimit(.minutes(1)))
+    func teardownCompletionDoesNotRequireMainActor() async throws {
+        // Intent: ordinary pane teardown signals native completion directly from
+        //   the host path even while the main actor is synchronously blocked.
+        // Why it exists: PO5/I1. The old detached close task awaited a
+        //   @MainActor completion, so Cmd-Q during an in-flight pane close left a
+        //   Swift job parked behind applicationWillTerminate's synchronous wait.
+        // Scenario: a pane starts closing immediately before the user confirms
+        //   quit, and the app's main thread then waits for host quiescence.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
+        )
+        let completions = PaneExitCompletionRecorder(expecting: 1)
+        controller.onTeardownCompleted = {
+            completions.signal()
+        }
+        #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
+
+        controller.tearDown()
+
+        #expect(completions.waitForAll(within: .seconds(20)))
+        #expect((await host.resourceSnapshot()).isReleased)
     }
 
     @Test("teardown completion fires backend registry cleanup exactly once", .timeLimit(.minutes(1)))
@@ -1209,20 +1240,17 @@ struct TerminalPaneSessionControllerTests {
             host: host,
             launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
         )
-        let completions = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
-        var iterator = completions.stream.makeAsyncIterator()
-        var completionCount = 0
+        let completions = PaneExitCompletionRecorder(expecting: 1)
         controller.onTeardownCompleted = {
-            completionCount += 1
-            completions.continuation.yield()
+            completions.signal()
         }
         #expect(await host.waitForOutput(containing: Array("__READY__".utf8)))
 
         controller.tearDown()
         controller.tearDown()
-        _ = await iterator.next()
 
-        #expect(completionCount == 1)
+        #expect(completions.waitForAll(within: .seconds(20)))
+        #expect(completions.signalCount == 1)
         #expect((await host.resourceSnapshot()).isReleased)
     }
 
@@ -1589,6 +1617,37 @@ private func bootstrapExecutable() throws -> String {
 
 private func probeExecutable() throws -> String {
     try builtExecutable(named: "PTYProbe")
+}
+
+/// Records dispatch completions while the main actor is intentionally blocked.
+private final class PaneExitCompletionRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    private let expectedCount: Int
+    private let group = DispatchGroup()
+
+    init(expecting count: Int) {
+        expectedCount = count
+        for _ in 0..<count { group.enter() }
+    }
+
+    func signal() {
+        lock.lock()
+        count += 1
+        let shouldLeave = count <= expectedCount
+        lock.unlock()
+        if shouldLeave { group.leave() }
+    }
+
+    func waitForAll(within timeout: DispatchTimeInterval) -> Bool {
+        group.wait(timeout: .now() + timeout) == .success
+    }
+
+    var signalCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
 }
 
 private extension RenderFramePlan {

@@ -14,4 +14,12 @@ public struct TerminalPaneTerminationHandle: Sendable {
     public func terminateForApplicationExit() async {
         await host.terminateForApplicationExit()
     }
+
+    /// Submits process exit without creating a Swift task and signals only after
+    /// the retained host has irreversibly released its native ownership.
+    public func submitApplicationExitTermination(
+        completion: @escaping @Sendable () -> Void
+    ) {
+        host.submitApplicationExitTermination(completion: completion)
+    }
 }

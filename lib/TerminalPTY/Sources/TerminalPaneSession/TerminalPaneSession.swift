@@ -1,13 +1,48 @@
 // Main-actor pane policy that turns one PTY host's conflated updates into cached
 // inspection text, complete render plans, child-ended evidence, and one exit notification.
-#if DANTERM_TERMINAL_BENCHMARK
 import Dispatch
-#endif
 import PaneLifecycle
+import Synchronization
 import TerminalCore
 import TerminalCoreRecording
 import TerminalPTYHost
 import TerminalRenderPlanning
+
+/// Coalesces host wakeups onto main and makes queued deliveries inert at teardown.
+private final class TerminalPaneUpdateDelivery: Sendable {
+    private struct State {
+        var isScheduled = false
+        var isStopped = false
+    }
+
+    private let state = Mutex(State())
+
+    func schedule(_ delivery: @escaping @MainActor @Sendable () -> Void) {
+        let shouldSchedule = state.withLock { state in
+            guard state.isStopped == false, state.isScheduled == false else { return false }
+            state.isScheduled = true
+            return true
+        }
+        guard shouldSchedule else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let shouldDeliver = self.state.withLock { state in
+                state.isScheduled = false
+                return state.isStopped == false
+            }
+            guard shouldDeliver else { return }
+            MainActor.assumeIsolated {
+                delivery()
+            }
+        }
+    }
+
+    func stop() {
+        state.withLock { state in
+            state.isStopped = true
+        }
+    }
+}
 
 /// Gives the AppKit adapter a deduplicated scrollbar projection without exposing Terminal storage.
 public struct TerminalPaneViewportState: Equatable, Sendable {
@@ -47,7 +82,7 @@ package struct TerminalPaneDiagnosticCapture: Sendable {
 @MainActor
 public final class TerminalPaneSessionController {
     private let host: TerminalPTYHost
-    private var consumeTask: Task<Void, Never>?
+    private let updateDelivery = TerminalPaneUpdateDelivery()
     private var cachedTerminal: Terminal
     private let initialDimensions: TerminalDimensions
     private var lastPlannedTerminal: Terminal?
@@ -96,8 +131,8 @@ public final class TerminalPaneSessionController {
     /// ones that mutate nothing -- the find overlay's counter is driven entirely from here.
     public var onSearchStatus: ((TerminalSearchStatus?) -> Void)?
 
-    /// Releases the backend registry entry only after this host's native teardown completes.
-    public var onTeardownCompleted: (@MainActor @Sendable () -> Void)?
+    /// Releases process-lifetime ownership from the host completion queue.
+    public var onTeardownCompleted: (@Sendable () -> Void)?
 
     /// The latest complete plan delivered for the visible pane, retained for scale-only redraws.
     public private(set) var currentPlan: RenderFramePlan?
@@ -218,44 +253,37 @@ public final class TerminalPaneSessionController {
 
         if isVisible { planIfNeeded(cachedTerminal) }
 
-        host.submitStart(launchInput)
-        consumeTask = Task { [weak self, host] in
-            for await _ in host.updates {
-                guard Task.isCancelled == false else { break }
-                let result = await host.result()
-                let transitions: [TerminalPTYAppliedTransition]?
-                // Results publish only after output drain, so these actor reads
-                // cannot acquire a transition newer than the final snapshot.
-                if case .some(.exited) = result, host.captureTransitions {
-                    transitions = await host.transitions()
-                } else {
-                    transitions = nil
-                }
-                guard let self, self.isTornDown == false else { break }
-                // Drained synchronously, not with `await host.frameState()`: the drain hands
-                // over damage exactly once, so it has to be indivisible from the `consume`
-                // that records it. An awaited drain resolves on the host's queue and delivers
-                // on the main actor, and any fence landing in that gap (`synchronizeState`,
-                // `diagnosticCapture`, `readSelectedTextSynchronizing`) sees a terminal newer
-                // than the damage still in flight -- so it plans reusing rows that did move,
-                // and the pane keeps stale content until later damage happens to cover it.
-                // Fencing here instead puts both halves in one main-actor step, which is what
-                // makes the gap unrepresentable rather than merely unlikely.
-                #if DANTERM_TERMINAL_BENCHMARK
-                let fenceStarted = DispatchTime.now().uptimeNanoseconds
-                let frameState = host.fencedFrameState()
-                self.pendingFenceStallNanoseconds +=
-                    DispatchTime.now().uptimeNanoseconds - fenceStarted
-                self.consume(frameState: frameState, result: result, transitions: transitions)
-                #else
-                self.consume(
-                    frameState: host.fencedFrameState(),
-                    result: result,
-                    transitions: transitions
-                )
-                #endif
+        let updateDelivery = updateDelivery
+        host.setUpdateHandler { [weak host] in
+            updateDelivery.schedule { [weak self, weak host] in
+                guard let self, let host else { return }
+                self.consumeHostUpdate(host)
             }
         }
+        host.submitStart(launchInput)
+    }
+
+    private func consumeHostUpdate(_ host: TerminalPTYHost) {
+        guard isTornDown == false else { return }
+        let metadata = host.fencedConsumptionMetadata()
+        // Drained synchronously: damage handoff and `consume` stay in one
+        // main-actor step, so a checkpoint fence cannot strand moved rows.
+        #if DANTERM_TERMINAL_BENCHMARK
+        let fenceStarted = DispatchTime.now().uptimeNanoseconds
+        let frameState = host.fencedFrameState()
+        pendingFenceStallNanoseconds += DispatchTime.now().uptimeNanoseconds - fenceStarted
+        consume(
+            frameState: frameState,
+            result: metadata.result,
+            transitions: metadata.transitions
+        )
+        #else
+        consume(
+            frameState: host.fencedFrameState(),
+            result: metadata.result,
+            transitions: metadata.transitions
+        )
+        #endif
     }
 
     /// Sends committed UTF-8 text through the host's shared ordered submission queue.
@@ -361,11 +389,10 @@ public final class TerminalPaneSessionController {
     /// Fences accepted owner work and freezes the recovery projection before app exit capture.
     public func fenceForApplicationExit() {
         guard isTornDown == false else { return }
+        updateDelivery.stop()
         cachedTerminal = host.beginCloseAndSnapshot()
         emitPrimaryHistoryMutationIfNeeded()
         isTornDown = true
-        consumeTask?.cancel()
-        consumeTask = nil
     }
 
     /// Returns the latest cached viewport without crossing the host actor boundary.
@@ -521,9 +548,10 @@ public final class TerminalPaneSessionController {
         }
     }
 
-    /// Ends callbacks immediately and lets a host-only detached task finish bounded teardown.
+    /// Ends callbacks immediately and lets the host queue finish bounded teardown.
     public func tearDown() {
         guard isTornDown == false else { return }
+        updateDelivery.stop()
         cachedTerminal = host.beginCloseAndSnapshot()
         isTornDown = true
         onFrame = nil
@@ -536,13 +564,9 @@ public final class TerminalPaneSessionController {
         onOpenLink = nil
         onSearchStatus = nil
         let onTeardownCompleted = takeTeardownCompletion()
-        consumeTask?.cancel()
-        consumeTask = nil
 
-        let host = host
-        Task.detached {
-            await host.close()
-            await onTeardownCompleted?()
+        host.submitApplicationExitTermination {
+            onTeardownCompleted?()
         }
     }
 
@@ -622,7 +646,7 @@ public final class TerminalPaneSessionController {
         cachedTerminal
     }
 
-    private func takeTeardownCompletion() -> (@MainActor @Sendable () -> Void)? {
+    private func takeTeardownCompletion() -> (@Sendable () -> Void)? {
         let completion = onTeardownCompleted
         onTeardownCompleted = nil
         return completion

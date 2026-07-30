@@ -3,10 +3,30 @@
 import Cocoa
 import Darwin
 import PaneLifecycle
+import Synchronization
 #if DANTERM_TERMINAL_CHARACTERIZATION
 import TerminalCoreRecording
 #endif
 import TerminalPaneSession
+
+/// Retains live native hosts without requiring main-actor progress to release them.
+private final class SwiftTerminalHostRegistry: Sendable {
+    private let handles = Mutex<[UUID: TerminalPaneTerminationHandle]>([:])
+
+    func insert(_ handle: TerminalPaneTerminationHandle, id: UUID) {
+        handles.withLock { $0[id] = handle }
+    }
+
+    func remove(id: UUID) {
+        handles.withLock { handles in
+            _ = handles.removeValue(forKey: id)
+        }
+    }
+
+    var snapshot: [TerminalPaneTerminationHandle] {
+        handles.withLock { Array($0.values) }
+    }
+}
 
 /// Constructs the Swift engine adapter selected by DANTERM_TERMINAL_BACKEND=swift.
 @MainActor
@@ -17,13 +37,11 @@ func makeSwiftTerminalBackend() -> any TerminalBackend {
 /// Owns process-level Swift terminal launch and teardown policy outside the Elm runtime.
 @MainActor
 final class SwiftTerminalBackend: TerminalBackend {
-    private static let applicationExitTimeout: DispatchTimeInterval = .seconds(2)
-
     private let bootstrapExecutable: String
     #if DANTERM_TERMINAL_CHARACTERIZATION
     private let recordingDirectory: URL?
     #endif
-    private var activeHosts: [UUID: TerminalPaneTerminationHandle] = [:]
+    private let activeHosts = SwiftTerminalHostRegistry()
 
     var onEvent: ((TerminalBackendEvent) -> Void)?
     var isReady: Bool {
@@ -79,9 +97,10 @@ final class SwiftTerminalBackend: TerminalBackend {
         }
 
         let id = UUID()
-        activeHosts[id] = controller.terminationHandle
-        controller.onTeardownCompleted = { [weak self] in
-            self?.activeHosts.removeValue(forKey: id)
+        activeHosts.insert(controller.terminationHandle, id: id)
+        let registry = activeHosts
+        controller.onTeardownCompleted = {
+            registry.remove(id: id)
         }
         #if DANTERM_TERMINAL_CHARACTERIZATION
         return SwiftTerminalSessionView(
@@ -100,18 +119,16 @@ final class SwiftTerminalBackend: TerminalBackend {
     func reloadConfig() {}
 
     func terminateForApplicationExit() {
-        let handles = Array(activeHosts.values)
+        let handles = activeHosts.snapshot
         guard handles.isEmpty == false else { return }
-        let completion = DispatchSemaphore(value: 0)
-        Task.detached {
-            await withTaskGroup(of: Void.self) { group in
-                for handle in handles {
-                    group.addTask { await handle.terminateForApplicationExit() }
-                }
+        let completions = DispatchGroup()
+        for handle in handles {
+            completions.enter()
+            handle.submitApplicationExitTermination {
+                completions.leave()
             }
-            completion.signal()
         }
-        _ = completion.wait(timeout: .now() + Self.applicationExitTimeout)
+        completions.wait()
     }
 
     #if DANTERM_TERMINAL_CHARACTERIZATION
