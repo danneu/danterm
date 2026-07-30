@@ -2,9 +2,11 @@
 
 Research started: 2026-07-30. **Status: OPEN -- the four original direction
 gates are decided and shipped, but `F12` reopened the workload's calibration:
-its noise is additive, so a longer replay should tighten the rule `D4` froze.
-`D5` tests that. Also outstanding: `H3` (parked) and the unclaimed vtebench
-import.**
+its noise is additive, so a longer replay tightens the rule `D4` froze. `D5`
+now carries a recommendation (quick 4p @2.10%, confirm 6p @1.90%) and awaits a
+user gate, and `F14` found `D4`'s method for combining replicates unsound --
+a defect in the rule frozen today. Also outstanding: `H3` (parked) and the
+unclaimed vtebench import.**
 Deliverables, all now settled: what throughput quantity the benchmark system
 should report (`D1` -- the descriptive split, shipped), whether a keypress-driven
 interactive workload is worth building (`D2` -- no, take a recording instead),
@@ -796,6 +798,61 @@ improvement as a failure.
   0.56% was the lucky draw, which is precisely the mistake screen 4 shows is
   available.
 
+### F14 -- the 5x replicate holds, and `D4`'s envelope method turns out to be unsound
+
+- Status: complete. Two 5x screens, replicating, plus a pooled re-evaluation that
+  cost no machine time.
+- Date: 2026-07-30, same tree `dc2402d5`, same seed, same 24-quartet design.
+- **The replicate is quieter than the first, and the outlier did not recur:**
+
+  | 5x screen | SD | trimmed | range | pairs beyond +/-3% | proposal |
+  | --- | --- | --- | --- | --- | --- |
+  | 5 | 1.65% | 0.56% | -2.49 .. +10.36 | 1 / 48 | q 4p@1.05%, c 4p@1.9% |
+  | 6 | 0.94% | 0.77% | -2.31 .. +2.28 | **0 / 48** | q 2p@2.1%, c 2p@2.1% |
+
+  Combined, the 192 blocks at 5x read median 739.7 ms, SD 7.12 ms (**0.96%**),
+  trimmed 3.72 ms (**0.50%**), with 1 block beyond +5% and **none beyond +10%**.
+  Against the 192 blocks at 1x (SD 1.5%, worst +6.9%), the percent noise is ~3x
+  lower while trimmed *absolute* SD moved 3.01 -> 3.72 ms. `F12` and `F13` hold.
+- **The two screens agree that it is quieter and disagree about which rule to
+  take** -- 4p@1.05% against 2p@2.1%. Both are points on the same frontier: the
+  search is cheapest-first, so a quieter series buys a lower pair count rather
+  than a tighter threshold. Neither screen's proposal is the rule.
+- **`D4`'s combination method does not survive being checked.** `D4` took "max
+  pair count, max threshold" across its replicates. Applying it here yields
+  4p@2.1% for both modes -- and that cell **fails the inconclusive gate on
+  screen 6 alone** (0.1142 against a 0.10 maximum) while passing on screen 5 and
+  pooled. An envelope over *selected cells* is not itself a screened cell, and
+  nothing in `D4` evaluated the combination it froze. That is a latent defect in
+  the frozen 1x rule too, not only here.
+- **The sound replacement, and what this file should use from now on: require the
+  cell to clear every gate on each screen independently *and* pooled.** Searched
+  that way over 96 pairs:
+
+  | mode | frozen (1x) | recommended (5x) | FP margin | detection | inconclusive |
+  | --- | --- | --- | --- | --- | --- |
+  | quick | 6p @2.65% | **4p @2.10%** | 0.0000-0.0019 (was 0.0084) | >= 0.9990 | <= 0.0695 |
+  | confirm | 8p @2.15% | **6p @1.90%** | 0.0000-0.0001 (was 0.0095) | >= 0.9916 | <= 0.0424 |
+
+  The strictly-cheapest passing cell at `quick` is 4p@1.45%, and it is **not**
+  recommended: its false-positive rate reaches 0.0091 against the 0.01 gate,
+  which is the same no-margin position `F11` flagged as the frozen rule's worst
+  property. 4p@2.10% is one grid step looser and buys an order of magnitude of
+  margin. Cheapest-first is the right search and the wrong tiebreak.
+- **This improves all three axes at once, which is why it is worth taking**:
+  fewer pairs (6 -> 4, 8 -> 6), a tighter threshold, and a false-positive rate
+  that moves off the ceiling `F11` warned about. Wall cost per verdict falls
+  ~59 -> ~43 s at `quick` and ~79 -> ~65 s at `confirm`, because `F13`'s
+  accounting holds: the longer block costs ~1 s per pair and the pair count is
+  what dominates.
+- Uncertainty: two screens on one machine on one afternoon, which is exactly the
+  evidence `D4` had before screen 4 undercut it. The pooled re-evaluation is a
+  genuine strengthening -- 96 pairs, and the recommended cell is verified against
+  each screen separately rather than combined by hand -- but it cannot rule out
+  that both 5x screens shared a favorable condition. 5x is also not shown to be
+  the right multiple; 3x and 10x were never measured.
+- Next action: `D5`.
+
 ## Decision log
 
 ### D1 -- what the benchmark system should report about PTY throughput
@@ -1025,9 +1082,58 @@ improvement as a failure.
   all three quick conditions, both confirm directions, and one suite-level A/A
   cell -- did not change when the sixth workload arrived, and only the literal
   did.
-- Not decided here, and deliberately: the tail's cause. A 29 ms excess in drain
+- ~~Not decided here, and deliberately: the tail's cause. A 29 ms excess in drain
   on ~1 block in 24 is a real phenomenon, but it belongs to whoever owns queue
-  occupancy (doc 19), not to the file that found it.
+  occupancy (doc 19), not to the file that found it.~~ **Superseded by `F12`:**
+  it is not a real phenomenon. That excess is screen 1's discarded outlier, seen
+  once in 216 blocks and never again; doc 19 inherits nothing.
+
+### D5 -- whether to lengthen the replay and re-freeze the rule
+
+- Status: **recommendation made, awaiting user direction gate.** Same standard as
+  `D4`: a screen writes a report, a human moves a rule. Nothing in
+  `DECISION_RULES` or the manifest has been changed.
+- The question: `D4` froze the corpus's loosest and costliest rule. `F12` found
+  the noise it rests on is additive, `F13` and `F14` measured a 5x replay of the
+  same committed capture, and the result improves cost, resolution, and safety
+  margin simultaneously.
+- **Recommendation: take it.** Set `replayCount: 5` on `synchronized-frames` and
+  re-freeze at **quick 4 pairs @ +/-2.10%** and **confirm 6 pairs @ +/-1.90%**,
+  against the frozen 6 @ 2.65% and 8 @ 2.15%.
+  - Evidence: two replicating 5x screens (`F14`), each clearing every gate for
+    the recommended cell independently, plus pooled over 96 pairs.
+  - It costs no new capture and no change to what is exercised -- the same 95
+    frames, five times, still bracket-balanced and still ending on the frame the
+    completion assertion is written against (pinned by test at `6950d51`).
+  - It is *cheaper* in wall clock than what it replaces (~43 s vs ~59 s at
+    `quick`, ~65 s vs ~79 s at `confirm`), because the pair count falls and the
+    longer block costs ~1 s per pair.
+  - It moves the false-positive rate off the ceiling `F11` flagged as the frozen
+    rule's worst property: 0.0000-0.0019 against 0.0084-0.0095.
+- **Take `F14`'s methodological correction with it, and this is the part that
+  outlives the workload.** `D4` combined replicates by taking max pair count and
+  max threshold across their *selected* cells, and never evaluated the
+  combination. Applied to the 5x screens that method yields a cell failing the
+  inconclusive gate on one of them. Any future re-screen should require the
+  candidate cell to clear every gate **on each screen independently and pooled**.
+  The frozen 1x rule was combined the unsound way; that is an argument for
+  replacing it, not for trusting it.
+- What the recommendation does **not** rest on: that 5x is optimal. 3x and 10x
+  were never measured, and the tail grew slightly (8.8 -> 10.3 ms), so the
+  additive model is approximate at the edges. 5x is a measured improvement, not
+  a located optimum.
+- The dissenting consideration, stated because it is real: this is two screens on
+  one machine on one afternoon, which is the same evidence `D4` had before screen
+  4 undercut it. The honest difference is that `F14` verifies per-screen rather
+  than combining by hand, and that `synchronized-frames` would stop being the
+  corpus's outlier workload. A reader who thinks that is still too thin should
+  ask for a third 5x screen before the freeze; it costs ~10 minutes.
+- If taken, the work is: `replayCount` in the manifest, both `DECISION_RULES`
+  entries, the pinning test at
+  `scripts/tests/terminal_benchmark_workloads_test.py` (which asserts 6/2.65 and
+  8/2.15 today), and the `agent-docs/terminal-performance.md` section whose
+  caveats -- "a 3-4% move is not a result", the thin margins -- would no longer
+  be true.
 
 ## Rejected
 
@@ -1093,14 +1199,17 @@ screens (`F11`).
 
 What is open, and why this file is not closed:
 
-- **`D5`, opened by `F12` and the reason this file did not close at `D4`.** The
+- **`D5`, opened by `F12` and now carrying a recommendation.** The
   frozen rule is the loosest and costliest in the corpus, and `F12` shows why
   that is fixable: this workload's noise is **additive, not proportional** --
   absolute SD is near-flat across a 2.24x change in block length while percent
   SD nearly halves. Since ~98% of a pair's wall clock is launch overhead, a
-  longer replay is nearly free. `D5` tests it by repeating the committed fixture
-  within one block, which needs no new capture. `F12` also **withdrew a claim
-  this file made twice** -- the unexplained drain tail was screen 1's discarded
+  longer replay is nearly free. **Tested and confirmed** (`F13`, `F14`): two
+  replicating 5x screens improve cost, resolution and safety margin at once, and
+  `D5` recommends re-freezing at quick 4p @2.10% and confirm 6p @1.90%. `F14`
+  also found `D4`'s method for combining replicates unsound, which is a defect in
+  the currently frozen rule. `F12` **withdrew a claim this
+  file made twice** -- the unexplained drain tail was screen 1's discarded
   outlier counted a second time, and 192 clean blocks show no block above +6.9%.
   Nothing about the tail passes to doc 19.
 - **`H3`, parked with a reopening condition**: drain is quieter than the metric
@@ -1111,7 +1220,7 @@ What is open, and why this file is not closed:
   obstruct work.
 - **The vtebench payload import**, logged in Open questions and owned by no file.
 
-Close this file when `D5` is decided either way. A flat percent SD closes it as
-legitimately as a fall does -- the negative result is the more valuable artifact,
-since it would establish that this workload's rule cannot be bought down with
-block length and stop anyone trying again.
+Close this file when `D5` is decided either way. Declining the re-freeze closes
+it as legitimately as taking it -- but `F14`'s finding that `D4` combined its
+replicates by an unsound method should be acted on regardless of which way `D5`
+goes, since it is a defect in the rule that is frozen today.
