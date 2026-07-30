@@ -505,5 +505,32 @@ a number look better next to a blog post.
 
 ## Outcome
 
-Investigation in progress. Phase 1 complete from artifacts already on disk; `D1`
-awaits a direction gate.
+Investigation in progress. **Phases 1 and 2 are complete and shipped in
+`995c8e8`; Phase 3 has not started.**
+
+What is settled. `scrollback-stream` was already a PTY throughput benchmark and
+nobody knew (`F2`), which refuted this file's own opening hypothesis (`H1`) and
+retired the reason it was opened. The reporting `D1` selected is implemented,
+hand-verified, and proved end to end (`F5`, `F7`), and
+`agent-docs/terminal-performance.md` documents it. `H2` is rejected: the
+producer's overhead is fully absorbed, so the reported rate needs no correction
+(`F6`).
+
+What is open, and why this file is not closed:
+
+- **`D2` and the whole of Phase 3.** The question that opened this file -- can we
+  benchmark a real TUI under a held key -- has an upstream survey (`F1`) and an
+  unmeasured hypothesis (`H4`) and nothing else. No direction gate has been put
+  to the user, and the subject choice (`less`/vim over btop, on attribution
+  grounds) is a substitution that needs raising rather than assuming.
+- **`H3`, parked with a reopening condition**: drain is quieter than the metric
+  that carries the frozen rule (`F4`), so it would be the better deciding metric
+  for this workload -- but taking it means recalibrating thresholds that docs
+  8-18 rest on, for a quantity 96% correlated with the one already there. Reopen
+  only if `scrollback-stream` starts returning `inconclusive` often enough to
+  obstruct work.
+- **The vtebench payload import**, logged in Open questions and owned by no file.
+
+Close this file when `D2` is decided either way. Deciding *not* to build the
+interactive workload closes it just as legitimately as building one -- the
+rejection reason is the valuable artifact, and it belongs in Rejected.
