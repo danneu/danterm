@@ -1,10 +1,12 @@
 # PTY throughput reporting and interactive stimulus coverage
 
-Research started: 2026-07-30. **Status: OPEN -- Phase 1 done from evidence
-already on disk; nothing built, no direction gate passed.**
-Deliverable is a decision on what throughput quantity the benchmark system
-should report (`D1`), and a judgement on whether a keypress-driven interactive
-workload is worth building (`D2`).
+Research started: 2026-07-30. **Status: OPEN -- Phases 1-2 shipped, Phase 3
+built and screened; `D4` is the one gate still open.**
+Deliverables: what throughput quantity the benchmark system should report
+(`D1`, decided and shipped), whether a keypress-driven interactive workload is
+worth building (`D2`, decided -- no, take a recording instead), whether that
+recording earns a workload (`D3`, admitted) and in what shape, and whether it
+freezes into a deciding rule (`D4`, **open**).
 Continues: no ancestor. Adjacent to doc 8 (benchmark variance) and doc 17
 (auxiliary metrics and their calibration), whose rules are inherited rather than
 re-derived.
@@ -126,6 +128,9 @@ draw by the five existing workloads and the queue wait by doc 19. So the
 hypothesis is true as stated and much less interesting than it sounded. See `D2`.
 
 ## Candidate direction, pending evidence
+
+**Superseded: this was `D1`'s provisional pitch, and `D1` selected it and shipped
+it in `995c8e8`. Kept as written so the decision log's inputs stay legible.**
 
 Provisional, pending `D1`: report the split descriptively on `scrollback-stream`
 -- drain ms, derived MB/s, and the draw tail (`finalDraw - producerWrite`) --
