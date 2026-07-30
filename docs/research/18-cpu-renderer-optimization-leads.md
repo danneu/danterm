@@ -1,11 +1,14 @@
 # CPU renderer optimization leads
 
 Research started: 2026-07-29. **Status: OPEN -- survey complete; two of the five
-tier-1 leads taken and confirmed (`L3`/`F10`, `L2`/`F11`), the rest still gated.**
+tier-1 leads taken and confirmed (`L3`/`F10`, `L2`/`F11`), the bracket re-captured
+and the remainder re-ranked (`F12`/`D3`), the rest still gated.**
 Deliverable is the API inventory (`F1`), the decomposition of the one decidable
-renderer bracket (`F4`-`F8`), the ranked lead list (`D1`), and the paired-benchmark
-verdict for each lead as it lands (`F10` onward). Together the two taken leads cut
-the draw bracket roughly in half on all three draw workloads.
+renderer bracket (`F4`-`F8`, superseded in its shares by `F12`), the ranked lead
+list (`D1`, re-ordered by `D3`), and the paired-benchmark verdict for each lead as
+it lands (`F10` onward). Together the two taken leads cut the draw bracket roughly
+in half on all three draw workloads -- **confirmed independently at -42.8% on-CPU
+by `F12`** -- which also halved the denominator every remaining lead is quoted in.
 Continues: [17-cpu-profile-sweep.md](17-cpu-profile-sweep.md) (`17/F2`, `17/F3`,
 `17/F6`, `17/F17`, `17/D8`), [11-render-frame-budget.md](11-render-frame-budget.md)
 (`11/F7`, `11/F8`, `11/F10`).
@@ -99,9 +102,10 @@ Added here:
 
 ### Phase 4 -- code-candidate direction gate
 
-**Opened by user direction on 2026-07-29 for `L3`, then `L2`.** Listed in `D1`'s
-recommended order; each entry is one commit-sized candidate with its own paired
-benchmark. Everything still unchecked remains gated.
+**Opened by user direction on 2026-07-29 for `L3`, then `L2`.** Each entry is one
+commit-sized candidate with its own paired benchmark. The first two were taken in
+`D1`'s order; everything after the re-capture is in `D3`'s. Everything still
+unchecked remains gated.
 
 - [x] **`L3` -- guard the sprite switch** (`>= 0x2500`). ~5% of the bracket.
       First because it is a few lines, its guarding test outlives it, and its
@@ -116,34 +120,51 @@ benchmark. Everything still unchecked remains gated.
       `confirm`: `content-churn` -49.43%, `style-churn` -53.16%,
       `incremental-mixed` -42.95%. Four times the estimate, because a table hit
       also skips the intermediate buffers -- see `F11`.**
+
+**Order below is `D3`'s, which supersedes `D1`'s for everything unchecked.**
+
+- [x] Capture at HEAD, both churn workloads. **Done -- `F12`. Retired every share
+      in `F4`, promoted `L4` from tier 2 to first, and reversed `L5` and `L1`.**
+- [ ] **`L4` -- write into pre-sized buffers** instead of per-element `Array.append`
+      in the run loop. **25-28% of the live bracket, the largest single mechanism
+      in it** (`F12`). Was tier 2 solely because `F8`'s attribution was unconfirmed;
+      `F11` and `F12` confirmed it by deletion-and-measure, so it is tier 1 and
+      first. Changes no output and no draw order.
+- [ ] **`L5` -- intern `CGColor`s and hoist the color space.** Up to ~23% of the
+      live bracket, shared with `L1`: `F12` finding 2 shows the two attack one
+      dedup block from opposite ends, and this is its Low-risk end. Carries a
+      pre-registered mechanism prediction (`D3`) resting on one unverified
+      assumption about `CGColorCompare` -- check that first.
 - [ ] **`L1` -- batch glyph submission** by (face, color) across the damaged
-      region. ~11%, and the only tier-1 lead whose *mechanism* the benchmark can
-      confirm or refute, via `F9`'s prediction that `content-churn` and
-      `style-churn` must diverge.
-- [ ] **`L6` -- batch fills by color**, then **`L5` -- intern `CGColor`s and
-      hoist the color space.** Sizes overlap `L1`'s; re-read the bracket between
-      them rather than pitching a combined number.
-- [ ] **`L4` is now mostly spent, and not by the route it was queued for.** `F11`
-      removed the intermediate buffers from the ASCII path rather than making them
-      cheaper, and took a win far larger than the cmap share alone -- so `F8`'s
-      27% was substantially real. What remains of `L4` applies only to the
-      non-ASCII residue. If the exact split between cmap and buffers is ever
-      wanted, `F11` names the one-variant experiment that yields it.
+      region. ~12% of its own plus the dedup block `L5` shares. Third now, not
+      because it shrank -- it did not -- but because `D3` prefers the low-risk half
+      of a shared mechanism first, and because `L1` is the only tier-1 lead with a
+      real ordering risk. Still the only tier-1 lead whose *mechanism* the benchmark
+      can confirm or refute, via `F9`'s prediction that `content-churn` and
+      `style-churn` must diverge -- now readable against `F12`'s measured
+      per-workload baselines instead of `17/F4`'s assumed-identical ones.
+- [ ] **`L6` -- batch fills by color.** 7-19% and sharply content-dependent
+      (`F12`): 18.6% of the `content-churn` bracket, 7.0% of `style-churn`'s. Size
+      it from the inclusive figure, not `F12`'s leaf row, which reads ~0% because
+      `fill`'s cost is inside the recorder.
 - [ ] Optional tooling, not a decision rule: the per-draw run-count and
       glyph-call counters `F9` asks for, which would make `L1`/`L6` predictable
       in advance instead of only measurable afterwards.
-- [ ] A fresh capture is **not** a precondition for the leads above, and here is
-      why: `git diff --stat 4ecb032..HEAD -- lib/TerminalCore app` touches only
-      `app/TerminalBenchmark.swift`, `TerminalCore/Terminal.swift`, and one test
-      file. **`TerminalRenderExecution` and `TerminalRenderPlanning` are
-      unchanged since the trace**, so `F4`'s bracket decomposition describes
-      HEAD's renderer exactly. Take a capture when a lead's *own* prediction
-      needs re-reading after it lands, or a `style-churn` capture if `L1` is
-      taken (`F9`) -- not before starting.
+- [x] The capture above was originally listed here as **not** a precondition, on
+      the grounds that `TerminalRenderExecution` was unchanged since the `4ecb032`
+      trace. `F10` and `F11` voided that justification and the item was inverted
+      into a requirement, then done. **Recorded because the reasoning failed in a
+      reusable way:** the bullet was true when written and became false without
+      anything editing it, because it asserted a fact about HEAD inside a document
+      whose whole purpose was to change HEAD. Any claim of the form "no fresh
+      measurement needed, because the code has not moved" expires the moment a lead
+      lands. `F12` found the bracket had halved and two leads had changed rank.
 
-Tier 2 and tier 3 leads (`L9`-`L15`) are deliberately absent from this ledger.
-Tier 2 is available but unranked against tier 1 until tier 1 is spent; tier 3 has
-no instrument that can score it and would need a new decision rule first.
+The remaining tier 2 and tier 3 leads (`L9`-`L13` minus `L4`, plus `L14`-`L15`) are
+deliberately absent from this ledger. `L4` is present because `D3` promoted it to
+tier 1 on `F12`'s evidence; the rest of tier 2 is available but unranked against
+tier 1 until tier 1 is spent, and tier 3 has no instrument that can score it and
+would need a new decision rule first.
 
 ## The renderer's exact API surface
 
@@ -279,6 +300,11 @@ unavailable-free on the macOS 26 deployment target (`Package.swift:6`).
   original to this file and verify them before trusting them.
 
 ## Findings log
+
+**`F4`-`F8` describe the renderer at `4ecb032`, before `L3` and `L2` landed. Their
+percentages are superseded by `F12`, which re-captured the bracket at HEAD; read
+them as history and take live sizes from `F12`.** `F6`'s internal decomposition of
+`dlRecorder_DrawGlyphs` is the exception -- `L2` did not touch that node.
 
 Provenance for every number in `F4`-`F8`: re-analysis of the **existing**
 `full-screen-content-churn` Time Profiler artifact from `17/F1`
@@ -581,19 +607,36 @@ produces, and `F9` says so.
   `_ArrayBuffer.beginCOWMutation` 14.3% plus `Array.replaceSubrange` 11.3%; and
   it skips the `repeatElement` growth of `glyphs` plus the second pass over
   `candidateCells`. Those add to roughly the observed figure.
-- **This partly answers `F8`'s open question, and not by the method `F8` asked
-  for.** `F8` attributed ~27% to array growth via an inlining attribution and
-  demanded an ablation before that number could be quoted. No ablation was run.
-  Instead the arrays were *removed* from the ASCII path, and draw time fell by far
-  more than the cmap share alone can explain. That is evidence the 27% was
-  substantially real, but it is inference from a two-mechanism commit, not
-  isolation: this run cannot say how the ~50% divides between the cmap and the
-  buffers.
+- **This answers `F8`'s open question, and by a better route than the ablation
+  `F8` asked for.** `F8` attributed ~27% to array growth via an inlining
+  attribution and demanded confirmation before the number could be quoted. What
+  ran is a confirmation of the right kind: the arrays were *deleted* from the ASCII
+  path and the bracket was re-measured. That is not the parent-minus-child
+  inference `17/D5` retired a candidate for. `F12`'s fresh capture then supplies
+  the split directly, because the cmap is now **absent** from the trace rather than
+  merely smaller: of the 804 ms the bracket lost, `L3` accounts for 94 ms and the
+  cmap for 301 ms, leaving **409 ms = 22.9% of the post-`L3` bracket** for the
+  buffer traffic plus the second correlation pass. See `F12` for the arithmetic
+  and its caveat.
+- So `F8`'s 27% is **corroborated but not exceeded**: 22.9% measured on the
+  profiler, or ~28% if the paired benchmark's larger total (-49.43% versus the
+  profile's -39.8%) is the truer one. An earlier draft of this finding claimed the
+  residue *exceeded* 27%; that was arithmetic across two disagreeing instruments --
+  it took the paired benchmark's total and the profiler's cmap share -- and it is
+  withdrawn. `F8`'s figure is quotable now, as an estimate that landed, and should
+  be cited to `F12` rather than to `F4`'s attribution.
 - The split is cheap to settle if anyone needs the number: benchmark a throwaway
   variant that consults the table but still pushes each hit through
   `characters`/`glyphs` as before. The difference between that and this commit is
   the buffer share. Nothing currently queued depends on the answer, which is why
   it was not run.
+- **`content-churn` and `style-churn` moving together here is expected and is not
+  evidence against `F9`.** Like `L3` (`F10`), `L2`'s mechanism keys on character
+  repertoire, which the two corpora share; `F9`'s divergence prediction keys on
+  *run counts*, which they differ on sharply. Two leads have now moved both
+  workloads symmetrically, which makes this worth stating explicitly: do not read
+  the accumulated symmetry as `F9`'s prediction having already failed. It remains
+  unfired and still belongs to `L1` alone.
 - Uncertainty: the three draw workloads' corpora are ASCII-dominated, so the
   table's hit rate there is near 100%. A CJK-heavy or emoji-heavy session keeps
   the old path for most cells and would see far less. The win is real but its size
@@ -607,6 +650,140 @@ produces, and `F9` says so.
   alignment test compares each cell against an isolated control, so glyphs are
   neither dropped nor displaced. The whole existing bitmap suite (97 tests) is
   unchanged and green.
+
+### F12 -- the bracket re-captured at HEAD: half the size, a different composition, and the two churn workloads are no longer interchangeable
+
+- Status: recorded. **Two fresh captures, and the first `style-churn` trace this
+  project has ever decomposed.** These supersede every *share* in `F4`.
+- Artifacts (**disposable**, per this section's provenance rule; every
+  decision-bearing number is transcribed below):
+  `.build/terminal-benchmark-profiles/2026-07-29-234114-17411` (`content-churn`,
+  16,818 ms on-CPU) and `.../2026-07-29-234237-18718` (`style-churn`, 17,191 ms).
+  Regenerate a folded view of either with `just benchmark-report <dir>`.
+- Method: `just benchmark-trace full-screen-content-churn "Time Profiler" 30` and
+  the same for `full-screen-style-churn`, at HEAD `b9e77fe` (post-`L3`, post-`L2`).
+  Both sustained and frame-capped at ~119 draws/s, matching `17/F16`. Leaf
+  attribution is used for ranking because leaf weight *partitions* the bracket and
+  can therefore be compared across mechanisms; `F4`'s inclusive shares overlap and
+  cannot.
+
+**The bracket, then and now (`content-churn`):**
+
+| | `4ecb032` (`F4`) | HEAD (`F12`) | change |
+| --- | ---: | ---: | ---: |
+| workload on-CPU total | 18,008 ms | 16,818 ms | -6.6% |
+| **draw bracket** | **1,879 ms** | **1,075 ms** | **-42.8%** |
+| bracket as % of workload | 10.43% | 6.39% | -- |
+| workload minus bracket | 16,129 ms | 15,743 ms | -2.4% |
+
+- The last row is what licenses comparing the absolute millisecond figures at all:
+  non-draw work held to within 2.4% across the two captures, so the bracket's
+  804 ms loss is the bracket's, not a shorter capture's.
+- **-42.8% here versus -49.43% from the paired benchmark on the same workload
+  (`F11`).** Two independent instruments -- on-CPU sampled milliseconds versus
+  wall-clock `drawNanosecondsPerDraw` -- agreeing on direction and magnitude while
+  disagreeing by ~6.6 points. Neither is corrected against the other. Anywhere this
+  file needs the difference between two mechanisms, that ~6.6-point spread is the
+  floor on what it can resolve, which is why `F11`'s withdrawn "exceeds 27%" claim
+  was unsound.
+
+**Where the 804 ms went, and the `F8` split `F11` said was unmeasured:**
+
+- `CTFontGetGlyphsForCharacters` and `TFormat4UTF16cmapTable::MapT` are **entirely
+  absent from HEAD's trace** -- 301 ms and 261 ms respectively at `4ecb032`, and no
+  sample at all now. `L2` did not shrink the cmap path; it removed it.
+- The despecialized `RangeExpression.contains` protocol witness fell 98 ms -> 4 ms,
+  and what remains appears as an *inlined* `specialized ClosedRange.contains` leaf
+  (11 ms / 20 ms). `L3`'s mechanism is likewise confirmed at the profile level: the
+  witness dispatch is gone, not merely called less.
+- Arithmetic: 804 ms lost = 94 ms (`L3`) + 301 ms (cmap) + **409 ms residual**.
+  Against the post-`L3` bracket of 1,785 ms that residual is **22.9%**, and it is
+  the buffer traffic plus the second pass over `candidateCells`. This is the number
+  `F11` said nothing queued needed; the capture supplied it for free.
+- Caveat on that split: it assumes `L3`'s and `L2`'s savings are independent and
+  that no third thing changed between the two commits. Both commits are small and
+  touch disjoint code, so the assumption is cheap, but it is an assumption.
+
+**Leaf weight inside the bracket, grouped by the mechanism each lead targets.**
+Additive, and this is the ranking table that replaces `F4`:
+
+| mechanism | `content-churn` | `style-churn` |
+| --- | ---: | ---: |
+| `L4` Swift array / COW traffic | 272 ms **25.3%** | 283 ms **27.9%** |
+| `L1`+`L5` display-list state and color dedup | 247 ms **23.0%** | 223 ms **22.0%** |
+| `L1` glyph entry recording (per call) | 127 ms **11.8%** | 131 ms **12.9%** |
+| allocator | 72 ms 6.7% | 53 ms 5.2% |
+| CF retain / release | 34 ms 3.2% | 25 ms 2.5% |
+| `L13` `TerminalScalars` copy/consume | 25 ms 2.3% | 27 ms 2.7% |
+| `L3` sprite classification (residual) | 11 ms 1.0% | 20 ms 2.0% |
+| `L6` fill submission (leaf only -- see below) | 1 ms 0.1% | 0 ms 0.0% |
+| unattributed long tail (168 / 141 distinct leaves) | 286 ms 26.6% | 251 ms 24.8% |
+
+- The unattributed bucket was inspected and holds nothing large: its biggest entry
+  is `drawTextRuns`'s own body at 2.7%, then a flat tail of sub-1% frames. It is
+  tail, not a hidden mechanism.
+- **`L6` reads as ~0% as a leaf and 7-19% inclusive**, because `fill(rect)`'s cost
+  is *inside* the recorder -- it lands in the state/color dedup group and the tail.
+  Size `L6` from the inclusive figure (`CGContextFillRect` 200 ms = 18.6% on
+  `content-churn`, 71 ms = 7.0% on `style-churn`), and treat the leaf row as a
+  reminder that batching fills buys entry-dedup work, not `fill` calls.
+
+**Three things this changes.**
+
+1. **`L4` is not spent.** `F11` and an earlier revision of this ledger said `L4`
+   was "mostly spent" because `L2` removed the ASCII glyph buffers. Wrong: Swift
+   array and COW traffic is still the **single largest mechanism in the bracket**
+   at 25-28%, ahead of everything else. `swift_isUniquelyReferenced_nonNull_native`
+   plus its DYLD stub alone is 8.9% / 10.9%, with `_platform_memmove` at 5.8% /
+   7.2% and `Array._getElement` / `_checkSubscript` / `append` /
+   `_reserveCapacityAssumingUniqueBuffer` filling the rest. `L2` removed three
+   arrays from one path; the rest of the run loop still appends per element. `L4`
+   is promoted to tier 1 on this evidence -- its precondition is met (`F11`,
+   `F8`) and it is now the largest item.
+2. **`L1` and `L5` are one mechanism, and the leaf census says which half is
+   cheap.** The 23% dedup group is not generic bookkeeping: its contents are
+   `CGColorCompare` (5.4% / 4.0%), `CompareEntryStateDrawing` (3.3% / 2.8%),
+   red-black-tree inserts (1.4% / 2.0%), `__CFStringEqual` (1.7% / 1.8%),
+   `getEntryFillState`, `getEntryDrawingState`, `CGColorGetContentHeadroom`, and
+   `pow` (1.9% / 2.0%). That is CoreGraphics **deduplicating each entry's color and
+   state against the resources it has already recorded, by value comparison**.
+   `F1` item 3 says DanTerm hands it a freshly allocated `CGColor` per color per
+   run, so every entry forces a full component compare and colorimetry. `L1`
+   reduces how many entries pay that; `L5` reduces the cost each payment incurs.
+   **`L5` is the Low-risk half of the same 23%**, and `pow` +
+   `CGColorGetContentHeadroom` appearing at all is direct evidence that per-draw
+   `CGColor` construction is doing colorimetric work a hoisted, interned color
+   would do once.
+3. **`content-churn` and `style-churn` are no longer interchangeable, so
+   `17/F4`'s assumption is now false where `F9` needs it most.** Their bracket
+   *totals* are close (1,075 vs 1,013 ms), which is why `17/F4` read them as
+   indistinguishable, but their *composition* diverges sharply: `drawTextRuns` is
+   68.4% of the bracket on `content-churn` and **81.3%** on `style-churn`, while
+   fill submission is 18.6% and **7.0%**. `dlRecorder_DrawGlyphs` is 30.8% versus
+   **43.1%** inclusive. This is exactly the load-bearing assumption the caveats
+   section flagged, and taking the capture retired it: `L1` must now be read
+   against two workloads known to differ in composition, not two assumed to match.
+
+- **`L9`'s target has grown relative to everything decidable.**
+  `TGlyphOutlineDictionaryCache` is 10.84% / 10.20% of the workload inclusive --
+  now **1.7x the entire draw bracket**, where at `4ecb032` it was comparable to it.
+  Nothing about `17/D7` changes: it is still off-thread and still unscoreable. But
+  the honest summary of this capture is that the two landed commits shrank the one
+  region this project can decide, and thereby made the undecidable region the
+  dominant one. Read `D1`'s remaining tier 1 as optimizing 6% of the workload.
+- Uncertainty: one capture per workload, no replicate -- doc 9's two-profile rule
+  is satisfied across *workloads* but not within one. Loop profiling still forces
+  full-viewport redraw (`17`, caveats), so run counts sit at maximum and `L6`'s and
+  `L1`'s sizes remain content-dependent per `F9`.
+- Uncertainty, and the reason `F4`'s per-node absolute figures were not carried
+  forward: several individual nodes moved in directions no code change explains
+  (`RenderColor.cgColor` 77 -> 203 ms, `_createNewBuffer` 28 -> 361 ms,
+  `TerminalScalars.Storage` 63 -> 712 ms inclusive) while the bracket containing
+  them fell 43%. With the cmap call gone, more of `drawTextRuns` inlines and the
+  symbolizer re-attributes; this is `F8`'s hazard appearing again from the other
+  side. **Do not compare a single node's absolute weight across these two
+  captures.** Compare the bracket total, and compare mechanism groups within one
+  capture.
 
 ## Decision log
 
@@ -624,7 +801,7 @@ produces, and `F9` says so.
 
 | # | Lead | Size (% of bracket) | Risk | Smallest first experiment |
 | --- | --- | ---: | --- | --- |
-| `L1` | **Batch glyph submission.** Accumulate glyphs and positions across *all* rows into one buffer per (face, color) for the whole draw; issue one `CTFontDrawGlyphs` per batch instead of one per row per style. Attacks the per-entry color-resource and fill-state construction in `F6`, plus the wrapper and antialias-style lookups. | **~11%** (`F6`), and it also cuts CA-side replay entries | Medium. Draw order changes: all text of one color is submitted before another color's. Text runs do not overlap by construction -- one glyph per cell at a cell-quantized position (`F1` item 1 for the run shape, `TerminalRenderExecution.swift:649-653` for the position derivation) -- so the composite result is identical, but that invariant must be asserted, not assumed. Decorations and cursor must stay ordered after text. | Batch by (face, color) only, keep the existing per-row loop for sprites and fills. Snapshot-test a frame containing every style combination, then run `just benchmark-quick` and read `content-churn` against `style-churn` per `F9`'s prediction. |
+| `L1` | **Batch glyph submission.** Accumulate glyphs and positions across *all* rows into one buffer per (face, color) for the whole draw; issue one `CTFontDrawGlyphs` per batch instead of one per row per style. Attacks the per-entry color-resource and fill-state construction in `F6`, plus the wrapper and antialias-style lookups. | **~11%** of `F4`'s bracket (`F6`) = **~20-22% of the post-`F11` bracket**, since `L2` left this node untouched while halving the denominator; it also cuts CA-side replay entries | Medium. Draw order changes: all text of one color is submitted before another color's. Text runs do not overlap by construction -- one glyph per cell at a cell-quantized position (`F1` item 1 for the run shape, `TerminalRenderExecution.swift:649-653` for the position derivation) -- so the composite result is identical, but that invariant must be asserted, not assumed. Decorations and cursor must stay ordered after text. | Batch by (face, color) only, keep the existing per-row loop for sprites and fills. Snapshot-test a frame containing every style combination, then run `just benchmark-quick` and read `content-churn` against `style-churn` per `F9`'s prediction. |
 | `L2` | **Taken; `faster` on all three draw workloads at ~4x the estimate -- see `F11`. Memoize character-to-glyph mapping** per face: 128-entry direct array for ASCII plus a dictionary tail, built lazily, owned by `TerminalFontSet` (`TerminalRenderExecution.swift:111-141` -- immutable after `init` and already `@unchecked Sendable`, so adding mutable state to it is a synchronization decision, not a free change; prefer per-draw-thread ownership over a lock). | **10-14%** (`F7`); measured -49% to -53% | Low. `F2` proves purity from the header. Behavior-preserving by construction. | Cache only the ASCII range first; measure; extend to the dictionary tail only if the residue justifies it. Test: a run of every BMP scalar the fixtures cover maps identically with and without the cache. |
 | `L3` | **Guard the sprite switch** with `scalar.value >= 0x2500` before the eight-arm range match. **Taken; `faster` on both draw workloads -- see `F10`.** | **~5%** (`F8`); measured -6.76% / -6.08% | Very low. Pure control flow; the guard's bound is verifiable against the eight constants in one grep. | Add the guard plus a test that asserts every family's `coarseRange.lowerBound >= 0x2500`, so the guard cannot silently outlive the constant that justifies it. This is the file's recommended *first* commit regardless of what else is taken. |
 | `L6` | **Batch fills by color.** Background, selection, and search-match runs each call `fill(rect)` per run; group by color and issue one `fill(rects)` per color per draw, and merge vertically adjacent equal-color spans. Each avoided call is also an avoided display-list entry with its own `colorResourceForColor` + `getEntryFillState` (`F6`). | up to **~14%** (`F4`, `CGContextFillRect`/`FillRects`); content-dependent per `F9` | Low. Fills are opaque and non-overlapping within a layer; the three layers keep their existing relative order. | Backgrounds only, grouped by color. `fill(rects)` is already used by the sprite path, so the idiom is established. |
@@ -634,7 +811,7 @@ produces, and `F9` says so.
 
 | # | Lead | Size | Note |
 | --- | --- | ---: | --- |
-| `L4` | **Replace per-element `Array.append` in the run loop with writes into pre-sized unsafe buffers.** | claimed 27% of the bracket, **unconfirmed** | `F8`. Blocked on confirming the inlining attribution first; `17/D5` retired a candidate sized exactly this way. Confirm, then it is arguably tier 1. |
+| `L4` | **Replace per-element `Array.append` in the run loop with writes into pre-sized unsafe buffers.** | was 27% of `F4`'s bracket, unconfirmed; **now confirmed and measured at 25-28% of the live bracket** | **Promoted to tier 1 and to first position by `D3`.** It sat here only because `F8`'s inlining attribution was the shape `17/D5` retired a candidate for. `F11` met that precondition by deletion-and-measure and `F12` measured what remains: still the largest single mechanism in the bracket. |
 | `L10` | **Multiple dirty rects.** Use `getRectsBeingDrawn(_:count:)` instead of the union `dirtyRect`, so damage on rows 3 and 60 stops repainting rows 3-60. | 0% on this workload; potentially large on real incremental output | `F1` item 5 + `F3`. Invisible to all three churn workloads (full-viewport damage) -- it would be decided by `incremental-mixed`, whose draw verdict is real but whose trace is ~1/6 instrument (`17/F2`). Correctness-positive regardless. |
 | `L11` | **View/layer configuration:** `isOpaque = true`, `wantsDefaultClipping = false`, `layerContentsRedrawPolicy = .onSetNeedsDisplay`, and drop one of the two background fills (`F1` item 6). | unmeasured; individually small | `F3`'s WWDC checklist. Cheap, low-risk, and each item is independently revertible. `isOpaque` has a visual precondition: the view must genuinely paint every pixel of its bounds, which `F1` item 6 says it does. |
 | `L12` | **Bypass the CoreText wrapper** for the common path: cache `CGFont` per face, `setFont` + `setFontSize` once, then `showGlyphs(_:at:)`. | ~2.7% of the bracket (`F6`) | **Strictly a subset of `L1`'s win.** Do not take it before `L1`; reconsider only if `L1` leaves a measurable wrapper residue. Loses CTFont matrix/variation handling, which DanTerm does not currently use but which a future font feature might. |
@@ -648,7 +825,8 @@ produces, and `F9` says so.
 | `L14` | **Rasterize into an owned bitmap and hand the layer a `CGImage`** via `wantsUpdateLayer`/`updateLayer`, eliminating display-list recording and CA's replay entirely, and enabling a scroll to become a blit of the previous frame. | The architectural answer to `F5`, and the only lead that could remove `17/F6`'s node rather than shrink it. It moves rasterization onto DanTerm's thread, so it would make the draw verdict *larger* while making total process CPU smaller -- i.e. it is scored `slower` by the only calibrated rule available. Needs a new decision rule before it can be attempted honestly. |
 | `L15` | **Metal glyph atlas.** | `09-renderer.md` defers it by design (`plan-terminal-engine/09-renderer.md:35, 62, 75`), and `F3` notes it is what every fast terminal did. Out of scope for a *CPU renderer* file; recorded so the ranking is not mistaken for a claim that the CPU path can win outright. |
 
-- Recommended order: **`L3`, then `L2`, then `L1`, then `L6`/`L5`.** `L3` first
+- Recommended order **as written on 2026-07-29 before any lead landed; see `D3`
+  for the order in force**: `L3`, then `L2`, then `L1`, then `L6`/`L5`. `L3` first
   because it is a few lines, has a test that outlives it, and its ~5% is real:
   it establishes whether the draw verdict can see a change of that size at all,
   which is information every later lead needs. `L2` second because it is the
@@ -672,6 +850,73 @@ produces, and `F9` says so.
   and `17`'s pre-rejected list forbids using `F6`-style shares to reopen the
   compositing stall. `F5` explains the *mechanism* behind those shares and `L14`
   records the only lead that would address them, in tier 3, unscored.
+
+### D3 -- re-ranked against `F12`'s live bracket; `L1`'s ordering risk is no longer worth paying first
+
+- Status: **supersedes `D1`'s recommended order for everything not yet taken.**
+  `D1`'s tier assignments and risk notes stand; its *sizes* and its *sequence* are
+  re-derived here against `F12` rather than `F4`.
+- Why re-rank at all: `D1` ordered by size against a denominator that `L3` and `L2`
+  then halved, and it sized every lead from overlapping inclusive shares. `F12`
+  measures the same leads as additive leaf groups against the bracket that exists
+  today, and two of them changed rank.
+
+| lead | `D1`'s size (`F4`) | `F12`'s size (live bracket) | risk | rank |
+| --- | ---: | ---: | --- | ---: |
+| `L4` pre-sized buffers instead of per-element `append` | 27%, unconfirmed, tier 2 | **25-28%**, confirmed | Low-Medium | **1st** |
+| `L5` intern `CGColor`s + hoist the color space | ~5.5% | **up to ~23%**, shared with `L1` | Low | **2nd** |
+| `L1` batch glyph submission by (face, color) | ~11% | **~12% own + the same ~23% `L5` shares** | Medium | **3rd** |
+| `L6` batch fills by color | up to ~14% | **7-19%**, content-dependent | Low | 4th |
+
+- **`L4` first.** It is now the largest single mechanism, its `17/D5`-shaped
+  precondition has been met by deletion-and-measure rather than by attribution
+  (`F11`, `F12`), and it changes no draw order and no output -- the same properties
+  that made `L3` the right first commit. It was tier 2 only because it was
+  unconfirmed, and it no longer is.
+- **`L5` before `L1`, reversing `D1`.** `F12` finding 2 shows they attack one 23%
+  block from opposite ends: `L1` reduces the number of display-list entries that
+  pay for color and state dedup, `L5` reduces what each payment costs. `L5` is Low
+  risk and touches no ordering; `L1` is the only tier-1 lead with a real ordering
+  risk. Taking the low-risk half of a shared mechanism first is the same reasoning
+  that put `L3` before `L2`, and it has the same payoff: `L1` is then read against a
+  bracket where the cheap half of its win is already banked, so an `equivalent`
+  verdict on it means something.
+- **How firm that reversal is.** `L5`'s *floor* is `F4`'s ~5.5% -- the `CGColor`
+  construction and color-space creation DanTerm performs itself, which interning
+  removes whatever CoreGraphics does downstream. Its *ceiling* is the 23% block, and
+  reaching it depends on an assumption the SDK cannot confirm (next bullet). So the
+  reversal is justified by risk and by cheapness, **not** by `L5` having a larger
+  expected win than `L1`: on floors alone `L1` (~12% of its own) is bigger. Anyone
+  who would rather take the bigger floor first and accept the ordering risk should
+  take `L1` second instead -- that is a defensible reading of the same table, and
+  `L4` is first either way.
+- **Pre-registered prediction for `L5`, since `F12` gives it one for the first
+  time:** if the 23% dedup group is dominated by *value* comparison of freshly
+  allocated `CGColor`s, then interning them so CoreGraphics sees pointer-identical
+  colors should collapse `CGColorCompare`, `CGColorGetContentHeadroom`, and `pow`
+  together. If `L5` lands as `equivalent` while those three frames survive at their
+  current weight, the mechanism attributed in `F12` finding 2 is wrong and `L1`'s
+  entry-count reduction is the only route to that 23%.
+- **The assumption underneath that prediction is unverified, and the headers cannot
+  settle it.** The prediction's strong form needs `CGColorCompare` to short-circuit
+  on pointer equality. `CGColor.h:110-112` documents `CGColorEqualToColor` as only
+  "Return true if `color1' is equal to `color2'; false otherwise" -- no statement
+  about identity, and `CGColorCompare` is not public at all. Checked so nobody
+  re-checks: **this is not answerable from the SDK.** Treat `L5` as sized at "up to
+  23%" with a floor of `F4`'s own ~5.5% (the `CGColor` construction DanTerm does
+  itself, which interning removes regardless of how CG compares), and let the
+  paired benchmark decide the rest. Do not pitch the 23% as `L5`'s expected win.
+- **`F9`'s divergence prediction still belongs to `L1` alone** and is unaffected by
+  this reordering. `L4` and `L5` are per-cell and per-color costs, not per-run, so
+  both should move both workloads together -- as `L3` and `L2` did (`F10`, `F11`).
+  `F12` finding 3 sharpens the test: the two workloads are now known to differ in
+  composition, so `L1`'s read is against measured baselines rather than an assumed
+  shared one.
+- `L4`, `L5`, `L1`, and `L6` all overlap somewhere. **Their sizes remain
+  non-additive**, and `F12` does not change `D1`'s instruction to re-read the
+  bracket between them rather than pitching a combined number. What `F12` adds is
+  that re-reading is now cheap and mandatory: the last two commits moved the
+  denominator by half, and nobody noticed until the capture.
 
 ## Pre-rejected
 
@@ -697,23 +942,31 @@ Added by this file:
 - **Sizing any glyph-drawing candidate per glyph.** `F6` measured the split:
   59% per-call, ~15% per-glyph. A pitch that multiplies a per-glyph cost by the
   cell count is wrong by roughly 4x in the direction that makes it look good.
-- **Quoting `F8`'s 27% array-growth figure.** It rests on an inlining
-  attribution that `17/D5` specifically retired a candidate for. It is a
-  precondition, not a size.
+- **Quoting `F8`'s 27% array-growth figure *as an inlining attribution*.** It
+  rested on exactly the parent-minus-child reading `17/D5` retired a candidate
+  for. `F11` has since met the precondition by deletion-and-measure and bounded
+  the figure from below at ~30%, so the number is now quotable -- but cite `F11`
+  for it, not `F4`'s attribution.
 
 ## Open questions and caveats
 
-- **No new capture was taken.** Every number here is re-analysis of one existing
-  30-second `content-churn` trace at `4ecb032` (`17/F1`), and HEAD is now
-  `8e9f538`. Doc 9's two-profile rule is unsatisfied. A candidate should get its
-  own capture at HEAD before it is benchmarked.
+- **Every share in `F4` is now stale.** All of them are re-analysis of one
+  existing 30-second `content-churn` trace at `4ecb032` (`17/F1`), taken before
+  `F10` and `F11` roughly halved the bracket. The *absolute* millisecond figures
+  and `F6`'s internal decomposition of the recorder node still describe HEAD's
+  unmodified code paths; the *percentages* describe a denominator that no longer
+  exists. Convert before pitching (the second investigation rule), and take the
+  capture the ledger now requires before `L1`. Doc 9's two-profile rule is still
+  unsatisfied.
 - **Loop profiling mode forces a full-viewport redraw**, so the bracket was
   measured at maximum glyph count. The ratios in `F4` are more robust to this
   than absolute shares would be, but `L1`'s and `L6`'s wins scale with the run
   count the stimulus produces, and `F9` shows the two churn workloads sit at
   opposite ends of that. Neither reflects a real TUI.
-- **`F8`'s array attribution is unconfirmed** and is the largest single number in
-  `F4`. Everything downstream of it (`L4`) is blocked on an ablation.
+- **`F8`'s array attribution is confirmed from below** by `F11`: at least ~30% of
+  `F4`'s bracket, measured by deletion rather than by frame subtraction. What
+  remains unmeasured is the exact cmap/buffer split, and `L4`'s residue now applies
+  only to the non-ASCII cells that still traverse the buffers.
 - **`F6`'s 24.3% recursive residual** is unsplit; the 59% per-call figure should
   be read as a 50-65% band.
 - **`F5`'s recorder path may be conditional.** If CoreGraphics picks the
@@ -725,10 +978,11 @@ Added by this file:
   larger than any node in the draw bracket -- and every instrument this project
   has is blind to it (`17/D7`). This is the same trap `17` fell into with
   candidate A; the difference is that here it is labelled tier 3 up front.
-- **`style-churn` was not re-analyzed.** `17/F4` found it CPU-indistinguishable
-  from `content-churn` at rest, so its bracket decomposition is assumed to match.
-  `F9` predicts the two must *diverge* under `L1`, which means that assumption
-  is load-bearing exactly where it is least tested. Capture it if `L1` is taken.
+- **`style-churn` has now been decomposed (`F12`) and the assumption it inherited
+  was false.** `17/F4` found it CPU-indistinguishable from `content-churn` at rest,
+  and this file assumed the bracket decomposition matched. Totals do match within
+  6%; composition does not (`drawTextRuns` 68.4% vs 81.3%, fills 18.6% vs 7.0%).
+  `L1`'s `F9` read is against measured baselines now, not assumed-identical ones.
 - **`terminal-feed` still has no on-CPU mode** (`17/F2`), and nothing in this
   file needs it: every lead is in the draw path.
 - Untracked `notes.md` and `plans/wip/*` were present in the tree during the
@@ -739,12 +993,18 @@ Added by this file:
 ## Outcome
 
 **Survey complete; ranked; `L3` (`F10`) and `L2` (`F11`) implemented and confirmed;
-the rest of Phase 4 still gated.** Fifteen leads, five
-of them decidable today by the frozen draw verdict and together covering roughly
-35-45% of the draw bracket (non-additively), three pre-rejections added, and one
-reading corrected before it reached code (`F6`).
+bracket re-captured and the remainder re-ranked (`F12`, `D3`); the rest of Phase 4
+still gated.** Fifteen leads, five of them decidable today by the frozen draw
+verdict, three pre-rejections added, one reading corrected before it reached code
+(`F6`), and one corrected after (`F11`'s withdrawn bound).
 
-Four results are worth more than the ranking:
+The two landed commits cut the draw bracket from 1,879 ms to 1,075 ms of on-CPU
+time on `content-churn` (-42.8%, `F12`) -- corroborating the paired benchmark's
+-49.4% on an independent instrument -- and the remaining tier 1 is worth roughly
+25% (`L4`), up to 23% (`L5`/`L1`, shared), and 7-19% (`L6`) of what is left,
+non-additively.
+
+Eight results are worth more than the ranking:
 
 1. **DanTerm's draw does not rasterize -- it records a CoreGraphics display
    list** (`F5`). That single fact reframes the whole bracket: inside `draw(_:)`,
@@ -777,3 +1037,16 @@ Four results are worth more than the ranking:
    change actually built skipped the surrounding buffer traffic too, so it
    measured ~4x larger. Both failures come from the same habit -- sizing a node
    instead of sizing the code path a specific edit removes.
+7. **A ranked lead list decays as soon as you start spending it** (`F12`, `D3`).
+   Two commits halved the bracket, and with it every share the ranking was built
+   from -- promoting `L4` from unconfirmed tier 2 to largest-remaining, reversing
+   `L5` and `L1`, and falsifying an inherited assumption that the two churn
+   workloads decompose alike. None of that was visible without a capture, and the
+   ledger had explicitly argued a capture was unnecessary. **Re-measure the
+   denominator after every landed lead, not after the last one.**
+8. **The decidable region is now the small one.** The draw bracket is 6% of the
+   workload and `TGlyphOutlineDictionaryCache` alone is 10% -- 1.7x the bracket,
+   off-thread, and unscoreable by any rule this project has (`17/D7`, `L9`).
+   Tier 1's remaining leads are real and worth taking, and they optimize 6% of the
+   process. That framing belongs in any future decision about whether to keep
+   grinding the CPU path or to reopen `L14`/`L15`.
