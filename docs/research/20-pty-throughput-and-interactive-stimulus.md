@@ -696,6 +696,13 @@ improvement as a failure.
     land as (2) -- the only cost is that the screen runs after a characterization
     rather than beside it.
 - Recommendation: **(1)**. Ordering only; it forecloses nothing.
+- **The A/A screen is cheap, which collapses most of this decision.** Written up
+  first as though authorizing the screen were a real resource commitment; the
+  archive says otherwise. 2,218 run directories under `.build/`, 2,095 of them
+  consecutive within 3 minutes, **median gap 7s and p90 26s**. A 24-pair screen
+  is 48 blocks, so **roughly 6 to 20 minutes of idle machine** -- not the
+  standing cost that would justify choosing (3) to avoid it. Recorded because the
+  wrong version of this estimate was briefly used to frame a user question.
 - Risks to carry into implementation regardless of shape:
   - **`17/F17` is the cautionary case.** A capture is a stimulus like any other,
     and btop full-screen at 179x66 is close in shape to the stimulus whose
