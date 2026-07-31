@@ -181,6 +181,11 @@ re-wrap). No integration emits `D`, `L`, `I`, or `N`.
   the emitters need their own bytes replayed, plus a
   `scripts/tests/shell-integration_test.sh` check that each script actually
   emits them.
+- [ ] TODO: promote F13's replay into a permanent test. The capture script is
+  [capture-fish-sweep.py](capture-fish-sweep.py); commit one variant's events as
+  a fixture and assert one prompt survives the sweep under the authored marks.
+  This is the test that would have caught D3's two wrong versions automatically,
+  and it is the fish half of the behavioral-coverage item above.
 - [ ] TODO: fold the shipped dialect into `docs/terminal-capabilities.md` and
   `plan-terminal-engine/10-protocols-shell-integration.md`, which today record
   only the OSC 1337 envelope on the emitting side.
@@ -242,6 +247,13 @@ an `aid=`.
   test. A real-pane probe must observe the rendered window (screen capture) or
   feed bytes to `TerminalCore.Terminal` and inspect the grid. Driving the pane
   over the control socket is fine; only the observation is unsuitable.
+- **The probe environment changed on 2026-07-31, mid-investigation.** Until
+  then the maintainer's `~/.zshrc` exec'd fish on line 3, so every probe of
+  "the user's zsh" -- and every DanTerm pane -- was silently running fish under
+  a zsh-shaped `$SHELL`. fish is now the account shell and the exec is gone, so
+  `zsh -i` is a real zsh and panes launch fish directly. Any measurement in this
+  doc dated before that, or in the originating plan, must be read with the
+  substitution in mind; F3's zsh findings used `zsh -f` and are unaffected.
 - Targeting the dev app means `DANTERM_SOCK=~/Library/Caches/com.danneu.danterm-dev/control.sock`.
   The CLI binary has no bundle identifier, so `controlSocketPath()` falls back to
   `com.danneu.danterm` -- an unguarded `danterm` drives the *production* app.

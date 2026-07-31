@@ -441,8 +441,13 @@ Evidence for the OSC 133 dialect. Parser probes feed
 - Status: settled. **Refutes the inference F11 drew, and reopens D3.**
 - Date and investigator: 2026-07-31, R1.
 - Commit and worktree state: `c4434ff`, scratch replay harness deleted after use.
-- Commands, inputs, or reproduction: two stages, both in
-  `scratchpad/capture_fish_sweep.py` and a temporary `TerminalCore` test.
+- Result or artifact paths: [capture-fish-sweep.py](capture-fish-sweep.py),
+  promoted out of the scratchpad so this finding stays reproducible. It writes
+  the capture plus the three replay variants and documents the expected counts.
+  The replay side was a throwaway `TerminalCore` test (feed events in order,
+  count the `repo:` token in `fullHistoryText`); making it permanent is a Phase
+  3 ledger item.
+- Commands, inputs, or reproduction: two stages.
   1. Capture: real interactive fish 4.7.1 with the user's own config (Starship
      prompt, two rows, right-aligned segment) in a `pty.fork()` PTY, cwd set to
      this repo so the prompt renders its real content. Gradual one-column shrink
