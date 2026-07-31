@@ -79,7 +79,7 @@ script edit). No finding depends on the uncommitted files.
 
 ### F3 -- `t/92lp1640917.test` is blocked only on a resolved milestone
 
-- Status: complete; awaiting the Phase 2 adoption.
+- Status: complete; adopted in Phase 2.
 - Date and investigator: 2026-07-31, Claude.
 - Commit and worktree state: `593ce4a`.
 - Commands, inputs, or reproduction:
@@ -109,12 +109,16 @@ script edit). No finding depends on the uncommitted files.
   behavioral point (report survives the redundant DECSET) is what matters and is
   disposition-independent.
 - Uncertainty: low on the gap, moderate on adopted-vs-adapted.
-- Next action: write the fixture, confirm the exact report bytes, record the
-  disposition, and rewrite the rationale.
+- Phase 2 result: `Fixtures/libvterm/state-mouse-idempotent-1002.json` replays
+  the upstream press and both drag-motion reports under authored, bytewise, and
+  every feed split. DanTerm's X10 bytes match upstream exactly, so the case is
+  `adopted`, not `adapted`; the manifest rationale now names the fixture and
+  behavior instead of Milestone 6.
+- Next action: none for this case. Continue the seven per-file F4 adjudications.
 
 ### F4 -- seven of eight `90vttest_*` recordings are blocked only on stale staging
 
-- Status: complete; awaiting the Phase 2 adoption.
+- Status: complete; all seven supported recordings adopted in Phase 2.
 - Date and investigator: 2026-07-31, Claude.
 - Commit and worktree state: `593ce4a`.
 - Commands, inputs, or reproduction:
@@ -145,10 +149,28 @@ script edit). No finding depends on the uncommitted files.
   `adopted` -- which is how the Alacritty vttest entries were resolved. That the
   Alacritty ones all landed `superseded` is a real prior against these being
   novel, and Phase 2 must check rather than assume the interleaving argument.
-- Uncertainty: moderate. The adoption is clearly correct; the disposition split
-  between adopted and superseded is not yet established.
-- Next action: replay each of the seven, compare against existing fixture
-  coverage, and record a per-file disposition.
+- Phase 2 result: all seven are `adopted` at their authored 80x25 dimensions and
+  replay under authored chunks, bytewise input, and the neutral runner's feed
+  split strategies:
+  - `90vttest_01-movement-2` -> `vttest-movement-2.json`: origin mode, margins,
+    wrap, control characters, and boundary cursor motion in one session.
+  - `90vttest_01-movement-3` -> `vttest-movement-3.json`: BS, CR, and VT inside
+    CSI sequences across four rendered rows.
+  - `90vttest_01-movement-4` -> `vttest-movement-4.json`: 26 long
+    leading-zero CUP sequences composing one screen result.
+  - `90vttest_02-screen-1` -> `vttest-screen-1.json`: enabled and disabled
+    autowrap across long runs and cursor repositioning.
+  - `90vttest_02-screen-2` -> `vttest-screen-2.json`: custom tab-stop clear,
+    set, and traversal in one session.
+  - `90vttest_02-screen-3` -> `vttest-screen-3.json`: enabled origin mode with
+    margins, line feed, and CUP.
+  - `90vttest_02-screen-4` -> `vttest-screen-4.json`: disabled origin mode with
+    margins and absolute CUP.
+- Adjudication: isolated fixtures cover each sequence family, but none asserts
+  these complete interleavings and final public screen/cursor outcomes. The
+  sessions therefore add behavioral coverage and are not `superseded`.
+- Uncertainty: low after neutral replay; no engine disagreement was found.
+- Next action: none for these cases. Phase 2 is complete.
 
 ### F5 -- Ghostty's own test suite is the largest corpus doc 1 never surveyed
 

@@ -532,48 +532,48 @@
     {
       "path": "t/90vttest_01-movement-1.test",
       "licenseNotice": "LICENSE.libvterm.txt",
-      "cases": [{ "name": "Output", "disposition": "out-of-scope", "rationale": "This full-session movement recording opens with deferred DECALN and is staged as Milestone 4 acceptance evidence." }]
+      "cases": [{ "name": "Output", "disposition": "out-of-scope", "rationale": "This full-session movement recording requires DECALN, which DanTerm does not implement." }]
     },
     {
       "path": "t/90vttest_01-movement-2.test",
       "licenseNotice": "LICENSE.libvterm.txt",
-      "cases": [{ "name": "Output", "disposition": "out-of-scope", "rationale": "This full-session origin-region movement recording is staged as Milestone 4 acceptance evidence; its supported behavior is covered by state fixtures." }]
+      "cases": [{ "name": "Output", "disposition": "adopted", "rationale": "Fixtures/libvterm/vttest-movement-2.json adopts the full-session interaction of origin mode, vertical margins, wrapping, control characters, and boundary cursor motion." }]
     },
     {
       "path": "t/90vttest_01-movement-3.test",
       "licenseNotice": "LICENSE.libvterm.txt",
-      "cases": [{ "name": "Output", "disposition": "out-of-scope", "rationale": "This full-session recording of controls inside escape sequences is staged as Milestone 4 acceptance evidence; parser fixtures cover the supported behavior." }]
+      "cases": [{ "name": "Output", "disposition": "adopted", "rationale": "Fixtures/libvterm/vttest-movement-3.json adopts the full-session screen and cursor outcome for BS, CR, and VT controls embedded in CSI sequences." }]
     },
     {
       "path": "t/90vttest_01-movement-4.test",
       "licenseNotice": "LICENSE.libvterm.txt",
-      "cases": [{ "name": "Output", "disposition": "out-of-scope", "rationale": "This full-session leading-zero cursor recording is staged as Milestone 4 acceptance evidence; state-movecursor.json covers normalization." }]
+      "cases": [{ "name": "Output", "disposition": "adopted", "rationale": "Fixtures/libvterm/vttest-movement-4.json adopts the full-session screen outcome for long leading-zero CUP parameters." }]
     },
     {
       "path": "t/90vttest_02-screen-1.test",
       "licenseNotice": "LICENSE.libvterm.txt",
-      "cases": [{ "name": "Output", "disposition": "out-of-scope", "rationale": "This full-session autowrap recording is staged as Milestone 4 acceptance evidence; adopted wrapping fixtures cover the supported behavior." }]
+      "cases": [{ "name": "Output", "disposition": "adopted", "rationale": "Fixtures/libvterm/vttest-screen-1.json adopts the full-session interaction of enabled and disabled autowrap with long runs and cursor repositioning." }]
     },
     {
       "path": "t/90vttest_02-screen-2.test",
       "licenseNotice": "LICENSE.libvterm.txt",
-      "cases": [{ "name": "Output", "disposition": "out-of-scope", "rationale": "This full-session custom-tab-stop recording is staged as Milestone 4 acceptance evidence; adopted tab-stop fixtures cover the supported behavior." }]
+      "cases": [{ "name": "Output", "disposition": "adopted", "rationale": "Fixtures/libvterm/vttest-screen-2.json adopts the full-session interaction of clearing, setting, and traversing custom tab stops." }]
     },
     {
       "path": "t/90vttest_02-screen-3.test",
       "licenseNotice": "LICENSE.libvterm.txt",
-      "cases": [{ "name": "Output", "disposition": "out-of-scope", "rationale": "This full-session enabled-origin-mode recording is staged as Milestone 4 acceptance evidence; state-mode.json covers the supported behavior." }]
+      "cases": [{ "name": "Output", "disposition": "adopted", "rationale": "Fixtures/libvterm/vttest-screen-3.json adopts the full-session interaction of enabled origin mode, vertical margins, line feed, and CUP." }]
     },
     {
       "path": "t/90vttest_02-screen-4.test",
       "licenseNotice": "LICENSE.libvterm.txt",
-      "cases": [{ "name": "Output", "disposition": "out-of-scope", "rationale": "This full-session disabled-origin-mode recording is staged as Milestone 4 acceptance evidence; state-mode.json covers the supported behavior." }]
+      "cases": [{ "name": "Output", "disposition": "adopted", "rationale": "Fixtures/libvterm/vttest-screen-4.json adopts the full-session interaction of disabled origin mode, vertical margins, and absolute CUP." }]
     },
     {
       "path": "t/92lp1640917.test",
       "licenseNotice": "LICENSE.libvterm.txt",
       "cases": [
-        { "name": "Mouse reporting should not break by idempotent DECSM 1002", "disposition": "out-of-scope", "rationale": "Mouse reporting is a Milestone 6 input-interaction seam." }
+        { "name": "Mouse reporting should not break by idempotent DECSM 1002", "disposition": "adopted", "rationale": "Fixtures/libvterm/state-mouse-idempotent-1002.json asserts that redundant DECSET 1002 preserves exact legacy X10 drag-motion reporting." }
       ]
     },
     {

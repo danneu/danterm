@@ -151,19 +151,19 @@ DanTerm contract, never against the source engine's behavior.
 
 ### Phase 2 -- re-adjudicate the stale libvterm rationales
 
-- [ ] Adopt `t/92lp1640917.test` as a neutral fixture asserting that a redundant
+- [x] Adopt `t/92lp1640917.test` as a neutral fixture asserting that a redundant
   `DECSET 1002` while 1002 is already active does not break motion reporting.
   Confirm first whether DanTerm's X10 report bytes match upstream exactly, or
   whether this lands as `adapted`. Record the disposition and the resulting
   fixture path in F3's next-action.
-- [ ] Adopt the seven supported `90vttest_*` recordings as full-session neutral
+- [x] Adopt the seven supported `90vttest_*` recordings as full-session neutral
   recordings at their authored dimensions, replayed one-chunk and at split
   points like the existing recordings. Record per-file disposition in F4.
-- [ ] Keep `90vttest_01-movement-1` out-of-scope, but rewrite its rationale to
+- [x] Keep `90vttest_01-movement-1` out-of-scope, but rewrite its rationale to
   cite the DECALN dependency rather than Milestone 4 staging.
-- [ ] Rewrite every remaining `90vttest_*` and `92lp1640917` rationale so no
+- [x] Rewrite every remaining `90vttest_*` and `92lp1640917` rationale so no
   manifest rationale cites a checked milestone as a live blocker.
-- [ ] Decide whether manifest re-adjudication becomes a standing milestone-exit
+- [x] Decide whether manifest re-adjudication becomes a standing milestone-exit
   step. Destination: D4.
 
 ### Phase 3 -- scope the Ghostty and windows-terminal mines
@@ -275,7 +275,10 @@ is why they are pinned.
 
 Investigation in progress. Phase 1 is complete: the census, both stale
 rationales, and the unsurveyed corpora are recorded in F1-F8, with recommended
-directions in D1-D5. Phases 2-5 are open, and no disposition has changed yet.
+directions in D1-D5. Phase 2 is complete: `92lp1640917` and the seven supported
+`90vttest_*` sessions are adopted, `90vttest_01-movement-1` remains
+out-of-scope on DECALN, all nine stale rationales are rewritten, and D4 is
+decided. Phases 3-5 are open.
 
 The one-line answer Phase 1 produced, for a reader who goes no further: the
 pinned corpora are fully classified, ~81 of the 89 out-of-scope cases are

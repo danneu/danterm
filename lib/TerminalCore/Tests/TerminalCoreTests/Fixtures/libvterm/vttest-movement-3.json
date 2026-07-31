@@ -1,0 +1,241 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/90vttest_01-movement-3.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Output",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": []
+  },
+  "initial": {
+    "columns": 80,
+    "rows": 25
+  },
+  "events": [
+    {
+      "type": "feed",
+      "text": "A B C D E F G H I"
+    },
+    {
+      "type": "feed",
+      "text": "\r\n"
+    },
+    {
+      "type": "feed",
+      "text": "A\u001b[2\bCB\u001b[2\bCC\u001b[2\bCD\u001b[2\bCE\u001b[2\bCF\u001b[2\bCG\u001b[2\bCH\u001b[2\bCI"
+    },
+    {
+      "type": "feed",
+      "text": "\r\n"
+    },
+    {
+      "type": "feed",
+      "text": "A \u001b[\r2CB\u001b[\r4CC\u001b[\r6CD\u001b[\r8CE\u001b[\r10CF\u001b[\r12CG\u001b[\r14CH\u001b[\r16CI"
+    },
+    {
+      "type": "feed",
+      "text": "\r\n"
+    },
+    {
+      "type": "feed",
+      "text": "A \u001b[1\u000bAB \u001b[1\u000bAC \u001b[1\u000bAD \u001b[1\u000bAE \u001b[1\u000bAF \u001b[1\u000bAG \u001b[1\u000bAH \u001b[1\u000bAI \u001b[1\u000bA"
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportContains": [
+          "A B C D E F G H I                                                               \nA B C D E F G H I                                                               \nA B C D E F G H I                                                               \nA B C D E F G H I "
+        ],
+        "cellScalars": [
+          {
+            "row": 0,
+            "column": 0,
+            "scalars": "A"
+          },
+          {
+            "row": 0,
+            "column": 2,
+            "scalars": "B"
+          },
+          {
+            "row": 0,
+            "column": 4,
+            "scalars": "C"
+          },
+          {
+            "row": 0,
+            "column": 6,
+            "scalars": "D"
+          },
+          {
+            "row": 0,
+            "column": 8,
+            "scalars": "E"
+          },
+          {
+            "row": 0,
+            "column": 10,
+            "scalars": "F"
+          },
+          {
+            "row": 0,
+            "column": 12,
+            "scalars": "G"
+          },
+          {
+            "row": 0,
+            "column": 14,
+            "scalars": "H"
+          },
+          {
+            "row": 0,
+            "column": 16,
+            "scalars": "I"
+          },
+          {
+            "row": 1,
+            "column": 0,
+            "scalars": "A"
+          },
+          {
+            "row": 1,
+            "column": 2,
+            "scalars": "B"
+          },
+          {
+            "row": 1,
+            "column": 4,
+            "scalars": "C"
+          },
+          {
+            "row": 1,
+            "column": 6,
+            "scalars": "D"
+          },
+          {
+            "row": 1,
+            "column": 8,
+            "scalars": "E"
+          },
+          {
+            "row": 1,
+            "column": 10,
+            "scalars": "F"
+          },
+          {
+            "row": 1,
+            "column": 12,
+            "scalars": "G"
+          },
+          {
+            "row": 1,
+            "column": 14,
+            "scalars": "H"
+          },
+          {
+            "row": 1,
+            "column": 16,
+            "scalars": "I"
+          },
+          {
+            "row": 2,
+            "column": 0,
+            "scalars": "A"
+          },
+          {
+            "row": 2,
+            "column": 2,
+            "scalars": "B"
+          },
+          {
+            "row": 2,
+            "column": 4,
+            "scalars": "C"
+          },
+          {
+            "row": 2,
+            "column": 6,
+            "scalars": "D"
+          },
+          {
+            "row": 2,
+            "column": 8,
+            "scalars": "E"
+          },
+          {
+            "row": 2,
+            "column": 10,
+            "scalars": "F"
+          },
+          {
+            "row": 2,
+            "column": 12,
+            "scalars": "G"
+          },
+          {
+            "row": 2,
+            "column": 14,
+            "scalars": "H"
+          },
+          {
+            "row": 2,
+            "column": 16,
+            "scalars": "I"
+          },
+          {
+            "row": 3,
+            "column": 0,
+            "scalars": "A"
+          },
+          {
+            "row": 3,
+            "column": 2,
+            "scalars": "B"
+          },
+          {
+            "row": 3,
+            "column": 4,
+            "scalars": "C"
+          },
+          {
+            "row": 3,
+            "column": 6,
+            "scalars": "D"
+          },
+          {
+            "row": 3,
+            "column": 8,
+            "scalars": "E"
+          },
+          {
+            "row": 3,
+            "column": 10,
+            "scalars": "F"
+          },
+          {
+            "row": 3,
+            "column": 12,
+            "scalars": "G"
+          },
+          {
+            "row": 3,
+            "column": 14,
+            "scalars": "H"
+          },
+          {
+            "row": 3,
+            "column": 16,
+            "scalars": "I"
+          }
+        ],
+        "cursor": {
+          "row": 3,
+          "column": 18,
+          "pendingWrap": false
+        }
+      }
+    }
+  ]
+}

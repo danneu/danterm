@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/92lp1640917.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Mouse reporting should not break by idempotent DECSM 1002",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": []
+  },
+  "initial": { "columns": 80, "rows": 25 },
+  "events": [
+    { "type": "feed", "text": "\u001b[?1002h" },
+    { "type": "mouse", "action": "move", "column": 0, "row": 0 },
+    { "type": "mouse", "action": "down", "button": 1, "column": 0, "row": 0 },
+    { "type": "expect", "expect": { "inputBytes": [27, 91, 77, 32, 33, 33] } },
+    { "type": "mouse", "action": "move", "column": 1, "row": 0 },
+    { "type": "expect", "expect": { "inputBytes": [27, 91, 77, 64, 34, 33] } },
+    { "type": "feed", "text": "\u001b[?1002h" },
+    { "type": "mouse", "action": "move", "column": 2, "row": 0 },
+    { "type": "expect", "expect": { "inputBytes": [27, 91, 77, 64, 35, 33] } }
+  ]
+}

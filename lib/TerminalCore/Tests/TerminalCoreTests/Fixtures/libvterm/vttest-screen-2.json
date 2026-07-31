@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/90vttest_02-screen-2.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Output",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": []
+  },
+  "initial": {
+    "columns": 80,
+    "rows": 25
+  },
+  "events": [
+    {
+      "type": "feed",
+      "text": "\u001b[2J\u001b[3g"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[1;1H"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH\u001b[3C\u001bH"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[1;4H"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[0g\u001b[6C\u001b[0g\u001b[6C\u001b[0g\u001b[6C\u001b[0g\u001b[6C\u001b[0g\u001b[6C\u001b[0g\u001b[6C\u001b[0g\u001b[6C\u001b[0g\u001b[6C\u001b[0g\u001b[6C\u001b[0g\u001b[6C\u001b[0g\u001b[6C\u001b[0g\u001b[6C\u001b[0g\u001b[6C"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[1;7H"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[1g\u001b[2g"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[1;1H"
+    },
+    {
+      "type": "feed",
+      "text": "\t*\t*\t*\t*\t*\t*\t*\t*\t*\t*\t*\t*\t*"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[2;2H"
+    },
+    {
+      "type": "feed",
+      "text": "     *     *     *     *     *     *     *     *     *     *     *     *     *"
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "viewportContains": [
+          "      *     *     *     *     *     *     *     *     *     *     *     *     * \n      *     *     *     *     *     *     *     *     *     *     *     *     * "
+        ],
+        "cellScalars": [
+          {
+            "row": 0,
+            "column": 6,
+            "scalars": "*"
+          },
+          {
+            "row": 0,
+            "column": 78,
+            "scalars": "*"
+          },
+          {
+            "row": 1,
+            "column": 6,
+            "scalars": "*"
+          },
+          {
+            "row": 1,
+            "column": 78,
+            "scalars": "*"
+          }
+        ],
+        "cursor": {
+          "row": 1,
+          "column": 79,
+          "pendingWrap": false
+        }
+      }
+    }
+  ]
+}

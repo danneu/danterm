@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "provenance": {
+    "source": "libvterm",
+    "url": "https://github.com/neovim/libvterm/blob/934bc2fbf21800ac3458a499df8820ca5fb45fd3/t/90vttest_02-screen-4.test",
+    "pinnedCommit": "934bc2fbf21800ac3458a499df8820ca5fb45fd3",
+    "upstreamCase": "Output",
+    "license": "MIT",
+    "licenseNotice": "LICENSE.libvterm.txt",
+    "recordedDeviations": []
+  },
+  "initial": {
+    "columns": 80,
+    "rows": 25
+  },
+  "events": [
+    {
+      "type": "feed",
+      "text": "\u001b[?6l"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[23;24r"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[24;1H"
+    },
+    {
+      "type": "feed",
+      "text": "Bottom"
+    },
+    {
+      "type": "feed",
+      "text": "\u001b[1;1H"
+    },
+    {
+      "type": "feed",
+      "text": "Top"
+    },
+    {
+      "type": "expect",
+      "expect": {
+        "cellScalars": [
+          {
+            "row": 0,
+            "column": 0,
+            "scalars": "T"
+          },
+          {
+            "row": 0,
+            "column": 1,
+            "scalars": "o"
+          },
+          {
+            "row": 0,
+            "column": 2,
+            "scalars": "p"
+          },
+          {
+            "row": 23,
+            "column": 0,
+            "scalars": "B"
+          },
+          {
+            "row": 23,
+            "column": 1,
+            "scalars": "o"
+          },
+          {
+            "row": 23,
+            "column": 2,
+            "scalars": "t"
+          },
+          {
+            "row": 23,
+            "column": 3,
+            "scalars": "t"
+          },
+          {
+            "row": 23,
+            "column": 4,
+            "scalars": "o"
+          },
+          {
+            "row": 23,
+            "column": 5,
+            "scalars": "m"
+          }
+        ],
+        "cursor": {
+          "row": 0,
+          "column": 3,
+          "pendingWrap": false
+        }
+      }
+    }
+  ]
+}

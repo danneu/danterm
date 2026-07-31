@@ -7,7 +7,7 @@ review obligations before copying or translating GPL/LGPL test code.
 
 ### D1 -- re-adjudicate the two stale libvterm rationales
 
-- Status: recommended; not yet approved or implemented.
+- Status: selected and implemented.
 - Evidence used: F3 (`92lp1640917`, blocked on Milestone 6), F4 (seven
   `90vttest_*` recordings, blocked on Milestone 4 staging), F2 (the contrast:
   every other out-of-scope rationale is still accurate).
@@ -30,12 +30,19 @@ review obligations before copying or translating GPL/LGPL test code.
   legitimate per-file outcome. Do not force `adopted` on a recording whose
   behavior existing fixtures already pin -- a defensible `superseded` with named
   evidence is the same quality of result.
-- Direction review: pending.
-- Selected direction: pending.
+- Direction review: accepted by the owner on 2026-07-31.
+- Selected direction: option 1, with `superseded` retained as a valid per-file
+  result for any recording whose behavior existing fixtures already pin.
 - Behavioral verification: each adopted case replays as a neutral fixture
   through public inspection views, one-chunk and at split points, matching the
   existing runner's contract.
-- Decision and rationale: pending.
+- Decision and rationale: fix every stale rationale, adopt the uncovered mouse
+  case, then adjudicate the seven supported recordings individually. This
+  repairs manifest accuracy immediately without forcing duplicate recordings
+  into the maintained fixture set.
+- Implementation result: all eight reclassifiable cases are `adopted`; the
+  seven recordings proved novel at the session-interleaving level even though
+  isolated fixtures cover their individual sequence families.
 
 ### D2 -- whether to mine Ghostty and windows-terminal as case sources
 
@@ -107,7 +114,7 @@ review obligations before copying or translating GPL/LGPL test code.
 
 ### D4 -- whether manifest re-adjudication becomes a standing milestone-exit step
 
-- Status: open question, raised by the pattern rather than by a single finding.
+- Status: decided; no standing milestone-exit step.
 - Evidence used: F3 and F4 -- two rationales citing blockers that resolved one
   and four milestones ago; and the asymmetry that Milestone 8 Slice 1
   re-adjudicated the Alacritty vttest ledger while leaving the libvterm one
@@ -127,9 +134,13 @@ review obligations before copying or translating GPL/LGPL test code.
 - Recommendation: both (2) going forward and (1) as a one-time sweep folded into
   D1's rationale rewrite. Prefer capability-stated rationales; the existing
   milestone-stated ones are what D1 is already fixing.
-- Direction review: pending.
-- Selected direction: pending.
-- Decision and rationale: pending.
+- Direction review: accepted by the owner on 2026-07-31.
+- Selected direction: option 2 going forward, plus option 1 as the completed
+  one-time sweep in D1.
+- Decision and rationale: manifest rationales must state the missing capability
+  or coverage fact rather than a milestone number. This prevents the observed
+  staleness at classification time and avoids a recurring process step; D1's
+  sweep repairs the existing affected entries.
 
 ### D5 -- what actually closes Milestone 9's external leg
 

@@ -20,6 +20,19 @@ struct TerminalFixtureTests {
     }
 
     @Test(
+        "Phase 2 libvterm recordings replay their public behavior",
+        arguments: Self.phase2LibvtermRecordings
+    )
+    func phase2LibvtermReplay(_ name: String) throws {
+        let url = try #require(Bundle.module.url(
+            forResource: name,
+            withExtension: "json",
+            subdirectory: "Fixtures/libvterm"
+        ))
+        try replayFixture(at: url)
+    }
+
+    @Test(
         "Milestone 8 Alacritty application recordings replay at authored chunking",
         arguments: Self.milestone8AlacrittyRecordings
     )
@@ -298,6 +311,17 @@ struct TerminalFixtureTests {
 
     private static let milestone8AlacrittyRecordings = [
         "tmux_git_log", "tmux_htop", "vim_24bitcolors_bce", "vim_large_window_scroll", "vim_simple_edit",
+    ]
+
+    private static let phase2LibvtermRecordings = [
+        "state-mouse-idempotent-1002",
+        "vttest-movement-2",
+        "vttest-movement-3",
+        "vttest-movement-4",
+        "vttest-screen-1",
+        "vttest-screen-2",
+        "vttest-screen-3",
+        "vttest-screen-4",
     ]
 
     private static let expectedAlacrittyRecordings: Set<String> = [
