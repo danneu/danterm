@@ -437,6 +437,44 @@ def _append_reason(reasons, reason):
         reasons.append(reason)
 
 
+def _fence_metrics_are_consistent(metrics):
+    """Validate one optional, descriptive controller/host fence census."""
+    if not isinstance(metrics, dict):
+        return False
+    kinds = metrics.get("kinds")
+    expected_kinds = {
+        "delivery", "checkpoint", "teardown", "initialization", "diagnostic",
+    }
+    if not isinstance(kinds, dict) or set(kinds) != expected_kinds:
+        return False
+    if metrics.get("clock") != "dispatch-uptime-nanoseconds":
+        return False
+    measurements = list(kinds.values())
+    if any(
+        not isinstance(value, dict)
+        or not isinstance(value.get("waitNanoseconds"), int)
+        or value["waitNanoseconds"] < 0
+        or not isinstance(value.get("count"), int)
+        or value["count"] < 0
+        for value in measurements
+    ):
+        return False
+    total_wait = metrics.get("totalWaitNanoseconds")
+    total_count = metrics.get("totalCount")
+    host_count = metrics.get("hostEntryCount")
+    return (
+        isinstance(total_wait, int)
+        and total_wait >= 0
+        and total_wait == sum(value["waitNanoseconds"] for value in measurements)
+        and isinstance(total_count, int)
+        and total_count >= 0
+        and total_count == sum(value["count"] for value in measurements)
+        and isinstance(host_count, int)
+        and host_count >= 0
+        and host_count == total_count
+    )
+
+
 def _battery_runs_allowed():
     """Whether a run on battery still counts, per explicit opt-in.
 
@@ -686,6 +724,7 @@ def collect_fixture_replay(blocks, *, workload, fixture_identity, run_block):
             "producerWriteBytes": producer.get("bytesWritten"),
             "producerWriteGeometry": producer.get("geometry"),
             "finalDrawNanoseconds": draw.get("elapsedNanoseconds"),
+            "fenceMetrics": draw.get("fenceMetrics"),
             "machineStateSamples": draw.get("machineStateSamples", []),
             "artifact": artifact,
         }
@@ -744,6 +783,11 @@ def collect_fixture_replay(blocks, *, workload, fixture_identity, run_block):
             _append_reason(
                 reasons, f"{prefix}-final-draw-preceded-producer-write"
             )
+        if (
+            "fenceMetrics" in draw
+            and not _fence_metrics_are_consistent(draw["fenceMetrics"])
+        ):
+            _append_reason(reasons, f"{prefix}-inconsistent-fence-metrics")
         for sample in draw.get("machineStateSamples", []):
             if sample.get("activeSpaceChanged", False):
                 _append_reason(reasons, f"{prefix}-active-space-changed")
@@ -1227,6 +1271,7 @@ def _collect_draw_churn(
             "drawNanosecondsPerDraw": normalized,
             "planNanosecondsPerDraw": normalized_plan,
             "processCPUNanosecondsPerDraw": normalized_cpu,
+            "fenceMetrics": draw.get("fenceMetrics"),
             "machineStateSamples": draw.get("machineStateSamples", []),
             "artifact": artifact,
         }
@@ -1289,6 +1334,11 @@ def _collect_draw_churn(
             _append_reason(reasons, f"{prefix}-{damage_reason}")
         if producer.get("event") != "producer-final-write-returned":
             _append_reason(reasons, f"{prefix}-missing-producer-write")
+        if (
+            "fenceMetrics" in draw
+            and not _fence_metrics_are_consistent(draw["fenceMetrics"])
+        ):
+            _append_reason(reasons, f"{prefix}-inconsistent-fence-metrics")
         for sample in draw.get("machineStateSamples", []):
             if sample.get("activeSpaceChanged", False):
                 _append_reason(reasons, f"{prefix}-active-space-changed")

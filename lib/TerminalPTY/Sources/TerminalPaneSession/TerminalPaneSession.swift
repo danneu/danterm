@@ -108,6 +108,16 @@ public struct TerminalPaneFenceMeasurement: Equatable, Sendable {
         self.waitNanoseconds += waitNanoseconds
         count += 1
     }
+
+    fileprivate func subtracting(_ baseline: Self) -> Self? {
+        guard waitNanoseconds >= baseline.waitNanoseconds,
+              count >= baseline.count
+        else { return nil }
+        return Self(
+            waitNanoseconds: waitNanoseconds - baseline.waitNanoseconds,
+            count: count - baseline.count
+        )
+    }
 }
 
 /// Keeps attributed controller totals beside the host's independent raw entry census.
@@ -124,6 +134,22 @@ public struct TerminalPaneFenceMetrics: Equatable, Sendable {
     public private(set) var diagnostic = TerminalPaneFenceMeasurement()
     /// Host-side raw production entries observed after the latest controller fence.
     public private(set) var hostEntryCount: UInt64 = 0
+
+    init(
+        delivery: TerminalPaneFenceMeasurement = .init(),
+        checkpoint: TerminalPaneFenceMeasurement = .init(),
+        teardown: TerminalPaneFenceMeasurement = .init(),
+        initialization: TerminalPaneFenceMeasurement = .init(),
+        diagnostic: TerminalPaneFenceMeasurement = .init(),
+        hostEntryCount: UInt64 = 0
+    ) {
+        self.delivery = delivery
+        self.checkpoint = checkpoint
+        self.teardown = teardown
+        self.initialization = initialization
+        self.diagnostic = diagnostic
+        self.hostEntryCount = hostEntryCount
+    }
 
     /// Combines every attributed kind without losing the count paired with its wait.
     public var total: TerminalPaneFenceMeasurement {
@@ -159,6 +185,24 @@ public struct TerminalPaneFenceMetrics: Equatable, Sendable {
             diagnostic.record(waitNanoseconds: waitNanoseconds)
         }
         self.hostEntryCount = hostEntryCount
+    }
+
+    func subtracting(_ baseline: Self) -> Self? {
+        guard let delivery = delivery.subtracting(baseline.delivery),
+              let checkpoint = checkpoint.subtracting(baseline.checkpoint),
+              let teardown = teardown.subtracting(baseline.teardown),
+              let initialization = initialization.subtracting(baseline.initialization),
+              let diagnostic = diagnostic.subtracting(baseline.diagnostic),
+              hostEntryCount >= baseline.hostEntryCount
+        else { return nil }
+        return Self(
+            delivery: delivery,
+            checkpoint: checkpoint,
+            teardown: teardown,
+            initialization: initialization,
+            diagnostic: diagnostic,
+            hostEntryCount: hostEntryCount - baseline.hostEntryCount
+        )
     }
 }
 

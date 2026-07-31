@@ -101,6 +101,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = Self.cgColor(RenderTheme.dark.defaultBackground)
+        #if DANTERM_TERMINAL_BENCHMARK
+        TerminalBenchmarkObserver.shared?.attachFenceMetricsController(controller)
+        #endif
 
         controller.onFrame = { [weak self] frame in
             self?.publish(frame)
@@ -540,6 +543,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
 
     func fenceForApplicationExit() {
         controller.fenceForApplicationExit()
+        #if DANTERM_TERMINAL_BENCHMARK
+        TerminalBenchmarkObserver.shared?.observeApplicationExitFence(for: controller)
+        #endif
     }
 
     func setFocusBorder(_ focused: Bool, hasBell: Bool) {
@@ -568,6 +574,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
             self.mouseTrackingArea = nil
         }
         callbackGate.tearDown()
+        #if DANTERM_TERMINAL_BENCHMARK
+        TerminalBenchmarkObserver.shared?.detachFenceMetricsController(controller)
+        #endif
         controller.tearDown()
     }
 

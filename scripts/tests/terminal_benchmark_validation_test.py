@@ -621,6 +621,80 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
             ],
         )
 
+    def test_scrollback_collector_promotes_consistent_fence_metrics(self):
+        artifact = self._fixture_replay_artifact()
+        fence_metrics = {
+            "clock": "dispatch-uptime-nanoseconds",
+            "totalWaitNanoseconds": 36,
+            "totalCount": 6,
+            "hostEntryCount": 6,
+            "kinds": {
+                "delivery": {"waitNanoseconds": 10, "count": 2},
+                "checkpoint": {"waitNanoseconds": 20, "count": 1},
+                "teardown": {"waitNanoseconds": 0, "count": 0},
+                "initialization": {"waitNanoseconds": 0, "count": 0},
+                "diagnostic": {"waitNanoseconds": 6, "count": 3},
+            },
+        }
+        artifact["finalDraw"]["fenceMetrics"] = fence_metrics
+
+        evidence = VALIDATION.collect_scrollback_stream(
+            [{"measurementRole": "A", "physicalArm": "a"}],
+            run_block=lambda _arm: artifact,
+        )
+
+        self.assertTrue(evidence["valid"], evidence["invalidationReasons"])
+        self.assertEqual(evidence["rawBlocks"][0]["fenceMetrics"], fence_metrics)
+
+    def test_absent_fence_metrics_are_not_promoted_as_zero(self):
+        artifact = self._fixture_replay_artifact()
+
+        evidence = VALIDATION.collect_scrollback_stream(
+            [{"measurementRole": "A", "physicalArm": "a"}],
+            run_block=lambda _arm: artifact,
+        )
+
+        self.assertTrue(evidence["valid"], evidence["invalidationReasons"])
+        self.assertIsNone(evidence["rawBlocks"][0]["fenceMetrics"])
+
+    def test_each_inconsistent_fence_aggregate_invalidates_the_block(self):
+        consistent_metrics = {
+            "clock": "dispatch-uptime-nanoseconds",
+            "totalWaitNanoseconds": 30,
+            "totalCount": 2,
+            "hostEntryCount": 2,
+            "kinds": {
+                "delivery": {"waitNanoseconds": 10, "count": 1},
+                "checkpoint": {"waitNanoseconds": 20, "count": 1},
+                "teardown": {"waitNanoseconds": 0, "count": 0},
+                "initialization": {"waitNanoseconds": 0, "count": 0},
+                "diagnostic": {"waitNanoseconds": 0, "count": 0},
+            },
+        }
+        for field in (
+            "totalWaitNanoseconds", "totalCount", "hostEntryCount"
+        ):
+            with self.subTest(field=field):
+                artifact = self._fixture_replay_artifact()
+                metrics = json.loads(json.dumps(consistent_metrics))
+                metrics[field] = 99
+                artifact["finalDraw"]["fenceMetrics"] = metrics
+
+                evidence = VALIDATION.collect_scrollback_stream(
+                    [{"measurementRole": "A", "physicalArm": "a"}],
+                    run_block=lambda _arm: artifact,
+                )
+
+                self.assertFalse(evidence["valid"])
+                self.assertIn(
+                    "block-0-inconsistent-fence-metrics",
+                    evidence["invalidationReasons"],
+                )
+        self.assertNotIn(
+            "fence", json.dumps(VALIDATION.DECISION_RULES).lower()
+        )
+        self.assertNotIn("fenceVerdict", evidence["rawBlocks"][0])
+
     def test_synchronized_frames_collector_holds_the_same_contract_as_scrollback(self):
         # Intent: the captured-replay workload is collected and validated by the
         #   same rules as the generated replay workload, against its own name and
@@ -1911,6 +1985,35 @@ class TerminalBenchmarkValidationTests(unittest.TestCase):
                 "drawSequences": list(range(50)),
                 "drawDurationsNanoseconds": durations,
                 "dirtyRowCounts": [dirty_rows] * 50,
+                "machineStateSamples": [{
+                    "activeSpaceChanged": False,
+                    "lowPowerMode": False,
+                    "thermalState": "nominal",
+                    "visible": True,
+                }],
+            },
+        }
+
+    def _fixture_replay_artifact(self):
+        return {
+            "schemaVersion": 1,
+            "backend": "swift",
+            "workload": "scrollback-stream",
+            "fixtureIdentity": "scrollback-stream-v1-25000-lines",
+            "processId": 101,
+            "sessionId": "pane-a",
+            "geometry": {"columns": 179, "rows": 66},
+            "producerWrite": {
+                "event": "producer-final-write-returned",
+                "elapsedNanoseconds": 155_000_000,
+                "bytesWritten": 3_020_662,
+            },
+            "finalDraw": {
+                "available": True,
+                "event": "final-draw-completed",
+                "startMarker": "DANTERM-BENCH-START-7",
+                "expectedFinalState": "DANTERM-BENCH-FINAL-STATE-7",
+                "elapsedNanoseconds": 163_000_000,
                 "machineStateSamples": [{
                     "activeSpaceChanged": False,
                     "lowPowerMode": False,

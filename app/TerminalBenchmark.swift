@@ -4,6 +4,7 @@
 import Cocoa
 import TerminalBenchmarkMarkers
 import TerminalCore
+import TerminalPaneSession
 import TerminalRenderExecution
 import TerminalRenderPlanning
 
@@ -294,6 +295,8 @@ final class TerminalBenchmarkObserver {
     private var observedDrawCount = 0
     private var observedPlanFrameCount = 0
     private var lastActivityWriteNanoseconds: UInt64 = 0
+    private weak var measuredController: TerminalPaneSessionController?
+    private var fenceBlockPolicy = TerminalPaneFenceBlockPolicy()
     /// Retained for the lifetime of the observer, not built per frame: it holds
     /// the scratch buffer that keeps marker detection off the allocator.
     private var markerScanner: TerminalBenchmarkMarkerScanner
@@ -338,6 +341,26 @@ final class TerminalBenchmarkObserver {
         self.startAcknowledgmentPathBytes = startAcknowledgmentPath.utf8CString.map { $0 }
     }
 
+    /// Selects the one pane whose cumulative fence counters define benchmark blocks.
+    func attachFenceMetricsController(_ controller: TerminalPaneSessionController) {
+        guard measuredController == nil || measuredController === controller else { return }
+        measuredController = controller
+    }
+
+    /// Drops controller access and invalidates any span that can no longer complete safely.
+    func detachFenceMetricsController(_ controller: TerminalPaneSessionController) {
+        guard measuredController === controller else { return }
+        fenceBlockPolicy.invalidateAfterApplicationExitFence()
+        measuredController = nil
+    }
+
+    /// Invalidates an open span after the controller's application-exit fence returns.
+    func observeApplicationExitFence(
+        for controller: TerminalPaneSessionController
+    ) {
+        detachFenceMetricsController(controller)
+    }
+
     /// Records the app-side observation before a newly parsed frame becomes drawable.
     ///
     /// `planDurationNanoseconds` is the cost of the `planFrame` call that produced
@@ -377,6 +400,9 @@ final class TerminalBenchmarkObserver {
         // (the harness echoing the next block's command) re-detect the previous
         // block's marker and open a block no producer had started.
         guard scanMarkers(plan, damage: damage).containsStartMarker else { return }
+        if let measuredController {
+            fenceBlockPolicy.beginBlock(at: measuredController.fenceMetrics)
+        }
         startNanoseconds = DispatchTime.now().uptimeNanoseconds
         // Seeded here so the first accepted draw has a predecessor to difference
         // against; without it that draw's interval would be unattributable and
@@ -536,6 +562,13 @@ final class TerminalBenchmarkObserver {
         object["fenceStallFrameCount"] = acceptedFenceStallCount + pendingFenceStallCount
         object["maxFenceStallNanoseconds"] = acceptedFenceStallMaxNanoseconds
         object["fenceStallDurationsNanoseconds"] = acceptedFenceStallDurations
+        if let measuredController,
+           let fenceMetrics = fenceBlockPolicy.completeBlock(
+               at: measuredController.fenceMetrics
+           )
+        {
+            object["fenceMetrics"] = fenceMetricsArtifact(fenceMetrics)
+        }
         if localizedDrawDurations.isEmpty == false {
             object["cumulativeDrawNanoseconds"] = localizedDrawDurations.reduce(0, +)
             object["drawCount"] = localizedDrawDurations.count
@@ -573,6 +606,33 @@ final class TerminalBenchmarkObserver {
         } catch {
             print("[benchmark] Failed to write final-draw result: \(error)")
         }
+    }
+
+    private func fenceMetricsArtifact(
+        _ metrics: TerminalPaneFenceMetrics
+    ) -> [String: Any] {
+        func measurement(
+            _ value: TerminalPaneFenceMeasurement
+        ) -> [String: Any] {
+            [
+                "waitNanoseconds": value.waitNanoseconds,
+                "count": value.count,
+            ]
+        }
+
+        return [
+            "clock": "dispatch-uptime-nanoseconds",
+            "totalWaitNanoseconds": metrics.total.waitNanoseconds,
+            "totalCount": metrics.total.count,
+            "hostEntryCount": metrics.hostEntryCount,
+            "kinds": [
+                "delivery": measurement(metrics.delivery),
+                "checkpoint": measurement(metrics.checkpoint),
+                "teardown": measurement(metrics.teardown),
+                "initialization": measurement(metrics.initialization),
+                "diagnostic": measurement(metrics.diagnostic),
+            ],
+        ]
     }
 
     /// Republishes the lifetime counters, at most every 100 ms, so a profiling

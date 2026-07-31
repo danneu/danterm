@@ -185,7 +185,7 @@ Instrument before reporting, with a revert boundary between them:
 ## Commit progress
 
 - [x] 1. Account for terminal owner-queue fences by construction
-- [ ] 2. Promote fence totals into benchmark blocks
+- [x] 2. Promote fence totals into benchmark blocks
 
 ## Implementation notes
 
@@ -193,3 +193,6 @@ Instrument before reporting, with a revert boundary between them:
   and publishes its pending update, so delivery-flush accounting is deterministic
   without waiting for a live child lifecycle transition. Production output still
   enters through the lifecycle reducer.
+- The benchmark observer holds the first attached measured controller weakly and
+  clears both that reference and any open sampling span after application-exit
+  fencing or pane teardown, so queued draws cannot sample a torn-down controller.
