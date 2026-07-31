@@ -490,3 +490,111 @@ Evidence for the OSC 133 dialect. Parser probes feed
   it. A right-aligned segment padded to the terminal width -- Starship's default,
   and common in fish prompts -- produces exactly such a row.
 - Next action: reopen D3 and re-decide between `redraw=1` and emitting nothing.
+
+### F14 -- a prompt framework decides whether zsh's marks exist at all, and the mechanism is source order, not asynchronous rebuilding
+
+- Status: settled. **Amends D1's emitter mechanism; changes no selected mark or
+  redraw value.**
+- Date and investigator: 2026-07-31, R1.
+- Commit and worktree state: `3cb5472`, scratch `TerminalCore` test deleted
+  after use (its case table is reproduced below).
+- Result or artifact paths:
+  [probe-zsh-prompt-frameworks.py](probe-zsh-prompt-frameworks.py), promoted out
+  of the scratchpad so this finding stays reproducible. Three stages (`native`,
+  `order`, `hostile`) and the expected numbers are documented in its docstring.
+- Commands, inputs, or reproduction: real zsh 5.9.1 under `pty.fork()`, four
+  stages.
+  1. `native`: the maintainer's own `~/.zshrc` (Starship 1.25.1, atuin, fzf,
+     zoxide, direnv) with DanTerm's env triggers stripped.
+  2. `order`: a synthetic `ZDOTDIR` that sources the "integration" **before** the
+     framework's init -- the order the real `~/.zshrc` uses, where the DanTerm
+     block sits well above the `starship init zsh` line -- crossed with three
+     emitter strategies and with the framework present or absent.
+  3. `hostile`: a synthetic framework that rebuilds `PS1` on every precmd, with
+     its hook registered before and after the emitter's.
+  4. Parser: the two-`A` conflict fed to `TerminalCore.Terminal` directly, over a
+     20 -> 12 column sweep with a full-width first prompt row.
+- Measurements or examples:
+
+  Stage 1. Real zsh + Starship emits **no OSC 133 at all** -- unlike fish, which
+  emits the full set natively (F5). Its SIGWINCH repaint covers the whole
+  two-row prompt (`\r\r\x1b[A ... \x1b[J`), and the first row is padded to the
+  full width by a right-aligned segment:
+
+  ```
+  \r\r\x1b[A\x1b[0m\x1b[27m\x1b[24m\x1b[J\x1b[90m╭\x1b[0m \x1b[90mrepo:...
+      \x1b[1;30m<38 spaces>\x1b[0m\x1b[90mk8s:\x1b[1;34morbstack\x1b[0m\r\n...
+  ```
+
+  Stage 2, marks reaching the terminal (`startup` / per prompt cycle / SIGWINCH):
+
+  | emitter | framework | startup | per cycle | SIGWINCH | user prompt |
+  | --- | --- | --- | --- | --- | --- |
+  | `ps1-assign` (D1 as written) | none | 2 | 2,2,2,2 | 2 | n/a |
+  | `ps1-assign` | starship | **0** | 0,0,0,0 | **0** | intact |
+  | `precmd-naive` | none | 2 | **4,6,8,10** | 10 | n/a |
+  | `precmd-naive` | starship | 2 | **4,6,8,10** | 10 | intact |
+  | `precmd-guarded` | none | 2 | 2,2,2,2 | 2 | n/a |
+  | `precmd-guarded` | starship | 2 | 2,2,2,2 | 2 | intact |
+
+  `precmd-naive` also renders its marker text once per accumulated wrap, so the
+  duplication is visible in the prompt, not just on the wire.
+
+  Stage 3, against a framework that rebuilds `PS1` every precmd:
+
+  | hook order | marks per cycle | on SIGWINCH |
+  | --- | --- | --- |
+  | framework's hook, then ours | 2,2,2,2 | 2 |
+  | ours, then the framework's | **0,0,0,0** | **0** |
+
+  Stage 4, parser. Prompt copies surviving the sweep; **1 is clean, 9 is the
+  staircase**, and both outcomes are exhibited, so the nulls are meaningful:
+
+  | opener on the prompt | in history | on screen |
+  | --- | --- | --- |
+  | `A;redraw=1` alone | 1 | 1 |
+  | `A;redraw=0` alone | 9 | 3 |
+  | `A;redraw=1` then `A;redraw=0` | 9 | 3 |
+  | `A;redraw=0` then `A;redraw=1` | 1 | 1 |
+  | `A;redraw=1` then bare `A` | 1 | 1 |
+  | bare `A` then `A;redraw=1` | 1 | 1 |
+  | `A;redraw=1` twice | 1 | 1 |
+  | `A;click_events=1` then `A;redraw=1` | 1 | 1 |
+  | `A;redraw=1` then `A;click_events=1` | 1 | 1 |
+
+  Separately, a nested shell's `redraw=0` inherited by a later bare `A` across a
+  command produced 9 copies -- D0's failure mode, measured as a staircase rather
+  than argued from F7 case 5.
+- Observation: for zsh the marks' existence is decided by **assignment order**,
+  not by asynchronous rebuilding. Starship-zsh assigns `PROMPT` exactly once, at
+  init (`starship init zsh --print-full-init` sets `PROMPT`, `RPROMPT`, and
+  `PROMPT2` under `setopt promptsubst`, and its `prompt_starship_precmd` collects
+  only status/duration/jobs). It never rewrites `PS1` afterwards. So a `PS1=`
+  assignment at source time is not *stripped* by an async rebuild -- it is
+  overwritten wholesale by the framework's own init, which in a real `~/.zshrc`
+  runs later. Running the assignment the other way round is worse: it clobbers
+  the user's prompt entirely.
+- Inference: D1's selected marks and `redraw=1` all stand -- stage 4 confirms
+  DanTerm's declaration survives every optionless neighbor, in either order, and
+  stage 1 confirms zsh's real prompt has the full-width re-wrapping row that
+  makes `redraw=1` necessary. What does not stand is D1's mechanism as phrased.
+  A source-time `PS1=` assignment is silently a no-op under the maintainer's own
+  configuration. The emitter must wrap `PS1` from a `precmd` hook, and that hook
+  must be idempotent -- keeping a pristine copy and rebuilding from it, because
+  the obvious "wrap whatever `PS1` is now" grows two marks and one visible
+  marker per prompt, forever.
+- Competing interpretations: that the `ps1-assign` zero is a probe artifact of
+  the synthetic `ZDOTDIR` rather than of source order. Ruled out by the
+  framework=none row of the same table: the identical rc file, minus the
+  `starship init` line, yields 2 marks on every cycle. The only difference is the
+  framework's later assignment. That the parser rows are a false null is ruled
+  out by the two exhibited outcomes (1 vs 9) in the same sweep.
+- Uncertainty: the `hostile` framework is synthetic. Powerlevel10k is not
+  installed here and was not measured; it is the real-world instance of the
+  rebuild-every-precmd shape, and its instant-prompt path may differ again. The
+  guarded emitter is also only proven against hooks registered *before* it --
+  when the framework's hook runs last, DanTerm loses completely and silently
+  (0 marks, no diagnostic), and nothing in the dialect detects that. Bash's
+  `PROMPT_COMMAND` has the same ordering hazard and was not probed.
+- Next action: amend D1 with the mechanism; carry the hook-ordering hazard into
+  Phase 3 as an emitter requirement, not a dialect change.

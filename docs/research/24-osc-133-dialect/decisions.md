@@ -27,9 +27,11 @@ The authored dialect, decision by decision. The bytes themselves are in
 
 ### D1 -- zsh: marks in `PS1`/`PS2`, `redraw=1`, continuation lines stamped
 
-- Status: selected.
+- Status: selected. **Mechanism amended by F14; marks and redraw value
+  unchanged.**
 - Evidence used: F3 (zsh re-emits `PS1` whole on SIGWINCH and repaints the whole
-  prompt), F1, F7 case 1.
+  prompt), F1, F7 case 1, F14 (how the marks get *into* `PS1`, and that the
+  declaration survives a framework's optionless neighbors).
 - Candidate solutions: (a) print marks from `precmd`; (b) embed them in
   `PS1`/`PS2` inside `%{...%}`.
 - Tradeoffs and correctness risks: (a) emits once per prompt *creation*, so a
@@ -37,20 +39,36 @@ The authored dialect, decision by decision. The bytes themselves are in
   of it -- the row loses its stamp and the next resize blanks nothing (or blanks
   from a stale stamp further up). (b) is re-emitted on every redisplay, which is
   precisely what F3 measured, and `%{...%}` keeps the marks out of zsh's prompt
-  width accounting. Risk: a prompt framework that rebuilds `PS1` asynchronously
-  drops the marks; Ghostty carries real machinery for this (saving and restoring
-  a clean `PS1`, detecting third-party modification), and DanTerm's emitter will
-  need the same care.
+  width accounting. The risk originally recorded here -- a framework that
+  rebuilds `PS1` asynchronously drops the marks -- **is not the one that bites
+  for Starship** (F14): Starship-zsh assigns `PROMPT` once at init and never
+  again, so what kills a source-time `PS1=` assignment is simply that the
+  framework's init runs later in `~/.zshrc` and overwrites it. Measured: 0 marks,
+  silently, in the maintainer's own configuration.
 - Selected direction: (b), with `A;redraw=1` opening `PS1`, `B` closing it,
   `A;k=s` opening each continuation line of a multi-line `PS1` and opening `PS2`.
   `C` is printed from `preexec`, after the existing `command-start` envelope
-  event.
+  event. **The wrapping happens in a `precmd` hook, not at source time**, and the
+  hook is idempotent: it keeps a pristine copy of `PS1`, rebuilds from that copy
+  every prompt, and re-captures whenever a third party has changed `PS1`
+  underneath it. F14 measured the unguarded "wrap whatever `PS1` is now" variant
+  growing two marks and one visible marker per prompt cycle without bound.
 - Behavioral verification: F7 case 1 -- four resize/repaint cycles leave exactly
   one prompt in history. F7 case 4 -- `C` protects command output from blanking.
+  F14 stage 2 -- the guarded hook holds at two marks per prompt across four
+  cycles and a SIGWINCH, with the user's Starship prompt intact.
 - Decision and rationale: zsh is the one shell that repaints everything, so it is
   the one shell that can safely ask for everything to be blanked. `A` is correct
   inside zsh's `PS1` (unlike Bash's, per the rejected idea in README) because
-  zsh's redisplay starts at column 0, where `A`'s fresh line is a no-op.
+  zsh's redisplay starts at column 0, where `A`'s fresh line is a no-op. F14
+  confirms the need as well as the safety: the maintainer's real zsh prompt has a
+  right-aligned segment padded to the full width, the same re-wrapping row shape
+  that produced fish's staircase in F13.
+- Known gap carried to Phase 3: the guarded hook is only proven against
+  framework hooks registered *before* it. A framework whose `precmd` is
+  registered after DanTerm's overwrites the wrapped `PS1` and the dialect goes
+  silent -- 0 marks, no diagnostic (F14 stage 3). Emitter-level problem, not a
+  dialect change.
 
 ### D2 -- Bash: `A;redraw=last` from precmd, `P` inside `PS1`/`PS2`
 

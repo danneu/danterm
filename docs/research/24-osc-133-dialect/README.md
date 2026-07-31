@@ -136,7 +136,10 @@ prompt (F8, F12), so the whole block may be blanked. D3 now selects `redraw=1`.
 Recorded in full in [dialect.md](dialect.md): each shell
 declares its own redraw mode on every prompt rather than inheriting the parser
 default, because the mode is sticky per-pane and a nested foreign shell can leave
-it wrong (F7). zsh declares `redraw=1` and marks continuation lines; Bash
+it wrong (F7, measured as a staircase in F14). zsh declares `redraw=1` and marks
+continuation lines -- wrapping `PS1` from an idempotent `precmd` hook, never by
+assignment at source time, which a prompt framework's later init silently
+overwrites (F14); Bash
 declares `redraw=last` because readline repaints only the final prompt line (F4);
 fish declares `redraw=1` and does not touch `fish_handle_reflow` (D3, settled by
 F13 -- fish repaints its whole prompt, and a full-width fish prompt row does
@@ -174,12 +177,25 @@ re-wrap). No integration emits `D`, `L`, `I`, or `N`.
   alternatives, so an unintegrated fish pane auto-sets `fish_handle_reflow 1`
   and repaints. F8's conclusion survives the switch from its synthetic identity
   to the real one. Recorded in F12.
+- [x] RESEARCH: settle how D1's marks survive a real zsh prompt framework, and
+  what happens when a framework and DanTerm both declare a redraw mode. The
+  marks and `redraw=1` stand; **D1's mechanism does not**. Starship-zsh assigns
+  `PROMPT` once at init rather than rebuilding it, so the hazard is source order,
+  not async rebuilding, and the emitter must wrap `PS1` from an idempotent
+  `precmd` hook. Recorded in F14.
 
 ### Phase 3 -- ship the emitters
 
 - [ ] TODO: implement the dialect in `danterm.zsh`, `danterm.bash`, and
   `danterm.fish`, preserving the existing prompt hooks the integrations already
-  promise not to disturb.
+  promise not to disturb. For zsh this means an idempotent `precmd` wrapper over
+  a pristine `PS1` copy, per D1 as amended by F14 -- not a `PS1=` assignment.
+- [ ] TODO: decide how the zsh emitter survives a prompt framework whose
+  `precmd` hook is registered *after* DanTerm's. F14 stage 3 measures that case
+  as a total silent loss (0 marks, no diagnostic); the guarded wrapper only holds
+  when DanTerm's hook runs last. Options not yet evaluated: re-appending the hook
+  each cycle, moving it to the end of `precmd_functions`, or detecting the loss
+  and warning. `PROMPT_COMMAND` has the same hazard for Bash and was not probed.
 - [ ] TODO: cover the emitted dialect behaviorally -- a resize over each shell's
   authored byte stream leaves exactly one prompt, and a resize during command
   output leaves the output intact. `TerminalOSC133Tests` covers the parser side;
@@ -233,15 +249,20 @@ an `aid=`.
   `bash --norc --noprofile` and have not been re-run with system config loaded.
   Neither shell keeps its resize behavior in a config file the way fish does, so
   the risk is lower -- but it is the same untested assumption.
-- The shell probes ran with config disabled (`zsh -f`, `bash --norc --noprofile`,
-  `fish -N`) and synthetic prompts. Real user frameworks (Powerlevel10k, Starship,
-  Pure) rewrite `PS1` asynchronously and may strip injected marks; Ghostty's zsh
-  integration carries substantial machinery to survive that. The dialect says
-  what to emit, not yet how to survive a hostile prompt framework.
-- A user's own framework may already emit OSC 133. Duplicate `A` marks on the
-  same row are idempotent at column 0 (F7), but a framework that emits
-  `A;redraw=0` and DanTerm's `A;redraw=1` on the same prompt leaves the mode
-  decided by whichever lands last. Not yet probed.
+- The mark-emitting probes for zsh ran with config disabled (`zsh -f`) and
+  synthetic prompts. F14 re-ran the *framework* question against the real
+  `~/.zshrc` and found the assumption stated here backwards: Starship-zsh does
+  not rewrite `PS1` asynchronously at all, it assigns `PROMPT` once at init, so
+  what strips a source-time assignment is ordinary source order. Powerlevel10k
+  and Pure remain unprobed and are the plausible homes of the async shape;
+  F14's `hostile` stage stands in for them synthetically.
+- A user's own framework may already emit OSC 133. Probed in F14 stage 4: **the
+  last `A` on the prompt wins**, and an optionless neighbor -- a bare `A`, or
+  fish's native `A;click_events=1` -- inherits rather than resets, in either
+  order. So DanTerm's declaration survives every mark measured in this doc
+  except an explicit competing `redraw=` that lands after it. Since DanTerm's
+  mark opens `PS1`, a framework's own mark embedded inside its prompt would land
+  later; no such framework was found here (real zsh + Starship emits none).
 - The redraw mode is per-pane parser state that survives the shell that set it,
   and is reset only by RIS (F7). The per-prompt restatement in D1-D3 is what
   makes a nested shell's mode recoverable; nothing else does.
@@ -268,6 +289,9 @@ an `aid=`.
 - Only the fish question (F11) was observed in a real DanTerm pane. Every
   authored mark is checked against `TerminalCore.Terminal` directly, so the zsh
   and Bash dialects have never been rendered by the app that will consume them.
+  F14 narrows this for zsh but does not close it: it drove a real zsh with the
+  real prompt framework and captured the bytes, but the consumer under test was
+  still `TerminalCore.Terminal`, not a pane.
 
 ## Outcome
 
@@ -293,8 +317,20 @@ sees -- resolved to `DanTerm <bundle version>`, which matches none of fish's
 special cases, so an unintegrated fish pane repaints (F12). The answer changes
 no decision; it confirms F8 was not an artifact of its synthetic identity.
 
-Remaining work is Phase 3 -- writing the emitters -- which is now unblocked for
-all three shells. The one design question R1 deliberately did not answer is
-waiting there: D1 puts marks inside zsh's `PS1`, and a prompt framework that
-rebuilds `PS1` asynchronously can strip them. Decide that before writing the
-zsh emitter, not during.
+The design question R1 deliberately deferred -- how D1's marks survive inside
+zsh's `PS1` under a real prompt framework -- is now answered by F14, and the
+answer was not the one the question assumed. Starship-zsh never rebuilds `PS1`;
+it assigns `PROMPT` once at init, which in a real `~/.zshrc` runs *after* the
+integration is sourced and overwrites a source-time assignment outright. So the
+failure is silent and total (0 marks) rather than intermittent, and the fix is
+an idempotent `precmd` wrapper over a pristine copy -- the unguarded version of
+which grows two marks per prompt forever. D1's marks and `redraw=1` are
+unchanged; only its mechanism moved.
+
+That leaves one live hazard, carried into Phase 3 as an emitter requirement
+rather than a dialect question: a framework whose `precmd` hook is registered
+after DanTerm's wins, and the dialect disappears with no diagnostic. Nothing in
+the marks can detect that; the emitter has to.
+
+Remaining work is Phase 3 -- writing the emitters -- which is unblocked for all
+three shells.
