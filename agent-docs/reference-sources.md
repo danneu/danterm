@@ -40,6 +40,18 @@ The following pinned source trees are materialized under `references/`:
   signal, and terminal interfaces.
 - [`references/objc4/`](../references/objc4/) -- Objective-C runtime ownership,
   teardown, and message dispatch behavior.
+- [`references/fish-shell/`](../references/fish-shell/) -- prompt repaint on
+  SIGWINCH, `fish_handle_reflow` auto-detection, and the OSC 133 marks fish
+  emits with no integration loaded.
+- [`references/zsh/`](../references/zsh/) -- prompt redisplay and expansion,
+  which decide whether marks embedded in `PS1` survive a repaint.
+- [`references/bash/`](../references/bash/) -- readline redisplay after
+  SIGWINCH, which decides how much of a Bash prompt may be blanked.
+
+The three shells are pinned at the versions DanTerm's shell-integration
+research measured (fish 4.7.1, zsh 5.9, bash 5.3). A shell's *behavior* is
+still established by probing a real binary in a real PTY -- these checkouts
+explain a measurement or pick the next probe, and are not a substitute for one.
 
 These directories are gitignored and absent from a fresh clone. If a source
 tree is missing, run `just fetch-references [name]` and read it locally instead

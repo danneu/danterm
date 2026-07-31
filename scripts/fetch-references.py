@@ -108,6 +108,30 @@ REFERENCES = [
         why="Objective-C runtime ownership, teardown, and message dispatch behavior.",
         release_tag="objc4-951.7",
     ),
+    Reference(
+        name="fish-shell",
+        url="https://github.com/fish-shell/fish-shell.git",
+        pin="cf3db77d3ac0b08fb7465ccd928e06e1f7fda9be",
+        sparse_cone=("share", "src"),
+        why="Prompt repaint on SIGWINCH, fish_handle_reflow auto-detection, and the OSC 133 marks fish emits unprompted.",
+        release_tag="4.7.1",
+    ),
+    Reference(
+        name="zsh",
+        url="https://github.com/zsh-users/zsh.git",
+        pin="d6bfe888700f47be827e7c6c616284b4c8eadaa0",
+        sparse_cone=("Src", "Functions"),
+        why="Prompt redisplay and expansion behavior the shell-integration dialect embeds marks into.",
+        release_tag="zsh-5.9",
+    ),
+    Reference(
+        name="bash",
+        url="https://git.savannah.gnu.org/git/bash.git",
+        pin="b8c60bc9ca365f8261fa97900b6fa939f6ebc303",
+        sparse_cone=("lib/readline",),
+        why="Readline redisplay after SIGWINCH, which decides how much of a Bash prompt may be blanked.",
+        release_tag="bash-5.3",
+    ),
 ]
 
 
