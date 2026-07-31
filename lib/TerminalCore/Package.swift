@@ -44,6 +44,7 @@ let package = Package(
             name: "TerminalRenderExecution",
             dependencies: ["TerminalRenderPlanning", "TerminalSpriteGeometry"],
             path: "Sources/TerminalRenderExecution",
+            resources: [.copy("Resources/NerdFontsSymbolsOnly")],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .executableTarget(

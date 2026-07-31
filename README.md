@@ -555,12 +555,11 @@ The optimized commands retain the `DanTerm Dev.app` name, dev bundle ID,
 development signing, install path, and selected terminal backend. They do not
 create a production release or publish anything.
 
-The `just preview-glyphs` sprite comparison requires
-[`SymbolsNerdFontMono-Regular.ttf`](https://github.com/ryanoasis/nerd-fonts/releases/latest/download/NerdFontsSymbolsOnly.zip)
-for its Powerline references and
+The `just preview-glyphs` sprite comparison uses DanTerm's bundled Nerd Font for
+its Powerline references. It requires
 [`unifont_upper-17.0.05.otf`](https://unifoundry.com/pub/unifont/unifont-17.0.05/font-builds/unifont_upper-17.0.05.otf)
-for its Symbols for Legacy Computing references. Install both with Font Book
-before launching the preview. The
+for its Symbols for Legacy Computing references; install that font with Font
+Book before launching the preview. The
 [terminal sprite system](docs/terminal-sprites.md) documents the procedural
 glyph contract, layer boundaries, family models, and extension rules.
 

@@ -19,6 +19,11 @@ python3 "$repository_root/scripts/pack-theme-catalog.py" \
     --source "$repository_root/themes" \
     --output "$resources/themes/catalog.json"
 
+symbols_source="$repository_root/lib/TerminalCore/Sources/TerminalRenderExecution/Resources/NerdFontsSymbolsOnly"
+mkdir -p "$resources/NerdFontsSymbolsOnly"
+cp "$symbols_source/SymbolsNerdFontMono-Regular.ttf" "$resources/NerdFontsSymbolsOnly/"
+cp "$symbols_source/LICENSE" "$resources/NerdFontsSymbolsOnly/"
+
 legacy_source="$repository_root/lib/ghostty-themes"
 if ! directory_has_entries "$legacy_source"; then
     legacy_source="$repository_root/.ghostty-src/zig-out/share/ghostty/themes"

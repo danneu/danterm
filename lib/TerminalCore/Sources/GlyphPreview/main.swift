@@ -126,17 +126,15 @@ final class GlyphPreviewView: NSView {
             systemReferenceFont.pointSize,
             nil
         )
-        // "SymbolsNFM" is the PostScript name for Symbols Nerd Font Mono Regular.
-        guard let nerdSymbolsReferenceFont = NSFont(name: "SymbolsNFM", size: 13),
+        guard let nerdSymbolsReferenceFont = NerdFontSymbolsResource.face(
+                  at: NerdFontSymbolsResource.packagedURL(),
+                  pointSize: 13
+              ),
               let unifontUpperReferenceFont = NSFont(name: "UnifontUpper", size: 13)
         else {
             return nil
         }
-        self.nerdSymbolsReferenceFont = CTFontCreateWithName(
-            nerdSymbolsReferenceFont.fontName as CFString,
-            nerdSymbolsReferenceFont.pointSize,
-            nil
-        )
+        self.nerdSymbolsReferenceFont = nerdSymbolsReferenceFont
         self.unifontUpperReferenceFont = CTFontCreateWithName(
             unifontUpperReferenceFont.fontName as CFString,
             unifontUpperReferenceFont.pointSize,

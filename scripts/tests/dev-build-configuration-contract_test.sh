@@ -22,6 +22,7 @@ mkdir -p "$BUILD_ROOT/lib/GhosttyKit.xcframework" \
     "$BUILD_ROOT/integrations/codex" \
     "$BUILD_ROOT/integrations/shell-integration" \
     "$BUILD_ROOT/lib/ghostty-themes" \
+    "$BUILD_ROOT/lib/TerminalCore/Sources/TerminalRenderExecution/Resources/NerdFontsSymbolsOnly" \
     "$BUILD_ROOT/scripts" \
     "$BUILD_ROOT/themes" \
     "$FAKE_BIN"
@@ -30,6 +31,8 @@ cp "$ROOT_DIR/scripts/bundle-theme-resources.sh" "$BUILD_ROOT/scripts/"
 cp "$ROOT_DIR/scripts/pack-theme-catalog.py" "$BUILD_ROOT/scripts/"
 cp "$ROOT_DIR/themes/0x96f.json" "$BUILD_ROOT/themes/"
 : > "$BUILD_ROOT/lib/ghostty-themes/Fixture"
+: > "$BUILD_ROOT/lib/TerminalCore/Sources/TerminalRenderExecution/Resources/NerdFontsSymbolsOnly/SymbolsNerdFontMono-Regular.ttf"
+: > "$BUILD_ROOT/lib/TerminalCore/Sources/TerminalRenderExecution/Resources/NerdFontsSymbolsOnly/LICENSE"
 cp "$ROOT_DIR/app/Info.plist" "$BUILD_ROOT/app/Info.plist"
 : > "$BUILD_ROOT/icon/AppIcon-dev/Assets.car"
 : > "$BUILD_ROOT/dev-entitlements.plist"
@@ -95,6 +98,10 @@ run_build() {
 run_build debug
 [[ -r "$BUILD_ROOT/.build/DanTerm Dev.app/Contents/Resources/themes/catalog.json" ]] \
     || fail "debug bundle omitted the packed theme catalog"
+[[ -r "$BUILD_ROOT/.build/DanTerm Dev.app/Contents/Resources/NerdFontsSymbolsOnly/SymbolsNerdFontMono-Regular.ttf" ]] \
+    || fail "debug bundle omitted the Nerd Font symbols face"
+[[ -r "$BUILD_ROOT/.build/DanTerm Dev.app/Contents/Resources/NerdFontsSymbolsOnly/LICENSE" ]] \
+    || fail "debug bundle omitted the Nerd Font license"
 for shell in zsh bash fish; do
     cmp "$BUILD_ROOT/integrations/shell-integration/danterm.$shell" \
         "$BUILD_ROOT/.build/DanTerm Dev.app/Contents/Resources/shell-integration/danterm.$shell" \

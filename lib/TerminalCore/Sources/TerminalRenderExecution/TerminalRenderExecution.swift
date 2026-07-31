@@ -41,6 +41,14 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
 
     /// Returns nil when scale or any derived cell dimension cannot be represented safely.
     public init?(displayScale: CGFloat) {
+        self.init(
+            displayScale: displayScale,
+            symbolsFontURL: NerdFontSymbolsResource.packagedURL()
+        )
+    }
+
+    /// Test seam for proving that an absent packaged symbols face preserves the old path.
+    init?(displayScale: CGFloat, symbolsFontURL: URL?) {
         guard displayScale.isFinite, displayScale > 0 else { return nil }
 
         let fontSize: CGFloat = 13
@@ -91,7 +99,12 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
             cellPixels: cellHeightPixels,
             thicknessPixels: underlinePixels
         )
-        self.fonts = TerminalFontSet(baseName: appKitFont.fontName, baseSize: fontSize)
+        self.fonts = TerminalFontSet(
+            baseName: appKitFont.fontName,
+            baseSize: fontSize,
+            symbolsFontURL: symbolsFontURL,
+            symbolsSize: self.cellSize.width
+        )
         self.baseFontName = appKitFont.fontName
         self.baseFontSize = fontSize
         self.unquantizedLineHeight = lineHeight
@@ -104,7 +117,11 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
 /// grow far faster than the hit rate.
 let asciiGlyphTableRange: ClosedRange<UInt32> = 0x20...0x7E
 
-/// One styled face together with its printable-ASCII glyphs, resolved eagerly at
+/// CoreText's unsupported BMP private-use block, where the packaged symbols face
+/// may fill a base-face cmap miss after sprite classification has declined it.
+let bmpPrivateUseRange: ClosedRange<UInt32> = 0xE000...0xF8FF
+
+/// One font face together with its printable-ASCII glyphs, resolved eagerly at
 /// construction so the draw loop never asks CoreText to map a character it has
 /// already mapped. `CTFontGetGlyphsForCharacters` is documented as the font's
 /// nominal cmap mapping (`CTFont.h`, `CTFontGetGlyphsForCharacters`) -- a pure
@@ -158,15 +175,24 @@ struct TerminalFace: @unchecked Sendable {
         guard asciiGlyphTableRange.contains(scalarValue) else { return nil }
         return glyphs[Int(scalarValue - asciiGlyphTableRange.lowerBound)]
     }
+
+    /// Returns this face's nominal BMP glyph without invoking font fallback.
+    func bmpGlyph(_ scalarValue: UInt32) -> CGGlyph? {
+        guard scalarValue <= UInt16.max else { return nil }
+        var character = UniChar(scalarValue)
+        var glyph = CGGlyph()
+        _ = CTFontGetGlyphsForCharacters(font, &character, &glyph, 1)
+        return glyph == 0 ? nil : glyph
+    }
 }
 
-/// The four styled faces a draw can need, built once alongside the metrics that
-/// fix the grid rather than per draw. Every face is derived from the same base
-/// family and size, so equality compares the faces themselves: two sets built
-/// from the same base are interchangeable, which is what keeps the metrics'
-/// synthesized `Equatable` a comparison of geometry and not of object identity.
-/// The glyph tables are derived from those same faces, so they are deliberately
-/// outside that comparison.
+/// The four styled base faces and optional packaged symbols face a draw can need,
+/// built once alongside the metrics that fix the grid rather than per draw. The
+/// styled faces share one base family and size; the symbols face instead uses the
+/// cell width as its size. Equality compares interchangeable font properties and
+/// the packaged source URL, which keeps the metrics' synthesized `Equatable` a
+/// comparison of geometry and font choice rather than object identity. The glyph
+/// tables are derived from those same faces, so they stay outside that comparison.
 ///
 /// `@unchecked` because CoreText does not annotate `CTFont` as `Sendable`, not
 /// because the faces need care: they are immutable after `init` and CoreText
@@ -177,13 +203,39 @@ struct TerminalFontSet: Equatable, @unchecked Sendable {
     let bold: TerminalFace
     let italic: TerminalFace
     let boldItalic: TerminalFace
+    let symbols: TerminalFace?
+    let symbolsResourceURL: URL?
 
     init(baseName: String, baseSize: CGFloat) {
+        self.init(
+            baseName: baseName,
+            baseSize: baseSize,
+            symbolsFontURL: nil,
+            symbolsSize: baseSize
+        )
+    }
+
+    init(
+        baseName: String,
+        baseSize: CGFloat,
+        symbolsFontURL: URL?,
+        symbolsSize: CGFloat
+    ) {
         let regular = CTFontCreateWithName(baseName as CFString, baseSize, nil)
         self.regular = TerminalFace(font: regular)
         self.bold = TerminalFace(font: regular.styled(with: .boldTrait))
         self.italic = TerminalFace(font: regular.styled(with: .italicTrait))
         self.boldItalic = TerminalFace(font: regular.styled(with: [.boldTrait, .italicTrait]))
+        if let symbolsFont = NerdFontSymbolsResource.face(
+            at: symbolsFontURL,
+            pointSize: symbolsSize
+        ) {
+            self.symbols = TerminalFace(font: symbolsFont)
+            self.symbolsResourceURL = symbolsFontURL
+        } else {
+            self.symbols = nil
+            self.symbolsResourceURL = nil
+        }
     }
 
     /// The face for one run's style, so callers route on traits rather than
@@ -202,6 +254,23 @@ struct TerminalFontSet: Equatable, @unchecked Sendable {
             && CFEqual(lhs.bold.font, rhs.bold.font)
             && CFEqual(lhs.italic.font, rhs.italic.font)
             && CFEqual(lhs.boldItalic.font, rhs.boldItalic.font)
+            && optionalFontsEqual(lhs.symbols?.font, rhs.symbols?.font)
+            && lhs.symbolsResourceURL == rhs.symbolsResourceURL
+    }
+}
+
+/// Compares optional data-backed faces by the properties that affect drawing;
+/// CoreText object equality is false for two descriptors built from the same bytes.
+private func optionalFontsEqual(_ lhs: CTFont?, _ rhs: CTFont?) -> Bool {
+    switch (lhs, rhs) {
+    case let (lhs?, rhs?):
+        CTFontCopyPostScriptName(lhs) == CTFontCopyPostScriptName(rhs)
+            && CTFontGetSize(lhs) == CTFontGetSize(rhs)
+            && CTFontGetMatrix(lhs) == CTFontGetMatrix(rhs)
+    case (nil, nil):
+        true
+    default:
+        false
     }
 }
 
@@ -525,6 +594,7 @@ private extension CGContext {
         var characters: [UniChar] = []
         var candidateCells: [(cell: RenderTextCell, column: Int)] = []
         var fallbackCells: [(cell: RenderTextCell, column: Int)] = []
+        var symbolsCells: [(cell: RenderTextCell, column: Int)] = []
         var spriteRects: [CGRect] = []
         var shadedSpriteRects: [BlockElementShade: [CGRect]] = [:]
         var geometricShapeTriangles: [GeometricShapeRenderTriangle] = []
@@ -545,6 +615,7 @@ private extension CGContext {
             characters.removeAll(keepingCapacity: true)
             candidateCells.removeAll(keepingCapacity: true)
             fallbackCells.removeAll(keepingCapacity: true)
+            symbolsCells.removeAll(keepingCapacity: true)
             spriteRects.removeAll(keepingCapacity: true)
             shadedSpriteRects.emptyValuesKeepingCapacity()
             geometricShapeTriangles.removeAll(keepingCapacity: true)
@@ -769,7 +840,15 @@ private extension CGContext {
             for (index, candidate) in candidateCells.enumerated() {
                 let glyph = glyphs[index]
                 guard glyph != 0 else {
-                    fallbackCells.append(candidate)
+                    if let scalar = candidate.cell.scalars.first,
+                       candidate.cell.scalars.count == 1,
+                       bmpPrivateUseRange.contains(scalar.value),
+                       fonts.symbols?.bmpGlyph(scalar.value) != nil
+                    {
+                        symbolsCells.append(candidate)
+                    } else {
+                        fallbackCells.append(candidate)
+                    }
                     continue
                 }
                 mappedGlyphs.append(glyph)
@@ -803,6 +882,22 @@ private extension CGContext {
                         positions,
                         mappedGlyphs.count,
                         self
+                    )
+                }
+            }
+            if let symbolsFont = fonts.symbols?.font, symbolsCells.isEmpty == false {
+                let attributes: [NSAttributedString.Key: Any] = [
+                    kCTFontAttributeName as NSAttributedString.Key: symbolsFont,
+                    kCTForegroundColorAttributeName as NSAttributedString.Key: foreground,
+                    kCTLigatureAttributeName as NSAttributedString.Key: 0,
+                ]
+                for symbolsCell in symbolsCells {
+                    drawTextCell(
+                        symbolsCell.cell,
+                        row: run.row,
+                        column: symbolsCell.column,
+                        attributes: attributes,
+                        metrics: metrics
                     )
                 }
             }

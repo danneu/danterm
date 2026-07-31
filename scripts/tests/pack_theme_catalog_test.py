@@ -143,6 +143,20 @@ class PackThemeCatalogTests(unittest.TestCase):
 
 
 class AssemblerContractTests(unittest.TestCase):
+    def write_symbols_fixture(self, repository):
+        symbols = (
+            repository
+            / "lib"
+            / "TerminalCore"
+            / "Sources"
+            / "TerminalRenderExecution"
+            / "Resources"
+            / "NerdFontsSymbolsOnly"
+        )
+        symbols.mkdir(parents=True)
+        (symbols / "SymbolsNerdFontMono-Regular.ttf").write_bytes(b"font fixture")
+        (symbols / "LICENSE").write_text("license fixture\n", encoding="utf-8")
+
     def test_every_app_assembler_routes_through_the_shared_bundle_step(self):
         assemblers = [
             ROOT / "build-app.sh",
@@ -179,6 +193,7 @@ class AssemblerContractTests(unittest.TestCase):
             (repository / "lib" / "ghostty-themes" / "Legacy").write_text(
                 "legacy\n", encoding="utf-8"
             )
+            self.write_symbols_fixture(repository)
             (repository / "scripts").mkdir()
             shutil.copy2(SCRIPT, repository / "scripts" / SCRIPT.name)
             helper = ROOT / "scripts" / "bundle-theme-resources.sh"
@@ -202,6 +217,26 @@ class AssemblerContractTests(unittest.TestCase):
                 "legacy\n",
             )
             self.assertEqual(
+                (
+                    app
+                    / "Contents"
+                    / "Resources"
+                    / "NerdFontsSymbolsOnly"
+                    / "SymbolsNerdFontMono-Regular.ttf"
+                ).read_bytes(),
+                b"font fixture",
+            )
+            self.assertEqual(
+                (
+                    app
+                    / "Contents"
+                    / "Resources"
+                    / "NerdFontsSymbolsOnly"
+                    / "LICENSE"
+                ).read_text(),
+                "license fixture\n",
+            )
+            self.assertEqual(
                 {
                     path.relative_to(repository): path.read_bytes()
                     for path in (repository / "themes").glob("*.json")
@@ -215,6 +250,7 @@ class AssemblerContractTests(unittest.TestCase):
             repository = root / "repo"
             shutil.copytree(ROOT / "themes", repository / "themes")
             (repository / "lib" / "ghostty-themes").mkdir(parents=True)
+            self.write_symbols_fixture(repository)
             (repository / "scripts").mkdir()
             shutil.copy2(SCRIPT, repository / "scripts" / SCRIPT.name)
             helper = ROOT / "scripts" / "bundle-theme-resources.sh"
