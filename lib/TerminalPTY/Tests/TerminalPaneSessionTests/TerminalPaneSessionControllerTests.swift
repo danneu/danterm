@@ -13,6 +13,140 @@ import TerminalPTYTestSupport
 @MainActor
 @Suite(.serialized)
 struct TerminalPaneSessionControllerTests {
+    @Test("every controller fence is timed, attributed, and matched by the host")
+    func everyControllerFenceIsAccounted() async throws {
+        // Intent: initialization, delivery, checkpoint, diagnostic, and teardown
+        //   fences each advance their attributed controller counter and the same
+        //   host production-entry counter.
+        // Why it exists: a new or bypassing fence otherwise silently escapes the
+        //   benchmark bracket while the existing delivery-only metric stays plausible.
+        // Scenario: one pane starts, consumes output, checkpoints, captures diagnostics,
+        //   and tears down; its accounting remains internally complete afterward.
+        var now: UInt64 = 0
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec sleep 30"),
+            fenceClock: {
+                defer { now += 10 }
+                return now
+            }
+        )
+
+        host.deliverOutputForTesting(Array("delivery".utf8))
+        controller.consumePendingHostUpdateForTesting()
+        controller.synchronizeState()
+        _ = controller.diagnosticCapture(test: "fence-accounting")
+        controller.tearDown()
+
+        let metrics = controller.fenceMetrics
+        #expect(metrics.initialization == .init(waitNanoseconds: 20, count: 2))
+        #expect(metrics.delivery == .init(waitNanoseconds: 10, count: 1))
+        #expect(metrics.checkpoint == .init(waitNanoseconds: 10, count: 1))
+        #expect(metrics.diagnostic == .init(waitNanoseconds: 10, count: 1))
+        #expect(metrics.teardown == .init(waitNanoseconds: 10, count: 1))
+        #expect(metrics.total == .init(waitNanoseconds: 60, count: 6))
+        #expect(metrics.hostEntryCount == metrics.total.count)
+        await host.close()
+    }
+
+    @Test("package-test fences do not advance the host production count")
+    func packageTestFencesDoNotPolluteProductionCount() throws {
+        let host = try makeHost()
+
+        _ = host.fencedSnapshot()
+        _ = host.fencedFrameState()
+        _ = host.fencedConsumptionState()
+        _ = host.fencedDiagnosticState()
+        _ = host.setTestUpdateHandler { _, _ in }
+        _ = host.observedOutputContains([])
+        _ = host.setTestOutputHandler { _ in }
+        host.deliverOutputForTesting(Array("test".utf8))
+
+        #expect(host.productionFenceEntryCountForTesting() == 0)
+    }
+
+    @Test("suppressed delivery stalls flush once at the next accepted publish")
+    func suppressedDeliveryFenceStallsCarryForward() async throws {
+        // Intent: delivery stalls accumulated while DEC 2026 suppresses planning
+        //   are charged exactly once when the synchronized update is accepted.
+        // Why it exists: drain-time latching dropped suppressed stalls, while retaining
+        //   the last latch allowed a later non-draining publish to charge one twice.
+        // Scenario: a TUI starts a synchronized frame, updates it, then commits it.
+        var now: UInt64 = 0
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec sleep 30"),
+            fenceClock: {
+                defer { now += 10 }
+                return now
+            }
+        )
+
+        host.deliverOutputForTesting(Array("\u{1B}[?2026hfirst".utf8))
+        controller.consumePendingHostUpdateForTesting()
+        #expect(controller.lastFenceStallNanoseconds == 0)
+        #expect(controller.unflushedDeliveryFenceWaitNanoseconds == 10)
+
+        host.deliverOutputForTesting(Array("second\u{1B}[?2026l".utf8))
+        controller.consumePendingHostUpdateForTesting()
+        #expect(controller.lastFenceStallNanoseconds == 20)
+        #expect(controller.unflushedDeliveryFenceWaitNanoseconds == 0)
+
+        controller.setVisible(false)
+        host.deliverOutputForTesting(Array("checkpoint".utf8))
+        controller.synchronizeState()
+        controller.setVisible(true)
+        #expect(controller.lastFenceStallNanoseconds == 0)
+
+        controller.tearDown()
+        await host.close()
+    }
+
+    @Test("delivery totals equal flushed stalls plus the pending remainder")
+    func deliveryTotalsReconcileWithFlushPipeline() async throws {
+        // Intent: cumulative delivery accounting equals every accepted frame's
+        //   flushed stall plus the still-suppressed remainder.
+        // Why it exists: the cumulative and frame-flush paths share one clock pair,
+        //   and this equality catches either path charging or dropping a fence alone.
+        // Scenario: a TUI suppresses two deliveries, commits them, publishes another
+        //   frame, then begins a second synchronized frame that remains pending.
+        var now: UInt64 = 0
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec sleep 30"),
+            fenceClock: {
+                defer { now += 10 }
+                return now
+            }
+        )
+        var flushedWaitNanoseconds: UInt64 = 0
+
+        host.deliverOutputForTesting(Array("\u{1B}[?2026hfirst".utf8))
+        controller.consumePendingHostUpdateForTesting()
+        host.deliverOutputForTesting(Array("second\u{1B}[?2026l".utf8))
+        controller.consumePendingHostUpdateForTesting()
+        flushedWaitNanoseconds += controller.lastFenceStallNanoseconds
+        host.deliverOutputForTesting(Array("accepted".utf8))
+        controller.consumePendingHostUpdateForTesting()
+        flushedWaitNanoseconds += controller.lastFenceStallNanoseconds
+        host.deliverOutputForTesting(Array("\u{1B}[?2026hpending".utf8))
+        controller.consumePendingHostUpdateForTesting()
+
+        #expect(flushedWaitNanoseconds == 30)
+        #expect(controller.unflushedDeliveryFenceWaitNanoseconds == 10)
+        #expect(
+            controller.fenceMetrics.delivery.waitNanoseconds
+                == flushedWaitNanoseconds
+                    + controller.unflushedDeliveryFenceWaitNanoseconds
+        )
+
+        controller.tearDown()
+        await host.close()
+    }
+
     @Test("primary-history generation covers every session string mutation")
     func primaryHistoryGenerationDifferential() throws {
         // Intent: every recovery projection change advances the primary-history generation.

@@ -48,6 +48,37 @@ package enum TerminalPTYAppliedTransition: Equatable, Sendable {
     case scrollToBottom
 }
 
+/// Names the controller-owned synchronous operations that count as production fences.
+package enum TerminalPTYProductionFenceOperation: Sendable {
+    case frameState
+    case consumptionState
+    case diagnosticState
+    case beginCloseAndSnapshot
+    case installUpdateHandler(@Sendable () -> Void)
+}
+
+/// Carries one production fence's payload together with the host's raw entry census.
+package enum TerminalPTYProductionFenceOutput: Sendable {
+    case frameState(TerminalPTYFrameState)
+    case consumptionState(
+        frameState: TerminalPTYFrameState,
+        result: PaneLifecycleResult?,
+        transitions: [TerminalPTYAppliedTransition]?
+    )
+    case diagnosticState(
+        frameState: TerminalPTYFrameState,
+        transitions: [TerminalPTYAppliedTransition]
+    )
+    case closeSnapshot(Terminal)
+    case updateHandlerInstalled
+}
+
+/// Lets the controller cross-check its attributed count against the host's raw count.
+package struct TerminalPTYProductionFenceResult: Sendable {
+    package let output: TerminalPTYProductionFenceOutput
+    package let entryCount: UInt64
+}
+
 /// Test-support view of input and resize effects applied on the shared owner queue.
 enum TerminalPTYSubmittedTransition: Equatable, Sendable {
     case input([UInt8])
@@ -196,6 +227,7 @@ public actor TerminalPTYHost {
     private var testUpdateHandler:
         (@Sendable ([UInt8], PaneLifecycleResult?) -> Void)?
     private var testOutputHandler: (@Sendable ([UInt8]) -> Void)?
+    private var productionFenceEntryCount: UInt64 = 0
 
     /// Binds Swift actor jobs to the FIFO queue that also delivers every system callback.
     nonisolated public var unownedExecutor: UnownedSerialExecutor {
@@ -620,51 +652,108 @@ public actor TerminalPTYHost {
     // acknowledges a watermark), so a lost or duplicated delivery degrades to a redundant
     // repaint instead of stale rows.
 
-    /// Fences earlier owner-queue work for synchronous session recovery reads.
-    nonisolated public func fencedSnapshot() -> Terminal {
-        queue.sync {
-            assumeIsolated { owner in owner.terminal }
-        }
-    }
-
-    /// Fences earlier owner work and drains exactly the damage accumulated through that fence.
-    nonisolated public func fencedFrameState() -> TerminalPTYFrameState {
-        queue.sync {
-            assumeIsolated { owner in owner.drainedFrameState() }
-        }
-    }
-
-    /// Drains frame effects and reads lifecycle evidence as one pane-consumer transaction.
-    package nonisolated func fencedConsumptionState() -> (
-        frameState: TerminalPTYFrameState,
-        result: PaneLifecycleResult?,
-        transitions: [TerminalPTYAppliedTransition]?
-    ) {
-        queue.sync {
-            assumeIsolated { owner in
+    /// Performs every controller-owned fence through the host's one counted sync path.
+    package nonisolated func performProductionFence(
+        _ operation: TerminalPTYProductionFenceOperation
+    ) -> TerminalPTYProductionFenceResult {
+        let fenced = fence(countsAsProduction: true) {
+            owner -> TerminalPTYProductionFenceOutput in
+            switch operation {
+            case .frameState:
+                return .frameState(owner.drainedFrameState())
+            case .consumptionState:
                 let transitions: [TerminalPTYAppliedTransition]?
                 if case .some(.exited) = owner.reportedResult, owner.captureTransitions {
                     transitions = owner.appliedTransitions
                 } else {
                     transitions = nil
                 }
-                return (
-                    owner.drainedFrameState(),
-                    owner.reportedResult,
-                    transitions
+                return .consumptionState(
+                    frameState: owner.drainedFrameState(),
+                    result: owner.reportedResult,
+                    transitions: transitions
                 )
+            case .diagnosticState:
+                return .diagnosticState(
+                    frameState: owner.drainedFrameState(),
+                    transitions: owner.appliedTransitions
+                )
+            case .beginCloseAndSnapshot:
+                owner.updateHandler = nil
+                owner.beginShutdown(completion: nil)
+                return .closeSnapshot(owner.terminal)
+            case .installUpdateHandler(let handler):
+                if owner.teardownFinished == false {
+                    owner.updateHandler = handler
+                }
+                return .updateHandlerInstalled
             }
         }
+        return TerminalPTYProductionFenceResult(
+            output: fenced.value,
+            entryCount: fenced.productionEntryCount
+        )
     }
 
-    /// Captures one owner-ordered diagnostic boundary before failure cleanup can discard evidence.
+    /// Fences earlier owner-queue work for test-only synchronous reads.
+    nonisolated public func fencedSnapshot() -> Terminal {
+        fence(countsAsProduction: false) { owner in owner.terminal }.value
+    }
+
+    /// Fences test work and drains exactly the damage accumulated through that fence.
+    nonisolated public func fencedFrameState() -> TerminalPTYFrameState {
+        fence(countsAsProduction: false) { owner in owner.drainedFrameState() }.value
+    }
+
+    /// Drains test frame effects and lifecycle evidence as one owner transaction.
+    package nonisolated func fencedConsumptionState() -> (
+        frameState: TerminalPTYFrameState,
+        result: PaneLifecycleResult?,
+        transitions: [TerminalPTYAppliedTransition]?
+    ) {
+        fence(countsAsProduction: false) { owner in
+            let transitions: [TerminalPTYAppliedTransition]?
+            if case .some(.exited) = owner.reportedResult, owner.captureTransitions {
+                transitions = owner.appliedTransitions
+            } else {
+                transitions = nil
+            }
+            return (
+                owner.drainedFrameState(),
+                owner.reportedResult,
+                transitions
+            )
+        }.value
+    }
+
+    /// Captures a test-only diagnostic boundary before failure cleanup can discard evidence.
     package nonisolated func fencedDiagnosticState() -> (
         frameState: TerminalPTYFrameState,
         transitions: [TerminalPTYAppliedTransition]
     ) {
+        fence(countsAsProduction: false) { owner in
+            (owner.drainedFrameState(), owner.appliedTransitions)
+        }.value
+    }
+
+    /// Returns the production census without counting the test's own inspection fence.
+    package nonisolated func productionFenceEntryCountForTesting() -> UInt64 {
+        fence(countsAsProduction: false) { owner in
+            owner.productionFenceEntryCount
+        }.value
+    }
+
+    /// Owns the sole synchronous entry onto the actor's serial executor.
+    nonisolated private func fence<Value: Sendable>(
+        countsAsProduction: Bool,
+        _ operation: @Sendable (isolated TerminalPTYHost) -> Value
+    ) -> (value: Value, productionEntryCount: UInt64) {
         queue.sync {
             assumeIsolated { owner in
-                (owner.drainedFrameState(), owner.appliedTransitions)
+                if countsAsProduction {
+                    owner.productionFenceEntryCount += 1
+                }
+                return (operation(owner), owner.productionFenceEntryCount)
             }
         }
     }
@@ -682,29 +771,6 @@ public actor TerminalPTYHost {
         )
     }
 
-    /// Starts close and returns its final accepted terminal state in one owner-queue fence.
-    nonisolated public func beginCloseAndSnapshot() -> Terminal {
-        queue.sync {
-            assumeIsolated { owner in
-                owner.updateHandler = nil
-                owner.beginShutdown(completion: nil)
-                return owner.terminal
-            }
-        }
-    }
-
-    /// Installs the pane adapter's conflated wakeup without creating a Swift task.
-    nonisolated public func setUpdateHandler(
-        _ handler: @escaping @Sendable () -> Void
-    ) {
-        queue.sync {
-            assumeIsolated { owner in
-                guard owner.teardownFinished == false else { return }
-                owner.updateHandler = handler
-            }
-        }
-    }
-
     /// Installs the test-support wakeup separately so adapters do not displace the pane consumer.
     package nonisolated func setTestUpdateHandler(
         _ handler: @escaping @Sendable ([UInt8], PaneLifecycleResult?) -> Void
@@ -713,50 +779,43 @@ public actor TerminalPTYHost {
         result: PaneLifecycleResult?,
         hasEmittedUpdate: Bool
     ) {
-        queue.sync {
-            assumeIsolated { owner in
-                if owner.teardownFinished == false {
-                    owner.testUpdateHandler = handler
-                }
-                return (
-                    recentOutput: owner.recentOutput,
-                    result: owner.reportedResult,
-                    hasEmittedUpdate: owner.emittedUpdateSignalCount > 0
-                )
+        fence(countsAsProduction: false) { owner in
+            if owner.teardownFinished == false {
+                owner.testUpdateHandler = handler
             }
-        }
+            return (
+                recentOutput: owner.recentOutput,
+                result: owner.reportedResult,
+                hasEmittedUpdate: owner.emittedUpdateSignalCount > 0
+            )
+        }.value
     }
 
     /// Returns whether retained test evidence already contains the requested byte sequence.
     package nonisolated func observedOutputContains(_ bytes: [UInt8]) -> Bool {
-        queue.sync {
-            assumeIsolated { owner in
-                owner.recentOutput.containsSubsequence(bytes)
-            }
-        }
+        fence(countsAsProduction: false) { owner in
+            owner.recentOutput.containsSubsequence(bytes)
+        }.value
     }
 
     /// Installs a test-support observer for every raw-output callback and returns prior evidence.
     package nonisolated func setTestOutputHandler(
         _ handler: @escaping @Sendable ([UInt8]) -> Void
     ) -> [UInt8] {
-        queue.sync {
-            assumeIsolated { owner in
-                if owner.teardownFinished == false {
-                    owner.testOutputHandler = handler
-                }
-                return owner.recentOutput
+        fence(countsAsProduction: false) { owner in
+            if owner.teardownFinished == false {
+                owner.testOutputHandler = handler
             }
-        }
+            return owner.recentOutput
+        }.value
     }
 
     /// Applies output synchronously so delivery-fence tests can queue callbacks without yielding main.
     package nonisolated func deliverOutputForTesting(_ bytes: [UInt8]) {
         guard bytes.isEmpty == false else { return }
-        queue.sync {
-            assumeIsolated { owner in
-                owner.process(.output(bytes))
-            }
+        _ = fence(countsAsProduction: false) { owner in
+            owner.applyOutput(bytes)
+            owner.publishPendingUpdate()
         }
     }
 

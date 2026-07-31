@@ -91,6 +91,86 @@ package struct TerminalPaneDiagnosticCapture: Sendable {
     package let semanticEvents: [TerminalSemanticEvent]
 }
 
+/// Pairs one cumulative fence wait with the number of entries that produced it.
+public struct TerminalPaneFenceMeasurement: Equatable, Sendable {
+    /// Cumulative caller-side wait measured on the monotonic uptime clock.
+    public private(set) var waitNanoseconds: UInt64
+    /// Number of fence entries included in `waitNanoseconds`.
+    public private(set) var count: UInt64
+
+    /// Creates one cumulative wait/count pair for sampling or delta calculation.
+    public init(waitNanoseconds: UInt64 = 0, count: UInt64 = 0) {
+        self.waitNanoseconds = waitNanoseconds
+        self.count = count
+    }
+
+    mutating func record(waitNanoseconds: UInt64) {
+        self.waitNanoseconds += waitNanoseconds
+        count += 1
+    }
+}
+
+/// Keeps attributed controller totals beside the host's independent raw entry census.
+public struct TerminalPaneFenceMetrics: Equatable, Sendable {
+    /// Frame-delivery and consume fences.
+    public private(set) var delivery = TerminalPaneFenceMeasurement()
+    /// Synchronous state and selection-read fences.
+    public private(set) var checkpoint = TerminalPaneFenceMeasurement()
+    /// Application-exit and pane teardown fences.
+    public private(set) var teardown = TerminalPaneFenceMeasurement()
+    /// Initial frame-state and update-handler installation fences.
+    public private(set) var initialization = TerminalPaneFenceMeasurement()
+    /// Failure-evidence capture fences.
+    public private(set) var diagnostic = TerminalPaneFenceMeasurement()
+    /// Host-side raw production entries observed after the latest controller fence.
+    public private(set) var hostEntryCount: UInt64 = 0
+
+    /// Combines every attributed kind without losing the count paired with its wait.
+    public var total: TerminalPaneFenceMeasurement {
+        TerminalPaneFenceMeasurement(
+            waitNanoseconds: delivery.waitNanoseconds
+                + checkpoint.waitNanoseconds
+                + teardown.waitNanoseconds
+                + initialization.waitNanoseconds
+                + diagnostic.waitNanoseconds,
+            count: delivery.count
+                + checkpoint.count
+                + teardown.count
+                + initialization.count
+                + diagnostic.count
+        )
+    }
+
+    fileprivate mutating func record(
+        kind: TerminalPaneFenceKind,
+        waitNanoseconds: UInt64,
+        hostEntryCount: UInt64
+    ) {
+        switch kind {
+        case .delivery:
+            delivery.record(waitNanoseconds: waitNanoseconds)
+        case .checkpoint:
+            checkpoint.record(waitNanoseconds: waitNanoseconds)
+        case .teardown:
+            teardown.record(waitNanoseconds: waitNanoseconds)
+        case .initialization:
+            initialization.record(waitNanoseconds: waitNanoseconds)
+        case .diagnostic:
+            diagnostic.record(waitNanoseconds: waitNanoseconds)
+        }
+        self.hostEntryCount = hostEntryCount
+    }
+}
+
+/// Gives each main-actor owner-queue fence exactly one accounting category.
+private enum TerminalPaneFenceKind {
+    case delivery
+    case checkpoint
+    case teardown
+    case initialization
+    case diagnostic
+}
+
 /// Owns one headless terminal pane while keeping host bytes and actor state behind the adapter.
 @MainActor
 public final class TerminalPaneSessionController {
@@ -112,6 +192,7 @@ public final class TerminalPaneSessionController {
     private var completedRecordingEvents: [NeutralTerminalRecordingEvent]?
     private var lastEmittedViewportState: TerminalPaneViewportState?
     private var lastPrimaryHistoryGeneration: UInt64
+    private let fenceClock: () -> UInt64
 
     /// Process-lifetime access retained by the backend until this host finishes teardown.
     public let terminationHandle: TerminalPaneTerminationHandle
@@ -150,6 +231,15 @@ public final class TerminalPaneSessionController {
     /// Damage paired with `currentPlan` at its most recent publication.
     public private(set) var currentDamage: TerminalDamage?
 
+    /// Cumulative owner-queue fence waits attributed by purpose and cross-checked by the host.
+    public private(set) var fenceMetrics = TerminalPaneFenceMetrics()
+
+    /// Per-delivery fence wait flushed into the most recently published frame.
+    public private(set) var lastFenceStallNanoseconds: UInt64 = 0
+
+    /// Delivery wait not yet charged because no frame has been accepted for publication.
+    private(set) var unflushedDeliveryFenceWaitNanoseconds: UInt64 = 0
+
     #if DANTERM_TERMINAL_BENCHMARK
     /// Cost of the `planFrame` call that produced `currentPlan`, for the benchmark
     /// observer to read when the resulting frame is published.
@@ -159,37 +249,6 @@ public final class TerminalPaneSessionController {
     /// is what lets a planner change be attributed at all. Benchmark builds only.
     public private(set) var lastPlanDurationNanoseconds: UInt64 = 0
 
-    /// Main-actor time spent blocked in the fence that drained the frame being
-    /// published, for the benchmark observer to read beside the plan cost.
-    ///
-    /// Exists because draining through `fencedConsumptionState()` is a `queue.sync`:
-    /// the main actor waits for the host's queue, and a child flooding its pty keeps
-    /// that queue busy with back-to-back read turns. That wait is not planning, not
-    /// drawing, and not on any other thread, so no existing metric can see it --
-    /// while it is exactly the cost the fence-based drain trades for its ordering
-    /// guarantee. Charged per published frame so a block sums what it actually paid.
-    ///
-    /// Counts the per-delivery fence only, summed over every delivery since the last
-    /// published frame. Checkpoint fences (`synchronizeState`,
-    /// `readSelectedTextSynchronizing`) block on the same queue but predate this path
-    /// and run at their callers' cadence, so this understates total main-thread
-    /// blocking by design -- it answers "what did the fence-based drain add", not
-    /// "how long is the main thread blocked on this queue".
-    public private(set) var lastFenceStallNanoseconds: UInt64 = 0
-
-    /// Stall accumulated since the last published frame, flushed into
-    /// `lastFenceStallNanoseconds` by `planIfNeeded` at publish.
-    ///
-    /// Latching the value at drain time instead would misattribute twice, and both
-    /// errors are silent. A frame published by a path that did not drain
-    /// (`synchronizeState`, `readSelectedTextSynchronizing`, `setVisible(true)`)
-    /// would hand the observer the previous delivery's stall a second time, inflating
-    /// the total; and a delivery whose publish is suppressed -- by the
-    /// synchronized-output guard, or by damage the planner finds empty -- would have
-    /// its stall dropped, understating it. The second case is the one that matters for
-    /// a permanent instrument: synchronized output is what modern full-screen TUIs
-    /// use, so latching would understate exactly the floods worth measuring.
-    private var pendingFenceStallNanoseconds: UInt64 = 0
     #endif
 
     /// Creates and starts the sole PTY host owned by this pane controller.
@@ -248,11 +307,27 @@ public final class TerminalPaneSessionController {
     init(
         host: TerminalPTYHost,
         launchInput: LaunchPolicyInput,
-        isVisible: Bool = true
+        isVisible: Bool = true,
+        fenceClock: @escaping () -> UInt64 = {
+            DispatchTime.now().uptimeNanoseconds
+        }
     ) {
+        var initialMetrics = TerminalPaneFenceMetrics()
+        let initialFence = Self.performAccountedFence(
+            host: host,
+            kind: .initialization,
+            operation: .frameState,
+            clock: fenceClock,
+            metrics: &initialMetrics
+        )
+        guard case .frameState(let initialFrameState) = initialFence.output else {
+            preconditionFailure("frame-state fence returned the wrong payload")
+        }
+
         self.host = host
+        self.fenceClock = fenceClock
+        fenceMetrics = initialMetrics
         terminationHandle = TerminalPaneTerminationHandle(host: host)
-        let initialFrameState = host.fencedFrameState()
         cachedTerminal = initialFrameState.terminal
         lastPrimaryHistoryGeneration = initialFrameState.terminal.primaryHistoryGeneration
         initialDimensions = launchInput.initialDimensions
@@ -264,12 +339,15 @@ public final class TerminalPaneSessionController {
         if isVisible { planIfNeeded(cachedTerminal) }
 
         let deliveryBoundary = deliveryBoundary
-        host.setUpdateHandler { [weak host] in
-            deliveryBoundary.scheduleFrame { [weak self, weak host] in
-                guard let self, let host else { return }
-                self.consumeHostUpdate(host)
+        _ = performAccountedFence(
+            kind: .initialization,
+            operation: .installUpdateHandler { [weak host] in
+                deliveryBoundary.scheduleFrame { [weak self, weak host] in
+                    guard let self, let host else { return }
+                    self.consumeHostUpdate(host)
+                }
             }
-        }
+        )
         host.submitStart(launchInput)
     }
 
@@ -277,23 +355,24 @@ public final class TerminalPaneSessionController {
         guard isTornDown == false else { return }
         // Drained synchronously: damage handoff and `consume` stay in one
         // main-actor step, so a checkpoint fence cannot strand moved rows.
-        #if DANTERM_TERMINAL_BENCHMARK
-        let fenceStarted = DispatchTime.now().uptimeNanoseconds
-        let consumption = host.fencedConsumptionState()
-        pendingFenceStallNanoseconds += DispatchTime.now().uptimeNanoseconds - fenceStarted
+        let fence = performAccountedFence(kind: .delivery, operation: .consumptionState)
+        guard case .consumptionState(
+            let frameState,
+            let result,
+            let transitions
+        ) = fence else {
+            preconditionFailure("consumption fence returned the wrong payload")
+        }
         consume(
-            frameState: consumption.frameState,
-            result: consumption.result,
-            transitions: consumption.transitions
+            frameState: frameState,
+            result: result,
+            transitions: transitions
         )
-        #else
-        let consumption = host.fencedConsumptionState()
-        consume(
-            frameState: consumption.frameState,
-            result: consumption.result,
-            transitions: consumption.transitions
-        )
-        #endif
+    }
+
+    /// Test seam for consuming a synchronously injected host update without yielding main.
+    package func consumePendingHostUpdateForTesting() {
+        consumeHostUpdate(host)
     }
 
     /// Sends committed UTF-8 text through the host's shared ordered submission queue.
@@ -394,14 +473,22 @@ public final class TerminalPaneSessionController {
     /// Fences host work and applies the newest state before a synchronous checkpoint read.
     public func synchronizeState() {
         guard isTornDown == false else { return }
-        consume(frameState: host.fencedFrameState(), result: nil, transitions: nil)
+        let fence = performAccountedFence(kind: .checkpoint, operation: .frameState)
+        guard case .frameState(let frameState) = fence else {
+            preconditionFailure("frame-state fence returned the wrong payload")
+        }
+        consume(frameState: frameState, result: nil, transitions: nil)
     }
 
     /// Fences accepted owner work and freezes the recovery projection before app exit capture.
     public func fenceForApplicationExit() {
         guard isTornDown == false else { return }
         deliveryBoundary.stop()
-        cachedTerminal = host.beginCloseAndSnapshot()
+        let fence = performAccountedFence(kind: .teardown, operation: .beginCloseAndSnapshot)
+        guard case .closeSnapshot(let terminal) = fence else {
+            preconditionFailure("close fence returned the wrong payload")
+        }
+        cachedTerminal = terminal
         emitPrimaryHistoryMutationIfNeeded()
         isTornDown = true
     }
@@ -442,7 +529,11 @@ public final class TerminalPaneSessionController {
     /// Fences pending pointer work, refreshes cached state, and returns finalized selection text.
     public func readSelectedTextSynchronizing() -> String? {
         guard isTornDown == false else { return nil }
-        consume(frameState: host.fencedFrameState(), result: nil, transitions: nil)
+        let fence = performAccountedFence(kind: .checkpoint, operation: .frameState)
+        guard case .frameState(let frameState) = fence else {
+            preconditionFailure("frame-state fence returned the wrong payload")
+        }
+        consume(frameState: frameState, result: nil, transitions: nil)
         return cachedTerminal.selectedText
     }
 
@@ -515,16 +606,19 @@ public final class TerminalPaneSessionController {
 
     /// Test harness seam that fences live evidence without changing completion eligibility.
     package func diagnosticCapture(test: String) -> TerminalPaneDiagnosticCapture {
-        let state = host.fencedDiagnosticState()
-        cachedTerminal = state.frameState.terminal
+        let fence = performAccountedFence(kind: .diagnostic, operation: .diagnosticState)
+        guard case .diagnosticState(let frameState, let transitions) = fence else {
+            preconditionFailure("diagnostic fence returned the wrong payload")
+        }
+        cachedTerminal = frameState.terminal
         // The fence drains the host's damage, so this is the only route by which the
         // terminal can advance without `consume` recording which rows moved. Folding it
         // in keeps the planner's retained rows in lineage with `cachedTerminal`.
-        pendingDamage.formUnion(state.frameState.damage)
+        pendingDamage.formUnion(frameState.damage)
         return TerminalPaneDiagnosticCapture(
-            terminal: state.frameState.terminal,
-            recording: makeRecording(test: test, events: neutralEvents(state.transitions)),
-            semanticEvents: state.frameState.semanticEvents
+            terminal: frameState.terminal,
+            recording: makeRecording(test: test, events: neutralEvents(transitions)),
+            semanticEvents: frameState.semanticEvents
         )
     }
 
@@ -564,7 +658,11 @@ public final class TerminalPaneSessionController {
     public func tearDown() {
         guard isTornDown == false else { return }
         deliveryBoundary.stop()
-        cachedTerminal = host.beginCloseAndSnapshot()
+        let fence = performAccountedFence(kind: .teardown, operation: .beginCloseAndSnapshot)
+        guard case .closeSnapshot(let terminal) = fence else {
+            preconditionFailure("close fence returned the wrong payload")
+        }
+        cachedTerminal = terminal
         isTornDown = true
         onFrame = nil
         onClipboardWrite = nil
@@ -575,6 +673,41 @@ public final class TerminalPaneSessionController {
         onPaneMenu = nil
         onOpenLink = nil
         onSearchStatus = nil
+    }
+
+    private func performAccountedFence(
+        kind: TerminalPaneFenceKind,
+        operation: TerminalPTYProductionFenceOperation
+    ) -> TerminalPTYProductionFenceOutput {
+        let measured = Self.performAccountedFence(
+            host: host,
+            kind: kind,
+            operation: operation,
+            clock: fenceClock,
+            metrics: &fenceMetrics
+        )
+        if kind == .delivery {
+            unflushedDeliveryFenceWaitNanoseconds += measured.waitNanoseconds
+        }
+        return measured.output
+    }
+
+    private static func performAccountedFence(
+        host: TerminalPTYHost,
+        kind: TerminalPaneFenceKind,
+        operation: TerminalPTYProductionFenceOperation,
+        clock: () -> UInt64,
+        metrics: inout TerminalPaneFenceMetrics
+    ) -> (output: TerminalPTYProductionFenceOutput, waitNanoseconds: UInt64) {
+        let started = clock()
+        let result = host.performProductionFence(operation)
+        let waitNanoseconds = clock() - started
+        metrics.record(
+            kind: kind,
+            waitNanoseconds: waitNanoseconds,
+            hostEntryCount: result.entryCount
+        )
+        return (result.output, waitNanoseconds)
     }
 
     private func consume(
@@ -672,11 +805,11 @@ public final class TerminalPaneSessionController {
         #if DANTERM_TERMINAL_BENCHMARK
         lastPlanDurationNanoseconds =
             DispatchTime.now().uptimeNanoseconds - planStartedNanoseconds
+        #endif
         // Below every early return above, so a suppressed publish carries its stall
         // forward to the next one instead of losing it.
-        lastFenceStallNanoseconds = pendingFenceStallNanoseconds
-        pendingFenceStallNanoseconds = 0
-        #endif
+        lastFenceStallNanoseconds = unflushedDeliveryFenceWaitNanoseconds
+        unflushedDeliveryFenceWaitNanoseconds = 0
         lastPlannedTerminal = terminal
         currentPlan = plan
         currentDamage = pendingDamage
