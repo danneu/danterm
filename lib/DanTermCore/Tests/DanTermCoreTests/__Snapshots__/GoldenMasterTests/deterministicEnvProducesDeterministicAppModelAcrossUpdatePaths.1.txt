@@ -128,6 +128,7 @@ AppModel(
     fontSize: nil,
     alertClearMode: .focus
   ),
+  resolvedFontFamily: nil,
   preferencesDraft: nil,
   committedGhosttyPrefs: nil,
   todoPopover: nil,

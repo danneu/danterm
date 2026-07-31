@@ -19,6 +19,17 @@ func resolveRemoteTheme(_ raw: String) -> String {
     return trimmed.isEmpty ? DanTermConfig.default.remoteTheme : trimmed
 }
 
+/// Normalizes a drafted font family to the value that belongs in the config
+/// document: trimmed, with blank text meaning "no `font.family` key" rather than
+/// an empty family name. This is the whole of the core's font-family validation
+/// -- whether the name is installed is a CoreText question the core never asks.
+func resolveFontFamilyDraft(_ raw: String?) -> String? {
+    guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+          trimmed.isEmpty == false
+    else { return nil }
+    return trimmed
+}
+
 /// Formats optional numeric config values for the Preferences text-field boundary.
 func configFontSizeText(_ size: Double) -> String {
     let text = String(size)
@@ -698,6 +709,7 @@ func isDraftDirty(_ draft: PreferencesDraft, vs config: DanTermConfig, ghostty: 
         || resolveRemoteTheme(draft.remoteTheme) != config.remoteTheme
         || draft.theme != ghostty?.theme
         || draft.fontSize != ghostty?.fontSize
+        || resolveFontFamilyDraft(draft.fontFamily) != config.fontFamily
 }
 
 func unreadAlertCount(for tab: TabModel, alerts: [AlertModel]) -> Int {

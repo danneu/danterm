@@ -280,7 +280,7 @@ states. The pure projection tests cannot prove this AppKit wiring.
       rendering)
 - [x] 2. Font-availability probe and installed-family catalog in Support +
       config-path move + CLI CoreText link
-- [ ] 3. Model contract: `resolvedFontFamily` and the single resolve-and-apply
+- [x] 3. Model contract: `resolvedFontFamily` and the single resolve-and-apply
       path through launch, reload, and save (I4)
 - [ ] 4. Render the resolved family end to end, including the system-monospace
       metrics fallback (I3, I5)
@@ -298,3 +298,24 @@ states. The pure projection tests cannot prove this AppKit wiring.
   note) were repointed. `test-ui.sh` also had to add the Support path file to its
   compile list, since it compiles a hand-listed subset of sources and the store's
   default argument still resolves the path.
+
+- **Commit 3:** the save leg took the plan's first discretion option (`.prefSave`
+  optimistically updates `model.config`, the runtime follows with the resolution),
+  and the follow-up is a resolution-only `.fontFamilyResolved(String?)` rather than
+  a second `.configLoaded`. Re-sending `configLoaded` after a save also re-runs its
+  draft reset, which would wipe an invalid font-size draft that `prefSave`
+  deliberately leaves on screen (pinned by "invalid font size stays dirty while
+  other fields save together"). The resolution is sent even when the disk write
+  fails, matching the write-failure message's promise that the running settings
+  stay active. Launch is the third caller and cannot send a `Msg` at all -- the Elm
+  loop is not running during `AppRuntime.init` -- so it assigns the same pair
+  directly; all three routes share the single `resolveConfiguredFontFamily`
+  composition in `app/DanTermConfigStore.swift`, which is the only place the core's
+  config type and Support's CoreText probe meet.
+
+- **Commit 3:** `PaneConfigKey` gains the resolved family here rather than with the
+  render commit, since it is a core projection and the plan's "keys change when the
+  resolved family changes, so reconcile re-pushes" test belongs to the model
+  contract. Until commit 4 consumes it, a family-only change makes
+  `reconcilePaneConfig` re-push the (unchanged) theme and font size -- both
+  idempotent.

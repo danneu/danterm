@@ -22,6 +22,18 @@ enum DanTermConfigStoreError: LocalizedError {
     }
 }
 
+/// Resolves the config's requested `font.family` to a canonical installed family,
+/// or nil when it names nothing installed (or was never set) and the system
+/// monospace font applies.
+///
+/// Lives in the app because it is the composition of two layers that never see
+/// each other: the core's config type and DanTermSupport's CoreText probe. Every
+/// config-apply path routes through this one function so a requested name can
+/// only ever reach the model as a verified verdict.
+func resolveConfiguredFontFamily(_ config: DanTermConfig) -> String? {
+    config.fontFamily.flatMap(resolveInstalledFontFamily(named:))
+}
+
 /// Performs each Preferences save as one fresh, atomic read-modify-write transaction.
 struct DanTermConfigStore {
     let url: URL

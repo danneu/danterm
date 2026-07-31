@@ -307,7 +307,7 @@ import Testing
         config.defaultTheme = "Dracula"
         config.fontSize = 18
 
-        _ = update(&model, .configLoaded(config))
+        _ = update(&model, .configLoaded(config, resolvedFontFamily: nil))
 
         #expect(desiredPaneConfig(in: model)[paneId] == PaneConfigKey(
             theme: "Dracula",
@@ -342,7 +342,7 @@ import Testing
         var model = makeModel()
         var newConfig = DanTermConfig()
         newConfig.remoteTheme = "Grape"
-        let commands = update(&model, .configLoaded(newConfig))
+        let commands = update(&model, .configLoaded(newConfig, resolvedFontFamily: nil))
         #expect(model.config.remoteTheme == "Grape")
         #expect(commands.count == 0)
     }
@@ -361,7 +361,7 @@ import Testing
 
         var newConfig = DanTermConfig()
         newConfig.remoteTheme = "Grape"
-        let commands = update(&model, .configLoaded(newConfig))
+        let commands = update(&model, .configLoaded(newConfig, resolvedFontFamily: nil))
         #expect(model.pane(paneId)?.remoteThemeOverride == "Grape", "remote pane should get new theme")
         #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Grape")
         #expect(commands.count == 0)
@@ -378,7 +378,7 @@ import Testing
         let paneId = model.groups[0].tabs[0].focusedPaneId
         _ = update(&model, .remoteSessionStarted(paneId: paneId))
 
-        let commands = update(&model, .configLoaded(DanTermConfig.default))
+        let commands = update(&model, .configLoaded(DanTermConfig.default, resolvedFontFamily: nil))
         #expect(commands.count == 0)
     }
 

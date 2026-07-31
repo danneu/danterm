@@ -1,0 +1,272 @@
+// Pins the model contract for the configurable terminal font family: the
+// injected `resolvedFontFamily` verdict that rides along with every config
+// application, its propagation into the per-pane config key, and the
+// preferences draft/save leg that lets the user change the family. The core
+// never asks CoreText whether a family exists (I1) -- it is handed the answer,
+// exactly like ids and time -- so every test here injects the verdict rather
+// than probing the machine. The CoreText probe itself is proved in
+// DanTermSupport's FontAvailabilityTests; the AppKit picker and the "not
+// installed" warning arrive with the preferences panel.
+import Foundation
+import Testing
+
+@testable import DanTermCore
+
+@Suite struct ConfigFontFamilyTests {
+    // MARK: - Applying a config carries its resolution
+
+    @Test("configLoaded stores the injected resolved family beside the config")
+    func configLoadedStoresResolvedFamily() {
+        var model = makeModel()
+        var config = DanTermConfig.default
+        config.fontFamily = "menlo"
+
+        _ = update(&model, .configLoaded(config, resolvedFontFamily: "Menlo"))
+
+        #expect(model.config.fontFamily == "menlo", "the request stays verbatim")
+        #expect(model.resolvedFontFamily == "Menlo", "the canonical family comes from the caller")
+    }
+
+    @Test("configLoaded with an unresolved family leaves resolvedFontFamily nil")
+    func configLoadedWithUnresolvedFamilyLeavesResolutionNil() {
+        // Intent: a family the caller could not resolve still lands in
+        //   model.config, but nothing reaches the render layer.
+        // Why it exists: pins the soft-failure contract -- a typo'd family must
+        //   not be silently promoted into a rendered face (I3), and the app must
+        //   still launch normally on it.
+        // Scenario: spec-first; the user typed "Fira Codee" into config.json.
+        var model = makeModel()
+        var config = DanTermConfig.default
+        config.fontFamily = "Fira Codee"
+
+        _ = update(&model, .configLoaded(config, resolvedFontFamily: nil))
+
+        #expect(model.config.fontFamily == "Fira Codee")
+        #expect(model.resolvedFontFamily == nil)
+    }
+
+    @Test("re-applying a config without a family clears a previous resolution")
+    func configLoadedWithoutFamilyClearsPreviousResolution() {
+        // Intent: removing font.family and reloading returns the model to the
+        //   system-monospace state.
+        // Why it exists: guards the pair against drift -- a stale resolution
+        //   would keep panes on the old face after the key was deleted (I4).
+        // Scenario: spec-first; the user deletes font.family and reloads config.
+        var model = makeModel()
+        var config = DanTermConfig.default
+        config.fontFamily = "Menlo"
+        _ = update(&model, .configLoaded(config, resolvedFontFamily: "Menlo"))
+
+        _ = update(&model, .configLoaded(.default, resolvedFontFamily: nil))
+
+        #expect(model.config.fontFamily == nil)
+        #expect(model.resolvedFontFamily == nil)
+    }
+
+    // MARK: - Pane projection
+
+    @Test("desiredPaneConfig carries the resolved family, not the requested one")
+    func desiredPaneConfigCarriesResolvedFamily() {
+        // Intent: live panes are keyed on the resolved family so reconcile
+        //   re-pushes when it changes, and only a verified family reaches them.
+        // Why it exists: pins I3 at the projection boundary -- the render layer
+        //   must never see the raw requested string.
+        // Scenario: spec-first; config asks for "menlo", the probe canonicalizes
+        //   it to "Menlo".
+        var model = makeModel()
+        _ = createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        var config = DanTermConfig.default
+        config.fontFamily = "menlo"
+
+        _ = update(&model, .configLoaded(config, resolvedFontFamily: "Menlo"))
+
+        #expect(desiredPaneConfig(in: model)[paneId]?.fontFamily == "Menlo")
+    }
+
+    @Test("desiredPaneConfig key changes when the resolved family changes")
+    func desiredPaneConfigKeyChangesWithResolvedFamily() {
+        var model = makeModel()
+        _ = createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let before = desiredPaneConfig(in: model)[paneId]
+
+        var config = DanTermConfig.default
+        config.fontFamily = "Menlo"
+        _ = update(&model, .configLoaded(config, resolvedFontFamily: "Menlo"))
+
+        #expect(desiredPaneConfig(in: model)[paneId] != before, "reconcile must re-push")
+    }
+
+    @Test("an unresolved family leaves the pane key on the system default")
+    func unresolvedFamilyLeavesPaneKeyUnchanged() {
+        var model = makeModel()
+        _ = createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        let before = desiredPaneConfig(in: model)[paneId]
+
+        var config = DanTermConfig.default
+        config.fontFamily = "Fira Codee"
+        _ = update(&model, .configLoaded(config, resolvedFontFamily: nil))
+
+        #expect(desiredPaneConfig(in: model)[paneId] == before)
+        #expect(desiredPaneConfig(in: model)[paneId]?.fontFamily == nil)
+    }
+
+    // MARK: - Preferences draft
+
+    @Test("preferencesOpened seeds the font-family draft from the committed config")
+    func preferencesOpenedSeedsFontFamilyDraft() {
+        var model = makeModel()
+        model.config.fontFamily = "Menlo"
+
+        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs(theme: nil, fontSize: nil)))
+
+        #expect(model.preferencesDraft?.fontFamily == "Menlo")
+    }
+
+    @Test("prefSetFontFamily changes only the draft")
+    func prefSetFontFamilyChangesOnlyTheDraft() {
+        var model = makeModel()
+        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs(theme: nil, fontSize: nil)))
+
+        _ = update(&model, .prefSetFontFamily("Menlo"))
+
+        #expect(model.preferencesDraft?.fontFamily == "Menlo")
+        #expect(model.config.fontFamily == nil, "committed config only moves on save")
+    }
+
+    @Test("a font-family edit alone enables Save")
+    func fontFamilyEditAloneEnablesSave() throws {
+        var model = makeModel()
+        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs(theme: nil, fontSize: nil)))
+        #expect(try #require(desiredPreferencesPanel(in: model)).saveEnabled == false)
+
+        _ = update(&model, .prefSetFontFamily("Menlo"))
+
+        #expect(try #require(desiredPreferencesPanel(in: model)).saveEnabled)
+        #expect(isDraftDirty(
+            try #require(model.preferencesDraft),
+            vs: model.config,
+            ghostty: model.committedGhosttyPrefs
+        ))
+    }
+
+    @Test("configLoaded while the panel is open resets the font-family draft")
+    func configLoadedResetsFontFamilyDraft() {
+        var model = makeModel()
+        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs(theme: nil, fontSize: nil)))
+        _ = update(&model, .prefSetFontFamily("Menlo"))
+
+        var config = DanTermConfig.default
+        config.fontFamily = "Courier"
+        _ = update(&model, .configLoaded(config, resolvedFontFamily: "Courier"))
+
+        #expect(model.preferencesDraft?.fontFamily == "Courier")
+    }
+
+    // MARK: - Save (I4)
+
+    @Test("prefSave writes the drafted family into the one config transaction")
+    func prefSaveWritesFontFamily() {
+        var model = makeModel()
+        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs(theme: nil, fontSize: nil)))
+        _ = update(&model, .prefSetFontFamily("Menlo"))
+
+        let commands = update(&model, .prefSave)
+
+        #expect(model.config.fontFamily == "Menlo")
+        #expect(commands.count == 1)
+        #expect(hasEffect(commands) {
+            if case .saveDanTermConfig(let config) = $0 { return config.fontFamily == "Menlo" }
+            return false
+        })
+    }
+
+    @Test("prefSave still writes a family the machine cannot resolve")
+    func prefSaveWritesUnresolvableFamily() {
+        // Intent: saving a family that is not installed is not an error -- it is
+        //   written to disk like any other value.
+        // Why it exists: pins the "it is the user's file" rule; they may be about
+        //   to install the font, and the core cannot tell either way (I1).
+        // Scenario: spec-first; the user types a font they have not installed yet.
+        var model = makeModel()
+        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs(theme: nil, fontSize: nil)))
+        _ = update(&model, .prefSetFontFamily("Fira Codee"))
+
+        let commands = update(&model, .prefSave)
+
+        #expect(hasEffect(commands) {
+            if case .saveDanTermConfig(let config) = $0 { return config.fontFamily == "Fira Codee" }
+            return false
+        })
+    }
+
+    @Test("prefSave with a blank family removes the key")
+    func prefSaveWithBlankFamilyRemovesTheKey() {
+        var model = makeModel()
+        model.config.fontFamily = "Menlo"
+        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs(theme: nil, fontSize: nil)))
+        _ = update(&model, .prefSetFontFamily("   "))
+
+        let commands = update(&model, .prefSave)
+
+        #expect(model.config.fontFamily == nil)
+        #expect(model.preferencesDraft?.fontFamily == nil, "draft normalizes to the saved value")
+        #expect(hasEffect(commands) {
+            if case .saveDanTermConfig(let config) = $0 { return config.fontFamily == nil }
+            return false
+        })
+    }
+
+    @Test("saving a family and then resolving it repaints live panes")
+    func saveThenResolveRepaintsLivePanes() throws {
+        // Intent: a Preferences save reaches live panes without a reload step in
+        //   between -- Save, then the resolution, and the pane key has moved.
+        // Why it exists: pins I4's save leg. prefSave alone cannot know whether
+        //   the family exists, so the runtime resolves what it was told to write
+        //   and feeds the verdict straight back; this is that round trip.
+        // Scenario: spec-first; the user picks Menlo in Preferences and hits Save.
+        var model = makeModel()
+        _ = createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs(theme: nil, fontSize: nil)))
+        _ = update(&model, .prefSetFontFamily("menlo"))
+
+        let commands = update(&model, .prefSave)
+        #expect(hasEffect(commands) {
+            if case .saveDanTermConfig = $0 { return true }
+            return false
+        })
+        _ = update(&model, .fontFamilyResolved("Menlo"))
+
+        #expect(desiredPaneConfig(in: model)[paneId]?.fontFamily == "Menlo")
+        #expect(try #require(desiredPreferencesPanel(in: model)).saveEnabled == false,
+                "the save is committed, so nothing is dirty")
+    }
+
+    @Test("fontFamilyResolved carries the verdict alone, touching nothing else")
+    func fontFamilyResolvedTouchesNothingElse() {
+        // Intent: the post-save resolution message updates only
+        //   `resolvedFontFamily`; the committed config and the open draft are
+        //   left exactly as prefSave left them.
+        // Why it exists: this is why the save path does not reuse configLoaded --
+        //   that message resets the draft, which would wipe an invalid font size
+        //   the panel deliberately keeps on screen so the user can fix it.
+        // Scenario: spec-first; the user saves a font family while the font-size
+        //   field still holds unparseable text.
+        var model = makeModel()
+        _ = update(&model, .preferencesOpened(ghostty: GhosttyPrefs(theme: nil, fontSize: nil)))
+        _ = update(&model, .prefSetFontFamily("Menlo"))
+        _ = update(&model, .prefSetFontSize("abc"))
+        _ = update(&model, .prefSave)
+        let configAfterSave = model.config
+
+        let commands = update(&model, .fontFamilyResolved("Menlo"))
+
+        #expect(model.resolvedFontFamily == "Menlo")
+        #expect(model.config == configAfterSave)
+        #expect(model.preferencesDraft?.fontSize == "abc", "the bad input stays visible")
+        #expect(commands.isEmpty)
+    }
+}

@@ -618,7 +618,7 @@ private func openPrefs(_ model: inout AppModel, ghostty: GhosttyPrefs = defaultG
         newConfig.remoteTheme = "Ocean"
         newConfig.defaultTheme = "Monokai"
         newConfig.fontSize = 18
-        _ = update(&model, .configLoaded(newConfig))
+        _ = update(&model, .configLoaded(newConfig, resolvedFontFamily: nil))
         #expect(model.preferencesDraft?.alertClearMode == .focus, "DanTerm field should match new config")
         #expect(model.preferencesDraft?.remoteTheme == "Ocean", "DanTerm field should match new config")
         #expect(model.preferencesDraft?.theme == "Monokai")
@@ -632,7 +632,7 @@ private func openPrefs(_ model: inout AppModel, ghostty: GhosttyPrefs = defaultG
         // Why it exists: pins the no-implicit-open rule.
         // Scenario: spec-first closed configLoaded.
         var model = makeModel()
-        _ = update(&model, .configLoaded(DanTermConfig.default))
+        _ = update(&model, .configLoaded(DanTermConfig.default, resolvedFontFamily: nil))
         #expect(model.preferencesDraft == nil, "draft should remain nil")
     }
 

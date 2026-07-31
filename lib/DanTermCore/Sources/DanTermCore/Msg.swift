@@ -110,8 +110,16 @@ enum Msg {
     case setShowAllAlerts(Bool)
     case clearAlertsForPane(paneId: PaneId)
 
-    // Config (external reload)
-    case configLoaded(DanTermConfig)
+    // Config (launch and external reload)
+    // Carries the font-family verdict because the core cannot compute it: the
+    // impure caller resolves the name against the installed families and injects
+    // the answer, so config and resolution can never be applied separately.
+    case configLoaded(DanTermConfig, resolvedFontFamily: String?)
+    // The resolution half on its own, for the save path: prefSave has already
+    // committed the config it wrote, so only the verdict it could not compute is
+    // missing. A full configLoaded would also reset the draft, discarding text
+    // the panel deliberately keeps on screen (an invalid font size).
+    case fontFamilyResolved(String?)
     case ghosttyConfigReloaded
 
     // Preferences panel
@@ -121,6 +129,7 @@ enum Msg {
     case prefSetRemoteTheme(String)
     case prefSetTheme(String?)
     case prefSetFontSize(String?)
+    case prefSetFontFamily(String?)
     case prefResetAlertClearMode
     case prefResetRemoteTheme
     case prefResetTheme

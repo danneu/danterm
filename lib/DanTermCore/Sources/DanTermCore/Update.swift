@@ -547,9 +547,12 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
 
     // MARK: - Config (external reload)
 
-    case .configLoaded(let newConfig):
+    case .configLoaded(let newConfig, let resolvedFontFamily):
         let oldConfig = model.config
         model.config = newConfig
+        // Written as a pair with the config it was resolved from; nothing else
+        // assigns either one, so panes can never render a stale family (I4).
+        model.resolvedFontFamily = resolvedFontFamily
         // Reset draft to match new config if panel is open.
         // Reset DanTerm draft fields to match new config; preserve Ghostty fields
         // (ghosttyPrefsRefreshed handles those separately after CONFIG_CHANGE).
@@ -558,6 +561,7 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
             model.preferencesDraft!.remoteTheme = newConfig.remoteTheme
             model.preferencesDraft!.theme = newConfig.defaultTheme
             model.preferencesDraft!.fontSize = newConfig.fontSize.map(configFontSizeText)
+            model.preferencesDraft!.fontFamily = newConfig.fontFamily
             model.committedGhosttyPrefs = GhosttyPrefs(
                 theme: newConfig.defaultTheme,
                 fontSize: newConfig.fontSize.map(configFontSizeText)
@@ -570,6 +574,10 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
                 model.updatePane(paneId) { $0.remoteThemeOverride = newConfig.remoteTheme }
             }
         }
+        return []
+
+    case .fontFamilyResolved(let resolvedFontFamily):
+        model.resolvedFontFamily = resolvedFontFamily
         return []
 
     case .ghosttyConfigReloaded:
@@ -585,7 +593,8 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
                 alertClearMode: model.config.alertClearMode,
                 remoteTheme: model.config.remoteTheme,
                 theme: ghostty.theme,
-                fontSize: ghostty.fontSize
+                fontSize: ghostty.fontSize,
+                fontFamily: model.config.fontFamily
             )
             model.committedGhosttyPrefs = ghostty
         }
@@ -626,6 +635,11 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         model.preferencesDraft!.fontSize = text
         return []
 
+    case .prefSetFontFamily(let text):
+        guard model.preferencesDraft != nil else { return [] }
+        model.preferencesDraft!.fontFamily = text
+        return []
+
     case .prefResetTheme:
         guard model.preferencesDraft != nil else { return [] }
         model.preferencesDraft!.theme = model.committedGhosttyPrefs?.theme
@@ -658,9 +672,16 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         if validFontSize {
             newConfig.fontSize = parsedFontSize
         }
+        // Whether the family is installed is not knowable here and is not a
+        // validation question anyway: an unavailable name is still written, since
+        // it is the user's file and they may be about to install the font. The
+        // runtime resolves what it writes and feeds the verdict back through
+        // fontFamilyResolved, which is what repaints live panes (I4).
+        newConfig.fontFamily = resolveFontFamilyDraft(draft.fontFamily)
         model.config = newConfig
         // Normalize draft to resolved values post-save.
         model.preferencesDraft!.remoteTheme = resolvedTheme
+        model.preferencesDraft!.fontFamily = newConfig.fontFamily
         // Update remote panes if theme changed.
         if resolvedTheme != oldConfig.remoteTheme {
             for paneId in model.allPanes.filter(\.isRemote).map(\.id) {

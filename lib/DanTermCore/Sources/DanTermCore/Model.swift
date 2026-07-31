@@ -175,6 +175,7 @@ struct PreferencesDraft: Equatable {
     var remoteTheme: String  // raw text from the field; may have whitespace or be empty
     var theme: String?       // nil = use Ghostty default (remove key from config)
     var fontSize: String?    // nil = use Ghostty default (remove key from config)
+    var fontFamily: String?  // nil = use the system monospace font (remove key from config)
 }
 
 // MRU tab switcher state. Ephemeral — never serialized into AppModelSnapshot.
@@ -211,6 +212,13 @@ struct AppModel: Equatable {
     var searchState: [PaneId: SearchModel] = [:]  // ephemeral — excluded from snapshots
     var showAllAlerts: Bool = false  // ephemeral — excluded from snapshots
     var config: DanTermConfig = .default  // ephemeral — loaded from disk, not snapshots
+    // The canonical installed family `config.fontFamily` resolved to, or nil for the
+    // system monospace font. Ephemeral: re-derived from disk on every config apply,
+    // never snapshotted. The core cannot compute it (that is a CoreText question), so
+    // the impure caller injects it alongside the config it came from -- which is also
+    // why "the configured font is missing" is derived from the pair rather than stored:
+    // a second copy of the requested name could drift from `config`.
+    var resolvedFontFamily: String? = nil
     var preferencesDraft: PreferencesDraft? = nil  // ephemeral — non-nil while prefs panel is open
     var committedGhosttyPrefs: GhosttyPrefs? = nil  // ephemeral — non-nil while prefs panel is open
     var todoPopover: TodoPopoverScope? = nil  // ephemeral — which TODO popover (pane or tab) is open

@@ -189,13 +189,18 @@ class AppRuntime {
         self.model = AppModel(
             groups: [GroupModel(id: GroupId(rawValue: CoreEnv.live.newId()), name: "General")]
         )
-        // Load DanTerm config before any tabs are created
+        // Load DanTerm config before any tabs are created. This is the one apply
+        // path that cannot go through send() -- the Elm loop is not running yet --
+        // so it assigns the same pair configLoaded does, via the same resolver.
+        let launchConfig: DanTermConfig
         do {
-            self.model.config = try configStore.load()
+            launchConfig = try configStore.load()
         } catch {
-            self.model.config = .default
+            launchConfig = .default
             self.pendingConfigError = error
         }
+        self.model.config = launchConfig
+        self.model.resolvedFontFamily = resolveConfiguredFontFamily(launchConfig)
 
         terminalBackend.onEvent = { [weak self] event in
             guard let self else { return }
@@ -633,6 +638,11 @@ class AppRuntime {
             } catch {
                 presentConfigError(error)
             }
+            // The save leg of I4. prefSave already committed `config` to the model
+            // but could not know whether its family is installed; the resolution
+            // follows here so live panes repaint without a reload or restart. Sent
+            // even when the write failed, because the running settings still apply.
+            send(.fontFamilyResolved(resolveConfiguredFontFamily(config)))
 
         case .scheduleCheckpoint:
             scheduleDebouncedCheckpoint()
@@ -1095,11 +1105,21 @@ class AppRuntime {
     /// Re-parse DanTerm-specific config keys and dispatch through the Elm loop.
     func reloadDanTermConfig() {
         do {
-            send(.configLoaded(try configStore.load()))
+            applyDanTermConfig(try configStore.load())
         } catch {
-            send(.configLoaded(.default))
+            applyDanTermConfig(.default)
             presentConfigError(error)
         }
+    }
+
+    /// Resolve-and-apply (I4): resolve the config's requested font family against
+    /// the installed families, then hand config and verdict to the core together
+    /// so `model.config` and `model.resolvedFontFamily` cannot drift apart. Launch
+    /// assigns the same pair by hand for want of a running Elm loop, and the save
+    /// path sends the resolution alone because prefSave already committed the
+    /// config; all three go through `resolveConfiguredFontFamily`.
+    private func applyDanTermConfig(_ config: DanTermConfig) {
+        send(.configLoaded(config, resolvedFontFamily: resolveConfiguredFontFamily(config)))
     }
 
     // MARK: - Preferences Panel

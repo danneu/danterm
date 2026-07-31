@@ -52,6 +52,7 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
     let ghostty = model.committedGhosttyPrefs
     let ghosttyThemeDirty = draft.theme != ghostty?.theme
     let fontSizeDirty = draft.fontSize != ghostty?.fontSize
+    let fontFamilyDirty = resolveFontFamilyDraft(draft.fontFamily) != committed.fontFamily
     let alertDirty = draft.alertClearMode != committed.alertClearMode
     let remoteThemeDirty = resolveRemoteTheme(draft.remoteTheme) != committed.remoteTheme
 
@@ -65,7 +66,8 @@ func desiredPreferencesPanel(in model: AppModel) -> PreferencesPanelProjection? 
         fontSizeDirtyLabel: fontSizeDirty ? "Prev: \(ghostty?.fontSize ?? "(default)")" : nil,
         alertClearModeDirtyLabel: alertDirty ? "Prev: \(alertDisplayValue)" : nil,
         remoteThemeDirtyLabel: remoteThemeDirty ? "Prev: \(committed.remoteTheme)" : nil,
-        saveEnabled: ghosttyThemeDirty || fontSizeDirty || alertDirty || remoteThemeDirty
+        saveEnabled: ghosttyThemeDirty || fontSizeDirty || fontFamilyDirty
+            || alertDirty || remoteThemeDirty
     )
 }
 
@@ -271,22 +273,33 @@ func desiredSearchOverlays(in model: AppModel) -> [PaneId: SearchOverlayRender] 
 struct PaneConfigKey: Equatable {
   let theme: String
   let fontSize: Double
+  /// The verified-installed family, or nil for the system monospace font. Never
+  /// the raw name from config: only a resolved family may reach rendering (I3).
+  let fontFamily: String?
   let generation: Int
 
-  init(theme: String, fontSize: Double = DanTermConfig.default.resolvedFontSize, generation: Int) {
+  init(
+    theme: String,
+    fontSize: Double = DanTermConfig.default.resolvedFontSize,
+    fontFamily: String? = nil,
+    generation: Int
+  ) {
     self.theme = theme
     self.fontSize = fontSize
+    self.fontFamily = fontFamily
     self.generation = generation
   }
 }
 
-/// Projects the resolved theme and global font size onto every live pane.
+/// Projects the resolved theme, global font size, and resolved font family onto
+/// every live pane.
 func desiredPaneConfig(in model: AppModel) -> [PaneId: PaneConfigKey] {
   var result: [PaneId: PaneConfigKey] = [:]
   for pane in model.allPanes {
     result[pane.id] = PaneConfigKey(
       theme: effectiveTheme(for: pane, config: model.config),
       fontSize: model.config.resolvedFontSize,
+      fontFamily: model.resolvedFontFamily,
       generation: model.ghosttyConfigGeneration
     )
   }
