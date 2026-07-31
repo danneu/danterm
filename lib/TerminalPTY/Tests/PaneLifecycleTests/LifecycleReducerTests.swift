@@ -169,6 +169,36 @@ import Testing
             #expect(reducer.handle(event).isEmpty)
         }
     }
+
+    @Test("a second launch request never creates a second process owner")
+    func duplicateStartIsInertOnceLaunched() throws {
+        // Intent: once a pane has started, another `.start` emits no command and
+        //   changes no state, so a pane can never own two child processes.
+        // Why it exists: `.start` is matched only in the idle state, and every
+        //   live state drops it through a `default: return []` catch-all. That
+        //   makes single ownership true today but silent -- adding a `case
+        //   .start` to a live state (a plausible way to build "restart this
+        //   pane") would spawn a second child, orphaning the first with its PTY
+        //   still open, and no existing test would object. The interleaving
+        //   suite covers close/exit races, not repeated launches.
+        // Scenario: a duplicate launch request arrives at a pane that is still
+        //   spawning, then again once it is running, then again while it drains
+        //   after the child exits.
+        var reducer = PaneLifecycleReducer()
+        let plan = try resolveLaunchPlan(lifecycleInput()).get()
+        #expect(reducer.handle(.start(lifecycleInput())) == [.spawn(plan.attempts[0])])
+
+        #expect(reducer.handle(.start(lifecycleInput())).isEmpty)
+        #expect(reducer.phase == .spawning)
+
+        #expect(reducer.handle(.spawnSucceeded) == [.activateIO])
+        #expect(reducer.handle(.start(lifecycleInput())).isEmpty)
+        #expect(reducer.phase == .running)
+
+        #expect(reducer.handle(.childExited(.exited(0))) == [.drainOutput])
+        #expect(reducer.handle(.start(lifecycleInput())).isEmpty)
+        #expect(reducer.phase == .drainingOutput)
+    }
 }
 
 let beginCloseCommands: [PaneLifecycleCommand] = [
