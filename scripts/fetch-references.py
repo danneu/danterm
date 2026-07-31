@@ -39,6 +39,13 @@ class Reference:
     release_tag: str | None
 
     def __post_init__(self) -> None:
+        # A pin must be the COMMIT, not the annotated-tag object that
+        # `git ls-remote --tags` prints -- both are 40 hex characters, so this
+        # check cannot tell them apart. git resolves a tag object when fetching,
+        # but the checkout's HEAD is the underlying commit, so a tag-object pin
+        # fails `cache_is_current` forever and refetches on every run. Get the
+        # peeled commit with:
+        #     git ls-remote <url> 'refs/tags/<tag>^{}'
         if re.fullmatch(r"[0-9a-f]{40}", self.pin) is None:
             raise ValueError(f"{self.name}: pin must be a full lowercase commit SHA")
 
@@ -111,7 +118,7 @@ REFERENCES = [
     Reference(
         name="fish-shell",
         url="https://github.com/fish-shell/fish-shell.git",
-        pin="cf3db77d3ac0b08fb7465ccd928e06e1f7fda9be",
+        pin="efb0223da10367031b7c887a3e40eccdf9bf7b06",
         sparse_cone=("share", "src"),
         why="Prompt repaint on SIGWINCH, fish_handle_reflow auto-detection, and the OSC 133 marks fish emits unprompted.",
         release_tag="4.7.1",
@@ -119,7 +126,7 @@ REFERENCES = [
     Reference(
         name="zsh",
         url="https://github.com/zsh-users/zsh.git",
-        pin="d6bfe888700f47be827e7c6c616284b4c8eadaa0",
+        pin="73d317384c9225e46d66444f93b46f0fbe7084ef",
         sparse_cone=("Src", "Functions"),
         why="Prompt redisplay and expansion behavior the shell-integration dialect embeds marks into.",
         release_tag="zsh-5.9",
