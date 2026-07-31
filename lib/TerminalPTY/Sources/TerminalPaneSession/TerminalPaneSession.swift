@@ -162,8 +162,8 @@ public final class TerminalPaneSessionController {
     /// Main-actor time spent blocked in the fence that drained the frame being
     /// published, for the benchmark observer to read beside the plan cost.
     ///
-    /// Exists because draining through `fencedFrameState()` is a `queue.sync`: the
-    /// main actor waits for the host's queue, and a child flooding its pty keeps
+    /// Exists because draining through `fencedConsumptionState()` is a `queue.sync`:
+    /// the main actor waits for the host's queue, and a child flooding its pty keeps
     /// that queue busy with back-to-back read turns. That wait is not planning, not
     /// drawing, and not on any other thread, so no existing metric can see it --
     /// while it is exactly the cost the fence-based drain trades for its ordering
@@ -275,23 +275,23 @@ public final class TerminalPaneSessionController {
 
     private func consumeHostUpdate(_ host: TerminalPTYHost) {
         guard isTornDown == false else { return }
-        let metadata = host.fencedConsumptionMetadata()
         // Drained synchronously: damage handoff and `consume` stay in one
         // main-actor step, so a checkpoint fence cannot strand moved rows.
         #if DANTERM_TERMINAL_BENCHMARK
         let fenceStarted = DispatchTime.now().uptimeNanoseconds
-        let frameState = host.fencedFrameState()
+        let consumption = host.fencedConsumptionState()
         pendingFenceStallNanoseconds += DispatchTime.now().uptimeNanoseconds - fenceStarted
         consume(
-            frameState: frameState,
-            result: metadata.result,
-            transitions: metadata.transitions
+            frameState: consumption.frameState,
+            result: consumption.result,
+            transitions: consumption.transitions
         )
         #else
+        let consumption = host.fencedConsumptionState()
         consume(
-            frameState: host.fencedFrameState(),
-            result: metadata.result,
-            transitions: metadata.transitions
+            frameState: consumption.frameState,
+            result: consumption.result,
+            transitions: consumption.transitions
         )
         #endif
     }

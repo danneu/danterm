@@ -80,26 +80,29 @@ class TerminalBenchmarkWorkloadSetTests(unittest.TestCase):
                         candidate, COMPARE.decision_rule(mode)["workloads"]
                     )
 
-    def test_the_captured_tui_workload_is_selectable_and_decidable(self):
-        # Intent: `synchronized-frames` can be named by `quick`, is run by
-        #   `confirm`, and carries the thresholds its A/A screen proposed.
-        # Why it exists: pins the graduation from candidate to calibrated. The
-        #   numbers are the conservative envelope across two replicating 48-pair
-        #   screens (20/F11) -- not a hand-picked pair, which is the failure mode
-        #   a frozen rule cannot recover from, since every later directional claim
-        #   inherits it.
-        # Scenario: spec-first; 20/D4 froze the rule after three screens.
+    def test_the_captured_tui_workload_is_collectable_but_not_decidable(self):
+        # Intent: `synchronized-frames` remains an instrument and candidate-screen
+        #   input without participating in routine quick or confirm verdicts.
+        # Why it exists: two fresh post-rewrite screens selected no confirm cell,
+        #   so retaining the old thresholds would knowingly label noise while
+        #   deleting the workload would lose unique synchronized-output coverage.
+        # Scenario: 23/D4 demotes the refused workload until fresh independent
+        #   screens and a held-out confirmation can graduate it again.
         self.assertEqual(
-            COMPARE.resolve_workloads("quick", "synchronized-frames"),
-            ("synchronized-frames",),
+            VALIDATION.CANDIDATE_WORKLOADS, ("synchronized-frames",)
         )
-        self.assertIn("synchronized-frames", COMPARE.resolve_workloads("confirm"))
-        quick = COMPARE.decision_rule("quick")["workloads"]["synchronized-frames"]
-        confirm = COMPARE.decision_rule("confirm")["workloads"]["synchronized-frames"]
-        self.assertEqual(quick["pairCount"], 6)
-        self.assertEqual(quick["directionalThresholdPercent"], 2.65)
-        self.assertEqual(confirm["pairCount"], 8)
-        self.assertEqual(confirm["directionalThresholdPercent"], 2.15)
+        self.assertNotIn("synchronized-frames", VALIDATION.WORKLOADS)
+        self.assertIn("synchronized-frames", VALIDATION.BLOCK_CONTRACTS)
+        self.assertTrue(callable(VALIDATION.collect_synchronized_frames))
+        for mode in COMPARE.MODES:
+            self.assertNotIn(
+                "synchronized-frames", COMPARE.decision_rule(mode)["workloads"]
+            )
+        with self.assertRaises(ValueError):
+            COMPARE.resolve_workloads("quick", "synchronized-frames")
+        self.assertNotIn(
+            "synchronized-frames", COMPARE.resolve_workloads("confirm")
+        )
 
     def test_the_harness_rejects_a_draw_workload_outside_that_set(self):
         # Intent: `terminal-benchmark.sh` refuses any workload that is neither one

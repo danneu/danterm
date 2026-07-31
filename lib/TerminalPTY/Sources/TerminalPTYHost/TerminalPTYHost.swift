@@ -634,8 +634,9 @@ public actor TerminalPTYHost {
         }
     }
 
-    /// Fences lifecycle evidence paired with the pane adapter's next frame drain.
-    package nonisolated func fencedConsumptionMetadata() -> (
+    /// Drains frame effects and reads lifecycle evidence as one pane-consumer transaction.
+    package nonisolated func fencedConsumptionState() -> (
+        frameState: TerminalPTYFrameState,
         result: PaneLifecycleResult?,
         transitions: [TerminalPTYAppliedTransition]?
     ) {
@@ -647,7 +648,11 @@ public actor TerminalPTYHost {
                 } else {
                     transitions = nil
                 }
-                return (owner.reportedResult, transitions)
+                return (
+                    owner.drainedFrameState(),
+                    owner.reportedResult,
+                    transitions
+                )
             }
         }
     }

@@ -64,6 +64,34 @@ struct TerminalPTYHostTests {
         await host.close()
     }
 
+    @Test("consumption fence pairs final frame damage with exit metadata", .timeLimit(.minutes(1)))
+    func consumptionFencePairsFrameAndExitMetadata() async throws {
+        // Intent: one synchronous consumer read returns terminal damage, lifecycle
+        //   result, and captured transitions from the same owner-queue boundary.
+        // Why it exists: reading lifecycle metadata and frame state through separate
+        //   fences both undercounted benchmark stall time and allowed intervening owner
+        //   work to make the values describe different moments.
+        // Scenario: a child prints its final frame and exits; the pane consumes the
+        //   redraw and exit evidence together before publishing the session end.
+        let host = try makeHost(captureTransitions: true)
+        _ = host.fencedFrameState()
+        await host.start(makeLaunchInput(command: "printf '__FINAL_FRAME__'; exit 7"))
+        #expect(await host.waitForResult() == .exited(.exited(7)))
+
+        let consumption = host.fencedConsumptionState()
+
+        #expect(consumption.frameState.damage != .none)
+        #expect(consumption.frameState.terminal.screenText.contains("__FINAL_FRAME__"))
+        #expect(consumption.result == .exited(.exited(7)))
+        #expect(consumption.transitions?.contains {
+            if case let .feed(bytes) = $0 {
+                return String(decoding: bytes, as: UTF8.self).contains("__FINAL_FRAME__")
+            }
+            return false
+        } == true)
+        await host.close()
+    }
+
     @Test("OSC 52 wakes and drains once without sending query data to the child", .timeLimit(.minutes(1)))
     func clipboardWriteFrameStateAndReadDenial() async throws {
         // Intent: owner framing drains completed clipboard writes independently from replies.

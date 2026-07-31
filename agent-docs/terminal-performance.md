@@ -202,10 +202,10 @@ byte count is recorded for them precisely so no rate can be derived.
 Like plan time and process CPU, this decides nothing. Evidence and the survey
 behind it: [docs/research/20-pty-throughput-and-interactive-stimulus.md](../docs/research/20-pty-throughput-and-interactive-stimulus.md).
 
-### `synchronized-frames` is the expensive one, and knowing why is the point
+### `synchronized-frames` is an expensive candidate, and knowing why is the point
 
-It is the sixth workload and the only captured one -- 95 real btop frames rather
-than a generator we wrote. Two things about it are not like the others.
+It is the only captured candidate -- 95 real btop frames rather than a generator
+we wrote. Two things about it are not like the calibrated workloads.
 
 **It is not a draw workload, despite being timed to a final draw.** 100% of its
 bytes arrive inside a `DECSET 2026` bracket, and `planIfNeeded` returns early
@@ -216,16 +216,16 @@ inflates the tail's percentage without measuring one nanosecond more drawing
 (`20/F10`). Read it as "how fast can we absorb a real TUI's output", and reach for
 `content-churn` or `style-churn` for anything about drawing.
 
-**Its rule is the loosest and costliest in the table, and its margins are thin.**
-6 pairs at +/-2.65% (quick) and 8 at +/-2.15% (confirm), against
-`scrollback-stream`'s 2 and 4. Those came from two replicating 48-pair A/A series
-and are the conservative envelope across them (`20/F11`). What that buys you:
-A/A false positives sit at 0.0084 and 0.0095 against a 0.01 gate, and confirm
-detection runs 0.917-0.944 against a 0.90 gate -- both the narrowest margins in
-this corpus. **8 of 48 A/A pairs exceeded +/-3% with no code change at all.** So a
-3-4% move on this workload alone is not a result; treat a lone quick verdict here
-as a screen and let confirm decide. The median-symmetric estimator is what absorbs
-that tail, and is why any rule clears.
+**Its former rule was the loosest and costliest in the table, and its margins
+were thin.** It used 6 pairs at +/-2.65% (quick) and 8 at +/-2.15% (confirm),
+against `scrollback-stream`'s 2 and 4. Those came from two replicating 48-pair
+A/A series and were the conservative envelope across them (`20/F11`). On that
+evidence, A/A false positives sat at 0.0084 and 0.0095 against a 0.01 gate, and
+confirm detection ran 0.917-0.944 against a 0.90 gate -- both the narrowest
+margins in the corpus. **8 of 48 A/A pairs exceeded +/-3% with no code change at
+all.** The median-symmetric estimator absorbed that tail and was why any rule
+appeared to clear. Fresh evidence below rejected both cells, so these numbers
+are provenance, not an operational decision rule.
 
 A first screen proposed 12 pairs at +/-1.05% and was discarded: its spread came
 from one block in 48 running 193 ms against a 164 ms median. **That block is the
@@ -236,13 +236,17 @@ unexplained" and handed it to doc 19. It was neither real nor doc 19's: the
 discarded outlier had been counted a second time as independent evidence. **A
 block discarded from a statistic is discarded from the whole file.**
 
-**Two known weaknesses in the frozen rule, neither yet fixed** (`20/F15`):
-`confirm 8p@2.15%` clears its detection gate only on pooled evidence -- on two of
-the three 1x screens individually it reads 0.8571 and 0.8867 against a 0.90 gate.
-And this workload never received the confirmation stage the other five had: doc 7
-records their selected cells re-run at **100,000 trials with disjoint fresh
-seeds** before freezing, while `synchronized-frames` was frozen directly off
-50,000-trial screen reports. Running that missing stage is the open action.
+**Fresh post-rewrite evidence now refuses the frozen rule** (`23/F8`). Two
+independent 48-pair 1x screens on one immutable post-fix tree had trimmed SD
+2.48% and 3.62%; both independently select no confirm cell, and pooled evidence
+selects none. The frozen `confirm 8p@2.15%` cell now reads 12-14% A/A false
+positives against the 1% gate and only 74-78% detection against 90%. The missing
+100,000-trial stage correctly did not run: screen-then-freeze requires one exact
+screened cell, and no such cell exists. `23/D4` therefore demoted the workload
+to `CANDIDATE_WORKLOADS` and removed its unsupported quick and confirm rules.
+Routine comparisons no longer issue a verdict for it, but its fixture,
+collector, direct harness command, block contract, and candidate-screen path
+remain available for descriptive collection and future research.
 
 **Do not try to buy a tighter rule by lengthening the replay.** It was tried
 (`20/F16`). `replayCount` exists and works, and block length is *not* a lever on
@@ -867,8 +871,9 @@ Practical rules:
   selected (`20/F15`).
 - **Verify a candidate cell on each series independently, not only pooled.** A
   cell can clear every gate on combined evidence and fail on two of the three
-  series that fed it -- which is the current state of `synchronized-frames`'
-  confirm rule. Pooling hides fragility that a per-series check surfaces.
+  series that fed it -- which was the defect that caused
+  `synchronized-frames`' confirm rule to be re-screened and then removed.
+  Pooling hides fragility that a per-series check surfaces.
 - Prefer the continuous quantity to the thresholded one. A pass/fail at a 60s
   time limit is one bit; the test's wall time underneath it shows a distribution
   shifting before any verdict flips. Across nine interleaved suite pairs, the

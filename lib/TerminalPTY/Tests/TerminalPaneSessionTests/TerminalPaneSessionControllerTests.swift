@@ -1233,13 +1233,14 @@ struct TerminalPaneSessionControllerTests {
         //   shutdown observers have run.
         // Why it exists: main-delivery cleanup could strand a mid-close host when
         //   applicationWillTerminate synchronously blocked the main actor.
-        // Scenario: the user quits with one live shell and one pane already
-        //   closing; the synchronous exit hook blocks main until both are quiescent.
+        // Scenario: the user quits with one continuously writing pane and one
+        //   pane already closing; the synchronous exit hook blocks main until
+        //   both are quiescent.
         let liveHost = try makeHost()
         let closingHost = try makeHost()
         let liveController = TerminalPaneSessionController(
             host: liveHost,
-            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) hold \"$0\"")
+            launchInput: makeLaunchInput(command: "exec \(try probeExecutable()) chatty \"$0\"")
         )
         let closingController = TerminalPaneSessionController(
             host: closingHost,
@@ -1255,8 +1256,12 @@ struct TerminalPaneSessionControllerTests {
         #expect(await closingHost.waitForOutput(containing: Array("__READY__".utf8)))
 
         closingController.tearDown()
+        let clock = ContinuousClock()
+        let start = clock.now
         registry.requestShutdownAndWait()
+        let elapsed = start.duration(to: clock.now)
 
+        #expect(elapsed < .seconds(3))
         #expect(observers.signalCount == 2)
         #expect(registry.retainedCount == 0)
         #expect((await liveHost.resourceSnapshot()).isReleased)
