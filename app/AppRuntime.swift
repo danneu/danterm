@@ -117,6 +117,8 @@ class AppRuntime {
     }
 
     var model: AppModel
+    private let configStore: DanTermConfigStore
+    private var pendingConfigError: Error?
     // Ephemeral view state the reconciler reads as a second input (see ViewLocalState).
     // Today just the inline-rename target, set/cleared by SidebarView's rename paths and
     // read only by reconcileSidebar's rename guard.
@@ -177,14 +179,23 @@ class AppRuntime {
     // https://github.com/danneu/danterm/issues/31
     private static let enrichedCheckpointInterval: TimeInterval = 600.0
 
-    init(terminalBackend: any TerminalBackend) {
+    init(
+        terminalBackend: any TerminalBackend,
+        configStore: DanTermConfigStore = DanTermConfigStore()
+    ) {
         self.terminalBackend = terminalBackend
+        self.configStore = configStore
         // Empty launch: one group, no tabs/leaves yet (panes live in leaves).
         self.model = AppModel(
             groups: [GroupModel(id: GroupId(rawValue: CoreEnv.live.newId()), name: "General")]
         )
         // Load DanTerm config before any tabs are created
-        self.model.config = DanTermConfigParser.loadFromDisk()
+        do {
+            self.model.config = try configStore.load()
+        } catch {
+            self.model.config = .default
+            self.pendingConfigError = error
+        }
 
         terminalBackend.onEvent = { [weak self] event in
             guard let self else { return }
@@ -491,7 +502,10 @@ class AppRuntime {
                 launchCommand: launchCommand,
                 waitAfterCommand: waitAfterCommand,
                 envVars: envVars,
-                themeName: model.pane(paneId).flatMap(effectiveTheme)
+                themeName: model.pane(paneId).map {
+                    effectiveTheme(for: $0, config: model.config)
+                },
+                fontSize: model.config.resolvedFontSize
             ) else {
                 send(.surfaceCreationFailed(paneId: paneId))
                 break
@@ -613,23 +627,12 @@ class AppRuntime {
                 self?.send(closeTabsConfirmationResponse(isConfirm: isConfirm, ids: tabIds))
             }
 
-        case .saveDanTermConfigKey(let key, let value):
-            let path = DanTermConfigPaths.configFilePath()
-            let url = URL(fileURLWithPath: path)
-            ensureFileExists(atPath: path, seed: DanTermConfigPaths.configFileSeed.data(using: .utf8))
-            let existing = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
-            let updated = DanTermConfigWriter.setKey(key, value: value, in: existing)
-            try? updated.write(to: url, atomically: true, encoding: .utf8)
-
-        case .removeDanTermConfigKey(let key):
-            let path = DanTermConfigPaths.configFilePath()
-            let url = URL(fileURLWithPath: path)
-            guard let existing = try? String(contentsOfFile: path, encoding: .utf8) else { break }
-            let updated = DanTermConfigWriter.removeKey(key, from: existing)
-            try? updated.write(to: url, atomically: true, encoding: .utf8)
-
-        case .reloadGhosttyConfig:
-            reloadAllConfig()
+        case .saveDanTermConfig(let config):
+            do {
+                try configStore.save(config)
+            } catch {
+                presentConfigError(error)
+            }
 
         case .scheduleCheckpoint:
             scheduleDebouncedCheckpoint()
@@ -1091,18 +1094,51 @@ class AppRuntime {
 
     /// Re-parse DanTerm-specific config keys and dispatch through the Elm loop.
     func reloadDanTermConfig() {
-        let config = DanTermConfigParser.loadFromDisk()
-        send(.configLoaded(config))
+        do {
+            send(.configLoaded(try configStore.load()))
+        } catch {
+            send(.configLoaded(.default))
+            presentConfigError(error)
+        }
     }
 
     // MARK: - Preferences Panel
 
-    /// Show or re-focus the preferences panel. Reads the live Ghostty config to
-    /// seed the draft, then lets reconcile create/show from the model. The final
+    /// Show or re-focus the preferences panel. Projects the live JSON config into
+    /// the draft, then lets reconcile create/show from the model. The final
     /// makeKeyAndOrderFront call re-raises an already-open normal-level panel.
     func showPreferencesPanel() {
-        send(.preferencesOpened(ghostty: terminalBackend.preferences))
+        send(.preferencesOpened(ghostty: GhosttyPrefs(
+            theme: model.config.defaultTheme,
+            fontSize: model.config.fontSize.map(configFontSizeText)
+        )))
         preferencesPanel?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Seeds and opens the valid v1 JSON file shared by both config menu entry points.
+    func openDanTermConfig() {
+        do {
+            try configStore.seedIfMissing()
+            NSWorkspace.shared.open(configStore.url)
+        } catch {
+            presentConfigError(error)
+        }
+    }
+
+    /// Presents a launch-time config failure after AppDelegate has installed the main window.
+    func presentPendingConfigError() {
+        guard let error = pendingConfigError else { return }
+        pendingConfigError = nil
+        presentConfigError(error)
+    }
+
+    private func presentConfigError(_ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "DanTerm Config Error"
+        alert.informativeText = (error as? LocalizedError)?.errorDescription
+            ?? error.localizedDescription
+        alert.alertStyle = .warning
+        alert.runModal()
     }
 
     // MARK: - Theme Browser
@@ -1192,7 +1228,10 @@ class AppRuntime {
                             launchCommand: nil,
                             waitAfterCommand: true,
                             envVars: envVars,
-                            themeName: loaded.model.pane(paneId).flatMap(effectiveTheme)
+                            themeName: loaded.model.pane(paneId).map {
+                                effectiveTheme(for: $0, config: loaded.model.config)
+                            },
+                            fontSize: loaded.model.config.resolvedFontSize
                         ) else {
                             throw RestoreBuildError.surfaceCreationFailed
                         }
@@ -1290,7 +1329,8 @@ class AppRuntime {
         launchCommand: String?,
         waitAfterCommand: Bool,
         envVars: [(String, String)],
-        themeName: String?
+        themeName: String?,
+        fontSize: Double
     ) -> (any TerminalSession)? {
         let request = TerminalSessionRequest(
             workingDirectory: workingDirectory,
@@ -1298,7 +1338,8 @@ class AppRuntime {
             launchCommand: launchCommand,
             waitAfterCommand: waitAfterCommand,
             environment: envVars,
-            themeName: themeName
+            themeName: themeName,
+            fontSize: fontSize
         )
         guard let session = terminalBackend.createSession(request) else { return nil }
         session.onEvent = { [weak self] event in

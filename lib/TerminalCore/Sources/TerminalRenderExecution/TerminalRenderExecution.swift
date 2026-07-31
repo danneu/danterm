@@ -40,18 +40,19 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
     let unquantizedLineHeight: CGFloat
 
     /// Returns nil when scale or any derived cell dimension cannot be represented safely.
-    public init?(displayScale: CGFloat) {
+    public init?(displayScale: CGFloat, fontSize: CGFloat = 13) {
         self.init(
             displayScale: displayScale,
+            fontSize: fontSize,
             symbolsFontURL: NerdFontSymbolsResource.packagedURL()
         )
     }
 
     /// Test seam for proving that an absent packaged symbols face preserves the old path.
-    init?(displayScale: CGFloat, symbolsFontURL: URL?) {
-        guard displayScale.isFinite, displayScale > 0 else { return nil }
-
-        let fontSize: CGFloat = 13
+    init?(displayScale: CGFloat, fontSize: CGFloat = 13, symbolsFontURL: URL?) {
+        guard displayScale.isFinite, displayScale > 0,
+              fontSize.isFinite, fontSize > 0
+        else { return nil }
         let appKitFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
         let font = CTFontCreateWithName(appKitFont.fontName as CFString, fontSize, nil)
         var character = UniChar(0x004D)

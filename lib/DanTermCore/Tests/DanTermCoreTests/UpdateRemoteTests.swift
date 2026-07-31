@@ -158,7 +158,7 @@ import Testing
     @Test("commandEnded clears isRemote and remoteThemeOverride")
     func commandEndedClearsIsRemoteAndOverride() {
         // Intent: commandEnded clears isRemote, remoteSession, and the
-        //   override; the per-pane config projection key drops.
+        //   override; the per-pane config returns to the local default.
         // Why it exists: pins the exit-from-remote cleanup.
         // Scenario: spec-first exit clean.
         var model = makeModel()
@@ -171,7 +171,7 @@ import Testing
         #expect(model.pane(paneId)?.isRemote == false)
         #expect(model.pane(paneId)?.remoteSession == nil, "remote session should be cleared")
         #expect(model.pane(paneId)?.remoteThemeOverride == nil, "override should be cleared")
-        #expect(desiredPaneConfig(in: model)[paneId] == nil, "cleared override without user theme -> no config key")
+        #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Monokai Remastered")
         #expect(commands.count == 0)
     }
 
@@ -289,14 +289,31 @@ import Testing
         #expect(effectiveTheme(for: pane) == "Dracula")
     }
 
-    @Test("effectiveTheme returns nil when both are nil")
-    func effectiveThemeReturnsNilWhenBothNil() {
-        // Intent: effectiveTheme returns nil when neither user theme
-        //   nor override is set.
-        // Why it exists: pins the both-nil branch.
-        // Scenario: spec-first both nil.
+    @Test("effectiveTheme uses the configured catalog-backed default")
+    func effectiveThemeUsesConfiguredDefault() {
         let pane = PaneModel(id: PaneId())
-        #expect(effectiveTheme(for: pane) == nil, "should be nil")
+        var config = DanTermConfig.default
+        #expect(effectiveTheme(for: pane, config: config) == "Monokai Remastered")
+        config.defaultTheme = "Dracula"
+        #expect(effectiveTheme(for: pane, config: config) == "Dracula")
+    }
+
+    @Test("configLoaded projects theme and font changes onto an existing local pane")
+    func configLoadedProjectsThemeAndFontOntoExistingPane() {
+        var model = makeModel()
+        createTab(&model)
+        let paneId = model.groups[0].tabs[0].focusedPaneId
+        var config = DanTermConfig.default
+        config.defaultTheme = "Dracula"
+        config.fontSize = 18
+
+        _ = update(&model, .configLoaded(config))
+
+        #expect(desiredPaneConfig(in: model)[paneId] == PaneConfigKey(
+            theme: "Dracula",
+            fontSize: 18,
+            generation: 0
+        ))
     }
 
     @Test("setPaneTheme while remote changes user theme not override")
@@ -370,7 +387,7 @@ import Testing
     @Test("pref save alertClearMode updates model and emits save")
     func prefSaveAlertClearModeUpdatesModelEmitsSave() {
         // Intent: pref save with a dirty alertClearMode updates config
-        //   and emits saveDanTermConfigKey.
+        //   and emits one whole-document save.
         // Why it exists: pins the alert-mode save path (also covered in
         //   UpdatePreferencesTests; preserved here for the remote-side
         //   suite's coverage of the pref-save surface).
@@ -381,17 +398,15 @@ import Testing
         let commands = update(&model, .prefSave)
         #expect(model.config.alertClearMode == .manual)
         #expect(hasEffect(commands) {
-            if case .saveDanTermConfigKey(let key, let value) = $0 {
-                return key == "alert-clear-mode" && value == "manual"
-            }
+            if case .saveDanTermConfig(let config) = $0 { return config.alertClearMode == .manual }
             return false
-        }, "should emit saveDanTermConfigKey")
+        }, "should emit saveDanTermConfig")
     }
 
     @Test("pref save alertClearMode with same value does not emit save key")
     func prefSaveAlertClearModeSameValueDoesNotEmitKey() {
         // Intent: pref save with an unchanged draft emits no
-        //   saveDanTermConfigKey.
+        //   saveDanTermConfig command.
         // Why it exists: pins the no-op-on-clean rule from the remote
         //   suite's pref-save surface.
         // Scenario: spec-first clean save.
@@ -400,9 +415,9 @@ import Testing
         let commands = update(&model, .prefSave)
         #expect(commands.count == 0)
         #expect(!hasEffect(commands) {
-            if case .saveDanTermConfigKey = $0 { return true }
+            if case .saveDanTermConfig = $0 { return true }
             return false
-        }, "should not emit saveDanTermConfigKey")
+        }, "should not emit saveDanTermConfig")
     }
 
     // MARK: - setRemoteTheme (via pref draft + save)
@@ -410,7 +425,7 @@ import Testing
     @Test("pref save remoteTheme updates model and saves")
     func prefSaveRemoteThemeUpdatesModelAndSaves() {
         // Intent: pref save with a dirty remoteTheme updates config and
-        //   emits saveDanTermConfigKey for "remote-theme".
+        //   emits one whole-document save carrying the remote theme.
         // Why it exists: pins the remote-theme save path (mirror of the
         //   UpdatePreferencesTests entry; preserved for remote-side
         //   coverage).
@@ -421,11 +436,9 @@ import Testing
         let commands = update(&model, .prefSave)
         #expect(model.config.remoteTheme == "Grape")
         #expect(hasEffect(commands) {
-            if case .saveDanTermConfigKey(let key, let value) = $0 {
-                return key == "remote-theme" && value == "Grape"
-            }
+            if case .saveDanTermConfig(let config) = $0 { return config.remoteTheme == "Grape" }
             return false
-        }, "should emit saveDanTermConfigKey")
+        }, "should emit saveDanTermConfig")
     }
 
     @Test("pref save remoteTheme updates remote panes")
@@ -445,9 +458,7 @@ import Testing
         #expect(model.pane(paneId)?.remoteThemeOverride == "Grape")
         #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Grape")
         #expect(hasEffect(commands) {
-            if case .saveDanTermConfigKey(let key, let value) = $0 {
-                return key == "remote-theme" && value == "Grape"
-            }
+            if case .saveDanTermConfig(let config) = $0 { return config.remoteTheme == "Grape" }
             return false
         }, "should save remote theme")
     }

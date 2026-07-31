@@ -84,13 +84,14 @@ final class SwiftTerminalBackend: TerminalBackend {
         #if DANTERM_TERMINAL_CHARACTERIZATION
         return SwiftTerminalSessionView(
             controller: controller,
+            fontSize: request.fontSize,
             onSessionEnded: { [weak self, weak controller] result in
                 guard case .exited = result, let self, let controller else { return }
                 self.writeRecording(from: controller, id: id)
             }
         )
         #else
-        return SwiftTerminalSessionView(controller: controller)
+        return SwiftTerminalSessionView(controller: controller, fontSize: request.fontSize)
         #endif
     }
 

@@ -53,7 +53,7 @@ cat >"$probe" <<EOF
   "applicationSupport": "$owned_root/home/Library/Application Support",
   "caches": "$owned_root/home/Library/Caches",
   "temporary": "$owned_root/tmp/",
-  "config": "$owned_root/home/.config/danterm/config",
+  "config": "$owned_root/home/.config/danterm/config.json",
   "recovery": "$owned_root/home/Library/Application Support/com.danneu.danterm-terminal-characterization/Recovery",
   "socket": "$owned_root/home/Library/Caches/com.danneu.danterm-terminal-characterization/control.sock",
   "replay": "$owned_root/tmp/danterm-scrollback"

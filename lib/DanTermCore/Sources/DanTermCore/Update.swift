@@ -556,6 +556,12 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         if model.preferencesDraft != nil {
             model.preferencesDraft!.alertClearMode = newConfig.alertClearMode
             model.preferencesDraft!.remoteTheme = newConfig.remoteTheme
+            model.preferencesDraft!.theme = newConfig.defaultTheme
+            model.preferencesDraft!.fontSize = newConfig.fontSize.map(configFontSizeText)
+            model.committedGhosttyPrefs = GhosttyPrefs(
+                theme: newConfig.defaultTheme,
+                fontSize: newConfig.fontSize.map(configFontSizeText)
+            )
         }
         if newConfig.remoteTheme != oldConfig.remoteTheme {
             // Two passes: collect remote pane ids, then updatePane
@@ -642,17 +648,17 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
         guard let draft = model.preferencesDraft else { return [] }
         let resolvedTheme = resolveRemoteTheme(draft.remoteTheme)
         let oldConfig = model.config
-        var commands: [Command] = []
-        // Save changed keys to disk.
-        if draft.alertClearMode != oldConfig.alertClearMode {
-            commands.append(.saveDanTermConfigKey(key: "alert-clear-mode", value: draft.alertClearMode.rawValue))
+        var newConfig = oldConfig
+        newConfig.alertClearMode = draft.alertClearMode
+        newConfig.remoteTheme = resolvedTheme
+        newConfig.defaultTheme = draft.theme
+        let parsedFontSize: Double? = draft.fontSize.flatMap { Double($0) }
+        let validFontSize = draft.fontSize == nil
+            || (parsedFontSize.map { $0.isFinite && $0 > 0 } ?? false)
+        if validFontSize {
+            newConfig.fontSize = parsedFontSize
         }
-        if resolvedTheme != oldConfig.remoteTheme {
-            commands.append(.saveDanTermConfigKey(key: "remote-theme", value: resolvedTheme))
-        }
-        // Apply to model.
-        model.config.alertClearMode = draft.alertClearMode
-        model.config.remoteTheme = resolvedTheme
+        model.config = newConfig
         // Normalize draft to resolved values post-save.
         model.preferencesDraft!.remoteTheme = resolvedTheme
         // Update remote panes if theme changed.
@@ -661,42 +667,11 @@ func update(_ model: inout AppModel, _ msg: Msg, env: CoreEnv = .live) -> [Comma
                 model.updatePane(paneId) { $0.remoteThemeOverride = resolvedTheme }
             }
         }
-        // Save changed Ghostty keys and trigger reload if any changed.
-        let committedGhostty = model.committedGhosttyPrefs ?? GhosttyPrefs()
-        var ghosttyChanged = false
-        if draft.theme != committedGhostty.theme {
-            if let theme = draft.theme {
-                commands.append(.saveDanTermConfigKey(key: "theme", value: theme))
-            } else {
-                commands.append(.removeDanTermConfigKey(key: "theme"))
-            }
-            ghosttyChanged = true
-        }
-        if draft.fontSize != committedGhostty.fontSize {
-            if let fs = draft.fontSize, let val = Double(fs), val > 0 {
-                commands.append(.saveDanTermConfigKey(key: "font-size", value: fs))
-                ghosttyChanged = true
-            } else if draft.fontSize == nil {
-                commands.append(.removeDanTermConfigKey(key: "font-size"))
-                ghosttyChanged = true
-            }
-            // else: invalid font-size — skip, leave dirty
-        }
-        if ghosttyChanged {
-            commands.append(.reloadGhosttyConfig)
-            // Optimistically update committed baselines for saved fields.
-            // The CONFIG_CHANGE callback will confirm with ghosttyPrefsRefreshed.
-            if draft.theme != committedGhostty.theme {
-                model.committedGhosttyPrefs?.theme = draft.theme
-            }
-            // Only update font-size baseline if it was actually saved (valid value or nil).
-            let fontSizeSaved = draft.fontSize == nil
-                || (draft.fontSize != nil && Double(draft.fontSize!) != nil && Double(draft.fontSize!)! > 0)
-            if fontSizeSaved && draft.fontSize != committedGhostty.fontSize {
-                model.committedGhosttyPrefs?.fontSize = draft.fontSize
-            }
-        }
-        return commands
+        model.committedGhosttyPrefs = GhosttyPrefs(
+            theme: newConfig.defaultTheme,
+            fontSize: newConfig.fontSize.map(configFontSizeText)
+        )
+        return newConfig == oldConfig ? [] : [.saveDanTermConfig(newConfig)]
 
     // MARK: - Export
 

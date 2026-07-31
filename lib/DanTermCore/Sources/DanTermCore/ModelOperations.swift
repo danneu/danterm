@@ -19,10 +19,15 @@ func resolveRemoteTheme(_ raw: String) -> String {
     return trimmed.isEmpty ? DanTermConfig.default.remoteTheme : trimmed
 }
 
-/// Returns the theme that should be applied to a pane's Ghostty surface.
-/// Remote override takes priority over user-set theme.
-func effectiveTheme(for pane: PaneModel) -> String? {
-  pane.remoteThemeOverride ?? pane.theme
+/// Formats optional numeric config values for the Preferences text-field boundary.
+func configFontSizeText(_ size: Double) -> String {
+    let text = String(size)
+    return text.hasSuffix(".0") ? String(text.dropLast(2)) : text
+}
+
+/// Resolves remote and pane overrides ahead of the catalog-backed local default.
+func effectiveTheme(for pane: PaneModel, config: DanTermConfig = .default) -> String {
+  pane.remoteThemeOverride ?? pane.theme ?? config.resolvedDefaultTheme
 }
 
 // MARK: - Pane side-table cleanup

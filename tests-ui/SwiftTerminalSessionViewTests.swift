@@ -34,9 +34,9 @@ func swiftTerminalSessionViewTests() {
                      "empty needle and end did not both clear search")
     }
 
-    uiTest("theme application resolves before changing presentation and clear restores dark") {
-        // Intent: only complete resolved themes reach the controller, while clear restores dark.
-        // Why it exists: failed or traversal-like keys must leave the pane coherently unchanged.
+    uiTest("theme application resolves names and falls back to dark") {
+        // Intent: complete themes apply while every unresolved name reaches the dark fallback.
+        // Why it exists: hand-edited catalog misses must never retain stale pane colors.
         // Scenario: a user applies a valid theme, two invalid names, then clears the override.
         let controller = TerminalPaneSessionController()
         let resolved = RenderTheme(defaultBackground: .init(red: 12, green: 34, blue: 56))
@@ -54,6 +54,8 @@ func swiftTerminalSessionViewTests() {
             controller.appliedThemes.map(\.defaultBackground) == [
                 resolved.defaultBackground,
                 RenderTheme.dark.defaultBackground,
+                RenderTheme.dark.defaultBackground,
+                RenderTheme.dark.defaultBackground,
             ],
             "theme dispatch changed on failed resolution: \(controller.appliedThemes)"
         )
@@ -61,18 +63,18 @@ func swiftTerminalSessionViewTests() {
 
     uiTest("font size updates live cell metrics and reports the resized PTY grid") {
         let controller = TerminalPaneSessionController()
-        let pane = SwiftTerminalSessionView(controller: controller, fontSize: 10)
+        let pane = SwiftTerminalSessionView(controller: controller, fontSize: 13)
         pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
         mountInTestWindow(pane, frame: pane.frame)
 
-        try uiExpect(controller.gridDimensions.last == TerminalDimensions(columns: 10, rows: 10),
+        try uiExpect(controller.gridDimensions.last == TerminalDimensions(columns: 12, rows: 12),
                      "initial configured font did not size the PTY grid")
 
-        pane.setFontSize(20)
+        pane.setFontSize(26)
 
-        try uiExpect(controller.gridDimensions.last == TerminalDimensions(columns: 5, rows: 5),
+        try uiExpect(controller.gridDimensions.last == TerminalDimensions(columns: 6, rows: 6),
                      "live font change did not resize the PTY grid")
-        try uiExpect(pane.state.cellHeight == 40, "live font change did not update cell metrics")
+        try uiExpect(pane.state.cellHeight == 32, "live font change did not update cell metrics")
     }
 
     uiTest("initial theme fills before draw and the retained first plan publishes on mount") {

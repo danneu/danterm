@@ -92,10 +92,11 @@ struct TerminalDimensions: Equatable {
 }
 
 struct TerminalRenderMetrics: Equatable {
-    let cellSize = CGSize(width: 8, height: 16)
+    let cellSize: CGSize
 
-    init?(displayScale: CGFloat) {
-        guard displayScale > 0 else { return nil }
+    init?(displayScale: CGFloat, fontSize: CGFloat = 13) {
+        guard displayScale > 0, fontSize > 0 else { return nil }
+        cellSize = CGSize(width: 8 * fontSize / 13, height: 16 * fontSize / 13)
     }
 }
 
@@ -337,7 +338,11 @@ final class TerminalPaneSessionController {
     func readViewportText() -> String { "" }
     func readFullHistoryText() -> String { "" }
     func readPrimaryHistoryText() -> String { "" }
-    func setGridDimensions(_ dimensions: TerminalDimensions) {}
+    private(set) var gridDimensions: [TerminalDimensions] = []
+
+    func setGridDimensions(_ dimensions: TerminalDimensions) {
+        gridDimensions.append(dimensions)
+    }
     func tearDown() {
         onOpenLink = nil
         onSearchStatus = nil

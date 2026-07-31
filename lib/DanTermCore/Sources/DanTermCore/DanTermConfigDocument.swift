@@ -4,6 +4,15 @@ import Foundation
 /// Owns one writable v1 config tree so Preferences can mutate known leaves without
 /// dropping future fields or changing untouched number tokens.
 struct DanTermConfigDocument: Equatable {
+    /// Canonical writable v1 seed used whenever DanTerm authors a new config file.
+    static let seedData = Data(
+        """
+        {
+          "schemaVersion": 1
+        }
+        """.utf8
+    )
+
     var config: DanTermConfig { Self.projectConfig(from: root) }
 
     private var root: ConfigJSONValue
@@ -53,6 +62,14 @@ struct DanTermConfigDocument: Equatable {
     /// Sets the alert policy while preserving unmodeled UI siblings.
     mutating func setAlertClearMode(_ mode: AlertClearMode) {
         setNestedValue(.string(mode.rawValue), parent: "ui", key: "alertClearMode")
+    }
+
+    /// Applies the complete modeled settings set as one document transaction.
+    mutating func apply(_ config: DanTermConfig) {
+        setDefaultTheme(config.defaultTheme)
+        setRemoteTheme(config.remoteTheme)
+        setFontSize(config.fontSize)
+        setAlertClearMode(config.alertClearMode)
     }
 
     /// Returns original bytes until a semantic edit occurs, then stable sorted JSON.

@@ -139,6 +139,9 @@ class PackThemeCatalogTests(unittest.TestCase):
             self.assertTrue(
                 all(len(theme["ansiPalette"]) == 16 for theme in catalog["themes"])
             )
+            names = {theme["name"] for theme in catalog["themes"]}
+            self.assertIn("Monokai Remastered", names)
+            self.assertIn("Purplepeter", names)
 
 
 class AssemblerContractTests(unittest.TestCase):

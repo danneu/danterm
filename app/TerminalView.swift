@@ -882,6 +882,8 @@ extension TerminalView {
         ghosttyApp.reloadConfig(surface: surface, soft: false)
     }
 
+    func setFontSize(_ size: Double) {}
+
     func startSearch() {
         guard let surface else { return }
         sendBindingAction(surface, "start_search")

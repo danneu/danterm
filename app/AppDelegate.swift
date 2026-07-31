@@ -138,6 +138,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
         runtime.sidebarView = sidebarView
         runtime.contentArea = contentArea
         runtime.chromeView = chromeView
+        runtime.presentPendingConfigError()
 
         // Write session lock (crash detection for next launch). Atomically
         // overwrites any stale lock from a previous crash, so there's no window
@@ -569,11 +570,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSSplitVie
     }
 
     @objc func openDanTermConfig(_ sender: Any?) {
-        let path = DanTermConfigPaths.configFilePath()
-        // Create file + parent dirs if needed so the editor opens something; the
-        // seed comment also makes macOS recognize it as a text file.
-        ensureFileExists(atPath: path, seed: DanTermConfigPaths.configFileSeed.data(using: .utf8))
-        NSWorkspace.shared.open(URL(fileURLWithPath: path))
+        runtime.openDanTermConfig()
     }
 
     @objc func openGhosttyConfig(_ sender: Any?) {

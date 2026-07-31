@@ -3086,20 +3086,13 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
 
     // MARK: - desiredPaneConfig (pane-config projection)
 
-    @Test("desiredPaneConfig: keyed only for themed panes; drops the key on clear")
-    func desiredPaneConfigKeyedForThemedDropsOnClear() {
-        // Intent: a pane's config key exists only while it has a theme;
-        //   clearing the theme drops the key.
-        // Why it exists: pins the disappear-but-host-survives net for
-        //   per-pane Ghostty config application.
-        // Scenario: spec-first lifecycle -- no key pre-set, set "Dracula"
-        //   (key appears), clear (key disappears).
+    @Test("desiredPaneConfig returns to the configured default after clearing an override")
+    func desiredPaneConfigReturnsToDefaultOnClear() {
         var model = makeModel()
         createTab(&model)
         let paneId = selectedTab(in: model)!.focusedPaneId
 
-        #expect(desiredPaneConfig(in: model)[paneId] == nil,
-            "nil theme -> no config key")
+        #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Monokai Remastered")
 
         update(&model, .setPaneTheme(paneId: paneId, themeName: "Dracula"))
         #expect(
@@ -3108,8 +3101,7 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
             "set theme keys the pane")
 
         update(&model, .setPaneTheme(paneId: paneId, themeName: nil))
-        #expect(desiredPaneConfig(in: model)[paneId] == nil,
-            "cleared theme drops the pane's key")
+        #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Monokai Remastered")
     }
 
     @Test("desiredPaneConfig: remote override takes priority over user theme")
@@ -3134,10 +3126,9 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
             "effective theme prefers remote override")
     }
 
-    @Test("desiredPaneConfig: ghosttyConfigReloaded changes every themed pane generation")
+    @Test("desiredPaneConfig: ghosttyConfigReloaded changes every pane generation")
     func desiredPaneConfigReloadBumpsGeneration() {
-        // Intent: ghosttyConfigReloaded bumps every themed pane's
-        //   generation while leaving unthemed panes absent.
+        // Intent: ghosttyConfigReloaded bumps every live pane's generation.
         // Why it exists: pins the reload-propagation rule that drives
         //   per-pane config refreshes after a global Ghostty reload.
         // Scenario: spec-first reload -- two themed panes + one
@@ -3148,19 +3139,19 @@ private func makeTwoPaneTabTodoRowsModel() -> (model: AppModel, tabId: TabId, pa
         let firstPaneId = selectedTab(in: model)!.focusedPaneId
         update(&model, .setPaneTheme(paneId: firstPaneId, themeName: "Dracula"))
         update(&model, .splitPane(paneId: firstPaneId, direction: .horizontal))
-        let themedPaneIds = Set(desiredPaneConfig(in: model).keys)
+        let firstTabPaneIds = Set(desiredPaneConfig(in: model).keys)
         createTab(&model)
         let unthemedPaneId = selectedTab(in: model)!.focusedPaneId
+        let allPaneIds = firstTabPaneIds.union([unthemedPaneId])
 
         let before = desiredPaneConfig(in: model)
-        #expect(Set(before.keys) == themedPaneIds)
-        #expect(before[unthemedPaneId] == nil, "unthemed pane is absent before reload")
+        #expect(Set(before.keys) == allPaneIds)
+        #expect(before[unthemedPaneId]?.theme == "Monokai Remastered")
 
         update(&model, .ghosttyConfigReloaded)
         let after = desiredPaneConfig(in: model)
-        #expect(Set(after.keys) == themedPaneIds)
-        #expect(after[unthemedPaneId] == nil, "unthemed pane stays absent after reload")
-        for paneId in themedPaneIds {
+        #expect(Set(after.keys) == allPaneIds)
+        for paneId in allPaneIds {
             #expect(after[paneId]?.generation == (before[paneId]?.generation ?? -1) + 1)
             #expect(after[paneId]?.theme == before[paneId]?.theme)
         }

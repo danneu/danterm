@@ -5,9 +5,8 @@
 // projection (clean draft + per-field dirty labels + saveEnabled + invalid
 // font-size persistence), edit operations (prefSet* preserve raw text for
 // remoteTheme, do NOT mutate committed config), reset operations, prefSave
-// (per-field saveDanTermConfigKey emission, remote-theme propagation to
-// remote panes, theme + font-size invalidating reloadGhosttyConfig, invalid
-// font-size skipping save, unchanged Ghostty keys not reloading),
+// (one whole-document transaction, remote-theme propagation to live panes,
+// theme + font-size ownership, and invalid font-size handling),
 // ghosttyPrefsRefreshed (committed-snapshot sync + draft reset), configLoaded
 // while open (resets only DanTerm fields), and the no-op-when-draft-nil guards
 // + helper functions (resolveRemoteTheme / isDraftDirty). The eight
@@ -356,6 +355,47 @@ private func openPrefs(_ model: inout AppModel, ghostty: GhosttyPrefs = defaultG
 
     // MARK: - Save
 
+    @Test("prefSave applies every valid field and emits one JSON transaction")
+    func prefSaveAppliesEveryFieldInOneTransaction() {
+        var model = makeModel()
+        _ = openPrefs(&model)
+        _ = update(&model, .prefSetTheme("Dracula"))
+        _ = update(&model, .prefSetFontSize("17.5"))
+        _ = update(&model, .prefSetAlertClearMode(.manual))
+        _ = update(&model, .prefSetRemoteTheme("Grape"))
+
+        let commands = update(&model, .prefSave)
+
+        #expect(model.config == DanTermConfig(
+            defaultTheme: "Dracula",
+            remoteTheme: "Grape",
+            fontSize: 17.5,
+            alertClearMode: .manual
+        ))
+        #expect(commands.count == 1)
+        #expect(hasEffect(commands) {
+            if case .saveDanTermConfig(let config) = $0 { return config == model.config }
+            return false
+        })
+        #expect(model.committedGhosttyPrefs == GhosttyPrefs(theme: "Dracula", fontSize: "17.5"))
+    }
+
+    @Test("invalid font size stays dirty while other fields save together")
+    func invalidFontSizeDoesNotBlockOtherFields() {
+        var model = makeModel()
+        _ = openPrefs(&model)
+        _ = update(&model, .prefSetFontSize("nan"))
+        _ = update(&model, .prefSetAlertClearMode(.manual))
+
+        let commands = update(&model, .prefSave)
+
+        #expect(model.config.alertClearMode == .manual)
+        #expect(model.config.fontSize == nil)
+        #expect(commands.count == 1)
+        #expect(model.preferencesDraft?.fontSize == "nan")
+        #expect(desiredPreferencesPanel(in: model)?.fontSizeDirtyLabel == "Prev: (default)")
+    }
+
     @Test("prefSave with no changes emits no commands")
     func prefSaveWithNoChangesEmitsNoCommands() {
         // Intent: a save on a clean draft emits no commands.
@@ -367,9 +407,9 @@ private func openPrefs(_ model: inout AppModel, ghostty: GhosttyPrefs = defaultG
         #expect(commands.count == 0)
     }
 
-    @Test("prefSave with alertClearMode change emits saveDanTermConfigKey")
+    @Test("prefSave with alertClearMode change emits one config transaction")
     func prefSaveWithAlertClearModeChangeEmitsKey() {
-        // Intent: a dirty alert mode emits saveDanTermConfigKey and
+        // Intent: a dirty alert mode emits a whole-document save and
         //   updates model.config.
         // Why it exists: pins the alert-mode save path.
         // Scenario: spec-first save alert mode.
@@ -379,16 +419,14 @@ private func openPrefs(_ model: inout AppModel, ghostty: GhosttyPrefs = defaultG
         let commands = update(&model, .prefSave)
         #expect(model.config.alertClearMode == .manual, "committed config should update")
         #expect(hasEffect(commands) {
-            if case .saveDanTermConfigKey(let key, let value) = $0 {
-                return key == "alert-clear-mode" && value == "manual"
-            }
+            if case .saveDanTermConfig(let config) = $0 { return config.alertClearMode == .manual }
             return false
         }, "should save alert-clear-mode")
     }
 
-    @Test("prefSave with remoteTheme change emits saveDanTermConfigKey")
+    @Test("prefSave with remoteTheme change emits one config transaction")
     func prefSaveWithRemoteThemeChangeEmitsKey() {
-        // Intent: a dirty remote theme emits saveDanTermConfigKey and
+        // Intent: a dirty remote theme emits a whole-document save and
         //   updates model.config.
         // Why it exists: pins the remote-theme save path.
         // Scenario: spec-first save remote theme.
@@ -398,9 +436,7 @@ private func openPrefs(_ model: inout AppModel, ghostty: GhosttyPrefs = defaultG
         let commands = update(&model, .prefSave)
         #expect(model.config.remoteTheme == "Grape", "committed config should update")
         #expect(hasEffect(commands) {
-            if case .saveDanTermConfigKey(let key, let value) = $0 {
-                return key == "remote-theme" && value == "Grape"
-            }
+            if case .saveDanTermConfig(let config) = $0 { return config.remoteTheme == "Grape" }
             return false
         }, "should save remote-theme")
     }
@@ -464,59 +500,45 @@ private func openPrefs(_ model: inout AppModel, ghostty: GhosttyPrefs = defaultG
         #expect(model.pane(paneId)?.remoteThemeOverride == "Grape")
         #expect(desiredPaneConfig(in: model)[paneId]?.theme == "Grape")
         #expect(hasEffect(commands) {
-            if case .saveDanTermConfigKey(let key, let value) = $0 {
-                return key == "remote-theme" && value == "Grape"
-            }
+            if case .saveDanTermConfig(let config) = $0 { return config.remoteTheme == "Grape" }
             return false
         }, "should save remote theme")
     }
 
-    @Test("prefSave with theme change emits saveDanTermConfigKey and reloadGhosttyConfig")
+    @Test("prefSave with theme change emits one config transaction")
     func prefSaveWithThemeChangeEmitsKeyAndReload() {
-        // Intent: a Ghostty theme change emits saveDanTermConfigKey +
-        //   reloadGhosttyConfig.
-        // Why it exists: pins the Ghostty-key save + reload pair.
-        // Scenario: spec-first save Ghostty theme.
+        // Intent: a local theme change enters the single JSON transaction.
+        // Why it exists: pins theme ownership at the DanTerm document boundary.
+        // Scenario: spec-first save local theme.
         var model = makeModel()
         _ = openPrefs(&model)
         _ = update(&model, .prefSetTheme("Solarized"))
         let commands = update(&model, .prefSave)
         #expect(hasEffect(commands) {
-            if case .saveDanTermConfigKey(let key, let value) = $0 {
-                return key == "theme" && value == "Solarized"
-            }
+            if case .saveDanTermConfig(let config) = $0 { return config.defaultTheme == "Solarized" }
             return false
         }, "should save theme key")
-        #expect(hasEffect(commands) {
-            if case .reloadGhosttyConfig = $0 { return true }
-            return false
-        }, "should emit reloadGhosttyConfig")
     }
 
-    @Test("prefSave with cleared theme emits removeDanTermConfigKey")
+    @Test("prefSave with cleared theme removes the JSON setting")
     func prefSaveWithClearedThemeEmitsRemoveKey() {
-        // Intent: clearing the Ghostty theme emits removeDanTermConfigKey
-        //   + reloadGhosttyConfig.
-        // Why it exists: pins the clear path of the Ghostty save.
-        // Scenario: spec-first clear Ghostty theme.
+        // Intent: clearing the local theme removes it through the JSON transaction.
+        // Why it exists: pins absent-key default semantics.
+        // Scenario: spec-first clear local theme.
         var model = makeModel()
+        model.config.defaultTheme = "Dracula"
         _ = openPrefs(&model, ghostty: GhosttyPrefs(theme: "Dracula", fontSize: nil))
         _ = update(&model, .prefSetTheme(nil))
         let commands = update(&model, .prefSave)
         #expect(hasEffect(commands) {
-            if case .removeDanTermConfigKey(let key) = $0 { return key == "theme" }
+            if case .saveDanTermConfig(let config) = $0 { return config.defaultTheme == nil }
             return false
-        }, "should remove theme key")
-        #expect(hasEffect(commands) {
-            if case .reloadGhosttyConfig = $0 { return true }
-            return false
-        }, "should emit reloadGhosttyConfig")
+        }, "should clear default theme")
     }
 
-    @Test("prefSave with valid fontSize emits saveDanTermConfigKey")
+    @Test("prefSave with valid fontSize emits one config transaction")
     func prefSaveWithValidFontSizeEmitsKey() {
-        // Intent: a valid font size emits saveDanTermConfigKey +
-        //   reloadGhosttyConfig.
+        // Intent: a valid font size enters the single JSON transaction.
         // Why it exists: pins the font-size save path.
         // Scenario: spec-first save font size.
         var model = makeModel()
@@ -524,15 +546,9 @@ private func openPrefs(_ model: inout AppModel, ghostty: GhosttyPrefs = defaultG
         _ = update(&model, .prefSetFontSize("16"))
         let commands = update(&model, .prefSave)
         #expect(hasEffect(commands) {
-            if case .saveDanTermConfigKey(let key, let value) = $0 {
-                return key == "font-size" && value == "16"
-            }
+            if case .saveDanTermConfig(let config) = $0 { return config.fontSize == 16 }
             return false
         }, "should save font-size key")
-        #expect(hasEffect(commands) {
-            if case .reloadGhosttyConfig = $0 { return true }
-            return false
-        }, "should emit reloadGhosttyConfig")
     }
 
     @Test("prefSave with invalid fontSize skips save and reload")
@@ -546,29 +562,9 @@ private func openPrefs(_ model: inout AppModel, ghostty: GhosttyPrefs = defaultG
         let commands = update(&model, .prefSave)
         #expect(commands.count == 0)
         #expect(!hasEffect(commands) {
-            if case .saveDanTermConfigKey(let key, _) = $0 { return key == "font-size" }
+            if case .saveDanTermConfig = $0 { return true }
             return false
         }, "should not save invalid font-size")
-        #expect(!hasEffect(commands) {
-            if case .reloadGhosttyConfig = $0 { return true }
-            return false
-        }, "should not reload for invalid font-size")
-    }
-
-    @Test("prefSave with unchanged Ghostty keys does not emit reload")
-    func prefSaveWithUnchangedGhosttyKeysSkipsReload() {
-        // Intent: saving with only DanTerm keys dirty does NOT emit
-        //   reloadGhosttyConfig.
-        // Why it exists: pins the reload scope (Ghostty keys only).
-        // Scenario: spec-first DanTerm-only save.
-        var model = makeModel()
-        _ = openPrefs(&model, ghostty: GhosttyPrefs(theme: "Dracula", fontSize: "14"))
-        _ = update(&model, .prefSetAlertClearMode(.manual))
-        let commands = update(&model, .prefSave)
-        #expect(!hasEffect(commands) {
-            if case .reloadGhosttyConfig = $0 { return true }
-            return false
-        }, "should not reload when Ghostty keys unchanged")
     }
 
     // MARK: - ghosttyPrefsRefreshed
@@ -608,11 +604,10 @@ private func openPrefs(_ model: inout AppModel, ghostty: GhosttyPrefs = defaultG
 
     // MARK: - External reload
 
-    @Test("configLoaded while panel open resets DanTerm draft fields only")
-    func configLoadedWhilePanelOpenResetsDanTermFields() {
-        // Intent: configLoaded while open resets DanTerm fields in the
-        //   draft (and preserves Ghostty draft fields).
-        // Why it exists: pins the scope of configLoaded's reset.
+    @Test("configLoaded while panel open resets all JSON-backed draft fields")
+    func configLoadedWhilePanelOpenResetsAllFields() {
+        // Intent: configLoaded while open resets every JSON-backed field in the draft.
+        // Why it exists: theme and font moved from Ghostty preferences into DanTerm JSON.
         // Scenario: spec-first configLoaded scope.
         var model = makeModel()
         _ = openPrefs(&model, ghostty: GhosttyPrefs(theme: "Dracula", fontSize: "14"))
@@ -621,10 +616,13 @@ private func openPrefs(_ model: inout AppModel, ghostty: GhosttyPrefs = defaultG
 
         var newConfig = DanTermConfig()
         newConfig.remoteTheme = "Ocean"
+        newConfig.defaultTheme = "Monokai"
+        newConfig.fontSize = 18
         _ = update(&model, .configLoaded(newConfig))
         #expect(model.preferencesDraft?.alertClearMode == .focus, "DanTerm field should match new config")
         #expect(model.preferencesDraft?.remoteTheme == "Ocean", "DanTerm field should match new config")
-        #expect(model.preferencesDraft?.theme == "Solarized", "Ghostty field should be preserved")
+        #expect(model.preferencesDraft?.theme == "Monokai")
+        #expect(model.preferencesDraft?.fontSize == "18")
     }
 
     @Test("configLoaded while panel closed does not create draft")

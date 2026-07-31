@@ -89,17 +89,17 @@ import Testing
         #expect(desiredPaneConfig(in: model)[newPaneId]?.theme == "Rose Pine")
     }
 
-    @Test("splitPane without theme has no projected config")
-    func splitPaneWithoutThemeHasNoProjectedConfig() {
-        // Intent: a split with no source theme produces no projection key
-        //   for the new pane.
-        // Why it exists: pins the "themed-only" projection rule.
-        // Scenario: spec-first no-theme split.
+    @Test("splitPane without an override projects the configured defaults")
+    func splitPaneWithoutThemeProjectsDefaults() {
         var model = makeModel()
         createTab(&model)
         update(&model, .splitPane(direction: .horizontal))
         let paneId = selectedTab(in: model)!.focusedPaneId
-        #expect(desiredPaneConfig(in: model)[paneId] == nil, "no theme -> no config key")
+        #expect(desiredPaneConfig(in: model)[paneId] == PaneConfigKey(
+            theme: "Monokai Remastered",
+            fontSize: 13,
+            generation: 0
+        ))
     }
 
     @Test("toSnapshot preserves theme")

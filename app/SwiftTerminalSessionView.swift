@@ -42,6 +42,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     private var lastEmittedState: TerminalSessionState?
     private var lastForwardedFocus = false
     private var isTornDown = false
+    private var fontSize: CGFloat
 
     weak var paneWrapper: PaneWrapperView?
     /// Defaults explicit selection copies to the system pasteboard while keeping UI tests isolated.
@@ -101,10 +102,12 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     /// work ahead of the app's close request and any resulting pane teardown.
     init(
         controller: TerminalPaneSessionController,
+        fontSize: Double = DanTermConfig.default.resolvedFontSize,
         resolveTheme: @escaping (String) -> RenderTheme? = ThemeCatalog.shared.renderTheme(named:),
         onSessionEnded: ((PaneLifecycleResult) -> Void)? = nil
     ) {
         self.controller = controller
+        self.fontSize = CGFloat(fontSize)
         self.resolveTheme = resolveTheme
         super.init(frame: .zero)
         wantsLayer = true
@@ -458,12 +461,17 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     }
 
     func applyTheme(_ themeName: String) {
-        guard let theme = resolveTheme(themeName) else { return }
-        applyResolvedTheme(theme)
+        applyResolvedTheme(resolveTheme(themeName) ?? .dark)
     }
 
     func clearTheme() {
         applyResolvedTheme(.dark)
+    }
+
+    func setFontSize(_ size: Double) {
+        guard size.isFinite, size > 0, CGFloat(size) != fontSize else { return }
+        fontSize = CGFloat(size)
+        synchronizeGeometry()
     }
     func startSearch() {
         // Synchronous on purpose: `.searchStarted` is what creates the pane's
@@ -651,7 +659,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         guard isTornDown == false,
               bounds.width > 0, bounds.height > 0,
               let scale = window?.backingScaleFactor,
-              let metrics = TerminalRenderMetrics(displayScale: scale),
+              let metrics = TerminalRenderMetrics(displayScale: scale, fontSize: fontSize),
               let dimensions = terminalGridDimensions(
                   size: .init(width: Double(bounds.width), height: Double(bounds.height)),
                   cellSize: .init(

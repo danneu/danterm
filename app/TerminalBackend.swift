@@ -61,6 +61,7 @@ struct TerminalSessionRequest {
     let waitAfterCommand: Bool
     let environment: [(String, String)]
     let themeName: String?
+    let fontSize: Double
 }
 
 /// Stable per-pane terminal owner mounted and reparented by the AppKit reconciler.
@@ -88,6 +89,7 @@ protocol TerminalSession: AnyObject {
     func refreshBackingProperties()
     func applyTheme(_ themeName: String)
     func clearTheme()
+    func setFontSize(_ size: Double)
     func startSearch()
     func setSearchNeedle(_ needle: String)
     func navigateSearch(_ direction: SearchDirection)

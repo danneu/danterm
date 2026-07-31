@@ -9,6 +9,7 @@ struct UITestRunner {
         let _ = NSApplication.shared
 
         terminalBackendBoundaryTests()
+        danTermConfigStoreTests()
         swiftTerminalSessionViewTests()
         paneSplitViewTests()
         linkPreviewViewTests()

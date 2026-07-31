@@ -9,6 +9,19 @@ import TerminalCore
 import TerminalRenderPlanning
 
 struct RenderMetricsTests {
+    @Test("Configured font size changes cell metrics and rejects invalid sizes")
+    func configuredFontSizeChangesMetrics() throws {
+        let defaultMetrics = try #require(TerminalRenderMetrics(displayScale: 2))
+        let largerMetrics = try #require(TerminalRenderMetrics(displayScale: 2, fontSize: 20))
+
+        #expect(largerMetrics.baseFontSize == 20)
+        #expect(largerMetrics.cellSize.width > defaultMetrics.cellSize.width)
+        #expect(largerMetrics.cellSize.height > defaultMetrics.cellSize.height)
+        for size in [0, -1, .nan, .infinity] as [CGFloat] {
+            #expect(TerminalRenderMetrics(displayScale: 2, fontSize: size) == nil)
+        }
+    }
+
     @Test("Cell dimensions are whole device pixels at representative scales", arguments: [1.0, 2.0, 1.5])
     func pixelIntegralCellDimensions(scale: CGFloat) throws {
         let metrics = try #require(TerminalRenderMetrics(displayScale: scale))

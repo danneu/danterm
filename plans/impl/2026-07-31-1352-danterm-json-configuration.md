@@ -221,4 +221,10 @@ behavior), and
 ## Commit progress
 
 - [x] 1. feat(config): add a lossless versioned JSON document boundary
-- [ ] 2. feat(config): apply JSON configuration live across the Swift backend
+- [x] 2. feat(config): apply JSON configuration live across the Swift backend
+
+## Implementation notes
+
+- The live font-resize UI proof landed in a concurrent user commit between
+  checklist entries. With user approval, commit 2 treats it as prior-commit
+  evidence and carries the implementation plus its updated assertions.

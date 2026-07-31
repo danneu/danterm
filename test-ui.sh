@@ -35,6 +35,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/TerminalBackendBoundary.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/TerminalMetadataBounds.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/DanTermConfig.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/DanTermConfigDocument.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/ThemeCatalogDocument.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/ClipboardWriteItems.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/DragDropInput.swift" \
@@ -44,6 +45,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/MenuCommandPolicy.swift" \
         "$SCRIPT_DIR/app/ClipboardWriteSurface.swift" \
         "$SCRIPT_DIR/app/TerminalBackend.swift" \
+        "$SCRIPT_DIR/app/DanTermConfigPaths.swift" \
         "$SCRIPT_DIR/lib/TerminalPTY/Sources/TerminalPaneSession/TerminalWheelNormalizer.swift" \
         "$SCRIPT_DIR/tests-ui/SwiftTerminalSessionViewTestShim.swift" \
         "$SCRIPT_DIR/app/SwiftTerminalSessionView.swift" \
@@ -85,6 +87,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/tests-ui/RemoteThemePickerSheetTests.swift" \
         "$SCRIPT_DIR/tests-ui/PaneSplitViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/TerminalBackendBoundaryTests.swift" \
+        "$SCRIPT_DIR/tests-ui/DanTermConfigStoreTests.swift" \
         "$SCRIPT_DIR/tests-ui/SwiftTerminalSessionViewTests.swift" \
         "$SCRIPT_DIR/tests-ui/AlertsPopoverViewTests.swift" \
         -framework Cocoa

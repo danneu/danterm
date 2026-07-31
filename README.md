@@ -49,32 +49,33 @@ Like any other terminal, you probably want to grant DanTerm.app these macOS perm
 
 ## Configuration
 
-DanTerm uses a config file at `~/.config/danterm/config` with the same `key = value`
-format as Ghostty. Open it with **Cmd+,** from the menu bar.
+DanTerm uses a versioned JSON config file at `~/.config/danterm/config.json`.
+Edit its supported settings with **Cmd+,**, or choose **Open DanTerm Config**
+from the app menu to edit the file directly.
 
-This file is an **overlay** on top of Ghostty's own config (`~/.config/ghostty/config`).
-You can put any Ghostty terminal setting in it (fonts, colors, cursor style, etc.) and
-it will override the Ghostty config. You can also use DanTerm-specific keys listed below.
-
-```
-# Override Ghostty settings for DanTerm
-font-size = 14
-theme = Dracula
-
-# DanTerm-specific settings
-remote-theme = Purplepeter
+```json
+{
+  "schemaVersion": 1,
+  "font": { "size": 14 },
+  "theme": { "default": "Dracula", "remote": "Purplepeter" },
+  "ui": { "alertClearMode": "focus" }
+}
 ```
 
 Reload with **Cmd+Shift+,**. Open the underlying Ghostty config with **Cmd+Option+,**.
 
-### DanTerm-specific keys
+### Settings
 
-| Key                | Default       | Description                                                                        |
-| ------------------ | ------------- | ---------------------------------------------------------------------------------- |
-| `remote-theme`     | `Purplepeter` | Ghostty theme applied to panes during SSH/remote sessions                          |
-| `alert-clear-mode` | `focus`       | When to clear pane alerts: `focus` (on pane focus) or `manual` (only via ⌘. / ⇧⌘.) |
+| Key                   | Default               | Description                                                                       |
+| --------------------- | --------------------- | --------------------------------------------------------------------------------- |
+| `font.size`           | `13`                  | Terminal font size                                                               |
+| `theme.default`       | `Monokai Remastered`  | Theme applied to local panes                                                      |
+| `theme.remote`        | `Purplepeter`         | Theme applied to panes during SSH/remote sessions                                 |
+| `ui.alertClearMode`   | `focus`               | When to clear pane alerts: `focus` (on pane focus) or `manual` (explicit dismiss) |
 
-Set `alert-clear-mode = manual` to make alerts persist until you explicitly dismiss them with ⌘. (all panes in tab) or ⇧⌘. (current pane only). This is useful when you want alerts to act as a to-do list — focusing a pane to check what triggered the alert won't clear it, so the badge stays visible as a reminder to come back to it.
+Set `ui.alertClearMode` to `manual` to make alerts persist until you explicitly
+dismiss them. This is useful when you want alerts to act as a to-do list: focusing
+a pane will not clear its badge.
 
 ## Non-negotiable features:
 
@@ -488,7 +489,7 @@ bash scripts/tests/shell-integration_test.sh
 | Clear Pane Alerts              | ⇧⌘.      |
 | Toggle Tab To-do List          | ⌘'       |
 | Toggle Pane To-do List         | ⇧⌘'      |
-| Open DanTerm Config            | ⌘,       |
+| Preferences                    | ⌘,       |
 | Open Ghostty Config            | ⌥⌘,      |
 | Reload Config                  | ⇧⌘,      |
 | Quit                           | ⌘Q       |

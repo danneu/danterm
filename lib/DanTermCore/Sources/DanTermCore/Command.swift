@@ -60,9 +60,7 @@ enum Command {
     // The dock + toolbar-bell unread badges are derived by reconcileWindowChrome (Stage 6).
 
     // Config persistence
-    case saveDanTermConfigKey(key: String, value: String)
-    case removeDanTermConfigKey(key: String)
-    case reloadGhosttyConfig
+    case saveDanTermConfig(DanTermConfig)
 
     // Persistence — triggers a debounced write of the model snapshot to disk.
     // Returned by state-mutating update() branches so the recovery file stays current.
@@ -105,8 +103,7 @@ extension Command {
              .readPaneText, .sendNotification,
              .showCloseTabConfirmation, .showCloseTabsConfirmation, .terminate, .activateApp,
              .setAppFocus, .dismissAlertsPopover,
-             .saveDanTermConfigKey, .removeDanTermConfigKey,
-             .reloadGhosttyConfig, .scheduleCheckpoint, .sendStartSearch,
+             .saveDanTermConfig, .scheduleCheckpoint, .sendStartSearch,
              .sendSearchNeedle, .sendSearchNavigate, .sendEndSearch, .showTodoPopover,
              .dismissTodoPopover, .showTodoPopoverForTab, .dismissTodoPopoverForTab,
              .showClosePaneConfirmation:

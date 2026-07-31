@@ -265,23 +265,30 @@ func desiredSearchOverlays(in model: AppModel) -> [PaneId: SearchOverlayRender] 
   return result
 }
 
-/// Per-pane Ghostty config render the reconciler diffs and pushes to the surface.
-/// The theme is keyed iff a pane has a non-nil effective theme; generation changes
-/// when the app's base Ghostty config reloads, forcing themed panes to re-layer.
+/// Per-pane terminal config render the reconciler diffs and pushes to the session.
+/// Every live pane is keyed because the JSON defaults always resolve both values;
+/// generation still lets legacy-backend config reloads force a fresh application.
 struct PaneConfigKey: Equatable {
   let theme: String
+  let fontSize: Double
   let generation: Int
+
+  init(theme: String, fontSize: Double = DanTermConfig.default.resolvedFontSize, generation: Int) {
+    self.theme = theme
+    self.fontSize = fontSize
+    self.generation = generation
+  }
 }
 
-/// Pane-config projection: one key per live themed pane. Unthemed panes are absent,
-/// so removing a theme makes the key disappear and the reconciler reloads base config
-/// while the surface host survives.
+/// Projects the resolved theme and global font size onto every live pane.
 func desiredPaneConfig(in model: AppModel) -> [PaneId: PaneConfigKey] {
   var result: [PaneId: PaneConfigKey] = [:]
   for pane in model.allPanes {
-    if let theme = effectiveTheme(for: pane) {
-      result[pane.id] = PaneConfigKey(theme: theme, generation: model.ghosttyConfigGeneration)
-    }
+    result[pane.id] = PaneConfigKey(
+      theme: effectiveTheme(for: pane, config: model.config),
+      fontSize: model.config.resolvedFontSize,
+      generation: model.ghosttyConfigGeneration
+    )
   }
   return result
 }

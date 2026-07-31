@@ -193,6 +193,7 @@ extension AppRuntime {
     func reconcilePaneConfig() {
         applyDiff(desiredPaneConfig(in: model), &caches.paneConfig, apply: { paneId, key in
             surfaces[paneId]?.applyTheme(key.theme)
+            surfaces[paneId]?.setFontSize(key.fontSize)
         }, remove: { paneId in
             surfaces[paneId]?.clearTheme()
         })

@@ -57,14 +57,14 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
 
         // -- Form grid --
         let grid = NSGridView(views: [
-            // Ghostty settings
+            // Terminal appearance settings
             formRow("Theme", makeHStack([ghosttyThemeField, ghosttyBrowseButton])),
             dirtyRow(ghosttyThemeDirtyRow, ghosttyThemePrevLabel, ghosttyThemeResetButton,
                      action: #selector(resetTheme(_:))),
             formRow("Font Size", fontSizeField),
             dirtyRow(fontSizeDirtyRow, fontSizePrevLabel, fontSizeResetButton,
                      action: #selector(resetFontSize(_:))),
-            // DanTerm settings
+            // Behavior settings
             formRow("Alert Clear Mode", alertClearModePopup),
             dirtyRow(alertClearModeDirtyRow, alertClearModePrevLabel, alertClearModeResetButton,
                      action: #selector(resetAlertClearMode(_:))),
@@ -90,9 +90,9 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
         // Add extra spacing before the "Config file" row.
         grid.row(at: 8).topPadding = 8
 
-        // Configure Ghostty controls.
+        // Configure terminal appearance controls.
         ghosttyThemeField.delegate = self
-        ghosttyThemeField.placeholderString = "Ghostty default"
+        ghosttyThemeField.placeholderString = DanTermConfig.default.resolvedDefaultTheme
         ghosttyThemeField.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         ghosttyBrowseButton.title = "Browse…"
@@ -103,7 +103,7 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
         ghosttyBrowseButton.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         fontSizeField.delegate = self
-        fontSizeField.placeholderString = "Ghostty default"
+        fontSizeField.placeholderString = configFontSizeText(DanTermConfig.default.resolvedFontSize)
         let fontSizeWidth = NSLayoutConstraint(item: fontSizeField, attribute: .width, relatedBy: .equal,
                                                 toItem: nil, attribute: .notAnAttribute, multiplier: 1, constant: 80)
         fontSizeWidth.priority = .defaultHigh
@@ -316,7 +316,7 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
         runtime?.send(.prefResetFontSize)
     }
 
-    /// Present the theme picker sheet so the user can browse and select a Ghostty theme.
+    /// Present the theme picker sheet so the user can browse DanTerm's catalog.
     @objc private func browseGhosttyTheme(_ sender: Any?) {
         let picker = RemoteThemePickerSheet()
         picker.currentThemeName = ghosttyThemeField.stringValue.isEmpty
@@ -347,18 +347,7 @@ class PreferencesPanel: NSPanel, NSTextFieldDelegate, NSWindowDelegate {
     }
 
     @objc private func openConfigFile(_ sender: Any?) {
-        let path = DanTermConfigPaths.configFilePath()
-        let url = URL(fileURLWithPath: path)
-        let fm = FileManager.default
-        let dir = url.deletingLastPathComponent().path
-        if !fm.fileExists(atPath: dir) {
-            try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        }
-        if !fm.fileExists(atPath: path) {
-            let seed = "# DanTerm config — Ghostty keys + DanTerm-specific keys\n# https://github.com/danneu/danterm\n"
-            fm.createFile(atPath: path, contents: seed.data(using: .utf8))
-        }
-        NSWorkspace.shared.open(url)
+        runtime?.openDanTermConfig()
     }
 
     @objc private func reloadConfig(_ sender: Any?) {
