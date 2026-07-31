@@ -78,17 +78,53 @@ import Testing
         #expect(reducer.handle(.sessionDrained) == finishCancelledCommands)
     }
 
-    @Test("a late child-exit observation reaps before completing a drained session")
-    func sessionDrainedBeforeChildExit() {
+    @Test("a drained session reaps and finishes without child-exit observation")
+    func sessionDrainConvergesWithoutChildExit() {
+        // Intent: session-drain evidence reaps the leader and completes teardown
+        //   without requiring a separate child-exit event.
+        // Why it exists: close-while-spawning never arms the best-effort exit
+        //   observer, so making that event mandatory stalls until the host bound.
+        // Scenario: a running pane closes and its host-owned census observes the
+        //   empty session before any best-effort process callback is delivered.
         var reducer = runningReducer()
 
         _ = reducer.handle(.requestClose)
-        #expect(reducer.handle(.sessionDrained).isEmpty)
-        #expect(reducer.handle(.childExited(.signaled(1))) == [
+        #expect(reducer.handle(.sessionDrained) == [
             .reapLeader,
             .cancelGrace,
             .finishTeardown,
         ])
+        #expect(reducer.phase == .finished)
+    }
+
+    @Test("teardown reaps exactly once before finishing under either witness order")
+    func teardownReapsOnceBeforeFinish() throws {
+        // Intent: whichever convergence witness arrives first, teardown requests
+        //   one leader reap and orders it before final ownership release.
+        // Why it exists: letting both exit observation and session drain request
+        //   a reap can double-wait, while finishing first can abandon a zombie.
+        // Scenario: the exit observer and session census race after a pane closes.
+        let orderings: [[PaneLifecycleEvent]] = [
+            [.childExited(.signaled(1)), .sessionDrained],
+            [.sessionDrained, .childExited(.signaled(1))],
+        ]
+
+        for events in orderings {
+            var reducer = runningReducer()
+            var commands = reducer.handle(.requestClose)
+            for event in events {
+                commands += reducer.handle(event)
+            }
+
+            let reapIndices = commands.indices.filter { commands[$0] == .reapLeader }
+            let finishIndices = commands.indices.filter { commands[$0] == .finishTeardown }
+            #expect(reapIndices.count == 1)
+            #expect(finishIndices.count == 1)
+            let reapIndex = try #require(reapIndices.first)
+            let finishIndex = try #require(finishIndices.first)
+            #expect(reapIndex < finishIndex)
+            #expect(reducer.phase == .finished)
+        }
     }
 
     @Test("close while spawning converges without retrying or orphaning a child")
@@ -100,8 +136,12 @@ import Testing
         _ = reducer.handle(.start(input))
         #expect(reducer.handle(.requestClose).isEmpty)
         #expect(reducer.handle(.spawnSucceeded) == beginCloseCommands)
-        #expect(reducer.handle(.childExited(.signaled(1))) == [.reapLeader])
-        #expect(reducer.handle(.sessionDrained) == finishCancelledCommands)
+        #expect(reducer.handle(.sessionDrained) == [
+            .reapLeader,
+            .cancelGrace,
+            .finishTeardown,
+        ])
+        #expect(reducer.phase == .finished)
     }
 
     @Test("close while a spawn failure is pending finishes without reporting failure")

@@ -3,8 +3,14 @@ import Testing
 @testable import PaneLifecycle
 
 @Suite struct LifecycleInterleavingTests {
-    @Test("named lifecycle races preserve cancellation, delivery, and reporting invariants")
+    @Test("named lifecycle races converge from host-owned census evidence")
     func namedRacePermutations() {
+        // Intent: every named close/exit permutation reaches a terminal state
+        //   when the convergence helper supplies only session-drain evidence.
+        // Why it exists: the old helper always injected a best-effort child-exit
+        //   event, masking teardown states that the real host could not resolve.
+        // Scenario: close, spawn, output, EOF, and grace events race while the
+        //   host-owned session poll remains the only guaranteed final witness.
         checkSpawnRace(with: .spawnSucceeded)
         checkSpawnRace(with: .spawnFailed(.workingDirectoryUnavailable))
 
@@ -92,7 +98,6 @@ import Testing
         case .idle, .tearingDown, .finished:
             break
         }
-        commands += reducer.handle(.childExited(.signaled(9)))
         commands += reducer.handle(.sessionDrained)
         return commands
     }

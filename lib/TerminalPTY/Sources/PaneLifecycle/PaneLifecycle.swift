@@ -259,7 +259,7 @@ public struct PaneLifecycleReducer: Sendable {
             if next.leaderStatus != nil {
                 return finishTeardown(next)
             }
-            return []
+            return [.reapLeader] + finishTeardown(next)
         case .graceElapsed(let stage) where stage == next.stage:
             switch stage {
             case .hangup:

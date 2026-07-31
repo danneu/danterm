@@ -620,9 +620,8 @@ public actor TerminalPTYHost {
         }
     }
 
-    /// Blocks, unlike the ladder's `reapLeader`, and deliberately: the PTY master
-    /// is already closed and the leader has just been SIGKILLed, so this returns
-    /// as soon as the kernel posts its status.
+    /// Blocks only after the PTY master is closed and SIGKILL guarantees the
+    /// leader is exiting, so the owner can prove reap before publishing quiescence.
     /// Giving up on a bounded poll would clear `leaderPID` and signal completion
     /// over a zombie this process still owns -- abandonment wearing quiescence's
     /// clothes -- and a completion is only worth anything if it is never that.
@@ -1579,17 +1578,24 @@ public actor TerminalPTYHost {
     private func reapLeader() {
         guard leaderReaped == false, let leaderPID else { return }
         var status: Int32 = 0
-        if waitpid(leaderPID, &status, WNOHANG) == leaderPID {
+        let result = waitpid(leaderPID, &status, WNOHANG)
+        if result == leaderPID {
             leaderReaped = true
+        } else if result == 0 {
+            // The session census can transiently stop seeing a newly launched
+            // leader before its wait status is ready. The reducer is about to
+            // finish, so force and synchronously confirm the reap rather than
+            // clear ownership over a live process or zombie.
+            reapLeaderAfterKill()
         }
     }
 
     private func closeMaster() {
         descriptorOwnershipSealed = true
         masterCloseRequested = true
-        // A close that raced spawn has sources installed but no activateIO
-        // command. Resume before cancellation so libdispatch never releases a
-        // suspended source, and keep process observation live for leader reap.
+        // A close can race source installation before the reducer activates IO.
+        // Resume before cancellation so libdispatch never releases a suspended
+        // source. A spawn adopted after this seal installs no sources at all.
         activateProcessSourceIfNeeded()
         cancelReadSource()
         cancelWriteSource()

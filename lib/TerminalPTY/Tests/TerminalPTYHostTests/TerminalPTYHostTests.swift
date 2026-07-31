@@ -691,7 +691,9 @@ struct TerminalPTYHostTests {
             command: "exec \(try probeExecutable()) hold \"$0\""
         ))
         await warmup.close()
-        #expect((await warmup.resourceSnapshot()).isReleased)
+        let warmupSnapshot = await warmup.resourceSnapshot()
+        #expect(warmupSnapshot.isReleased)
+        #expect(warmupSnapshot.forcedQuiescenceCount == 0)
         let descriptorsBefore = try openFileDescriptorCount()
 
         for iteration in 0..<16 {
@@ -712,7 +714,9 @@ struct TerminalPTYHostTests {
                         group.addTask { await host.close() }
                     }
                 }
-                #expect((await host.resourceSnapshot()).isReleased)
+                let snapshot = await host.resourceSnapshot()
+                #expect(snapshot.isReleased)
+                #expect(snapshot.forcedQuiescenceCount == 0)
             }
             for _ in 0..<40 where releasedHost != nil {
                 try await Task.sleep(for: .milliseconds(50))
@@ -730,6 +734,37 @@ struct TerminalPTYHostTests {
             descriptorsAfter = try openFileDescriptorCount()
         }
         #expect(descriptorsAfter <= descriptorsBefore)
+    }
+
+    @Test("close racing a prompt spawn converges inside the real host bound", .timeLimit(.minutes(1)))
+    func closeRacingPromptSpawnUsesTeardownLadder() async throws {
+        // Intent: a spawn that lands after close starts still completes through
+        //   the teardown ladder, reaps its leader, and never needs forced cleanup.
+        // Why it exists: a close-while-spawning host does not arm process exit
+        //   observation, so the old reducer waited for the full two-second bound.
+        // Scenario: a user opens a pane and immediately closes it while the
+        //   launch worker is handing its successful spawn back to the owner.
+        let host = try makeHost(captureTransitions: false)
+        await host.injectSpawnReportDelay(0.05)
+        await host.start(makeLaunchInput(
+            command: "exec \(try probeExecutable()) hold \"$0\""
+        ))
+
+        let clock = ContinuousClock()
+        let start = clock.now
+        await host.close()
+        let elapsed = start.duration(to: clock.now)
+
+        let snapshot = await host.resourceSnapshot()
+        #expect(elapsed < .seconds(1))
+        #expect(snapshot.isReleased)
+        #expect(snapshot.forcedQuiescenceCount == 0)
+
+        let leader = try #require(await host.lastLaunchedLeaderPID())
+        var status: Int32 = 0
+        errno = 0
+        #expect(waitpid(leader, &status, WNOHANG) == -1)
+        #expect(errno == ECHILD)
     }
 
     @Test("application termination remains bounded with stalled input and chatty output", .timeLimit(.minutes(1)))
