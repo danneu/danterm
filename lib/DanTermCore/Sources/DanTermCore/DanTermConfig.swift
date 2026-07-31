@@ -10,12 +10,19 @@ enum AlertClearMode: String, Equatable {
 }
 
 struct DanTermConfig: Equatable {
+    /// Explicit local theme, or nil when the catalog-backed default applies.
+    var defaultTheme: String? = nil
     /// Theme applied to panes during SSH/remote sessions.
     var remoteTheme: String = "Purplepeter"
+    /// Explicit terminal font size, or nil when the engine default applies.
+    var fontSize: Double? = nil
     /// When alerts are cleared: on pane focus (.focus) or only via Cmd+./Cmd+Shift+. (.manual).
     var alertClearMode: AlertClearMode = .focus
 
     static let `default` = DanTermConfig()
+
+    var resolvedDefaultTheme: String { defaultTheme ?? "Monokai Remastered" }
+    var resolvedFontSize: Double { fontSize ?? 13 }
 }
 
 /// Parses DanTerm-specific keys from the config file.

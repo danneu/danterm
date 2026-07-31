@@ -122,7 +122,9 @@ AppModel(
   searchState: [:],
   showAllAlerts: false,
   config: DanTermConfig(
+    defaultTheme: nil,
     remoteTheme: "Purplepeter",
+    fontSize: nil,
     alertClearMode: .focus
   ),
   preferencesDraft: nil,
