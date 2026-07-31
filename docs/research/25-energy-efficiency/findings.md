@@ -60,7 +60,7 @@ external-guidance survey; every claim in it carries the URL it came from.
   user can't see" (F6) at the render level, while preserving the app's
   notification and recovery goals. Occlusion state also covers screen saver
   and inactive Mission Control spaces for free (F6).
-- Next action: none; boundary input to T8/T9.
+- Next action: none; boundary input to T8.
 
 ### F3 -- hidden-pane main-actor deliveries are coalesced but unthrottled
 
@@ -83,8 +83,10 @@ external-guidance survey; every claim in it carries the URL it came from.
   - Frame state is *pulled* at fence time (`drainedFrameState` runs when the
     fence executes), so deferring a delivery also skips snapshot production --
     a throttle would not queue anything.
-  - Delivery counts are already observable without code changes:
-    `#TerminalPaneFenceMetrics` exposes `delivery.count` per pane.
+  - Delivery counts are tracked per pane (`#TerminalPaneFenceMetrics` exposes
+    `delivery.count`), but only as an in-memory controller property: existing
+    artifacts capture fence totals at draw boundaries, which a hidden pane
+    never produces, so sampling it needs the T3 instrumentation.
 - Inference: for a hidden flooding pane, all main-thread wakeups, fence
   stalls, and snapshot drains feed a `planIfNeeded` that is skipped -- this is
   the discretionary work Apple says to suspend proactively on visibility loss
@@ -103,13 +105,15 @@ external-guidance survey; every claim in it carries the URL it came from.
   `qos:` argument
   (`lib/TerminalPTY/Sources/TerminalPTYHost/TerminalPTYHost.swift#queue`);
   read/write/process sources and the teardown timers all target it.
-- Inference: parse work runs unclassified, so the scheduler cannot make the
-  speed-vs-efficiency (P-core vs E-core) placement Apple's QoS guidance calls
-  "very important" (F6). This is the doc's one clear non-compliance. Fixed
-  `.utility` may be viable even for visible panes because the main actor's
-  synchronous fences propagate a QoS boost to the queue while the UI waits on
-  it -- but that is exactly the latency risk T5 must gate with the paired
-  benchmark harness.
+- Inference: the application never states an intent for this work. Unspecified
+  QoS is not "no placement" -- the system falls back to environmental
+  inference -- but it is not the explicit classification Apple calls "very
+  important" (F6) either. Where the work actually lands today is an empirical
+  question: T2's baseline `--show-process-qos` distribution is the premise for
+  T5, not this inspection. Fixed `.utility` may be viable even for visible
+  panes because the main actor's synchronous fences propagate a QoS boost to
+  the queue while the UI waits on it -- but that is exactly the latency risk
+  T5 must gate with the paired benchmark harness.
 - Next action: T5, T7.
 
 ### F5 -- nothing prevents App Nap; power-state signals are observed but unused
