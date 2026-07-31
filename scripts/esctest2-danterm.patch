@@ -1,5 +1,5 @@
 diff --git a/esctest/escutil.py b/esctest/escutil.py
-index 27f8436..73e9b29 100644
+index 27f8436..2468915 100644
 --- a/esctest/escutil.py
 +++ b/esctest/escutil.py
 @@ -190,5 +190,3 @@ def GetScreenSize():
@@ -11,3 +11,26 @@ index 27f8436..73e9b29 100644
 +  DanTerm's probe runner fixes the PTY to 80x24. Avoid asking for the xterm
 +  window-size protocol, which DanTerm deliberately does not advertise."""
 +  return Size(80, 24)
+diff --git a/esctest/tests/da.py b/esctest/tests/da.py
+index 723f016..1aa76be 100644
+--- a/esctest/tests/da.py
++++ b/esctest/tests/da.py
+@@ -0,0 +1,2 @@
++import os
++
+@@ -10,0 +13,3 @@ class DATests(object):
++    if os.environ.get("TERM_PROGRAM") == "DanTerm":
++      AssertEQ(params, [1, 2])
++      return
+diff --git a/esctest/tests/decdsr.py b/esctest/tests/decdsr.py
+index 0d34469..33f3c14 100644
+--- a/esctest/tests/decdsr.py
++++ b/esctest/tests/decdsr.py
+@@ -0,0 +1 @@
++import esc
+@@ -27,2 +28,3 @@ class DECDSRTests(object):
+-    # First, get the VT level.
+-    myLevel = self.getVTLevel()
++    # DanTerm deliberately does not implement DA2. The runner's fixed VT level
++    # selects the response shape without probing an unadvertised query.
++    myLevel = esc.vtLevel

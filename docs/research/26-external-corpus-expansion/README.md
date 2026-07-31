@@ -125,9 +125,9 @@ Provisional, and explicitly ordered by cost-to-value rather than by size:
    `OutputEngineTest.cpp`, which map onto gaps this doc already found. See D2.
 3. Close the two Unicode data gaps (F6) -- both reuse the existing generator
    path. See D3.
-4. Start Milestone 9's actual external legs: the pinned esctest2 subset and
-   replayable vttest sessions (F7). This is the milestone blocker; items 1-3 are
-   not. See D5.
+4. Finish Milestone 9's actual external legs: keep F10's passing, pinned
+   14-case esctest2 gate and add replayable external vttest sessions. The
+   vttest leg is now the milestone blocker; items 1-3 are not. See D5.
 
 Throughout, `references/xterm/ctlseqs.txt` is the adjudication instrument
 (F8): an imported expectation is justified against the specification or the
@@ -146,7 +146,9 @@ DanTerm contract, never against the source engine's behavior.
 - [x] Census Ghostty's local Zig test suite as an unsurveyed corpus. Result in
   F5.
 - [x] Identify Unicode/decoder fixture gaps doc 1's table omits. Result in F6.
-- [x] Confirm which Milestone 9 external legs are unstarted. Result in F7.
+- [x] Audit the Milestone 9 external legs. F7's initial result was corrected by
+  F10: esctest2 already had a pinned 11-case gate; the scope expansion and
+  external vttest runner remained.
 - [x] Census the eight terminal trees pinned mid-session for test corpora.
   Result in F8.
 
@@ -207,10 +209,16 @@ DanTerm contract, never against the source engine's behavior.
 
 ### Phase 5 -- Milestone 9's external legs
 
-- [ ] Scope the supported esctest2 subset against DanTerm's advertised
-  capability contract. Run as a separately fetched pinned external program;
-  it is GPL-2.0 and must not be vendored.
-- [ ] Select and record the replayable vttest sessions for the gate.
+- [x] Scope the supported esctest2 subset against DanTerm's advertised
+  capability contract. F10 retains the passing 11 cases and selects two adapted
+  DA1 forms plus one adapted DECCPR form for a 14-case target. The existing
+  gate runs the GPL-2.0 program from a separately fetched pinned checkout.
+- [x] Land the three selected esctest2 additions and rerun the 14-case gate.
+  F10 records the expected failing-first result and the passing adapted gate.
+- [x] Select and record the replayable vttest sessions for the gate. F11 chooses
+  VT100 DSR/CPR, VT100 DA1, and VT320 DECCPR, and declines unjudged visual
+  sessions as gate oracles.
+- [ ] Land the pinned three-session vttest runner and its result parser.
 - [ ] Reduce every failure either program finds to the smallest native
   byte-stream fixture before fixing it.
 - [ ] Assemble the pinned evidence package and confirm upstream updates cannot
@@ -285,12 +293,14 @@ declined, and windows-terminal's two novel OSC 52 cases replay from a neutral
 fixture under a complete manifest and bundled license notice. Phase 4 is
 complete: a neutral Kuhn-derived corpus pins the decoder's modern
 maximal-subpart behavior, while double-click selection is explicitly DanTerm's
-terminal-token policy rather than UAX #29 word segmentation. Phase 5 remains
-open.
+terminal-token policy rather than UAX #29 word segmentation. Phase 5's
+esctest2 leg is complete: F10's pinned 14-case gate passes. F11 scopes three
+response-driven vttest sessions; their external runner and the final evidence
+package remain open.
 
 The one-line answer Phase 1 produced, for a reader who goes no further: the
 pinned corpora are fully classified, ~81 of the 89 out-of-scope cases are
 feature or policy decisions rather than test decisions, exactly 8 are
 reclassifiable today on stale rationales, and the corpora most worth adding
 (Ghostty, windows-terminal) are ones doc 1's survey never listed. None of that
-is what blocks Milestone 9 -- the unstarted esctest2 and vttest legs are.
+is what blocks Milestone 9 -- the external vttest leg is.

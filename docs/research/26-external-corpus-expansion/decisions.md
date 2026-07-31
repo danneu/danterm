@@ -175,11 +175,12 @@ review obligations before copying or translating GPL/LGPL test code.
 
 ### D5 -- what actually closes Milestone 9's external leg
 
-- Status: recommended framing; not a decision to implement anything yet.
-- Evidence used: F7 (neither esctest2 nor vttest is pinned or runnable, while
-  their prerequisites -- real PTY, host replies, documented capability contract
-  -- all landed in Milestones 3-7), F1 (the corpora are fully classified, so
-  there is no mining backlog to work through first).
+- Status: decided; the 14-case esctest2 gate passes and vttest execution remains
+  to land.
+- Evidence used: F10 corrects F7: the pinned esctest2 runner and 11-case
+  allowlist already existed and pass, while vttest still has no external runner.
+  F10 also scopes a 14-case Milestone 9 esctest2 target against the capability
+  contract. F1 shows there is no fixture-classification backlog to clear first.
 - Candidate solutions:
   1. Build the esctest2 subset and the replayable vttest sessions, and assemble
      the pinned evidence package.
@@ -193,10 +194,21 @@ review obligations before copying or translating GPL/LGPL test code.
   contract or the gate will fail on unpromised behavior. (2) is legitimate but
   must be written down, because doc 1 closes on this package existing and an
   unrecorded waiver would leave doc 1 permanently live.
-- Recommendation: (1), with the subset scoped against the advertised capability
-  contract before any run, and every failure reduced to the smallest native
-  byte-stream fixture before it is fixed. If the owner prefers (2), record it
-  here so doc 1 has a close condition it can actually meet.
-- Direction review: pending.
-- Selected direction: pending.
-- Decision and rationale: pending.
+- Recommendation: (1), building on the existing gate rather than creating a
+  new esctest2 path. Retain its 11 cases, add the two DA1 forms and one DECCPR
+  form identified by F10, then build the external vttest leg. Reduce every
+  discovered failure to the smallest native byte-stream fixture before fixing
+  it.
+- Direction review: accepted by the owner by continuing Phase 5 on 2026-07-31.
+- Selected direction: option 1, with the corrected existing-infrastructure
+  baseline and F10's 14-case esctest2 scope.
+- Vttest scope: F11 selects three response-driven replay sessions: VT100
+  DSR/CPR, VT100 DA1, and VT320 DECCPR. Whole visual sessions are declined as
+  gate oracles because they do not judge their output and mix in unsupported
+  behavior; the seven neutral `90vttest_*` fixtures retain that deterministic
+  movement/screen role.
+- Decision and rationale: complete the two external legs rather than waive
+  them. The esctest2 gate already supplies the licensing, pinning, timeout,
+  artifact, and real-PTY seams; three narrow additions finish its advertised
+  query coverage without adopting xterm-only behavior. A replayable external
+  vttest path is still required before the evidence package can close doc 1.

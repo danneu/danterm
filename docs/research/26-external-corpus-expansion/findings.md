@@ -407,3 +407,128 @@ script edit). No finding depends on the uncommitted files.
   The shared fixture runner validates provenance and replays the fixture whole,
   bytewise, and at every split point.
 - Next action: none for Phase 3.
+
+### F10 -- the esctest2 gate already exists; its Milestone 9 scope is 14 query-observable cases
+
+- Status: complete; the scoped 14-case gate passes.
+- Date and investigator: 2026-07-31, Codex.
+- Commit and worktree state: `7c01ec2`; unrelated untracked plan files and
+  `TODO.md` were present and were not read or modified.
+- Commands, inputs, or reproduction:
+  - verified that commit `593ce4a`, F7's own census point, already contains
+    `scripts/terminal-protocol-probes.sh`, its allowlist, and
+    `docs/evidence/2026-07-21-real-pane-protocol-probes.md`
+  - materialized esctest2 revision
+    `664be3cf2c1e3f06bc93a8bafb48a0db83c607db` in the existing ignored
+    `.build/terminal-protocol-probe-sources/` cache and inventoried
+    `esctest/tests/`
+  - read `esctest/tests/cup.py#CUPTests`,
+    `esctest/tests/decrqm.py#DECRQMTests`, `esctest/tests/da.py#DATests`,
+    `esctest/tests/decdsr.py#DECDSRTests`, and the observation helpers in
+    `esctest/escutil.py`
+  - cross-checked the candidates against `docs/terminal-capabilities.md`,
+    `TerminalQueryTests`, and the runner's fixed VT level and dimensions
+  - ran `just test-terminal-protocol-probes`; all 11 selected cases passed
+- Measurements or examples: the pin contains 560 test methods in 80 Python
+  files under `esctest/tests/`. The current gate already selects five CUP cases
+  observed through CPR and six implemented ANSI/DEC modes observed through
+  DECRQM. It is version-pinned, separately fetched, bounded by a timeout, and
+  retains a recording plus failure artifacts.
+- Scope result:
+
+  | Disposition | Cases or families | Rationale |
+  | --- | --- | --- |
+  | retain unchanged | five CUP/CPR cases; ANSI IRM/LNM; DEC DECCKM/DECOM/DECAWM/DECTCEM | advertised, stateful, query-observable behavior already passing through the production PTY path |
+  | add with a narrow DanTerm adapter | `DATests.test_DA_NoParameter`, `DATests.test_DA_0` | DA1 is advertised, but upstream's xterm identity expectation must become DanTerm's exact `CSI ? 1 ; 2 c` contract |
+  | add with a narrow DanTerm adapter | `DECDSRTests.test_DECDSR_DECXCPR` | DECCPR is advertised; the upstream test must use the runner's fixed VT3 profile instead of probing the deliberately denied DA2 first |
+  | decline for this gate | screen, editing, SGR, reset, tab, and alternate-screen families | their assertions use DECRQCRA or xterm window reports, neither of which DanTerm advertises; adding a protocol only to let an external suite inspect the screen would expand the product contract for the test |
+  | decline as contract mismatches | DA2, DECRQSS, window operations, color mutation, OSC 52 reads, raw C1/8-bit replies, horizontal margins, and other VT4+ families | explicitly denied or absent from DanTerm's capability contract |
+  | no compatible upstream case | DSR status, XTVERSION, query-only OSC 10/11, keyboard, mouse, focus, and bracketed paste | esctest2 has no isolated case matching DanTerm's contract; its color cases mutate before querying, while its input cases require user interaction |
+
+- Observation: F7's claim that no esctest2 pin or runner existed was false at
+  its stated commit. The infrastructure and passing 11-case Milestone 7 evidence
+  had landed ten days earlier. What remained unstarted was the Milestone 9 scope
+  audit and any justified expansion, plus the external vttest leg.
+- Inference: the supported Milestone 9 esctest2 subset should contain 14 cases:
+  retain the existing 11 and add only the two DA1 forms and one DECCPR form.
+  This broadens independent black-box coverage of the advertised query contract
+  without importing xterm identity claims or creating test-only terminal
+  protocols. The native suite remains the right oracle for behavior esctest2
+  cannot observe through DanTerm's public protocol.
+- Competing interpretations: Milestone 9 could declare the already-passing 11
+  cases sufficient because DA1 and DECCPR are covered natively. That would miss
+  the purpose of the external leg: verifying terminal-to-host replies through
+  the real pane and PTY path. The three adaptations are small and exercise two
+  advertised reply families the current gate omits.
+- Uncertainty: low. The inventory, adapter mechanics, expected failure, and
+  passing 14-case result were all observed at the pinned revision.
+- Implementation result: the expanded allowlist first produced the predicted
+  TDD failure: the original 11 cases passed, both DA1 cases rejected DanTerm's
+  two-parameter identity against xterm's eight expected features, and DECCPR
+  timed out waiting for DA2. The adapter now checks exact `CSI ? 1 ; 2 c` for
+  DanTerm and uses esctest2's runner-supplied VT3 level for DECCPR. All 14 cases
+  then passed through `just test-terminal-protocol-probes`.
+- Next action: completed by F11's external vttest scope audit.
+
+### F11 -- vttest's replay is suitable for three response-driven sessions, not visual verdicts
+
+- Status: complete as a scope audit; the external runner remains to land.
+- Date and investigator: 2026-07-31, Codex.
+- Commit and worktree state: `7c01ec2`; the same unrelated untracked files
+  recorded by F10 remained untouched.
+- Commands, inputs, or reproduction:
+  - materialized the canonical `ThomasDickey/vttest-snapshots` tag
+    `t20251205`, commit `0229d7171a8574a2bf406c6ce14549f65d810e51`, in
+    the existing ignored `.build/` research cache
+  - read `vttest.1#OPTIONS`, `replay.c#setup_replay`,
+    `replay.c#replay_string`, `main.c#menu2`, `reports.c#tst_reports`,
+    `reports.c#tst_DSR`, `reports.c#tst_DA`,
+    `vt320.c#tst_vt320_device_status`, and
+    `vt320.c#tst_DSR_cursor`
+  - configured and built the pin successfully on macOS arm64
+  - cross-checked every candidate sequence and expected reply against
+    `docs/terminal-capabilities.md` and `TerminalQueryTests`
+- Measurements or examples: vttest's `-c` option replays menu choices and
+  next-page/hold responses recorded by `-l`. Replay pauses while the program
+  waits for a terminal reply or unpredictable keyboard/mouse input. Report
+  tests decode replies and write `show_result` judgments into the log; visual
+  tests only print prose such as "should look the same" and never produce a
+  machine verdict.
+- Selected sessions, all at fixed `24x80.80` geometry with UTF-8 retained:
+
+  | Session | Menu path | Contract checked | Gate evidence |
+  | --- | --- | --- | --- |
+  | VT100 DSR/CPR | `6.3` | DSR 5, CPR in absolute mode, CPR relative to a DECOM margin | terminal-OK result plus both cursor reports accepted, with no unknown/failure result |
+  | VT100 DA1 | `6.4` | exact primary identity `CSI ? 1 ; 2 c` | vttest recognizes the reply as its VT100-with-AVO form rather than unknown |
+  | VT320 DECCPR | `11.2.5.2.6` | private DSR 6 / extended cursor-position reply | decoded nonzero line and column, with no failure result |
+
+- Declined session families:
+  - the complete cursor-movement session includes unsupported DECALN
+  - the complete screen session includes DECCOLM, DECSCNM, blink, and legacy
+    character-set behavior outside DanTerm's contract
+  - the insert/delete session includes DECCOLM and double-width lines
+  - keyboard, mouse, focus, and similar sessions deliberately suspend replay
+    for real user input and are not unattended evidence
+  - accepting captured visual output as truth would violate the neutrality
+    rule; vttest supplies stimuli and decoded replies, not DanTerm's expected
+    screen model
+- Observation: the seven adopted `90vttest_*` neutral fixtures remain the
+  deterministic evidence for supported movement, wrapping, tab, and screen
+  interactions. The external vttest program adds independent real-PTY query
+  evidence; it should not duplicate those fixtures with unjudged screenshots.
+- Inference: the three selected sessions are the smallest honest replayable
+  vttest gate. The runner should separately fetch and pin the permissively
+  licensed program, build it in ignored storage, execute checked-in DanTerm-
+  authored replay command files through the production pane/PTY path, retain
+  byte recordings and logs, require the named positive results, reject failure
+  or unknown markers, and enforce bounded timeout and complete teardown.
+- Competing interpretations: a smoke gate could merely require vttest to exit.
+  That proves process integration but not terminal conformance. Conversely,
+  snapshotting visual screens would appear broader but would turn upstream
+  prose and captured output into an unaudited oracle. Parsing the three report
+  sessions is both narrower and stronger.
+- Uncertainty: low on source provenance, buildability, menu paths, and contract
+  fit; moderate on orchestration details until replay command files run through
+  `TerminalPaneSessionController`.
+- Next action: implement the pinned three-session vttest runner and prove its
+  log parser failing-first before assembling the final evidence package.
