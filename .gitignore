@@ -20,8 +20,7 @@ build/
 .spm-build/
 .swiftpm/
 Package.resolved
-/scripts/__pycache__
-/scripts/tests/__pycache__
+__pycache__/
 
 # Reproducible external source checkouts (materialize with `just fetch-references`).
 /references/
