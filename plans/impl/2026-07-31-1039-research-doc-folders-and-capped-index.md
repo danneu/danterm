@@ -253,7 +253,7 @@ Example of the target shape, for the pattern rather than the wording:
 
 ## Commit progress
 - [x] 1. Enforce the research index contract (lint, self-test, index rewrite)
-- [ ] 2. Add docs/research/FORMAT-NOTES.md
+- [x] 2. Add docs/research/FORMAT-NOTES.md
 
 ## Implementation notes
 
@@ -290,3 +290,14 @@ Example of the target shape, for the pattern rather than the wording:
   and every over-cap cell -- 12 rows from 133 to 10,268 characters. The
   cell-cap check deliberately runs before the row-shape check so a structurally
   broken index still reports which rows are oversized.
+- **`D4`'s "a documented-only cap is what exists today" does not hold, and
+  `FORMAT-NOTES.md` records what actually did.** Checked against the pre-rewrite
+  README: its `## Contract` had no bullet about index rows at all -- no cap, no
+  shape. The 90-260 characters of rows 1-14 were habit, not a written rule. That
+  makes the case for the machine check stronger rather than weaker (a convention
+  held without help for fourteen rows still failed), so the entry argues it on
+  the evidence that exists instead of repeating the plan's claim.
+- **The README's `FORMAT-NOTES.md` link is part of this commit, not commit 1.**
+  Commit 1 rewrote the project-notes block but left the bullet out, because
+  linking a file that did not exist yet would have been a dangling reference in
+  a commit whose whole point is a link-checking lint.

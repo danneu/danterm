@@ -143,6 +143,9 @@ pointers live here instead:
 - The contract below is machine-checked by `scripts/research-index-lint.sh`,
   which also holds the enumerated frozen set of grandfathered flat docs (1-4 and
   6-23). That list never grows: a new entry in it would be a new flat doc.
+- [FORMAT-NOTES.md](FORMAT-NOTES.md) is the change log for the contract itself:
+  dated `observation -> cost -> rule changed or rejected` entries, plus the
+  rules whose only support so far is performance research.
 
 ## Contract
 
