@@ -184,9 +184,10 @@ struct TerminalQueryTests {
             "\u{1B}[$p", "\u{1B}[?6;7$p", "\u{1B}[>1q",
             "\u{1B}P$qm\u{1B}\\",
             // XTGETTCAP: "TN" (terminal name), "Co" (colors), and an unknown
-            // capability. Denied per 10-protocols-shell-integration.md I2 --
-            // a terminfo query that answers wrongly is worse than one that
-            // stays silent, because applications trust the answer.
+            // capability. `plan-terminal-engine/10-protocols-shell-integration.md`
+            // keeps XTGETTCAP unsupported alongside DA2 and DECRQSS -- a terminfo
+            // query that answers wrongly is worse than one that stays silent,
+            // because applications trust the answer.
             "\u{1B}P+q544E\u{1B}\\", "\u{1B}P+q436F\u{1B}\\",
             "\u{1B}P+q7A7A7A\u{1B}\\",
         ]
