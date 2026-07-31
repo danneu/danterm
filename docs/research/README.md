@@ -51,87 +51,26 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 (There is no doc 5; numbers are never reused or renumbered. Docs 1-23 predate
 the folder form and stay flat files; doc 24 onward is a folder.)
 
-**Two results worth knowing before you open any of these.** The draw path fits
-the frame budget (`11/F7`, `11/F8`), so a new render optimization needs a
-trigger, not just a profile share. And `8/D2` moved damage-*drawing*
-comparisons off the GUI benchmark onto `just benchmark-headless-draw`; damage
-*generation* stays on a degraded `benchmark-quick`. Read
-[docs/design/2026-07-27-damage-render-benchmark-routing.md](../design/2026-07-27-damage-render-benchmark-routing.md)
-before measuring anything. A third: **the plan/draw ratio is workload-shaped and
-no published ratio generalizes** -- doc 13's four captures are btop, doc 14's is
-a full-viewport scroll, and they disagree by 2x in both directions (`14/F1`).
-And a fourth, which is about method: **re-size any `sample`-derived hotspot on an
-on-CPU instrument before spending a paired benchmark on it.** `just
-benchmark-trace` costs one build and one 30 s run; in `14/F6` it deflated a node
-by 2.5x and killed the candidate built on it (`14/D1`). `sample` counts blocked
-threads, so it inflates anything near allocation, ARC, or the kernel. The
-corollary, from `14/F11`: **do not then discount the on-CPU share.** `9/F3`'s ~3x
-optimism factor attaches to `sample`, and applying it to an on-CPU share of
-deletable work under-predicted a 16% win as 5%. And a mechanical trap worth
-knowing before you measure a plan-path change: **`benchmark-confirm` does not
-classify plan time at all** -- the calibrated plan rule lives only in
-`benchmark-quick`, on `content-churn` and `style-churn` (`14/F11`). The memory
-equivalent, from `15/F6`: **`just benchmark-memory` is a leak detector, not a
-measurement instrument.** Asked to confirm a ~22 MB saving it reported the fixed
-build as *larger* -- one memgraph samples one arbitrary point on a sawtoothing
-quantity, and GUI IOSurface churn ran 50 MB over the same window. Use it for
-"is this growing without bound"; do not use it for "did this get smaller".
-Its replacement can be wrong too, in the same shape: the headless probe that
-succeeded it charged its own oversized `feed` call to resident state and reported
-cell bytes as 35-50% of process cost when the true figure is ~85% (`15/F7`). The
-general rule those two cost: **vary something that should not matter -- sawtooth
-phase, feed chunk size, column count -- before believing any memory number.**
-Related, and cheap to be burned by: a 2-pair `benchmark-quick` reading of
-**+1.05%** on `scrollback-stream` flipped to **-0.86%** at 4 pairs (`15/F6`) --
-an "inconclusive" verdict is not a weak regression signal, so escalate before
-reporting one.
+**Read this before you open any of these.** Each line cites the doc that owns
+it; instrument caveats and how to read a verdict live in
+[agent-docs/terminal-performance.md](../../agent-docs/terminal-performance.md).
 
-Two more, both from doc 17 and both about where to *look*. **The draw verdict does
-not contain the draw's largest cost.** `drawNanosecondsPerDraw` brackets
-`clipFramePlan` + `drawRenderFrame` inside `draw(_:)` -- 10.43% of
-`content-churn`'s on-CPU time -- while CoreAnimation's replay of that same display
-list costs 23.15% on the dispatch pool, after `draw` returns, inside no frozen
-decision rule at all (`17/F2`, `17/F6`). **Now measured on the benchmark's own
-denominator: the draw verdict brackets ~11% of the CPU the process burns per
-accepted draw on the churn workloads and ~4.3% on `incremental-mixed`** (`17/F12`).
-Every block now reports `processCPUNanosecondsPerDraw` beside the verdict -- read
-it before concluding a change was free, and note it carries no verdict of its own
-(uncalibrated; ~6% noise floor). And **date a performance number before you plan
-against it**: `agent-docs/terminal-performance.md`'s claim that the planner plans
-the whole viewport regardless of damage was made three days before the commit that
-fixed it, and it kept a parked backlog item (`9/H2`) alive for two days after it
-was already implemented (`17/F5`). Its figures were 1.7x-17.5x too high and it had
-the plan-versus-draw ordering backwards on both workloads (`17/F12`); both that
-file and doc 9's Phase 5 note are now corrected. A parked item inherits the
-staleness of the document holding it.
-
-One more, from doc 17's first accepted candidate. **A pitch's mechanism deserves the
-same scepticism these files apply to a pitch's size.** `17/F7` and `17/D1` both
-specified candidate B's implementation, and `17/F7` filed its one correctness risk as
-"unverified"; the guarding test, written before the code, showed that implementation
-drops hover damage outright (`17/F13`). The benchmark would have returned `faster`
-with the bug included, because no benchmark measures hover damage. Write the
-behavioral test for the *named risk* first, and verify it fails against the naive
-implementation -- a green paired verdict is not evidence of correctness.
-
-And one from the screen that closed doc 17's tooling arc. **"This metric is
-uncalibrated" and "this metric is uncalibratable at the sample size we have" read as
-the same sentence and license opposite next steps.** Only a screen tells them apart:
-`17/F15` ran one and found the false-positive and detection gates cross with no
-overlap, so the honest label changed from *pending* to *refused* and the plan that
-depended on it (deciding candidate A by frozen rule) died rather than waiting.
-A calibration that proposes nothing is a result -- and this one still paid off twice
-over, by retro-pricing a judgement (`17/F14`) that had been made on mechanism alone.
-Run the screen before building on the rule you expect it to produce.
-
-And one from the same file's last measurement. **Confirming that a cost is real and
-confirming that removing it would show up are two different experiments.** `17/F16`
-put doc 17's headline finding through the elasticity test it had never faced and it
-passed at 95% of linear -- and the same two traces showed the draw rate pinned at the
-panel's refresh in both, so the app pays that cost *and still makes every frame*. The
-win is energy, not latency, and no metric this project owns can decide it. Passing the
-first experiment is what makes the second worth designing; it is not permission to
-start the change (`17/D7`).
+- The draw path fits the 60Hz frame budget (`11/F7`, `11/F8`), so a new render
+  optimization needs a trigger, not just a profile share.
+- Damage-*drawing* comparisons run on `just benchmark-headless-draw`, not the
+  GUI benchmark; damage *generation* stays on a degraded `benchmark-quick`
+  (`8/D2`). Read
+  [the routing note](../design/2026-07-27-damage-render-benchmark-routing.md)
+  before measuring anything.
+- No published plan/draw ratio generalizes -- the ratio is workload-shaped, and
+  docs 13 and 14 disagree by 2x in both directions (`14/F1`).
+- The draw verdict does not contain the draw's largest cost. It brackets ~11% of
+  the CPU the process burns per accepted draw on the churn workloads and ~4.3%
+  on `incremental-mixed`, so read `processCPUNanosecondsPerDraw` beside it
+  (`17/F2`, `17/F12`).
+- Date a performance number before you plan against it. One claim outlived the
+  commit that fixed it and kept a parked backlog item alive for two days
+  (`17/F5`).
 
 **Project notes, above the portable seam.** Everything below `## Contract` is
 generic research prose meant to survive extraction as a portable skill, so no
@@ -178,11 +117,17 @@ pointers live here instead:
   or on what it is waiting for (`## Live`). No cell exceeds 100 characters, and
   a `## Closed` result opens with `Shipped`, `No change`, `Rejected`,
   `Declined`, `Superseded`, or `Tooling`. The arc, the evidence, and the
-  reopening condition live in the doc's own `## Outcome`; a durable
-  cross-cutting lesson goes in the results-worth-knowing block above the index,
-  or graduates out of research entirely. The diagnostic reading is part of the
-  rule: **a row that will not fit means the doc's `## Outcome` is underwritten
-  -- fix it there.**
+  reopening condition live in the doc's own `## Outcome`, and a durable
+  cross-cutting lesson graduates out of research entirely -- to whichever
+  project guide owns that subject. The diagnostic reading is part of the rule:
+  **a row that will not fit means the doc's `## Outcome` is underwritten -- fix
+  it there.**
+- **The index does not accumulate.** The only prose above the tables is a short
+  list of things a reader must know before opening any doc, one line each,
+  citing the `N/F#` that owns it. It is not a destination for lessons: an entry
+  that needs a paragraph is a sign it belongs in a project guide, and an entry
+  that only summarizes one doc belongs in that doc's `## Outcome`. Capping the
+  rows without capping this list just moves the problem up the page.
 - **A new file may continue an older one.** Reopening a closed investigation, or
   zooming in on one revelation from another file, gets its own number and names
   its ancestor at the top. See "Continue an older doc instead of reopening it"

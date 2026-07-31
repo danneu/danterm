@@ -102,6 +102,35 @@ a short uninformative row passes, and no mechanical check distinguishes them.
 Nor does it check which *number* a new doc claims. Both are known gaps, not
 oversights.
 
+## 2026-07-31 -- capping the rows moved the pressure up the page
+
+**Observation.** Same day the row cap landed. The prose block above the index --
+"results worth knowing" -- had grown to 81 lines and ~6,000 characters, which is
+more than the twenty-two capped rows below it now hold combined. It was the only
+part of the index with no cap, and the contract named it as the destination for
+any durable cross-cutting lesson.
+
+**Cost.** Checked item by item, most of it was a third copy: the lesson's own
+doc holds it as an `F#` with the evidence, and
+`agent-docs/terminal-performance.md` had already received the general form of
+the same lesson -- the `benchmark-memory` leak-detector rule, the `inconclusive`
+escalation rule, the `sample`-counts-blocked-threads correction, the A/A gate
+trap. So a reader who wanted the index paid for the third copy, and the third
+copy was the one under no maintenance.
+
+**Rule changed.** The block is a short list of things to know before opening any
+doc, one line each, citing the `N/F#` that owns it -- currently five. The
+contract now says the index does not accumulate, and routes a durable
+cross-cutting lesson out of research entirely rather than into this block. The
+dropped paragraphs were not migrated anywhere: each already existed in its own
+doc and, where it generalized, in the performance guide.
+
+**The general shape, which is the reason this entry exists.** Capping one
+container without capping the next one just relocates the growth. The row cap
+and this trim are one change made twice; if a third container starts absorbing
+prose -- the framing paragraphs, most likely -- that is this same failure, not a
+new one.
+
 ## Rules still under watch
 
 These three are load-bearing in the contract but supported only by performance
