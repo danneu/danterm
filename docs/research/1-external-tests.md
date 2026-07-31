@@ -38,6 +38,17 @@ another emulator's output as DanTerm truth.
 the point at which its recommendations have all been either taken or explicitly
 declined.
 
+Continued by
+[26-external-corpus-expansion/README.md](26-external-corpus-expansion/README.md)
+(2026-07-31), which took the census this file's Milestone 9 work needs: both
+pinned corpora are fully classified, most out-of-scope cases are feature or
+policy decisions rather than test decisions, eight are reclassifiable on stale
+rationales, and Ghostty's and windows-terminal's test suites are absent from the
+candidate table below. Milestone 8 is now checked; the M8 line above is
+satisfied, with its waivers recorded on the roadmap. Doc 26 owns the
+re-adjudication and the unsurveyed corpora; this file keeps the survey, the
+licensing rules, and the close condition.
+
 ## Purpose
 
 DanTerm should reuse the strongest public terminal-emulator test work where it

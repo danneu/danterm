@@ -30,6 +30,7 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 21 | [Selection gesture cost](21-selection-gesture-cost.md) | What a pointer-driven selection query costs | Phase 1's scratch probe, then D1's pre-registered gate |
 | 24 | [OSC 133 dialect](24-osc-133-dialect/README.md) | The marks DanTerm's shell integrations emit | Dialect settled for all three shells; next is writing the emitters |
 | 25 | [Energy efficiency](25-energy-efficiency/README.md) | The engine's battery/energy posture and its backlog | Phase 1 baselines: idle wakeups, hidden-flood powermetrics |
+| 26 | [External corpus expansion](26-external-corpus-expansion/README.md) | Re-adjudicating skipped external cases, and unsurveyed corpora | Phase 2's eight stale-rationale reclassifications |
 
 ## Closed
 
