@@ -1,14 +1,8 @@
 // App-side filesystem boundary for DanTerm's versioned JSON configuration:
-// path resolution, launch/reload reads, seeding, and atomic save transactions.
+// launch/reload reads, seeding, and atomic save transactions. These need the
+// core's config type, so they stay in the app; the path itself lives in
+// DanTermSupport (`DanTermConfigPaths`) because the CLI resolves it too.
 import Foundation
-
-/// App-level resolver for DanTerm's config file location.
-enum DanTermConfigPaths {
-    /// Standard config file path: ~/.config/danterm/config.json
-    static func configFilePath() -> String {
-        "\(NSHomeDirectory())/.config/danterm/config.json"
-    }
-}
 
 /// Distinguishes invalid documents from filesystem failures for user-visible reports.
 enum DanTermConfigStoreError: LocalizedError {

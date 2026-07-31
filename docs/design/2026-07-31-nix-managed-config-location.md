@@ -42,5 +42,5 @@ from sending a save derived from the old file into the new file.
 ## References
 
 - [Home Manager module](../../hm-module.nix)
-- [Config filesystem boundary](../../app/DanTermConfigPaths.swift)
+- [Config filesystem boundary](../../app/DanTermConfigStore.swift)
 - [Config transaction tests](../../tests-ui/DanTermConfigStoreTests.swift)

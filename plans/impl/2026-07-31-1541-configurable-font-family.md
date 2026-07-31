@@ -278,7 +278,7 @@ states. The pure projection tests cannot prove this AppKit wiring.
 
 - [x] 1. Schema + JSON document support for `font.family` (core only; no UI, no
       rendering)
-- [ ] 2. Font-availability probe and installed-family catalog in Support +
+- [x] 2. Font-availability probe and installed-family catalog in Support +
       config-path move + CLI CoreText link
 - [ ] 3. Model contract: `resolvedFontFamily` and the single resolve-and-apply
       path through launch, reload, and save (I4)
@@ -286,3 +286,15 @@ states. The pure projection tests cannot prove this AppKit wiring.
       metrics fallback (I3, I5)
 - [ ] 5. Preferences installed-family combo box + inline warning
 - [ ] 6. `danterm doctor` config-font check + `SKILL.md` update
+
+## Implementation notes
+
+- **Commit 2:** moving `DanTermConfigPaths` into Support forced a rename of
+  `app/DanTermConfigPaths.swift` to `app/DanTermConfigStore.swift`. The app target
+  compiles both `app/` and the `app/DanTermSupport` symlink into one module, and
+  SwiftPM refuses two same-named sources in a module ("multiple producers"). The
+  app file keeps only the store + error type, which the new name describes; the
+  two references to the old filename (`test-ui.sh`, the Nix config-location design
+  note) were repointed. `test-ui.sh` also had to add the Support path file to its
+  compile list, since it compiles a hand-listed subset of sources and the store's
+  default argument still resolves the path.
