@@ -165,6 +165,32 @@ struct TerminalStyleTests {
         }
     }
 
+    @Test("unknown SGR color selector is consumed atomically and recovery continues")
+    func unknownColorSelectorIsInert() throws {
+        // Intent: an unknown selector in a colon color group leaves the pen unchanged and
+        //   does not prevent a later valid SGR parameter in the same sequence from applying.
+        // Why it exists: pins maximal colon-group consumption so selector members cannot
+        //   escape malformed SGR 58 groups and become standalone presentation attributes.
+        // Scenario: an application emits `CSI 58:4:` while a styled pen is active, then
+        //   follows it with a valid foreground color in the same CSI sequence.
+        var terminal = try #require(Terminal(columns: 2, rows: 1))
+        terminal.feed(Array("\u{1B}[1;3;4:5;31;42;58:5:7m".utf8))
+        let styled = terminal.currentStyle
+
+        terminal.feed(Array("\u{1B}[58:4:m".utf8))
+        #expect(terminal.currentStyle == styled)
+
+        terminal.feed(Array("\u{1B}[58:4:;32m".utf8))
+        #expect(terminal.currentStyle == TerminalStyle(
+            foreground: .indexed(2),
+            background: .indexed(2),
+            bold: true,
+            italic: true,
+            underline: .dashed,
+            underlineColor: .indexed(7)
+        ))
+    }
+
     @Test("empty SGR parameters reset wherever they appear")
     func emptyParameters() throws {
         var terminal = try #require(Terminal(columns: 2, rows: 1))
