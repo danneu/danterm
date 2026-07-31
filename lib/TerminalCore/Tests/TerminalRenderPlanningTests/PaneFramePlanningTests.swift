@@ -54,6 +54,56 @@ struct PaneFramePlanningTests {
         #expect(planner.planFrame(for: terminal, presentation: barCursor, damage: .none) == expected)
     }
 
+    @Test("Selection changes remain identical under row reuse and full planning")
+    func selectionChangesMatchFromScratch() throws {
+        // Intent: every selection transition produces the same complete plan through
+        //   damage-aware row reuse as through a fresh viewport traversal.
+        // Why it exists: selected foreground now lives in retained text runs, making
+        //   the selection damage rows load-bearing for reuse correctness.
+        // Scenario: a user sets, extends, shrinks, moves, and then clears a selection
+        //   across two rows while the terminal output itself stays quiescent.
+        var terminal = try #require(Terminal(columns: 8, rows: 2))
+        feed("abcdef\r\nghijkl", to: &terminal)
+        _ = terminal.drainDamage()
+        var planner = PaneFramePlanner()
+        _ = planner.planFrame(for: terminal, presentation: blockCursor, damage: .full)
+
+        let ranges: [TerminalTextRange?] = [
+            .init(
+                start: .init(row: 0, column: 1),
+                end: .init(row: 0, column: 3)
+            ),
+            .init(
+                start: .init(row: 0, column: 1),
+                end: .init(row: 1, column: 4)
+            ),
+            .init(
+                start: .init(row: 0, column: 2),
+                end: .init(row: 1, column: 3)
+            ),
+            .init(
+                start: .init(row: 1, column: 1),
+                end: .init(row: 1, column: 5)
+            ),
+            nil,
+        ]
+
+        for range in ranges {
+            if let range {
+                terminal.setSelection(range)
+            } else {
+                terminal.clearSelection()
+            }
+            let damage = terminal.drainDamage()
+            let reused = planner.planFrame(
+                for: terminal,
+                presentation: blockCursor,
+                damage: damage
+            )
+            #expect(reused == planFrame(for: terminal, presentation: blockCursor))
+        }
+    }
+
     @Test("Reuse is refused when the grid dimensions differ from the retained frame")
     func reuseRefusedOnChangedDimensions() throws {
         // Intent: retained rows are discarded when the next frame's grid is a different

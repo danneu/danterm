@@ -348,6 +348,19 @@ public func drawRenderFrame(
         ))
     }
 
+    // A block cursor is a cell presentation, not an overlay stroke. Repaint its
+    // background after both highlight channels but before glyphs so selection and
+    // search cannot hide it while the planned cursor-text foreground remains visible.
+    if let cursor = plan.cursor, cursor.shape == .block {
+        context.setFillColor(cursor.color.cgColor(in: colorSpace))
+        context.fill(CGRect(
+            x: CGFloat(cursor.column) * metrics.cellSize.width,
+            y: CGFloat(cursor.row) * metrics.cellSize.height,
+            width: CGFloat(cursor.columnWidth) * metrics.cellSize.width,
+            height: metrics.cellSize.height
+        ))
+    }
+
     context.drawTextRuns(
         plan.textRuns,
         metrics: metrics,

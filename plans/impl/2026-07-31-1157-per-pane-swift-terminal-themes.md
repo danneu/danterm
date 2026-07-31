@@ -328,7 +328,7 @@ painted background.
 
 - [x] 1. feat(themes): import canonical theme catalog
 - [x] 2. build(themes): pack the runtime theme catalog
-- [ ] 3. feat(renderer): support complete theme presentation
+- [x] 3. feat(renderer): support complete theme presentation
 - [ ] 4. feat(terminal): apply themes per pane
 
 ## Implementation notes
@@ -336,3 +336,8 @@ painted background.
 - The packed layout is `Contents/Resources/themes/catalog.json`, with a catalog
   schema version and one case-insensitively sorted array of the complete tracked
   theme documents, including provenance.
+- The renderer stores ANSI colors as 16 fixed fields behind a failable array
+  boundary. Search-match backgrounds choose the maximum minimum squared RGB
+  distance from selection and default backgrounds across three fixed candidates;
+  the candidates include the previous baked search color and deterministic
+  fallbacks, so the result is never less separated than the old color.

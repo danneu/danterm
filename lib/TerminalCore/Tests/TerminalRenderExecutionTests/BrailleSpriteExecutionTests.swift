@@ -110,7 +110,7 @@ struct BrailleSpriteExecutionTests {
         #expect(boldItalic == regular)
     }
 
-    @Test("Selection stays behind braille drawn with its resolved foreground")
+    @Test("Selection stays behind braille drawn with the selection foreground")
     func selectionLayering() throws {
         let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
         var terminal = try #require(Terminal(columns: 2, rows: 1))
@@ -133,7 +133,8 @@ struct BrailleSpriteExecutionTests {
         let pixels = bitmap.pixels(in: cellRect(row: 0, column: 0, metrics: metrics))
 
         #expect(pixels.contains(Pixel(RenderTheme.dark.selectionBackground)))
-        #expect(pixels.contains(Pixel(RenderTheme.dark.ansiColors[1])))
+        #expect(pixels.contains(Pixel(RenderTheme.dark.selectionForeground)))
+        #expect(pixels.contains(Pixel(RenderTheme.dark.ansiColors[1])) == false)
     }
 
     @Test("A block cursor supplies braille background and foreground colors")

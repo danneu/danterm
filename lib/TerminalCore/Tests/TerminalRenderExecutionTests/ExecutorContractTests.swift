@@ -117,8 +117,8 @@ struct ExecutorContractTests {
         )
     }
 
-    @Test("A visible block cursor is rendered entirely by planned runs")
-    func visibleCursorUsesPlannedLayers() throws {
+    @Test("A visible block cursor preserves its planned colors and grid isolation")
+    func visibleCursorUsesPlannedPresentation() throws {
         let metrics = try #require(TerminalRenderMetrics(displayScale: 2))
         let plan = try makePlan(
             input: "A\u{1B}[1;1H",

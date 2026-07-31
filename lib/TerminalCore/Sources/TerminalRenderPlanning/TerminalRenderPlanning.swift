@@ -26,11 +26,86 @@ public struct RenderColor: Equatable, Sendable {
     }
 }
 
-/// Fixes every palette input needed to turn semantic terminal colors into a
-/// deterministic frame while configurable themes remain outside this slice.
+/// Stores the ANSI palette at fixed arity so a complete theme cannot carry a
+/// missing or extra indexed color past its decode boundary.
+public struct RenderANSIColors: Equatable, Sendable {
+    private let color0: RenderColor
+    private let color1: RenderColor
+    private let color2: RenderColor
+    private let color3: RenderColor
+    private let color4: RenderColor
+    private let color5: RenderColor
+    private let color6: RenderColor
+    private let color7: RenderColor
+    private let color8: RenderColor
+    private let color9: RenderColor
+    private let color10: RenderColor
+    private let color11: RenderColor
+    private let color12: RenderColor
+    private let color13: RenderColor
+    private let color14: RenderColor
+    private let color15: RenderColor
+
+    /// Admits only a complete ANSI palette while keeping its storage fixed once built.
+    public init?(exactly colors: [RenderColor]) {
+        guard colors.count == 16 else { return nil }
+        color0 = colors[0]
+        color1 = colors[1]
+        color2 = colors[2]
+        color3 = colors[3]
+        color4 = colors[4]
+        color5 = colors[5]
+        color6 = colors[6]
+        color7 = colors[7]
+        color8 = colors[8]
+        color9 = colors[9]
+        color10 = colors[10]
+        color11 = colors[11]
+        color12 = colors[12]
+        color13 = colors[13]
+        color14 = colors[14]
+        color15 = colors[15]
+    }
+
+    /// Projects the fixed palette for catalog and diagnostic consumers.
+    public var colors: [RenderColor] {
+        [
+            color0, color1, color2, color3,
+            color4, color5, color6, color7,
+            color8, color9, color10, color11,
+            color12, color13, color14, color15,
+        ]
+    }
+
+    /// Resolves a validated ANSI index without exposing variable-length storage.
+    public subscript(index: Int) -> RenderColor {
+        switch index {
+        case 0: color0
+        case 1: color1
+        case 2: color2
+        case 3: color3
+        case 4: color4
+        case 5: color5
+        case 6: color6
+        case 7: color7
+        case 8: color8
+        case 9: color9
+        case 10: color10
+        case 11: color11
+        case 12: color12
+        case 13: color13
+        case 14: color14
+        case 15: color15
+        default: preconditionFailure("ANSI palette index out of range: \(index)")
+        }
+    }
+}
+
+/// Fixes every palette and presentation input needed to turn semantic terminal
+/// colors into a deterministic frame.
 public struct RenderTheme: Equatable, Sendable {
     /// The fixed 16-color ANSI palette used for indices 0 through 15.
-    public let ansiColors: [RenderColor]
+    public let ansiColors: RenderANSIColors
 
     /// Foreground used when a terminal cell retains semantic `.default`.
     public let defaultForeground: RenderColor
@@ -40,6 +115,9 @@ public struct RenderTheme: Equatable, Sendable {
 
     /// Background overlay used to distinguish the current local selection.
     public let selectionBackground: RenderColor
+
+    /// Foreground forced onto selected text before cursor presentation is applied.
+    public let selectionForeground: RenderColor
 
     /// Background overlay for the active find match. Deliberately unlike
     /// `selectionBackground`: the two can cover the same cells, and the whole point of
@@ -52,9 +130,9 @@ public struct RenderTheme: Equatable, Sendable {
     /// Foreground used for visible content beneath the filled-block cursor.
     public let cursorText: RenderColor
 
-    /// The single baked theme for the correctness-first renderer slice.
+    /// Baked fallback for panes without a resolved per-pane theme.
     public static let dark = RenderTheme(
-        ansiColors: [
+        ansiColors: RenderANSIColors(exactly: [
             RenderColor(red: 0, green: 0, blue: 0),
             RenderColor(red: 205, green: 0, blue: 0),
             RenderColor(red: 0, green: 205, blue: 0),
@@ -71,31 +149,67 @@ public struct RenderTheme: Equatable, Sendable {
             RenderColor(red: 255, green: 0, blue: 255),
             RenderColor(red: 0, green: 255, blue: 255),
             RenderColor(red: 255, green: 255, blue: 255),
-        ],
+        ])!,
         defaultForeground: RenderColor(TerminalDefaultColors.baked.foreground),
         defaultBackground: RenderColor(TerminalDefaultColors.baked.background),
+        selectionForeground: RenderColor(TerminalDefaultColors.baked.foreground),
         selectionBackground: RenderColor(red: 56, green: 88, blue: 140),
-        searchMatchBackground: RenderColor(red: 175, green: 128, blue: 20),
         cursor: RenderColor(red: 229, green: 229, blue: 229),
         cursorText: RenderColor(red: 0, green: 0, blue: 0)
     )
 
-    private init(
-        ansiColors: [RenderColor],
+    /// Creates a complete renderer theme and derives its theme-local search highlight.
+    public init(
+        ansiColors: RenderANSIColors,
         defaultForeground: RenderColor,
         defaultBackground: RenderColor,
+        selectionForeground: RenderColor,
         selectionBackground: RenderColor,
-        searchMatchBackground: RenderColor,
         cursor: RenderColor,
         cursorText: RenderColor
     ) {
         self.ansiColors = ansiColors
         self.defaultForeground = defaultForeground
         self.defaultBackground = defaultBackground
+        self.selectionForeground = selectionForeground
         self.selectionBackground = selectionBackground
-        self.searchMatchBackground = searchMatchBackground
+        searchMatchBackground = Self.deriveSearchMatchBackground(
+            defaultBackground: defaultBackground,
+            selectionBackground: selectionBackground
+        )
         self.cursor = cursor
         self.cursorText = cursorText
+    }
+
+    /// Chooses the fixed candidate furthest from the two competing background channels.
+    private static func deriveSearchMatchBackground(
+        defaultBackground: RenderColor,
+        selectionBackground: RenderColor
+    ) -> RenderColor {
+        let candidates = [
+            RenderColor(red: 175, green: 128, blue: 20),
+            RenderColor(red: 80, green: 127, blue: 235),
+            RenderColor(red: 56, green: 88, blue: 140),
+        ]
+        return candidates.max { first, second in
+            separationScore(first, from: defaultBackground, and: selectionBackground)
+                < separationScore(second, from: defaultBackground, and: selectionBackground)
+        }!
+    }
+
+    private static func separationScore(
+        _ candidate: RenderColor,
+        from first: RenderColor,
+        and second: RenderColor
+    ) -> Int {
+        min(squaredDistance(candidate, first), squaredDistance(candidate, second))
+    }
+
+    private static func squaredDistance(_ first: RenderColor, _ second: RenderColor) -> Int {
+        let red = Int(first.red) - Int(second.red)
+        let green = Int(first.green) - Int(second.green)
+        let blue = Int(first.blue) - Int(second.blue)
+        return red * red + green * green + blue * blue
     }
 }
 

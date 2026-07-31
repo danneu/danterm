@@ -296,6 +296,7 @@ struct FramePlanner {
         // row, then walk the columns.
         let kinds = geometry.rows[row].cells
         let hovered = hoveredColumns(row: row, columns: geometry.columns)
+        let selected = selectedColumns(row: row, columns: geometry.columns)
 
         var result: [PlannedCell] = []
         result.reserveCapacity(kinds.count)
@@ -308,6 +309,7 @@ struct FramePlanner {
                 scalars: scalars,
                 semanticStyle: semanticStyle,
                 hovered: hovered,
+                selected: selected,
                 cursorSpan: cursorSpan
             ))
         }
@@ -321,6 +323,7 @@ struct FramePlanner {
                 scalars: .empty,
                 semanticStyle: TerminalStyle(),
                 hovered: hovered,
+                selected: selected,
                 cursorSpan: cursorSpan
             ))
         }
@@ -334,6 +337,7 @@ struct FramePlanner {
         scalars: TerminalScalars,
         semanticStyle: TerminalStyle,
         hovered: Range<Int>?,
+        selected: Range<Int>?,
         cursorSpan: CursorSpan?
     ) -> PlannedCell {
         var style = resolveCellStyle(semanticStyle, theme: presentation.theme)
@@ -345,6 +349,18 @@ struct FramePlanner {
                 italic: style.italic,
                 underline: .single,
                 underlineColor: style.foreground,
+                hidden: style.hidden,
+                strikethrough: style.strikethrough
+            )
+        }
+        if selected?.contains(column) == true {
+            style = ResolvedCellStyle(
+                foreground: presentation.theme.selectionForeground,
+                background: style.background,
+                bold: style.bold,
+                italic: style.italic,
+                underline: style.underline,
+                underlineColor: style.underlineColor,
                 hidden: style.hidden,
                 strikethrough: style.strikethrough
             )
@@ -374,6 +390,19 @@ struct FramePlanner {
         let end = streamRow == range.end.row ? range.end.column : columns
         guard start <= end else { return nil }
         return start..<end
+    }
+
+    /// The local-selection span for one viewport row, resolved once per traversal.
+    private func selectedColumns(row: Int, columns: Int) -> Range<Int>? {
+        guard let selection = terminal.selectionRange else { return nil }
+        let streamRow = terminal.scrollProjection.topRow + row
+        guard selection.start.row...selection.end.row ~= streamRow else { return nil }
+        let start = streamRow == selection.start.row ? selection.start.column : 0
+        let end = streamRow == selection.end.row ? selection.end.column : columns
+        let clampedStart = min(max(start, 0), columns)
+        let clampedEnd = min(max(end, 0), columns)
+        guard clampedStart < clampedEnd else { return nil }
+        return clampedStart..<clampedEnd
     }
 
     private func backgroundRuns(row: Int, cells: [PlannedCell]) -> [RenderBackgroundRun] {
