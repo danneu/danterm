@@ -81,7 +81,7 @@ Supported protocol families, with their evidence suite:
 | `title-cwd-notifications-progress` | TerminalSemanticEventTests |
 | `http-https-hyperlinks` | TerminalHyperlinkTests |
 | `clipboard-write-read-denial` | TerminalOSC52Tests |
-| `osc-133-semantic-prompt-redraw` | TerminalOSC133Tests, DanTermRecordingFixtureTests |
+| `osc-133-semantic-prompt-redraw` | TerminalOSC133Tests, TerminalShellDialectTests, DanTermRecordingFixtureTests |
 | `tokenless-shell-events` | TerminalShellEventTests |
 
 Denied: `audible-bell`, `clipboard-read`, `da2`, `decrqss`, `kitty-osc-99`,
@@ -90,6 +90,32 @@ Denied: `audible-bell`, `clipboard-read`, `da2`, `decrqss`, `kitty-osc-99`,
 OSC 133 support is engine-internal: semantic prompt/input state lets a shell
 redraw its prompt cleanly after resize. DanTerm does not expose semantic events,
 per-cell semantics, click-to-move, or prompt navigation from this protocol.
+
+The engine accepts `A`, `B`, `C`, `D`, and `P` with the options `redraw=0|1|last`,
+`k=i|s`, `aid=`, `cl=`, and `click_events=`; unknown actions and options are
+ignored rather than rejected. `redraw` is the only option that changes behavior:
+it declares how much of the prompt block the shell promises to repaint, and the
+parser blanks exactly that much before a reflow. The mode is sticky per-pane
+state reset only by RIS, so a well-behaved integration restates it on every
+prompt. Absent any declaration the mode is `full`, which means a shell that
+stamps a prompt row without declaring `redraw` has implicitly promised a whole-
+prompt repaint.
+
+The bundled integrations emit a deliberately small subset of that grammar, and
+each one's `redraw` value is measured against how that shell actually repaints
+after SIGWINCH rather than copied from another terminal:
+
+| integration | emits | declares |
+|---|---|---|
+| `danterm.zsh` | `A`/`B` inside `PS1`/`PS2`, `A;k=s` per continuation line, `C` from preexec | `redraw=1` -- zsh re-renders the whole prompt |
+| `danterm.bash` | `A` from `PROMPT_COMMAND`, `P;k=i`/`P;k=s`/`B` inside `PS1`/`PS2`, `C` from preexec | `redraw=last` -- readline repaints only the final prompt line |
+| `danterm.fish` | the `redraw` declaration only; fish emits `A`/`B`/`C`/`D` itself | `redraw=1` -- fish re-renders the whole prompt |
+
+Bash uses `P` rather than `A` for its in-prompt row stamps because `P` carries no
+fresh-line behavior and readline redisplays mid-line on Ctrl-L and vi-mode
+switches. `D`, `L`, `I`, and `N` are parsed but no integration emits them. The
+derivation of each choice is in
+[docs/research/24-osc-133-dialect/dialect.md](research/24-osc-133-dialect/dialect.md).
 
 ## Child environment
 

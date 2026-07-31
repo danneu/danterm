@@ -229,9 +229,12 @@ re-wrap). No integration emits `D`, `L`, `I`, or `N`.
   (whose capture used the maintainer's real fish config) reproduces the
   staircase, and only Bash's sweep discriminates its own value. Finding a
   recordable stimulus that discriminates for zsh would close the gap.
-- [ ] TODO: fold the shipped dialect into `docs/terminal-capabilities.md` and
-  `plan-terminal-engine/10-protocols-shell-integration.md`, which today record
-  only the OSC 1337 envelope on the emitting side.
+- [x] Folded the shipped dialect into `docs/terminal-capabilities.md` (accepted
+  actions and options, the per-integration emit/declare table, and why Bash uses
+  `P`) and `plan-terminal-engine/10-protocols-shell-integration.md` (the
+  measured-not-inherited `redraw` choice and why the declaration is load-bearing
+  rather than a hint). Both previously recorded only the OSC 1337 envelope on the
+  emitting side.
 
 ## Rejected
 
@@ -387,7 +390,6 @@ the shell, and the emitted bytes are pinned by a shell-level gate plus replayed
 PTY recordings. Two things Phase 3 leaves open, both recorded above: the zsh and
 Bash dialects have still never been rendered in a real pane, and the shipped
 width-sweep recordings guard the emitters without discriminating the redraw value
-for zsh or fish -- only F13's fish trio and Bash's own sweep do that. The
-remaining integration work is documentation: folding the shipped dialect into
-`docs/terminal-capabilities.md` and
-`plan-terminal-engine/10-protocols-shell-integration.md`.
+for zsh or fish -- only F13's fish trio and Bash's own sweep do that. The public
+contract and the engine plan now both record the shipped dialect, so no
+documentation work remains; what is left is the two open gaps above.

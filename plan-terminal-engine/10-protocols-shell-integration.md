@@ -85,6 +85,21 @@ local cwd with OSC 7, and have ssh/mosh wrappers forward `LC_DANTERM=1` through
 remote identity and suppresses OSC 7 cwd events. Markers remain available to
 nested remote shells.
 
+Those integrations also emit the OSC 133 dialect the resize path consumes. Each
+declares a `redraw` mode chosen from how that shell actually repaints after
+SIGWINCH -- `redraw=1` for zsh and fish, which re-render the whole prompt, and
+`redraw=last` for Bash, where readline repaints only the final prompt line -- and
+restates it on every prompt, because the mode is per-pane terminal state that
+outlives the shell that set it. The declaration is load-bearing rather than a
+hint: the parser's default is `full`, so a stamped prompt row with no declaration
+is an implicit promise to repaint everything, and for Bash that promise blanks
+rows readline never rewrites. The dialect is engine-internal; semantic facts
+still travel only on the OSC 1337 envelope above, which is what lets the dialect
+be revised for row classification and reflow without touching the semantic model.
+The per-shell derivation, the live-PTY recordings, and the two departures found
+while implementing it are in
+[docs/research/24-osc-133-dialect](../docs/research/24-osc-133-dialect/README.md).
+
 BEL emits DanTerm's existing pane-scoped bell event. The initial engine never
 plays an audible bell. Existing alert suppression and admitted-event
 notification behavior remain in the DanTerm model; a transient visual bell is
