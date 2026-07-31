@@ -45,12 +45,13 @@ Pane semantic state is a set of small independent facets, not one machine:
 
 - **command**: idle, or running a reported command
 - **connection**: local, or a reported remote identity
-- **agent**: none, or an attached agent session (kind and session id)
+- **agent**: none, or an attached agent session (kind, session id, and its
+  reported activity: working, waiting on the user, or idle)
 
 Facets transition only on declared semantic inputs -- DanTermShell envelope
 events and pane-scoped IPC events such as the bundled
-Claude Code and Codex `danterm agent attach` hooks -- and are never inferred
-from rendered cells. Most facet
+Claude Code and Codex `danterm agent attach` and activity hooks -- and are
+never inferred from rendered cells. Most facet
 data already exists across engine and model; the decision is that every facet
 derives from the same ordered semantic stream that feeds the journal below, so
 current state and history cannot disagree about what happened. The facet set
@@ -59,6 +60,9 @@ demonstrated need moves them). Degradation is strict, not tiered: a pane
 with DanTerm's integration gets complete records; any other pane stays idle
 with an empty journal, and a consumer can tell that emptiness apart from an
 integrated pane where no commands ran. Nothing is guessed in either state.
+The same rule scopes agent activity: each integration reports only the
+states its hooks genuinely distinguish, so a coarser hook surface yields
+fewer states, never guessed ones.
 
 ### The command journal
 
@@ -97,7 +101,9 @@ one record.
 Pane-scoped IPC events join the same ordered stream as explicit inputs
 through the pane owner: an attached agent session becomes part of records
 opened while it is active, and a command launched through the `danterm` CLI
-records the requesting context as launch provenance.
+records the requesting context as launch provenance. Agent activity reports
+move the facet only; the journal ignores them -- what an agent was doing
+moment to moment is live state, not history.
 
 A record carries the reported command text, cwd, and identity (user and
 host) -- all required, all carried on command-start; a record missing any
@@ -144,6 +150,7 @@ enum CommandJournalEvent {
     case commandStarted(text: String, cwd: String, user: String, host: String)  // the only opener
     case commandEnded(exitStatus: Int32)                 // envelope command-end; $? required
     case agentAttached(kind: String, sessionId: String)  // IPC, via the pane owner
+    case agentActivity(AgentActivity)                    // IPC; moves the facet, never a record
 }
 
 /// Facets snapshot for one pane. Every field derives from declared
@@ -153,8 +160,13 @@ enum CommandJournalEvent {
 struct PaneSemanticState {
     var command: CommandFacet        // derived: .running(open.id) | .idle
     var connection: ConnectionFacet  // .local | .remote(user:host:)
-    var agent: AgentFacet            // .none | .attached(kind:sessionId:)
+    var agent: AgentFacet            // .none | .attached(kind:sessionId:activity:)
 }
+
+/// Reported by the bundled hooks; activity cannot exist without an
+/// attached session. `waiting` is the needs-attention state: blocked on
+/// a human (permission prompt, question).
+enum AgentActivity { case working, waiting, idle }
 
 /// The bounded per-pane journal. The case split carries the invariants:
 /// records cannot exist under .neverReported, at most one record is
@@ -217,6 +229,11 @@ completion, exit status, output span -- replacing today's
 launch-then-poll-and-scrape pattern. Both ride the surface every consumer
 uses; agent priority sets delivery order, not a privileged channel.
 
+The activity facet adds a third first-release consumer: an attached agent
+entering waiting in an unfocused pane fires a needs-attention notification
+whose click focuses the pane -- composing one facet fact with the existing
+notification-click-focuses-pane behavior.
+
 CLI surface changes carry the standing `integrations/danterm/SKILL.md`
 co-update rule. While both backends exist, journal queries are a
 Swift-engine capability; a Ghostty pane reports the capability absent rather
@@ -244,7 +261,12 @@ A user runs `claude` in a pane at `~/Code/danterm`:
    launch provenance -- and closes it with exit status 1 and an output span.
 4. The Claude Code TUI redraws continuously. Nothing enters any journal:
    drawing is not an event.
-5. The user quits. The envelope command-end closes the record with exit
+5. Claude Code pauses on a permission prompt; its notification hook reports
+   waiting. The pane is unfocused, so DanTerm fires a needs-attention
+   notification; clicking it focuses the pane, and the user's next prompt
+   returns the facet to working. Nothing enters the journal: activity is
+   facet-only.
+6. The user quits. The envelope command-end closes the record with exit
    status and end timestamp, and the agent facet detaches (today's
    command-end behavior, unchanged).
 
@@ -279,8 +301,8 @@ fact:
   duration and focus, composing with the existing
   notification-click-focuses-pane behavior.
 - Sidebar and tab chrome showing per-pane running, idle, or failed command
-  state and live agent sessions; today `lastCommand` never clears, so chrome
-  cannot even distinguish running from finished.
+  state and live agent sessions with their activity; today `lastCommand`
+  never clears, so chrome cannot even distinguish running from finished.
 - Semantic navigation and selection: scrollbar marks at command boundaries,
   jump to previous command, select one command's output, search scoped to a
   span -- bounded reuses of the proven viewport, selection, and search
@@ -491,10 +513,13 @@ None of this gates Milestones 8-10.
 - [ ] **5: Output spans.** Records carry reflow-attached spans into primary
   history; span reads equal the logical projection; eviction clamps and
   surfaces truncation without invalidating records.
-- [ ] **6: Agent and launch provenance.** `danterm agent attach` sessions
+- [ ] **6: Agent provenance and activity.** `danterm agent attach` sessions
   join the stream through the pane owner and appear on records opened while
-  attached; commands launched through the `danterm` CLI record the
-  requesting context.
+  attached; the bundled hooks report activity transitions (working, waiting,
+  idle) that move the facet only, each integration reporting the strict
+  subset its hooks genuinely distinguish -- verified against each agent's
+  real hook surface, not assumed; commands launched through the `danterm`
+  CLI record the requesting context.
 - [ ] **7: Query and await surface.** `danterm pane commands` and
   `danterm pane read --command` return typed results with the existing IPC
   layering, and an agent can launch a command in another pane and await its
@@ -504,7 +529,9 @@ None of this gates Milestones 8-10.
   updates in the same change.
 - [ ] **8: First-release agent consumers.** The Claude Code and Codex
   recipes ship in the danterm skill: debugging (journal first, spans second)
-  and launch-and-await replacing the poll-and-scrape pattern; then evaluate
+  and launch-and-await replacing the poll-and-scrape pattern; the
+  needs-attention notification ships (an attached agent entering waiting in
+  an unfocused pane, click focuses the pane); then evaluate
   which product consumer from the downstream list follows
   (completion notifications, sidebar command chrome) and record the
   decision.
