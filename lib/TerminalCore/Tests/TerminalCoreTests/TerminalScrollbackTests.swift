@@ -69,6 +69,41 @@ struct TerminalScrollbackTests {
         #expect(terminal.fullHistoryText == "   AB")
     }
 
+    @Test("full-history logical lines are identical at every terminal width")
+    func fullHistoryLogicalLinesAreWidthIndependent() throws {
+        // Intent: the same fed content projects to the same logical lines no
+        //   matter how wide the terminal is, so soft wraps never become line
+        //   boundaries.
+        // Why it exists: `pane read --lines N` is one step on top of this
+        //   projection -- AppRuntime takes fullHistoryText and chops the last N
+        //   newline-delimited lines. If the projection ever emitted visual rows,
+        //   --lines would silently return N screen rows instead of N logical
+        //   lines, and its result would change when the pane is resized. The
+        //   existing soft-wrap tests each pin a single width, so none of them
+        //   would catch that.
+        // Scenario: three logical lines, each long enough to wrap at the narrow
+        //   widths and not at the wide one, read back at four widths.
+        let content = "the first logical line is quite long\r\n"
+            + "second\r\n"
+            + "a third line that also wraps at narrow widths\r\n"
+        let expected = [
+            "the first logical line is quite long",
+            "second",
+            "a third line that also wraps at narrow widths",
+        ]
+
+        for columns in [8, 13, 20, 60] {
+            var terminal = try #require(Terminal(columns: columns, rows: 4))
+            terminal.feed(Array(content.utf8))
+
+            let lines = terminal.fullHistoryText
+                .split(separator: "\n", omittingEmptySubsequences: false)
+                .map(String.init)
+                .filter { !$0.isEmpty }
+            #expect(lines == expected, "logical lines differed at width \(columns)")
+        }
+    }
+
     @Test("full-history text omits a structural spacer before a wrapped wide cell")
     func fullHistorySpacerProjection() throws {
         var terminal = try #require(Terminal(columns: 4, rows: 2))
