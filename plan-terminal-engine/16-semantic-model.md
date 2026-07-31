@@ -34,12 +34,11 @@ table and assumption in this document small.
 Pane semantic state is a set of small independent facets, not one machine:
 
 - **command**: idle, or running a reported command
-- **presentation**: primary or alternate screen
 - **connection**: local, or a reported remote identity
 - **agent**: none, or an attached agent session (kind and session id)
 
 Facets transition only on declared semantic inputs -- DanTermShell envelope
-events, parser state changes, and pane-scoped IPC events such as the bundled
+events and pane-scoped IPC events such as the bundled
 Claude Code and Codex `danterm agent attach` hooks -- and are never inferred
 from rendered cells. Most facet
 data already exists across engine and model; the decision is that every facet
@@ -58,10 +57,10 @@ terminal core as deterministic state alongside selection and search. The
 envelope is the journal's only source; everything lowers into one stream:
 
 - DanTermShell envelope events are the sole record authority: command-start
-  carries the required command text and cwd and is the only record opener;
-  command-end carries the exit status and closes the record; remote identity
-  decorates it. DanTerm owns both ends of the envelope, so the journal
-  parses no foreign dialect.
+  carries the required command text, cwd, and reporting identity (user and
+  host) and is the only record opener; command-end carries the required exit
+  status and closes the record. DanTerm owns both ends of the envelope, so
+  the journal parses no foreign dialect.
 - OSC 133 marks stay emitted by the bundled integrations -- extending the
   integration contract in
   [Protocols and shell integration](10-protocols-shell-integration.md) --
@@ -73,13 +72,16 @@ envelope is the journal's only source; everything lowers into one stream:
   command-start, from the same reporter, on the same host, in the same verb
   as its text -- never snapshotted from pane state that may be stale or
   belong to a different host.
-- Parser facts supply presentation transitions during the command.
+- The envelope's remote events keep driving the live connection facet
+  (chrome can show user@host even at an idle prompt), but the journal never
+  listens to them either: a record's identity arrives on its own
+  command-start, self-reported by whichever shell ran the command.
 
-Envelope, IPC, and parser inputs lower into a single ordered stream that the
+Envelope and IPC inputs lower into a single ordered stream that the
 journal and facets consume, and the reducer over that stream is small and
 total: command-start opens a record, sealing any dangling predecessor;
-command-end closes it; pane teardown seals; identity events decorate the
-open record and are otherwise dropped. Each reported command yields exactly
+command-end closes it; pane teardown seals; agent attach decorates the
+open record and is otherwise dropped. Each reported command yields exactly
 one record.
 
 Pane-scoped IPC events join the same ordered stream as explicit inputs
@@ -87,12 +89,12 @@ through the pane owner: an attached agent session becomes part of records
 opened while it is active, and a command launched through the `danterm` CLI
 records the requesting context as launch provenance.
 
-A record carries the reported command text and cwd (both required, both
-carried on command-start -- a record without identity or location cannot
-exist), stream order, injected wall-clock timestamps (stamped at the owner
-boundary under the existing save/send/assert injection rule), the
-connection facet at start, exit status when reported (absent only when the
-record was sealed rather than closed), and an output span.
+A record carries the reported command text, cwd, and identity (user and
+host) -- all required, all carried on command-start; a record missing any
+of them cannot exist -- plus stream order, injected wall-clock timestamps
+(stamped at the owner boundary under the existing save/send/assert
+injection rule), exit status when reported (absent only when the record was
+sealed rather than closed), and an output span.
 
 A record stores no output text. Its output span is a reflow-attached logical
 range into primary history under the same anchor contract selection and
@@ -122,23 +124,21 @@ contract is the invariants below, not this sketch. It exists so readers
 share one concrete picture of the stream, the facets, and a record:
 
 ```swift
-/// The single vocabulary the journal consumes. Envelope, parser, and
-/// pane-scoped IPC inputs lower into one ordered stream; the journal
-/// reducer never sees an OSC.
+/// The single vocabulary the journal consumes. Envelope and pane-scoped
+/// IPC inputs lower into one ordered stream; the journal reducer never
+/// sees an OSC.
 enum CommandJournalEvent {
-    case commandStarted(text: String, cwd: String)  // envelope command-start; the only opener
-    case commandEnded(exitStatus: Int32?)           // envelope command-end, carrying $?
-    case remoteIdentity(user: String, host: String)
+    case commandStarted(text: String, cwd: String, user: String, host: String)  // the only opener
+    case commandEnded(exitStatus: Int32)                 // envelope command-end; $? required
     case agentAttached(kind: String, sessionId: String)  // IPC, via the pane owner
 }
 
 /// Facets snapshot for one pane. Every field derives from declared
 /// sources; rendered cells are never an input.
 struct PaneSemanticState {
-    var command: CommandFacet            // .idle | .running(CommandRecordId)
-    var presentation: PresentationFacet  // .primary | .alternate
-    var connection: ConnectionFacet      // .local | .remote(user:host:)
-    var agent: AgentFacet                // .none | .attached(kind:sessionId:)
+    var command: CommandFacet        // .idle | .running(CommandRecordId)
+    var connection: ConnectionFacet  // .local | .remote(user:host:)
+    var agent: AgentFacet            // .none | .attached(kind:sessionId:)
 }
 
 /// One executed command in the bounded per-pane journal. Never stores
@@ -147,10 +147,11 @@ struct CommandRecord {
     let id: CommandRecordId
     var text: String                  // required; no partial records exist
     var cwd: String                   // required; reported on command-start
+    var user: String                  // required; reported on command-start
+    var host: String                  // required; reported on command-start
     var exitStatus: Int32?            // nil only when sealed, not closed
     var startedAt: Date               // injected at the owner boundary
     var endedAt: Date?
-    var connection: ConnectionFacet   // at start
     var agent: AgentProvenance?       // attached session and/or launch requester
     var output: OutputSpan            // reflow-attached; clamps under eviction
 }
@@ -188,8 +189,8 @@ A user runs `claude` in a pane at `~/Code/danterm`:
 
 1. The shell integration reports the command through the envelope's
    command-start. The command facet becomes running, and the journal opens a
-   record with the required command text and cwd (both carried on
-   command-start), the connection facet, and an injected start timestamp. The integration's OSC 133 marks classify
+   record with the required command text, cwd, and identity (all carried on
+   command-start) and an injected start timestamp. The integration's OSC 133 marks classify
    the prompt and output rows for navigation; the journal takes nothing from
    them.
 2. Claude Code's session-start hook runs
@@ -200,8 +201,7 @@ A user runs `claude` in a pane at `~/Code/danterm`:
    journal opens its own record -- carrying the requesting agent session as
    launch provenance -- and closes it with exit status 1 and an output span.
 4. The Claude Code TUI redraws continuously. Nothing enters any journal:
-   drawing is not an event, and the presentation facet changes only if the
-   application actually switches screens.
+   drawing is not an event.
 5. The user quits. The envelope command-end closes the record with exit
    status and end timestamp, and the agent facet detaches (today's
    command-end behavior, unchanged).
@@ -220,7 +220,7 @@ danterm pane read --pane 32 --command c41
 ```
 
 The journal answers "what happened"; spans answer "what it printed"; the
-agent facet answers "who asked"; the record's cwd answers "where". A
+agent facet answers "who asked"; the record's cwd and host answer "where". A
 debugging agent reads three records instead of two thousand scraped lines,
 then fetches output only for the one command that failed.
 
@@ -261,8 +261,9 @@ feed-throughput work.
 
 This direction gates nothing in Milestones 8-10 and adds no replacement proof
 obligation. Its early protocol needs are small and DanTerm-owned: the
-versioned envelope grows cwd on command-start and exit status on
-command-end, and the bundled shell integrations start emitting the
+versioned envelope grows user, host, and cwd on command-start and a
+required exit status on command-end, and the bundled shell integrations
+start emitting the
 OSC 133 marks the engine already parses -- which independently activates the
 existing prompt-redraw-on-resize behavior for every DanTerm user, and which
 serves navigation, never the journal.
@@ -294,8 +295,8 @@ introducing a new subsystem.
   re-entrant envelope events (an end while idle, a start while running) have
   pinned outcomes, never a partial or duplicate record. Marks alone never
   produce a record.
-- Every record carries its command text and cwd; the journal admits no
-  partial records. An empty journal is honest: a consumer can distinguish a
+- Every record carries its command text, cwd, and reporting identity; the
+  journal admits no partial records. An empty journal is honest: a consumer can distinguish a
   pane whose integration has never reported from an integrated pane where no
   commands ran.
 - The journal lives with the pane owner; the top-level model continues to
@@ -312,8 +313,8 @@ introducing a new subsystem.
   envelope events evicts oldest records without touching scrollback.
 - Unmatched and re-entrant traces have pinned outcomes: command-start while
   a record is open (the predecessor seals), command-end while idle, pane
-  teardown mid-command, nested remote sessions, alternate-screen entry
-  mid-command, foreign OSC 133 marks arriving with and without the envelope,
+  teardown mid-command, nested remote sessions,
+  foreign OSC 133 marks arriving with and without the envelope,
   and agent attach with no running command -- each yielding at most one
   record per reported command and no record from marks alone.
 - The bundled zsh, Bash, and fish integrations drive complete records
@@ -328,9 +329,6 @@ introducing a new subsystem.
 - An agent launch-and-await resolves with the awaited record's completion
   facts -- exit status and span state -- exactly once, including when pane
   teardown or span eviction intervenes.
-- A live shell running a full-screen application inside one command (enter
-  and exit alternate screen) produces the same facet transitions in headless
-  replay and at the product boundary.
 
 ## Non-goals
 
@@ -375,6 +373,15 @@ introducing a new subsystem.
   report-time staleness), and app-side filesystem watching
   stays rejected -- it breaks remote panes, races cwd changes, and
   reintroduces the ambient-IO enrichment the declared-sources rule forbids.
+- A presentation facet (primary vs alternate screen): cut for lacking a
+  named consumer. Alternate-screen state remains engine and render state
+  either way; re-projecting it as a facet is purely additive if an
+  introspection consumer ("is a TUI active in this pane") ever earns it.
+- Stamping records from facet snapshots and decoration events (connection
+  at start, remote identity decorating the open record): replaced by
+  self-reported identity on command-start, so every record fact shares one
+  reporter, one host, and one verb; the live connection facet keeps
+  consuming the envelope's remote events for chrome.
 - Driving the journal from OSC 133 marks (dual-source records with an
   anonymous marks-only tier): cross-source arbitration, per-record
   provenance, and a foreign-dialect survey bought journal coverage only on
@@ -389,8 +396,8 @@ introducing a new subsystem.
   batching, provided the bounds are explicit and tested.
 - Retaining less of a command's text in the journal than the 64 KiB event
   limit, provided truncation is flagged.
-- The internal stream representation that lowers envelope, IPC, and parser
-  inputs into the events the journal consumes.
+- The internal stream representation that lowers envelope and IPC inputs
+  into the events the journal consumes.
 - Query grammar and JSON shape of the CLI/IPC surface.
 - Slicing: exit-status capture, facets, journal, and query surface may land
   as independent green slices in any order.
@@ -423,20 +430,20 @@ None of this gates Milestones 8-10.
   contract in
   [Protocols and shell integration](10-protocols-shell-integration.md)
   records the emission.
-- [ ] **2: Exit status and cwd over the envelope.** The bundled scripts
-  report cwd on command-start and `$?` on command-end through the versioned
-  envelope, and the engine retains both through pane-scoped semantics under
-  the existing bounds.
+- [ ] **2: Record facts over the envelope.** The bundled scripts report
+  user, host, and cwd on command-start and `$?` on command-end through the
+  versioned envelope, and the engine retains them through pane-scoped
+  semantics under the existing bounds.
 - [ ] **3: Command facet and record lifecycle.** Envelope events alone drive
   idle/running transitions and open/close bounded journal records --
-  command-start opens with required text and cwd, sealing any dangling
-  predecessor;
+  command-start opens with required text, cwd, and identity, sealing any
+  dangling predecessor;
   command-end closes with exit status; teardown seals; behavior is
   chunk-invariant and proven by neutral replay, including the unmatched and
   re-entrant traces.
-- [ ] **4: Identity decoration.** Remote identity stamps the open record;
-  injected timestamps stamp records at the owner boundary; marks-only
-  replays leave the journal empty while row classification still works.
+- [ ] **4: Timestamps and honest emptiness.** Injected timestamps stamp
+  records at the owner boundary; marks-only replays leave the journal empty
+  while row classification still works.
 - [ ] **5: Output spans.** Records carry reflow-attached spans into primary
   history; span reads equal the logical projection; eviction clamps and
   surfaces truncation without invalidating records.
