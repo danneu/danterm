@@ -39,3 +39,4 @@ Default statuses are:
 - [2026-07-20: Terminal Engine Experiment Decision (Milestone 5)](2026-07-20-terminal-engine-experiment-decision.md)
 - [2026-07-27: Benchmark Routing for Damage-Scoped Render Changes](2026-07-27-damage-render-benchmark-routing.md)
 - [2026-07-29: Cross-Module Dispatch on Hot Value Types](2026-07-29-cross-module-value-dispatch.md)
+- [2026-07-31: Nix-Managed Config Location](2026-07-31-nix-managed-config-location.md)

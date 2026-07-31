@@ -66,16 +66,18 @@ struct DanTermConfigStore {
 
     /// Creates a missing file as a valid writable v1 document without touching an existing file.
     func seedIfMissing() throws {
-        guard fileManager.fileExists(atPath: url.path) == false else { return }
-        try write(DanTermConfigDocument.seedData)
+        let transactionURL = resolvedTransactionURL()
+        guard fileManager.fileExists(atPath: transactionURL.path) == false else { return }
+        try write(DanTermConfigDocument.seedData, to: transactionURL)
     }
 
     /// Re-reads the latest file, mutates every modeled setting, and writes at most once.
     func save(_ config: DanTermConfig) throws {
+        let transactionURL = resolvedTransactionURL()
         let original: Data
-        if fileManager.fileExists(atPath: url.path) {
+        if fileManager.fileExists(atPath: transactionURL.path) {
             do {
-                original = try readData(url)
+                original = try readData(transactionURL)
             } catch {
                 throw DanTermConfigStoreError.readFailed(url, error.localizedDescription)
             }
@@ -87,17 +89,28 @@ struct DanTermConfigStore {
         }
         document.apply(config)
         let encoded = document.encoded()
-        guard encoded != original || fileManager.fileExists(atPath: url.path) == false else { return }
-        try write(encoded)
+        guard encoded != original
+            || fileManager.fileExists(atPath: transactionURL.path) == false
+        else { return }
+        try write(encoded, to: transactionURL)
     }
 
-    private func write(_ data: Data) throws {
+    private func resolvedTransactionURL() -> URL {
+        let parentURL = url.deletingLastPathComponent().resolvingSymlinksInPath()
+        guard let destination = try? fileManager.destinationOfSymbolicLink(atPath: url.path)
+        else { return url.resolvingSymlinksInPath() }
+        return URL(fileURLWithPath: destination, relativeTo: parentURL)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+    }
+
+    private func write(_ data: Data, to transactionURL: URL) throws {
         do {
             try fileManager.createDirectory(
-                at: url.deletingLastPathComponent(),
+                at: transactionURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
-            try writeData(data, url)
+            try writeData(data, transactionURL)
         } catch {
             throw DanTermConfigStoreError.writeFailed(url, error.localizedDescription)
         }

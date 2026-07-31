@@ -1,4 +1,9 @@
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 with lib;
 let
   cfg = config.programs.danterm;
@@ -14,10 +19,19 @@ in
       type = types.bool;
       default = false;
     };
+    configPath = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      description = "Absolute out-of-store path to DanTerm's app-writable config file";
+    };
   };
 
   config = mkIf cfg.enable {
     home.packages = [ cfg.package ];
+
+    home.file.".config/danterm/config.json" = mkIf (cfg.configPath != null) {
+      source = config.lib.file.mkOutOfStoreSymlink cfg.configPath;
+    };
 
     launchd.agents.danterm = mkIf cfg.startAtLogin {
       enable = true;

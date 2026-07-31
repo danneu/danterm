@@ -30,7 +30,11 @@ Download the latest `.dmg` from [Releases](https://github.com/danneu/danterm/rel
       modules = [
         danterm.homeManagerModules.default
         {
-          programs.danterm.enable = true;
+          programs.danterm = {
+            enable = true;
+            # Optional: keep the app-writable config in your nix repo.
+            configPath = "/Users/myuser/src/dotfiles/danterm/config.json";
+          };
         }
       ];
     };
@@ -63,6 +67,14 @@ from the app menu to edit the file directly.
 ```
 
 Reload with **Cmd+Shift+,**. Open the underlying Ghostty config with **Cmd+Option+,**.
+
+Nix users can set `programs.danterm.configPath` to an absolute string path in
+their nix repo. Home Manager links the standard location to that out-of-store
+file, and DanTerm writes Preferences changes to the linked file directly. Leave
+the option unset to let DanTerm own `~/.config/danterm/config.json` as usual.
+Use a string such as `"/Users/myuser/src/dotfiles/danterm/config.json"`, not a
+nix path literal such as `./danterm/config.json`, which nix would copy into its
+read-only store.
 
 ### Settings
 
