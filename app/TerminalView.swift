@@ -883,6 +883,7 @@ extension TerminalView {
     }
 
     func setFontSize(_ size: Double) {}
+    func setFontFamily(_ family: String?) {}
 
     func startSearch() {
         guard let surface else { return }

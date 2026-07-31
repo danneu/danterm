@@ -43,6 +43,9 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     private var lastForwardedFocus = false
     private var isTornDown = false
     private var fontSize: CGFloat
+    /// The verified-installed family to render, or nil for the system monospace
+    /// font. Never a raw name from config -- only a resolved family reaches here.
+    private var fontFamily: String?
 
     weak var paneWrapper: PaneWrapperView?
     /// Defaults explicit selection copies to the system pasteboard while keeping UI tests isolated.
@@ -103,11 +106,13 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     init(
         controller: TerminalPaneSessionController,
         fontSize: Double = DanTermConfig.default.resolvedFontSize,
+        fontFamily: String? = nil,
         resolveTheme: @escaping (String) -> RenderTheme? = ThemeCatalog.shared.renderTheme(named:),
         onSessionEnded: ((PaneLifecycleResult) -> Void)? = nil
     ) {
         self.controller = controller
         self.fontSize = CGFloat(fontSize)
+        self.fontFamily = fontFamily
         self.resolveTheme = resolveTheme
         super.init(frame: .zero)
         wantsLayer = true
@@ -473,6 +478,13 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         fontSize = CGFloat(size)
         synchronizeGeometry()
     }
+
+    func setFontFamily(_ family: String?) {
+        guard family != fontFamily else { return }
+        fontFamily = family
+        synchronizeGeometry()
+    }
+
     func startSearch() {
         // Synchronous on purpose: `.searchStarted` is what creates the pane's
         // searchState and mounts the overlay, so it cannot wait on an engine round-trip.
@@ -659,7 +671,7 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         guard isTornDown == false,
               bounds.width > 0, bounds.height > 0,
               let scale = window?.backingScaleFactor,
-              let metrics = TerminalRenderMetrics(displayScale: scale, fontSize: fontSize),
+              let metrics = resolvedMetrics(displayScale: scale),
               let dimensions = terminalGridDimensions(
                   size: .init(width: Double(bounds.width), height: Double(bounds.height)),
                   cellSize: .init(
@@ -686,6 +698,26 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
             emitStateIfNeeded()
             needsDisplay = true
         }
+    }
+
+    /// Metrics for the configured family, falling back to the system monospace font
+    /// when that family yields none (I5).
+    ///
+    /// Passing the availability probe does not guarantee usable grid geometry -- a
+    /// face can be installed and still lack the nominal `M` glyph the cell box is
+    /// derived from. Without this retry `synchronizeGeometry` would bail, leaving a
+    /// new pane with no geometry and an existing pane frozen on its old grid.
+    private func resolvedMetrics(displayScale: CGFloat) -> TerminalRenderMetrics? {
+        if let fontFamily,
+           let metrics = TerminalRenderMetrics(
+               displayScale: displayScale,
+               fontSize: fontSize,
+               fontFamily: fontFamily
+           )
+        {
+            return metrics
+        }
+        return TerminalRenderMetrics(displayScale: displayScale, fontSize: fontSize)
     }
 
     private func applyResolvedTheme(_ theme: RenderTheme) {

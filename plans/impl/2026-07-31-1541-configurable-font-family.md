@@ -282,7 +282,7 @@ states. The pure projection tests cannot prove this AppKit wiring.
       config-path move + CLI CoreText link
 - [x] 3. Model contract: `resolvedFontFamily` and the single resolve-and-apply
       path through launch, reload, and save (I4)
-- [ ] 4. Render the resolved family end to end, including the system-monospace
+- [x] 4. Render the resolved family end to end, including the system-monospace
       metrics fallback (I3, I5)
 - [ ] 5. Preferences installed-family combo box + inline warning
 - [ ] 6. `danterm doctor` config-font check + `SKILL.md` update
@@ -319,3 +319,36 @@ states. The pure projection tests cannot prove this AppKit wiring.
   contract. Until commit 4 consumes it, a family-only change makes
   `reconcilePaneConfig` re-push the (unchanged) theme and font size -- both
   idempotent.
+
+- **Commit 4:** the I5 fallback lives in the session view, not in
+  `TerminalRenderMetrics`. Metrics keep their single meaning ("this face cannot
+  produce a usable grid") and return nil; the view is the layer that knows a
+  second attempt is available, and it is also where the "existing pane frozen on
+  its old grid" symptom would appear. Folding the retry into the initializer
+  would have made a nil return unreachable and quietly changed what every
+  existing caller's nil means.
+
+- **Commit 4:** `test-ui.sh` compiles a hand-listed subset of sources and was
+  already broken before this slice -- commit 2 put `resolveInstalledFontFamily`
+  in Support but only added `DanTermConfigPaths.swift` to the list, so
+  `DanTermConfigStore.swift` no longer compiled there. `just test-ui` is outside
+  the `just test` gate, so nothing caught it. Adding `FontAvailability.swift` to
+  the list is the minimal repair, and it was a prerequisite for running this
+  slice's own harness.
+
+- **Commit 4:** the I5 harness drives its unusable face through a named sentinel
+  family on the UI shim's `TerminalRenderMetrics` rather than the `symbolsFontURL`
+  seam the plan suggested. The shim already substitutes for the real metrics type
+  in that harness, so a sentinel name is the seam that is actually reachable there;
+  `symbolsFontURL` is an initializer parameter of the real type, which the UI tests
+  never construct. The plan's actual requirement -- no dependence on a particular
+  font being installed on the test machine -- holds either way.
+
+## Follow Up
+
+- A restore commits `model = staged.model` (`app/AppRuntime.swift#commitRestoreSession`),
+  and `AppModel.config` / `resolvedFontFamily` are both ephemeral, so a restored
+  session drops the on-disk config back to `.default` until the next config apply.
+  This predates the font work -- theme and `font.size` are affected identically --
+  but the font family now rides the same path. Worth deciding whether restore
+  should re-apply the launch config instead of inheriting the snapshot's defaults.

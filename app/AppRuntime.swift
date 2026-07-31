@@ -510,7 +510,8 @@ class AppRuntime {
                 themeName: model.pane(paneId).map {
                     effectiveTheme(for: $0, config: model.config)
                 },
-                fontSize: model.config.resolvedFontSize
+                fontSize: model.config.resolvedFontSize,
+                fontFamily: model.resolvedFontFamily
             ) else {
                 send(.surfaceCreationFailed(paneId: paneId))
                 break
@@ -1251,7 +1252,8 @@ class AppRuntime {
                             themeName: loaded.model.pane(paneId).map {
                                 effectiveTheme(for: $0, config: loaded.model.config)
                             },
-                            fontSize: loaded.model.config.resolvedFontSize
+                            fontSize: loaded.model.config.resolvedFontSize,
+                            fontFamily: loaded.model.resolvedFontFamily
                         ) else {
                             throw RestoreBuildError.surfaceCreationFailed
                         }
@@ -1350,7 +1352,8 @@ class AppRuntime {
         waitAfterCommand: Bool,
         envVars: [(String, String)],
         themeName: String?,
-        fontSize: Double
+        fontSize: Double,
+        fontFamily: String?
     ) -> (any TerminalSession)? {
         let request = TerminalSessionRequest(
             workingDirectory: workingDirectory,
@@ -1359,7 +1362,8 @@ class AppRuntime {
             waitAfterCommand: waitAfterCommand,
             environment: envVars,
             themeName: themeName,
-            fontSize: fontSize
+            fontSize: fontSize,
+            fontFamily: fontFamily
         )
         guard let session = terminalBackend.createSession(request) else { return nil }
         session.onEvent = { [weak self] event in

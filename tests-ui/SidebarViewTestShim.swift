@@ -67,6 +67,7 @@ class TerminalView: NSView, TerminalSession {
     func applyTheme(_ themeName: String) {}
     func clearTheme() {}
     func setFontSize(_ size: Double) {}
+    func setFontFamily(_ family: String?) {}
     func startSearch() {}
     func setSearchNeedle(_ needle: String) {}
     func navigateSearch(_ direction: SearchDirection) {}

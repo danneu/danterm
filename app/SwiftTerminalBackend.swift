@@ -85,13 +85,18 @@ final class SwiftTerminalBackend: TerminalBackend {
         return SwiftTerminalSessionView(
             controller: controller,
             fontSize: request.fontSize,
+            fontFamily: request.fontFamily,
             onSessionEnded: { [weak self, weak controller] result in
                 guard case .exited = result, let self, let controller else { return }
                 self.writeRecording(from: controller, id: id)
             }
         )
         #else
-        return SwiftTerminalSessionView(controller: controller, fontSize: request.fontSize)
+        return SwiftTerminalSessionView(
+            controller: controller,
+            fontSize: request.fontSize,
+            fontFamily: request.fontFamily
+        )
         #endif
     }
 

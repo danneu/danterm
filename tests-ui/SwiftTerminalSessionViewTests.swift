@@ -77,6 +77,63 @@ func swiftTerminalSessionViewTests() {
         try uiExpect(pane.state.cellHeight == 32, "live font change did not update cell metrics")
     }
 
+    uiTest("font family updates live cell metrics and resizes the PTY grid") {
+        // Intent: a resolved family handed to a live pane re-derives cell geometry and
+        //   the grid the child process is told about.
+        // Why it exists: the family reaches panes the same way the font size does, so
+        //   without this the reconciler could push a family that never leaves the view.
+        // Scenario: spec-first -- the user picks a new font family in Preferences and
+        //   saves; open panes must repaint on the new grid with no reload.
+        let controller = TerminalPaneSessionController()
+        let pane = SwiftTerminalSessionView(controller: controller, fontSize: 13)
+        pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
+        mountInTestWindow(pane, frame: pane.frame)
+
+        pane.setFontFamily(TerminalRenderMetrics.wideFamily)
+
+        try uiExpect(controller.gridDimensions.last == TerminalDimensions(columns: 6, rows: 12),
+                     "live family change did not resize the PTY grid")
+    }
+
+    uiTest("a family without usable metrics falls back to system monospace") {
+        // Intent: a family that passes availability but cannot yield grid metrics still
+        //   leaves the pane with valid metrics and grid dimensions, both at creation and
+        //   on a live change away from a working family.
+        // Why it exists: I5 -- synchronizeGeometry used to bail outright on nil metrics,
+        //   which would leave a newly created pane with no geometry at all and freeze an
+        //   existing pane on the grid it already had, with no way back short of a restart.
+        // Scenario: spec-first -- an installed but degenerate face named in config.
+        let created = TerminalPaneSessionController()
+        let createdPane = SwiftTerminalSessionView(
+            controller: created,
+            fontSize: 13,
+            fontFamily: TerminalRenderMetrics.unusableFamily
+        )
+        createdPane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
+        mountInTestWindow(createdPane, frame: createdPane.frame)
+
+        try uiExpect(created.gridDimensions.last == TerminalDimensions(columns: 12, rows: 12),
+                     "an unusable configured family left a new pane without geometry")
+        try uiExpect(createdPane.state.cellHeight == 16,
+                     "an unusable configured family left a new pane without cell metrics")
+
+        let live = TerminalPaneSessionController()
+        let livePane = SwiftTerminalSessionView(
+            controller: live,
+            fontSize: 13,
+            fontFamily: TerminalRenderMetrics.wideFamily
+        )
+        livePane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
+        mountInTestWindow(livePane, frame: livePane.frame)
+        try uiExpect(live.gridDimensions.last == TerminalDimensions(columns: 6, rows: 12),
+                     "the working family did not size the grid before the fallback case")
+
+        livePane.setFontFamily(TerminalRenderMetrics.unusableFamily)
+
+        try uiExpect(live.gridDimensions.last == TerminalDimensions(columns: 12, rows: 12),
+                     "an unusable family froze an existing pane on its old grid")
+    }
+
     uiTest("initial theme fills before draw and the retained first plan publishes on mount") {
         // Intent: the view paints themed chrome immediately and adopts the controller's first plan.
         // Why it exists: waiting for child output creates a dark flash on restore and split inheritance.

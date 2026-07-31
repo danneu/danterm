@@ -92,11 +92,22 @@ struct TerminalDimensions: Equatable {
 }
 
 struct TerminalRenderMetrics: Equatable {
+    /// A family that would pass an availability probe yet yields no usable cell
+    /// geometry -- the real metrics refuse a face with no nominal `M` glyph, or one
+    /// whose cell box cannot be pixel-quantized. Naming the case here keeps the I5
+    /// fallback harness off any particular font being installed on the test machine.
+    static let unusableFamily = "DanTermTestUnusableFace"
+
+    /// A family with double-width cells, so a live family change is observable in the
+    /// grid the view reports rather than only in metrics the harness cannot see.
+    static let wideFamily = "DanTermTestWideFace"
+
     let cellSize: CGSize
 
-    init?(displayScale: CGFloat, fontSize: CGFloat = 13) {
-        guard displayScale > 0, fontSize > 0 else { return nil }
-        cellSize = CGSize(width: 8 * fontSize / 13, height: 16 * fontSize / 13)
+    init?(displayScale: CGFloat, fontSize: CGFloat = 13, fontFamily: String? = nil) {
+        guard displayScale > 0, fontSize > 0, fontFamily != Self.unusableFamily else { return nil }
+        let widthFactor: CGFloat = fontFamily == Self.wideFamily ? 2 : 1
+        cellSize = CGSize(width: 8 * widthFactor * fontSize / 13, height: 16 * fontSize / 13)
     }
 }
 

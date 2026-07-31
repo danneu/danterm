@@ -62,6 +62,8 @@ struct TerminalSessionRequest {
     let environment: [(String, String)]
     let themeName: String?
     let fontSize: Double
+    /// The verified-installed family, or nil for the system monospace font (I3).
+    let fontFamily: String?
 }
 
 /// Stable per-pane terminal owner mounted and reparented by the AppKit reconciler.
@@ -90,6 +92,7 @@ protocol TerminalSession: AnyObject {
     func applyTheme(_ themeName: String)
     func clearTheme()
     func setFontSize(_ size: Double)
+    func setFontFamily(_ family: String?)
     func startSearch()
     func setSearchNeedle(_ needle: String)
     func navigateSearch(_ direction: SearchDirection)

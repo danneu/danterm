@@ -1,5 +1,6 @@
 // Behavioral proofs for display-scale metrics, its styled font set, and
 // overflow-safe frame sizing.
+import AppKit
 import CoreGraphics
 import CoreText
 import Testing
@@ -19,6 +20,65 @@ struct RenderMetricsTests {
         #expect(largerMetrics.cellSize.height > defaultMetrics.cellSize.height)
         for size in [0, -1, .nan, .infinity] as [CGFloat] {
             #expect(TerminalRenderMetrics(displayScale: 2, fontSize: size) == nil)
+        }
+    }
+
+    @Test("An absent font family is the system-monospace path, unchanged")
+    func absentFontFamilyKeepsTheSystemMonospacePath() throws {
+        // Intent: omitting `fontFamily` and passing an explicit nil build the same
+        //   metrics, and both stay on the system monospace face.
+        // Why it exists: every existing caller omits the new parameter, so the
+        //   default must be provably the old behavior rather than merely similar
+        //   to it -- a config with no `font.family` key has to render byte-identically
+        //   to the build before the family was configurable.
+        // Scenario: spec-first -- a user who never sets `font.family` at all.
+        let implicit = try #require(TerminalRenderMetrics(displayScale: 2))
+        let explicitNil = try #require(TerminalRenderMetrics(displayScale: 2, fontFamily: nil))
+
+        #expect(implicit == explicitNil)
+        #expect(implicit.fonts == explicitNil.fonts)
+        #expect(
+            explicitNil.baseFontName
+                == NSFont.monospacedSystemFont(ofSize: 13, weight: .regular).fontName
+        )
+    }
+
+    @Test("A named family builds that family's faces with usable whole-pixel cells")
+    func namedFamilyBuildsThatFamily() throws {
+        // Intent: a resolved family reaches the faces a draw reads, and the cell
+        //   geometry derived from it is still whole-pixel and positive.
+        // Why it exists: `CTFontCreateWithName` silently substitutes a last-resort
+        //   face for a name it cannot match, so "the metrics were built" proves
+        //   nothing on its own -- the family on the resulting face is the only
+        //   evidence that the configured font is what the terminal will draw.
+        // Scenario: spec-first -- a user sets `"font": {"family": "Menlo"}`.
+        //   Menlo ships with every macOS, so the case needs no test fixture font.
+        let menlo = try #require(TerminalRenderMetrics(displayScale: 2, fontFamily: "Menlo"))
+        let systemMonospace = try #require(TerminalRenderMetrics(displayScale: 2))
+
+        #expect(CTFontCopyFamilyName(menlo.fonts.regular.font) as String == "Menlo")
+        #expect(menlo != systemMonospace)
+        #expect(menlo.cellWidthPixels > 0)
+        #expect(menlo.cellHeightPixels > 0)
+        #expect(menlo.cellSize.width * 2 == CGFloat(menlo.cellWidthPixels))
+        #expect(menlo.cellSize.height * 2 == CGFloat(menlo.cellHeightPixels))
+    }
+
+    @Test("Bold and italic still derive from the named family")
+    func namedFamilyStillDerivesStyledFaces() throws {
+        // Intent: choosing a family sets only the base face; the styled faces are
+        //   still derived from it by trait.
+        // Why it exists: I3 -- the schema deliberately has no per-style families, so
+        //   the render layer must keep synthesizing bold and italic off whatever base
+        //   family it was handed rather than treating the configured name as final.
+        // Scenario: spec-first -- terminal output mixes styles under a custom family.
+        let metrics = try #require(TerminalRenderMetrics(displayScale: 2, fontFamily: "Menlo"))
+        let fonts = metrics.fonts
+
+        #expect(CTFontGetSymbolicTraits(fonts.bold.font).contains(.boldTrait))
+        #expect(CTFontGetSymbolicTraits(fonts.italic.font).contains(.italicTrait))
+        for font in [fonts.regular.font, fonts.bold.font, fonts.italic.font, fonts.boldItalic.font] {
+            #expect(CTFontCopyFamilyName(font) as String == "Menlo")
         }
     }
 

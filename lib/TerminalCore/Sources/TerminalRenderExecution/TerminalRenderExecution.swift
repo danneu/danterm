@@ -5,8 +5,9 @@ import CoreText
 import TerminalRenderPlanning
 import TerminalSpriteGeometry
 
-/// Fixes the regular 13 pt system-monospace grid geometry for one explicit
-/// display scale so later font choices cannot move terminal cell boundaries.
+/// Fixes the grid geometry of one regular face -- the system monospace font, or a
+/// caller-supplied family -- at one explicit size and display scale, so later font
+/// choices cannot move terminal cell boundaries mid-frame.
 public struct TerminalRenderMetrics: Equatable, Sendable {
     /// The caller-provided point-to-backing-pixel scale.
     public let displayScale: CGFloat
@@ -40,21 +41,38 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
     let unquantizedLineHeight: CGFloat
 
     /// Returns nil when scale or any derived cell dimension cannot be represented safely.
-    public init?(displayScale: CGFloat, fontSize: CGFloat = 13) {
+    ///
+    /// `fontFamily` is the family the caller has already verified is installed, or
+    /// nil for the system monospace font. The metrics layer takes the name on
+    /// trust -- `CTFontCreateWithName` substitutes a last-resort face rather than
+    /// failing, so an unverified name would render proportionally with no signal.
+    /// Passing the check is still not a guarantee of usable geometry, hence the
+    /// existing nil return: a face without a nominal `M` glyph, or one whose cell
+    /// box cannot be pixel-quantized, is refused here and the caller falls back.
+    public init?(displayScale: CGFloat, fontSize: CGFloat = 13, fontFamily: String? = nil) {
         self.init(
             displayScale: displayScale,
             fontSize: fontSize,
+            fontFamily: fontFamily,
             symbolsFontURL: NerdFontSymbolsResource.packagedURL()
         )
     }
 
     /// Test seam for proving that an absent packaged symbols face preserves the old path.
-    init?(displayScale: CGFloat, fontSize: CGFloat = 13, symbolsFontURL: URL?) {
+    init?(
+        displayScale: CGFloat,
+        fontSize: CGFloat = 13,
+        fontFamily: String? = nil,
+        symbolsFontURL: URL?
+    ) {
         guard displayScale.isFinite, displayScale > 0,
               fontSize.isFinite, fontSize > 0
         else { return nil }
-        let appKitFont = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        let font = CTFontCreateWithName(appKitFont.fontName as CFString, fontSize, nil)
+        // Only the base face comes from the configured family; bold and italic are
+        // still derived by trait below, since the schema carries no per-style names.
+        let baseName = fontFamily
+            ?? NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular).fontName
+        let font = CTFontCreateWithName(baseName as CFString, fontSize, nil)
         var character = UniChar(0x004D)
         var glyph = CGGlyph()
         guard CTFontGetGlyphsForCharacters(font, &character, &glyph, 1) else { return nil }
@@ -101,12 +119,12 @@ public struct TerminalRenderMetrics: Equatable, Sendable {
             thicknessPixels: underlinePixels
         )
         self.fonts = TerminalFontSet(
-            baseName: appKitFont.fontName,
+            baseName: baseName,
             baseSize: fontSize,
             symbolsFontURL: symbolsFontURL,
             symbolsSize: self.cellSize.width
         )
-        self.baseFontName = appKitFont.fontName
+        self.baseFontName = baseName
         self.baseFontSize = fontSize
         self.unquantizedLineHeight = lineHeight
     }
