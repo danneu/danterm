@@ -52,6 +52,8 @@ test:
     ./scripts/tests/terminal-exit-concurrency-lint_test.sh
     ./scripts/terminal-fence-accounting-lint.sh
     ./scripts/tests/terminal-fence-accounting-lint_test.sh
+    ./scripts/research-index-lint.sh
+    ./scripts/tests/research-index-lint_test.sh
     ./scripts/tests/terminal-capture-api-gate_test.sh
     ./scripts/tests/load-ghostty-version_test.sh
     ./scripts/tests/build-lib-stale-guard_test.sh
