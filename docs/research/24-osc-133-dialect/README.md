@@ -34,7 +34,12 @@ reflow or how the prompt block is treated on resize.
   the evidence.
 - A claim about a shell is checked in a real PTY with a real shell binary, and
   records the shell version and how much user config was loaded. A shell behavior
-  quoted from Ghostty's integration is a lead, not evidence.
+  quoted from Ghostty's integration is a lead, not evidence. Shell source is now
+  local and pinned at the versions measured here -- `references/fish-shell`,
+  `references/zsh`, `references/bash` via `just fetch-references` -- so cite it
+  as `file#identifier` rather than an installed store path, and treat it the
+  same way: it explains a measurement or picks the next probe, never replaces
+  one.
 - The dialect may only use marks the shipping parser already accepts. If a mark
   the dialect wants is not accepted, that is a parser change with its own plan --
   record it here and stop, rather than authoring bytes nothing consumes.

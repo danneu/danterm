@@ -282,7 +282,10 @@ Evidence for the OSC 133 dialect. Parser probes feed
 - Date and investigator: 2026-07-31, R1.
 - Commands, inputs, or reproduction: `grep -rn handle_reflow` across the
   installed fish share tree (`.../fish-4.7.1/share/fish`), then a read of
-  `share/fish/functions/__fish_config_interactive.fish`.
+  `share/fish/functions/__fish_config_interactive.fish`. Now citable in the
+  pinned checkout instead: `references/fish-shell/` at fish 4.7.1, whose
+  `share/functions/__fish_config_interactive.fish#__fish_config_interactive` was
+  verified byte-identical to the installed copy quoted below.
 - Measurements or examples: the variable appears in `completions/set.fish`
   ("if fish should repaint prompt when the term resizes"), in the man pages, and
   live in `__fish_config_interactive.fish#__fish_config_interactive`, which ends
@@ -398,7 +401,9 @@ Evidence for the OSC 133 dialect. Parser probes feed
 - Status: settled.
 - Date and investigator: 2026-07-31, R1.
 - Commit and worktree state: `c2ec7a4`, working tree clean of engine changes.
-- Commands, inputs, or reproduction: `scratchpad/xtversion_probe.py` -- interactive
+- Result or artifact paths: [xtversion-probe.py](xtversion-probe.py), promoted
+  out of the scratchpad so this finding stays reproducible.
+- Commands, inputs, or reproduction: that script -- interactive
   fish 4.7.1 (`fish -i`, config loaded; **not** `-N`, the F6 artifact) over a
   `pty.fork()` PTY with `XDG_CONFIG_HOME` pointed at a nonexistent directory and
   `VTE_VERSION`/`KONSOLE_VERSION` cleared. The harness answers fish's startup
