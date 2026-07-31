@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#073642",
+    "#dc322f",
+    "#859900",
+    "#b58900",
+    "#268bd2",
+    "#d33682",
+    "#2aa198",
+    "#bbb5a2",
+    "#002b36",
+    "#cb4b16",
+    "#586e75",
+    "#657b83",
+    "#839496",
+    "#6c71c4",
+    "#93a1a1",
+    "#fdf6e3"
+  ],
+  "background": "#fdf6e3",
+  "cursor": "#657b83",
+  "cursorText": "#eee8d5",
+  "foreground": "#657b83",
+  "name": "iTerm2 Solarized Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#eee8d5",
+  "selectionForeground": "#586e75"
+}

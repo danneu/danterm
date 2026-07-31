@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#242728",
+    "#ff0090",
+    "#b6ff00",
+    "#fff727",
+    "#47e0fb",
+    "#d731ff",
+    "#0effbb",
+    "#e1e1e1",
+    "#636667",
+    "#fb58b4",
+    "#deff8c",
+    "#ebe087",
+    "#7fecff",
+    "#e681ff",
+    "#69fcd3",
+    "#f9f9f5"
+  ],
+  "background": "#242728",
+  "cursor": "#c1c1c1",
+  "cursorText": "#ffffff",
+  "foreground": "#c1c1c1",
+  "name": "Ultra Violent",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#574c49",
+  "selectionForeground": "#c3c7cb"
+}

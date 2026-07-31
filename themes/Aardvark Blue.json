@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#191919",
+    "#aa342e",
+    "#4b8c0f",
+    "#dbba00",
+    "#1370d3",
+    "#c43ac3",
+    "#008eb0",
+    "#bebebe",
+    "#525252",
+    "#f05b50",
+    "#95dc55",
+    "#ffe763",
+    "#60a4ec",
+    "#e26be2",
+    "#60b6cb",
+    "#f7f7f7"
+  ],
+  "background": "#102040",
+  "cursor": "#007acc",
+  "cursorText": "#bfdbfe",
+  "foreground": "#dddddd",
+  "name": "Aardvark Blue",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#bfdbfe",
+  "selectionForeground": "#000000"
+}

@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#1b1d1e",
+    "#f92672",
+    "#4df840",
+    "#f4fd22",
+    "#2757d6",
+    "#8c54fe",
+    "#38c8b5",
+    "#ccccc6",
+    "#505354",
+    "#ff5995",
+    "#b6e354",
+    "#feed6c",
+    "#3f78ff",
+    "#9e6ffe",
+    "#23cfd5",
+    "#f8f8f2"
+  ],
+  "background": "#1b1d1e",
+  "cursor": "#fc971f",
+  "cursorText": "#000000",
+  "foreground": "#f8f8f8",
+  "name": "Thayer Bright",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#4d4d4d",
+  "selectionForeground": "#ffffff"
+}

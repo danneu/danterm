@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#d6d6d6",
+    "#874e42",
+    "#677940",
+    "#b89058",
+    "#8ba1bf",
+    "#aa759f",
+    "#3e5f66",
+    "#151515",
+    "#2b2b2b",
+    "#637786",
+    "#677940",
+    "#b89058",
+    "#93a2ab",
+    "#aa759f",
+    "#99ab93",
+    "#373737"
+  ],
+  "background": "#e1e1e1",
+  "cursor": "#151515",
+  "cursorText": "#d0d0d0",
+  "foreground": "#151515",
+  "name": "No Clown Fiesta Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#c6d5de",
+  "selectionForeground": "#151515"
+}

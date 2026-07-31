@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#43454b",
+    "#ff8a7a",
+    "#83c9bc",
+    "#d9c668",
+    "#4ec4e6",
+    "#ff85b8",
+    "#cda1ff",
+    "#ffffff",
+    "#838991",
+    "#ff8a7a",
+    "#b1faeb",
+    "#ffa14f",
+    "#6bdfff",
+    "#ff85b8",
+    "#e5cfff",
+    "#ffffff"
+  ],
+  "background": "#1f1f24",
+  "cursor": "#ffffff",
+  "cursorText": "#1f1f24",
+  "foreground": "#ffffff",
+  "name": "Xcode Dark hc",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#43454b",
+  "selectionForeground": "#ffffff"
+}

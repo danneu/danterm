@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#13a10e",
+    "#13a10e",
+    "#13a10e",
+    "#13a10e",
+    "#13a10e",
+    "#13a10e",
+    "#13a10e",
+    "#13a10e",
+    "#16ba10",
+    "#16ba10",
+    "#16ba10",
+    "#16ba10",
+    "#16ba10",
+    "#16ba10",
+    "#16ba10",
+    "#16ba10"
+  ],
+  "background": "#000000",
+  "cursor": "#13a10e",
+  "cursorText": "#000000",
+  "foreground": "#13a10e",
+  "name": "Retro",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#ffffff",
+  "selectionForeground": "#000000"
+}

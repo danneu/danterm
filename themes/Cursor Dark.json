@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#2a2a2a",
+    "#bf616a",
+    "#a3be8c",
+    "#ebcb8b",
+    "#81a1c1",
+    "#b48ead",
+    "#88c0d0",
+    "#d8dee9",
+    "#505050",
+    "#bf616a",
+    "#a3be8c",
+    "#ebcb8b",
+    "#81a1c1",
+    "#b48ead",
+    "#88c0d0",
+    "#ffffff"
+  ],
+  "background": "#141414",
+  "cursor": "#ffffff",
+  "cursorText": "#141414",
+  "foreground": "#ffffff",
+  "name": "Cursor Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#303030",
+  "selectionForeground": "#ffffff"
+}

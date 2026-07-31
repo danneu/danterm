@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#2e3440",
+    "#cb4f53",
+    "#48a53d",
+    "#ee5e25",
+    "#3879c5",
+    "#9f4aca",
+    "#3ea1ad",
+    "#b2b6bd",
+    "#646a76",
+    "#d16366",
+    "#5f9e9d",
+    "#ba793e",
+    "#1b40a6",
+    "#9665af",
+    "#8fbcbb",
+    "#eceff4"
+  ],
+  "background": "#f7f8fa",
+  "cursor": "#3879c5",
+  "cursorText": "#f7f8fa",
+  "foreground": "#2e3440",
+  "name": "Onenord Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#eaebed",
+  "selectionForeground": "#000000"
+}

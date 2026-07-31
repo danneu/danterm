@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#b64c00",
+    "#7c8b16",
+    "#d3bd26",
+    "#616bb0",
+    "#8c5a90",
+    "#916c25",
+    "#cac29a",
+    "#5e5219",
+    "#ff9149",
+    "#b2ca3b",
+    "#ffe54a",
+    "#acb8ff",
+    "#ffa0ff",
+    "#ffbc51",
+    "#fed698"
+  ],
+  "background": "#1d1908",
+  "cursor": "#d3ba30",
+  "cursorText": "#fffc7d",
+  "foreground": "#cac296",
+  "name": "Medallion",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#626dac",
+  "selectionForeground": "#cac29a"
+}

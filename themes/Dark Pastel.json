@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#ff5555",
+    "#55ff55",
+    "#ffff55",
+    "#5555ff",
+    "#ff55ff",
+    "#55ffff",
+    "#bbbbbb",
+    "#555555",
+    "#ff5555",
+    "#55ff55",
+    "#ffff55",
+    "#5555ff",
+    "#ff55ff",
+    "#55ffff",
+    "#ffffff"
+  ],
+  "background": "#000000",
+  "cursor": "#bbbbbb",
+  "cursorText": "#ffffff",
+  "foreground": "#ffffff",
+  "name": "Dark Pastel",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#b5d5ff",
+  "selectionForeground": "#000000"
+}

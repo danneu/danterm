@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#08002e",
+    "#7e1a46",
+    "#5d731a",
+    "#cd751c",
+    "#1d6da1",
+    "#b7077e",
+    "#42a38c",
+    "#f3e0b8",
+    "#4c3866",
+    "#d02063",
+    "#b4ce59",
+    "#fac357",
+    "#40a4cf",
+    "#f12aae",
+    "#62caa8",
+    "#fff5db"
+  ],
+  "background": "#0e0d15",
+  "cursor": "#bbbbbb",
+  "cursorText": "#ffffff",
+  "foreground": "#dbd1b9",
+  "name": "Floraverse",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#f3e0b8",
+  "selectionForeground": "#08002e"
+}

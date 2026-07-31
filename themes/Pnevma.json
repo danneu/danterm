@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#2f2e2d",
+    "#a36666",
+    "#90a57d",
+    "#d7af87",
+    "#7fa5bd",
+    "#c79ec4",
+    "#8adbb4",
+    "#d0d0d0",
+    "#4a4845",
+    "#d78787",
+    "#afbea2",
+    "#e4c9af",
+    "#a1bdce",
+    "#d7beda",
+    "#b1e7dd",
+    "#efefef"
+  ],
+  "background": "#1c1c1c",
+  "cursor": "#e4c9af",
+  "cursorText": "#000000",
+  "foreground": "#d0d0d0",
+  "name": "Pnevma",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#4d4d4d",
+  "selectionForeground": "#ffffff"
+}

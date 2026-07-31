@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#161616",
+    "#00dfdb",
+    "#00b4ff",
+    "#ff4297",
+    "#00c15a",
+    "#c693ff",
+    "#ff74b8",
+    "#f2f4f8",
+    "#585858",
+    "#00dfdb",
+    "#00b4ff",
+    "#ff4297",
+    "#00c15a",
+    "#c693ff",
+    "#ff74b8",
+    "#f2f4f8"
+  ],
+  "background": "#161616",
+  "cursor": "#ffffff",
+  "cursorText": "#000000",
+  "foreground": "#f2f4f8",
+  "name": "Oxocarbon",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#393939",
+  "selectionForeground": "#626262"
+}

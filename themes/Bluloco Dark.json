@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#41444d",
+    "#fc2f52",
+    "#25a45c",
+    "#ff936a",
+    "#3476ff",
+    "#7a82da",
+    "#4483aa",
+    "#cdd4e0",
+    "#8f9aae",
+    "#ff6480",
+    "#3fc56b",
+    "#f9c859",
+    "#10b1fe",
+    "#ff78f8",
+    "#5fb9bc",
+    "#ffffff"
+  ],
+  "background": "#282c34",
+  "cursor": "#ffcc00",
+  "cursorText": "#282c34",
+  "foreground": "#b9c0cb",
+  "name": "Bluloco Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#b9c0ca",
+  "selectionForeground": "#272b33"
+}

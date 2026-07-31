@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#ff3045",
+    "#5ffa74",
+    "#fffc7e",
+    "#0f15d8",
+    "#f924e7",
+    "#00fffc",
+    "#c7c7c7",
+    "#686868",
+    "#ff5a5a",
+    "#75ff88",
+    "#fffd96",
+    "#3c40cb",
+    "#f15be5",
+    "#88fffe",
+    "#ffffff"
+  ],
+  "background": "#14161a",
+  "cursor": "#c7c7c7",
+  "cursorText": "#8c8c8c",
+  "foreground": "#00fffc",
+  "name": "Neon",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#0013ff",
+  "selectionForeground": "#08d2cf"
+}

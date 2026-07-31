@@ -21,6 +21,10 @@ fetch-references *args:
 build-lib:
     ./build-lib.sh
 
+# Refresh DanTerm's tracked JSON themes from the catalog bundled by pinned Ghostty.
+update-themes:
+    python3 ./scripts/import-ghostty-themes.py
+
 # Compile Icon Composer .icon files into Assets.car
 build-icons:
     ./icon/gen-dev-icon.sh
@@ -78,6 +82,7 @@ test:
     python3 ./scripts/tests/terminal_profile_report_test.py
     python3 ./scripts/tests/terminal_memory_profile_test.py
     python3 ./scripts/tests/fetch_references_test.py
+    python3 ./scripts/tests/import_ghostty_themes_test.py
     ./scripts/tests/test-terminal-pty_test.sh
     ./scripts/tests/shell-integration_test.sh
     ./scripts/tests/agent-notifications-live_test.py

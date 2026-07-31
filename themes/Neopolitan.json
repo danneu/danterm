@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#9a1a1a",
+    "#61ce3c",
+    "#fbde2d",
+    "#324883",
+    "#ff0080",
+    "#8da6ce",
+    "#f8f8f8",
+    "#4c4c4c",
+    "#9a1a1a",
+    "#61ce3c",
+    "#fbde2d",
+    "#324883",
+    "#ff0080",
+    "#8da6ce",
+    "#f8f8f8"
+  ],
+  "background": "#271f19",
+  "cursor": "#ffffff",
+  "cursorText": "#bfbfbf",
+  "foreground": "#ffffff",
+  "name": "Neopolitan",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#253b76",
+  "selectionForeground": "#ffffff"
+}

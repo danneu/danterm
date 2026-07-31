@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#e9e1db",
+    "#c77b8b",
+    "#6e9b72",
+    "#bc5c00",
+    "#7892bd",
+    "#be79bb",
+    "#739797",
+    "#7d6658",
+    "#a98a78",
+    "#bf0021",
+    "#3a684a",
+    "#a06d00",
+    "#465aa4",
+    "#904180",
+    "#3d6568",
+    "#54433a"
+  ],
+  "background": "#f1f1f1",
+  "cursor": "#54433a",
+  "cursorText": "#f1f1f1",
+  "foreground": "#54433a",
+  "name": "Melange Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#54433a",
+  "selectionForeground": "#d9d3ce"
+}

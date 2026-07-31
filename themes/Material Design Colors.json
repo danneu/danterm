@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#435b67",
+    "#fc3841",
+    "#5cf19e",
+    "#fed032",
+    "#37b6ff",
+    "#fc226e",
+    "#59ffd1",
+    "#ffffff",
+    "#a1b0b8",
+    "#fc746d",
+    "#adf7be",
+    "#fee16c",
+    "#70cfff",
+    "#fc669b",
+    "#9affe6",
+    "#ffffff"
+  ],
+  "background": "#1d262a",
+  "cursor": "#eaeaea",
+  "cursorText": "#000000",
+  "foreground": "#e7ebed",
+  "name": "Material Design Colors",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#4e6a78",
+  "selectionForeground": "#e7ebed"
+}

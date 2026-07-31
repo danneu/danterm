@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#1d1a1e",
+    "#ff5b82",
+    "#47d7a1",
+    "#e8e562",
+    "#5db4ee",
+    "#da6cda",
+    "#57e9eb",
+    "#ededed",
+    "#504d51",
+    "#ff5b82",
+    "#47d7a1",
+    "#e8e562",
+    "#5db4ee",
+    "#da6cda",
+    "#57e9eb",
+    "#ededed"
+  ],
+  "background": "#1d1a1e",
+  "cursor": "#c7c7c7",
+  "cursorText": "#8c8c8c",
+  "foreground": "#efecec",
+  "name": "Kolorit",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#e1925c",
+  "selectionForeground": "#1d1a1e"
+}

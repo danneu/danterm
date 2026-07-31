@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#1a1a1a",
+    "#f4005f",
+    "#98e024",
+    "#fd971f",
+    "#9d65ff",
+    "#f4005f",
+    "#58d1eb",
+    "#c4c5b5",
+    "#625e4c",
+    "#f4005f",
+    "#98e024",
+    "#e0d561",
+    "#9d65ff",
+    "#f4005f",
+    "#58d1eb",
+    "#f6f6ef"
+  ],
+  "background": "#0c0c0c",
+  "cursor": "#fc971f",
+  "cursorText": "#000000",
+  "foreground": "#d9d9d9",
+  "name": "Monokai Remastered",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#343434",
+  "selectionForeground": "#ffffff"
+}

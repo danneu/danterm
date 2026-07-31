@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#ff6c6b",
+    "#98be65",
+    "#ecbe7b",
+    "#a9a1e1",
+    "#c678dd",
+    "#51afef",
+    "#bbc2cf",
+    "#595959",
+    "#ff6655",
+    "#99bb66",
+    "#ecbe7b",
+    "#a9a1e1",
+    "#c678dd",
+    "#51afef",
+    "#bfbfbf"
+  ],
+  "background": "#282c34",
+  "cursor": "#51afef",
+  "cursorText": "#1b1b1b",
+  "foreground": "#bbc2cf",
+  "name": "Doom One",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#42444b",
+  "selectionForeground": "#bbc2cf"
+}

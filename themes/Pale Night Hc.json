@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#f07178",
+    "#c3e88d",
+    "#ffcb6b",
+    "#82aaff",
+    "#c792ea",
+    "#89ddff",
+    "#ffffff",
+    "#737373",
+    "#f6a9ae",
+    "#dbf1ba",
+    "#ffdfa6",
+    "#b4ccff",
+    "#ddbdf2",
+    "#b8eaff",
+    "#999999"
+  ],
+  "background": "#3e4251",
+  "cursor": "#ffcb6b",
+  "cursorText": "#323232",
+  "foreground": "#cccccc",
+  "name": "Pale Night Hc",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#717cb4",
+  "selectionForeground": "#80cbc4"
+}

@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#1d1d1d",
+    "#cda074",
+    "#9e744d",
+    "#fecf75",
+    "#7f0e0f",
+    "#734c4d",
+    "#979797",
+    "#ffffce",
+    "#404040",
+    "#fecea0",
+    "#cc734d",
+    "#fd9f4d",
+    "#cb4a05",
+    "#4e739f",
+    "#fed04d",
+    "#ffffff"
+  ],
+  "background": "#000000",
+  "cursor": "#bbbbbb",
+  "cursorText": "#ffffff",
+  "foreground": "#ffffce",
+  "name": "Fahrenheit",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#4e739f",
+  "selectionForeground": "#ffffce"
+}

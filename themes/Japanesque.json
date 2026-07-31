@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#343935",
+    "#cf3f61",
+    "#7bb75b",
+    "#e9b32a",
+    "#4c9ad4",
+    "#a57fc4",
+    "#389aad",
+    "#fafaf6",
+    "#595b59",
+    "#d18fa6",
+    "#767f2c",
+    "#78592f",
+    "#135979",
+    "#604291",
+    "#76bbca",
+    "#b2b5ae"
+  ],
+  "background": "#1e1e1e",
+  "cursor": "#edcf4f",
+  "cursorText": "#343935",
+  "foreground": "#f7f6ec",
+  "name": "Japanesque",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#175877",
+  "selectionForeground": "#f7f6ec"
+}

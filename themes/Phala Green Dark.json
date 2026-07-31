@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#ab1500",
+    "#00b100",
+    "#a9a700",
+    "#0223c0",
+    "#c22ec0",
+    "#00b4c0",
+    "#cbcbcb",
+    "#797979",
+    "#ed2200",
+    "#00db00",
+    "#eae700",
+    "#0433ff",
+    "#ed3aea",
+    "#00e8ea",
+    "#eaeaea"
+  ],
+  "background": "#000000",
+  "cursor": "#c1fc03",
+  "cursorText": "#ff271d",
+  "foreground": "#c1fc03",
+  "name": "Phala Green Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#014804",
+  "selectionForeground": "#ffffff"
+}

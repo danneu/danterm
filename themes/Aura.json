@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#110f18",
+    "#ff6767",
+    "#61ffca",
+    "#ffca85",
+    "#a277ff",
+    "#a277ff",
+    "#61ffca",
+    "#edecee",
+    "#4d4d4d",
+    "#ffca85",
+    "#a277ff",
+    "#ffca85",
+    "#a277ff",
+    "#a277ff",
+    "#61ffca",
+    "#edecee"
+  ],
+  "background": "#15141b",
+  "cursor": "#a277ff",
+  "cursorText": "#edecee",
+  "foreground": "#edecee",
+  "name": "Aura",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#a277ff",
+  "selectionForeground": "#edecee"
+}

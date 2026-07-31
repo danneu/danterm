@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#b4d8fd",
+    "#ad1805",
+    "#355d61",
+    "#78492a",
+    "#0058a1",
+    "#9c2191",
+    "#703daa",
+    "#000000",
+    "#8a99a6",
+    "#ad1805",
+    "#174145",
+    "#78492a",
+    "#003f73",
+    "#9c2191",
+    "#441ea1",
+    "#000000"
+  ],
+  "background": "#ffffff",
+  "cursor": "#000000",
+  "cursorText": "#ffffff",
+  "foreground": "#000000",
+  "name": "Xcode Light hc",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#b4d8fd",
+  "selectionForeground": "#000000"
+}

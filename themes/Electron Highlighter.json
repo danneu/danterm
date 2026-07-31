@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#15161f",
+    "#ff6c8d",
+    "#00ffc3",
+    "#ffd7a9",
+    "#77abff",
+    "#daa4f4",
+    "#00fdff",
+    "#778faf",
+    "#4a6789",
+    "#ff6c8d",
+    "#00ffc3",
+    "#ffd7a9",
+    "#77abff",
+    "#daa4f4",
+    "#00fdff",
+    "#c3cee2"
+  ],
+  "background": "#23283d",
+  "cursor": "#a5b6d4",
+  "cursorText": "#1a1b27",
+  "foreground": "#a5b6d4",
+  "name": "Electron Highlighter",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#25345a",
+  "selectionForeground": "#a5b6d4"
+}

@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#ac2e31",
+    "#31ac61",
+    "#ac4300",
+    "#2d57ac",
+    "#b08528",
+    "#1fa6ac",
+    "#8a8eac",
+    "#684432",
+    "#ff3d48",
+    "#3bff99",
+    "#ff5e1e",
+    "#4488ff",
+    "#ffc21d",
+    "#1ffaff",
+    "#5b6ea7"
+  ],
+  "background": "#222125",
+  "cursor": "#5b6ea7",
+  "cursorText": "#2a292d",
+  "foreground": "#8a8dae",
+  "name": "Ollie",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#1e3a66",
+  "selectionForeground": "#8a8eac"
+}

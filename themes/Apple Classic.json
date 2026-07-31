@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#c91b00",
+    "#00c200",
+    "#c7c400",
+    "#1c3fe1",
+    "#ca30c7",
+    "#00c5c7",
+    "#c7c7c7",
+    "#686868",
+    "#ff6e67",
+    "#5ffa68",
+    "#fffc67",
+    "#6871ff",
+    "#ff77ff",
+    "#60fdff",
+    "#ffffff"
+  ],
+  "background": "#2c2b2b",
+  "cursor": "#c7c7c7",
+  "cursorText": "#8c8c8c",
+  "foreground": "#d5a200",
+  "name": "Apple Classic",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#6b5b02",
+  "selectionForeground": "#67e000"
+}

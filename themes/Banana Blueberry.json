@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#17141f",
+    "#ff6b7f",
+    "#00bd9c",
+    "#e6c62f",
+    "#22e8df",
+    "#dc396a",
+    "#56b6c2",
+    "#f1f1f1",
+    "#495162",
+    "#fe9ea1",
+    "#98c379",
+    "#f9e46b",
+    "#91fff4",
+    "#da70d6",
+    "#bcf3ff",
+    "#ffffff"
+  ],
+  "background": "#191323",
+  "cursor": "#e07d13",
+  "cursorText": "#ffffff",
+  "foreground": "#cccccc",
+  "name": "Banana Blueberry",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#220525",
+  "selectionForeground": "#f4f4f4"
+}

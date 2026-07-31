@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#685742",
+    "#cc967b",
+    "#97976d",
+    "#6c9861",
+    "#b5955e",
+    "#c9a554",
+    "#d7c483",
+    "#b5955e",
+    "#75644f",
+    "#cc967b",
+    "#97976d",
+    "#6c9861",
+    "#b5955e",
+    "#c9a554",
+    "#d7c483",
+    "#b5955e"
+  ],
+  "background": "#34392d",
+  "cursor": "#d7c483",
+  "cursorText": "#141415",
+  "foreground": "#f4d2ae",
+  "name": "Tearout",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#e4c47a",
+  "selectionForeground": "#000000"
+}

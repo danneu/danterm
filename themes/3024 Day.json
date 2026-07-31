@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#090300",
+    "#db2d20",
+    "#01a252",
+    "#caba00",
+    "#01a0e4",
+    "#a16a94",
+    "#8fbece",
+    "#a5a2a2",
+    "#5c5855",
+    "#dbaec3",
+    "#3a3432",
+    "#4a4543",
+    "#807d7c",
+    "#bcbbba",
+    "#cdab53",
+    "#f7f7f7"
+  ],
+  "background": "#f7f7f7",
+  "cursor": "#4a4543",
+  "cursorText": "#f7f7f7",
+  "foreground": "#4a4543",
+  "name": "3024 Day",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#a5a2a2",
+  "selectionForeground": "#4a4543"
+}

@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#1f2842",
+    "#985248",
+    "#577159",
+    "#be6b00",
+    "#3a577d",
+    "#7c5c97",
+    "#925780",
+    "#b0b5c5",
+    "#1f2842",
+    "#cc4a35",
+    "#719679",
+    "#f1a527",
+    "#6089c0",
+    "#7d7396",
+    "#aa869d",
+    "#d6dbeb"
+  ],
+  "background": "#f8f9fb",
+  "cursor": "#226c4f",
+  "cursorText": "#d6dbeb",
+  "foreground": "#3b4a7a",
+  "name": "Havn Daggry",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#cfe9dd",
+  "selectionForeground": "#313c64"
+}

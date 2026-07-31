@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#1b1d1e",
+    "#269d1b",
+    "#13ce30",
+    "#63e457",
+    "#2525f5",
+    "#712c81",
+    "#378ca9",
+    "#d9d8d1",
+    "#505354",
+    "#8dff2a",
+    "#48ff77",
+    "#3afe16",
+    "#506b95",
+    "#72589d",
+    "#4085a6",
+    "#e5e6e1"
+  ],
+  "background": "#1b1d1e",
+  "cursor": "#16b61b",
+  "cursorText": "#000000",
+  "foreground": "#b5b5b5",
+  "name": "The Hulk",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#4d504c",
+  "selectionForeground": "#31892f"
+}

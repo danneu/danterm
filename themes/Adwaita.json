@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#241f31",
+    "#c01c28",
+    "#2ec27e",
+    "#e8b504",
+    "#1e78e4",
+    "#9841bb",
+    "#0ab9dc",
+    "#c0bfbc",
+    "#5e5c64",
+    "#ed333b",
+    "#4ad67c",
+    "#d2be36",
+    "#51a1ff",
+    "#c061cb",
+    "#4fd2fd",
+    "#f6f5f4"
+  ],
+  "background": "#ffffff",
+  "cursor": "#000000",
+  "cursorText": "#ffffff",
+  "foreground": "#000000",
+  "name": "Adwaita",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#c0bfbc",
+  "selectionForeground": "#000000"
+}

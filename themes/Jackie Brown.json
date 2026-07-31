@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#2c1d16",
+    "#ef5734",
+    "#2baf2b",
+    "#bebf00",
+    "#246eb2",
+    "#d05ec1",
+    "#00acee",
+    "#bfbfbf",
+    "#666666",
+    "#e50000",
+    "#86a93e",
+    "#e5e500",
+    "#0000ff",
+    "#e500e5",
+    "#00e5e5",
+    "#e5e5e5"
+  ],
+  "background": "#2c1d16",
+  "cursor": "#23ff18",
+  "cursorText": "#ff0018",
+  "foreground": "#ffcc2f",
+  "name": "Jackie Brown",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#af8d21",
+  "selectionForeground": "#ffffff"
+}

@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#ff615a",
+    "#b1e969",
+    "#ebd99c",
+    "#5da9f6",
+    "#e86aff",
+    "#82fff7",
+    "#dedacf",
+    "#4a4a4a",
+    "#f58c80",
+    "#ddf88f",
+    "#eee5b2",
+    "#a5c7ff",
+    "#ddaaff",
+    "#b7fff9",
+    "#ffffff"
+  ],
+  "background": "#171717",
+  "cursor": "#bbbbbb",
+  "cursorText": "#ffffff",
+  "foreground": "#dedacf",
+  "name": "Wombat",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#453b39",
+  "selectionForeground": "#b6bbc0"
+}

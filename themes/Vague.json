@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#252530",
+    "#d8647e",
+    "#7fa563",
+    "#f3be7c",
+    "#6e94b2",
+    "#bb9dbd",
+    "#aeaed1",
+    "#cdcdcd",
+    "#606079",
+    "#e08398",
+    "#99b782",
+    "#f5cb96",
+    "#8ba9c1",
+    "#c9b1ca",
+    "#bebeda",
+    "#d7d7d7"
+  ],
+  "background": "#141415",
+  "cursor": "#cdcdcd",
+  "cursorText": "#141415",
+  "foreground": "#cdcdcd",
+  "name": "Vague",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#252530",
+  "selectionForeground": "#cdcdcd"
+}

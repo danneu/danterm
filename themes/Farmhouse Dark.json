@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#1d2027",
+    "#ba0004",
+    "#549d00",
+    "#c87300",
+    "#0049e6",
+    "#9f1b61",
+    "#1fb65c",
+    "#e8e4e1",
+    "#464d54",
+    "#eb0009",
+    "#7ac100",
+    "#ea9a00",
+    "#006efe",
+    "#bf3b7f",
+    "#19e062",
+    "#f4eef0"
+  ],
+  "background": "#1d2027",
+  "cursor": "#006efe",
+  "cursorText": "#e8e4e1",
+  "foreground": "#e8e4e1",
+  "name": "Farmhouse Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#4d5658",
+  "selectionForeground": "#b3b1aa"
+}

@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#302c2c",
+    "#5a5a5a",
+    "#989898",
+    "#cacaca",
+    "#656565",
+    "#b1b1b1",
+    "#7f7f7f",
+    "#dedede",
+    "#5d595b",
+    "#da5b2c",
+    "#989898",
+    "#cacaca",
+    "#656565",
+    "#b1b1b1",
+    "#7f7f7f",
+    "#ffffff"
+  ],
+  "background": "#2f2b2c",
+  "cursor": "#dedede",
+  "cursorText": "#2f2b2c",
+  "foreground": "#dedede",
+  "name": "owl",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#dedede",
+  "selectionForeground": "#2f2b2c"
+}

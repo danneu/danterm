@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#cc5555",
+    "#55cc55",
+    "#cdcd55",
+    "#5555cc",
+    "#cc55cc",
+    "#7acaca",
+    "#cccccc",
+    "#555555",
+    "#ff5555",
+    "#55ff55",
+    "#ffff55",
+    "#5555ff",
+    "#ff55ff",
+    "#55ffff",
+    "#ffffff"
+  ],
+  "background": "#000000",
+  "cursor": "#53ae71",
+  "cursorText": "#000000",
+  "foreground": "#b3b3b3",
+  "name": "Wez",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#4d52f8",
+  "selectionForeground": "#000000"
+}

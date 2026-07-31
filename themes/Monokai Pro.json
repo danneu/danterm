@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#2d2a2e",
+    "#ff6188",
+    "#a9dc76",
+    "#ffd866",
+    "#fc9867",
+    "#ab9df2",
+    "#78dce8",
+    "#fcfcfa",
+    "#727072",
+    "#ff6188",
+    "#a9dc76",
+    "#ffd866",
+    "#fc9867",
+    "#ab9df2",
+    "#78dce8",
+    "#fcfcfa"
+  ],
+  "background": "#2d2a2e",
+  "cursor": "#c1c0c0",
+  "cursorText": "#8e8d8d",
+  "foreground": "#fcfcfa",
+  "name": "Monokai Pro",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#5b595c",
+  "selectionForeground": "#fcfcfa"
+}

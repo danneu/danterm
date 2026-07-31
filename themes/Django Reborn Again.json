@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#fd6209",
+    "#41a83e",
+    "#ffe862",
+    "#245032",
+    "#f8f8f8",
+    "#9df39f",
+    "#ffffff",
+    "#4c4c4c",
+    "#ff943b",
+    "#73da70",
+    "#ffff94",
+    "#568264",
+    "#ffffff",
+    "#cfffd1",
+    "#ffffff"
+  ],
+  "background": "#051f14",
+  "cursor": "#ffcc00",
+  "cursorText": "#9a9e9c",
+  "foreground": "#dadedc",
+  "name": "Django Reborn Again",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#203727",
+  "selectionForeground": "#dadedc"
+}

@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#162c35",
+    "#ec5f67",
+    "#99c794",
+    "#fac863",
+    "#6699cc",
+    "#c594c5",
+    "#5fb3b3",
+    "#ffffff",
+    "#65737e",
+    "#ec5f67",
+    "#99c794",
+    "#fac863",
+    "#6699cc",
+    "#c594c5",
+    "#5fb3b3",
+    "#ffffff"
+  ],
+  "background": "#162c35",
+  "cursor": "#c0c5ce",
+  "cursorText": "#1b2b34",
+  "foreground": "#c0c5ce",
+  "name": "Oceanic Next",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#4f5b66",
+  "selectionForeground": "#c0c5ce"
+}

@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#35241c",
+    "#c2562d",
+    "#96a65e",
+    "#d29b5a",
+    "#3b8e8c",
+    "#c47e5b",
+    "#639a90",
+    "#cfc1a9",
+    "#564a45",
+    "#c2562d",
+    "#96a65e",
+    "#d29b5a",
+    "#3b8e8c",
+    "#c47e5b",
+    "#639a90",
+    "#cfc1a9"
+  ],
+  "background": "#32221a",
+  "cursor": "#cfc1a9",
+  "cursorText": "#32221a",
+  "foreground": "#cfc1a9",
+  "name": "branch",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#cfc1a9",
+  "selectionForeground": "#32221a"
+}

@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#b12424",
+    "#006b4f",
+    "#f8a300",
+    "#138af2",
+    "#9a1b6e",
+    "#3eb8bf",
+    "#bfbfbf",
+    "#000000",
+    "#b12424",
+    "#006b4f",
+    "#f8a300",
+    "#138af2",
+    "#9a1b6e",
+    "#3eb8bf",
+    "#ffffff"
+  ],
+  "background": "#ffffff",
+  "cursor": "#000000",
+  "cursorText": "#404040",
+  "foreground": "#000000",
+  "name": "Raycast Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#e5e5e5",
+  "selectionForeground": "#000000"
+}

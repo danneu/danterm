@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#cc0000",
+    "#00a600",
+    "#999900",
+    "#0000b2",
+    "#b200b2",
+    "#00a6b2",
+    "#b2b2b2",
+    "#666666",
+    "#e50000",
+    "#00cc00",
+    "#bfbf00",
+    "#0000ff",
+    "#e500e5",
+    "#00cbcb",
+    "#e5e5e5"
+  ],
+  "background": "#fef49c",
+  "cursor": "#7f7f7f",
+  "cursorText": "#000000",
+  "foreground": "#000000",
+  "name": "Man Page",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#a4c9cd",
+  "selectionForeground": "#000000"
+}

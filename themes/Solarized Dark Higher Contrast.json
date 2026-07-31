@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#002831",
+    "#d11c24",
+    "#6cbe6c",
+    "#a57706",
+    "#2176c7",
+    "#c61c6f",
+    "#259286",
+    "#eae3cb",
+    "#006488",
+    "#f5163b",
+    "#51ef84",
+    "#b27e28",
+    "#178ec8",
+    "#e24d8e",
+    "#00b39e",
+    "#fcf4dc"
+  ],
+  "background": "#001e27",
+  "cursor": "#f34b00",
+  "cursorText": "#002831",
+  "foreground": "#9cc2c3",
+  "name": "Solarized Dark Higher Contrast",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#003748",
+  "selectionForeground": "#7a8f8e"
+}

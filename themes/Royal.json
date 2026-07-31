@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#241f2b",
+    "#91284c",
+    "#23801c",
+    "#b49d27",
+    "#6580b0",
+    "#674d96",
+    "#8aaabe",
+    "#524966",
+    "#3e3a4a",
+    "#d5356c",
+    "#2cd946",
+    "#fde83b",
+    "#90baf9",
+    "#a479e3",
+    "#acd4eb",
+    "#9e8cbd"
+  ],
+  "background": "#100815",
+  "cursor": "#524966",
+  "cursorText": "#100613",
+  "foreground": "#514968",
+  "name": "Royal",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#1f1d2b",
+  "selectionForeground": "#a593cd"
+}

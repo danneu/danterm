@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#20111b",
+    "#be100e",
+    "#858162",
+    "#d08b30",
+    "#426a79",
+    "#97522c",
+    "#989a9c",
+    "#968c83",
+    "#5e5252",
+    "#be100e",
+    "#858162",
+    "#d08b30",
+    "#426a79",
+    "#97522c",
+    "#989a9c",
+    "#d5ccba"
+  ],
+  "background": "#d5ccba",
+  "cursor": "#45373c",
+  "cursorText": "#d5ccba",
+  "foreground": "#45373c",
+  "name": "Belafonte Day",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#968c83",
+  "selectionForeground": "#45373c"
+}

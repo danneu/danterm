@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#1a1a1a",
+    "#cc372e",
+    "#26a439",
+    "#cdac08",
+    "#0869cb",
+    "#9647bf",
+    "#479ec2",
+    "#98989d",
+    "#464646",
+    "#ff453a",
+    "#32d74b",
+    "#ffd60a",
+    "#0a84ff",
+    "#bf5af2",
+    "#76d6ff",
+    "#ffffff"
+  ],
+  "background": "#1e1e1e",
+  "cursor": "#98989d",
+  "cursorText": "#ffffff",
+  "foreground": "#ffffff",
+  "name": "Apple System Colors",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#3f638b",
+  "selectionForeground": "#ffffff"
+}

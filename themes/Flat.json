@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#222d3f",
+    "#a82320",
+    "#32a548",
+    "#e58d11",
+    "#3167ac",
+    "#781aa0",
+    "#2c9370",
+    "#b0b6ba",
+    "#475262",
+    "#d4312e",
+    "#2d9440",
+    "#e5be0c",
+    "#3c7dd2",
+    "#8230a7",
+    "#35b387",
+    "#e7eced"
+  ],
+  "background": "#002240",
+  "cursor": "#e5be0c",
+  "cursorText": "#ffffff",
+  "foreground": "#2cc55d",
+  "name": "Flat",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#792b9c",
+  "selectionForeground": "#ffffff"
+}

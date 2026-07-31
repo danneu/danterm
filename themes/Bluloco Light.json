@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#373a41",
+    "#d52753",
+    "#23974a",
+    "#df631c",
+    "#275fe4",
+    "#823ff1",
+    "#27618d",
+    "#babbc2",
+    "#676a77",
+    "#ff6480",
+    "#3cbc66",
+    "#c5a332",
+    "#0099e1",
+    "#ce33c0",
+    "#6d93bb",
+    "#d3d3d3"
+  ],
+  "background": "#f9f9f9",
+  "cursor": "#f32759",
+  "cursorText": "#ffffff",
+  "foreground": "#373a41",
+  "name": "Bluloco Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#daf0ff",
+  "selectionForeground": "#373a41"
+}

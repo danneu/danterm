@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#322931",
+    "#dd464c",
+    "#8fc13e",
+    "#fdcc59",
+    "#1290bf",
+    "#c85e7c",
+    "#149b93",
+    "#b9b5b8",
+    "#797379",
+    "#fd8b19",
+    "#5c545c",
+    "#5c545b",
+    "#989498",
+    "#d5d3d5",
+    "#b33508",
+    "#ffffff"
+  ],
+  "background": "#322931",
+  "cursor": "#b9b5b8",
+  "cursorText": "#322931",
+  "foreground": "#b9b5b8",
+  "name": "Hopscotch",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#5c545b",
+  "selectionForeground": "#b9b5b8"
+}

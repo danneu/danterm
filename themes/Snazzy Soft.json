@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#ff5c57",
+    "#5af78e",
+    "#f3f99d",
+    "#57c7ff",
+    "#ff6ac1",
+    "#9aedfe",
+    "#f1f1f0",
+    "#686868",
+    "#ff5c57",
+    "#5af78e",
+    "#f3f99d",
+    "#57c7ff",
+    "#ff6ac1",
+    "#9aedfe",
+    "#f1f1f0"
+  ],
+  "background": "#282a36",
+  "cursor": "#eaeaea",
+  "cursorText": "#282a36",
+  "foreground": "#eff0eb",
+  "name": "Snazzy Soft",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#92bcd0",
+  "selectionForeground": "#000000"
+}

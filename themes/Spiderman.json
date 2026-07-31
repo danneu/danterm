@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#1b1d1e",
+    "#e60813",
+    "#e22928",
+    "#e24756",
+    "#2c3fff",
+    "#2435db",
+    "#3256ff",
+    "#fffef6",
+    "#505354",
+    "#ff0325",
+    "#ff3338",
+    "#fe3a35",
+    "#1d50ff",
+    "#747cff",
+    "#6184ff",
+    "#fffff9"
+  ],
+  "background": "#1b1d1e",
+  "cursor": "#2c3fff",
+  "cursorText": "#000000",
+  "foreground": "#e3e3e3",
+  "name": "Spiderman",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#070e50",
+  "selectionForeground": "#f0272d"
+}

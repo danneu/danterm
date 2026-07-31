@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#3e3e3e",
+    "#970b16",
+    "#07962a",
+    "#c5bb94",
+    "#003e8a",
+    "#e94691",
+    "#7cc4df",
+    "#b2b2b2",
+    "#666666",
+    "#de0000",
+    "#7ac895",
+    "#d7b600",
+    "#2e6cba",
+    "#f29592",
+    "#00c7cb",
+    "#ffffff"
+  ],
+  "background": "#f4f4f4",
+  "cursor": "#3f3f3f",
+  "cursorText": "#f4f4f4",
+  "foreground": "#3e3e3e",
+  "name": "GitHub",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#a9c1e2",
+  "selectionForeground": "#535353"
+}

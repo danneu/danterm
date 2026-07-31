@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#1d1d19",
+    "#f18339",
+    "#9fd364",
+    "#f4ef6d",
+    "#5096be",
+    "#695abc",
+    "#d63865",
+    "#ffffff",
+    "#50504c",
+    "#d22a24",
+    "#a7d42c",
+    "#ff8949",
+    "#61b9d0",
+    "#695abc",
+    "#d63865",
+    "#ffffff"
+  ],
+  "background": "#1d1f21",
+  "cursor": "#708284",
+  "cursorText": "#002831",
+  "foreground": "#b8dbef",
+  "name": "Flatland",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#2b2a24",
+  "selectionForeground": "#ffffff"
+}

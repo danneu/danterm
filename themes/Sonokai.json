@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#181819",
+    "#fc5d7c",
+    "#9ed072",
+    "#e7c664",
+    "#76cce0",
+    "#b39df3",
+    "#f39660",
+    "#e2e2e3",
+    "#7f8490",
+    "#fc5d7c",
+    "#9ed072",
+    "#e7c664",
+    "#76cce0",
+    "#b39df3",
+    "#f39660",
+    "#e2e2e3"
+  ],
+  "background": "#2c2e34",
+  "cursor": "#e2e2e3",
+  "cursorText": "#2c2e34",
+  "foreground": "#e2e2e3",
+  "name": "Sonokai",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#414550",
+  "selectionForeground": "#e2e2e3"
+}

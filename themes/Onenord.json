@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#3b4252",
+    "#e06c75",
+    "#9ec183",
+    "#ebcb8b",
+    "#81a1c1",
+    "#b988b0",
+    "#88c0d0",
+    "#e5e9f0",
+    "#596377",
+    "#e06c75",
+    "#9ec183",
+    "#ebcb8b",
+    "#81a1c1",
+    "#b988b0",
+    "#8fbcbb",
+    "#eceff4"
+  ],
+  "background": "#2e3440",
+  "cursor": "#81a1c1",
+  "cursorText": "#3b4252",
+  "foreground": "#e5e9f0",
+  "name": "Onenord",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#434c5e",
+  "selectionForeground": "#d8dee9"
+}

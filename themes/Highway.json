@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#d00e18",
+    "#138034",
+    "#ffcb3e",
+    "#006bb3",
+    "#783482",
+    "#455271",
+    "#ededed",
+    "#5d504a",
+    "#f07e18",
+    "#b1d130",
+    "#fff120",
+    "#4fc2fd",
+    "#de0071",
+    "#5d504a",
+    "#ffffff"
+  ],
+  "background": "#222225",
+  "cursor": "#e0d9b9",
+  "cursorText": "#1f192a",
+  "foreground": "#ededed",
+  "name": "Highway",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#384564",
+  "selectionForeground": "#ededed"
+}

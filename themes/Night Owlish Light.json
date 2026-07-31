@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#011627",
+    "#d3423e",
+    "#2aa298",
+    "#daaa01",
+    "#4876d6",
+    "#403f53",
+    "#08916a",
+    "#7a8181",
+    "#7a8181",
+    "#f76e6e",
+    "#49d0c5",
+    "#dac26b",
+    "#5ca7e4",
+    "#697098",
+    "#00c990",
+    "#989fb1"
+  ],
+  "background": "#ffffff",
+  "cursor": "#403f53",
+  "cursorText": "#fbfbfb",
+  "foreground": "#403f53",
+  "name": "Night Owlish Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#f2f2f2",
+  "selectionForeground": "#403f53"
+}

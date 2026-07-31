@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#202020",
+    "#8c3432",
+    "#728271",
+    "#e8bf6a",
+    "#69819e",
+    "#896492",
+    "#5b8390",
+    "#b9aa99",
+    "#676767",
+    "#b55242",
+    "#869985",
+    "#ebeb91",
+    "#60827e",
+    "#de4974",
+    "#38add8",
+    "#d6bfb8"
+  ],
+  "background": "#222222",
+  "cursor": "#c2b790",
+  "cursorText": "#202020",
+  "foreground": "#c2b790",
+  "name": "Red Planet",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#1b324a",
+  "selectionForeground": "#bcb291"
+}

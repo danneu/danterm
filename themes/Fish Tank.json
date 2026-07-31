@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#03073c",
+    "#c6004a",
+    "#acf157",
+    "#fecd5e",
+    "#525fb8",
+    "#986f82",
+    "#968763",
+    "#ecf0fc",
+    "#6c5b30",
+    "#da4b8a",
+    "#dbffa9",
+    "#fee6a9",
+    "#b2befa",
+    "#fda5cd",
+    "#a5bd86",
+    "#f6ffec"
+  ],
+  "background": "#232537",
+  "cursor": "#fecd5e",
+  "cursorText": "#232537",
+  "foreground": "#ecf0fe",
+  "name": "Fish Tank",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#fcf7e9",
+  "selectionForeground": "#232537"
+}

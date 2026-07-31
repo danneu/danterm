@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#5f8787",
+    "#eceee3",
+    "#974b46",
+    "#888888",
+    "#999999",
+    "#aaaaaa",
+    "#c1c1c1",
+    "#404040",
+    "#5f8787",
+    "#eceee3",
+    "#974b46",
+    "#888888",
+    "#999999",
+    "#aaaaaa",
+    "#c1c1c1"
+  ],
+  "background": "#000000",
+  "cursor": "#c1c1c1",
+  "cursorText": "#8e8e8e",
+  "foreground": "#c1c1c1",
+  "name": "Black Metal (Khold)",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#c1c1c1",
+  "selectionForeground": "#000000"
+}

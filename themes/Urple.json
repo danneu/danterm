@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#b0425b",
+    "#37a415",
+    "#ad5c42",
+    "#564d9b",
+    "#6c3ca1",
+    "#808080",
+    "#87799c",
+    "#6a3f32",
+    "#ff6388",
+    "#29e620",
+    "#f08161",
+    "#867aed",
+    "#a05eee",
+    "#eaeaea",
+    "#bfa3ff"
+  ],
+  "background": "#1b1b23",
+  "cursor": "#a063eb",
+  "cursorText": "#1b1b22",
+  "foreground": "#877a9b",
+  "name": "Urple",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#a063eb",
+  "selectionForeground": "#1b1b22"
+}

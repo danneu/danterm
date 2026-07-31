@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#323d47",
+    "#ff657a",
+    "#8cc98f",
+    "#ffc64c",
+    "#409dd4",
+    "#cba3c7",
+    "#37b5b4",
+    "#d7deea",
+    "#62747f",
+    "#e47e8b",
+    "#baddbb",
+    "#ffdc91",
+    "#7ac0eb",
+    "#f3ccef",
+    "#84e4e3",
+    "#ffffff"
+  ],
+  "background": "#0b1c24",
+  "cursor": "#37b5b4",
+  "cursorText": "#ffffff",
+  "foreground": "#d7deea",
+  "name": "Cobalt Next Minimal",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#37b5b4",
+  "selectionForeground": "#ffffff"
+}

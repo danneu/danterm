@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#352c24",
+    "#a5222f",
+    "#396847",
+    "#ac5402",
+    "#2848a9",
+    "#6e33ce",
+    "#287980",
+    "#bfb6ae",
+    "#534c45",
+    "#b3434e",
+    "#577f63",
+    "#b86e28",
+    "#4863b6",
+    "#8452d5",
+    "#488d93",
+    "#f4ece6"
+  ],
+  "background": "#f6f2ee",
+  "cursor": "#3d2b5a",
+  "cursorText": "#f6f2ee",
+  "foreground": "#3d2b5a",
+  "name": "Dayfox",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#e7d2be",
+  "selectionForeground": "#3d2b5a"
+}

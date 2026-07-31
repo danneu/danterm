@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#111147",
+    "#5ca8dc",
+    "#53b397",
+    "#249a84",
+    "#db7ddd",
+    "#d0beee",
+    "#f9f3f9",
+    "#a175d4",
+    "#44447a",
+    "#5cb5dc",
+    "#52deb5",
+    "#01f5c7",
+    "#fa5dfd",
+    "#c6a5fd",
+    "#ffffff",
+    "#b577fd"
+  ],
+  "background": "#111147",
+  "cursor": "#53b397",
+  "cursorText": "#93f3d7",
+  "foreground": "#db7ddd",
+  "name": "Sugarplum",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#5ca8dc",
+  "selectionForeground": "#ead8ff"
+}

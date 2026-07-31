@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#0c0c0c",
+    "#a80f20",
+    "#c7ff98",
+    "#fff964",
+    "#145fcd",
+    "#ffe9ff",
+    "#9effef",
+    "#fcf1fb",
+    "#434343",
+    "#d91329",
+    "#d3ffaf",
+    "#ffef50",
+    "#0075ea",
+    "#ffefff",
+    "#93ffef",
+    "#fff3fe"
+  ],
+  "background": "#ff8cd9",
+  "cursor": "#c7ff98",
+  "cursorText": "#202020",
+  "foreground": "#0b0b0b",
+  "name": "Unikitty",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#3ea9fe",
+  "selectionForeground": "#ffffff"
+}

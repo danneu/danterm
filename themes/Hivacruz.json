@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#202746",
+    "#c94922",
+    "#ac9739",
+    "#c08b30",
+    "#3d8fd1",
+    "#6679cc",
+    "#22a2c9",
+    "#979db4",
+    "#6b7394",
+    "#c76b29",
+    "#73ad43",
+    "#5e6687",
+    "#898ea4",
+    "#dfe2f1",
+    "#9c637a",
+    "#f5f7ff"
+  ],
+  "background": "#132638",
+  "cursor": "#979db4",
+  "cursorText": "#202746",
+  "foreground": "#ede4e4",
+  "name": "Hivacruz",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#5e6687",
+  "selectionForeground": "#979db4"
+}

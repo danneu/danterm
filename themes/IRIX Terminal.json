@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#1a1919",
+    "#ff2b1e",
+    "#57ff3d",
+    "#ffff44",
+    "#0004ff",
+    "#ff2cff",
+    "#56ffff",
+    "#ffffff",
+    "#ffff44",
+    "#ffff44",
+    "#ffff44",
+    "#fffc72",
+    "#ffff44",
+    "#ffff44",
+    "#ffff44",
+    "#ffff44"
+  ],
+  "background": "#000043",
+  "cursor": "#c7c7c7",
+  "cursorText": "#8c8c8c",
+  "foreground": "#f2f2f2",
+  "name": "IRIX Terminal",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#c2deff",
+  "selectionForeground": "#000000"
+}

@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#454b58",
+    "#f74840",
+    "#25a343",
+    "#cc8100",
+    "#0087c1",
+    "#b50da9",
+    "#009ab7",
+    "#c5b2b3",
+    "#0e131f",
+    "#ff3711",
+    "#00b90e",
+    "#ec9900",
+    "#1065de",
+    "#e500d8",
+    "#00b4dd",
+    "#ffffff"
+  ],
+  "background": "#fafafa",
+  "cursor": "#1a1919",
+  "cursorText": "#dbdfe5",
+  "foreground": "#383a43",
+  "name": "One Double Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#454e5e",
+  "selectionForeground": "#1a1919"
+}

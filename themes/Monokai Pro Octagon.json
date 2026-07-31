@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#282a3a",
+    "#ff657a",
+    "#bad761",
+    "#ffd76d",
+    "#ff9b5e",
+    "#c39ac9",
+    "#9cd1bb",
+    "#eaf2f1",
+    "#696d77",
+    "#ff657a",
+    "#bad761",
+    "#ffd76d",
+    "#ff9b5e",
+    "#c39ac9",
+    "#9cd1bb",
+    "#eaf2f1"
+  ],
+  "background": "#282a3a",
+  "cursor": "#b2b9bd",
+  "cursorText": "#f2f9fd",
+  "foreground": "#eaf2f1",
+  "name": "Monokai Pro Octagon",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#535763",
+  "selectionForeground": "#eaf2f1"
+}

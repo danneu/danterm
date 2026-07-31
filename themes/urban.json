@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#33303b",
+    "#87404f",
+    "#74934e",
+    "#ae835a",
+    "#615772",
+    "#854b64",
+    "#625464",
+    "#c0a79a",
+    "#5c5865",
+    "#87404f",
+    "#74934e",
+    "#ae835a",
+    "#615772",
+    "#854b64",
+    "#625464",
+    "#c0a79a"
+  ],
+  "background": "#312e39",
+  "cursor": "#c0a79a",
+  "cursorText": "#312e39",
+  "foreground": "#c0a79a",
+  "name": "urban",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#c0a79a",
+  "selectionForeground": "#312e39"
+}

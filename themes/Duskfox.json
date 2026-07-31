@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#393552",
+    "#eb6f92",
+    "#a3be8c",
+    "#f6c177",
+    "#569fba",
+    "#c4a7e7",
+    "#9ccfd8",
+    "#e0def4",
+    "#544d8a",
+    "#f083a2",
+    "#b1d196",
+    "#f9cb8c",
+    "#65b1cd",
+    "#ccb1ed",
+    "#a6dae3",
+    "#e2e0f7"
+  ],
+  "background": "#232136",
+  "cursor": "#e0def4",
+  "cursorText": "#232136",
+  "foreground": "#e0def4",
+  "name": "Duskfox",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#433c59",
+  "selectionForeground": "#e0def4"
+}

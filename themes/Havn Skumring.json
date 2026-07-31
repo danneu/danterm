@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#252c47",
+    "#ea563e",
+    "#6ead7b",
+    "#f8b330",
+    "#596cf7",
+    "#7c719e",
+    "#d588c1",
+    "#dce0ee",
+    "#38425c",
+    "#d17264",
+    "#8c9e8f",
+    "#eac58c",
+    "#5186cb",
+    "#9b7cee",
+    "#d17ab6",
+    "#fff6e1"
+  ],
+  "background": "#111522",
+  "cursor": "#277a6f",
+  "cursorText": "#e0e4f3",
+  "foreground": "#d6dbeb",
+  "name": "Havn Skumring",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#2b514b",
+  "selectionForeground": "#dce0ef"
+}

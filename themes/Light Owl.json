@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#403f53",
+    "#de3d3b",
+    "#08916a",
+    "#e0af02",
+    "#288ed7",
+    "#d6438a",
+    "#2aa298",
+    "#bdbdbd",
+    "#989fb1",
+    "#de3d3b",
+    "#08916a",
+    "#daaa01",
+    "#288ed7",
+    "#d6438a",
+    "#2aa298",
+    "#f0f0f0"
+  ],
+  "background": "#fbfbfb",
+  "cursor": "#403f53",
+  "cursorText": "#f6f6f6",
+  "foreground": "#403f53",
+  "name": "Light Owl",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#e0e0e0",
+  "selectionForeground": "#403f53"
+}

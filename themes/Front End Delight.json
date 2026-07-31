@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#242526",
+    "#f8511b",
+    "#565747",
+    "#fa771d",
+    "#2c70b7",
+    "#f02e4f",
+    "#3ca1a6",
+    "#adadad",
+    "#5fac6d",
+    "#f74319",
+    "#74ec4c",
+    "#fdc325",
+    "#3393ca",
+    "#e75e4f",
+    "#4fbce6",
+    "#8c735b"
+  ],
+  "background": "#1b1c1d",
+  "cursor": "#cdcdcd",
+  "cursorText": "#1b1c1d",
+  "foreground": "#adadad",
+  "name": "Front End Delight",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#ea6154",
+  "selectionForeground": "#1b1c1d"
+}

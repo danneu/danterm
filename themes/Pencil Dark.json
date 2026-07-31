@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#212121",
+    "#c30771",
+    "#10a778",
+    "#a89c14",
+    "#008ec4",
+    "#5f4986",
+    "#20a5ba",
+    "#d9d9d9",
+    "#4f4f4f",
+    "#fb007a",
+    "#5fd7af",
+    "#f3e430",
+    "#20bbfc",
+    "#6855de",
+    "#4fb8cc",
+    "#f1f1f1"
+  ],
+  "background": "#212121",
+  "cursor": "#20bbfc",
+  "cursorText": "#f1f1f1",
+  "foreground": "#f1f1f1",
+  "name": "Pencil Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#b6d6fd",
+  "selectionForeground": "#989898"
+}

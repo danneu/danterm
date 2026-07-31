@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#25292a",
+    "#f24840",
+    "#629655",
+    "#b68800",
+    "#2075c7",
+    "#797fd4",
+    "#15968d",
+    "#d2d8d9",
+    "#65696a",
+    "#f24840",
+    "#629655",
+    "#b68800",
+    "#2075c7",
+    "#797fd4",
+    "#15968d",
+    "#d2d8d9"
+  ],
+  "background": "#3d3f41",
+  "cursor": "#708284",
+  "cursorText": "#002831",
+  "foreground": "#d2d8d9",
+  "name": "Solarized Darcula",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#214283",
+  "selectionForeground": "#d2d8d9"
+}

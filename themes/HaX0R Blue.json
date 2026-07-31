@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#010921",
+    "#10b6ff",
+    "#10b6ff",
+    "#10b6ff",
+    "#10b6ff",
+    "#10b6ff",
+    "#10b6ff",
+    "#fafafa",
+    "#484157",
+    "#00b3f7",
+    "#00b3f7",
+    "#00b3f7",
+    "#00b3f7",
+    "#00b3f7",
+    "#00b3f7",
+    "#fefefe"
+  ],
+  "background": "#010515",
+  "cursor": "#10b6ff",
+  "cursorText": "#ffffff",
+  "foreground": "#11b7ff",
+  "name": "HaX0R Blue",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#c1e4ff",
+  "selectionForeground": "#a9a9a9"
+}

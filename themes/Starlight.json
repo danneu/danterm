@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#242424",
+    "#f62b5a",
+    "#47b413",
+    "#e3c401",
+    "#24acd4",
+    "#f2affd",
+    "#13c299",
+    "#e6e6e6",
+    "#616161",
+    "#ff4d51",
+    "#35d450",
+    "#e9e836",
+    "#5dc5f8",
+    "#feabf2",
+    "#24dfc4",
+    "#ffffff"
+  ],
+  "background": "#242424",
+  "cursor": "#ffffff",
+  "cursorText": "#242424",
+  "foreground": "#ffffff",
+  "name": "Starlight",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#ffffff",
+  "selectionForeground": "#242424"
+}

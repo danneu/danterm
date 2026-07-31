@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#252b37",
+    "#d0679d",
+    "#5de4c7",
+    "#fffac2",
+    "#89ddff",
+    "#f087bd",
+    "#89ddff",
+    "#ffffff",
+    "#a6accd",
+    "#d0679d",
+    "#5de4c7",
+    "#fffac2",
+    "#add7ff",
+    "#f087bd",
+    "#add7ff",
+    "#ffffff"
+  ],
+  "background": "#252b37",
+  "cursor": "#ffffff",
+  "cursorText": "#252b37",
+  "foreground": "#a6accd",
+  "name": "Poimandres Storm",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#a6accd",
+  "selectionForeground": "#ffffff"
+}

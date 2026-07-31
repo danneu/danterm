@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#091013",
+    "#1a4831",
+    "#6fa64c",
+    "#595900",
+    "#00cb6b",
+    "#4e375a",
+    "#125459",
+    "#1a4833",
+    "#404040",
+    "#0d452a",
+    "#90d762",
+    "#e2e500",
+    "#00ff87",
+    "#4e375a",
+    "#176c73",
+    "#00381e"
+  ],
+  "background": "#070c0e",
+  "cursor": "#444733",
+  "cursorText": "#00ff87",
+  "foreground": "#35451a",
+  "name": "Darkermatrix",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#0f191c",
+  "selectionForeground": "#00ff87"
+}

@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#db4437",
+    "#0f9d58",
+    "#f4b400",
+    "#4285f4",
+    "#db4437",
+    "#4285f4",
+    "#bfbfbf",
+    "#000000",
+    "#db4437",
+    "#0f9d58",
+    "#f4b400",
+    "#4285f4",
+    "#4285f4",
+    "#0f9d58",
+    "#ffffff"
+  ],
+  "background": "#ffffff",
+  "cursor": "#000000",
+  "cursorText": "#ffffff",
+  "foreground": "#000000",
+  "name": "Primary",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#656565",
+  "selectionForeground": "#eeeeee"
+}

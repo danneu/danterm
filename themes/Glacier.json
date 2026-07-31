@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#2e343c",
+    "#bd0f2f",
+    "#35a770",
+    "#fb9435",
+    "#1f5872",
+    "#bd2523",
+    "#778397",
+    "#ffffff",
+    "#404a55",
+    "#bd0f2f",
+    "#49e998",
+    "#fddf6e",
+    "#2a8bc1",
+    "#ea4727",
+    "#a0b6d3",
+    "#ffffff"
+  ],
+  "background": "#0c1115",
+  "cursor": "#6c6c6c",
+  "cursorText": "#9f9f9f",
+  "foreground": "#ffffff",
+  "name": "Glacier",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#bd2523",
+  "selectionForeground": "#ffffff"
+}

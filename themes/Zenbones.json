@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#f0edec",
+    "#a8334c",
+    "#4f6c31",
+    "#944927",
+    "#286486",
+    "#88507d",
+    "#3b8992",
+    "#2c363c",
+    "#b5a7a0",
+    "#94253e",
+    "#3f5a22",
+    "#803d1c",
+    "#1d5573",
+    "#7b3b70",
+    "#2b747c",
+    "#4f5e68"
+  ],
+  "background": "#f0edec",
+  "cursor": "#2c363c",
+  "cursorText": "#f0edec",
+  "foreground": "#2c363c",
+  "name": "Zenbones",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#cbd9e3",
+  "selectionForeground": "#2c363c"
+}

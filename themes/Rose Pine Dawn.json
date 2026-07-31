@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#f2e9e1",
+    "#b4637a",
+    "#286983",
+    "#ea9d34",
+    "#56949f",
+    "#907aa9",
+    "#d7827e",
+    "#575279",
+    "#9893a5",
+    "#b4637a",
+    "#286983",
+    "#ea9d34",
+    "#56949f",
+    "#907aa9",
+    "#d7827e",
+    "#575279"
+  ],
+  "background": "#faf4ed",
+  "cursor": "#575279",
+  "cursorText": "#faf4ed",
+  "foreground": "#575279",
+  "name": "Rose Pine Dawn",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#dfdad9",
+  "selectionForeground": "#575279"
+}

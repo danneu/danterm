@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#d54e53",
+    "#b9ca4a",
+    "#e7c547",
+    "#7aa6da",
+    "#c397d8",
+    "#70c0b1",
+    "#ffffff",
+    "#404040",
+    "#d54e53",
+    "#b9ca4a",
+    "#e7c547",
+    "#7aa6da",
+    "#c397d8",
+    "#70c0b1",
+    "#ffffff"
+  ],
+  "background": "#000000",
+  "cursor": "#eaeaea",
+  "cursorText": "#000000",
+  "foreground": "#eaeaea",
+  "name": "Tomorrow Night Bright",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#424242",
+  "selectionForeground": "#eaeaea"
+}

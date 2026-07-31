@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#6e5346",
+    "#e35b00",
+    "#5cab96",
+    "#e3cd7b",
+    "#0f548b",
+    "#e35b00",
+    "#06afc7",
+    "#f0f1ce",
+    "#684c31",
+    "#ff8a3a",
+    "#aecab8",
+    "#ffc878",
+    "#67a0ce",
+    "#ff8a3a",
+    "#83a7b4",
+    "#fefff1"
+  ],
+  "background": "#0a1e24",
+  "cursor": "#708284",
+  "cursorText": "#002831",
+  "foreground": "#ecf0c1",
+  "name": "Spacedust",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#0a385c",
+  "selectionForeground": "#ffffff"
+}

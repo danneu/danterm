@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#d6262b",
+    "#919c00",
+    "#be8a13",
+    "#4699a3",
+    "#8d4331",
+    "#da8213",
+    "#ddc265",
+    "#7f6a55",
+    "#e55a1c",
+    "#bfc65a",
+    "#ffcb1b",
+    "#7cc9cf",
+    "#d26349",
+    "#e6a96b",
+    "#ffeaa3"
+  ],
+  "background": "#251200",
+  "cursor": "#e5591c",
+  "cursorText": "#000000",
+  "foreground": "#dec165",
+  "name": "Fun Forrest",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#e5591c",
+  "selectionForeground": "#000000"
+}

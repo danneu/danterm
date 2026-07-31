@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#4d4d4d",
+    "#c70031",
+    "#29cf13",
+    "#d8e30e",
+    "#3449d1",
+    "#8400ff",
+    "#0798ab",
+    "#e2d1e3",
+    "#5a5a5a",
+    "#f01578",
+    "#6ce05c",
+    "#f3f79e",
+    "#97a4f7",
+    "#c495f0",
+    "#68f2e0",
+    "#ffffff"
+  ],
+  "background": "#0e100a",
+  "cursor": "#9fda9c",
+  "cursorText": "#000000",
+  "foreground": "#f7f7f7",
+  "name": "Kibble",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#9ba787",
+  "selectionForeground": "#000000"
+}

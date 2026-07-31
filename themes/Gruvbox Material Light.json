@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#fbf1c7",
+    "#c14a4a",
+    "#6c782e",
+    "#b47109",
+    "#45707a",
+    "#945e80",
+    "#4c7a5d",
+    "#654735",
+    "#a89984",
+    "#c14a4a",
+    "#6c782e",
+    "#b47109",
+    "#45707a",
+    "#945e80",
+    "#4c7a5d",
+    "#4f3829"
+  ],
+  "background": "#fbf1c7",
+  "cursor": "#654735",
+  "cursorText": "#fbf1c7",
+  "foreground": "#654735",
+  "name": "Gruvbox Material Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#654735",
+  "selectionForeground": "#fbf1c7"
+}

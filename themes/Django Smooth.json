@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#fd6209",
+    "#41a83e",
+    "#ffe862",
+    "#989898",
+    "#f8f8f8",
+    "#9df39f",
+    "#e8e8e7",
+    "#727272",
+    "#ff943b",
+    "#73da70",
+    "#ffff94",
+    "#cacaca",
+    "#ffffff",
+    "#cfffd1",
+    "#ffffff"
+  ],
+  "background": "#245032",
+  "cursor": "#4c7e5c",
+  "cursorText": "#f8f8f8",
+  "foreground": "#f8f8f8",
+  "name": "Django Smooth",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#336442",
+  "selectionForeground": "#f8f8f8"
+}

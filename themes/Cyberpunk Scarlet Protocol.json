@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#101116",
+    "#ff0051",
+    "#01dc84",
+    "#faf945",
+    "#0271b6",
+    "#c930c7",
+    "#00c5c7",
+    "#c7c7c7",
+    "#686868",
+    "#ff6e67",
+    "#60fa68",
+    "#fffc67",
+    "#6871ff",
+    "#bd35ec",
+    "#60fdff",
+    "#ffffff"
+  ],
+  "background": "#101116",
+  "cursor": "#76ff9f",
+  "cursorText": "#a6a6a6",
+  "foreground": "#e41951",
+  "name": "Cyberpunk Scarlet Protocol",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#c1deff",
+  "selectionForeground": "#000000"
+}

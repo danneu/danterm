@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#f57f6c",
+    "#52b87a",
+    "#d99530",
+    "#7fb6ed",
+    "#f88aaf",
+    "#32c5d2",
+    "#ffffff",
+    "#666666",
+    "#fcb5aa",
+    "#91d4a8",
+    "#e9be74",
+    "#498dd1",
+    "#fcacc5",
+    "#5edee3",
+    "#ffffff"
+  ],
+  "background": "#28262b",
+  "cursor": "#ffffff",
+  "cursorText": "#bfbfbf",
+  "foreground": "#ffffff",
+  "name": "GitLab Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#ad95e9",
+  "selectionForeground": "#28262b"
+}

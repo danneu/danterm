@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#f07178",
+    "#c3e88d",
+    "#ffcb6b",
+    "#82aaff",
+    "#c792ea",
+    "#89ddff",
+    "#cccccc",
+    "#404040",
+    "#f6a9ae",
+    "#dbf1ba",
+    "#ffdfa6",
+    "#b4ccff",
+    "#ddbdf2",
+    "#b8eaff",
+    "#ffffff"
+  ],
+  "background": "#000000",
+  "cursor": "#fefefe",
+  "cursorText": "#000000",
+  "foreground": "#ffffff",
+  "name": "Ultra Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#222222",
+  "selectionForeground": "#cccccc"
+}

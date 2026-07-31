@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#121212",
+    "#fa2934",
+    "#98e123",
+    "#fff30a",
+    "#0443ff",
+    "#f800f8",
+    "#01b6ed",
+    "#ffffff",
+    "#838383",
+    "#f6669d",
+    "#b1e05f",
+    "#fff26d",
+    "#0443ff",
+    "#f200f6",
+    "#51ceff",
+    "#ffffff"
+  ],
+  "background": "#121212",
+  "cursor": "#fb0007",
+  "cursorText": "#ff8c95",
+  "foreground": "#f9f9f9",
+  "name": "Monokai Vivid",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#ffffff",
+  "selectionForeground": "#000000"
+}

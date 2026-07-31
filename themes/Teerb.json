@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#1c1c1c",
+    "#d68686",
+    "#aed686",
+    "#d7af87",
+    "#86aed6",
+    "#d6aed6",
+    "#8adbb4",
+    "#d0d0d0",
+    "#4f4f4f",
+    "#d68686",
+    "#aed686",
+    "#e4c9af",
+    "#86aed6",
+    "#d6aed6",
+    "#b1e7dd",
+    "#efefef"
+  ],
+  "background": "#262626",
+  "cursor": "#e4c9af",
+  "cursorText": "#000000",
+  "foreground": "#d0d0d0",
+  "name": "Teerb",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#4d4d4d",
+  "selectionForeground": "#ffffff"
+}

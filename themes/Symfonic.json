@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#dc322f",
+    "#56db3a",
+    "#ff8400",
+    "#0084d4",
+    "#b729d9",
+    "#ccccff",
+    "#ffffff",
+    "#414347",
+    "#dc322f",
+    "#56db3a",
+    "#ff8400",
+    "#0084d4",
+    "#b729d9",
+    "#ccccff",
+    "#ffffff"
+  ],
+  "background": "#000000",
+  "cursor": "#dc322f",
+  "cursorText": "#ffffff",
+  "foreground": "#ffffff",
+  "name": "Symfonic",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#073642",
+  "selectionForeground": "#ffffff"
+}

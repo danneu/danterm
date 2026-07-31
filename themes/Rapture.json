@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#fc644d",
+    "#7afde1",
+    "#fff09b",
+    "#6c9bf5",
+    "#ff4fa1",
+    "#64e0ff",
+    "#c0c9e5",
+    "#304b66",
+    "#fc644d",
+    "#7afde1",
+    "#fff09b",
+    "#6c9bf5",
+    "#ff4fa1",
+    "#64e0ff",
+    "#ffffff"
+  ],
+  "background": "#111e2a",
+  "cursor": "#ffffff",
+  "cursorText": "#111e2a",
+  "foreground": "#c0c9e5",
+  "name": "Rapture",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#304b66",
+  "selectionForeground": "#ffffff"
+}

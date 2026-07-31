@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#080808",
+    "#ff8373",
+    "#00c172",
+    "#d2a700",
+    "#0071cf",
+    "#ff90fe",
+    "#6bffdd",
+    "#f1f1f1",
+    "#484848",
+    "#ffc4be",
+    "#d6fcba",
+    "#fffed5",
+    "#c2e3ff",
+    "#ffb2fe",
+    "#e6e7fe",
+    "#ffffff"
+  ],
+  "background": "#151144",
+  "cursor": "#00ff9c",
+  "cursorText": "#a6a6a6",
+  "foreground": "#00ff92",
+  "name": "Cyberdyne",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#454d96",
+  "selectionForeground": "#f4f4f4"
+}

@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#5d5d6b",
+    "#c6797e",
+    "#969e92",
+    "#dbcdab",
+    "#6e94b9",
+    "#4c4e78",
+    "#8ab6c1",
+    "#e8e8ea",
+    "#616274",
+    "#c6797e",
+    "#e6dcc4",
+    "#e6dcc4",
+    "#98b3cd",
+    "#8283a1",
+    "#abcbd3",
+    "#e8e8ea"
+  ],
+  "background": "#17182b",
+  "cursor": "#969e92",
+  "cursorText": "#ffffff",
+  "foreground": "#a2a3aa",
+  "name": "Rouge 2",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#5d5d6b",
+  "selectionForeground": "#dfe5ee"
+}

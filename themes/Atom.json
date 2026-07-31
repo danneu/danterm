@@ -1,0 +1,33 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#fd5ff1",
+    "#87c38a",
+    "#ffd7b1",
+    "#85befd",
+    "#b9b6fc",
+    "#85befd",
+    "#e0e0e0",
+    "#4c4c4c",
+    "#fd5ff1",
+    "#94fa36",
+    "#f5ffa8",
+    "#96cbfe",
+    "#b9b6fc",
+    "#85befd",
+    "#e0e0e0"
+  ],
+  "background": "#161719",
+  "cursor": "#d0d0d0",
+  "cursorText": "#151515",
+  "foreground": "#c5c8c6",
+  "name": "Atom",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes via Ghostty",
+    "ghosttyVersion": "v1.3.1",
+    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#444444",
+  "selectionForeground": "#c5c8c6"
+}
