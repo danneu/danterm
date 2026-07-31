@@ -83,6 +83,7 @@ test:
     python3 ./scripts/tests/terminal_memory_profile_test.py
     python3 ./scripts/tests/fetch_references_test.py
     python3 ./scripts/tests/import_ghostty_themes_test.py
+    python3 ./scripts/tests/pack_theme_catalog_test.py
     ./scripts/tests/test-terminal-pty_test.sh
     ./scripts/tests/shell-integration_test.sh
     ./scripts/tests/agent-notifications-live_test.py

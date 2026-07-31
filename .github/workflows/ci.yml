@@ -121,6 +121,11 @@ jobs:
         if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
         run: ./build-lib.sh all
 
+      - name: Verify tracked theme freshness
+        run: |
+          python3 ./scripts/import-ghostty-themes.py
+          test -z "$(git status --porcelain --untracked-files=all -- themes)"
+
       - name: Build app bundle
         run: ./build-app.sh
 
@@ -169,6 +174,7 @@ jobs:
           for shell in zsh bash fish; do
             test -r "$APP_PATH/Contents/Resources/shell-integration/danterm.$shell"
           done
+          test -r "$APP_PATH/Contents/Resources/themes/catalog.json"
           if cmp -s "$APP_PATH/Contents/MacOS/DanTerm" "$APP_PATH/Contents/Helpers/danterm"; then
             echo "Error: GUI and CLI bundle binaries have identical content" >&2
             exit 1

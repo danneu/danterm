@@ -157,7 +157,7 @@ BOOTSTRAP_BIN_PATH="$(swift build --package-path "$REPO_ROOT/lib/TerminalPTY" \
     --build-path "$BUILD_PATH/TerminalPTY" --configuration release --show-bin-path)"
 record_phase "build-complete"
 
-mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Helpers" "$APP_PATH/Contents/Resources/ghostty"
+mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Helpers" "$APP_PATH/Contents/Resources"
 cp "$BIN_PATH/DanTerm" "$APP_PATH/Contents/MacOS/DanTerm Benchmark"
 cp "$BIN_PATH/DanTermCLI" "$APP_PATH/Contents/Helpers/danterm"
 cp "$BOOTSTRAP_BIN_PATH/PTYSessionBootstrap" "$APP_PATH/Contents/Helpers/PTYSessionBootstrap"
@@ -172,11 +172,7 @@ plutil -replace CFBundleIdentifier -string "$BUNDLE_ID" "$APP_PATH/Contents/Info
 plutil -replace CFBundleName -string "DanTerm Benchmark" "$APP_PATH/Contents/Info.plist"
 plutil -replace CFBundleExecutable -string "DanTerm Benchmark" "$APP_PATH/Contents/Info.plist"
 plutil -remove CFBundleIconName "$APP_PATH/Contents/Info.plist" 2>/dev/null || true
-if [[ -d "$REPO_ROOT/lib/ghostty-themes" ]]; then
-    cp -R "$REPO_ROOT/lib/ghostty-themes" "$APP_PATH/Contents/Resources/ghostty/themes"
-else
-    cp -R "$REPO_ROOT/.ghostty-src/zig-out/share/ghostty/themes" "$APP_PATH/Contents/Resources/ghostty/themes"
-fi
+"$SCRIPT_DIR/bundle-theme-resources.sh" "$REPO_ROOT" "$APP_PATH"
 codesign --force --deep --sign - --entitlements "$SCRIPT_DIR/terminal-benchmark-entitlements.plist" "$APP_PATH" >/dev/null
 codesign -d --entitlements :- "$APP_PATH" 2>&1 | grep -q '<key>com.apple.security.get-task-allow</key>' || {
     echo "Benchmark app is missing the get-task-allow profiling entitlement" >&2

@@ -21,8 +21,15 @@ mkdir -p "$BUILD_ROOT/lib/GhosttyKit.xcframework" \
     "$BUILD_ROOT/integrations/claude-code" \
     "$BUILD_ROOT/integrations/codex" \
     "$BUILD_ROOT/integrations/shell-integration" \
+    "$BUILD_ROOT/lib/ghostty-themes" \
+    "$BUILD_ROOT/scripts" \
+    "$BUILD_ROOT/themes" \
     "$FAKE_BIN"
 ln -s "$ROOT_DIR/dev-build.sh" "$BUILD_ROOT/dev-build.sh"
+cp "$ROOT_DIR/scripts/bundle-theme-resources.sh" "$BUILD_ROOT/scripts/"
+cp "$ROOT_DIR/scripts/pack-theme-catalog.py" "$BUILD_ROOT/scripts/"
+cp "$ROOT_DIR/themes/0x96f.json" "$BUILD_ROOT/themes/"
+: > "$BUILD_ROOT/lib/ghostty-themes/Fixture"
 cp "$ROOT_DIR/app/Info.plist" "$BUILD_ROOT/app/Info.plist"
 : > "$BUILD_ROOT/icon/AppIcon-dev/Assets.car"
 : > "$BUILD_ROOT/dev-entitlements.plist"
@@ -86,6 +93,8 @@ run_build() {
 # Why it exists: adding an optimized variant must not slow the normal incremental dev loop.
 # Scenario: a developer runs ./dev-build.sh or `just build` without an option.
 run_build debug
+[[ -r "$BUILD_ROOT/.build/DanTerm Dev.app/Contents/Resources/themes/catalog.json" ]] \
+    || fail "debug bundle omitted the packed theme catalog"
 for shell in zsh bash fish; do
     cmp "$BUILD_ROOT/integrations/shell-integration/danterm.$shell" \
         "$BUILD_ROOT/.build/DanTerm Dev.app/Contents/Resources/shell-integration/danterm.$shell" \

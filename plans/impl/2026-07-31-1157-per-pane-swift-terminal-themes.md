@@ -327,6 +327,12 @@ painted background.
 ## Commit progress
 
 - [x] 1. feat(themes): import canonical theme catalog
-- [ ] 2. build(themes): pack the runtime theme catalog
+- [x] 2. build(themes): pack the runtime theme catalog
 - [ ] 3. feat(renderer): support complete theme presentation
 - [ ] 4. feat(terminal): apply themes per pane
+
+## Implementation notes
+
+- The packed layout is `Contents/Resources/themes/catalog.json`, with a catalog
+  schema version and one case-insensitively sorted array of the complete tracked
+  theme documents, including provenance.

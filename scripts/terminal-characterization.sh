@@ -196,7 +196,7 @@ BIN_PATH="$(swift build \
     -Xswiftc -DDANTERM_TERMINAL_CHARACTERIZATION \
     --show-bin-path)"
 
-mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Helpers" "$APP_PATH/Contents/Resources/ghostty"
+mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Helpers" "$APP_PATH/Contents/Resources"
 cp "$BIN_PATH/DanTerm" "$APP_PATH/Contents/MacOS/$CHARACTERIZATION_APP_NAME"
 cp "$BIN_PATH/DanTermCLI" "$APP_PATH/Contents/Helpers/danterm"
 chmod +x "$APP_PATH/Contents/MacOS/$CHARACTERIZATION_APP_NAME" "$APP_PATH/Contents/Helpers/danterm"
@@ -207,14 +207,7 @@ plutil -replace CFBundleDisplayName -string "$CHARACTERIZATION_APP_NAME" "$APP_P
 plutil -replace CFBundleExecutable -string "$CHARACTERIZATION_APP_NAME" "$APP_PATH/Contents/Info.plist"
 plutil -remove CFBundleIconName "$APP_PATH/Contents/Info.plist" 2>/dev/null || true
 
-if [[ -d "$REPO_ROOT/lib/ghostty-themes" ]]; then
-    cp -R "$REPO_ROOT/lib/ghostty-themes" "$APP_PATH/Contents/Resources/ghostty/themes"
-elif [[ -d "$REPO_ROOT/.ghostty-src/zig-out/share/ghostty/themes" ]]; then
-    cp -R "$REPO_ROOT/.ghostty-src/zig-out/share/ghostty/themes" "$APP_PATH/Contents/Resources/ghostty/themes"
-else
-    echo "Ghostty themes are missing; run ./build-lib.sh once." >&2
-    exit 1
-fi
+"$SCRIPT_DIR/bundle-theme-resources.sh" "$REPO_ROOT" "$APP_PATH"
 codesign --force --deep --sign - "$APP_PATH" >/dev/null
 
 cp "$SCRIPT_DIR/terminal-characterization-driver.py" "$RUN_ROOT/driver.py"

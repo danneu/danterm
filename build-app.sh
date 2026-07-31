@@ -87,19 +87,6 @@ for shell in zsh bash fish; do
         "$APP_PATH/Contents/Resources/shell-integration/danterm.$shell"
 done
 
-# Bundle ghostty themes (CI caches to lib/ghostty-themes; local builds have .ghostty-src)
-THEMES_SRC="$SCRIPT_DIR/lib/ghostty-themes"
-if [ ! -d "$THEMES_SRC" ]; then
-    THEMES_SRC="$SCRIPT_DIR/.ghostty-src/zig-out/share/ghostty/themes"
-fi
-mkdir -p "$APP_PATH/Contents/Resources/ghostty"
-cp -R "$THEMES_SRC" "$APP_PATH/Contents/Resources/ghostty/themes"
-
-THEME_COUNT=$(ls "$APP_PATH/Contents/Resources/ghostty/themes" | wc -l | tr -d ' ')
-echo "Bundled $THEME_COUNT themes"
-if [ "$THEME_COUNT" -eq 0 ]; then
-    echo "Error: no themes bundled"
-    exit 1
-fi
+"$SCRIPT_DIR/scripts/bundle-theme-resources.sh" "$SCRIPT_DIR" "$APP_PATH"
 
 echo "Built: $APP_PATH"
