@@ -490,7 +490,8 @@ class AppRuntime {
                 command: command,
                 launchCommand: launchCommand,
                 waitAfterCommand: waitAfterCommand,
-                envVars: envVars
+                envVars: envVars,
+                themeName: model.pane(paneId).flatMap(effectiveTheme)
             ) else {
                 send(.surfaceCreationFailed(paneId: paneId))
                 break
@@ -1190,7 +1191,8 @@ class AppRuntime {
                             command: nil,
                             launchCommand: nil,
                             waitAfterCommand: true,
-                            envVars: envVars
+                            envVars: envVars,
+                            themeName: loaded.model.pane(paneId).flatMap(effectiveTheme)
                         ) else {
                             throw RestoreBuildError.surfaceCreationFailed
                         }
@@ -1287,14 +1289,16 @@ class AppRuntime {
         command: String?,
         launchCommand: String?,
         waitAfterCommand: Bool,
-        envVars: [(String, String)]
+        envVars: [(String, String)],
+        themeName: String?
     ) -> (any TerminalSession)? {
         let request = TerminalSessionRequest(
             workingDirectory: workingDirectory,
             command: command,
             launchCommand: launchCommand,
             waitAfterCommand: waitAfterCommand,
-            environment: envVars
+            environment: envVars,
+            themeName: themeName
         )
         guard let session = terminalBackend.createSession(request) else { return nil }
         session.onEvent = { [weak self] event in

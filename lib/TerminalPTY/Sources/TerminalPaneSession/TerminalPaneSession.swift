@@ -223,6 +223,7 @@ public final class TerminalPaneSessionController {
     private var cachedTerminal: Terminal
     private let initialDimensions: TerminalDimensions
     private var lastPlannedTerminal: Terminal?
+    private var lastPlannedTheme: RenderTheme?
     /// This pane's own frame stream, so undamaged rows are copied from the frame
     /// this controller planned last rather than re-inspected. One planner per
     /// controller is what keeps the retained rows and `pendingDamage` in lineage.
@@ -237,6 +238,9 @@ public final class TerminalPaneSessionController {
     private var lastEmittedViewportState: TerminalPaneViewportState?
     private var lastPrimaryHistoryGeneration: UInt64
     private let fenceClock: () -> UInt64
+
+    /// Theme retained independently of terminal bytes so configuration can repaint immediately.
+    public private(set) var renderTheme: RenderTheme
 
     /// Process-lifetime access retained by the backend until this host finishes teardown.
     public let terminationHandle: TerminalPaneTerminationHandle
@@ -300,15 +304,22 @@ public final class TerminalPaneSessionController {
         configuration: TerminalPaneLaunchConfiguration,
         bootstrapExecutable: String,
         isVisible: Bool = true,
-        machineHostname: String? = MachineHostname.posix
+        machineHostname: String? = MachineHostname.posix,
+        theme: RenderTheme = .dark
     ) throws {
         let host = try TerminalPTYHost(
             initialDimensions: configuration.initialDimensions,
             bootstrapExecutable: bootstrapExecutable,
             machineHostname: machineHostname,
-            programVersion: configuration.terminalProgramVersion
+            programVersion: configuration.terminalProgramVersion,
+            defaultColors: theme.defaultColors
         )
-        self.init(host: host, launchInput: configuration.launchInput, isVisible: isVisible)
+        self.init(
+            host: host,
+            launchInput: configuration.launchInput,
+            isVisible: isVisible,
+            theme: theme
+        )
     }
 
     /// Enables transition capture only for package tests or characterization app builds.
@@ -318,6 +329,7 @@ public final class TerminalPaneSessionController {
         bootstrapExecutable: String,
         isVisible: Bool = true,
         machineHostname: String? = MachineHostname.posix,
+        theme: RenderTheme = .dark,
         captureTransitions: Bool
     ) throws {
         let host = try TerminalPTYHost(
@@ -325,9 +337,15 @@ public final class TerminalPaneSessionController {
             bootstrapExecutable: bootstrapExecutable,
             machineHostname: machineHostname,
             programVersion: configuration.terminalProgramVersion,
+            defaultColors: theme.defaultColors,
             captureTransitions: captureTransitions
         )
-        self.init(host: host, launchInput: configuration.launchInput, isVisible: isVisible)
+        self.init(
+            host: host,
+            launchInput: configuration.launchInput,
+            isVisible: isVisible,
+            theme: theme
+        )
     }
     #else
     package convenience init(
@@ -335,6 +353,7 @@ public final class TerminalPaneSessionController {
         bootstrapExecutable: String,
         isVisible: Bool = true,
         machineHostname: String? = MachineHostname.posix,
+        theme: RenderTheme = .dark,
         captureTransitions: Bool
     ) throws {
         let host = try TerminalPTYHost(
@@ -342,9 +361,15 @@ public final class TerminalPaneSessionController {
             bootstrapExecutable: bootstrapExecutable,
             machineHostname: machineHostname,
             programVersion: configuration.terminalProgramVersion,
+            defaultColors: theme.defaultColors,
             captureTransitions: captureTransitions
         )
-        self.init(host: host, launchInput: configuration.launchInput, isVisible: isVisible)
+        self.init(
+            host: host,
+            launchInput: configuration.launchInput,
+            isVisible: isVisible,
+            theme: theme
+        )
     }
     #endif
 
@@ -352,6 +377,7 @@ public final class TerminalPaneSessionController {
         host: TerminalPTYHost,
         launchInput: LaunchPolicyInput,
         isVisible: Bool = true,
+        theme: RenderTheme = .dark,
         fenceClock: @escaping () -> UInt64 = {
             DispatchTime.now().uptimeNanoseconds
         }
@@ -370,9 +396,12 @@ public final class TerminalPaneSessionController {
 
         self.host = host
         self.fenceClock = fenceClock
+        renderTheme = theme
         fenceMetrics = initialMetrics
         terminationHandle = TerminalPaneTerminationHandle(host: host)
         cachedTerminal = initialFrameState.terminal
+        cachedTerminal.setDefaultColors(theme.defaultColors)
+        host.setDefaultColors(theme.defaultColors)
         lastPrimaryHistoryGeneration = initialFrameState.terminal.primaryHistoryGeneration
         initialDimensions = launchInput.initialDimensions
         pendingDamage = initialFrameState.damage
@@ -512,6 +541,16 @@ public final class TerminalPaneSessionController {
         guard isTornDown == false, visible != isVisible else { return }
         isVisible = visible
         if visible { planIfNeeded(cachedTerminal) }
+    }
+
+    /// Applies one complete theme, deferring its full repaint through existing visibility gates.
+    public func setTheme(_ theme: RenderTheme) {
+        guard isTornDown == false, theme != renderTheme else { return }
+        renderTheme = theme
+        cachedTerminal.setDefaultColors(theme.defaultColors)
+        host.setDefaultColors(theme.defaultColors)
+        pendingDamage.formUnion(.full)
+        if isVisible { planIfNeeded(cachedTerminal) }
     }
 
     /// Fences host work and applies the newest state before a synchronous checkpoint read.
@@ -831,7 +870,7 @@ public final class TerminalPaneSessionController {
 
     private func planIfNeeded(_ terminal: Terminal) {
         guard pendingDamage != .none else { return }
-        guard terminal != lastPlannedTerminal else { return }
+        guard terminal != lastPlannedTerminal || renderTheme != lastPlannedTheme else { return }
         let presentation = terminal.presentation
         guard presentation.isSynchronizedOutputActive == false || didChildExit else { return }
         #if DANTERM_TERMINAL_BENCHMARK
@@ -840,7 +879,7 @@ public final class TerminalPaneSessionController {
         let plan = framePlanner.planFrame(
             for: terminal,
             presentation: RenderPresentation(
-                theme: .dark,
+                theme: renderTheme,
                 isCursorVisible: presentation.isCursorVisible,
                 cursorShape: presentation.cursorShape
             ),
@@ -855,6 +894,7 @@ public final class TerminalPaneSessionController {
         lastFenceStallNanoseconds = unflushedDeliveryFenceWaitNanoseconds
         unflushedDeliveryFenceWaitNanoseconds = 0
         lastPlannedTerminal = terminal
+        lastPlannedTheme = renderTheme
         currentPlan = plan
         currentDamage = pendingDamage
         let frame = TerminalPaneFrame(plan: plan, damage: pendingDamage)

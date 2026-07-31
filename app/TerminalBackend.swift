@@ -60,6 +60,7 @@ struct TerminalSessionRequest {
     let launchCommand: String?
     let waitAfterCommand: Bool
     let environment: [(String, String)]
+    let themeName: String?
 }
 
 /// Stable per-pane terminal owner mounted and reparented by the AppKit reconciler.

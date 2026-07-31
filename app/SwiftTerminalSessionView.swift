@@ -25,6 +25,7 @@ func terminalDamageRowsWithGlyphHalo(_ rows: Set<Int>, rowCount: Int) -> Set<Int
 /// Adapts one headless Swift terminal controller into DanTerm's AppKit pane contract.
 final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValidation, TerminalSession {
     private let controller: TerminalPaneSessionController
+    private let resolveTheme: (String) -> RenderTheme?
     private let callbackGate = TerminalSessionCallbackGate()
     private let wheelNormalizer = TerminalWheelNormalizer()
     private var markedText = NSMutableAttributedString()
@@ -77,6 +78,11 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         )
     }
     var hasSelection: Bool { controller.hasSelection }
+    #if DANTERM_UI_TEST
+    var publishedBackgroundForTesting: RenderColor? {
+        publishedFrame?.plan.defaultBackground
+    }
+    #endif
     #if DANTERM_TERMINAL_BENCHMARK
     var benchmarkGeometry: TerminalBenchmarkGeometry? {
         guard let dimensions = currentDimensions, let metrics = currentMetrics else { return nil }
@@ -95,12 +101,14 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
     /// work ahead of the app's close request and any resulting pane teardown.
     init(
         controller: TerminalPaneSessionController,
+        resolveTheme: @escaping (String) -> RenderTheme? = ThemeCatalog.shared.renderTheme(named:),
         onSessionEnded: ((PaneLifecycleResult) -> Void)? = nil
     ) {
         self.controller = controller
+        self.resolveTheme = resolveTheme
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = Self.cgColor(RenderTheme.dark.defaultBackground)
+        layer?.backgroundColor = Self.cgColor(controller.renderTheme.defaultBackground)
         registerForDraggedTypes([.fileURL, .URL, .string])
         #if DANTERM_TERMINAL_BENCHMARK
         TerminalBenchmarkObserver.shared?.attachFenceMetricsController(controller)
@@ -449,8 +457,14 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
         synchronizeGeometry()
     }
 
-    func applyTheme(_ themeName: String) {}
-    func clearTheme() {}
+    func applyTheme(_ themeName: String) {
+        guard let theme = resolveTheme(themeName) else { return }
+        applyResolvedTheme(theme)
+    }
+
+    func clearTheme() {
+        applyResolvedTheme(.dark)
+    }
     func startSearch() {
         // Synchronous on purpose: `.searchStarted` is what creates the pane's
         // searchState and mounts the overlay, so it cannot wait on an engine round-trip.
@@ -664,6 +678,12 @@ final class SwiftTerminalSessionView: NSView, NSTextInputClient, NSMenuItemValid
             emitStateIfNeeded()
             needsDisplay = true
         }
+    }
+
+    private func applyResolvedTheme(_ theme: RenderTheme) {
+        controller.setTheme(theme)
+        layer?.backgroundColor = Self.cgColor(theme.defaultBackground)
+        needsDisplay = true
     }
 
     private func emitStateIfNeeded() {

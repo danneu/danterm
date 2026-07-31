@@ -498,6 +498,7 @@ public struct Terminal: Equatable, Sendable {
     private var inputStream = TerminalInputStream()
     private var replyBytes: [UInt8] = []
     private var programVersion: String
+    private var defaultColors: TerminalDefaultColors
     private var primaryKittyKeyboardStack: [UInt16] = []
     private var alternateKittyKeyboardStack: [UInt16] = []
     private var evictedRowCount = 0
@@ -960,14 +961,16 @@ public struct Terminal: Equatable, Sendable {
         columns: Int,
         rows: Int,
         machineHostname: String? = nil,
-        programVersion: String = "dev"
+        programVersion: String = "dev",
+        defaultColors: TerminalDefaultColors = .baked
     ) {
         self.init(
             columns: columns,
             rows: rows,
             scrollbackBudgetBytes: Self.productionScrollbackBudgetBytes,
             machineHostname: machineHostname,
-            programVersion: programVersion
+            programVersion: programVersion,
+            defaultColors: defaultColors
         )
     }
 
@@ -977,7 +980,8 @@ public struct Terminal: Equatable, Sendable {
         rows: Int,
         scrollbackBudgetBytes: Int,
         machineHostname: String? = nil,
-        programVersion: String = "dev"
+        programVersion: String = "dev",
+        defaultColors: TerminalDefaultColors = .baked
     ) {
         guard columns >= 2, rows >= 1, scrollbackBudgetBytes >= 0 else { return nil }
         columnCount = columns
@@ -985,11 +989,17 @@ public struct Terminal: Equatable, Sendable {
         self.scrollbackBudgetBytes = scrollbackBudgetBytes
         self.machineHostname = machineHostname
         self.programVersion = programVersion
+        self.defaultColors = defaultColors
         tabStops = Self.defaultTabStops(columns: columns)
         damage = TerminalDamageAccumulator(rowCount: rows, isFull: true)
         self.rows = (0..<rows).map { _ in
             GridRow(cells: (0..<columns).map { _ in GridCell() })
         }
+    }
+
+    /// Updates protocol-visible defaults without treating configuration as grid damage.
+    public mutating func setDefaultColors(_ colors: TerminalDefaultColors) {
+        defaultColors = colors
     }
 
     /// Reduces a byte chunk synchronously while retaining unfinished stream state.
@@ -1044,14 +1054,14 @@ public struct Terminal: Equatable, Sendable {
                 payload,
                 selectorEnd: selectorEnd,
                 selector: selector,
-                color: TerminalDefaultColors.baked.foreground
+                color: defaultColors.foreground
             )
         case 11:
             dispatchDefaultColorQuery(
                 payload,
                 selectorEnd: selectorEnd,
                 selector: selector,
-                color: TerminalDefaultColors.baked.background
+                color: defaultColors.background
             )
         case 52:
             dispatchOSC52(payload, selectorEnd: selectorEnd)

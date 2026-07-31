@@ -627,6 +627,101 @@ struct TerminalPaneSessionControllerTests {
         await host.close()
     }
 
+    @Test("theme changes publish one full frame and preserve deferred presentation")
+    func themeChangesPublishAndDefer() async throws {
+        // Intent: theme changes repaint exactly once while existing visibility and sync gates hold.
+        // Why it exists: a theme-only change has no terminal damage and can be lost by byte-state dedupe.
+        // Scenario: a visible pane changes twice, changes while hidden, then changes inside DEC 2026.
+        let host = try makeHost()
+        let themed = makeRenderTheme(seed: 20)
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec sleep 30")
+        )
+        var frames: [TerminalPaneFrame] = []
+        controller.onFrame = { frames.append($0) }
+
+        controller.setTheme(themed)
+        controller.setTheme(themed)
+        #expect(frames.count == 1)
+        #expect(frames.first?.damage == .full)
+        #expect(frames.first?.plan.defaultBackground == themed.defaultBackground)
+
+        controller.setVisible(false)
+        controller.setTheme(.dark)
+        #expect(frames.count == 1)
+        controller.setVisible(true)
+        #expect(frames.count == 2)
+        #expect(frames.last?.damage == .full)
+        #expect(frames.last?.plan.defaultBackground == RenderTheme.dark.defaultBackground)
+
+        host.deliverOutputForTesting(Array("\u{1B}[?2026h".utf8))
+        controller.consumePendingHostUpdateForTesting()
+        let synchronizedBaseline = frames.count
+        controller.setTheme(themed)
+        #expect(frames.count == synchronizedBaseline)
+        host.deliverOutputForTesting(Array("\u{1B}[?2026l".utf8))
+        controller.consumePendingHostUpdateForTesting()
+        #expect(frames.count == synchronizedBaseline + 1)
+        #expect(frames.last?.damage == .full)
+        #expect(frames.last?.plan.defaultBackground == themed.defaultBackground)
+
+        controller.tearDown()
+        await host.close()
+    }
+
+    @Test("live theme defaults preserve ordering for OSC 10 and 11")
+    func liveThemeDefaultsPreserveQueryOrdering() async throws {
+        // Intent: query replies use the defaults ordered between theme switches on the owner queue.
+        // Why it exists: renderer-local theme state would make OSC 10/11 stale or race child output.
+        // Scenario: a child queries before a theme, after applying it, and after clearing it.
+        let host = try makeHost()
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec sleep 30")
+        )
+        let query = Array("\u{1B}]10;?\u{07}\u{1B}]11;?\u{1B}\\".utf8)
+
+        host.deliverOutputForTesting(query)
+        controller.setTheme(makeRenderTheme(seed: 20))
+        host.deliverOutputForTesting(query)
+        controller.setTheme(.dark)
+        host.deliverOutputForTesting(query)
+
+        let replies = await host.replyWrites().flatMap { $0 }
+        #expect(replies == Array(
+            ("\u{1B}]10;rgb:e5e5/e5e5/e5e5\u{1B}\\"
+                + "\u{1B}]11;rgb:0000/0000/0000\u{1B}\\"
+                + "\u{1B}]10;rgb:1414/0404/0505\u{1B}\\"
+                + "\u{1B}]11;rgb:1414/0606/0707\u{1B}\\"
+                + "\u{1B}]10;rgb:e5e5/e5e5/e5e5\u{1B}\\"
+                + "\u{1B}]11;rgb:0000/0000/0000\u{1B}\\").utf8
+        ))
+
+        controller.tearDown()
+        await host.close()
+    }
+
+    @Test("initial theme is present in the controller's first retained plan")
+    func initialThemePlansFirstFrame() async throws {
+        // Intent: construction plans with the selected theme before any child output arrives.
+        // Why it exists: applying only through reconcile permits a restored pane's first dark frame.
+        // Scenario: a restored or inherited themed pane is created and inspected immediately.
+        let host = try makeHost()
+        let themed = makeRenderTheme(seed: 40)
+        let controller = TerminalPaneSessionController(
+            host: host,
+            launchInput: makeLaunchInput(command: "exec sleep 30"),
+            theme: themed
+        )
+
+        #expect(controller.renderTheme == themed)
+        #expect(controller.currentPlan?.defaultBackground == themed.defaultBackground)
+
+        controller.tearDown()
+        await host.close()
+    }
+
     @Test("clipboard delivery bypasses hidden rendering and precedes frame publication", .timeLimit(.minutes(1)))
     func clipboardDeliveryIsUngated() async throws {
         // Intent: every drained write reaches the session callback before any frame from that consume.
@@ -1758,6 +1853,21 @@ private func makeLaunchInput(command: String?) -> LaunchPolicyInput {
         command: nil,
         launchCommand: command,
         initialDimensions: .init(columns: 80, rows: 24)
+    )
+}
+
+private func makeRenderTheme(seed: UInt8) -> RenderTheme {
+    let palette = (0..<16).map { offset in
+        RenderColor(red: seed &+ UInt8(offset), green: 2, blue: 3)
+    }
+    return RenderTheme(
+        ansiColors: RenderANSIColors(exactly: palette)!,
+        defaultForeground: .init(red: seed, green: 4, blue: 5),
+        defaultBackground: .init(red: seed, green: 6, blue: 7),
+        selectionForeground: .init(red: seed, green: 8, blue: 9),
+        selectionBackground: .init(red: seed, green: 10, blue: 11),
+        cursor: .init(red: seed, green: 12, blue: 13),
+        cursorText: .init(red: seed, green: 14, blue: 15)
     )
 }
 

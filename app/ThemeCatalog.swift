@@ -1,9 +1,7 @@
-// Runtime theme discovery: scans the app bundle's ghostty/themes/ directory
-// and provides an alphabetized list of all available theme names plus cached
-// preview colors (background, foreground, accent) for each theme.
+// Single-read runtime access to DanTerm's packed themes and AppKit preview projections.
 import Cocoa
 
-/// Resolved preview colors for a single theme, ready for rendering.
+/// Resolved preview colors for a single complete theme, ready for browser rendering.
 struct ThemeColors {
     let background: NSColor
     let foreground: NSColor
@@ -11,47 +9,56 @@ struct ThemeColors {
     let palette: [NSColor]  // ANSI colors 1-6: red, green, yellow, blue, magenta, cyan
 }
 
-class ThemeCatalog {
-    static let shared = ThemeCatalog()
-    let names: [String]  // all theme names, sorted alphabetically
-    let colors: [String: ThemeColors]  // theme name → preview colors
+/// Owns the process-wide decoded catalog and resolves names without performing per-name IO.
+final class ThemeCatalog {
+    static let shared = ThemeCatalog(data: ThemeCatalog.loadBundledCatalog())
 
-    private init() {
-        guard let themesURL = Bundle.main.url(
-            forResource: "ghostty/themes", withExtension: nil
-        ) else {
+    let names: [String]
+    let colors: [String: ThemeColors]
+    private let themesByName: [String: DanTermTheme]
+
+    init(data: Data?) {
+        guard let data, let catalog = ThemeCatalogDocument.decode(data) else {
             names = []
             colors = [:]
+            themesByName = [:]
             return
         }
-        let fm = FileManager.default
-        let contents = (try? fm.contentsOfDirectory(atPath: themesURL.path)) ?? []
-        names = contents
-            .filter { !$0.hasPrefix(".") }
-            .sorted(by: { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending })
-
-        var parsed: [String: ThemeColors] = [:]
-        for name in names {
-            let path = themesURL.appendingPathComponent(name).path
-            guard let hex = ThemeColorParser.parse(themeFileAt: path) else { continue }
-            guard let bg = ThemeCatalog.colorFromHex(hex.background),
-                  let fg = ThemeCatalog.colorFromHex(hex.foreground),
-                  let accent = ThemeCatalog.colorFromHex(hex.accent) else { continue }
-            let pal = hex.palette.compactMap { ThemeCatalog.colorFromHex($0) }
-            guard pal.count == 6 else { continue }
-            parsed[name] = ThemeColors(background: bg, foreground: fg, accent: accent, palette: pal)
-        }
-        colors = parsed
+        names = catalog.names
+        themesByName = Dictionary(uniqueKeysWithValues: catalog.themes.map { ($0.name, $0) })
+        colors = Dictionary(uniqueKeysWithValues: catalog.themes.map { theme in
+            (
+                theme.name,
+                ThemeColors(
+                    background: Self.nsColor(theme.background),
+                    foreground: Self.nsColor(theme.foreground),
+                    accent: Self.nsColor(theme.cursor),
+                    palette: Array(theme.ansiPalette[1...6]).map(Self.nsColor)
+                )
+            )
+        })
     }
 
-    /// Convert a validated "#rrggbb" hex string to an NSColor in sRGB.
-    private static func colorFromHex(_ hex: String) -> NSColor? {
-        var h = hex
-        if h.hasPrefix("#") { h = String(h.dropFirst()) }
-        guard h.count == 6, let val = UInt64(h, radix: 16) else { return nil }
-        let r = CGFloat((val >> 16) & 0xFF) / 255.0
-        let g = CGFloat((val >> 8) & 0xFF) / 255.0
-        let b = CGFloat(val & 0xFF) / 255.0
-        return NSColor(srgbRed: r, green: g, blue: b, alpha: 1.0)
+    /// Resolves only exact catalog keys, so untrusted names never become filesystem paths.
+    func theme(named name: String) -> DanTermTheme? {
+        themesByName[name]
+    }
+
+    private static func loadBundledCatalog(bundle: Bundle = .main) -> Data? {
+        guard let url = bundle.url(
+            forResource: "catalog",
+            withExtension: "json",
+            subdirectory: "themes"
+        ) else { return nil }
+        return try? Data(contentsOf: url)
+    }
+
+    private static func nsColor(_ color: ThemeRGBColor) -> NSColor {
+        NSColor(
+            srgbRed: CGFloat(color.red) / 255,
+            green: CGFloat(color.green) / 255,
+            blue: CGFloat(color.blue) / 255,
+            alpha: 1
+        )
     }
 }

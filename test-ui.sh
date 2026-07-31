@@ -35,7 +35,7 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/TerminalBackendBoundary.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/TerminalMetadataBounds.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/DanTermConfig.swift" \
-        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/ThemeColorParser.swift" \
+        "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/ThemeCatalogDocument.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/ClipboardWriteItems.swift" \
         "$SCRIPT_DIR/lib/DanTermCore/Sources/DanTermCore/DragDropInput.swift" \
         "$SCRIPT_DIR/lib/TerminalCore/Sources/TerminalCore/TerminalInputEncoding.swift" \
@@ -64,8 +64,8 @@ echo "Compiling UI tests..."
         "$SCRIPT_DIR/app/PaneWrapperView.swift" \
         "$SCRIPT_DIR/app/SplitContainerView.swift" \
         "$SCRIPT_DIR/app/SidebarView.swift" \
-        "$SCRIPT_DIR/app/ThemeColorFileLoader.swift" \
         "$SCRIPT_DIR/app/ThemeCatalog.swift" \
+        "$SCRIPT_DIR/app/ThemeRenderBridge.swift" \
         "$SCRIPT_DIR/app/ThemeSwatchViews.swift" \
         "$SCRIPT_DIR/app/ThemeBrowserView.swift" \
         "$SCRIPT_DIR/app/RemoteThemePickerSheet.swift" \

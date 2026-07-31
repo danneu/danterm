@@ -531,13 +531,15 @@ public struct NeutralTerminalRecording: Codable, Equatable, Sendable {
     /// with, or the two terminals differ on configuration alone.
     public func replay(
         machineHostname: String? = nil,
+        defaultColors: TerminalDefaultColors = .baked,
         inspect: (_ eventIndex: Int, _ terminal: Terminal) throws -> Void = { _, _ in }
     ) throws -> Terminal {
         guard version == 1,
               let initialTerminal = Terminal(
                   columns: initial.columns,
                   rows: initial.rows,
-                  machineHostname: machineHostname
+                  machineHostname: machineHostname,
+                  defaultColors: defaultColors
               )
         else {
             throw NeutralTerminalRecordingError.invalidDimensions

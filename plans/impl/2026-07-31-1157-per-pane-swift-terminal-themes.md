@@ -329,7 +329,7 @@ painted background.
 - [x] 1. feat(themes): import canonical theme catalog
 - [x] 2. build(themes): pack the runtime theme catalog
 - [x] 3. feat(renderer): support complete theme presentation
-- [ ] 4. feat(terminal): apply themes per pane
+- [x] 4. feat(terminal): apply themes per pane
 
 ## Implementation notes
 
@@ -341,3 +341,6 @@ painted background.
   distance from selection and default backgrounds across three fixed candidates;
   the candidates include the previous baked search color and deterministic
   fallbacks, so the result is never less separated than the old color.
+- Runtime catalog decoding remains in the pure core while
+  `app/ThemeRenderBridge.swift` is the sole decoded-theme-to-renderer conversion
+  and is named explicitly in the Swift-engine boundary allowlist.

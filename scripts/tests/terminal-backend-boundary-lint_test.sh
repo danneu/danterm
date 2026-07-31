@@ -24,7 +24,7 @@ printf '// import GhosttyKit\nimport GhosttyKitExtra\n' > "$TMP/denied/AppRuntim
 
 rm -rf "$TMP/allowed" "$TMP/denied"
 mkdir -p "$TMP/allowed" "$TMP/denied"
-for file in SwiftTerminalSessionView.swift SwiftTerminalBackend.swift; do
+for file in SwiftTerminalSessionView.swift SwiftTerminalBackend.swift ThemeRenderBridge.swift; do
     for module in PaneLifecycle TerminalCore TerminalCoreRecording TerminalPTYHost TerminalPaneSession TerminalRenderPlanning TerminalRenderExecution; do
         printf 'import %s\n' "$module" > "$TMP/allowed/$file"
         "$LINT" "$TMP/allowed" >/dev/null \
@@ -45,5 +45,15 @@ fi
 printf '// import TerminalCore\nimport TerminalCoreExtras\n' > "$TMP/denied/AppRuntime.swift"
 "$LINT" "$TMP/denied" >/dev/null \
     || fail "comments and longer engine module names should pass"
+
+printf 'let path = "ghostty/themes"\n' > "$TMP/denied/ThemeCatalog.swift"
+if "$LINT" "$TMP/denied" >/dev/null 2>&1; then
+    fail "DanTerm runtime theme paths should fail"
+fi
+
+printf 'let path = "ghostty/themes"\n' > "$TMP/denied/GhosttyApp.swift"
+rm "$TMP/denied/ThemeCatalog.swift"
+"$LINT" "$TMP/denied" >/dev/null \
+    || fail "legacy adapter theme paths should pass"
 
 echo "terminal backend boundary lint self-test passed"

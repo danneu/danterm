@@ -3,6 +3,14 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TARGET="${1:-$SCRIPT_DIR/../app}"
+THEME_RUNTIME_TARGETS=("$TARGET")
+if [[ $# -eq 0 ]]; then
+    THEME_RUNTIME_TARGETS+=(
+        "$SCRIPT_DIR/../lib/DanTermCore/Sources/DanTermCore"
+        "$SCRIPT_DIR/../lib/TerminalCore/Sources"
+        "$SCRIPT_DIR/../lib/TerminalPTY/Sources"
+    )
+fi
 
 failed=0
 while IFS= read -r file; do
@@ -19,7 +27,7 @@ done < <(find "$TARGET" -name '*.swift' -type f -print)
 
 while IFS= read -r file; do
     case "$(basename "$file")" in
-        SwiftTerminalSessionView.swift|SwiftTerminalBackend.swift|TerminalBenchmark.swift)
+        SwiftTerminalSessionView.swift|SwiftTerminalBackend.swift|ThemeRenderBridge.swift|TerminalBenchmark.swift)
             continue
             ;;
     esac
@@ -28,6 +36,20 @@ while IFS= read -r file; do
         failed=1
     fi
 done < <(find "$TARGET" -name '*.swift' -type f -print)
+
+for theme_target in "${THEME_RUNTIME_TARGETS[@]}"; do
+    while IFS= read -r file; do
+        case "$(basename "$file")" in
+            GhosttyApp.swift)
+                continue
+                ;;
+        esac
+        if grep -nE 'ghostty/themes|ThemeColorParser' "$file"; then
+            echo "Ghostty theme syntax or paths outside the legacy adapter: $file" >&2
+            failed=1
+        fi
+    done < <(find "$theme_target" -name '*.swift' -type f -print)
+done
 
 if [[ "$failed" -ne 0 ]]; then
     exit 1

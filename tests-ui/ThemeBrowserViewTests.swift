@@ -6,6 +6,40 @@ import Cocoa
 func themeBrowserViewTests() {
     print("ThemeBrowserView")
 
+    uiTest("runtime catalog projects complete swatches and resolves names without paths") {
+        // Intent: one decoded entry drives both browser colors and the renderer bridge.
+        // Why it exists: separate parsing paths can drift, and untrusted names must never become paths.
+        // Scenario: the browser renders a packed theme and a remote traversal-like key is rejected.
+        let catalog = ThemeCatalog(data: fixtureThemeCatalogData())
+
+        try uiExpect(catalog.names == ["Fixture"], "runtime names diverged: \(catalog.names)")
+        guard let colors = catalog.colors["Fixture"] else {
+            throw UITestFailure(message: "missing fixture swatch")
+        }
+        try uiExpect(
+            UInt8((colors.background.usingColorSpace(.sRGB)!.redComponent * 255).rounded()) == 4,
+            "swatch did not project the decoded theme background"
+        )
+        try uiExpect(
+            catalog.renderTheme(named: "Fixture")?.defaultBackground
+                == RenderColor(red: 4, green: 5, blue: 6),
+            "renderer bridge did not project the decoded theme"
+        )
+        try uiExpect(catalog.renderTheme(named: "../Fixture") == nil,
+                     "path traversal resolved outside exact catalog keys")
+    }
+
+    uiTest("unreadable and malformed catalogs expose no partial themes") {
+        // Intent: resource failures collapse to an empty catalog rather than partial theme state.
+        // Why it exists: runtime theme completeness is all-or-nothing across the packed resource.
+        // Scenario: the bundle read fails or returns malformed JSON during application startup.
+        try uiExpect(ThemeCatalog(data: nil).names.isEmpty, "missing resource exposed themes")
+        try uiExpect(
+            ThemeCatalog(data: Data("{not-json".utf8)).names.isEmpty,
+            "malformed resource exposed themes"
+        )
+    }
+
     uiTest("constructs against an empty catalog and applies a projection without dispatch") {
         let runtime = AppRuntime()
         let view = ThemeBrowserView()
@@ -288,6 +322,24 @@ func themeBrowserViewTests() {
         menu = nil
         view = nil
     }
+}
+
+/// Builds one complete packed entry for the app-side catalog and bridge tests.
+private func fixtureThemeCatalogData() -> Data {
+    Data(
+        """
+        {"schemaVersion":1,"themes":[{
+          "schemaVersion":1,"name":"Fixture","foreground":"#010203",
+          "background":"#040506","cursor":"#070809","cursorText":"#0a0b0c",
+          "selectionBackground":"#0d0e0f","selectionForeground":"#101112",
+          "ansiPalette":[
+            "#000000","#000001","#000002","#000003","#000004","#000005",
+            "#000006","#000007","#000008","#000009","#00000a","#00000b",
+            "#00000c","#00000d","#00000e","#00000f"],
+          "provenance":{"collection":"source","ghosttyVersion":"v1.3.1","release":"release"}
+        }]}
+        """.utf8
+    )
 }
 
 private struct ThemeBrowserFixture {

@@ -34,6 +34,57 @@ func swiftTerminalSessionViewTests() {
                      "empty needle and end did not both clear search")
     }
 
+    uiTest("theme application resolves before changing presentation and clear restores dark") {
+        // Intent: only complete resolved themes reach the controller, while clear restores dark.
+        // Why it exists: failed or traversal-like keys must leave the pane coherently unchanged.
+        // Scenario: a user applies a valid theme, two invalid names, then clears the override.
+        let controller = TerminalPaneSessionController()
+        let resolved = RenderTheme(defaultBackground: .init(red: 12, green: 34, blue: 56))
+        let pane = SwiftTerminalSessionView(
+            controller: controller,
+            resolveTheme: { $0 == "Known" ? resolved : nil }
+        )
+
+        pane.applyTheme("Known")
+        pane.applyTheme("Missing")
+        pane.applyTheme("../Known")
+        pane.clearTheme()
+
+        try uiExpect(
+            controller.appliedThemes.map(\.defaultBackground) == [
+                resolved.defaultBackground,
+                RenderTheme.dark.defaultBackground,
+            ],
+            "theme dispatch changed on failed resolution: \(controller.appliedThemes)"
+        )
+    }
+
+    uiTest("initial theme fills before draw and the retained first plan publishes on mount") {
+        // Intent: the view paints themed chrome immediately and adopts the controller's first plan.
+        // Why it exists: waiting for child output creates a dark flash on restore and split inheritance.
+        // Scenario: a themed controller with a retained plan mounts before its child writes a byte.
+        let prefill = RenderTheme(defaultBackground: .init(red: 11, green: 22, blue: 33))
+        let planned = RenderColor(red: 44, green: 55, blue: 66)
+        let controller = TerminalPaneSessionController(
+            theme: prefill,
+            currentPlan: RenderFramePlan(defaultBackground: planned)
+        )
+        let pane = SwiftTerminalSessionView(controller: controller)
+
+        try uiExpect(
+            pane.layer?.backgroundColor?.components?.prefix(3).map { UInt8(($0 * 255).rounded()) }
+                == [11, 22, 33],
+            "pane did not prefill from the controller's initial theme"
+        )
+
+        pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+        mountInTestWindow(pane, frame: pane.frame)
+        try uiExpect(
+            pane.publishedBackgroundForTesting == planned,
+            "mount waited for child output instead of retaining the controller's first plan"
+        )
+    }
+
     uiTest("engine search status maps into paired product events") {
         // Intent: each atomic engine status becomes the total and selected events the model expects.
         // Why it exists: splitting one engine value into two callbacks must preserve nil, empty,

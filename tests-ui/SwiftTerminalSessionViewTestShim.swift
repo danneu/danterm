@@ -35,9 +35,32 @@ struct RenderColor: Equatable {
     let blue: UInt8
 }
 
+/// Test-only fixed-palette stand-in used by the real app-side bridge.
+struct RenderANSIColors {
+    init?(exactly colors: [RenderColor]) {
+        guard colors.count == 16 else { return nil }
+    }
+}
+
 struct RenderTheme {
-    static let dark = RenderTheme()
-    let defaultBackground = RenderColor(red: 0, green: 0, blue: 0)
+    static let dark = RenderTheme(defaultBackground: .init(red: 0, green: 0, blue: 0))
+    let defaultBackground: RenderColor
+
+    init(defaultBackground: RenderColor) {
+        self.defaultBackground = defaultBackground
+    }
+
+    init(
+        ansiColors: RenderANSIColors,
+        defaultForeground: RenderColor,
+        defaultBackground: RenderColor,
+        selectionForeground: RenderColor,
+        selectionBackground: RenderColor,
+        cursor: RenderColor,
+        cursorText: RenderColor
+    ) {
+        self.defaultBackground = defaultBackground
+    }
 }
 
 struct RenderFramePlan {
@@ -211,6 +234,8 @@ final class TerminalPaneSessionController {
     var onSearchStatus: ((TerminalSearchStatus?) -> Void)?
     var onPrimaryHistoryMutation: (() -> Void)?
     var currentPlan: RenderFramePlan?
+    private(set) var renderTheme = RenderTheme.dark
+    private(set) var appliedThemes: [RenderTheme] = []
     var viewportState: TerminalPaneViewportState
     private(set) var scrolledTopRows: [Int] = []
     private(set) var textInputs: [String] = []
@@ -233,11 +258,17 @@ final class TerminalPaneSessionController {
     private var linkClickArmed = false
     var inputModes = TerminalInputModes.default
 
-    init(viewportState: TerminalPaneViewportState = .init(
-        isScrollbarEnabled: true,
-        projection: .init(totalRows: 30, topRow: 10, windowRows: 20, isFollowing: false)
-    )) {
+    init(
+        viewportState: TerminalPaneViewportState = .init(
+            isScrollbarEnabled: true,
+            projection: .init(totalRows: 30, topRow: 10, windowRows: 20, isFollowing: false)
+        ),
+        theme: RenderTheme = .dark,
+        currentPlan: RenderFramePlan? = nil
+    ) {
         self.viewportState = viewportState
+        renderTheme = theme
+        self.currentPlan = currentPlan
     }
 
     func sendText(_ text: String) { textInputs.append(text) }
@@ -297,6 +328,10 @@ final class TerminalPaneSessionController {
     }
     func scroll(toTopRow row: Int) { scrolledTopRows.append(row) }
     func setVisible(_ visible: Bool) {}
+    func setTheme(_ theme: RenderTheme) {
+        renderTheme = theme
+        appliedThemes.append(theme)
+    }
     func fenceForApplicationExit() {}
     func synchronizeState() {}
     func readViewportText() -> String { "" }

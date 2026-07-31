@@ -48,6 +48,7 @@ final class SwiftTerminalBackend: TerminalBackend {
     }
 
     func createSession(_ request: TerminalSessionRequest) -> (any TerminalSession)? {
+        let theme = request.themeName.flatMap(ThemeCatalog.shared.renderTheme(named:)) ?? .dark
         let launchRequest = TerminalPaneLaunchRequest(
             workingDirectory: request.workingDirectory,
             command: request.command,
@@ -64,12 +65,14 @@ final class SwiftTerminalBackend: TerminalBackend {
             controller = try TerminalPaneSessionController(
                 configuration: configuration,
                 bootstrapExecutable: bootstrapExecutable,
+                theme: theme,
                 captureTransitions: recordingDirectory != nil
             )
             #else
             controller = try TerminalPaneSessionController(
                 configuration: configuration,
-                bootstrapExecutable: bootstrapExecutable
+                bootstrapExecutable: bootstrapExecutable,
+                theme: theme
             )
             #endif
         } catch {

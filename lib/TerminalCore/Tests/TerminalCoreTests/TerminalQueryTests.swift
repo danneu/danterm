@@ -36,6 +36,22 @@ struct TerminalQueryTests {
         #expect(terminal == before)
     }
 
+    @Test("OSC 10 and 11 report the defaults injected for this terminal")
+    func injectedDefaultColorQueries() throws {
+        let defaults = TerminalDefaultColors(
+            foreground: .init(red: 1, green: 35, blue: 69),
+            background: .init(red: 103, green: 137, blue: 171)
+        )
+        var terminal = try #require(Terminal(columns: 8, rows: 4, defaultColors: defaults))
+
+        terminal.feed(Array("\u{1B}]10;?\u{07}\u{1B}]11;?\u{1B}\\".utf8))
+
+        #expect(terminal.drainReplyBytes() == Array(
+            ("\u{1B}]10;rgb:0101/2323/4545\u{1B}\\"
+                + "\u{1B}]11;rgb:6767/8989/abab\u{1B}\\").utf8
+        ))
+    }
+
     @Test("OSC default-color queries preserve stream order and recover after invalid forms")
     func defaultColorQueryOrderingAndRecovery() throws {
         let invalidQueries = [

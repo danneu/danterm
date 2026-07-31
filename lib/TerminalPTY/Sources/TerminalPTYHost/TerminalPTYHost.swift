@@ -239,13 +239,15 @@ public actor TerminalPTYHost {
         initialDimensions: TerminalDimensions,
         bootstrapExecutable: String,
         machineHostname: String? = MachineHostname.posix,
-        programVersion: String = "dev"
+        programVersion: String = "dev",
+        defaultColors: TerminalDefaultColors = .baked
     ) throws {
         try self.init(
             initialDimensions: initialDimensions,
             bootstrapExecutable: bootstrapExecutable,
             machineHostname: machineHostname,
             programVersion: programVersion,
+            defaultColors: defaultColors,
             captureTransitions: false
         )
     }
@@ -257,6 +259,7 @@ public actor TerminalPTYHost {
         bootstrapExecutable: String,
         machineHostname: String? = MachineHostname.posix,
         programVersion: String = "dev",
+        defaultColors: TerminalDefaultColors = .baked,
         captureTransitions: Bool,
         applicationExitBound: DispatchTimeInterval = TerminalPTYHost.defaultApplicationExitBound
     ) throws {
@@ -264,7 +267,8 @@ public actor TerminalPTYHost {
             columns: initialDimensions.columns,
             rows: initialDimensions.rows,
             machineHostname: machineHostname,
-            programVersion: programVersion
+            programVersion: programVersion,
+            defaultColors: defaultColors
         ) else {
             throw TerminalPTYHostError.invalidDimensions
         }
@@ -301,6 +305,15 @@ public actor TerminalPTYHost {
             self?.assumeIsolated { owner in
                 owner.applyViewportNavigation(.scrollToBottom, publishUpdate: false)
                 owner.process(.sendInput(bytes))
+            }
+        }
+    }
+
+    /// Orders default-color changes with child output and later terminal queries.
+    nonisolated public func setDefaultColors(_ colors: TerminalDefaultColors) {
+        queueClosingResizeRun().async { [weak self] in
+            self?.assumeIsolated { owner in
+                owner.terminal.setDefaultColors(colors)
             }
         }
     }

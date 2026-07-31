@@ -213,6 +213,24 @@ public struct RenderTheme: Equatable, Sendable {
     }
 }
 
+public extension RenderTheme {
+    /// Projects renderer defaults back into the neutral pair used by terminal queries.
+    var defaultColors: TerminalDefaultColors {
+        TerminalDefaultColors(
+            foreground: TerminalRGBColor(
+                red: defaultForeground.red,
+                green: defaultForeground.green,
+                blue: defaultForeground.blue
+            ),
+            background: TerminalRGBColor(
+                red: defaultBackground.red,
+                green: defaultBackground.green,
+                blue: defaultBackground.blue
+            )
+        )
+    }
+}
+
 /// Bundles every presentation choice that may affect planning so repeated
 /// calls never consult focus state, preferences, or another ambient source.
 public struct RenderPresentation: Equatable, Sendable {
