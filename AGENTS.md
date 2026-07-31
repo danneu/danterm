@@ -60,6 +60,12 @@ measuring one. A shell's behavior is established by a real binary in a real PTY,
 and a terminal's by feeding bytes to `TerminalCore.Terminal` -- reading the code
 tells you which experiment to run.
 
+References are input, not authority. On compatibility -- what a sequence does,
+what a shell emits -- match them; that's the requirement. On design -- data
+model, where state lives, API shape -- they're only ideas: take the edge cases
+they found, then build the simplest ideal solution for DanTerm. Their structure
+encodes their history, not our constraints. "Ghostty does X" is not a rationale.
+
 ## Architecture
 
 Elm architecture (unidirectional data flow): views dispatch `Msg` values,
