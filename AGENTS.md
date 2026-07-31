@@ -34,6 +34,30 @@ For GitHub API requests:
 
 - Use the `gh` CLI. Don't reach for `curl` or hand-rolled HTTP.
 
+## Local source references
+
+Real source for the systems DanTerm imitates or runs on is available locally at
+pinned revisions. Read it. Grepping a real implementation beats reasoning from
+memory about what a terminal, a shell, or Darwin does, and it costs one command:
+
+- **Terminals** -- `libvterm` (parser, reflow), `alacritty` (recordings and
+  replay cases), plus `.ghostty-src/` for the libghostty C API.
+- **Shells** -- `fish-shell`, `zsh`, `bash` (readline). Pinned at the versions
+  the shell-integration research measured.
+- **Darwin** -- `xnu` (process, signal, tty, Mach), `Libc`, `libdispatch`,
+  `libpthread`, `libplatform`, `objc4`.
+
+`references/` is gitignored, so it's empty in a fresh clone: run
+`just fetch-references [name]` (`--list` shows names, pins, and why each exists)
+and read locally instead of fetching files over the web. Details and per-tree
+entry points are in
+[agent-docs/reference-sources.md](agent-docs/reference-sources.md).
+
+Source explains a behavior or picks the next probe; it does not replace
+measuring one. A shell's behavior is established by a real binary in a real PTY,
+and a terminal's by feeding bytes to `TerminalCore.Terminal` -- reading the code
+tells you which experiment to run.
+
 ## Architecture
 
 Elm architecture (unidirectional data flow): views dispatch `Msg` values,
@@ -298,6 +322,6 @@ Topic docs. Read the linked file before editing if your task touches the topic.
 - [agent-docs/build-details.md](agent-docs/build-details.md) -- `build-lib.sh`, Swift compilation modes, xcframework + linker details. Read when touching build scripts or upgrading Ghostty.
 - [agent-docs/terminal-performance.md](agent-docs/terminal-performance.md) -- real-app benchmarks, compatible history, profiler selection, CPU and memory profiling, and artifact handling. Read before measuring or optimizing terminal speed or memory footprint.
 - [docs/design/2026-07-29-cross-module-value-dispatch.md](docs/design/2026-07-29-cross-module-value-dispatch.md) -- why hot value types crossing a SwiftPM target boundary need an inlinable surface, and how to tell witness-table dispatch from value-witness traffic in a profile. Read before removing an `@inlinable`/`@usableFromInline` annotation in `lib/TerminalCore`, adding a generic entry point that crosses a target boundary, or acting on an `outlined copy`/`outlined consume` frame.
-- [agent-docs/reference-sources.md](agent-docs/reference-sources.md) -- `.ghostty-src/` layout, key files for the libghostty C API, other terminal references. Read when implementing against libghostty.
+- [agent-docs/reference-sources.md](agent-docs/reference-sources.md) -- `.ghostty-src/` layout, key files for the libghostty C API, and the pinned `references/` checkouts (terminals, shells, Darwin). Read when implementing against libghostty, or before reasoning from memory about what a terminal, shell, or Darwin API does.
 - [docs/ci.md](docs/ci.md) -- CI/CD pipeline, code signing, notarization, troubleshooting.
 - [docs/upgrading-ghostty.md](docs/upgrading-ghostty.md) -- upgrading the pinned Ghostty version, CI cache.
