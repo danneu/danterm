@@ -265,13 +265,19 @@ source.
 ### Check integration health
 
 `doctor` is local-only and does not require the app to be running. Use it when
-the user asks whether DanTerm's shell command, agent hooks, agent skill, or `jq`
-setup is healthy:
+the user asks whether DanTerm's shell command, agent hooks, agent skill, `jq`, or
+configured font setup is healthy:
 
     danterm doctor
 
 The output reports all rows (INFO/SKIP/WARN/ERROR/OK) plus a summary footer.
 Exit status is 1 only when a check is an ERROR; WARN/INFO/SKIP still exit 0.
+
+The `Configured font installed` row checks `font.family` in
+`~/.config/danterm/config.json`: SKIP when no family is set, OK when it names an
+installed family, and WARN when it does not (DanTerm falls back to the system
+monospace font) or when the config file can't be read as a schemaVersion 1 JSON
+document. It is always advisory -- a font problem never changes the exit code.
 
 ### Todos
 

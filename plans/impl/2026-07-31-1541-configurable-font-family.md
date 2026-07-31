@@ -285,7 +285,7 @@ states. The pure projection tests cannot prove this AppKit wiring.
 - [x] 4. Render the resolved family end to end, including the system-monospace
       metrics fallback (I3, I5)
 - [x] 5. Preferences installed-family combo box + inline warning
-- [ ] 6. `danterm doctor` config-font check + `SKILL.md` update
+- [x] 6. `danterm doctor` config-font check + `SKILL.md` update
 
 ## Implementation notes
 
@@ -371,6 +371,24 @@ states. The pure projection tests cannot prove this AppKit wiring.
   and reset button to be internal rather than private. The alternative -- digging
   the controls out of the `NSGridView` subtree by position -- would pin layout
   structure the tests have no business asserting.
+
+- **Commit 6:** the config-font verdict is a pre-decided `DoctorFacts.ConfigFont`
+  enum passed *into* `gatherDoctorFacts`, not probed inside it. Support cannot
+  decide it (deciding needs the core's document type, which I2 forbids Support
+  from naming), so the CLI composes the two halves in `cli/DoctorConfigFont.swift`
+  and hands the answer over. The parameter defaults to `.unset` so the existing
+  Support prober tests, which have no way to build the fact, keep calling
+  `gatherDoctorFacts(env:)` unchanged.
+
+- **Commit 6:** `.installed` carries no payload. `DoctorCheck` documents OK rows
+  as message-free, so a resolved family name would be data the evaluator could
+  never render -- only `.notInstalled` needs the requested name, which is what the
+  warning quotes.
+
+- **Commit 6:** an unreadable file (IO error) and an undecodable one share the
+  `.unreadableConfig` case and one message worded to cover both, rather than
+  splitting a case the ladder treats identically -- the plan's ladder has a single
+  "config undecodable -> warn (defaults active)" rung.
 
 ## Follow Up
 

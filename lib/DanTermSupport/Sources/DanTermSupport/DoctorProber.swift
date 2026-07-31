@@ -27,7 +27,14 @@ struct DoctorProbeEnv {
 
 /// Reads the local machine integration state for `danterm doctor`. It performs
 /// no IPC and does not require the app to be launched.
-func gatherDoctorFacts(env: DoctorProbeEnv = .live) -> DoctorFacts {
+///
+/// `configFont` is passed in rather than probed here: deciding it needs the
+/// core's config document type, which this module must never depend on, so the
+/// CLI composes that one fact and hands it over.
+func gatherDoctorFacts(
+    env: DoctorProbeEnv = .live,
+    configFont: DoctorFacts.ConfigFont = .unset
+) -> DoctorFacts {
     let installerDiagnostics = CLIPathInstaller(env.installerDeps).installDiagnostics()
     let runningBinary = resolvedExecutablePath(env.argv0, env: env)
     let pathDanterm = pathCommand("danterm", env: env)
@@ -45,7 +52,8 @@ func gatherDoctorFacts(env: DoctorProbeEnv = .live) -> DoctorFacts {
         bundledHookDir: bundledHookDir(forResolvedExecutable: runningBinary),
         symlinkEntry: installerDiagnostics.entry,
         translocated: installerDiagnostics.translocated,
-        jqOnPath: executableOnPath("jq", env: env) != nil
+        jqOnPath: executableOnPath("jq", env: env) != nil,
+        configFont: configFont
     )
 }
 

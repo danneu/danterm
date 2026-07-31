@@ -14,6 +14,7 @@ enum DoctorCheckID: Equatable {
     case manualAppLink
     case translocation
     case jq
+    case configFont
 }
 
 /// Severity-like result for one doctor check. Only `.error` maps to a failing
@@ -75,6 +76,7 @@ func evaluateDoctor(_ facts: DoctorFacts) -> [DoctorCheck] {
         evaluateManualAppLink(facts),
         evaluateTranslocation(facts),
         evaluateJQ(facts),
+        evaluateConfigFont(facts),
     ]
 }
 
@@ -266,6 +268,38 @@ private func evaluateJQ(_ facts: DoctorFacts) -> DoctorCheck {
         )
     }
     return DoctorCheck(id: .jq, title: "jq on PATH", status: .ok, message: nil)
+}
+
+/// Reports whether the config file's `font.family` names an installed family.
+/// Every outcome is advisory: an unavailable font falls back to the system
+/// monospace face, so it must never fail a scripted `danterm doctor`.
+private func evaluateConfigFont(_ facts: DoctorFacts) -> DoctorCheck {
+    let title = "Configured font installed"
+    switch facts.configFont {
+    case .unset:
+        return DoctorCheck(
+            id: .configFont,
+            title: title,
+            status: .skip,
+            message: "No font.family set in ~/.config/danterm/config.json."
+        )
+    case .unreadableConfig:
+        return DoctorCheck(
+            id: .configFont,
+            title: title,
+            status: .warn,
+            message: "~/.config/danterm/config.json can't be read as a schemaVersion 1 JSON document, so font.family is ignored; defaults are active."
+        )
+    case .installed:
+        return DoctorCheck(id: .configFont, title: title, status: .ok, message: nil)
+    case .notInstalled(let requested):
+        return DoctorCheck(
+            id: .configFont,
+            title: title,
+            status: .warn,
+            message: "Font \"\(requested)\" is not installed -- using the system monospace font. Install it, or pick an installed family in Preferences > Font Family."
+        )
+    }
 }
 
 /// Builds the shared missing-or-dangling manual app-link warning so both failure

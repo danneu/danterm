@@ -163,7 +163,7 @@ struct DanTermCLI {
             throw CLIParseError("unexpected argument: \(arg)")
         }
 
-        let checks = evaluateDoctor(gatherDoctorFacts())
+        let checks = evaluateDoctor(gatherDoctorFacts(configFont: gatherConfigFontFacts()))
         print(renderDoctorReport(checks), terminator: "")
         exit(doctorExitCode(for: checks))
     }

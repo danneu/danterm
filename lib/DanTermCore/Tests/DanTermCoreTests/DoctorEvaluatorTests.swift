@@ -143,6 +143,38 @@ import DanTermProtocol
         #expect(present.status == .ok)
     }
 
+    @Test("configured font family status ladder stays advisory")
+    func configuredFontFamilyStatusLadderStaysAdvisory() {
+        // Intent: doctor reports whether the config's `font.family` names an
+        //   installed family, and never fails the process over it.
+        // Why it exists: `CTFontCreateWithName` substitutes a last-resort face for
+        //   an unknown name, so a typo'd family silently renders wrong. Doctor is
+        //   the app-independent place a user can see that; pins the four ladder
+        //   outcomes and the advisory exit code together, since a font fallback is
+        //   fully recovered and must not break scripted `danterm doctor` calls.
+        let unset = check(.configFont, in: evaluateDoctor(makeFacts(configFont: .unset)))
+        #expect(unset.status == .skip)
+        #expect(unset.message == "No font.family set in ~/.config/danterm/config.json.")
+
+        let unreadable = check(.configFont, in: evaluateDoctor(makeFacts(configFont: .unreadableConfig)))
+        #expect(unreadable.status == .warn)
+        #expect(unreadable.message == "~/.config/danterm/config.json can't be read as a schemaVersion 1 JSON document, so font.family is ignored; defaults are active.")
+
+        let installed = check(.configFont, in: evaluateDoctor(makeFacts(configFont: .installed)))
+        #expect(installed.status == .ok)
+        #expect(installed.message == nil)
+
+        let missing = check(.configFont, in: evaluateDoctor(makeFacts(
+            configFont: .notInstalled(requested: "Fira Codee")
+        )))
+        #expect(missing.status == .warn)
+        #expect(missing.message == "Font \"Fira Codee\" is not installed -- using the system monospace font. Install it, or pick an installed family in Preferences > Font Family.")
+
+        for facts in [DoctorFacts.ConfigFont.unset, .unreadableConfig, .installed, .notInstalled(requested: "Fira Codee")] {
+            #expect(doctorExitCode(for: evaluateDoctor(makeFacts(configFont: facts))) == 0)
+        }
+    }
+
     @Test("PATH CLI status ladder")
     func pathCLIStatusLadder() {
         let missing = check(.pathCLI, in: evaluateDoctor(makeFacts(pathDanterm: nil)))
@@ -271,7 +303,8 @@ private func makeFacts(
     bundledHookDir: String? = "/bundle/danterm-hooks",
     symlinkEntry: SymlinkEntry = .symlink(target: "/bundle/Contents/Helpers/danterm", targetExists: true),
     translocated: Bool = false,
-    jqOnPath: Bool = true
+    jqOnPath: Bool = true,
+    configFont: DoctorFacts.ConfigFont = .unset
 ) -> DoctorFacts {
     DoctorFacts(
         claude: claude,
@@ -282,7 +315,8 @@ private func makeFacts(
         bundledHookDir: bundledHookDir,
         symlinkEntry: symlinkEntry,
         translocated: translocated,
-        jqOnPath: jqOnPath
+        jqOnPath: jqOnPath,
+        configFont: configFont
     )
 }
 

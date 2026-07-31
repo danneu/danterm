@@ -64,6 +64,22 @@ public struct DoctorFacts: Equatable {
         }
     }
 
+    /// Verdict on the config file's `font.family`, already resolved against the
+    /// installed families. It arrives pre-decided because neither module that
+    /// owns half of it can see the other: reading `config.json` needs the core's
+    /// document type, and answering "is it installed?" needs support's CoreText
+    /// probe, so only the CLI composes both.
+    public enum ConfigFont: Equatable {
+        /// No config file, or one with no `font.family`: nothing to check.
+        case unset
+        /// A config file exists but is not a decodable schemaVersion 1 document.
+        case unreadableConfig
+        /// The requested name resolved to an installed family.
+        case installed
+        /// Nothing installed carries this name; the system monospace font applies.
+        case notInstalled(requested: String)
+    }
+
     public var claude: Agent
     public var codex: Agent
     public var runningBinaryResolved: String?
@@ -73,6 +89,7 @@ public struct DoctorFacts: Equatable {
     public var symlinkEntry: SymlinkEntry
     public var translocated: Bool
     public var jqOnPath: Bool
+    public var configFont: ConfigFont
 
     public init(
         claude: Agent,
@@ -83,7 +100,8 @@ public struct DoctorFacts: Equatable {
         bundledHookDir: String?,
         symlinkEntry: SymlinkEntry,
         translocated: Bool,
-        jqOnPath: Bool
+        jqOnPath: Bool,
+        configFont: ConfigFont
     ) {
         self.claude = claude
         self.codex = codex
@@ -94,5 +112,6 @@ public struct DoctorFacts: Equatable {
         self.symlinkEntry = symlinkEntry
         self.translocated = translocated
         self.jqOnPath = jqOnPath
+        self.configFont = configFont
     }
 }
