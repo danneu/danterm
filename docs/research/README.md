@@ -29,6 +29,7 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 | 19 | [Owner-queue occupancy](19-owner-queue-occupancy.md) | How long one job holds a pane's PTY queue, and who waits | Why stacked prompts survive a resize storm |
 | 21 | [Selection gesture cost](21-selection-gesture-cost.md) | What a pointer-driven selection query costs | Phase 1's scratch probe, then D1's pre-registered gate |
 | 24 | [OSC 133 dialect](24-osc-133-dialect/README.md) | The marks DanTerm's shell integrations emit | Dialect settled for all three shells; next is writing the emitters |
+| 25 | [Energy efficiency](25-energy-efficiency/README.md) | The engine's battery/energy posture and its backlog | Phase 1 baselines: idle wakeups, hidden-flood powermetrics |
 
 ## Closed
 
