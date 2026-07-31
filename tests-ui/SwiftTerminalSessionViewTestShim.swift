@@ -5,6 +5,11 @@ enum PaneLifecycleResult {
     case exited
 }
 
+enum TerminalSearchStatus {
+    case empty
+    case matched(selected: Int, total: Int)
+}
+
 enum TerminalSemanticEvent {
     case title(String)
     case workingDirectory(String?)
@@ -203,6 +208,7 @@ final class TerminalPaneSessionController {
     var onViewportStateChange: ((TerminalPaneViewportState) -> Void)?
     var onPaneMenu: ((TerminalViewportCell) -> Void)?
     var onOpenLink: ((TerminalHyperlink) -> Void)?
+    var onSearchStatus: ((TerminalSearchStatus?) -> Void)?
     var onPrimaryHistoryMutation: (() -> Void)?
     var currentPlan: RenderFramePlan?
     var viewportState: TerminalPaneViewportState
@@ -212,6 +218,10 @@ final class TerminalPaneSessionController {
     private(set) var focusChanges: [Bool] = []
     private(set) var pointerEvents: [TerminalPointerEvent] = []
     private(set) var wheelEvents: [TerminalWheelEvent] = []
+    private(set) var searchQueries: [String] = []
+    private(set) var searchNextRequests = 0
+    private(set) var searchPreviousRequests = 0
+    private(set) var clearSearchRequests = 0
     private(set) var synchronizedSelectionReads = 0
     private(set) var linkInteractionCancellations = 0
     var allowsPaneMenu = true
@@ -237,6 +247,10 @@ final class TerminalPaneSessionController {
     func sendPaste(_ text: String) {
         inputBytes.append(encodeTerminalPaste(text, modes: inputModes))
     }
+    func beginSearch(_ query: String) { searchQueries.append(query) }
+    func searchNext() { searchNextRequests += 1 }
+    func searchPrevious() { searchPreviousRequests += 1 }
+    func clearSearch() { clearSearchRequests += 1 }
     func sendFocus(_ focused: Bool) {
         focusChanges.append(focused)
         let bytes = encodeTerminalFocus(focused: focused, modes: inputModes)
@@ -291,6 +305,7 @@ final class TerminalPaneSessionController {
     func setGridDimensions(_ dimensions: TerminalDimensions) {}
     func tearDown() {
         onOpenLink = nil
+        onSearchStatus = nil
         onSemanticEvents = nil
     }
 
@@ -305,6 +320,10 @@ final class TerminalPaneSessionController {
 
     func emitSemanticEvents(_ events: [TerminalSemanticEvent]) {
         onSemanticEvents?(events)
+    }
+
+    func emitSearchStatus(_ status: TerminalSearchStatus?) {
+        onSearchStatus?(status)
     }
 
     func emitFrameForTest() {

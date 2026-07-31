@@ -8,6 +8,53 @@ import CoreGraphics
 func swiftTerminalSessionViewTests() {
     print("SwiftTerminalSessionView")
 
+    uiTest("search commands route through the Swift pane controller") {
+        // Intent: every search entry point reaches the engine controller with its semantic input.
+        // Why it exists: the real view gained search routing while the UI controller shim stayed
+        //   incomplete, preventing the harness from compiling and leaving this adapter untested.
+        // Scenario: the user opens find, types a needle, navigates both ways, clears it, and closes.
+        let controller = TerminalPaneSessionController()
+        let pane = SwiftTerminalSessionView(controller: controller)
+        var events: [TerminalSessionEvent] = []
+        pane.onEvent = { events.append($0) }
+
+        pane.startSearch()
+        pane.setSearchNeedle("needle")
+        pane.navigateSearch(.next)
+        pane.navigateSearch(.previous)
+        pane.setSearchNeedle("")
+        pane.endSearch()
+
+        try uiExpect(events == [.searchStarted("")], "search start did not mount the overlay")
+        try uiExpect(controller.searchQueries == ["needle"],
+                     "search needle routing diverged: \(controller.searchQueries)")
+        try uiExpect(controller.searchNextRequests == 1, "next search was not routed once")
+        try uiExpect(controller.searchPreviousRequests == 1, "previous search was not routed once")
+        try uiExpect(controller.clearSearchRequests == 2,
+                     "empty needle and end did not both clear search")
+    }
+
+    uiTest("engine search status maps into paired product events") {
+        // Intent: each atomic engine status becomes the total and selected events the model expects.
+        // Why it exists: splitting one engine value into two callbacks must preserve nil, empty,
+        //   and zero-based matched semantics without leaving stale counter state.
+        // Scenario: a search is cleared, misses, then selects the third of five matches.
+        let controller = TerminalPaneSessionController()
+        let pane = SwiftTerminalSessionView(controller: controller)
+        var events: [TerminalSessionEvent] = []
+        pane.onEvent = { events.append($0) }
+
+        controller.emitSearchStatus(nil)
+        controller.emitSearchStatus(.empty)
+        controller.emitSearchStatus(.matched(selected: 2, total: 5))
+
+        try uiExpect(events == [
+            .searchTotal(nil), .searchSelected(nil),
+            .searchTotal(0), .searchSelected(nil),
+            .searchTotal(5), .searchSelected(2),
+        ], "search status mapping diverged: \(events)")
+    }
+
     uiTest("pane registers and accepts only supported drag types") {
         // Intent: the Swift pane participates in AppKit dragging for file URLs, URLs, and strings.
         // Why it exists: destination callbacks are never sent unless the view registers its types.
