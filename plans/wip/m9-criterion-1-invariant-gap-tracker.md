@@ -214,7 +214,10 @@ test). Runs in `just test-ui` (needs GUI session).
 
 ### E5. XTGETTCAP explicit denial (10-protocols-shell-integration.md I2)
 
-Status: open
+Status: done -- filled 2026-07-31 with three XTGETTCAP cases in
+TerminalQueryTests `unsupportedQueriesAreSilent` (commit e98e064; citation
+corrected in df46a7f -- doc 10 has no I2, the denial is stated in its
+unsupported-query prose).
 
 TerminalQueryTests `unsupportedQueriesAreSilent` pins DA2, DECRQSS, and
 `>1q` as bit-identical no-ops, but not XTGETTCAP (`DCS + q`). Fill: add the
@@ -285,6 +288,9 @@ Status: open
 - 2026-07-31: E3 ruled FILL; test landed and verified failing-when-broken.
 - 2026-07-31: E4 ruled FILL; tests-ui test landed and verified
   failing-when-broken.
+- 2026-07-31: E5 ruled FILL; three XTGETTCAP cases landed. The audit cited
+  "10 I2", which does not exist -- the denial lives in doc 10's
+  unsupported-query prose. Citation corrected in the test comment.
 
 ## Close-out
 
