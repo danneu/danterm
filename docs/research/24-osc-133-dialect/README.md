@@ -195,30 +195,40 @@ re-wrap). No integration emits `D`, `L`, `I`, or `N`.
 
 ### Phase 3 -- ship the emitters
 
-- [ ] TODO: implement the dialect in `danterm.zsh`, `danterm.bash`, and
+- [x] Implemented the dialect in `danterm.zsh`, `danterm.bash`, and
   `danterm.fish`, preserving the existing prompt hooks the integrations already
-  promise not to disturb. For zsh this means an idempotent `precmd` wrapper over
-  a pristine `PS1` copy that re-appends itself to `precmd_functions` and heals
-  the first prompt from `zle-line-init`, per D1 as amended by F14 and F15 -- not
-  a `PS1=` assignment. For Bash it means the same guarded wrap driven from a
-  self-re-appending `PROMPT_COMMAND`, per D2 as amended by F15, and accepting
-  that the session's first prompt carries `A` with no row stamp.
-- [ ] TODO: decide whether the Bash first-prompt gap is worth closing by other
-  means, or is acceptable as measured. It costs one unstamped prompt row per
-  session, only when a framework rebuilds `PS1` after DanTerm's hook. F15 found
-  no hook that runs after `PROMPT_COMMAND`, so any fix would be a different
-  mechanism (e.g. re-printing the prompt once at install time), not a reordering.
-- [ ] TODO: cover the emitted dialect behaviorally -- a resize over each shell's
-  authored byte stream leaves exactly one prompt, and a resize during command
-  output leaves the output intact. `TerminalOSC133Tests` covers the parser side;
-  the emitters need their own bytes replayed, plus a
-  `scripts/tests/shell-integration_test.sh` check that each script actually
-  emits them.
-- [ ] TODO: promote F13's replay into a permanent test. The capture script is
-  [capture-fish-sweep.py](capture-fish-sweep.py); commit one variant's events as
-  a fixture and assert one prompt survives the sweep under the authored marks.
-  This is the test that would have caught D3's two wrong versions automatically,
-  and it is the fish half of the behavioral-coverage item above.
+  promise not to disturb. zsh got the idempotent `precmd` wrapper over a pristine
+  `PS1` copy that re-appends itself to `precmd_functions` and heals the first
+  prompt from `zle-line-init` (D1 as amended by F14/F15); Bash got the same
+  guarded wrap driven from a self-re-appending `PROMPT_COMMAND` entry (D2 as
+  amended by F15); fish got the single `redraw=1` declaration (D3). Verified in
+  live PTYs against no framework and real Starship in both source orders.
+- [x] Closed the Bash first-prompt gap -- it does not exist as shipped, and
+  neither does the doubled `A`. Both were artifacts of F15 measuring on a bare
+  Bash; DanTerm bundles `bash-preexec`, which runs `precmd_functions` (where
+  Starship registers) from the head of `PROMPT_COMMAND`, so our tail entry
+  already runs last on the first prompt. The doubled `A` traced to `bash-preexec`
+  folding the string `PROMPT_COMMAND` into one array element, which hid our
+  registration from the re-tail's dedup. See D2's revised "Known gap".
+- [x] Covered the emitted dialect behaviorally in `TerminalShellDialectTests` --
+  a 40-step width sweep over each shell's recorded output leaves exactly one
+  prompt, and a resize during command output leaves the output intact -- plus
+  prompt-mark, idempotence, hook-re-tail, and silence checks in
+  `scripts/tests/shell-integration_test.sh`.
+- [x] Promoted F13's replay into permanent fixtures: `fish-staircase-asis`,
+  `-redraw0`, and `-redraw1` under `Fixtures/danterm/`. Re-running
+  [capture-fish-sweep.py](capture-fish-sweep.py) reproduces F13's numbers (1 / 31
+  / 1), so the trio still discriminates the redraw value, which is what makes it
+  the test that would have caught D3's two wrong versions.
+- [ ] TODO: the `*-dialect-width-sweep` recordings guard the shipped emitters but
+  do **not** discriminate the redraw value for zsh or fish: replaying them with
+  `redraw=0`, or with the declaration stripped, still leaves exactly one prompt.
+  A settled sweep -- each repaint drained before the next resize -- does not
+  strand rows, and coalescing the resizes does not help because dropping a
+  repaint also drops the redraw that follows a blank. Only the F13 fish trio
+  (whose capture used the maintainer's real fish config) reproduces the
+  staircase, and only Bash's sweep discriminates its own value. Finding a
+  recordable stimulus that discriminates for zsh would close the gap.
 - [ ] TODO: fold the shipped dialect into `docs/terminal-capabilities.md` and
   `plan-terminal-engine/10-protocols-shell-integration.md`, which today record
   only the OSC 1337 envelope on the emitting side.
@@ -309,6 +319,11 @@ an `aid=`.
   still `TerminalCore.Terminal`, not a pane. F15 adds a real Bash to the same
   arrangement, and one artifact of its Bash emitter -- a doubled `A` on every
   prompt -- has been measured as inert at the parser but never seen rendered.
+  The shipped emitters do not reproduce that doubled `A` at all, but they do
+  produce a doubled `B` on Bash's SIGWINCH repaint that is likewise only
+  parser-checked. This caveat is unchanged by shipping: the emitters are now
+  real, and their recorded output is replayed in tests, but the consumer in those
+  tests is still `TerminalCore.Terminal` and not a DanTerm pane.
 
 ## Outcome
 
@@ -352,8 +367,13 @@ are snapshotted per cycle, so a hook that re-appends itself to
 re-expands from the live `PS1`, so a `zle-line-init` widget can heal the one
 prompt the re-append cannot reach. Made conditional on finding `PS1` unmarked,
 that heal costs one extra paint per pane instead of one per prompt. Bash gets
-the same re-append and no heal, because nothing runs after `PROMPT_COMMAND`; its
-session's first prompt ships with `A` and no row stamp.
+the same re-append and no heal, because nothing runs after `PROMPT_COMMAND`; F15
+concluded its session's first prompt would ship with `A` and no row stamp.
+Implementation refuted that last clause: F15 measured a bare Bash, and DanTerm
+bundles `bash-preexec`, which runs `precmd_functions` -- where Starship's Bash
+init registers -- from the head of `PROMPT_COMMAND`. Our tail entry therefore
+already runs after the framework on the very first prompt. The gap was an
+artifact of the probe's environment, not of Bash.
 
 F15's other result is one D2 asserted but had never measured against readline's
 actual repaint shape: emitting *nothing* for Bash is not neutral. The parser
@@ -361,6 +381,13 @@ default is `full`, readline rewrites only the last row, and the difference is
 erased permanently -- the upper prompt row does not survive at all. For Bash the
 declaration is what protects the prompt, not what tunes it.
 
-Remaining work is Phase 3 -- writing the emitters -- which is unblocked for all
-three shells, with one open judgment call: whether Bash's first-prompt gap is
-worth a different mechanism or is acceptable as measured.
+Phase 3 shipped on 2026-07-31. All three integrations emit the dialect, both
+predicted Bash costs turned out to be probe artifacts rather than properties of
+the shell, and the emitted bytes are pinned by a shell-level gate plus replayed
+PTY recordings. Two things Phase 3 leaves open, both recorded above: the zsh and
+Bash dialects have still never been rendered in a real pane, and the shipped
+width-sweep recordings guard the emitters without discriminating the redraw value
+for zsh or fish -- only F13's fish trio and Bash's own sweep do that. The
+remaining integration work is documentation: folding the shipped dialect into
+`docs/terminal-capabilities.md` and
+`plan-terminal-engine/10-protocols-shell-integration.md`.

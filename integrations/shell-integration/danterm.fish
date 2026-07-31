@@ -46,6 +46,18 @@ function danterm_emit_cwd
     printf '\e]7;file://%s%s\e\\' (hostname) "$PWD"
 end
 
+# The whole of DanTerm's OSC 133 contribution for fish. fish already emits
+# A/B/C/D itself, so we add only the `redraw` declaration -- the promise that
+# tells DanTerm's parser how much of the prompt block it may blank before a
+# reflow. `1` means "I repaint the whole prompt", which is what fish does on
+# SIGWINCH. Re-declared on every prompt, not once at load: the mode is
+# per-pane terminal state that a nested shell can overwrite and that survives
+# that shell's exit. See docs/research/24-osc-133-dialect (D0, D3).
+function danterm_emit_prompt_redraw
+    test -n "$_danterm_enabled"; or return 0
+    printf '\e]133;A;redraw=1\a'
+end
+
 function _danterm_preexec --on-event fish_preexec
     danterm_emit_command_start "$argv[1]"
     set -g _danterm_command_active 1
@@ -57,6 +69,7 @@ function _danterm_postexec --on-event fish_postexec
     end
 end
 function _danterm_prompt --on-event fish_prompt
+    danterm_emit_prompt_redraw
     if set -q _danterm_remote_user
         danterm_emit_remote_host "$_danterm_remote_user" "$_danterm_remote_host"
     else

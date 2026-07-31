@@ -169,9 +169,125 @@ fish_hooks="$(env DANTERM=1 /usr/bin/env fish --no-config -c '
     emit fish_postexec 0
     emit fish_prompt
 ' "$integration_dir" "$command_text")"
+osc133_a_full="$(printf '\033]133;A;redraw=1\007')"
+osc133_a_last="$(printf '\033]133;A;redraw=last\007')"
+osc133_b="$(printf '\033]133;B\007')"
+osc133_p_i="$(printf '\033]133;P;k=i\007')"
+osc133_c="$(printf '\033]133;C\007')"
+
 for hook_output in "$zsh_hooks" "$bash_hooks" "$fish_hooks"; do
-    assert_contains "$hook_output" "$prefix""command-start;$encoded_command$terminator$prefix""command-end$terminator"
+    assert_contains "$hook_output" "$prefix""command-start;$encoded_command$terminator"
+    assert_contains "$hook_output" "$prefix""command-end$terminator"
     assert_contains "$hook_output" "$(printf '\033]7;file://')"
+done
+# zsh and Bash emit OSC 133 `C` themselves, immediately after the private
+# envelope event so the mark sits adjacent to the command's own output. fish
+# emits its own `C` and DanTerm adds none (docs/research/24-osc-133-dialect D4).
+assert_contains "$zsh_hooks" "$prefix""command-start;$encoded_command$terminator$osc133_c"
+assert_contains "$bash_hooks" "$prefix""command-start;$encoded_command$terminator$osc133_c"
+assert_not_contains "$fish_hooks" "$osc133_c"
+# fish's whole contribution is the redraw declaration, emitted per fish_prompt.
+assert_contains "$fish_hooks" "$osc133_a_full"
+
+# --- OSC 133 prompt marks ---------------------------------------------------
+#
+# The dialect's contract is one `prompt`-stamped row per prompt, restated on
+# every prompt, surviving a prompt framework that installs its hooks after ours.
+# These check the emitted bytes rather than the internals, so a mechanism change
+# that still produces the dialect does not break them.
+
+# zsh puts its marks inside PS1, because zsh re-emits PS1 in full on every
+# redisplay -- that is what keeps the stamp alive across a SIGWINCH repaint.
+zsh_prompt="$(DANTERM=1 /usr/bin/env zsh -f -c '
+    PS1="%% "
+    source "$1/danterm.zsh"
+    _danterm_prompt_precmd
+    printf "%s" "$PS1"
+' _ "$integration_dir")"
+assert_contains "$zsh_prompt" "$osc133_a_full"
+assert_contains "$zsh_prompt" "$osc133_b"
+
+# Running the hook again must not accumulate a second pair of marks. The
+# unguarded "wrap whatever PS1 is now" form grows two marks per prompt forever.
+zsh_prompt_twice="$(DANTERM=1 /usr/bin/env zsh -f -c '
+    PS1="%% "
+    source "$1/danterm.zsh"
+    _danterm_prompt_precmd
+    _danterm_prompt_precmd
+    _danterm_prompt_precmd
+    printf "%s" "$PS1"
+' _ "$integration_dir")"
+test "$zsh_prompt" = "$zsh_prompt_twice" || fail "zsh prompt wrap is not idempotent"
+
+# A framework whose precmd is registered after ours would otherwise overwrite
+# PS1 behind our back, silently: no marks, no diagnostic. We re-claim the tail.
+zsh_tail="$(DANTERM=1 /usr/bin/env zsh -f -c '
+    source "$1/danterm.zsh"
+    late_framework_hook() { :; }
+    add-zsh-hook precmd late_framework_hook
+    _danterm_prompt_precmd
+    printf "%s" "${precmd_functions[-1]}"
+' _ "$integration_dir")"
+test "$zsh_tail" = _danterm_prompt_precmd || fail "zsh hook did not re-claim the tail of precmd_functions"
+
+# Bash prints `A` (fresh line + mode) and stamps the row from inside PS1 with
+# `P`, which has no fresh-line behavior, because readline redisplays mid-line.
+# `redraw=last` because readline repaints only the final line of the prompt.
+bash_prompt="$(DANTERM=1 /bin/bash --noprofile --norc -c '
+    PS1="bash$ "
+    source "$1/danterm.bash"
+    _danterm_prompt_command
+    printf "%s" "$PS1"
+' _ "$integration_dir")"
+assert_contains "$bash_prompt" "$osc133_a_last"
+assert_contains "$bash_prompt" "$osc133_p_i"
+assert_contains "$bash_prompt" "$osc133_b"
+assert_not_contains "$bash_prompt" "$osc133_a_full"
+# The in-prompt marks must be wrapped in \[...\] or readline counts them toward
+# the prompt width and mis-places the cursor on every line edit.
+assert_contains "$bash_prompt" "$(printf '\\[\033]133;P;k=i\007\\]')"
+assert_contains "$bash_prompt" "$(printf '\\[\033]133;B\007\\]')"
+
+bash_prompt_twice="$(DANTERM=1 /bin/bash --noprofile --norc -c '
+    PS1="bash$ "
+    source "$1/danterm.bash"
+    _danterm_prompt_command >/dev/null
+    _danterm_prompt_command >/dev/null
+    _danterm_prompt_command >/dev/null
+    printf "%s" "$PS1"
+' _ "$integration_dir")"
+bash_prompt_once="$(DANTERM=1 /bin/bash --noprofile --norc -c '
+    PS1="bash$ "
+    source "$1/danterm.bash"
+    _danterm_prompt_command >/dev/null
+    printf "%s" "$PS1"
+' _ "$integration_dir")"
+test "$bash_prompt_once" = "$bash_prompt_twice" || fail "bash prompt wrap is not idempotent"
+
+bash_tail="$(DANTERM=1 /bin/bash --noprofile --norc -c '
+    source "$1/danterm.bash"
+    PROMPT_COMMAND="${PROMPT_COMMAND}
+late_framework_hook"
+    _danterm_prompt_command >/dev/null
+    printf "%s" "${PROMPT_COMMAND##*$'"'"'\n'"'"'}"
+' _ "$integration_dir")"
+test "$bash_tail" = _danterm_prompt_command || fail "bash hook did not re-claim the tail of PROMPT_COMMAND"
+
+# With no DanTerm marker in the environment the dialect must be silent too --
+# these scripts are sourced from a user's rc file and may run under any terminal.
+for shell in zsh bash fish; do
+    case "$shell" in
+        zsh)
+            quiet="$(env -u DANTERM -u LC_DANTERM /usr/bin/env zsh -f -c 'PS1="%% "; source "$1/danterm.zsh"; _danterm_prompt_precmd; printf "%s" "$PS1"' _ "$integration_dir")"
+            ;;
+        bash)
+            quiet="$(env -u DANTERM -u LC_DANTERM /bin/bash --noprofile --norc -c 'PS1="bash$ "; source "$1/danterm.bash"; _danterm_prompt_command; printf "%s" "$PS1"' _ "$integration_dir")"
+            ;;
+        fish)
+            quiet="$(env -u DANTERM -u LC_DANTERM /usr/bin/env fish --no-config -c 'source $argv[1]/danterm.fish; danterm_emit_prompt_redraw' "$integration_dir")"
+            ;;
+    esac
+    assert_not_contains "$quiet" "$(printf '\033]133;')"
 done
 
 precedence_output="$(env DANTERM=1 LC_DANTERM=1 /usr/bin/env zsh -f -c '

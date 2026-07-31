@@ -2,8 +2,11 @@
 
 The exact marks each bundled integration emits, where it emits them, and the
 parser rule each one relies on. Authored by R1 and checked against the shipping
-parser in `F7`; the emitters are not written yet, so this is a specification, not
-a description of `integrations/shell-integration/` as it stands today (`F2`).
+parser in `F7`. **The emitters now ship**: `integrations/shell-integration/danterm.{zsh,bash,fish}`
+emit this dialect, `scripts/tests/shell-integration_test.sh` checks the bytes
+each one produces, and `TerminalShellDialectTests` replays live PTY recordings of
+all three through a width sweep. Two departures from the specification below were
+found while implementing it; both are noted in place and in `D2`.
 
 Every mark below is `ESC ] 133 ; <action> [ ; <option> ... ] BEL`. BEL and ST are
 interchangeable (`F7` case 6); the dialect writes BEL (`\a`, `0x07`), matching the
@@ -67,6 +70,12 @@ PS1   =  \[ESC]133;P;k=i BEL\]  <user PS1>  \[ESC]133;B BEL\]
 PS2   =  \[ESC]133;P;k=s BEL\]  <user PS2>  \[ESC]133;B BEL\]
 preexec: printf 'ESC]133;C BEL'
 ```
+
+As shipped, `A` is printed from a dedicated `PROMPT_COMMAND` entry that also
+re-appends itself to the end of `PROMPT_COMMAND` and rebuilds `PS1` from a
+pristine copy (`D2`, `F15`). It is deliberately not a `precmd_functions` entry:
+the bundled `bash-preexec` drives those from the *front* of `PROMPT_COMMAND`, and
+the wrap has to run after any framework's `PS1` assignment.
 
 Each `\n` prompt escape inside `PS1` is followed by `\[ESC]133;P;k=s BEL\]`.
 Substitute only the `\n` escape, not a literal newline: a literal one can appear

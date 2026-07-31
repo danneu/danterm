@@ -42,10 +42,101 @@ danterm_emit_cwd() {
     printf '\033]7;file://%s%s\033\\' "${HOST:-localhost}" "$PWD"
 }
 
+danterm_emit_osc133() {
+    [[ -n $_danterm_enabled ]] || return 0
+    printf '\033]133;%s\a' "$1"
+}
+
+# --- OSC 133 prompt marks ---------------------------------------------------
+#
+# Row stamps that tell DanTerm's parser which rows belong to the prompt, plus
+# the `redraw` promise that tells it how much of the prompt block it may blank
+# before reflowing on a resize. zsh re-emits PS1 in full on every redisplay,
+# SIGWINCH included, so the marks live *inside* PS1 -- that is what keeps the
+# stamp and the declaration alive across a repaint, which printing them from
+# precmd would not. `%{...%}` keeps them out of zsh's prompt width accounting.
+# `redraw=1` is restated every prompt rather than once at load because the mode
+# is per-pane terminal state that a nested shell can overwrite and that outlives
+# that shell. See docs/research/24-osc-133-dialect (D0, D1).
+typeset -g _danterm_p_open=$'%{\e]133;A;redraw=1\a%}'
+typeset -g _danterm_p_cont=$'%{\e]133;A;k=s\a%}'
+typeset -g _danterm_p_close=$'%{\e]133;B\a%}'
+
+typeset -g _danterm_ps1_pristine='' _danterm_ps1_marked=''
+typeset -g _danterm_ps2_pristine='' _danterm_ps2_marked=''
+
+_danterm_mark_prompt() {
+    [[ -n $_danterm_enabled ]] || return 0
+    local nl=$'\n'
+
+    # Rebuild from a pristine copy, re-capturing it whenever a third party has
+    # changed the prompt out from under us. Wrapping "whatever PS1 is now"
+    # instead composes the wrap with its own previous output and grows two marks
+    # per prompt cycle without bound (F14).
+    [[ -n $_danterm_ps1_marked && $PS1 == $_danterm_ps1_marked ]] || _danterm_ps1_pristine=$PS1
+    local body=${_danterm_ps1_pristine//$nl/$nl$_danterm_p_cont}
+    # A newline at the very start is already covered by the opening `A`'s fresh
+    # line; stamping it as well would classify one row twice.
+    [[ $_danterm_ps1_pristine == $nl* ]] && body=${body/#$nl$_danterm_p_cont/$nl}
+    PS1=$_danterm_p_open$body$_danterm_p_close
+    _danterm_ps1_marked=$PS1
+
+    [[ -n $_danterm_ps2_marked && $PS2 == $_danterm_ps2_marked ]] || _danterm_ps2_pristine=$PS2
+    PS2=$_danterm_p_cont${_danterm_ps2_pristine//$nl/$nl$_danterm_p_cont}$_danterm_p_close
+    _danterm_ps2_marked=$PS2
+}
+
+typeset -g _danterm_zle_heal_installed=''
+
+# Deferred to the first precmd rather than done at source time so that a widget
+# defined later in ~/.zshrc is already registered and can be chained instead of
+# clobbered. The first precmd still runs before the first zle-line-init, so the
+# heal below is in place in time to fix the session's first prompt.
+_danterm_install_zle_heal() {
+    [[ -z $_danterm_zle_heal_installed ]] || return 0
+    _danterm_zle_heal_installed=1
+    if [[ ${widgets[zle-line-init]:-} == user:* ]]; then
+        zle -A zle-line-init _danterm_zle_line_init_orig
+    fi
+    zle -N zle-line-init _danterm_zle_line_init
+}
+
+_danterm_zle_line_init() {
+    # Heals the one prompt the precmd re-tail below cannot reach. `zleread`
+    # expands the prompt before line-init runs
+    # (references/zsh/Src/Zle/zle_main.c#zleread), so a wrap here only reaches
+    # the screen if it also resets. Conditional on PS1 being unmarked: the
+    # unconditional form paints every prompt twice for the life of the session.
+    if [[ $PS1 != *$'\e]133;A'* ]]; then
+        _danterm_mark_prompt
+        zle reset-prompt
+    fi
+    (( ${+widgets[_danterm_zle_line_init_orig]} )) && zle _danterm_zle_line_init_orig
+    return 0
+}
+
+_danterm_prompt_precmd() {
+    [[ -n $_danterm_enabled ]] || return 0
+    # Re-append ourselves to the tail of precmd_functions so a framework hook
+    # registered after ours cannot leave us wrapping a PS1 it is about to
+    # overwrite -- which is silent when it happens: no marks, no diagnostic.
+    # zsh snapshots the hook array before iterating it
+    # (references/zsh/Src/utils.c#callhookfunc), so this takes effect from the
+    # next prompt and never the current one. That is exactly the prompt the
+    # zle-line-init heal covers.
+    precmd_functions=("${(@)precmd_functions:#_danterm_prompt_precmd}" _danterm_prompt_precmd)
+    _danterm_install_zle_heal
+    _danterm_mark_prompt
+}
+
 autoload -Uz add-zsh-hook
 _danterm_preexec() {
     typeset -g _danterm_command_active=1
     danterm_emit_command_start "$1"
+    # Emitted after the private envelope event so the mark sits adjacent to the
+    # command's own output. `C` is what stops a resize mid-command from blanking
+    # the prompt block underneath a running program.
+    danterm_emit_osc133 C
 }
 _danterm_precmd() {
     if [[ -n ${_danterm_command_active:-} ]]; then
@@ -64,6 +155,7 @@ _danterm_precmd() {
 }
 add-zsh-hook preexec _danterm_preexec
 add-zsh-hook precmd _danterm_precmd
+add-zsh-hook precmd _danterm_prompt_precmd
 
 danterm_ssh() {
     danterm_emit_remote_start

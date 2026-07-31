@@ -113,13 +113,29 @@ The authored dialect, decision by decision. The bytes themselves are in
   survives and only the cursor row is blanked. F15 stage 3 -- under readline's
   repaint shape `redraw=last` is the only opener of the four measured that
   leaves exactly one prompt; `redraw=1` and no marks both leave none.
-- Known gap: Bash offers no hook that runs after `PROMPT_COMMAND`, so it has no
-  analogue of zsh's `zle-line-init` heal. The re-tail recovers every prompt from
-  the second onward; the **first prompt of a session ships with `A` only**, no
-  row stamp (F15 stage 2). The re-tail also makes the emitter run twice per
-  prompt when a framework swallows the prior `PROMPT_COMMAND` and runs it before
-  its own assignment (Starship does), so `A` is printed twice. F15 stage 3
-  measures a doubled `A` as byte-for-byte equivalent to one.
+- Known gap, **closed in implementation on 2026-07-31; both costs F15 predicted
+  were avoidable.** F15 measured the emitter on a bare Bash. DanTerm bundles
+  `bash-preexec`, which changes both outcomes:
+  - The **first prompt is stamped after all.** F15 predicted it would ship with
+    `A` only, because Bash has no hook running after `PROMPT_COMMAND` and so no
+    analogue of zsh's `zle-line-init` heal. That is still true, but the heal is
+    not needed: `bash-preexec` runs `precmd_functions` from
+    `__bp_precmd_invoke_cmd` at the *head* of `PROMPT_COMMAND`, and Starship's
+    Bash init registers there. Our entry is at the tail, so it already runs after
+    the framework on the very first prompt, in both source orders. Measured with
+    the shipped emitter: `A;redraw=last`, `P;k=i`, `B` on every prompt including
+    the session's first, against no framework and Starship in either order.
+  - The **doubled `A` is gone.** Its cause was not Starship swallowing
+    `PROMPT_COMMAND`, as F15 read it, but `bash-preexec` folding the string
+    `PROMPT_COMMAND` it finds at install time into a single array element --
+    which swallows our source-time registration, so the re-tail added a second
+    copy instead of moving the first. The emitter's dedup strips its own line out
+    of a multi-line element rather than only matching whole elements, and the
+    mark count drops to exactly one `A` per prompt.
+- Known gap, still open: a second `B` appears on Bash's SIGWINCH repaint, because
+  readline rewrites the final prompt line and that line ends in `B`. It re-stamps
+  a row already stamped, and the same duplicate is present with no marks
+  installed at all, so it is readline's shape rather than the dialect's.
 - Decision and rationale: the redraw mode is a promise about what the shell will
   repaint. Bash promises one line, so DanTerm may blank one line. `P` rather than
   `A` inside `PS1` because readline redisplays mid-line (README, rejected ideas).
