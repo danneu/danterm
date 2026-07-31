@@ -216,7 +216,12 @@ class HarnessTests(unittest.TestCase):
             output, _ = live.drive_pty(
                 [str(SCRIPT), "--fake-child", "codex", "--fake-auth", str(link)],
                 os.environ.copy(), root, root / "pty.raw",
-                lambda data: bool(live.terminal_sequences(data, "codex")), 2)
+                # Wait for the unlink itself, not just the notify sequence that precedes
+                # it. The child writes the sequence and only then unlinks, so a predicate
+                # that stops at the sequence lets drive_pty's SIGTERM land in between and
+                # kill the child before it cleans up -- which reads as a cleanup bug.
+                lambda data: (bool(live.terminal_sequences(data, "codex"))
+                              and not link.exists()), 2)
             self.assertTrue(live.terminal_sequences(output, "codex"))
             self.assertFalse(link.exists())
             self.assertTrue(target.exists())

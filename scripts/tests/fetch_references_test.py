@@ -218,7 +218,12 @@ class FetchReferencesTests(unittest.TestCase):
             start_new_session=True,
             text=True,
         )
-        for _ in range(200):
+        # Liveness bound, not a deadline the test asserts on: the loop exits the moment
+        # the marker appears, so a generous budget costs nothing on the happy path and
+        # only bounds a genuine hang. Sized for a saturated machine -- `just test` runs
+        # its steps in parallel, and 2s was too tight for a git subprocess to reach
+        # transfer under that load.
+        for _ in range(3000):
             if marker.exists():
                 break
             process.poll()
