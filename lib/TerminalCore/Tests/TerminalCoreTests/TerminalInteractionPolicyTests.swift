@@ -147,6 +147,75 @@ struct TerminalInteractionPolicyTests {
         ).consumption == .selection)
     }
 
+    @Test("line click counts select line content without its surrounding whitespace")
+    func lineSelectionTrimsWhitespace() throws {
+        // Intent: every click count that maps to line granularity yields the same
+        //   whitespace-free line unit, in the viewport and in retained history alike.
+        // Why it exists: the trimming rule lives behind the pointer path, so a wiring
+        //   gap would leave triple-click selecting the line's padding.
+        // Scenario: triple-clicking a padded prompt line, then the same line after it
+        //   has aged into scrollback past an eviction.
+        var terminal = try #require(Terminal(columns: 20, rows: 2))
+        terminal.feed(Array("  foo bar       ".utf8))
+
+        for clickCount in [3, 6] {
+            var state = TerminalInteractionState()
+            let down = decideTerminalPointer(
+                .down(.left, column: 13, row: 0, clickCount: clickCount),
+                terminal: terminal,
+                state: &state
+            )
+            #expect(down.selectionMutation == .set(range(0, 2, 0, 9)))
+        }
+        terminal.setSelection(range(0, 2, 0, 9))
+        #expect(terminal.selectedText == "foo bar")
+
+        var evicting = try #require(Terminal(
+            columns: 12,
+            rows: 2,
+            scrollbackBudgetBytes: historyRowCost(columns: 12) * 2
+        ))
+        evicting.feed(Array("  aa  \r\n  bb  \r\n  cc  \r\n  dd  \r\n  ee  ".utf8))
+        evicting.scroll(toTopRow: 0)
+        // Five hard lines fed into a two-row history budget: only four rows survive,
+        // so the topmost retained line is the second one written.
+        #expect(evicting.scrollProjection.totalRows == 4)
+
+        var history = TerminalInteractionState()
+        let historyDown = decideTerminalPointer(
+            .down(.left, column: 5, row: 0, clickCount: 3),
+            terminal: evicting,
+            state: &history
+        )
+        #expect(historyDown.selectionMutation == .set(range(0, 2, 0, 4)))
+        evicting.setSelection(range(0, 2, 0, 4))
+        #expect(evicting.selectedText == "bb")
+    }
+
+    @Test("line dragging trims only the selection's outer edges")
+    func lineDragTrimsOuterEdgesOnly() throws {
+        // Intent: a multi-line line-granularity drag stays one contiguous range whose
+        //   interior whitespace -- including the padding around the hard line break --
+        //   survives, while its two outer edges are trimmed.
+        // Why it exists: trimming each line separately would make the selection
+        //   discontiguous and drop text between the drag endpoints.
+        // Scenario: dragging a triple-click across two padded log lines.
+        var terminal = try #require(Terminal(columns: 12, rows: 3))
+        terminal.feed(Array("  first  \r\n  second  ".utf8))
+
+        var state = TerminalInteractionState()
+        _ = decideTerminalPointer(
+            .down(.left, column: 0, row: 0, clickCount: 3), terminal: terminal, state: &state
+        )
+        let move = decideTerminalPointer(
+            .move(column: 11, row: 1), terminal: terminal, state: &state
+        )
+
+        #expect(move.selectionMutation == .set(range(0, 2, 1, 8)))
+        terminal.setSelection(range(0, 2, 1, 8))
+        #expect(terminal.selectedText == "first  \n  second")
+    }
+
     @Test("click count never reaches an application that has captured the mouse")
     func capturedMouseIgnoresClickCount() throws {
         // Intent: under mouse capture, a high-click-count press reports exactly the

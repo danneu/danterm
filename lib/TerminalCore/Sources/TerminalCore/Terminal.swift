@@ -2191,7 +2191,15 @@ public struct Terminal: Equatable, Sendable {
 
     /// Returns one logical line across all soft-wrapped visual rows for multi-click selection.
     public func logicalLineRange(at position: TerminalTextPosition) -> TerminalTextRange {
-        let stream = activeProjectionRows()
+        logicalLineRange(at: position, in: activeProjectionRows())
+    }
+
+    /// Takes the stream so a caller that already materialized it -- `trimmedLogicalLineRange` --
+    /// does not rebuild the whole projection a second time per pointer sample.
+    private func logicalLineRange(
+        at position: TerminalTextPosition,
+        in stream: [GridRow]
+    ) -> TerminalTextRange {
         let target = min(max(position.row, 0), stream.count - 1)
         var first = target
         var last = target
@@ -2205,6 +2213,26 @@ public struct Terminal: Equatable, Sendable {
             start: TerminalTextPosition(row: first, column: 0),
             end: TerminalTextPosition(row: last, column: projectedCellEnd(in: stream[last]))
         )
+    }
+
+    /// Returns the logical line with whitespace units removed from both outer edges, which is the
+    /// unit a line-granularity pointer gesture selects. Deliberately separate from
+    /// `logicalLineRange`: link detection windows its scan on that untrimmed extent, so trimming in
+    /// place would move the rows it searches. A line that projects only whitespace -- or no units at
+    /// all -- collapses to an empty range at the logical line's start, matching a blank line.
+    public func trimmedLogicalLineRange(at position: TerminalTextPosition) -> TerminalTextRange {
+        let stream = activeProjectionRows()
+        let line = logicalLineRange(at: position, in: stream)
+        let lineStart = TerminalTextPosition(row: line.start.row, column: 0)
+        let empty = TerminalTextRange(start: lineStart, end: lineStart)
+        // Trimming whole projected units is what keeps a wide cell atomic and stops a combining
+        // mark from re-classifying its whitespace base.
+        let content = projectionUnits(
+            from: Array(stream[line.start.row...line.end.row]),
+            absoluteBase: evictedRowCount + line.start.row
+        ).filter { $0.isHardBoundary == false && isWhitespaceUnit($0) == false }
+        guard let first = content.first, let last = content.last else { return empty }
+        return publicRange(TextAnchorRange(start: first.start, end: last.end)) ?? empty
     }
 
     /// Gives character-granular pointer policy the same grapheme and wide-cell atomicity as selection.
@@ -2859,6 +2887,12 @@ public struct Terminal: Equatable, Sendable {
             column: boundary.column
         )
         return TerminalTextRange(start: publicPosition, end: publicPosition)
+    }
+
+    /// Classifies by the leading scalar, like `isSelectionBoundaryUnit`, so a combining mark
+    /// cannot pull its base cell across the trimming decision.
+    private func isWhitespaceUnit(_ unit: ProjectionUnit) -> Bool {
+        unit.scalars.first?.properties.isWhitespace ?? false
     }
 
     private func isSelectionBoundaryUnit(_ unit: ProjectionUnit) -> Bool {

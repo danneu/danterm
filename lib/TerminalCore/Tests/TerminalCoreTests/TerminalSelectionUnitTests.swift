@@ -97,6 +97,76 @@ struct TerminalSelectionUnitTests {
             == range(2, 0, 2, 3))
     }
 
+    @Test("line ranges trim whitespace at both outer edges of the logical line")
+    func lineRangeTrimsOuterWhitespace() throws {
+        var terminal = try #require(Terminal(columns: 20, rows: 2))
+        terminal.feed(Array("  foo bar       ".utf8))
+
+        let trimmed = terminal.trimmedLogicalLineRange(at: .init(row: 0, column: 12))
+        #expect(trimmed == range(0, 2, 0, 9))
+        terminal.setSelection(trimmed)
+        #expect(terminal.selectedText == "foo bar")
+    }
+
+    @Test("line trimming removes whole Unicode-whitespace units")
+    func lineRangeTrimsUnicodeWhitespaceUnits() throws {
+        // Intent: trimming classifies a projected unit by its leading scalar's
+        //   Unicode whitespace property and never splits a wide cell.
+        // Why it exists: the ASCII set {NUL, space, tab} would leave a no-break or
+        //   ideographic space selected, and a per-column trim could start the range
+        //   on a wide cell's tail column.
+        // Scenario: a line padded with CJK-era spacing whose content starts on a
+        //   double-width glyph.
+        var terminal = try #require(Terminal(columns: 24, rows: 2))
+        terminal.feed(Array("\u{00A0}\u{3000} \u{0301}\u{6F22}z \u{3000}\u{00A0}".utf8))
+
+        let trimmed = terminal.trimmedLogicalLineRange(at: .init(row: 0, column: 0))
+        #expect(trimmed == range(0, 4, 0, 7))
+        terminal.setSelection(trimmed)
+        #expect(terminal.selectedText == "\u{6F22}z")
+    }
+
+    @Test("line trimming spans a soft-wrapped line and keeps whitespace inside it")
+    func lineRangeTrimsAcrossSoftWrap() throws {
+        var terminal = try #require(Terminal(columns: 4, rows: 4))
+        terminal.feed(Array("  ab  cd  \r\nX".utf8))
+
+        let wrapped = terminal.trimmedLogicalLineRange(at: .init(row: 1, column: 0))
+        #expect(wrapped == range(0, 2, 1, 4))
+        terminal.setSelection(wrapped)
+        #expect(terminal.selectedText == "ab  cd")
+
+        let afterHardLine = terminal.trimmedLogicalLineRange(at: .init(row: 3, column: 2))
+        #expect(afterHardLine == range(3, 0, 3, 1))
+        terminal.setSelection(afterHardLine)
+        #expect(terminal.selectedText == "X")
+    }
+
+    @Test("whitespace-only and unwritten lines trim to empty ranges at their line start")
+    func lineRangeEmptyForBlankLines() throws {
+        var terminal = try #require(Terminal(columns: 8, rows: 4))
+        terminal.feed(Array("A\r\n   \r\nB".utf8))
+
+        #expect(terminal.trimmedLogicalLineRange(at: .init(row: 1, column: 2)) == range(1, 0, 1, 0))
+        #expect(terminal.trimmedLogicalLineRange(at: .init(row: 3, column: 5)) == range(3, 0, 3, 0))
+    }
+
+    @Test("link detection keeps scanning the untrimmed logical line")
+    func detectedLinksIgnoreLineTrimming() throws {
+        // Intent: a URL on a line whose first row holds only whitespace still
+        //   resolves, because detection scans `logicalLineRange`, not the trimmed unit.
+        // Why it exists: trimming inside `logicalLineRange` would have moved the row
+        //   window link detection searches, silently dropping links.
+        // Scenario: an indented wrapped line whose visible URL begins after the wrap.
+        var terminal = try #require(Terminal(columns: 8, rows: 4))
+        terminal.feed(Array("        https://a.example/x".utf8))
+
+        #expect(terminal.logicalLineRange(at: .init(row: 0, column: 0)) == range(0, 0, 3, 3))
+        #expect(terminal.trimmedLogicalLineRange(at: .init(row: 0, column: 0)) == range(1, 0, 3, 3))
+        let link = try #require(terminal.activatableLink(at: .init(row: 1, column: 2)))
+        #expect(link.hyperlink.uri == "https://a.example/x")
+    }
+
     private func range(
         _ startRow: Int,
         _ startColumn: Int,

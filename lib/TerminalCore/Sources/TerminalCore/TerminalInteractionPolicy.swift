@@ -600,7 +600,7 @@ private func selectionUnit(
     switch granularity {
     case .character: terminal.characterRange(at: position)
     case .cluster: terminal.clusterRange(at: position)
-    case .line: terminal.logicalLineRange(at: position)
+    case .line: terminal.trimmedLogicalLineRange(at: position)
     }
 }
 
