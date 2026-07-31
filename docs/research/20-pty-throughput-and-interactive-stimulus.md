@@ -1,16 +1,22 @@
 # PTY throughput reporting and interactive stimulus coverage
 
-Research started: 2026-07-30. **Status: OPEN -- the four original direction
-gates are decided and shipped. `F12` reopened the workload's calibration on the
-theory that its noise is additive; `F16` measured four block lengths and
-**refuted that**, so `D5` declines the lengthening and the fixture stays at 1x.
-Two findings survive and are actionable: the frozen `confirm 8p@2.15%` fails its
+Research started: 2026-07-30. **Status: CLOSED 2026-07-30 -- `D5` is decided
+(declined), which was this file's stated close condition. All five direction
+gates are resolved. `F12` reopened the workload's calibration on the theory
+that its noise is additive; `F16` measured four block lengths and **refuted
+that**, so `D5` declines the lengthening and the fixture stays at 1x. Two
+findings survived as actionable -- the frozen `confirm 8p@2.15%` fails its
 detection gate on two of three individual screens (`F15`), and this workload
-never received the 100,000-trial confirmation stage doc 7 records for the other
-five (`F15`). `F14`'s claim that `D4` combined replicates unsoundly is
-**retracted** -- it was my own misreading of which condition the inconclusive
-gate is read from. Also outstanding: `H3` (parked) and the unclaimed vtebench
-import.**
+never received the 100,000-trial confirmation stage doc 7 records for the
+other five (`F15`) -- and both are inherited by
+[23-pty-benchmark-alignment.md](23-pty-benchmark-alignment.md) (`23/D2`),
+which also re-examines this file's instruments against the PTY rewrite that
+landed the same evening; note `23/F1`: every measurement in this file
+predates that rewrite. `F14`'s claim that `D4` combined replicates unsoundly
+is **retracted** -- it was my own misreading of which condition the
+inconclusive gate is read from. `H3` stays parked here with its reopening
+condition; the vtebench import stays logged in Open questions, owned by no
+file.**
 Deliverables, all now settled: what throughput quantity the benchmark system
 should report (`D1` -- the descriptive split, shipped), whether a keypress-driven
 interactive workload is worth building (`D2` -- no, take a recording instead),
@@ -1351,3 +1357,13 @@ Close this file when `D5` is decided either way. Declining the re-freeze closes
 it as legitimately as taking it -- but `F14`'s finding that `D4` combined its
 replicates by an unsound method should be acted on regardless of which way `D5`
 goes, since it is a defect in the rule that is frozen today.
+
+**Closed 2026-07-30.** `D5` declined; the close condition is met. (The `F14`
+caveat in the previous paragraph was itself retracted by `F15` -- the real
+defects are the frozen confirm cell's per-screen detection failures and the
+skipped confirmation stage.) Continued by
+[23-pty-benchmark-alignment.md](23-pty-benchmark-alignment.md), which
+inherits both actionables as `23/D2` and additionally owns re-examining the
+benchmark system's PTY-coupled instruments against the dispatch-join PTY
+rewrite (`6d97878`/`50c5240`, `a932c5f`..`a1c00b9`) that landed after every
+measurement in this file was taken.
