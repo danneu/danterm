@@ -93,6 +93,16 @@ jobs:
           [ "$fix_conv_line" -gt "$bugs_line" ] && [ "$fix_conv_line" -lt "$other_line" ] \
             || { echo "conventional 'fix:' not in Bug Fixes section"; exit 1; }
 
+  theme-freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Verify tracked theme freshness
+        run: |
+          python3 ./scripts/import-ghostty-themes.py
+          test -z "$(git status --porcelain --untracked-files=all -- themes)"
+
   build:
     runs-on: macos-26
     steps:
@@ -120,11 +130,6 @@ jobs:
       - name: Build GhosttyKit
         if: steps.cache-ghosttykit.outputs.cache-hit != 'true'
         run: ./build-lib.sh all
-
-      - name: Verify tracked theme freshness
-        run: |
-          python3 ./scripts/import-ghostty-themes.py
-          test -z "$(git status --porcelain --untracked-files=all -- themes)"
 
       - name: Build app bundle
         run: ./build-app.sh

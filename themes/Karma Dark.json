@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#0a0e14",
+    "#fc618d",
+    "#7bd88f",
+    "#fce566",
+    "#5ad4e6",
+    "#af98e6",
+    "#5ad4e6",
+    "#bab6c0",
+    "#69676c",
+    "#ff7ba0",
+    "#9ce3ab",
+    "#fce566",
+    "#7fe0ee",
+    "#c3b0f0",
+    "#7fe0ee",
+    "#f7f1ff"
+  ],
+  "background": "#0a0e14",
+  "cursor": "#fce566",
+  "cursorText": "#0a0e14",
+  "foreground": "#f7f1ff",
+  "name": "Karma Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#3a384a",
+  "selectionForeground": "#f7f1ff"
+}

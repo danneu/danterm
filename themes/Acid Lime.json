@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#131d0c",
+    "#ff3344",
+    "#97e63c",
+    "#eeff5c",
+    "#4deca0",
+    "#a6ff6b",
+    "#50ffb4",
+    "#bfe0a4",
+    "#4a6b36",
+    "#ff3344",
+    "#97e63c",
+    "#dbff45",
+    "#4deca0",
+    "#a6ff6b",
+    "#50ffb4",
+    "#d4efbc"
+  ],
+  "background": "#080c05",
+  "cursor": "#c2ff33",
+  "cursorText": "#080c05",
+  "foreground": "#d4efbc",
+  "name": "Acid Lime",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#1b2a10",
+  "selectionForeground": "#545852"
+}

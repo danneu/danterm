@@ -7,15 +7,15 @@
     "#8caaee",
     "#f4b8e4",
     "#81c8be",
-    "#a5adce",
+    "#b5bfe2",
     "#626880",
-    "#e67172",
-    "#8ec772",
-    "#d9ba73",
-    "#7b9ef0",
-    "#f2a4db",
-    "#5abfb5",
-    "#b5bfe2"
+    "#eda0a2",
+    "#b9dba2",
+    "#ecd7ae",
+    "#adc2f3",
+    "#f38ed8",
+    "#98d2ca",
+    "#a5adce"
   ],
   "background": "#303446",
   "cursor": "#f2d5cf",
@@ -23,11 +23,10 @@
   "foreground": "#c6d0f5",
   "name": "Catppuccin Frappe",
   "provenance": {
-    "collection": "iTerm2-Color-Schemes via Ghostty",
-    "ghosttyVersion": "v1.3.1",
-    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
   },
   "schemaVersion": 1,
-  "selectionBackground": "#626880",
-  "selectionForeground": "#c6d0f5"
+  "selectionBackground": "#f2d5cf",
+  "selectionForeground": "#303446"
 }

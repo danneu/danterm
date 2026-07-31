@@ -1,21 +1,21 @@
 {
   "ansiPalette": [
-    "#5c5f77",
+    "#bcc0cc",
     "#d20f39",
     "#40a02b",
     "#df8e1d",
     "#1e66f5",
     "#ea76cb",
     "#179299",
+    "#5c5f77",
     "#acb0be",
-    "#6c6f85",
-    "#de293e",
-    "#49af3d",
-    "#eea02d",
-    "#456eff",
-    "#fe85d8",
-    "#2d9fa8",
-    "#bcc0cc"
+    "#e7103f",
+    "#46b02f",
+    "#e49931",
+    "#3878f6",
+    "#ef95d7",
+    "#19a1a8",
+    "#6c6f85"
   ],
   "background": "#eff1f5",
   "cursor": "#dc8a78",
@@ -23,11 +23,10 @@
   "foreground": "#4c4f69",
   "name": "Catppuccin Latte",
   "provenance": {
-    "collection": "iTerm2-Color-Schemes via Ghostty",
-    "ghosttyVersion": "v1.3.1",
-    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
   },
   "schemaVersion": 1,
-  "selectionBackground": "#acb0be",
-  "selectionForeground": "#4c4f69"
+  "selectionBackground": "#dc8a78",
+  "selectionForeground": "#eff1f5"
 }

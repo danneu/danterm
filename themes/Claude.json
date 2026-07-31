@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#c15f3c",
+    "#788c5d",
+    "#b16803",
+    "#6a9bcc",
+    "#8b6cb0",
+    "#2e8b8b",
+    "#b5b3a9",
+    "#3d3d3c",
+    "#d97757",
+    "#8fa86b",
+    "#d4952b",
+    "#7bafd4",
+    "#a080c8",
+    "#4eaaaa",
+    "#bab9b5",
+    "#141413"
+  ],
+  "background": "#faf9f5",
+  "cursor": "#d97757",
+  "cursorText": "#faf9f5",
+  "foreground": "#141413",
+  "name": "Claude",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#e8e6dc",
+  "selectionForeground": "#141413"
+}

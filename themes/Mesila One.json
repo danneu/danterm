@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#101418",
+    "#93867f",
+    "#5cc8ff",
+    "#ebb3a9",
+    "#dec1ff",
+    "#7d70ba",
+    "#5cc8ff",
+    "#e9fae3",
+    "#7d70ba",
+    "#93867f",
+    "#5cc8ff",
+    "#ebb3a9",
+    "#dec1ff",
+    "#7d70ba",
+    "#5cc8ff",
+    "#e9fae3"
+  ],
+  "background": "#1b1f23",
+  "cursor": "#5cc8ff",
+  "cursorText": "#1b1f23",
+  "foreground": "#e9fae3",
+  "name": "Mesila One",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#334155",
+  "selectionForeground": "#676b6f"
+}

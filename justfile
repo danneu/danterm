@@ -21,7 +21,7 @@ fetch-references *args:
 build-lib:
     ./build-lib.sh
 
-# Refresh DanTerm's tracked JSON themes from the catalog bundled by pinned Ghostty.
+# Refresh tracked JSON themes from DanTerm's pinned iTerm2-Color-Schemes release.
 update-themes:
     python3 ./scripts/import-ghostty-themes.py
 

@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#ccd0dc",
+    "#c25a4d",
+    "#2f7aab",
+    "#785fd0",
+    "#6288d8",
+    "#629aa5",
+    "#e58678",
+    "#3f4363",
+    "#505575",
+    "#c25a4d",
+    "#2f7aab",
+    "#785fd0",
+    "#6288d8",
+    "#629aa5",
+    "#e58678",
+    "#3f4363"
+  ],
+  "background": "#f6f7fb",
+  "cursor": "#6d7296",
+  "cursorText": "#3f4363",
+  "foreground": "#3f4363",
+  "name": "Serendipity Morning",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#5a5670",
+  "selectionForeground": "#7f83a3"
+}

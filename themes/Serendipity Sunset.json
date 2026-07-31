@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#363847",
+    "#d1918f",
+    "#709bbd",
+    "#a392dc",
+    "#a0b6e8",
+    "#aac9d4",
+    "#d6b4b4",
+    "#dee0ef",
+    "#6b6d7c",
+    "#d1918f",
+    "#709bbd",
+    "#a392dc",
+    "#a0b6e8",
+    "#aac9d4",
+    "#d6b4b4",
+    "#dee0ef"
+  ],
+  "background": "#202231",
+  "cursor": "#8d8f9e",
+  "cursorText": "#dee0ef",
+  "foreground": "#dee0ef",
+  "name": "Serendipity Sunset",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#6b6d7c",
+  "selectionForeground": "#dee0ef"
+}

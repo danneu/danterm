@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#221c12",
+    "#d9604f",
+    "#a8b86a",
+    "#d9a441",
+    "#5fbfb0",
+    "#b98fb0",
+    "#8fd6b0",
+    "#bfb29a",
+    "#6e6450",
+    "#d9604f",
+    "#a8b86a",
+    "#c97a45",
+    "#5fbfb0",
+    "#b98fb0",
+    "#8fd6b0",
+    "#e8dcc6"
+  ],
+  "background": "#14110b",
+  "cursor": "#ce8b45",
+  "cursorText": "#14110b",
+  "foreground": "#e8dcc6",
+  "name": "Verdigris",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#2a2417",
+  "selectionForeground": "#54514b"
+}

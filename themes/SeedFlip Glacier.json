@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#c2d4e5",
+    "#bd0f0f",
+    "#0fbd49",
+    "#bda00f",
+    "#0f58bd",
+    "#bd0fbd",
+    "#0fbdbd",
+    "#080d17",
+    "#8dadce",
+    "#ee2b2b",
+    "#12d452",
+    "#d4b312",
+    "#2b7cee",
+    "#ee2bee",
+    "#12d4d4",
+    "#0f172a"
+  ],
+  "background": "#f8fafc",
+  "cursor": "#0ea5e9",
+  "cursorText": "#0f172a",
+  "foreground": "#0f172a",
+  "name": "SeedFlip Glacier",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#ffffff",
+  "selectionForeground": "#0f172a"
+}

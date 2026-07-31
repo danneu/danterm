@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#080808",
+    "#7a0047",
+    "#145b0e",
+    "#733a11",
+    "#002fa7",
+    "#5400a8",
+    "#00566b",
+    "#9c958d",
+    "#494440",
+    "#af1608",
+    "#4c6129",
+    "#7a5000",
+    "#0d50c5",
+    "#952197",
+    "#006092",
+    "#ffffff"
+  ],
+  "background": "#e4e2e0",
+  "cursor": "#061f4a",
+  "cursorText": "#e4e2e0",
+  "foreground": "#061f4a",
+  "name": "Moonwalk",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#b8d2e5",
+  "selectionForeground": "#061f4a"
+}

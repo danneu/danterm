@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#7b7080",
+    "#ff8fc4",
+    "#b2ffe3",
+    "#f6e6a8",
+    "#96ccff",
+    "#b4b7f2",
+    "#8ff7f0",
+    "#eee4ff",
+    "#7b7080",
+    "#ff8fc4",
+    "#b2ffe3",
+    "#f6e6a8",
+    "#96ccff",
+    "#b4b7f2",
+    "#8ff7f0",
+    "#eee4ff"
+  ],
+  "background": "#171219",
+  "cursor": "#ff8fc4",
+  "cursorText": "#171219",
+  "foreground": "#eee4ff",
+  "name": "hazyland",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#0d2847",
+  "selectionForeground": "#eee4ff"
+}

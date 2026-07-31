@@ -1,33 +1,32 @@
 {
   "ansiPalette": [
-    "#241f31",
+    "#1d1d20",
     "#c01c28",
-    "#2ec27e",
-    "#e8b504",
-    "#1e78e4",
-    "#9841bb",
-    "#0ab9dc",
-    "#c0bfbc",
-    "#5e5c64",
-    "#ed333b",
-    "#4ad67c",
-    "#d2be36",
-    "#51a1ff",
+    "#26a269",
+    "#a2734c",
+    "#12488b",
+    "#a347ba",
+    "#2aa1b3",
+    "#c2c2c2",
+    "#5d5d5d",
+    "#f66151",
+    "#33d17a",
+    "#e9ad0c",
+    "#2a7bde",
     "#c061cb",
-    "#4fd2fd",
-    "#f6f5f4"
+    "#33c7de",
+    "#ffffff"
   ],
   "background": "#ffffff",
-  "cursor": "#000000",
+  "cursor": "#1d1d20",
   "cursorText": "#ffffff",
-  "foreground": "#000000",
+  "foreground": "#1d1d20",
   "name": "Adwaita",
   "provenance": {
-    "collection": "iTerm2-Color-Schemes via Ghostty",
-    "ghosttyVersion": "v1.3.1",
-    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
   },
   "schemaVersion": 1,
-  "selectionBackground": "#c0bfbc",
-  "selectionForeground": "#000000"
+  "selectionBackground": "#1d1d20",
+  "selectionForeground": "#ffffff"
 }

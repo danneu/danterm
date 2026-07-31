@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#231417",
+    "#ff4d54",
+    "#c9a24a",
+    "#e0b24a",
+    "#d9743f",
+    "#e0556b",
+    "#e0a36a",
+    "#e8d2d4",
+    "#7a5458",
+    "#ff686e",
+    "#cfad60",
+    "#d9743f",
+    "#e86b72",
+    "#c8324b",
+    "#e4ae7c",
+    "#ffffff"
+  ],
+  "background": "#140b0d",
+  "cursor": "#e0483a",
+  "cursorText": "#140b0d",
+  "foreground": "#e8d2d4",
+  "name": "Oxblood",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#3a2227",
+  "selectionForeground": "#60575a"
+}

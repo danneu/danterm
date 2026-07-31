@@ -7,15 +7,15 @@
     "#8aadf4",
     "#f5bde6",
     "#8bd5ca",
-    "#a5adcb",
+    "#b8c0e0",
     "#5b6078",
-    "#ec7486",
-    "#8ccf7f",
-    "#e1c682",
-    "#78a1f6",
-    "#f2a9dd",
-    "#63cbc0",
-    "#b8c0e0"
+    "#f2a7b2",
+    "#bde3b0",
+    "#f4e3c1",
+    "#adc5f7",
+    "#f493da",
+    "#a5ded6",
+    "#a5adcb"
   ],
   "background": "#24273a",
   "cursor": "#f4dbd6",
@@ -23,11 +23,10 @@
   "foreground": "#cad3f5",
   "name": "Catppuccin Macchiato",
   "provenance": {
-    "collection": "iTerm2-Color-Schemes via Ghostty",
-    "ghosttyVersion": "v1.3.1",
-    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
   },
   "schemaVersion": 1,
-  "selectionBackground": "#5b6078",
-  "selectionForeground": "#cad3f5"
+  "selectionBackground": "#f4dbd6",
+  "selectionForeground": "#24273a"
 }

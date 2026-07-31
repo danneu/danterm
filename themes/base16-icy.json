@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#021012",
+    "#16c2d9",
+    "#4dd0e1",
+    "#80deea",
+    "#00bcd4",
+    "#00adc1",
+    "#26c6d6",
+    "#095b67",
+    "#1e484e",
+    "#b3ebf2",
+    "#4dd0e1",
+    "#80deea",
+    "#00bcd4",
+    "#00adc1",
+    "#26c6d6",
+    "#0c7c7c"
+  ],
+  "background": "#021012",
+  "cursor": "#16c2d9",
+  "cursorText": "#021012",
+  "foreground": "#095b67",
+  "name": "base16-icy",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#041f23",
+  "selectionForeground": "#425052"
+}

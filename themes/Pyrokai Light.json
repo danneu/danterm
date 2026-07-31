@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#242120",
+    "#b84963",
+    "#568413",
+    "#8e7100",
+    "#0979c4",
+    "#b44a74",
+    "#008490",
+    "#b4afad",
+    "#807c7a",
+    "#943c50",
+    "#456a13",
+    "#735a00",
+    "#0f619d",
+    "#913c5d",
+    "#006a74",
+    "#faf6f5"
+  ],
+  "background": "#faf6f5",
+  "cursor": "#b65318",
+  "cursorText": "#faf6f5",
+  "foreground": "#242120",
+  "name": "Pyrokai Light",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#e4e0de",
+  "selectionForeground": "#242120"
+}

@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#003b42",
+    "#e34e1c",
+    "#00b368",
+    "#f49725",
+    "#0094f0",
+    "#ff5792",
+    "#00bdd6",
+    "#8ca6a6",
+    "#004d57",
+    "#ff4000",
+    "#00d17a",
+    "#ff8c00",
+    "#0fa3ff",
+    "#ff6b9f",
+    "#00cbe6",
+    "#bbc3c4"
+  ],
+  "background": "#fef8ec",
+  "cursor": "#005661",
+  "cursorText": "#fef8ec",
+  "foreground": "#005661",
+  "name": "Noctis Lux",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#f4e2b8",
+  "selectionForeground": "#005661"
+}

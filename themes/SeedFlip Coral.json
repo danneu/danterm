@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#d9d9d9",
+    "#bd0f0f",
+    "#0fbd49",
+    "#bda00f",
+    "#0f58bd",
+    "#bd0fbd",
+    "#0fbdbd",
+    "#101010",
+    "#b3b3b3",
+    "#ee2b2b",
+    "#12d452",
+    "#e1c01e",
+    "#2b7cee",
+    "#ee2bee",
+    "#12d4d4",
+    "#1d1d1d"
+  ],
+  "background": "#ffffff",
+  "cursor": "#f24e1e",
+  "cursorText": "#1d1d1d",
+  "foreground": "#1d1d1d",
+  "name": "SeedFlip Coral",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#f5f5f5",
+  "selectionForeground": "#1d1d1d"
+}

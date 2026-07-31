@@ -28,7 +28,6 @@ def fixture_theme(name="Fixture"):
         "name": name,
         "provenance": {
             "collection": "Fixture collection",
-            "ghosttyVersion": "v1.2.3",
             "release": "fixture-release",
         },
         "schemaVersion": 1,
@@ -81,7 +80,7 @@ class PackThemeCatalogTests(unittest.TestCase):
             "selectionBackground",
             "selectionForeground",
         ]
-        provenance_required = ["collection", "ghosttyVersion", "release"]
+        provenance_required = ["collection", "release"]
 
         for field in required:
             with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
@@ -135,8 +134,8 @@ class PackThemeCatalogTests(unittest.TestCase):
             count = PACKER.pack_catalog(ROOT / "themes", output)
             catalog = json.loads(output.read_bytes())
 
-            self.assertEqual(count, 463)
-            self.assertEqual(len(catalog["themes"]), 463)
+            self.assertEqual(count, 592)
+            self.assertEqual(len(catalog["themes"]), 592)
             self.assertTrue(
                 all(len(theme["ansiPalette"]) == 16 for theme in catalog["themes"])
             )
@@ -183,6 +182,19 @@ class AssemblerContractTests(unittest.TestCase):
         self.assertIn(
             "git status --porcelain --untracked-files=all -- themes", workflow
         )
+        freshness_job = workflow.split("  theme-freshness:", 1)[1].split("\n  build:", 1)[0]
+        self.assertNotIn(".ghostty-version", freshness_job)
+        self.assertNotIn("lib/ghostty-themes", freshness_job)
+        self.assertNotIn("build-lib.sh", freshness_job)
+
+    def test_collection_notice_names_the_direct_pinned_release(self):
+        notice = (ROOT / "themes" / "NOTICE.iTerm2-Color-Schemes").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("release-20260720-153658-97e244c", notice)
+        self.assertIn("mbadolato/iTerm2-Color-Schemes", notice)
+        self.assertNotIn("bundled by Ghostty", notice)
 
     def test_shared_bundle_step_packs_runtime_catalog_and_preserves_legacy_themes(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -211,7 +223,7 @@ class AssemblerContractTests(unittest.TestCase):
             catalog = json.loads(
                 (app / "Contents" / "Resources" / "themes" / "catalog.json").read_bytes()
             )
-            self.assertEqual(len(catalog["themes"]), 463)
+            self.assertEqual(len(catalog["themes"]), 592)
             self.assertEqual(
                 (app / "Contents" / "Resources" / "ghostty" / "themes" / "Legacy").read_text(),
                 "legacy\n",

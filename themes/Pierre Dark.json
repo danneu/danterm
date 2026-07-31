@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#141415",
+    "#ff2e3f",
+    "#0dbe4e",
+    "#ffca00",
+    "#009fff",
+    "#c635e4",
+    "#08c0ef",
+    "#c6c6c8",
+    "#6c6c71",
+    "#ff6762",
+    "#5ecc71",
+    "#ffd452",
+    "#69b1ff",
+    "#d568ea",
+    "#68cdf2",
+    "#fbfbfb"
+  ],
+  "background": "#070707",
+  "cursor": "#009fff",
+  "cursorText": "#070707",
+  "foreground": "#fbfbfb",
+  "name": "Pierre Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#19283c",
+  "selectionForeground": "#fbfbfb"
+}

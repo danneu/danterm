@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Behavioral tests for the one-way Ghostty theme importer.
+"""Behavioral tests for the pinned iTerm2-Color-Schemes theme importer.
 
-The importer is DanTerm's only Ghostty-syntax reader, so these tests pin its
-complete-value rejection rules and deterministic tracked output.
+The importer is DanTerm's only Ghostty-syntax reader, so these tests pin the
+archive verification boundary, complete-value rejection, and atomic output.
 """
 
+import hashlib
+import io
 import importlib.util
 import json
 from pathlib import Path
 import sys
+import tarfile
 import tempfile
 import unittest
 
@@ -43,6 +46,21 @@ def theme_source(*, palette_order=range(16), omit=None, replacement=None):
         if key != omit
     )
     return "\n".join(lines) + "\n"
+
+
+def fixture_archive(themes):
+    """Builds an offline Ghostty-format release fixture from committed values."""
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        directory = tarfile.TarInfo("ghostty/")
+        directory.type = tarfile.DIRTYPE
+        archive.addfile(directory)
+        for name, content in themes.items():
+            encoded = content.encode("utf-8")
+            member = tarfile.TarInfo(f"ghostty/{name}")
+            member.size = len(encoded)
+            archive.addfile(member, io.BytesIO(encoded))
+    return buffer.getvalue()
 
 
 class ParseThemeTests(unittest.TestCase):
@@ -104,75 +122,99 @@ class ParseThemeTests(unittest.TestCase):
 
 
 class ImportCatalogTests(unittest.TestCase):
-    def test_provenance_rejects_a_different_pinned_ghostty_version(self):
-        with tempfile.TemporaryDirectory() as directory:
-            version_file = Path(directory) / ".ghostty-version"
-            version_file.write_text("v9.9.9\n", encoding="utf-8")
+    def snapshot(self, output):
+        return {
+            path.name: path.read_bytes()
+            for path in sorted(output.iterdir())
+            if path.is_file()
+        }
 
-            with self.assertRaisesRegex(
-                IMPORTER.ThemeImportError, "update the importer provenance"
-            ):
-                IMPORTER.validate_provenance(version_file)
+    def test_pinned_release_names_direct_upstream_without_ghostty(self):
+        self.assertEqual(
+            IMPORTER.PROVENANCE,
+            {
+                "collection": "iTerm2-Color-Schemes",
+                "release": "release-20260720-153658-97e244c",
+            },
+        )
+        self.assertEqual(
+            IMPORTER.ARCHIVE_SHA256,
+            "7329d0e2e958ee8404e516a6550bd07334edc611334a73f84d50477daa459f0c",
+        )
+        self.assertIn(IMPORTER.PROVENANCE["release"], IMPORTER.ARCHIVE_URL)
+        self.assertTrue(IMPORTER.ARCHIVE_URL.endswith("/ghostty-themes.tgz"))
 
     def test_import_is_deterministic_and_removes_stale_json(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = root / "source"
-            output = root / "output"
-            source.mkdir()
+            output = Path(directory) / "output"
             output.mkdir()
-            (source / "Zulu").write_text(theme_source(), encoding="utf-8")
-            (source / "Alpha").write_text(theme_source(), encoding="utf-8")
             (output / "Stale.json").write_text("{}\n", encoding="utf-8")
             (output / "NOTICE").write_text("keep\n", encoding="utf-8")
+            archive = fixture_archive(
+                {"Zulu": theme_source(), "Alpha": theme_source()}
+            )
+            digest = hashlib.sha256(archive).hexdigest()
 
-            IMPORTER.import_catalog(source, output)
-            first = {
-                path.name: path.read_bytes() for path in sorted(output.glob("*.json"))
-            }
-            IMPORTER.import_catalog(source, output)
-            second = {
-                path.name: path.read_bytes() for path in sorted(output.glob("*.json"))
-            }
+            IMPORTER.import_archive(archive, digest, output)
+            first = self.snapshot(output)
+            IMPORTER.import_archive(archive, digest, output)
+            second = self.snapshot(output)
 
-            self.assertEqual(list(first), ["Alpha.json", "Zulu.json"])
+            self.assertEqual(list(first), ["Alpha.json", "NOTICE", "Zulu.json"])
             self.assertEqual(second, first)
-            self.assertEqual((output / "NOTICE").read_text(), "keep\n")
             document = json.loads(first["Alpha.json"])
             self.assertEqual(document["schemaVersion"], 1)
             self.assertEqual(document["name"], "Alpha")
             self.assertEqual(document["provenance"], IMPORTER.PROVENANCE)
 
-    def test_invalid_source_leaves_existing_output_unchanged(self):
+    def test_digest_mismatch_leaves_existing_output_unchanged(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            source = root / "source"
             output = root / "output"
-            source.mkdir()
             output.mkdir()
-            existing = output / "Existing.json"
-            existing.write_text('{"old": true}\n', encoding="utf-8")
-            (source / "Broken").write_text(
-                theme_source(omit="selection-foreground"), encoding="utf-8"
+            (output / "Existing.json").write_text('{"old": true}\n', encoding="utf-8")
+            before = self.snapshot(output)
+
+            with self.assertRaisesRegex(IMPORTER.ThemeImportError, "SHA-256"):
+                IMPORTER.import_archive(
+                    fixture_archive({"Fixture": theme_source()}), "0" * 64, output
+                )
+
+            self.assertEqual(self.snapshot(output), before)
+
+    def test_corrupt_archive_leaves_existing_output_unchanged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "output"
+            output.mkdir()
+            (output / "Existing.json").write_text('{"old": true}\n', encoding="utf-8")
+            before = self.snapshot(output)
+            archive = b"not a tar archive"
+
+            with self.assertRaisesRegex(IMPORTER.ThemeImportError, "archive"):
+                IMPORTER.import_archive(
+                    archive, hashlib.sha256(archive).hexdigest(), output
+                )
+
+            self.assertEqual(self.snapshot(output), before)
+
+    def test_incomplete_archive_theme_leaves_existing_output_unchanged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "output"
+            output.mkdir()
+            (output / "Existing.json").write_text('{"old": true}\n', encoding="utf-8")
+            before = self.snapshot(output)
+            archive = fixture_archive(
+                {"Broken": theme_source(omit="selection-foreground")}
             )
 
-            with self.assertRaises(IMPORTER.ThemeImportError):
-                IMPORTER.import_catalog(source, output)
+            with self.assertRaisesRegex(IMPORTER.ThemeImportError, "selection-foreground"):
+                IMPORTER.import_archive(
+                    archive, hashlib.sha256(archive).hexdigest(), output
+                )
 
-            self.assertEqual(existing.read_text(), '{"old": true}\n')
-
-    def test_every_pinned_source_theme_imports_to_a_complete_value(self):
-        source = ROOT / "lib" / "ghostty-themes"
-        self.assertTrue(source.is_dir(), "run ./build-lib.sh once before the test gate")
-
-        documents = [
-            IMPORTER.parse_theme(path.name, path.read_text(encoding="utf-8"))
-            for path in sorted(source.iterdir())
-            if path.is_file()
-        ]
-
-        self.assertEqual(len(documents), 463)
-        self.assertTrue(all(len(document["ansiPalette"]) == 16 for document in documents))
+            self.assertEqual(self.snapshot(output), before)
 
 
 if __name__ == "__main__":

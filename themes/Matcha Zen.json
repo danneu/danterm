@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#354029",
+    "#c2452a",
+    "#4e8c2e",
+    "#927000",
+    "#2e7c78",
+    "#7e5ba6",
+    "#2a8585",
+    "#56664a",
+    "#97a887",
+    "#c2452a",
+    "#4e8c2e",
+    "#b05a1e",
+    "#2e7c78",
+    "#7e5ba6",
+    "#2a8585",
+    "#354029"
+  ],
+  "background": "#f5f7ea",
+  "cursor": "#4e8c2e",
+  "cursorText": "#f5f7ea",
+  "foreground": "#354029",
+  "name": "Matcha Zen",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#dde7cc",
+  "selectionForeground": "#a8aa9d"
+}

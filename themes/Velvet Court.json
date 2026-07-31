@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#2f1629",
+    "#ee5c82",
+    "#9ad08a",
+    "#f0c44e",
+    "#b392e8",
+    "#d087e0",
+    "#6fd0c8",
+    "#e2c8d8",
+    "#836075",
+    "#ee5c82",
+    "#9ad08a",
+    "#e8964f",
+    "#b392e8",
+    "#d087e0",
+    "#6fd0c8",
+    "#f2dcea"
+  ],
+  "background": "#1f0e1c",
+  "cursor": "#f0c44e",
+  "cursorText": "#1f0e1c",
+  "foreground": "#f2dcea",
+  "name": "Velvet Court",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#3e2138",
+  "selectionForeground": "#5f4e5c"
+}

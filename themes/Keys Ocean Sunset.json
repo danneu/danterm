@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#101927",
+    "#e85a52",
+    "#4a9a72",
+    "#e89a2e",
+    "#5288b8",
+    "#bc5090",
+    "#5ec8c8",
+    "#a5b5d5",
+    "#344658",
+    "#fc9077",
+    "#62c48e",
+    "#ffcb9a",
+    "#5a8fd4",
+    "#fdbfde",
+    "#7ed4e0",
+    "#fff5be"
+  ],
+  "background": "#0a1018",
+  "cursor": "#fc9077",
+  "cursorText": "#0a1018",
+  "foreground": "#b8c8dc",
+  "name": "Keys Ocean Sunset",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#1a2430",
+  "selectionForeground": "#fff5be"
+}

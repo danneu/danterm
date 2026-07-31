@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#35424c",
+    "#b45648",
+    "#6caa71",
+    "#c4ac62",
+    "#6d96b4",
+    "#bd7bcd",
+    "#7ccbcd",
+    "#dee5eb",
+    "#465c6d",
+    "#df6c5a",
+    "#79be7e",
+    "#e5c872",
+    "#67b5ed",
+    "#d389e5",
+    "#84dde0",
+    "#e5eff5"
+  ],
+  "background": "#212734",
+  "cursor": "#9d9d9d",
+  "cursorText": "#212734",
+  "foreground": "#e6e6e6",
+  "name": "Clear Dark",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#334e5e",
+  "selectionForeground": "#6e7380"
+}

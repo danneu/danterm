@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#2e2a24",
+    "#a84040",
+    "#3a7055",
+    "#6e5817",
+    "#2f626f",
+    "#8a5a50",
+    "#387775",
+    "#5a5248",
+    "#6a6258",
+    "#bf3c3c",
+    "#3e7a5e",
+    "#826743",
+    "#3f7381",
+    "#9d594b",
+    "#337675",
+    "#393a34"
+  ],
+  "background": "#f5f2ed",
+  "cursor": "#2e2a24",
+  "cursorText": "#f5f2ed",
+  "foreground": "#2e2a24",
+  "name": "Patina Stellar",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#dbd5c5",
+  "selectionForeground": "#2e2a24"
+}

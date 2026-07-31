@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#222734",
+    "#c26265",
+    "#52aa60",
+    "#ad9b49",
+    "#487fd4",
+    "#af5bd1",
+    "#269d9a",
+    "#5a6377",
+    "#3a4152",
+    "#e48383",
+    "#75cf84",
+    "#c7b461",
+    "#76a8f2",
+    "#d58bf0",
+    "#52c4c0",
+    "#dfe5ee"
+  ],
+  "background": "#0f141f",
+  "cursor": "#b4bcca",
+  "cursorText": "#0f141f",
+  "foreground": "#b4bcca",
+  "name": "Aardvark Ink",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#2a3645",
+  "selectionForeground": "#dfe5ee"
+}

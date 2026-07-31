@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#302f3d",
+    "#e66533",
+    "#49e9a6",
+    "#e4b781",
+    "#49ace9",
+    "#df769b",
+    "#49d6e9",
+    "#b6b3cc",
+    "#504e65",
+    "#e97749",
+    "#60ebb1",
+    "#e69533",
+    "#60b6eb",
+    "#e798b3",
+    "#60dbeb",
+    "#c5c2d6"
+  ],
+  "background": "#292640",
+  "cursor": "#c5c2d6",
+  "cursorText": "#292640",
+  "foreground": "#c5c2d6",
+  "name": "Noctis Uva",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#35325a",
+  "selectionForeground": "#c5c2d6"
+}

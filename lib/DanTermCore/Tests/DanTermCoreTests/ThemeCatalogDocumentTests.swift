@@ -19,7 +19,8 @@ struct ThemeCatalogDocumentTests {
         #expect(theme.selectionBackground == .init(red: 13, green: 14, blue: 15))
         #expect(theme.selectionForeground == .init(red: 16, green: 17, blue: 18))
         #expect(theme.ansiPalette.count == 16)
-        #expect(theme.provenance.ghosttyVersion == "v1.3.1")
+        #expect(theme.provenance.collection == "iTerm2-Color-Schemes")
+        #expect(theme.provenance.release == "release-20260720-153658-97e244c")
     }
 
     @Test(
@@ -40,7 +41,7 @@ struct ThemeCatalogDocumentTests {
 
     @Test(
         "decode rejects every missing provenance field",
-        arguments: ["collection", "ghosttyVersion", "release"]
+        arguments: ["collection", "release"]
     )
     func missingProvenanceField(field: String) throws {
         var object = try catalogObject()
@@ -128,9 +129,8 @@ struct ThemeCatalogDocumentTests {
                   "#00000c", "#00000d", "#00000e", "#00000f"
                 ],
                 "provenance": {
-                  "collection": "source",
-                  "ghosttyVersion": "v1.3.1",
-                  "release": "release"
+                  "collection": "iTerm2-Color-Schemes",
+                  "release": "release-20260720-153658-97e244c"
                 }
               }]
             }

@@ -23,7 +23,7 @@ COLOR_FIELDS = (
 THEME_FIELDS = frozenset(
     (*COLOR_FIELDS, "ansiPalette", "name", "provenance", "schemaVersion")
 )
-PROVENANCE_FIELDS = frozenset(("collection", "ghosttyVersion", "release"))
+PROVENANCE_FIELDS = frozenset(("collection", "release"))
 COLOR_PATTERN = re.compile(r"#[0-9a-f]{6}")
 
 

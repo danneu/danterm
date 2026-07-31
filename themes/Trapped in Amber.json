@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#4a3220",
+    "#e05c1c",
+    "#7a9c4a",
+    "#f0a020",
+    "#4a7ec9",
+    "#c95a8c",
+    "#7a9ea8",
+    "#ffd9a0",
+    "#5a4a3a",
+    "#ff7832",
+    "#a8c46b",
+    "#ffd700",
+    "#6b9fff",
+    "#ff7fa8",
+    "#a5c2cc",
+    "#fff5e0"
+  ],
+  "background": "#0a1017",
+  "cursor": "#ffc940",
+  "cursorText": "#0a1017",
+  "foreground": "#f0a020",
+  "name": "Trapped in Amber",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#4a3416",
+  "selectionForeground": "#ffd9a0"
+}

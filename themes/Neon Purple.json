@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#000000",
+    "#cd0d76",
+    "#03eba5",
+    "#fffa6a",
+    "#00bfff",
+    "#ff00e0",
+    "#9aa5ed",
+    "#ffffff",
+    "#a8fcff",
+    "#ff0da5",
+    "#00ffb6",
+    "#fff787",
+    "#1bccfd",
+    "#ff00f8",
+    "#a6b6ff",
+    "#ffffff"
+  ],
+  "background": "#291b47",
+  "cursor": "#21f6bc",
+  "cursorText": "#999999",
+  "foreground": "#e5e5e5",
+  "name": "Neon Purple",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#c1deff",
+  "selectionForeground": "#000000"
+}

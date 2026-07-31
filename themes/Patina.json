@@ -1,0 +1,32 @@
+{
+  "ansiPalette": [
+    "#16201c",
+    "#d9603f",
+    "#9fc08c",
+    "#c8a24a",
+    "#5fc9b0",
+    "#d7b45a",
+    "#7fd0c0",
+    "#dce5de",
+    "#5c7068",
+    "#df785c",
+    "#abc89a",
+    "#d98e5a",
+    "#5fc9b0",
+    "#e0c36a",
+    "#8ed6c8",
+    "#ffffff"
+  ],
+  "background": "#0e1613",
+  "cursor": "#e0c36a",
+  "cursorText": "#0e1613",
+  "foreground": "#dce5de",
+  "name": "Patina",
+  "provenance": {
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
+  },
+  "schemaVersion": 1,
+  "selectionBackground": "#23302b",
+  "selectionForeground": "#4e5653"
+}

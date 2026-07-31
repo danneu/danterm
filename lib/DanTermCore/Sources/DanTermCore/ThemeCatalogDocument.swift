@@ -11,7 +11,6 @@ struct ThemeRGBColor: Equatable, Sendable {
 /// Retains the upstream identity required to audit each redistributed theme.
 struct ThemeProvenance: Equatable, Sendable {
     let collection: String
-    let ghosttyVersion: String
     let release: String
 }
 
@@ -54,7 +53,6 @@ struct ThemeCatalogDocument: Equatable, Sendable {
                   names.insert(rawTheme.name).inserted,
                   rawTheme.ansiPalette.count == 16,
                   rawTheme.provenance.collection.isEmpty == false,
-                  rawTheme.provenance.ghosttyVersion.isEmpty == false,
                   rawTheme.provenance.release.isEmpty == false,
                   let foreground = decodeColor(rawTheme.foreground),
                   let background = decodeColor(rawTheme.background),
@@ -76,7 +74,6 @@ struct ThemeCatalogDocument: Equatable, Sendable {
                 ansiPalette: palette,
                 provenance: ThemeProvenance(
                     collection: rawTheme.provenance.collection,
-                    ghosttyVersion: rawTheme.provenance.ghosttyVersion,
                     release: rawTheme.provenance.release
                 )
             ))
@@ -120,6 +117,5 @@ private struct RawTheme: Decodable {
 /// Requires every provenance field before a theme can enter the runtime catalog.
 private struct RawThemeProvenance: Decodable {
     let collection: String
-    let ghosttyVersion: String
     let release: String
 }

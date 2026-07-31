@@ -23,9 +23,8 @@
   "foreground": "#f2f2f2",
   "name": "IRIX Console",
   "provenance": {
-    "collection": "iTerm2-Color-Schemes via Ghostty",
-    "ghosttyVersion": "v1.3.1",
-    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
   },
   "schemaVersion": 1,
   "selectionBackground": "#c2deff",

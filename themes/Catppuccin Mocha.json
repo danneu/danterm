@@ -7,15 +7,15 @@
     "#89b4fa",
     "#f5c2e7",
     "#94e2d5",
-    "#a6adc8",
+    "#bac2de",
     "#585b70",
-    "#f37799",
-    "#89d88b",
-    "#ebd391",
-    "#74a8fc",
-    "#f2aede",
-    "#6bd7ca",
-    "#bac2de"
+    "#f7aec2",
+    "#c2ecbf",
+    "#fcd682",
+    "#aeccfc",
+    "#f398da",
+    "#b1eae1",
+    "#a6adc8"
   ],
   "background": "#1e1e2e",
   "cursor": "#f5e0dc",
@@ -23,11 +23,10 @@
   "foreground": "#cdd6f4",
   "name": "Catppuccin Mocha",
   "provenance": {
-    "collection": "iTerm2-Color-Schemes via Ghostty",
-    "ghosttyVersion": "v1.3.1",
-    "release": "ghostty-themes-release-20260216-151611-fc73ce3"
+    "collection": "iTerm2-Color-Schemes",
+    "release": "release-20260720-153658-97e244c"
   },
   "schemaVersion": 1,
-  "selectionBackground": "#585b70",
-  "selectionForeground": "#cdd6f4"
+  "selectionBackground": "#f5e0dc",
+  "selectionForeground": "#1e1e2e"
 }

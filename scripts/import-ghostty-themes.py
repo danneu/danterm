@@ -1,27 +1,35 @@
 #!/usr/bin/env python3
-"""Import Ghostty's bundled theme syntax into DanTerm's tracked JSON schema.
+"""Import a pinned iTerm2-Color-Schemes archive into DanTerm's JSON schema.
 
-This is the only DanTerm-authored Ghostty theme parser. Runtime and build paths
-consume the committed JSON collection and must never call this importer.
+This is DanTerm's only Ghostty-format theme parser. Explicit updates download
+and verify the pinned archive; runtime and build paths consume committed JSON.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
+import io
 import json
 from pathlib import Path
 import re
+import shutil
+import tarfile
 import tempfile
+from urllib.request import Request, urlopen
 
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_SOURCE = ROOT / "lib" / "ghostty-themes"
 DEFAULT_OUTPUT = ROOT / "themes"
-DEFAULT_GHOSTTY_VERSION_FILE = ROOT / ".ghostty-version"
+RELEASE = "release-20260720-153658-97e244c"
+ARCHIVE_URL = (
+    "https://github.com/mbadolato/iTerm2-Color-Schemes/releases/download/"
+    f"{RELEASE}/ghostty-themes.tgz"
+)
+ARCHIVE_SHA256 = "7329d0e2e958ee8404e516a6550bd07334edc611334a73f84d50477daa459f0c"
 PROVENANCE = {
-    "collection": "iTerm2-Color-Schemes via Ghostty",
-    "release": "ghostty-themes-release-20260216-151611-fc73ce3",
-    "ghosttyVersion": "v1.3.1",
+    "collection": "iTerm2-Color-Schemes",
+    "release": RELEASE,
 }
 NAMED_COLOR_FIELDS = {
     "background": "background",
@@ -102,56 +110,102 @@ def encoded_theme(document: dict[str, object]) -> bytes:
     return (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
-def validate_provenance(version_file: Path) -> None:
-    """Stops a Ghostty upgrade from stamping the previous catalog's provenance."""
-    pinned_version = version_file.read_text(encoding="utf-8").strip()
-    if pinned_version != PROVENANCE["ghosttyVersion"]:
-        raise ThemeImportError(
-            f"Ghostty is pinned to {pinned_version!r}, but importer provenance names "
-            f"{PROVENANCE['ghosttyVersion']!r}; update the importer provenance first"
-        )
+def download_archive(url: str = ARCHIVE_URL) -> bytes:
+    """Downloads the explicitly pinned release asset for an update or CI check."""
+    request = Request(url, headers={"User-Agent": "DanTerm-theme-importer"})
+    with urlopen(request) as response:
+        return response.read()
 
 
-def import_catalog(source: Path, output: Path) -> int:
-    """Validates every source before replacing the tracked JSON collection."""
-    if not source.is_dir():
-        raise ThemeImportError(f"theme source directory does not exist: {source}")
-    source_files = sorted(path for path in source.iterdir() if path.is_file())
-    if not source_files:
-        raise ThemeImportError(f"theme source directory is empty: {source}")
+def archive_sources(content: bytes) -> dict[str, str]:
+    """Reads only flat regular files from the release's Ghostty archive directory."""
+    sources: dict[str, str] = {}
+    try:
+        with tarfile.open(fileobj=io.BytesIO(content), mode="r:gz") as archive:
+            for member in archive.getmembers():
+                parts = Path(member.name).parts
+                if member.isdir() and parts == ("ghostty",):
+                    continue
+                if not member.isfile() or len(parts) != 2 or parts[0] != "ghostty":
+                    raise ThemeImportError(
+                        f"theme archive contains unexpected entry {member.name!r}"
+                    )
+                name = parts[1]
+                if name in sources:
+                    raise ThemeImportError(f"theme archive contains duplicate theme {name!r}")
+                extracted = archive.extractfile(member)
+                if extracted is None:
+                    raise ThemeImportError(f"theme archive cannot read {member.name!r}")
+                sources[name] = extracted.read().decode("utf-8")
+    except (tarfile.TarError, UnicodeError) as error:
+        raise ThemeImportError(f"cannot read theme archive: {error}") from error
+    if not sources:
+        raise ThemeImportError("theme archive contains no themes")
+    return sources
 
-    rendered = {
-        f"{path.name}.json": encoded_theme(
-            parse_theme(path.name, path.read_text(encoding="utf-8"))
-        )
-        for path in source_files
-    }
 
-    output.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix=".theme-import-", dir=output.parent) as staged:
-        staged_path = Path(staged)
+def replace_catalog(rendered: dict[str, bytes], output: Path) -> None:
+    """Swaps a fully rendered collection into place while preserving notices."""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=".theme-import-", dir=output.parent
+    ) as workspace_name:
+        workspace = Path(workspace_name)
+        staged = workspace / "themes"
+        if output.is_dir():
+            shutil.copytree(output, staged)
+        else:
+            staged.mkdir()
+        for path in staged.glob("*.json"):
+            path.unlink()
         for name, content in rendered.items():
-            (staged_path / name).write_bytes(content)
-        for path in output.glob("*.json"):
-            if path.name not in rendered:
-                path.unlink()
-        for name in sorted(rendered):
-            (staged_path / name).replace(output / name)
+            (staged / name).write_bytes(content)
+
+        if not output.exists():
+            staged.replace(output)
+            return
+        previous = workspace / "previous"
+        output.replace(previous)
+        try:
+            staged.replace(output)
+        except OSError:
+            previous.replace(output)
+            raise
+
+
+def import_archive(content: bytes, expected_sha256: str, output: Path) -> int:
+    """Verifies and validates the complete archive before replacing tracked JSON."""
+    actual_sha256 = hashlib.sha256(content).hexdigest()
+    if actual_sha256 != expected_sha256:
+        raise ThemeImportError(
+            f"theme archive SHA-256 is {actual_sha256}, expected {expected_sha256}"
+        )
+    sources = archive_sources(content)
+    rendered = {
+        f"{name}.json": encoded_theme(parse_theme(name, source))
+        for name, source in sources.items()
+    }
+    replace_catalog(rendered, output)
     return len(rendered)
 
 
 def main() -> int:
     """Runs the explicit source-to-tracked update command."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument(
-        "--ghostty-version-file", type=Path, default=DEFAULT_GHOSTTY_VERSION_FILE
+        "--archive",
+        type=Path,
+        help="use a local copy of the pinned asset instead of downloading it",
     )
     arguments = parser.parse_args()
     try:
-        validate_provenance(arguments.ghostty_version_file)
-        count = import_catalog(arguments.source, arguments.output)
+        content = (
+            arguments.archive.read_bytes()
+            if arguments.archive is not None
+            else download_archive()
+        )
+        count = import_archive(content, ARCHIVE_SHA256, arguments.output)
     except (OSError, UnicodeError, ThemeImportError) as error:
         parser.error(str(error))
     print(f"Imported {count} themes into {arguments.output}")
