@@ -111,10 +111,15 @@ struct TerminalBackendBoundaryTests {
         }
     }
 
-    @Test("backend selection defaults to Ghostty and accepts explicit Ghostty")
-    func ghosttySelection() throws {
-        #expect(try resolveTerminalBackend(nil) == .ghostty)
-        #expect(try resolveTerminalBackend("") == .ghostty)
+    @Test("backend selection defaults to Swift and accepts explicit Ghostty")
+    func defaultAndGhosttySelection() throws {
+        // Intent: an unset or empty DANTERM_TERMINAL_BACKEND selects the Swift
+        //   engine, while Ghostty remains reachable only by explicit opt-in.
+        // Why it exists: pins the Milestone 9 daily-use flip (2026-07-31); a
+        //   silent regression back to Ghostty-by-default would invalidate the
+        //   sustained-daily-use evidence the replacement gate requires.
+        #expect(try resolveTerminalBackend(nil) == .swift)
+        #expect(try resolveTerminalBackend("") == .swift)
         #expect(try resolveTerminalBackend("ghostty") == .ghostty)
     }
 

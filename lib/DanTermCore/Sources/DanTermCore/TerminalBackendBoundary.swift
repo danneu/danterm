@@ -38,8 +38,10 @@ enum TerminalBackendSelectionError: Error, Equatable {
 }
 
 /// Resolves the launch-only backend selection without reading ambient process state.
+/// Swift is the default as of the Milestone 9 daily-use flip (2026-07-31);
+/// Ghostty remains reachable by explicit opt-in until Milestone 10 removes it.
 func resolveTerminalBackend(_ value: String?) throws -> TerminalBackendKind {
-    guard let value, value.isEmpty == false else { return .ghostty }
+    guard let value, value.isEmpty == false else { return .swift }
     guard let backend = TerminalBackendKind(rawValue: value) else {
         throw TerminalBackendSelectionError.unsupported(value)
     }
