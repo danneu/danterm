@@ -45,12 +45,13 @@ by one research domain only, is in [FORMAT-NOTES.md](FORMAT-NOTES.md).
   project guide owns that subject. The diagnostic reading is part of the rule:
   **a row that will not fit means the doc's `## Outcome` is underwritten -- fix
   it there.**
-- **The index does not accumulate.** The only prose above the tables is a short
-  list of things a reader must know before opening any doc, one line each,
-  citing the `N/F#` that owns it. It is not a destination for lessons: an entry
-  that needs a paragraph is a sign it belongs in a project guide, and an entry
-  that only summarizes one doc belongs in that doc's `## Outcome`. Capping the
-  rows without capping this list just moves the problem up the page.
+- **The index carries no lessons at all.** Its content is the two tables plus
+  the pointers needed to reach the project's guides -- not a digest of what the
+  docs found, at any length. A capped digest is still a second copy under no
+  maintenance, and a cap is a rule with a valve in it: capping the rows moved
+  the growth to the prose above them, and capping that prose would move it
+  again. A lesson that generalizes belongs in the guide that owns its subject;
+  one that does not belongs in its own doc's `## Outcome`.
 - **A new file may continue an older one.** Reopening a closed investigation, or
   zooming in on one revelation from another file, gets its own number and names
   its ancestor at the top. See "Continue an older doc instead of reopening it"

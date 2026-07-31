@@ -168,6 +168,36 @@ above 20 and 22. At most two of {append-only writes, ascending order,
 status-by-membership} are available at once; the entry above chose the last two
 deliberately, and this split does not change that.
 
+## 2026-07-31 -- the cap on the prose block was the valve, so the block went
+
+**Observation.** The entry above capped the "results worth knowing" block at one
+cited line each and predicted the pressure would move to the framing paragraphs.
+It did not. It stayed exactly where it was, because a cap is not a reason for
+something to exist -- it is permission to keep it at a smaller size. Checked
+against the guide it was supposedly duplicating: four of the five surviving
+lines were already there in general form, and the fifth (the 60Hz frame-budget
+trigger) and the dating rule were not there at all.
+
+**Cost.** Two of the five lessons existed only in a research index, which is the
+one place no reader of `agent-docs/terminal-performance.md` looks before
+measuring. The other three were third copies, which is what the entry above
+already established the cost of. So the capped block was simultaneously
+duplicating what the guide had and hiding what it lacked.
+
+**Rule changed.** The index carries no lessons at any length. The two missing
+rules were written into `agent-docs/terminal-performance.md` -- the frame-budget
+trigger and "date a number before you plan against it" under `When to measure`,
+and the "no plan/draw ratio generalizes" line under `The plan-time line is
+decided separately` -- and the block was deleted. What remains is one pointer at
+the guide. The contract bullet now says the index is the tables plus pointers,
+with no size allowance, because there is nothing left to size.
+
+**The correction to the prediction, which is why this is its own entry.**
+"Capping one container relocates the growth" was half right. Growth relocates
+only if the container it leaves has somewhere to go; a capped container with a
+standing invitation in the contract keeps it instead. Look for the invitation,
+not the next container down.
+
 ## Rules still under watch
 
 These three are load-bearing in the contract but supported only by performance

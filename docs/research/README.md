@@ -55,34 +55,15 @@ the evidence, and the reopening condition live in the doc's own `## Outcome`.
 (There is no doc 5; numbers are never reused or renumbered. Docs 1-23 predate
 the folder form and stay flat files; doc 24 onward is a folder.)
 
-**Read this before you open any of these.** Each line cites the doc that owns
-it; instrument caveats and how to read a verdict live in
-[agent-docs/terminal-performance.md](../../agent-docs/terminal-performance.md).
-
-- The draw path fits the 60Hz frame budget (`11/F7`, `11/F8`), so a new render
-  optimization needs a trigger, not just a profile share.
-- Damage-*drawing* comparisons run on `just benchmark-headless-draw`, not the
-  GUI benchmark; damage *generation* stays on a degraded `benchmark-quick`
-  (`8/D2`). Read
-  [the routing note](../design/2026-07-27-damage-render-benchmark-routing.md)
-  before measuring anything.
-- No published plan/draw ratio generalizes -- the ratio is workload-shaped, and
-  docs 13 and 14 disagree by 2x in both directions (`14/F1`).
-- The draw verdict does not contain the draw's largest cost. It brackets ~11% of
-  the CPU the process burns per accepted draw on the churn workloads and ~4.3%
-  on `incremental-mixed`, so read `processCPUNanosecondsPerDraw` beside it
-  (`17/F2`, `17/F12`).
-- Date a performance number before you plan against it. One claim outlived the
-  commit that fixed it and kept a parked backlog item alive for two days
-  (`17/F5`).
-
 **Project notes.** The portable seam is a file boundary: [FORMAT.md](FORMAT.md)
 is generic research prose meant to survive extraction as a portable skill, so no
 link in it may resolve outside `docs/research/`. The DanTerm-local pointers live
 here instead:
 
-- Performance claims name the benchmark, commit, and compatibility conditions
-  defined in [agent-docs/terminal-performance.md](../../agent-docs/terminal-performance.md).
+- Read [agent-docs/terminal-performance.md](../../agent-docs/terminal-performance.md)
+  before measuring anything or planning against a number in one of these docs.
+  It owns the benchmark, commit, and compatibility conditions a performance
+  claim must name, and the cross-cutting rules these docs produced.
 - The contract in [FORMAT.md](FORMAT.md) is machine-checked by
   `scripts/research-index-lint.sh`, which also holds the enumerated frozen set
   of grandfathered flat docs (1-4 and 6-23). That list never grows: a new entry

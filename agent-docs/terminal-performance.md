@@ -115,6 +115,12 @@ accepted draw costs about 540k ns to draw against 501k-510k ns to plan on
 `content-churn`, and about 86k ns to draw against 66k ns to plan on
 `incremental-mixed`.
 
+**No plan/draw ratio generalizes across workloads**, so do not carry one from a
+doc or a profile to a workload it was not measured on. The two figures above
+already differ, and `docs/research/14-live-scroll-workload-profile.md` `F1`
+found docs 13 and 14 disagreeing by 2x in opposite directions. The ratio is a
+property of how much damage the workload generates, not of the code.
+
 Planning is the **smaller** cost on both, and it shrinks by ~7.6x when damage goes
 from 66 rows to 6, because **the planner is damage-scoped**. Production planning
 runs through `PaneFramePlanner.planFrame(for:presentation:damage:)`, which replans
@@ -412,6 +418,21 @@ the change was benchmarked and looked fine.
 When the honest answer is that you have no hypothesis yet, profile the
 suspicious path instead. That is the cheaper question and usually the one you
 actually have.
+
+Two things that are not hypotheses, and have each cost real time here:
+
+- **A profile share is not a trigger.** The draw path already fits the 60Hz
+  frame budget (`docs/research/11-render-frame-budget.md` `F7`, `F8`), so "this
+  function is N% of the draw" does not by itself justify a render optimization.
+  Name what a user would observe differently, or leave it.
+- **Date a number before you plan against it.** Every figure in this guide and
+  in `docs/research/` is a measurement of one tree at one commit, and the commit
+  that invalidates it does not come back to update the prose. One claim here
+  outlived its fix by three days and kept a parked backlog item alive on the
+  strength of it (`docs/research/17-cpu-profile-sweep.md` `F5`); the superseded
+  block under "The plan-time line is decided separately" is what that looks like
+  once it is caught. Check the commit a number names against what has landed
+  since.
 
 ## Choose a profiler
 
