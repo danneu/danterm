@@ -59,6 +59,22 @@ func swiftTerminalSessionViewTests() {
         )
     }
 
+    uiTest("font size updates live cell metrics and reports the resized PTY grid") {
+        let controller = TerminalPaneSessionController()
+        let pane = SwiftTerminalSessionView(controller: controller, fontSize: 10)
+        pane.frame = NSRect(x: 0, y: 0, width: 100, height: 200)
+        mountInTestWindow(pane, frame: pane.frame)
+
+        try uiExpect(controller.gridDimensions.last == TerminalDimensions(columns: 10, rows: 10),
+                     "initial configured font did not size the PTY grid")
+
+        pane.setFontSize(20)
+
+        try uiExpect(controller.gridDimensions.last == TerminalDimensions(columns: 5, rows: 5),
+                     "live font change did not resize the PTY grid")
+        try uiExpect(pane.state.cellHeight == 40, "live font change did not update cell metrics")
+    }
+
     uiTest("initial theme fills before draw and the retained first plan publishes on mount") {
         // Intent: the view paints themed chrome immediately and adopts the controller's first plan.
         // Why it exists: waiting for child output creates a dark flash on restore and split inheritance.
@@ -873,6 +889,60 @@ func swiftTerminalSessionViewTests() {
                      "focus funnel emitted duplicates: \(controller.focusChanges)")
         try uiExpect(controller.inputBytes == [Array("\u{1B}[I".utf8), Array("\u{1B}[O".utf8)],
                      "focus reports were not owner-gated: \(controller.inputBytes)")
+    }
+
+    uiTest("a released pane is unreachable by every controller callback") {
+        // Intent: deallocating the AppKit view while the controller still holds its
+        //   callbacks releases the view and leaves no callback able to touch it.
+        // Why it exists: the view's eight controller callbacks are `[weak self]` and
+        //   its `isolated deinit` runs `tearDown()` to drop the tracking area and
+        //   close the callback gate -- but nothing enforces any of that. Drop one
+        //   `[weak self]` and the controller retains a dead view forever; skip the
+        //   deinit teardown and a frame arriving after dealloc dereferences freed
+        //   memory. Controller-side teardown is proven by
+        //   TerminalPaneSessionControllerTests; this pins the AppKit view's own
+        //   half, the same use-after-free class as the 2026-06-09 Cmd-Z SIGSEGV.
+        // Scenario: a pane is mounted, takes a frame, and is torn out of its window
+        //   while the controller keeps emitting frames, viewport state, clipboard
+        //   writes, semantic events, search status, and hover at it.
+        // The pane is built and released inside an autoreleasepool: AppKit init
+        // paths routinely autorelease view references, so without draining them the
+        // pane would survive regardless and a broken `[weak self]` would still pass.
+        let controller = TerminalPaneSessionController()
+        var events: [TerminalSessionEvent] = []
+        weak var released: SwiftTerminalSessionView?
+
+        autoreleasepool {
+            let pane = SwiftTerminalSessionView(controller: controller)
+            pane.frame = NSRect(x: 0, y: 0, width: 80, height: 160)
+            pane.onEvent = { events.append($0) }
+            released = pane
+
+            let window = NSWindow(
+                contentRect: pane.frame, styleMask: [], backing: .buffered, defer: false)
+            window.contentView = pane
+            pane.updateTrackingAreas()
+            controller.emitFrameForTest()
+
+            window.contentView = NSView(frame: pane.frame)
+        }
+
+        try uiExpect(released == nil,
+                     "the controller or a callback is still retaining the released pane")
+
+        let deliveredBeforeRelease = events.count
+        controller.emitFrameForTest()
+        controller.emitViewportState(TerminalPaneViewportState(
+            isScrollbarEnabled: true,
+            projection: .init(totalRows: 40, topRow: 4, windowRows: 20, isFollowing: false)
+        ))
+        controller.emitClipboardWrite("after release")
+        controller.emitSemanticEvents([.desktopNotification(title: "Late", body: "Frame")])
+        controller.emitSearchStatus(.matched(selected: 1, total: 2))
+        controller.emitHoveredLinkForTest(TerminalHyperlink(uri: "https://example.com/late"))
+
+        try uiExpect(events.count == deliveredBeforeRelease,
+                     "a callback reached the released pane: \(events)")
     }
 }
 

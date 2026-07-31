@@ -191,7 +191,16 @@ test) asserting the duplicate request is inert.
 
 ### E4. AppKit view teardown with frames in flight (09-renderer.md I5, also 02 I4)
 
-Status: open
+Status: done -- filled 2026-07-31 with tests-ui
+"a released pane is unreachable by every controller callback": the pane is
+mounted, takes a frame, and is torn out of its window inside an
+autoreleasepool; the test then asserts the weak ref is nil and that frames,
+viewport state, clipboard writes, semantic events, search status, and hover all
+reach nothing. Verified it can fail: making `controller.onFrame` capture self
+strongly (dropping one `[weak self]`) failed it with the pane still retained,
+and the weak capture was restored. `just test-ui` green (185/185).
+
+Runs in `just test-ui`, so it needs a GUI session and does not run in CI.
 
 Controller/host teardown is rigorously proven
 (TerminalPaneSessionControllerTests teardown suite, weak-ref release census).
@@ -251,7 +260,15 @@ Status: open
 
 ## Decision log
 
-- 2026-07-31: audit completed; tracker created. No rulings yet.
+- 2026-07-31: audit completed; tracker created.
+- 2026-07-31: Dan waived the manual sleep/wake probes for section B. Rationale:
+  code reading shows the plain sleep case is safe by construction (child
+  freezes too, PTY write backpressure, event-driven rendering with no display
+  link on the Swift backend, monotonic timers that pause during sleep), the
+  residual wake-burst risks are visible-not-silent failures, and as sole user
+  Dan will hit the scenarios in daily use and fix forward. Section B's
+  criterion-2 carry-forward note still applies; before milestone 10 removal,
+  tag the last dual-backend release as the escape hatch.
 - 2026-07-31: A ruled EXCLUDE -- semantic modeling (doc 16) is out of scope for
   this review. Before this tracker is deleted, the two heads-up findings in
   section A must be carried into doc 16 itself so they survive.
@@ -266,6 +283,8 @@ Status: open
 - 2026-07-31: E1 ruled KEEP WRAPPING; doc 06 corrected. Item done.
 - 2026-07-31: E2 ruled FILL; test landed and verified failing-when-broken.
 - 2026-07-31: E3 ruled FILL; test landed and verified failing-when-broken.
+- 2026-07-31: E4 ruled FILL; tests-ui test landed and verified
+  failing-when-broken.
 
 ## Close-out
 
